@@ -104,18 +104,18 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 ## What xlflow can do
 
-| Area                                              | Capabilities                                                                                                                                                                 |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source control                                    | Export and import standard modules, class modules, UserForms, and document modules                                                                                           |
-| Formula snapshots                                 | Extract worksheet formulas and defined names into region-based JSONL files with `xlflow formulas pull` or refresh them with `xlflow pull --formulas`                         |
-| Execution                                         | Run macros from the CLI with typed arguments                                                                                                                                 |
-| Testing                                           | Discover and run VBA test procedures                                                                                                                                         |
-| Formatting                                        | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                                              |
-| Linting                                           | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, unqualified Excel objects, public module fields, and interactive operations |
-| Debugging                                         | Collect terminal logs and return runtime diagnostics                                                                                                                         |
-| Diffing                                           | Compare workbook cell values, formulas, sheet structure, and exported VBA source                                                                                             |
-| AI agents                                         | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents                                      |
-| LSP Server                                        | Provides features like code completion, jump-to-definition, and real-time diagnostics                                                                                        |
+| Area                                          | Capabilities                                                                                                                                                                 |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source control                                | Export and import standard modules, class modules, UserForms, and document modules                                                                                           |
+| Formula snapshots                             | Extract worksheet formulas and defined names into region-based JSONL files with `xlflow formulas pull` or refresh them with `xlflow pull --formulas`                         |
+| Execution                                     | Run macros from the CLI with typed arguments                                                                                                                                 |
+| Testing                                       | Discover and run VBA test procedures                                                                                                                                         |
+| Formatting                                    | Conservative, non-destructive VBA formatting for `.bas` and `.cls` source files                                                                                              |
+| Linting                                       | Catch `Option Explicit` omissions, `Select`/`Activate`, broad error handling, implicit variants, unqualified Excel objects, public module fields, and interactive operations |
+| Debugging                                     | Collect terminal logs and return runtime diagnostics                                                                                                                         |
+| Diffing                                       | Compare workbook cell values, formulas, sheet structure, and exported VBA source                                                                                             |
+| AI agents                                     | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents                                      |
+| LSP Server                                    | Provides features like code completion, jump-to-definition, and real-time diagnostics                                                                                        |
 | [VS Code Extension](editors/vscode/README.md) | Graphical user interface for all xlflow operations, offering an enhanced development experience with the LSP server                                                          |
 
 Formula snapshots can also be created outside an xlflow workspace:

@@ -2,9 +2,11 @@
 name: final-review
 description: >
   Run the repository's final independent Codex review after completing an
-  implementation and its required verification. Use this before declaring
-  implementation work complete. Apply a bounded review-and-fix loop rather
-  than repeatedly reviewing until no possible finding remains.
+  implementation and its required verification. Select an appropriate review
+  scope (origin/main, one commit, or uncommitted changes) based on diff size
+  and workflow state before declaring implementation work complete. Apply a
+  bounded review-and-fix loop rather than repeatedly reviewing until no
+  possible finding remains.
 ---
 
 # Final Codex Review
@@ -18,11 +20,52 @@ Run:
 rtk proxy task review:codex
 ```
 
-The runner uses automatic scope selection. A dirty worktree is rejected when
-it also contains committed changes relative to the review base, because
-`--uncommitted` would otherwise omit those committed changes. In that case,
-commit or stash one scope first, or explicitly choose `-ReviewMode base` or
-`-ReviewMode uncommitted` when reviewing only one scope is intentional.
+Before running the review, choose its scope. The task forwards explicit
+arguments after `--`:
+
+```powershell
+# All committed changes from origin/main to HEAD
+rtk proxy task review:codex -- -ReviewMode base -Base origin/main
+
+# Changes introduced by one commit; HEAD is the default commit reference
+rtk proxy task review:codex -- -ReviewMode commit -Commit HEAD
+
+# Only staged, unstaged, and untracked changes
+rtk proxy task review:codex -- -ReviewMode uncommitted
+```
+
+`ReviewMode auto` remains the default for compatibility. It selects
+`uncommitted` when the worktree contains only uncommitted changes and selects
+the base review when the worktree is clean. If both committed changes relative
+to the base and uncommitted changes are present, auto mode stops instead of
+silently omitting one scope. Choose `base`, `commit`, or `uncommitted`
+explicitly in that situation.
+
+## Selecting review scope
+
+Measure the changed-line count before Pass 1. For a branch-wide review, use
+`rtk git diff --numstat origin/main...HEAD` and sum additions plus deletions.
+For a single-commit review, use `rtk git diff --numstat <commit>^ <commit>`.
+These counts are a routing signal, not a correctness threshold.
+
+- Use `base` when the review must cover interactions among multiple commits,
+  or when the committed diff is small enough to fit comfortably in one review.
+  This reviews the complete committed delta from the selected base to `HEAD`.
+- When the committed delta is around 3500 changed lines or larger, prefer
+  `commit` and review the relevant commits incrementally. This reduces the
+  timeout risk of one oversized review. Use an explicit SHA or ref with
+  `-Commit` when `HEAD` is not the intended unit.
+- Use `uncommitted` for work that has not yet been committed. It reviews the
+  current staged, unstaged, and untracked changes without requiring a base.
+- If a large change has important cross-commit interactions, review the
+  individual commits first, then run a base review only when that integration
+  view is necessary and the resulting scope is acceptable.
+
+Commit mode resolves the requested ref to a commit before starting Codex. It
+reviews only that commit: other commits and uncommitted changes are excluded.
+If review-driven fixes are made after a commit review, do not reuse the old
+`-Commit` invocation expecting it to see those fixes; review the new
+uncommitted changes explicitly or commit them and review the new commit.
 
 The command intentionally suppresses the nested reviewer's intermediate
 reasoning and tool output.

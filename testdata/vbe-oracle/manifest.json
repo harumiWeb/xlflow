@@ -235,6 +235,7 @@
     { "id": "lbound-scalar", "path": "cases/lbound-scalar/case.json" },
     { "id": "foreach-scalar", "path": "cases/foreach-scalar/case.json" },
     { "id": "redim-reversed-bound", "path": "cases/redim-reversed-bound/case.json" },
+    { "id": "variant-redim-array", "path": "cases/variant-redim-array/case.json" },
     {
       "id": "issue594-conditional-elseif-after-else",
       "path": "cases/issue594-conditional-elseif-after-else/case.json"

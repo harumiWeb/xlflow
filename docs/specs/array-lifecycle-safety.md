@@ -151,15 +151,86 @@ Byte-array assignment. Variant results
 from a binary stream `Read(-1)` expression and the `vbNullString`-to-Byte-array
 idiom are recognized as Byte-array transfers. The latter is a known empty
 array: `LBound` / `UBound` queries are valid, but element access remains a
-`VBA227` finding. A private `ByRef` output helper that fills the output on each
+`VBA227` finding. A `StrConv` result assigned to a Byte array is also
+recognized when its source is a statically proven non-empty String; unknown
+String sources remain conservative. A private `ByRef` output helper that fills the output on each
 accepted branch and routes rejected inputs through a project-local procedure
 with no normal exit is summarized at its normal exits; the rejecting branch
 does not poison the allocation proof.
+
+For a documented array-returning `Function` or `Property Get`, a direct
+non-`Preserve` `ReDim` on a Variant with fully known, non-empty bounds may
+establish the returned array's non-empty state. This uses the VBE-confirmed
+behavior that an initially empty Variant can be resized into an array. The
+relaxation is limited to return-summary inference; ordinary unknown Variant
+analysis remains conservative, and a `ReDim Preserve`-only implementation does
+not prove that a returned array exists when its input can produce zero loop
+iterations.
+
+If such a documented return consistently allocates its source from a known lower
+bound, the caller may use that lower-bound fact only after a successful
+`UBound` query. A loop beginning at or above that bound therefore does not make
+its element access unsafe; the possibly-failing `UBound` diagnostic is retained.
+
+For a declared array, the established VBA emptiness guard
+`(Not values) = -1` followed on the same line by `Err.Raise` proves that the
+normal path has a non-empty allocation. This refinement is limited to a
+single-line raising guard without local error handling; `On Error` and
+`Resume Next` paths remain conservative.
+
+Dictionary `Keys` and `Items` materializations are tracked as paired,
+zero-based snapshots tied to the source dictionary's `Count`. A
+`For i = 1 To dictionary.Count` or `For i = 0 To dictionary.Count - 1` body
+proves the corresponding snapshot is non-empty when its receiver is known to
+be a Dictionary. A successful `UBound(Keys)` likewise proves the paired
+`Keys`/`Items` snapshots contain an element; the `UBound` query itself remains
+subject to the empty-Dictionary check.
+
+When source analysis proves that a local `CreateLookupDict`-style helper returns
+an outer Dictionary with at least two fixed `CreateObject` members, a matching
+`Keys` or `Items` snapshot is treated as allocated and non-empty. This summary
+is limited to the exact receiver/member assignment; ordinary or reassigned
+dictionaries remain conservative.
 
 The same allocation-probe contract also applies when the positive length is
 first assigned to a scalar local and that local is compared with zero or a
 positive threshold. The proof remains path-sensitive; unrelated scalar
 assignments do not establish allocation.
+
+A project-local scalar helper that probes successive `LBound(value, dimension)`
+calls under `On Error GoTo`, then returns `dimension - 1`, is also recognized as
+a dimension-count probe. Its zero result represents an unallocated input; a
+caller branch that proves the result is one may therefore rely on the input as
+an allocated one-dimensional array. The helper must have the complete probe
+shape, including its recovery label and return assignment; an arbitrary
+`expression - 1` helper is not an allocation proof.
+
+A `SAFEARRAY` accessor's `rgsabound()` member may be passed through a private
+ByRef helper chain without a separate count argument when the descriptor data
+pointer and bound-array count are initialized by an observed caller, and the
+immediate helper reaches the call only after a successful `ReDim ... (0 To ub)`
+where `ub` is that descriptor count minus one. This is the narrow normal-path
+contract for descriptor projections; missing descriptor setup, an unresolved or
+public caller, and arbitrary `ReDim` shapes remain conservative.
+
+A private helper may also prove a dynamic Byte array allocated by the low-level
+`VarPtrArray`/`CopyMemoryFromPtr` descriptor idiom. The recognized normal-path
+sequence obtains the array pointer slot, exits when that slot is null, copies
+the SAFEARRAY pointer into a scalar using `LenB` of that scalar, and exits when
+the copied descriptor pointer is null. The second guard makes later `LBound`
+and `UBound` queries safe; it does not prove that the descriptor contains an
+element, so indexed access remains subject to the possible-empty check. The
+four statements must remain in this structural order; a pointer-slot check
+without descriptor validation or a different memory-copy shape is conservative.
+
+A procedure-local `Static` dynamic array may be carried as allocated at entry
+when the same procedure has exactly one `If Not state.isSet Then` setup block,
+`state` is a Static UDT-like readiness value, a resolved ByRef helper sets the
+passed `.isSet` field on every normal return, and the block performs a direct
+non-`Preserve` `ReDim` before any array use. The proof also requires that no
+indexed/bounds access, whole-array replacement, or `Erase` precedes setup and
+that the target is not resized again. This models reusable backing buffers such
+as `fakeSafeArray()` while keeping arbitrary Static arrays conservative.
 
 At a join, allocation and dimensions are retained only when all incoming paths
 agree. Exceptional and uncertain CFG edges use the pre-statement state. This
@@ -334,6 +405,20 @@ guards refine the normal branch, and a definitely failing constant `ReDim`
 without local error handling is excluded from normal-return evidence. Mixed
 return kinds, missing assignments, recursive or ambiguous chains, and external
 calls remain unknown.
+
+A unique project-local typed array `Function` or `Property Get` may also be
+summarized when it returns a direct typed member of a Static UDT-like accessor
+whose SAFEARRAY descriptor is populated from scalar parameters. The summary
+requires one `If Not accessor.isSet Then InitMemoryAccessor accessor` guard, a
+resolved ByRef initializer that assigns the passed `.isSet` field to `True`,
+the descriptor data pointer, element size, lower bound, and element count to
+be initialized before the return on every normal path, and a definitely
+assigned function result. Named and omitted optional arguments are bound to
+their formal parameters; known string literals, `vbNullString`, and
+`StrConv`-wrapped known literals recover the returned one-dimensional shape.
+Unknown source lengths retain only the allocation proof, while incomplete
+descriptor setup, invalid arguments, ambiguous helpers, and mixed return paths
+remain conservative.
 
 A unique project-local scalar `Function` or `Property Get` with one array or
 `Variant` parameter may also be recognized as an allocation probe when its

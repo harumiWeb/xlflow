@@ -223,6 +223,17 @@ func TestOutgoingEdgesUsesIndexedOrder(t *testing.T) {
 	if len(edges) != 2 || edges[0].ID != 1 || edges[1].ID != 2 {
 		t.Fatalf("OutgoingEdges(40) = %+v, want graph-order edges 1 and 2", edges)
 	}
+	if cap(edges) != len(edges) {
+		t.Fatalf("OutgoingEdges(40) capacity = %d, want bounded capacity %d", cap(edges), len(edges))
+	}
+	var incoming []EdgeID
+	graph.View(EdgeFilter{}).ForEachIncoming(40, func(edge Edge) bool {
+		incoming = append(incoming, edge.ID)
+		return true
+	})
+	if !reflect.DeepEqual(incoming, []EdgeID{2, 3}) {
+		t.Fatalf("ForEachIncoming(40) = %v, want graph-order edges 2 and 3", incoming)
+	}
 	if got := graph.OutgoingEdges(120); got != nil {
 		t.Fatalf("OutgoingEdges(120) = %+v, want nil for unknown block", got)
 	}

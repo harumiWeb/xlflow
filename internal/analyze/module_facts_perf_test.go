@@ -310,7 +310,7 @@ func TestModuleIdempotentSetupPreservesNonCandidateExecutableTail(t *testing.T) 
 				"ready":  {Name: "ready", Type: "Boolean"},
 				"values": {Name: "values", Array: true, Type: "Long"},
 			}
-			got := arrayModuleIdempotentSetupArrays(file, proc, moduleDecls)
+			got := arrayModuleIdempotentSetupArrays(file, proc, moduleDecls, analysisContext{})
 			if got["values"] != test.wantValues {
 				t.Fatalf("idempotent setup summary = %#v, values presence = %v, want %v", got, got["values"], test.wantValues)
 			}

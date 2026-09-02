@@ -708,7 +708,6 @@
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA202","severity":"warning","line":1939,"column":0}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1949,"column":0}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1949,"column":0}
-{"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1950,"column":0}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":1971,"column":17}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VB045","severity":"error","line":1978,"column":5}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":1978,"column":5}

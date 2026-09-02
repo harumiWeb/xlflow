@@ -210,6 +210,7 @@ type arrayCompactLane struct {
 	initial             arrayFlowState
 	stats               *arrayInterproceduralStats
 	visit               func(text string, line int, in arrayFlowState) arrayFlowState
+	visitBlock          func(block vbacfg.Block, text string, line int, in arrayFlowState) arrayFlowState
 	edgeState           func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState
 	stop                func(text string, line int) bool
 	reliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool
@@ -240,9 +241,14 @@ func walkArrayCFGCompact(ctx context.Context, graph *vbacfg.CFGView, lines []str
 // for source-line and edge-refined paths. It is intentionally kept in this
 // package so the generic semanticstate solver does not acquire VBA policy.
 func walkArrayCFGCompactAdvanced(ctx context.Context, graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, reliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool, sourceLines bool) error {
+	return walkArrayCFGCompactAdvancedWithBlock(ctx, graph, lines, initial, visit, nil, edgeState, stop, reliableExceptional, sourceLines)
+}
+
+func walkArrayCFGCompactAdvancedWithBlock(ctx context.Context, graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, visitBlock func(block vbacfg.Block, text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, reliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool, sourceLines bool) error {
 	return walkArrayCFGCompactLanes(ctx, graph, lines, []arrayCompactLane{{
 		initial:                     initial,
 		visit:                       visit,
+		visitBlock:                  visitBlock,
 		edgeState:                   edgeState,
 		stop:                        stop,
 		reliableExceptional:         reliableExceptional,
@@ -288,7 +294,7 @@ func walkArrayCFGCompactLanes(ctx context.Context, graph *vbacfg.CFGView, lines 
 					return nil
 				}
 				in := transferCursor.load(input)
-				out, wasStopped := arrayCompactVisitBlockWithStop(lines, block, in, policy.visit, policy.stop, policy.sourceLines)
+				out, wasStopped := arrayCompactVisitBlockWithStop(lines, block, in, policy.visit, policy.visitBlock, policy.stop, policy.sourceLines)
 				if wasStopped {
 					stopped[ordinal] = true
 					output.Reset()
@@ -432,10 +438,16 @@ func preserveArrayConditionalEvidence(sources map[string]string, after arrayFlow
 	return after
 }
 
-func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) (arrayFlowState, bool) {
+func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, visitBlock func(block vbacfg.Block, text string, line int, in arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) (arrayFlowState, bool) {
 	in := visitIn
-	if visit == nil || block.Statement == nil {
+	if (visit == nil && visitBlock == nil) || block.Statement == nil {
 		return in, false
+	}
+	visitLine := func(text string, line int, state arrayFlowState) arrayFlowState {
+		if visitBlock != nil {
+			return visitBlock(block, text, line, state)
+		}
+		return visit(text, line, state)
 	}
 	if !sourceLines {
 		line := block.Statement.Range.StartLine
@@ -446,7 +458,7 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 		if strings.TrimSpace(text) == "" && line >= 1 && line <= len(lines) {
 			text = normalizedCodeLine(lines[line-1])
 		}
-		out := visit(text, line, in)
+		out := visitLine(text, line, in)
 		return out, stop != nil && stop(text, line)
 	}
 	start := block.Statement.Range.StartLine
@@ -458,9 +470,9 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 		end = start
 	}
 	out := in
-	if block.Statement.Kind == procedureir.StatementSelect && start >= 1 && start <= len(lines) {
+	if (block.Statement.Kind == procedureir.StatementSelect || block.Statement.Kind == procedureir.StatementCase) && start >= 1 && start <= len(lines) {
 		text := normalizedCodeLine(lines[start-1])
-		out = visit(text, start, out)
+		out = visitLine(text, start, out)
 		return out, stop != nil && stop(text, start)
 	}
 	if start == end && start >= 1 && start <= len(lines) {
@@ -468,7 +480,7 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 		if strings.TrimSpace(text) == "" {
 			text = normalizedCodeLine(lines[start-1])
 		}
-		out = visit(text, start, out)
+		out = visitLine(text, start, out)
 		return out, stop != nil && stop(text, start)
 	}
 	if start >= 1 && end <= len(lines) {
@@ -477,7 +489,7 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 			if len(text) == 0 {
 				continue
 			}
-			out = visit(text, line, out)
+			out = visitLine(text, line, out)
 			if stop != nil && stop(text, line) {
 				return out, true
 			}
@@ -488,6 +500,6 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 	if strings.TrimSpace(text) == "" && start >= 1 && start <= len(lines) {
 		text = normalizedCodeLine(lines[start-1])
 	}
-	out = visit(text, start, out)
+	out = visitLine(text, start, out)
 	return out, stop != nil && stop(text, start)
 }

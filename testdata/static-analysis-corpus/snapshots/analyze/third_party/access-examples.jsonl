@@ -488,8 +488,6 @@
 {"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA237","severity":"warning","line":495,"column":0}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA204","severity":"warning","line":497,"column":0}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA227","severity":"warning","line":589,"column":0}
-{"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA227","severity":"warning","line":589,"column":0}
-{"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA227","severity":"warning","line":597,"column":0}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA227","severity":"warning","line":597,"column":0}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA206","severity":"warning","line":628,"column":17}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA214","severity":"warning","line":676,"column":0}

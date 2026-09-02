@@ -15,6 +15,7 @@ var (
 	benchmarkPredecessorSink []BlockID
 	benchmarkOutgoingSink    []Edge
 	benchmarkViewSink        CFGView
+	benchmarkQueryIndexSink  *queryIndex
 )
 
 func BenchmarkCFGQuery(b *testing.B) {
@@ -108,6 +109,19 @@ func BenchmarkCFGIndexedLookup(b *testing.B) {
 			benchmarkOutgoingSink = graph.OutgoingEdges(BlockID(i%size + 6))
 		}
 	})
+}
+
+func BenchmarkBuildQueryIndex(b *testing.B) {
+	for _, size := range []int{100, 1000, 5000} {
+		graph := benchmarkQueryGraph(size)
+		b.Run("build/"+benchmarkSizeName(size), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchmarkQueryIndexSink = buildQueryIndex(graph)
+			}
+		})
+	}
 }
 
 // BenchmarkCFGViewReuse contrasts the compatibility materialization boundary

@@ -16,6 +16,25 @@ All notable changes to xlflow will be documented in this file.
 - Fixed false-positive `VBA249` array-unallocated findings for indexed uses that
   follow a branch-local `ReDim` inside straight-line `Select Case` clauses.
 
+- Fixed false-positive `VBA227` bound findings after the established VBA
+  `(Not array) = -1 Then Err.Raise` empty-array guard on a normal path.
+
+- Fixed false-positive `VBA227` element findings for Dictionary `Keys`/`Items`
+  snapshots guarded by `Count`, a successful `UBound(Keys)` query, or a
+  source-proven non-empty `CreateLookupDict` member.
+
+- Fixed `VBA227` array-return analysis from treating the false branch of a
+  negative-only count guard such as `count < 0` as proof of a non-empty array.
+
+- Fixed false-positive `VBA227` element findings after documented Variant array
+  property returns with a direct non-empty `ReDim`. The summary solver now
+  carries the VBE-confirmed Variant allocation only within documented return
+  inference and keeps `ReDim Preserve`-only empty-input paths conservative.
+
+- Refined `VBA227` for documented array returns that may be unallocated on empty
+  input but have a consistent known lower bound when allocated: retain the
+  possible `UBound` failure while suppressing only the guarded loop-body access.
+
 ## v0.31.1
 
 - Kept LSP completion, signature help, hover, and definition responsive while

@@ -5883,6 +5883,128 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesStrConvStringAssignmentToByteArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Safe(ByVal text As String)
+  Dim payload As String
+  payload = "header" & text
+  Dim bytes() As Byte
+  bytes = StrConv(payload, vbFromUnicode)
+  Debug.Print bytes(0)
+  Debug.Print UBound(bytes)
+End Sub
+
+Private Sub SafeInline(ByVal text As String)
+  Dim payload As String
+  payload = "header" & text
+  Dim bytes() As Byte: bytes = StrConv(payload, vbFromUnicode)
+  Debug.Print bytes(0)
+  Debug.Print UBound(bytes)
+End Sub
+
+Private Sub SafeConstant(ByVal text As String)
+  Dim bytes() As Byte
+  bytes = StrConv(text & vbNullChar, vbFromUnicode)
+  Debug.Print bytes(0)
+End Sub
+
+Private Sub Unsafe(ByVal text As String)
+  Dim bytes() As Byte
+  bytes = StrConv(text, vbFromUnicode)
+  Debug.Print bytes(0)
+End Sub
+
+Private Sub UnknownBounds(ByVal text As String)
+  Dim bytes() As Byte
+  bytes = StrConv(text, vbFromUnicode)
+  Debug.Print UBound(bytes)
+End Sub
+
+Private Sub Conditional(ByVal text As String, ByVal enabled As Boolean)
+  Dim payload As String
+  If enabled Then
+    payload = "header"
+  End If
+  Dim bytes() As Byte
+  bytes = StrConv(payload, vbFromUnicode)
+  Debug.Print bytes(0)
+End Sub
+
+Public Sub Run()
+  Safe vbNullString
+  SafeInline vbNullString
+  SafeConstant vbNullString
+  Unsafe vbNullString
+  UnknownBounds vbNullString
+  Conditional vbNullString, False
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 3 || got[0].Procedure != "Unsafe" || got[1].Procedure != "UnknownBounds" || got[2].Procedure != "Conditional" {
+		t.Fatalf("known non-empty StrConv should be safe while unknown or conditional transfers remain conservative: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesStrConvStringAssignmentInsideWith(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Safe()
+  Dim connection As Object
+  Dim source As String
+  Dim bytes() As Byte
+  With connection
+    source = "header"
+  End With
+  bytes = StrConv(source, vbFromUnicode)
+  Debug.Print bytes(0), UBound(bytes)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a non-empty String assigned inside With should prove the converted Byte array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesStrConvStringReassignmentInsideConditional(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Safe(ByVal retry As Boolean)
+  Dim connection As Object
+  Dim request As String
+  Dim bytes() As Byte
+  With connection
+    request = "header"
+    If retry Then
+      request = "retry"
+      bytes = StrConv(request, vbFromUnicode)
+      Debug.Print bytes(0), UBound(bytes)
+    End If
+  End With
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a non-empty String reassigned inside a conditional should prove the converted Byte array: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227PropagatesArrayReturnIntoByRefParameter(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -6014,6 +6136,90 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesInlineVariantArrayFactoryAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Tokenise(ByVal source As String) As Variant
+  Select Case Left(source, 1)
+    Case "{"
+      Dim vExpression: vExpression = Split(source, " ")
+      Dim iExpressionLen As Long: iExpressionLen = UBound(vExpression) - LBound(vExpression) + 1
+      Dim iArg As Long
+      For iArg = 1 To UBound(vExpression)
+        Dim vArg As Variant
+        vArg = vExpression(iArg)
+      Next
+  End Select
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an inline Variant assignment from Split should establish allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227UsesSuccessfulUBoundForKnownLowerBoundReturnAccess(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+'@returns Array<Long>
+Private Function Tokenise(ByVal source As String) As Long()
+  Dim values() As Long
+  If source <> "" Then
+    ReDim Preserve values(1 To 1)
+  End If
+  Tokenise = values
+End Function
+
+Public Sub Run(ByVal source As String)
+  Dim values() As Long: values = Tokenise(source)
+  Dim i As Long
+  For i = 1 To UBound(values)
+    Debug.Print values(i)
+  Next
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Run" || got[0].Line != 14 || !strings.Contains(strings.ToLower(got[0].Message), "ubound") {
+		t.Fatalf("the possibly-unallocated return should retain only its UBound finding: all=%+v vba227=%+v", findings, got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsLoopBelowKnownArrayLowerBound(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values(1 To 2) As Long
+  Dim i As Long
+  For i = 0 To UBound(values)
+    Debug.Print values(i)
+  Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 5 || !strings.Contains(got[0].Message, "inconsistent lower bound") {
+		t.Fatalf("a loop starting below a known lower bound must remain diagnosed: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227TracksModuleArrayAfterSplitOnBothBranches(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -6092,6 +6298,1140 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesIsArrayAssignmentThroughByRefArrayCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByRef args() As Variant)
+  Debug.Print UBound(args)
+End Sub
+
+Public Sub Run(ByVal source As Variant)
+  If IsArray(source) Then
+    Dim args() As Variant
+    args = source
+    Consume args
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an IsArray-guarded whole-array assignment should establish allocation at a ByRef callee: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227IgnoresArrayLikeStringLiterals(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe()
+  Dim data() As Byte
+  Call RaiseError("clipboard data (not an array access)")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("array-like text inside a string literal must not be treated as an indexed access: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227TreatsBoundInsideIndexAsAllocationProof(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant)
+  Dim data() As Byte
+  data = source
+  Debug.Print data(LBound(data))
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 {
+		t.Fatalf("the LBound query should remain the only possible failure before data(LBound(data)): %+v", got)
+	}
+	if !strings.Contains(strings.ToLower(got[0].Message), "lbound") {
+		t.Fatalf("the remaining finding should protect the LBound query, got: %+v", got[0])
+	}
+}
+
+func TestAnalyzerVBA227RecognizesSafeUBoundGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function SafeUBoundValues(ByRef values() As Long) As Long
+  On Error GoTo noValues
+  SafeUBoundValues = UBound(values)
+  Exit Function
+noValues:
+  SafeUBoundValues = -1
+End Function
+
+Public Sub Run(ByRef values() As Long)
+  Dim ub As Long: ub = SafeUBoundValues(values)
+  If ub < 0 Then Exit Sub
+  Debug.Print values(0)
+End Sub
+
+Public Sub Direct(ByRef values() As Long)
+  If SafeUBoundValues(values) >= 0 Then Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a nonnegative SafeUBound result should prove the later array access safe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesSafeUBoundIntoForBody(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function SafeUBoundValues(ByRef values() As Long) As Long
+  On Error GoTo noValues
+  SafeUBoundValues = UBound(values)
+  Exit Function
+noValues:
+  SafeUBoundValues = -1
+End Function
+
+Public Sub Run(ByRef values() As Long)
+  Dim ub As Long
+  ub = SafeUBoundValues(values)
+  Dim i As Long
+  For i = 0 To ub
+    Debug.Print values(i)
+  Next
+End Sub
+
+Public Sub Direct(ByRef values() As Long)
+  Dim i As Long
+  For i = 0 To UBound(values)
+    Debug.Print values(i)
+  Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directBound := false
+	directBody := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Run" {
+			t.Fatalf("a safe-bound scalar should make the For body access safe: %+v", finding)
+		}
+		if finding.Procedure == "Direct" {
+			directBound = true
+			if strings.Contains(strings.ToLower(finding.Message), "is indexed before") {
+				directBody = true
+			}
+		}
+	}
+	if !directBound || directBody {
+		t.Fatalf("a direct UBound loop must retain only the bound evidence; its body runs after a successful bound query: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227PropagatesIsArrayGuardToNestedArrayElement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Merge(ByRef arr() As Variant) As Variant
+  Dim i As Long
+  Dim newLength As Long
+  newLength = UBound(arr) - LBound(arr) + 1
+  For i = LBound(arr) To UBound(arr)
+    If IsArray(arr(i)) Then
+      newLength = newLength + UBound(arr(i)) - LBound(arr(i)) + 1
+    End If
+  Next
+  Merge = newLength
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 8 {
+			t.Fatalf("an IsArray(arr(i)) guard should suppress the nested bound access finding: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA227DoesNotRestoreNestedArrayGuardAfterErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Variant)
+  If IsArray(values(0)) Then
+    Erase values
+  End If
+  If UBound(values) > 0 Then Debug.Print "bad"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 6 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an Erase after a nested IsArray guard must not be overwritten by the guard refinement: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotPromoteUnknownVariantElementGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Probe(ByVal value As Variant)
+  If IsArray(value("key")) Then
+    ReDim value(0 To -1)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an element-like access on an unknown Variant must not promote the Variant to an allocated array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesNestedArrayGuardThroughElseIf(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Variant)
+  If False Then
+    Debug.Print "skip"
+  ElseIf IsArray(values(0)) Then
+    Debug.Print UBound(values(0))
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 6 {
+			t.Fatalf("an ElseIf IsArray(values(0)) guard should suppress the guarded body finding: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA227PropagatesNestedArrayGuardThroughSingleLineIf(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Variant)
+  If IsArray(values(0)) Then Debug.Print "ok"
+  If UBound(values) > 0 Then Debug.Print "bad"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 4 {
+			t.Fatalf("a single-line nested IsArray guard should establish the outer array for following code: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA227PreservesSingleLineElseArrayMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Variant)
+  If IsArray(values(0)) Then Debug.Print "ok" Else Erase values
+  If UBound(values) > 0 Then Debug.Print "bad"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 4 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an Else-side Erase must keep the following outer-array bounds query conservative: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227ClearsEmptyStateAfterNestedArrayElementGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe()
+  Dim bytes() As Byte
+  bytes = vbNullString
+  If IsArray(bytes(0)) Then
+    Debug.Print "nested"
+  End If
+  Debug.Print bytes(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 8 {
+			t.Fatalf("a successful nested element evaluation should prove the outer Byte array is non-empty: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA227CarriesSuccessfulBoundsThroughFollowingStatements(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Single)
+  If (UBound(values) - LBound(values) + 1) Mod 2 <> 0 Then
+    Exit Sub
+  End If
+  Debug.Print UBound(values)
+  Debug.Print values(LBound(values))
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 3 {
+			initial = true
+		}
+		if finding.Line == 6 || finding.Line == 7 {
+			t.Fatalf("successful bounds evaluation should establish allocation for following statements: %+v", finding)
+		}
+	}
+	if !initial {
+		t.Fatalf("the first bounds query must remain diagnosed when the input array is unallocated: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227CarriesSuccessfulBoundsAfterLengthAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  Dim length As Long
+  length = UBound(values) - LBound(values) + 1
+  Debug.Print values(LBound(values))
+End Sub
+
+Private Sub LoopProbe(ByRef values() As Byte)
+  Dim index As Long
+  For index = LBound(values) To UBound(values)
+    Debug.Print values(index)
+  Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	bounds := map[int]int{}
+	for _, finding := range got {
+		if finding.Line == 4 || finding.Line == 10 {
+			bounds[finding.Line]++
+		}
+		if finding.Line == 5 || finding.Line == 11 {
+			t.Fatalf("a successful length assignment should establish allocation for the following indexed access: %+v", finding)
+		}
+	}
+	if bounds[4] != 2 || bounds[10] != 2 {
+		t.Fatalf("the bounds queries themselves must remain diagnosed twice: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesSuccessfulBoundsAcrossRepeatedSelectCase(t *testing.T) {
+	t.Parallel()
+	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {
+		strategy := strategy
+		t.Run(string(strategy), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal format As Long, ByVal input As Variant)
+  Dim data() As Byte
+  Dim size As Long
+  Select Case format
+  Case 1
+    size = 1
+  Case Else
+    data = input
+    size = UBound(data) - LBound(data) + 1
+  End Select
+  Select Case format
+  Case 1
+    Debug.Print size
+  Case Else
+    Debug.Print data(LBound(data))
+  End Select
+End Sub
+`)
+
+			findings, err := (Analyzer{RootDir: dir, Config: config.Default(), arrayStrategy: strategy}).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			sawEmptyArrayFinding := false
+			for _, finding := range findingsByCode(findings, "VBA227") {
+				if finding.Procedure == "Probe" && finding.Line == 16 && finding.arrayOperationKey == "bound:lbound:data:unallocated" {
+					t.Fatalf("successful bounds in the matching first Case Else should protect the repeated Case Else access: %+v", finding)
+				}
+				if finding.Procedure == "Probe" && finding.Line == 16 && finding.arrayOperationKey == "index:data:empty" {
+					sawEmptyArrayFinding = true
+				}
+			}
+			if !sawEmptyArrayFinding {
+				t.Fatal("the repeated Case Else access must retain the empty-Byte-array warning")
+			}
+		})
+	}
+}
+
+func TestAnalyzerVBA227CarriesSuccessfulUBoundAfterLengthLimitCheckInsideWith(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Const MaxLength As Long = 100
+Private Sub Probe(ByVal source As String)
+  Dim connection As Object
+  Dim values() As Byte
+  With connection
+    values = StrConv(source, vbFromUnicode)
+    If UBound(values) + 1 > MaxLength Then
+      SetError "too long"
+      Exit Sub
+    End If
+    Debug.Print UBound(values)
+  End With
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 12 {
+			t.Fatalf("a successful UBound length check inside With should make the following UBound safe: %+v", findingsByCode(findings, "VBA227"))
+		}
+	}
+}
+
+func TestAnalyzerVBA227CarriesUBoundLengthIntoZeroBasedLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As String)
+  Dim values() As Byte
+  Dim length As Long
+  Dim i As Long
+  values = StrConv(source, vbFromUnicode)
+  length = UBound(values) + 1
+  For i = 0 To length - 1
+    Debug.Print values(i)
+  Next i
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("only the UBound safety finding should remain; the loop-body access is safe after a successful bound query: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesPositiveLengthAllocationIntoSeparatedZeroElseBranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef input() As Byte)
+  Dim recvLen As Long
+  Dim recvBuffer() As Byte
+  recvLen = UBound(input) - LBound(input) + 1
+  If recvLen > 0 Then
+    ReDim recvBuffer(0 To recvLen - 1)
+  End If
+  If recvLen = 0 Then
+    Debug.Print "empty"
+  Else
+    Debug.Print recvBuffer(0)
+  End If
+End Sub
+`)
+
+	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {
+		findings, err := (Analyzer{RootDir: dir, Config: config.Default(), arrayStrategy: strategy}).Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, finding := range findingsByCode(findings, "VBA227") {
+			if finding.Line == 12 {
+				t.Fatalf("a positive length branch with a matching zero/else guard should prove recvBuffer allocation: %+v", findingsByCode(findings, "VBA227"))
+			}
+		}
+	}
+}
+
+func TestAnalyzerVBA227CarriesConditionalArrayAllocationThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {
+		strategy := strategy
+		t.Run(string(strategy), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByRef payload() As Byte, ByVal payloadLen As Long)
+  If payloadLen > 0 Then
+    Debug.Print payload(0)
+  End If
+End Sub
+
+Private Sub ConsumeMismatch(ByRef payload() As Byte, ByVal payloadLen As Long)
+  If payloadLen > 0 Then
+    Debug.Print payload(0)
+  End If
+End Sub
+
+Private Sub ConsumeExpressionMismatch(ByRef payload() As Byte, ByVal payloadLen As Long)
+  If payloadLen > 0 Then
+    Debug.Print payload(0)
+  End If
+End Sub
+
+Private Sub Dispatch(ByVal payloadLen As Long)
+  Dim payload() As Byte
+  If payloadLen > 0 Then
+    ReDim payload(0 To payloadLen - 1)
+  Else
+    Erase payload
+  End If
+  Consume payload, payloadLen
+End Sub
+
+Private Sub DispatchZero()
+  Consume NullByteArray(), 0
+End Sub
+
+Private Function NullByteArray() As Byte()
+  Dim payload() As Byte
+  NullByteArray = payload
+End Function
+
+Private Sub DispatchExpressionMismatch()
+  ConsumeExpressionMismatch NullByteArray(), 1
+End Sub
+
+Private Sub DispatchMismatch(ByVal payloadLen As Long)
+  Dim payload() As Byte
+  Dim allocatedLen As Long
+  allocatedLen = payloadLen
+  If allocatedLen > 0 Then
+    ReDim payload(0 To allocatedLen - 1)
+  Else
+    Erase payload
+  End If
+  ConsumeMismatch payload, payloadLen
+End Sub
+
+Public Sub Run()
+  Dispatch 1
+  DispatchZero
+  DispatchMismatch 1
+  DispatchExpressionMismatch
+End Sub
+`)
+
+			findings, err := (Analyzer{RootDir: dir, Config: config.Default(), arrayStrategy: strategy}).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, finding := range findingsByCode(findings, "VBA227") {
+				if finding.Procedure == "Consume" {
+					t.Fatalf("a matching positive-length allocation should cross the private ByRef boundary: %+v", finding)
+				}
+			}
+			foundMismatch := false
+			for _, finding := range findingsByCode(findings, "VBA227") {
+				if finding.Procedure == "ConsumeMismatch" {
+					foundMismatch = true
+					break
+				}
+			}
+			if !foundMismatch {
+				t.Fatalf("a different caller-side length condition must remain conservative: %+v", findingsByCode(findings, "VBA227"))
+			}
+			foundExpressionMismatch := false
+			for _, finding := range findingsByCode(findings, "VBA227") {
+				if finding.Procedure == "ConsumeExpressionMismatch" {
+					foundExpressionMismatch = true
+					break
+				}
+			}
+			if !foundExpressionMismatch {
+				t.Fatalf("an unallocated array-return expression with a positive length must remain conservative: %+v", findingsByCode(findings, "VBA227"))
+			}
+		})
+	}
+}
+
+func TestAnalyzerVBA227CarriesConditionalArrayAllocationThroughWithAndSelectCaseByRefCall(t *testing.T) {
+	t.Parallel()
+	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {
+		strategy := strategy
+		t.Run(string(strategy), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type State
+  marker As Long
+End Type
+
+Private m_State As State
+
+Private Sub ConsumeText(ByRef payload() As Byte, ByVal payloadLen As Long, ByVal fin As Boolean)
+  With m_State
+    If Not fin Then
+      If payloadLen > 0 Then
+        Debug.Print .marker, payload(0)
+      End If
+    End If
+  End With
+End Sub
+
+Private Sub ConsumeBinary(ByRef payload() As Byte, ByVal payloadLen As Long, ByVal fin As Boolean)
+  With m_State
+    If Not fin Then
+      If payloadLen > 0 Then
+        Debug.Print .marker, payload(0)
+      End If
+    End If
+  End With
+End Sub
+
+Private Sub ConsumeContinuation(ByRef payload() As Byte, ByVal payloadLen As Long, ByVal fin As Boolean)
+  With m_State
+    If payloadLen > 0 Then
+      Debug.Print .marker, payload(0)
+    End If
+  End With
+End Sub
+
+Private Sub ConsumeThreshold(ByRef payload() As Byte, ByVal payloadLen As Long)
+  With m_State
+    If payloadLen >= 2 Then
+      Debug.Print .marker, payload(1)
+    End If
+  End With
+End Sub
+
+Private Sub Dispatch(ByVal opcode As Long, ByVal payloadLen As Long)
+  Dim payload() As Byte
+  If payloadLen > 0 Then
+    ReDim payload(0 To payloadLen - 1)
+  Else
+    Erase payload
+  End If
+			Select Case opcode
+			  Case 1
+			    ConsumeText payload, payloadLen, False
+			  Case 2
+			    ConsumeBinary payload, payloadLen, False
+			  Case 0
+			    ConsumeContinuation payload, payloadLen, True
+			  Case 3
+			    ConsumeThreshold payload, payloadLen
+			End Select
+End Sub
+
+Public Sub Run()
+  Dispatch 1, 1
+  Dispatch 2, 1
+  Dispatch 0, 1
+  Dispatch 3, 2
+End Sub
+`)
+
+			findings, err := (Analyzer{RootDir: dir, Config: config.Default(), arrayStrategy: strategy}).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, finding := range findingsByCode(findings, "VBA227") {
+				if finding.Procedure == "ConsumeText" || finding.Procedure == "ConsumeBinary" || finding.Procedure == "ConsumeContinuation" || finding.Procedure == "ConsumeThreshold" {
+					t.Fatalf("matching positive-length allocation should cross a Select Case ByRef boundary: %+v", finding)
+				}
+			}
+		})
+	}
+}
+
+func TestAnalyzerVBA227CarriesSuccessfulUpperBoundThroughExitGuardToLoopBody(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Decode(ByRef buf() As Byte, ByVal index As Long)
+  Do
+    If index > UBound(buf) Then Exit Do
+    Debug.Print buf(index)
+    index = index + 1
+  Loop
+End Sub
+
+Public Sub Run(ByRef buf() As Byte)
+  Decode buf, 0
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBound := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		switch finding.Line {
+		case 4:
+			foundBound = true
+		case 5:
+			t.Fatalf("successful UBound in the exit guard should make the following loop access allocated: %+v", finding)
+		}
+	}
+	if !foundBound {
+		t.Fatalf("the UBound query in the exit guard should remain reviewable: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227CarriesUBoundLengthIntoPositiveGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  Dim length As Long
+  length = UBound(values) + 1
+  If length > 0 Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBounds := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 4 {
+			foundBounds = true
+		}
+		if finding.Line == 6 {
+			t.Fatalf("a positive guard over UBound-derived length should prove the indexed array non-empty: %+v", finding)
+		}
+	}
+	if !foundBounds {
+		t.Fatalf("the UBound-derived length query must remain diagnosed: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227CarriesUBoundLengthIntoCopyMemoryGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As String)
+  Dim values() As Byte
+  Dim payload(0 To 31) As Byte
+  Dim length As Long
+  If Len(source) > 0 Then
+    values = UnknownByteArray()
+    length = UBound(values) + 1
+  End If
+  If length > 0 Then
+    CopyMemory payload(0), values(0), length
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBounds := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 8 {
+			foundBounds = true
+		}
+		if finding.Line == 11 {
+			t.Fatalf("a positive UBound-derived length guard should prove CopyMemory's source element: %+v", finding)
+		}
+	}
+	if !foundBounds {
+		t.Fatalf("the UBound query in the guarded conversion path must remain diagnosed: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryUBoundLengthProofPastErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  Dim length As Long
+  length = UBound(values) + 1
+  Erase values
+  If length > 0 Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBounds := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		switch finding.Line {
+		case 4:
+			foundBounds = true
+		case 7:
+			t.Fatalf("a fully proven unallocated array access should be owned by VBA249, not duplicated as VBA227: %+v", finding)
+		}
+	}
+	if !foundBounds {
+		t.Fatalf("the UBound query before Erase must remain diagnosed: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryUBoundLengthProofPastArrayReplacement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  Dim length As Long
+  length = UBound(values) + 1
+  values = UnknownByteArray()
+  If length > 0 Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBounds := false
+	foundIndex := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		switch finding.Line {
+		case 4:
+			foundBounds = true
+		case 7:
+			foundIndex = true
+		}
+	}
+	if !foundBounds || !foundIndex {
+		t.Fatalf("an array replacement after the bounds query must keep the later access diagnosed: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227CarriesSuccessfulUBoundIntoWhileBody(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Evaluate(ByRef operations() As Long) As Long
+  Dim index As Long: index = 0
+  Dim upper As Long: upper = UBound(operations)
+  While index <= upper
+    Evaluate = operations(index)
+    index = index + 1
+  Wend
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 4 {
+		t.Fatalf("the UBound query must remain while its successful result protects the While body: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryLoopBodyBoundsPastPossibleEmptyLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run(ByVal values() As Long, ByVal count As Long)
+  Dim i As Long
+  For i = 0 To count
+    Dim lower As Long: lower = LBound(values)
+  Next i
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 6 || got[1].Line != 8 {
+		t.Fatalf("a bound proven only inside a possibly-empty loop must not protect later code: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsLoopBodyBoundProofForSameIteration(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run(ByVal values() As Long, ByVal count As Long)
+  Dim i As Long
+  For i = 0 To count
+    Dim lower As Long: lower = LBound(values)
+    Debug.Print values(lower)
+  Next i
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 6 {
+		t.Fatalf("a successful bound must protect later accesses in the same loop iteration: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesSuccessfulBoundsForVariantElementArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef args() As Variant)
+  Select Case UBound(args) - LBound(args) + 1
+    Case 1: Debug.Print args(0)
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 3 || got[1].Line != 3 {
+		t.Fatalf("a successful bounds query should establish allocation for a Variant element array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarrySkippedElseIfBounds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte, ByVal skip As Boolean)
+  If skip Then
+    Debug.Print "skip"
+  ElseIf UBound(values) - LBound(values) + 1 > 0 Then
+    Debug.Print "checked"
+  End If
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 3 {
+		t.Fatalf("a skipped ElseIf must not prove the later access safe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesSuccessfulElseIfBoundsIntoBranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte, ByVal skip As Boolean)
+  If skip Then
+    Debug.Print "skip"
+  ElseIf UBound(values) > 0 Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("a successful ElseIf bounds query should make its branch access safe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustBoundsUnderResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Single)
+  On Error Resume Next
+  If UBound(values) - LBound(values) + 1 >= 0 Then
+    Debug.Print "maybe"
+  End If
+  On Error GoTo 0
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 8 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a bounds query after an unhandled Resume Next failure must remain diagnosed: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustBoundsAcrossResumeNextBranches(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Single, ByVal useResume As Boolean)
+  If useResume Then
+    On Error Resume Next
+  Else
+    On Error GoTo 0
+  End If
+  If UBound(values) - LBound(values) + 1 >= 0 Then
+    Debug.Print "maybe"
+  End If
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 11 {
+			return
+		}
+	}
+	t.Fatalf("a branch-local Resume Next must keep the later bounds query diagnosed: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227RecognizesCompoundResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Single)
+resume_path: On Error Resume Next: Debug.Print "probe"
+  If UBound(values) - LBound(values) + 1 >= 0 Then
+    Debug.Print "maybe"
+  End If
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 7 {
+			return
+		}
+	}
+	t.Fatalf("a compound Resume Next statement must keep the later bounds query diagnosed: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227RecognizesSingleLineResumeNextElse(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Single, ByVal useResume As Boolean)
+  If useResume Then On Error Resume Next Else On Error GoTo 0
+  If UBound(values) - LBound(values) + 1 >= 0 Then
+    Debug.Print "maybe"
+  End If
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 7 {
+			return
+		}
+	}
+	t.Fatalf("a single-line If Else Resume Next must keep the later bounds query diagnosed: %+v", findingsByCode(findings, "VBA227"))
+}
+
 func TestAnalyzerVBA227RecognizesVariantByteArrayTransfer(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -6149,6 +7489,707 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesNotArrayEmptyGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByRef values() As Byte)
+  If (Not values) = -1 Then Err.Raise 5
+  Debug.Print UBound(values) - LBound(values) + 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("the Not-array empty guard should make normal-path bounds safe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesNotArrayEmptyGuardWithExitFunction(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Length(ByRef values() As Byte) As Long
+  If (Not values) = -1 Then
+    Length = 0
+    Exit Function
+  End If
+  Length = UBound(values) - LBound(values) + 1
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("the false Not-array empty branch should make bounds safe after Exit Function: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustNotArrayEmptyGuardWithErrorHandling(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Length(ByRef values() As Byte) As Long
+  On Error Resume Next
+  If (Not values) = -1 Then
+    Length = 0
+  End If
+  Length = UBound(values) - LBound(values) + 1
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) == 0 {
+		t.Fatal("a Not-array empty guard under error handling must remain conservative")
+	}
+}
+
+func TestAnalyzerVBA227CarriesAllocationThroughLocalReadyFlag(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CopyAddress(ByVal hasAddress As Boolean)
+  Dim found As Boolean
+  Dim values() As Byte
+  If hasAddress Then
+    ReDim values(0 To 1)
+    found = True
+  End If
+  If found Then
+    Debug.Print values(0)
+  End If
+End Sub
+
+Public Sub Run()
+  CopyAddress True
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a local ready flag assigned after ReDim should prove the array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustLocalReadyFlagWithoutAllocation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CopyAddress(ByVal hasAddress As Boolean)
+  Dim found As Boolean
+  Dim values() As Byte
+  values = vbNullString
+  If hasAddress Then
+    found = True
+  End If
+  If found Then
+    Debug.Print values(0)
+  End If
+End Sub
+
+Public Sub Run(ByVal hasAddress As Boolean)
+  CopyAddress hasAddress
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) == 0 {
+		t.Fatal("a local ready flag without a preceding allocation must remain conservative")
+	}
+}
+
+func TestAnalyzerVBA227CarriesAllocationThroughRepeatedLocalReadyFlag(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CopyAddress(ByVal first As Boolean, ByVal second As Boolean)
+  Dim found As Boolean
+  Dim values() As Byte
+  If first Then
+    ReDim values(0 To 1)
+    found = True
+  End If
+  If Not found And second Then
+    ReDim values(0 To 1)
+    found = True
+  End If
+  If found Then
+    Debug.Print values(0)
+  End If
+  If Not first And found Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("repeated ready-flag allocations should prove the array on either path: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesStrPtrArrayGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByRef values() As Byte)
+  If StrPtr(values) = 0 Then
+    Exit Sub
+  End If
+  Debug.Print UBound(values), values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("the false StrPtr empty-array branch should prove a non-empty array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesSafeArrayPointerAllocationGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Private Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  SafeArrayLen = UBound(values) - LBound(values) + 1
+  Debug.Print values(0)
+End Function
+
+Private Function MissingDescriptorCheck(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  MissingDescriptorCheck = LBound(values)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Procedure != "SafeArrayLen" || got[1].Procedure != "MissingDescriptorCheck" {
+		t.Fatalf("descriptor validation should protect bounds while retaining the possible-empty element warning: %+v", got)
+	}
+	if !strings.Contains(got[0].Message, "may be empty") {
+		t.Fatalf("descriptor validation must not prove a non-empty array: %+v", got[0])
+	}
+}
+
+func TestAnalyzerVBA227UsesSafeArrayPointerLengthGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Private Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  If hi >= lo Then
+    SafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private Function UnprovenLength(ByRef values() As Byte) As Long
+  UnprovenLength = 1
+End Function
+
+Private Sub Guarded(ByRef values() As Byte)
+  Dim length As Long
+  length = SafeArrayLen(values)
+  If length > 0 Then
+    values(0) = 1
+  End If
+End Sub
+
+Private Sub Unproven(ByRef values() As Byte)
+  Dim length As Long
+  length = UnprovenLength(values)
+  If length > 0 Then
+    values(0) = 1
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Guarded" {
+			t.Fatalf("a positive SafeArrayLen result should prove a non-empty array: %+v", finding)
+		}
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Unproven" {
+		t.Fatalf("an unrelated positive helper must not establish array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesSafeArrayLengthIntoZeroBasedLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Private Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  If hi >= lo Then
+    SafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private Function StringToUtf8(ByVal text As String) As Byte()
+  Dim result() As Byte
+  If Len(text) > 0 Then
+    ReDim result(0 To Len(text) - 1)
+  End If
+  StringToUtf8 = result
+End Function
+
+Private Sub Guarded()
+  Dim values() As Byte
+  Dim length As Long
+  Dim i As Long
+  Dim text As String
+  values = StrConv(text, vbFromUnicode)
+  length = SafeArrayLen(values)
+  For i = 0 To length - 1
+    Debug.Print values(i)
+  Next
+  Debug.Print values(0)
+End Sub
+
+Private Sub InlineGuard()
+  Dim values() As Byte
+  Dim length As Long
+  Dim text As String
+  values = StrConv(text, vbFromUnicode)
+  length = SafeArrayLen(values)
+  If length > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub FactoryGuard(ByVal text As String)
+  Dim values() As Byte
+  Dim length As Long
+  Dim i As Long
+  values = StringToUtf8(text)
+  length = SafeArrayLen(values)
+  For i = 0 To length - 1
+    Debug.Print values(i)
+  Next
+End Sub
+
+Private Sub DoWhileGuard(ByVal text As String)
+  Dim values() As Byte
+  Dim length As Long
+  Dim offset As Long
+  values = StringToUtf8(text)
+  length = SafeArrayLen(values)
+  offset = 0
+  Do While offset < length
+    Debug.Print values(offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub DoWhileUnsafe(ByVal text As String)
+  Dim values() As Byte
+  Dim length As Long
+  Dim offset As Long
+  values = StringToUtf8(text)
+  length = SafeArrayLen(values)
+  offset = -1
+  Do While offset < length
+    Debug.Print values(offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub SplitGuard(ByVal enabled As Boolean, ByVal text As String)
+  Dim values() As Byte
+  Dim length As Long
+  If enabled Then
+    values = StringToUtf8(text)
+    length = SafeArrayLen(values)
+  Else
+    length = 0
+  End If
+  If length > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub ConditionalRedimGuard(ByVal enabled As Boolean)
+  Dim values() As Byte
+  Dim length As Long
+  If enabled Then
+    ReDim values(0 To 4)
+    length = 5
+  Else
+    length = 0
+  End If
+  If length > 0 Then Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+  Guarded
+End Sub
+
+Private Sub Unsafe()
+  Dim other() As Byte
+		Debug.Print other(0)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenUnsafe := false
+	seenDoWhileUnsafe := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Guarded" {
+			if finding.Line == 39 {
+				seenUnsafe = true
+				continue
+			}
+			t.Fatalf("a positive SafeArrayLen loop bound should prove a zero-based array access: %+v", finding)
+		}
+		if finding.Procedure == "InlineGuard" {
+			t.Fatalf("a positive SafeArrayLen inline guard should prove a zero-based array access: %+v", finding)
+		}
+		if finding.Procedure == "FactoryGuard" {
+			t.Fatalf("a positive SafeArrayLen result from a zero-based factory should prove loop access: %+v", finding)
+		}
+		if finding.Procedure == "DoWhileGuard" {
+			t.Fatalf("a positive SafeArrayLen Do While guard should prove a zero-based array access: %+v", finding)
+		}
+		if finding.Procedure == "DoWhileUnsafe" {
+			seenDoWhileUnsafe = true
+		}
+		if finding.Procedure == "SplitGuard" {
+			t.Fatalf("a positive SafeArrayLen guard after a zero fallback should prove the selected array: %+v", finding)
+		}
+		if finding.Procedure == "ConditionalRedimGuard" {
+			t.Fatalf("a positive conditional ReDim length should prove the selected array: %+v", finding)
+		}
+	}
+	if !seenUnsafe {
+		t.Fatalf("an unguarded access after the loop should remain diagnosed: all=%+v vba227=%+v", findings, findingsByCode(findings, "VBA227"))
+	}
+	if !seenDoWhileUnsafe {
+		t.Fatalf("a Do While loop with a negative index must remain diagnosed: all=%+v vba227=%+v", findings, findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotDuplicateNestedByRefCallOwnership(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function RawSendFor(ByVal handle As Long, ByRef frame() As Byte) As Boolean
+  Dim totalSent As Long
+  Dim toSend As Long
+  Dim sent As Long
+  toSend = UBound(frame) + 1
+  With m_Connections(handle)
+    Do While totalSent < toSend
+      sent = sock_send(.Socket, frame(totalSent), toSend - totalSent, 0)
+      If sent <= 0 Then Exit Function
+      totalSent = totalSent + sent
+    Loop
+  End With
+  RawSendFor = True
+End Function
+
+Private Function SendFrameFor(ByVal handle As Long, ByRef frame() As Byte) As Boolean
+  If m_TLS Then
+    SendFrameFor = TLSSend(handle, frame)
+  Else
+    SendFrameFor = RawSendFor(handle, frame)
+  End If
+End Function
+
+Private Function BuildFrame() As Byte()
+  Dim frame() As Byte
+  ReDim frame(0 To 5)
+  BuildFrame = frame
+End Function
+
+Public Sub Run()
+  Dim frame() As Byte
+  Dim i As Long
+  Do While i < 1
+    frame = BuildFrame()
+    If Not SendFrameFor(0, frame) Then Exit Sub
+    i = i + 1
+  Loop
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("the nested Exit statement must not duplicate its parent ByRef call: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesCompoundStrPtrArrayGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByRef values() As Byte, ByRef key() As Byte)
+  If StrPtr(values) = 0 Or StrPtr(key) = 0 Then
+    Exit Sub
+  End If
+  Debug.Print UBound(values), UBound(key)
+  Debug.Print values(0), key(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("the false compound StrPtr branch should prove both arrays non-empty: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesStrPtrGuardIntoElseIf(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByRef values() As Byte, ByRef key() As Byte)
+  If StrPtr(values) = 0 Or StrPtr(key) = 0 Then
+  ElseIf UBound(values) - LBound(values) + 1 = 0 Then
+    Exit Sub
+  Else
+    Debug.Print values(0), key(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("the false StrPtr branch should protect a later ElseIf bound and element access: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesStrPtrGuardAcrossNestedElseIfChain(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByRef values() As Byte, ByVal hasValue As Boolean, ByVal kind As Long)
+  Select Case kind
+    Case 1
+      If hasValue And StrPtr(values) = 0 Then
+      ElseIf StrPtr(values) = 0 Then
+      ElseIf hasValue And (UBound(values) - LBound(values) + 1 > 10) Then
+        Debug.Print values(0)
+      End If
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a false StrPtr ElseIf branch must protect a later nested ElseIf access: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesDictionarySnapshotCountGuards(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CountLoop(ByVal data As Variant)
+  Dim keys() As String
+  Dim values() As String
+  Dim i As Long
+  Select Case TypeName(data)
+    Case "Dictionary"
+      With data
+        keys = .Keys
+        values = .Items
+      End With
+      For i = 1 To data.Count
+        Debug.Print keys(i - 1)
+        Debug.Print values(i - 1)
+      Next
+  End Select
+End Sub
+
+Public Sub NonDictionary(ByVal data As Variant)
+  Dim keys() As String
+  Dim i As Long
+  keys = data.Keys
+  For i = 1 To data.Count
+    Debug.Print keys(i - 1)
+  Next
+End Sub
+
+Public Sub BoundLoop(ByVal data As Variant)
+  Select Case TypeName(data)
+    Case "Dictionary"
+      With data
+        Dim keys() As String
+        keys = .Keys
+        Dim values() As String
+        values = .Items
+        Dim i As Long, upper As Long
+        upper = UBound(keys)
+        For i = 0 To upper
+          Debug.Print keys(i)
+          Debug.Print values(i)
+        Next
+      End With
+End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var countLoop, nonDictionary, boundLoop []Finding
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		switch finding.Procedure {
+		case "CountLoop":
+			countLoop = append(countLoop, finding)
+		case "NonDictionary":
+			nonDictionary = append(nonDictionary, finding)
+		case "BoundLoop":
+			boundLoop = append(boundLoop, finding)
+		}
+	}
+	if len(countLoop) != 0 {
+		t.Fatalf("a positive Dictionary.Count loop should prove Keys/Items are non-empty: %+v", countLoop)
+	}
+	if len(nonDictionary) != 1 {
+		t.Fatalf("an unproven Keys receiver must remain unsafe: %+v", nonDictionary)
+	}
+	if len(boundLoop) != 1 || boundLoop[0].Line != 37 {
+		t.Fatalf("a direct UBound should remain the only Dictionary snapshot warning: bound=%+v all=%+v", boundLoop, findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227RecognizesCreateLookupDictSnapshots(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type TState
+  Lookups As Object
+End Type
+Private This As TState
+
+Private Function CreateLookupDict(ByVal values As Variant) As Object
+	  Dim result As Object
+	  Set result = CreateObject("Scripting.Dictionary")
+	  Set result("S2N") = CreateObject("Scripting.Dictionary")
+	  Set result("N2S") = CreateObject("Scripting.Dictionary")
+	  Set CreateLookupDict = result
+End Function
+
+Public Sub Run()
+	  Set This.Lookups = CreateObject("Scripting.Dictionary")
+	  Set This.Lookups("EWndStyles") = CreateLookupDict(Array("key", 1))
+	  Dim keys As Variant: keys = This.Lookups("EWndStyles").keys()
+	  Dim values As Variant: values = This.Lookups("EWndStyles").items()
+	  Dim i As Long
+	  For i = 0 To UBound(keys)
+    Debug.Print keys(i)
+    Debug.Print values(i)
+  Next
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("keys and items from CreateLookupDict should be non-empty after UBound(keys): %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227UsesDocumentedVariantArrayPropertyReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+'@returns Variant<Array<Long>>
+Public Property Get Rect() As Variant
+  Dim result As Variant
+  ReDim result(0 To 3)
+  Rect = result
+End Property
+
+Public Sub Run()
+  Dim values() As Long
+  values = Rect
+  Debug.Print values(0)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a documented Variant array property should establish allocation for its caller: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227KeepsEmptyByteArrayElementAccessUnsafe(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -6169,6 +8210,88 @@ End Sub
 	got := findingsByCode(findings, "VBA227")
 	if len(got) != 1 || got[0].Line != 7 {
 		t.Fatalf("expected only the empty-array element access to be reported, got %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsUnknownByteArrayElementPossiblyEmptyAfterBounds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run(ByVal source As Variant)
+  Dim bytes() As Byte
+  bytes = source
+  Dim upper As Long: upper = UBound(bytes)
+  Debug.Print bytes(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 6 || got[1].Line != 7 {
+		t.Fatalf("an arbitrary Byte-array source must retain the bound and possibly-empty element findings: %+v", got)
+	}
+	if !strings.Contains(strings.ToLower(got[1].Message), "may be empty") {
+		t.Fatalf("the element finding must retain the empty-array risk after UBound succeeds: %+v", got[1])
+	}
+}
+
+func TestAnalyzerVBA227KeepsUnknownByteArrayElementPossiblyEmptyThroughVariableSubscript(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run(ByVal source As Variant)
+  Dim bytes() As Byte
+  bytes = source
+  Dim lower As Long: lower = LBound(bytes)
+  Dim upper As Long: upper = UBound(bytes)
+  Debug.Print VarPtr(bytes(lower)), upper
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 6 || got[1].Line != 8 {
+		t.Fatalf("variable Byte-array subscripts must retain both bound and empty-element findings: %+v", got)
+	}
+	if !strings.Contains(strings.ToLower(got[1].Message), "may be empty") {
+		t.Fatalf("the variable-subscript finding must retain the empty-array risk: %+v", got[1])
+	}
+}
+
+func TestAnalyzerVBA227KeepsUnknownByteArrayElementInsideSelectCase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run(ByVal source As Variant, ByVal kind As Long)
+  Select Case kind
+    Case 1
+      Dim bytes() As Byte: bytes = source
+      Dim lower As Long: lower = LBound(bytes)
+      Dim upper As Long: upper = UBound(bytes)
+      Debug.Print VarPtr(bytes(lower)), upper
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 7 || got[1].Line != 9 {
+		t.Fatalf("a Select Case Byte-array path must retain the bound and empty-element findings: %+v", got)
+	}
+	if !strings.Contains(strings.ToLower(got[1].Message), "may be empty") {
+		t.Fatalf("the Select Case element finding must retain the empty-array risk: %+v", got[1])
 	}
 }
 
@@ -6237,6 +8360,349 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesQualifiedMemberArrayThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Holder.cls", `Attribute VB_Name = "Holder"
+Option Explicit
+Public values() As String
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByRef values() As String)
+  Debug.Print UBound(values)
+End Sub
+
+Private Sub ConsumeConditional(ByRef values() As String)
+  Debug.Print UBound(values)
+End Sub
+
+Public Sub Run()
+  Dim holder As Holder
+  Set holder = New Holder
+  With holder
+    ReDim .values(0 To 1)
+    Consume .values
+  End With
+End Sub
+
+Public Sub RunConditional(ByVal choose As Boolean)
+  Dim holder As Holder
+  Set holder = New Holder
+  With holder
+    If choose Then ReDim .values(0 To 1)
+    ConsumeConditional .values
+  End With
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "ConsumeConditional" {
+		t.Fatalf("only the conditionally ReDim'd qualified member array should remain unsafe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesDynamicQualifiedMemberArrayThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Holder.cls", `Attribute VB_Name = "Holder"
+Option Explicit
+Public values() As String
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByRef values() As String)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(ByVal upper As Long)
+  Dim holder As Holder
+  Set holder = New Holder
+  With holder
+    ReDim .values(0 To upper)
+    Consume .values
+  End With
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a successfully reached dynamic ReDim of a qualified member should prove the ByRef array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesDescriptorBackedMemberArrayThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type BoundInfo
+  cElements As Long
+End Type
+
+Private Type SafeArrayInfo
+  pvData As LongPtr
+  rgsabound0 As BoundInfo
+End Type
+
+Private Type ByteAccessor
+  arr() As Byte
+  sa As SafeArrayInfo
+End Type
+
+Private Sub Consume(ByRef values() As Byte, ByVal sizeB As Long)
+  Debug.Print values(0)
+End Sub
+
+Public Sub RunPositive(ByVal text As String)
+  Dim bytes As ByteAccessor
+  Dim sizeB As Long
+  sizeB = LenB(text)
+  bytes.sa.pvData = 1
+  bytes.sa.rgsabound0.cElements = sizeB
+  If sizeB >= 1 Then
+    Consume bytes.arr, sizeB
+  End If
+End Sub
+
+Public Sub RunAfterZeroGuard(ByVal text As String)
+  Dim bytes As ByteAccessor
+  Dim sizeB As Long
+  sizeB = LenB(text)
+  bytes.sa.pvData = 1
+  bytes.sa.rgsabound0.cElements = sizeB
+  If sizeB = 0 Then Exit Sub
+  Consume bytes.arr, sizeB
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a descriptor-backed member with a positive element count should prove the ByRef array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotProveNegativeDescriptorCount(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type BoundInfo
+  cElements As Long
+End Type
+
+Private Type SafeArrayInfo
+  pvData As LongPtr
+  rgsabound0 As BoundInfo
+End Type
+
+Private Type ByteAccessor
+  arr() As Byte
+  sa As SafeArrayInfo
+End Type
+
+Private Sub Consume(ByRef values() As Byte, ByVal sizeB As Long)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(ByVal text As String)
+  Dim bytes As ByteAccessor
+  Dim sizeB As Long
+  sizeB = -LenB(text)
+  bytes.sa.pvData = 1
+  bytes.sa.rgsabound0.cElements = sizeB
+  If sizeB = 0 Then Exit Sub
+  Consume bytes.arr, sizeB
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) == 0 {
+		t.Fatal("a negative descriptor element count must not prove the ByRef array allocated")
+	}
+}
+
+func TestAnalyzerVBA227CarriesDescriptorBackedBoundArrayThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type BoundInfo
+  cElements As Long
+End Type
+
+Private Type SafeArrayInfo
+  pvData As LongPtr
+  rgsabound0 As BoundInfo
+End Type
+
+Private Type BoundAccessor
+  rgsabound() As BoundInfo
+  sa As SafeArrayInfo
+End Type
+
+Private Sub Consume(ByRef values() As BoundInfo, ByVal count As Long)
+  Debug.Print values(0).cElements
+End Sub
+
+Public Sub Run(ByVal count As Long)
+  Dim bounds As BoundAccessor
+  bounds.sa.pvData = 1
+  bounds.sa.rgsabound0.cElements = count
+  If count >= 1 Then
+    Consume bounds.rgsabound, count
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a descriptor-backed bound array with a positive element count should prove the ByRef array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesDescriptorBackedBoundArrayWithoutExplicitCount(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type BoundInfo
+  cElements As Long
+End Type
+
+Private Type SafeArrayInfo
+  pvData As LongPtr
+  rgsabound0 As BoundInfo
+End Type
+
+Private Type BoundAccessor
+  rgsabound() As BoundInfo
+  sa As SafeArrayInfo
+End Type
+
+Private Sub Consume(ByRef values() As BoundInfo)
+  Debug.Print values(0).cElements
+End Sub
+
+Private Sub Forward(ByRef bounds As BoundAccessor)
+  Consume bounds.rgsabound
+End Sub
+
+Public Sub Run(ByVal count As Long)
+  Dim bounds As BoundAccessor
+  bounds.sa.pvData = 1
+  bounds.sa.rgsabound0.cElements = count
+  If count >= 1 Then
+    Forward bounds
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a descriptor-backed bound array forwarded without a separate count should prove the ByRef array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryDescriptorBackedBoundArrayWithoutSetup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type BoundInfo
+  cElements As Long
+End Type
+
+Private Type SafeArrayInfo
+  pvData As LongPtr
+  rgsabound0 As BoundInfo
+End Type
+
+Private Type BoundAccessor
+  rgsabound() As BoundInfo
+  sa As SafeArrayInfo
+End Type
+
+Private Sub Consume(ByRef values() As BoundInfo)
+  Debug.Print values(0).cElements
+End Sub
+
+Private Sub Forward(ByRef bounds As BoundAccessor)
+  Consume bounds.rgsabound
+End Sub
+
+Public Sub Run()
+  Dim bounds As BoundAccessor
+  Forward bounds
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("an uninitialized descriptor-backed bound array must remain conservative: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesQualifiedDictionarySnapshotsThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type SortState
+  arrKeys() As Variant
+  arrItems() As Variant
+  ub As Long
+End Type
+
+Private Sub QuickSortKeys(ByRef arrKeys() As Variant, ByRef arrItems() As Variant, ByVal lb As Long, ByVal ub As Long)
+  If lb >= ub Then Exit Sub
+  Debug.Print arrKeys(lb)
+  Debug.Print arrItems(lb)
+End Sub
+
+Public Sub Run()
+  Dim state As SortState
+  Dim dict As Object
+  Dim lastFound As Long
+  Set dict = CreateObject("Scripting.Dictionary")
+  dict.Add "key", "value"
+  With state
+    lastFound = 0
+    If lastFound < 0 Then
+      Exit Sub
+    Else
+      .ub = lastFound
+      If True Then .arrKeys = dict.Keys() Else .arrKeys = dict.Keys()
+      If True Then .arrItems = dict.Items() Else .arrItems = dict.Items()
+      QuickSortKeys .arrKeys, .arrItems, 0, .ub
+    End If
+  End With
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("qualified Keys/Items snapshots guarded by a nonnegative upper bound should prove the ByRef arrays: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesAllocatedArrayThroughLineContinuationByRefCall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -6259,6 +8725,2014 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("an allocated array should remain allocated through a line-continuation ByRef call: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesClassModuleArrayThroughPrivateByRefHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private values() As String
+
+Private Sub Consume(ByRef idx As Long, ByRef maxIdx As Long, ByRef items() As String)
+  If idx <= maxIdx Then
+    Debug.Print LenB(items(idx))
+  End If
+End Sub
+
+Private Sub Parse()
+  values = Split("a,b", ",")
+  Consume 0, 1, values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an allocated class-module array passed through a private ByRef helper should remain allocated: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesClassModuleArrayThroughMultilinePrivateByRefHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private tmpCSV() As String
+
+Private Sub SkipUnwantedLines(ByRef idx As Long, _
+                              ByRef maxIdx As Long, _
+                              ByRef arr() As String, _
+                              ByVal commentToken As Long, _
+                              Optional skipComments As Boolean = True, _
+                              Optional skipEmptyLines As Boolean = True)
+  Dim currentLength As Long
+  If idx <= maxIdx Then
+    currentLength = LenB(arr(idx))
+    If currentLength > 0 Then Debug.Print AscW(arr(idx)) + commentToken
+  End If
+End Sub
+
+Private Sub Parse()
+  tmpCSV() = Split("a,b", ",")
+  SkipUnwantedLines 0, 1, tmpCSV, 35, _
+                     True, True
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a Split-allocated class-module array passed through a multiline private ByRef helper should remain allocated: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesClassModuleArrayThroughLoopPrivateByRefHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private values() As String
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  values() = Split("a,b", ",")
+  Do
+    Consume values
+    Exit Do
+  Loop
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an allocated class-module array passed through a loop private ByRef helper should remain allocated: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesArrayThroughUnreachableColonCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private values() As String
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  values() = Split("a,b", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an allocated array passed through a colon-separated unreachable-call boundary should remain allocated: %+v", got)
+	}
+}
+
+func TestArraySourceOrderCallsBySegmentPreservesLogicalOrder(t *testing.T) {
+	t.Parallel()
+	line := "Call AllocateValues(values): Call ClearValues(values)"
+	file := parsedFile{Lines: []string{line}, Source: []byte(line)}
+	calls := []procedureir.CallSite{
+		{
+			Callee: procedureir.Callee{BaseName: "AllocateValues"},
+			Range:  vbaast.Range{StartLine: 1, StartByte: strings.Index(line, "AllocateValues")},
+		},
+		{
+			Callee: procedureir.Callee{BaseName: "ClearValues"},
+			Range:  vbaast.Range{StartLine: 1, StartByte: strings.Index(line, "ClearValues")},
+		},
+	}
+
+	bySegment, unassigned := arraySourceOrderCallsBySegment(file, 1, calls)
+	if len(unassigned) != 0 {
+		t.Fatalf("all calls should have a source segment: %+v", unassigned)
+	}
+	if len(bySegment) != 2 || len(bySegment[0]) != 1 || len(bySegment[1]) != 1 {
+		t.Fatalf("calls should be assigned to their colon-separated segments: %+v", bySegment)
+	}
+	if got := bySegment[0][0].Callee.BaseName; got != "AllocateValues" {
+		t.Fatalf("first segment call = %q, want AllocateValues", got)
+	}
+	if got := bySegment[1][0].Callee.BaseName; got != "ClearValues" {
+		t.Fatalf("second segment call = %q, want ClearValues", got)
+	}
+}
+
+func TestArraySourceOrderPreserveRequiresAllocatedInput(t *testing.T) {
+	t.Parallel()
+	names := map[string]bool{"values": true}
+	if !arraySourceOrderPreserveNeedsAllocatedInput("ReDim Preserve values(0 To 1)", names, arrayFlowState{
+		"values": {kind: arrayUnallocated, knownArray: true},
+	}) {
+		t.Fatal("ReDim Preserve on an unallocated array must not establish an allocation proof")
+	}
+	if arraySourceOrderPreserveNeedsAllocatedInput("ReDim Preserve values(0 To 1)", names, arrayFlowState{
+		"values": {kind: arrayAllocated, knownArray: true},
+	}) {
+		t.Fatal("ReDim Preserve on an allocated array should retain the source-order path")
+	}
+}
+
+func TestArraySourceOrderStripCommentHandlesRem(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{name: "leading", line: "Rem note: Erase values: ReDim values(0 To 1)", want: ""},
+		{name: "after colon", line: "values() = Split(\"a,b\", \",\"): Rem note: Erase values", want: "values() = Split(\"a,b\", \",\"): "},
+		{name: "identifier", line: "Remember values", want: "Remember values"},
+		{name: "string", line: "Debug.Print \"Rem note: Erase values\"", want: "Debug.Print \"Rem note: Erase values\""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := arraySourceOrderStripComment(test.line); got != test.want {
+				t.Fatalf("arraySourceOrderStripComment(%q) = %q, want %q", test.line, got, test.want)
+			}
+		})
+	}
+}
+
+func TestArraySourceOrderCallLineIgnoresRemCommentColons(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{name: "rem comment", line: "Consume values: Rem note: colon", want: true},
+		{name: "executable separator", line: "Consume values: ClearValues values", want: false},
+		{name: "apostrophe comment", line: "Consume values: 'note: colon", want: true},
+		{name: "named argument", line: "Consume values, force:=True", want: true},
+		{name: "url string", line: `Consume values, "http://example.test/a:b"`, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := arraySourceOrderCallLineIsSingleStatement([]string{test.line}, 1); got != test.want {
+				t.Fatalf("arraySourceOrderCallLineIsSingleStatement(%q) = %t, want %t", test.line, got, test.want)
+			}
+		})
+	}
+}
+
+func TestArrayLocalGoSubEffectsInvalidateUnknownState(t *testing.T) {
+	t.Parallel()
+	state := arrayFlowState{
+		"values": {kind: arrayAllocated, knownArray: true},
+	}
+	got := applyArrayLocalGoSubStatementEffects(state, "GoSub ClearValues", nil)
+	if got["values"].kind != arrayUnknown || got["values"].knownArray {
+		t.Fatalf("unknown GoSub state = %+v, want unknown allocation", got["values"])
+	}
+}
+
+func TestAnalyzerVBA227CarriesArrayThroughLocalGoSub(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  GoSub AllocateValues
+  Consume values
+  Exit Sub
+AllocateValues:
+  ReDim values(0 To 1)
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a local GoSub that allocates an array before returning should preserve the allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesArrayThroughLocalGoSubPreserve(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  GoSub InitializeValues
+  Consume values
+  Exit Sub
+InitializeValues:
+  ReDim values(0 To 1)
+  ReDim Preserve values(0 To 2)
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a local GoSub that preserves an allocated array should keep the allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsAllocatedArrayThroughLocalGoSubPreserveOnly(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  values() = Split("a,b", ",")
+  GoSub ResizeValues
+  Consume values
+  Exit Sub
+ResizeValues:
+  ReDim Preserve values(0 To 2)
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a GoSub Preserve on an allocated array must retain the caller allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryUnallocatedArrayThroughLocalGoSubPreserve(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  GoSub InitializeValues
+  Consume values
+  Exit Sub
+InitializeValues:
+  On Error Resume Next
+  ReDim Preserve values(0 To 1)
+  On Error GoTo 0
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a failed ReDim Preserve on an unallocated array must not prove the GoSub output safe: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227CarriesNamedByRefHelperThroughLocalGoSub(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub InitializeValues(ByRef items() As String)
+  ReDim items(0 To 1)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  GoSub FillValues
+  Consume values
+  Exit Sub
+FillValues:
+  InitializeValues items:=values
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a named ByRef helper call inside a local GoSub should preserve its allocation contract: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesByRefOutputAllocatedByLocalGoSub(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Prepare(ByRef items() As String)
+  GoSub AllocateItems
+  Exit Sub
+AllocateItems:
+  ReDim items(0 To 1)
+  Return
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  Dim values() As String
+  Prepare values
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a ByRef output allocated by a local GoSub should preserve the caller's allocation proof: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesParamArrayByRefEffect(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub ClearValues(ByRef items() As String, ParamArray extras() As Variant)
+  Erase items
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  Dim values() As String
+  values = Split("a,b", ",")
+  ClearValues values, 1, 2
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a ByRef effect must remain conservative when a ParamArray consumes extra arguments: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotAliasParamArrayElementsToCallerArrays(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub ClearParamArray(ParamArray args() As Variant)
+  Erase args
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  Dim values() As String
+  values = Split("a,b", ",")
+  ClearParamArray values
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("mutating a ParamArray must not invalidate the caller's array alias: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotAliasParamArrayInLocalGoSub(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub LogValues(ParamArray args() As Variant)
+  Debug.Print UBound(args)
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  values = Split("a,b", ",")
+  GoSub LogArguments
+  Consume values
+  Exit Sub
+LogArguments:
+  LogValues values
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a local GoSub call to a ParamArray helper must not invalidate the caller array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecordsRepeatedByRefCallsInSourceOrder(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub ClearValues(ByRef items() As String)
+  Debug.Print items(0)
+  Erase items
+End Sub
+
+Public Sub Run()
+  Dim values() As String
+  values = Split("a,b", ",")
+  ClearValues values: ClearValues values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "ClearValues" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("the second same-line ByRef call must observe the first call's Erase: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotSummarizeConditionalByRefInvalidationAsAllocated(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub ClearValues(ByRef items() As String)
+  Erase items
+End Sub
+
+Private Sub Prepare(ByRef items() As String, ByVal shouldClear As Boolean)
+  ReDim items(0 To 1)
+  If shouldClear Then ClearValues items
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Public Sub Run(ByVal shouldClear As Boolean)
+  Dim values() As String
+  Prepare values, shouldClear
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a conditional ByRef invalidation must not be summarized as an unconditional allocation: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryArrayThroughUnknownGoSubCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub ClearValues(ByRef items() As String)
+  Erase items
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  GoSub InitializeValues
+  Consume values
+  Exit Sub
+InitializeValues:
+  ReDim values(0 To 1)
+  ClearValues values
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an unproven GoSub call that receives the array must keep the ByRef call conservative: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryModuleArrayThroughUnknownGoSubCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private values() As String
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub ClearValues()
+  Erase values
+End Sub
+
+Private Sub Parse()
+  GoSub InitializeValues
+  Consume values
+  Exit Sub
+InitializeValues:
+  ReDim values(0 To 1)
+  ClearValues
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a GoSub call that may mutate a module array without passing it directly must remain conservative: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustByRefHelperAfterErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub InitializeValues(ByRef items() As String)
+  ReDim items(0 To 1)
+  Erase items
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  InitializeValues values
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			return
+		}
+	}
+	t.Fatalf("a ByRef helper that erases its output before returning must not prove the caller safe: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227SourceOrderFallbackReflectsByRefErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private Sub ClearValues(ByRef items() As String)
+  Erase items
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  values() = Split("a,b", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  ClearValues values
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`
+	writeClass(t, dir, "Parser.cls", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" && finding.Line == 9 {
+			return
+		}
+	}
+	t.Fatalf("a ByRef Erase before a recovered source-order call must invalidate the caller state: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227SourceOrderFallbackKeepsPublicByRefEraseConservative(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Attribute VB_Name = "Parser"
+Option Explicit
+
+Public Sub ClearValues(ByRef items() As String)
+  Erase items
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  values() = Split("a,b", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  ClearValues values
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`
+	writeClass(t, dir, "Parser.cls", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" && finding.Line == 9 {
+			return
+		}
+	}
+	t.Fatalf("a public ByRef Erase before a recovered source-order call must invalidate the caller state: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227SourceOrderFallbackKeepsPrivateModuleEraseConservative(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Attribute VB_Name = "Parser"
+Option Explicit
+Private values() As String
+
+Private Sub ClearValues()
+  Erase values
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  values() = Split("a,b", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  ClearValues
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`
+	writeClass(t, dir, "Parser.cls", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" && finding.Line == 10 {
+			return
+		}
+	}
+	t.Fatalf("a private module Erase before a recovered source-order call must invalidate the caller state: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227SourceOrderFallbackTracksOnlyErasedModuleArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Attribute VB_Name = "Parser"
+Option Explicit
+Private values() As String
+Private other() As String
+
+Public Sub ClearValues()
+  Erase values
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  values() = Split("a,b", ",")
+  other() = Split("c,d", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  ClearValues
+  Consume other
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`
+	writeClass(t, dir, "Parser.cls", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a public helper that erases values must not invalidate unrelated module arrays: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227SourceOrderFallbackHonorsTargetArrayShadowing(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Attribute VB_Name = "Parser"
+Option Explicit
+Private values() As String
+
+Private Sub ClearLocal()
+  Dim values() As String
+  Erase values
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  values() = Split("a,b", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  ClearLocal
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`
+	writeClass(t, dir, "Parser.cls", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an Erase of a helper-local shadow must not invalidate the module array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227SourceOrderFallbackRejectsUnresolvedReceiverAsLocalTarget(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Attribute VB_Name = "Parser"
+Option Explicit
+Private values() As String
+
+Public Sub ClearValues()
+  Erase values
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim other As Object
+  values() = Split("a,b", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  other.ClearValues
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`
+	writeClass(t, dir, "Parser.cls", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an unresolved receiver call must not be rebound to a same-module helper: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227SourceOrderFallbackKeepsConditionalPreserveAllocated(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse(ByVal shouldResize As Boolean)
+  Dim values() As String
+  values() = Split("a,b", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  If shouldResize Then ReDim Preserve values(0 To 2)
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse True
+End Sub
+`
+	writeClass(t, dir, "Parser.cls", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a conditional ReDim Preserve must retain an already allocated array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227SourceOrderFallbackAcceptsFixedArrayInitialState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef items() As Long)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values(0 To 1) As Long
+  If False Then Debug.Print vbNullString: Exit Sub
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a fixed array's trusted initial state should satisfy source-order ByRef proof: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227SourceOrderFallbackAcceptsGuaranteedModuleInitialState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As Long
+
+Private Sub SetupValues()
+  ReDim values(0 To 1)
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  SetupValues
+  If False Then Debug.Print vbNullString: Exit Sub
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a guaranteed module initialization state should satisfy source-order ByRef proof: %+v", got)
+	}
+}
+
+func TestArraySourceOrderInlineArrayMutationHonorsConstantCondition(t *testing.T) {
+	t.Parallel()
+	names := map[string]bool{"values": true}
+	if arraySourceOrderInlineArrayMutation("If False Then Erase values", names, analysisContext{}) {
+		t.Fatal("an unreachable constant-false array mutation must not reject source-order fallback")
+	}
+	if !arraySourceOrderInlineArrayMutation("If True Then Erase values", names, analysisContext{}) {
+		t.Fatal("a reachable constant-true array mutation must reject source-order fallback")
+	}
+}
+
+func TestApplyArrayUnknownModuleCallEffectsInvalidatesVisibleModuleArrays(t *testing.T) {
+	t.Parallel()
+	targetIR := &procedureir.ProcedureIR{
+		Symbol: procedureir.ProcedureSymbol{
+			Name: "ClearModule", QualifiedName: "Parser.ClearModule", Kind: procedureir.ProcedureSub,
+			Visibility: "Public", DeclarationRange: vbaast.Range{StartLine: 2, EndLine: 3},
+		},
+		Statements: []procedureir.Statement{{ID: 1, Kind: procedureir.StatementUnknown, Text: "Erase values"}},
+	}
+	target := sourceProcedure{
+		IR: targetIR, Module: "Parser", Name: "ClearModule", Visibility: "Public", StartLine: 2, EndLine: 3,
+		Statements: newReadOnlySpan(targetIR.Statements),
+	}
+	file := parsedFile{
+		Module:     "Parser",
+		Lines:      []string{"Sub Parse()"},
+		Procedures: []sourceProcedure{target},
+		ModuleDeclarations: map[string]sourceDeclaration{
+			"values": {Name: "values", Array: true},
+			"other":  {Name: "other", Array: true},
+		},
+	}
+	proc := sourceProcedure{
+		IR:     &procedureir.ProcedureIR{Symbol: procedureir.ProcedureSymbol{Name: "Parse", QualifiedName: "Parser.Parse", Kind: procedureir.ProcedureSub, DeclarationRange: vbaast.Range{StartLine: 1, EndLine: 1}}},
+		Module: "Parser", Name: "Parse", StartLine: 1, EndLine: 1,
+	}
+	call := procedureir.CallSite{Callee: procedureir.Callee{Text: "ClearModule", BaseName: "ClearModule"}}
+	ctx := analysisContext{
+		procedureResolver:   procedureir.NewResolver([]procedureir.ResolverSymbol{{Name: "ClearModule", Module: "Parser", Kind: "sub", Visibility: "Public"}}),
+		arrayPrivateTargets: map[string]sourceProcedure{},
+	}
+	state := arrayFlowState{
+		"values": {kind: arrayAllocated, knownArray: true},
+		"other":  {kind: arrayAllocated, knownArray: true},
+	}
+	variables := map[string]arrayVariable{
+		"values": {name: "values", isArray: true},
+		"other":  {name: "other", isArray: true},
+	}
+	got := applyArrayUnknownModuleCallEffects(state, file, proc, call, ctx, variables, file.moduleDecls())
+	if got["values"].kind != arrayUnknown || got["values"].knownArray {
+		t.Fatalf("a source-local public module call must invalidate visible module arrays: %+v", got["values"])
+	}
+	if got["other"].kind != arrayAllocated || !got["other"].knownArray {
+		t.Fatalf("a source-local public module call must not invalidate unrelated module arrays: %+v", got["other"])
+	}
+	falseCall := procedureir.CallSite{
+		Callee: procedureir.Callee{Text: "ClearModule", BaseName: "ClearModule"},
+		Range:  vbaast.Range{StartLine: 1},
+	}
+	file.Lines = []string{"If False Then ClearModule"}
+	got = applyArrayUnknownModuleCallEffects(state, file, proc, falseCall, ctx, variables, file.moduleDecls())
+	if got["values"].kind != arrayAllocated || !got["values"].knownArray {
+		t.Fatalf("a constant-false public module call must not invalidate visible module arrays: %+v", got["values"])
+	}
+	call = procedureir.CallSite{Callee: procedureir.Callee{Text: "RecordToken", BaseName: "RecordToken"}}
+	got = applyArrayUnknownModuleCallEffects(state, file, proc, call, ctx, variables, file.moduleDecls())
+	if got["values"].kind != arrayAllocated || !got["values"].knownArray {
+		t.Fatalf("an unrelated unresolved call must not invalidate visible module arrays: %+v", got["values"])
+	}
+}
+
+func TestAnalyzerVBA227IgnoresConstantFalsePrivateModuleEraseCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As Long
+
+Private Sub ClearValues()
+  Erase values
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  ReDim values(0 To 1)
+  If False Then ClearValues
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a constant-false private module call must not invalidate the module array: %+v", got)
+	}
+}
+
+func TestArrayByRefParameterMayInvalidateDetectsErase(t *testing.T) {
+	t.Parallel()
+	proc := sourceProcedure{
+		Module: "Main",
+		Name:   "ClearValues",
+		Params: newReadOnlySpan([]parameterInfo{{Name: "items", Type: "String()", Passing: "ByRef", ValueShape: procedureir.ValueShapeDynamicArray}}),
+		Statements: newReadOnlySpan([]procedureir.Statement{{
+			ID: 1, Kind: procedureir.StatementUnknown, Text: "Erase items",
+		}}),
+	}
+	if !arrayByRefParameterMayInvalidate(proc, 0, analysisContext{}, map[string]bool{}) {
+		t.Fatal("an Erase of a ByRef array parameter must invalidate its caller allocation state")
+	}
+	proc.Statements = newReadOnlySpan([]procedureir.Statement{{
+		ID: 1, Kind: procedureir.StatementUnknown, Text: "ReDim Preserve items(0 To 1)",
+	}})
+	if arrayByRefParameterMayInvalidate(proc, 0, analysisContext{}, map[string]bool{}) {
+		t.Fatal("ReDim Preserve of a ByRef array parameter must preserve an allocated caller state")
+	}
+	proc.Statements = newReadOnlySpan([]procedureir.Statement{{
+		ID: 1, Kind: procedureir.StatementUnknown, Text: "If False Then Erase items",
+	}})
+	if arrayByRefParameterMayInvalidate(proc, 0, analysisContext{}, map[string]bool{}) {
+		t.Fatal("an unreachable inline Erase must not invalidate a ByRef array parameter")
+	}
+}
+
+func TestArrayByRefParameterMayInvalidateTreatsBoundsBuiltinsAsReadOnly(t *testing.T) {
+	t.Parallel()
+	proc := sourceProcedure{
+		Module: "Main",
+		Name:   "ByteArrayLength",
+		Params: newReadOnlySpan([]parameterInfo{{Name: "dataBytes", Type: "Byte()", Passing: "ByRef", ValueShape: procedureir.ValueShapeDynamicArray}}),
+		Statements: newReadOnlySpan([]procedureir.Statement{{
+			ID: 1, Kind: procedureir.StatementUnknown, Text: "ByteArrayLength = UBound(dataBytes) - LBound(dataBytes) + 1",
+			Range: vbaast.Range{StartLine: 1},
+		}}),
+		Calls: newReadOnlySpan([]procedureir.CallSite{
+			{
+				Callee:    procedureir.Callee{Text: "UBound", BaseName: "UBound"},
+				Arguments: procedureir.Arguments{Count: 1, Named: []procedureir.NamedArgument{{ValueText: "dataBytes"}}},
+				Range:     vbaast.Range{StartLine: 1},
+			},
+			{
+				Callee:    procedureir.Callee{Text: "LBound", BaseName: "LBound"},
+				Arguments: procedureir.Arguments{Count: 1, Named: []procedureir.NamedArgument{{ValueText: "dataBytes"}}},
+				Range:     vbaast.Range{StartLine: 1},
+			},
+		}),
+	}
+	if arrayByRefParameterMayInvalidate(proc, 0, analysisContext{}, map[string]bool{}) {
+		t.Fatal("LBound/UBound reads must not invalidate a ByRef array parameter")
+	}
+}
+
+func TestAnalyzerVBA227IgnoresUnreachableByRefErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub KeepValues(ByRef items() As String)
+  Exit Sub
+  Erase items
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  Dim values() As String
+  values() = Split("a,b", ",")
+  KeepValues values
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an unreachable ByRef Erase must not invalidate the caller allocation: %+v", got)
+	}
+}
+
+func TestArrayByRefSourceOrderProofReflectsByRefErase(t *testing.T) {
+	t.Parallel()
+	parameter := parameterInfo{Name: "items", Type: "String()", Passing: "ByRef", ValueShape: procedureir.ValueShapeDynamicArray}
+	clearValues := sourceProcedure{
+		Module: "Main",
+		Name:   "ClearValues",
+		Params: newReadOnlySpan([]parameterInfo{parameter}),
+		Statements: newReadOnlySpan([]procedureir.Statement{{
+			ID: 1, Kind: procedureir.StatementUnknown, Text: "Erase items",
+		}}),
+	}
+	consume := sourceProcedure{
+		Module: "Main",
+		Name:   "Consume",
+		Params: newReadOnlySpan([]parameterInfo{parameter}),
+	}
+	callerIR := &procedureir.ProcedureIR{
+		Symbol: procedureir.ProcedureSymbol{Name: "Parse", Kind: procedureir.ProcedureSub},
+		Expressions: []procedureir.Expression{
+			{ID: 1, Text: "values"},
+			{ID: 2, Text: "values"},
+		},
+		Calls: []procedureir.CallSite{
+			{
+				ID: 1, StatementID: 1, Caller: procedureir.ProcedureRef{Name: "Parse", QualifiedName: "Main.Parse"},
+				Callee:    procedureir.Callee{Text: "ClearValues", BaseName: "ClearValues"},
+				Arguments: procedureir.Arguments{Count: 1, ExpressionIDs: []int{1}}, Range: vbaast.Range{StartLine: 3},
+			},
+			{
+				ID: 2, StatementID: 2, Caller: procedureir.ProcedureRef{Name: "Parse", QualifiedName: "Main.Parse"},
+				Callee:    procedureir.Callee{Text: "Consume", BaseName: "Consume"},
+				Arguments: procedureir.Arguments{Count: 1, ExpressionIDs: []int{2}}, Range: vbaast.Range{StartLine: 4},
+			},
+		},
+	}
+	caller := sourceProcedure{
+		IR:        callerIR,
+		Module:    "Main",
+		Name:      "Parse",
+		StartLine: 1,
+		EndLine:   4,
+		Calls:     newReadOnlySpan(callerIR.Calls),
+	}
+	file := parsedFile{Lines: []string{
+		"Sub Parse()",
+		`values() = Split("a,b", ",")`,
+		"ClearValues values",
+		"Consume values",
+	}}
+	ctx := analysisContext{
+		arrayPrivateTargets: map[string]sourceProcedure{
+			arrayProcedureKey(clearValues): clearValues,
+			arrayProcedureKey(consume):     consume,
+		},
+		arrayByRefAllocations: arrayByRefAllocationSummaries{},
+		procedureResolver: procedureir.NewResolver([]procedureir.ResolverSymbol{
+			{Name: "ClearValues", Module: "Main", Kind: "sub", Visibility: "Private"},
+			{Name: "Consume", Module: "Main", Kind: "sub", Visibility: "Private"},
+		}),
+	}
+	variables := map[string]arrayVariable{"values": {name: "values", typ: "String", isArray: true}}
+	facts := arraySourceOrderFallbackFacts{
+		allocations: map[string][]arraySourceOrderAllocation{
+			"values": {{line: 2}},
+		},
+	}
+	_, proven := (Analyzer{Config: config.Default()}).arrayByRefCallSourceOrderProof(
+		file, facts, nil, caller, consume, callerIR.Calls[1], arrayInitialState(variables), ctx, variables, nil,
+	)
+	if proven {
+		t.Fatal("source-order proof must reject an allocated array after a private ByRef Erase")
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTreatGoSubCleanupJumpAsSuccessfulReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  GoSub InitializeValues
+  Consume values
+  Exit Sub
+InitializeValues:
+  ReDim values(0 To 1)
+  GoTo CleanupValues
+  Return
+CleanupValues:
+  Erase values
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a GoSub jump past its first Return must not prove the ByRef call safe: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustImpossibleGoSubReDim(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Const InvalidUpper As Long = -1
+
+Private Sub Consume(ByRef items() As Long)
+  items(0) = 1
+End Sub
+
+Private Sub Parse()
+  Dim values() As Long
+  GoSub InitializeValues
+  Consume values
+  Exit Sub
+InitializeValues:
+  ReDim values(0 To InvalidUpper)
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("an impossible GoSub ReDim must not establish allocation: %+v", got)
+	}
+}
+
+func TestArrayLocalGoSubInvariantRejectsSiblingUnallocatedReturn(t *testing.T) {
+	t.Parallel()
+	statements := []procedureir.Statement{
+		{ID: 1, Kind: procedureir.StatementLabel, Label: "InitializeValues", Text: "InitializeValues:"},
+		{ID: 2, Kind: procedureir.StatementReDim, Text: "ReDim values(0 To 1)"},
+		{ID: 3, Kind: procedureir.StatementUnknown, Text: "Stop"},
+		{ID: 4, Kind: procedureir.StatementUnknown, Text: "Erase values"},
+		{ID: 5, Kind: procedureir.StatementUnknown, Text: "Return"},
+	}
+	graph := vbacfg.Graph{
+		Blocks: []vbacfg.Block{
+			{ID: 1, Kind: vbacfg.BlockEntry},
+			{ID: 2, Kind: vbacfg.BlockStatement, StatementID: 1, Statement: &statements[0]},
+			{ID: 3, Kind: vbacfg.BlockStatement, StatementID: 2, Statement: &statements[1]},
+			{ID: 4, Kind: vbacfg.BlockStatement, StatementID: 3, Statement: &statements[2]},
+			{ID: 5, Kind: vbacfg.BlockStatement, StatementID: 4, Statement: &statements[3]},
+			{ID: 6, Kind: vbacfg.BlockStatement, StatementID: 5, Statement: &statements[4]},
+			{ID: 7, Kind: vbacfg.BlockTerminationExit},
+		},
+		Edges: []vbacfg.Edge{
+			{From: 1, To: 2, Kind: vbacfg.EdgeFallthrough, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 3, Kind: vbacfg.EdgeFallthrough, Class: vbacfg.EdgeNormal},
+			{From: 3, To: 4, Kind: vbacfg.EdgeFallthrough, Class: vbacfg.EdgeNormal},
+			// The terminal edge deliberately precedes the sibling path that
+			// erases the array before the first Return.
+			{From: 4, To: 7, Kind: vbacfg.EdgeTermination, Class: vbacfg.EdgeNormal},
+			{From: 4, To: 5, Kind: vbacfg.EdgeBranchFalse, Class: vbacfg.EdgeNormal},
+			{From: 5, To: 6, Kind: vbacfg.EdgeFallthrough, Class: vbacfg.EdgeNormal},
+		},
+		Entry: 1, TerminationExit: 7,
+	}
+	view := graph.View(vbacfg.EdgeFilter{})
+	if arrayLocalGoSubAllocationInvariant(sourceProcedure{}, &view, statements, 0, 4, "values", analysisContext{}, 0, nil, nil) {
+		t.Fatal("a sibling path from a terminal edge to an unallocated Return must invalidate the GoSub summary")
+	}
+}
+
+func TestArrayLocalGoSubInvariantRejectsUnknownFlow(t *testing.T) {
+	t.Parallel()
+	statements := []procedureir.Statement{
+		{ID: 1, Kind: procedureir.StatementLabel, Label: "InitializeValues", Text: "InitializeValues:"},
+		{ID: 2, Kind: procedureir.StatementReDim, Text: "ReDim values(0 To 1)"},
+		{ID: 3, Kind: procedureir.StatementUnknown, Text: "On selector GoTo Cleanup"},
+		{ID: 4, Kind: procedureir.StatementUnknown, Text: "Return"},
+	}
+	graph := vbacfg.Graph{
+		Blocks: []vbacfg.Block{
+			{ID: 1, Kind: vbacfg.BlockEntry},
+			{ID: 2, Kind: vbacfg.BlockStatement, StatementID: 1, Statement: &statements[0]},
+			{ID: 3, Kind: vbacfg.BlockStatement, StatementID: 2, Statement: &statements[1]},
+			{ID: 4, Kind: vbacfg.BlockStatement, StatementID: 3, Statement: &statements[2]},
+			{ID: 5, Kind: vbacfg.BlockStatement, StatementID: 4, Statement: &statements[3]},
+			{ID: 6, Kind: vbacfg.BlockUnknownExit},
+		},
+		Edges: []vbacfg.Edge{
+			{From: 1, To: 2, Kind: vbacfg.EdgeFallthrough, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 3, Kind: vbacfg.EdgeFallthrough, Class: vbacfg.EdgeNormal},
+			{From: 3, To: 4, Kind: vbacfg.EdgeFallthrough, Class: vbacfg.EdgeNormal},
+			{From: 4, To: 5, Kind: vbacfg.EdgeFallthrough, Class: vbacfg.EdgeNormal},
+			{From: 4, To: 6, Kind: vbacfg.EdgeUnknown, Class: vbacfg.EdgeNormal, Uncertain: true},
+		},
+		Entry: 1, UnknownExit: 6,
+	}
+	view := graph.View(vbacfg.EdgeFilter{})
+	if arrayLocalGoSubAllocationInvariant(sourceProcedure{}, &view, statements, 0, 3, "values", analysisContext{}, 0, nil, nil) {
+		t.Fatal("an unknown-flow edge must invalidate a local GoSub allocation summary")
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryFailedGoSubRedim(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  GoSub InitializeValues
+  Consume values
+  Exit Sub
+InitializeValues:
+  On Error Resume Next
+  ReDim values(1 To 0)
+  On Error GoTo 0
+  Return
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a failed constant-bound ReDim must not prove the ByRef call safe: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotUseFallbackAfterDefinitelyTerminatingIf(t *testing.T) {
+	t.Parallel()
+	if !arraySourceOrderInlineConditionalDefinitelyTerminates("If True Then Debug.Print vbNullString: Exit Sub", nil) {
+		t.Fatal("a literal True inline If with Exit Sub must be recognized as definitely terminating")
+	}
+	if arraySourceOrderInlineConditionalDefinitelyTerminates("If False Then Debug.Print vbNullString: Exit Sub", nil) {
+		t.Fatal("a literal False inline If must not be recognized as definitely terminating")
+	}
+	view := vbacfg.Graph{
+		Blocks: []vbacfg.Block{{ID: 1, Kind: vbacfg.BlockEntry}},
+		Entry:  1,
+	}.View(vbacfg.EdgeFilter{})
+	facts := arraySourceOrderFallbackFacts{
+		conditionalTransferLines: []int{3},
+		definiteExitLines:        []int{3},
+	}
+	file := parsedFile{Lines: []string{"", "", "If True Then Exit Sub", "", "", "Consume values"}}
+	proc := sourceProcedure{StartLine: 1}
+	call := procedureir.CallSite{Range: vbaast.Range{StartLine: 6}}
+	if arrayByRefSourceOrderFallbackApplies(file, proc, &view, facts, call) {
+		t.Fatal("source-order fallback must be disabled after a definitely terminating constant If")
+	}
+	facts.definiteExitLines = nil
+	if !arrayByRefSourceOrderFallbackApplies(file, proc, &view, facts, call) {
+		t.Fatal("source-order fallback should remain available without a definite exit")
+	}
+	facts.unknownFlow = true
+	if arrayByRefSourceOrderFallbackApplies(file, proc, &view, facts, call) {
+		t.Fatal("source-order fallback must remain disabled when the procedure has unknown flow")
+	}
+}
+
+func TestArraySourceOrderAllocationInvariantRequiresEveryRelevantBranchGroup(t *testing.T) {
+	t.Parallel()
+	facts := arraySourceOrderFallbackFacts{
+		parents: map[int]procedureir.Statement{
+			1: {ID: 1, Kind: procedureir.StatementIf, Range: vbaast.Range{StartLine: 2}},
+			3: {ID: 3, Kind: procedureir.StatementElse, ParentID: 1, Range: vbaast.Range{StartLine: 4}},
+			4: {ID: 4, Kind: procedureir.StatementIf, Range: vbaast.Range{StartLine: 5}},
+			6: {ID: 6, Kind: procedureir.StatementElse, ParentID: 4, Range: vbaast.Range{StartLine: 7}},
+			7: {ID: 7, Kind: procedureir.StatementIf, Range: vbaast.Range{StartLine: 8}},
+			8: {ID: 8, Kind: procedureir.StatementElse, ParentID: 7, Range: vbaast.Range{StartLine: 9}},
+		},
+		branchGroups: map[int]map[int]bool{
+			1: {1: true, 3: true},
+			4: {4: true, 6: true},
+			7: {7: true, 8: true},
+		},
+		allocations: map[string][]arraySourceOrderAllocation{
+			"values": {
+				{line: 3, parentID: 1},
+				{line: 6, parentID: 4},
+			},
+		},
+	}
+	if facts.allocationInvariant("values", 10) {
+		t.Fatal("one incomplete branch group must not prove the allocation invariant")
+	}
+	facts.allocations["values"] = append(facts.allocations["values"], arraySourceOrderAllocation{line: 4, parentID: 3}, arraySourceOrderAllocation{line: 7, parentID: 6})
+	if !facts.allocationInvariant("values", 10) {
+		t.Fatal("complete relevant branch groups should prove the allocation invariant")
+	}
+}
+
+func TestArraySourceOrderAllocationInvariantRejectsMixedTransferLine(t *testing.T) {
+	t.Parallel()
+	facts := arraySourceOrderFallbackFacts{
+		allocations: map[string][]arraySourceOrderAllocation{
+			"values": {{line: 4}, {line: 5}},
+		},
+		ambiguousTransferLines: map[int]bool{4: true},
+	}
+	if facts.allocationInvariant("values", 8) {
+		t.Fatal("a same-line transfer and ReDim must disable source-order allocation proof")
+	}
+}
+
+func TestArrayCFGWorklistReachableDoesNotExpandUnknownFlow(t *testing.T) {
+	t.Parallel()
+	graph := vbacfg.Graph{
+		Blocks: []vbacfg.Block{
+			{ID: 1, Kind: vbacfg.BlockEntry},
+			{ID: 2, Kind: vbacfg.BlockStatement, StatementID: 1},
+			{ID: 3, Kind: vbacfg.BlockStatement, StatementID: 2},
+			{ID: 4, Kind: vbacfg.BlockUnknownExit},
+		},
+		Edges: []vbacfg.Edge{
+			{From: 1, To: 2, Kind: vbacfg.EdgeFallthrough, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 4, Kind: vbacfg.EdgeUnknown, Class: vbacfg.EdgeNormal, Uncertain: true},
+		},
+		Entry: 1, UnknownExit: 4, UnknownFlowSources: []vbacfg.BlockID{2},
+	}
+	view := graph.View(vbacfg.EdgeFilter{})
+	if !view.IsReachable(3) {
+		t.Fatal("the conservative CFG reachability view should expand an unknown-flow source")
+	}
+	if arrayCFGWorklistReachable(&view)[3] {
+		t.Fatal("the array worklist reachability set must not include disconnected statement blocks")
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryArrayAcrossGoSubBypass(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse(ByVal skipValues As Boolean)
+  Dim values() As String
+  GoSub InitializeValues
+  Consume values
+  Exit Sub
+InitializeValues:
+  If skipValues Then GoTo Done
+  ReDim values(0 To 1)
+Done:
+  Return
+End Sub
+
+Public Sub Run()
+  Parse True
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a GoSub path that bypasses ReDim must not prove the ByRef call safe: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryArrayAcrossBranchBypassGoto(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse(ByVal skipValues As Boolean, ByVal first As Boolean)
+  Dim values() As String
+  If skipValues Then GoTo UseValues
+  If first Then
+    ReDim values(0 To 1)
+  Else
+    ReDim values(0 To 1)
+  End If
+UseValues:
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse True, False
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a conditional GoTo that bypasses an allocating branch must not prove the ByRef call safe: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryConditionalAllocationToFalseEdge(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  If UBound(items) > 0 Then Debug.Print items(0)
+End Sub
+
+Private Sub Parse(ByVal makeValues As Boolean)
+  Dim values() As String
+  If makeValues Then
+    ReDim values(0 To 1)
+  End If
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse False
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" && finding.Line == 5 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a conditional ReDim must not be propagated to the false edge of its If: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryAllocationPastUnreachableExit(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  Exit Sub
+  values() = Split("a,b", ",")
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" && finding.Line == 5 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an allocation after an unconditional Exit Sub must not prove the unreachable ByRef call safe: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryAllocationAcrossBypassGoto(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse(ByVal skip As Boolean)
+  Dim values() As String
+  If skip Then GoTo Use
+  values() = Split("a,b", ",")
+Use:
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse False
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" && finding.Line == 5 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an allocation that can be bypassed by a GoTo must not prove the ByRef call safe: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227RejectsSameLineMutationInSourceOrderFallback(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  values() = Split("a,b", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  Erase values: Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" && finding.Line == 5 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a same-line Erase before the ByRef call must not be skipped by the source-order fallback: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227RejectsCompositeLineEraseInSourceOrderFallback(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse()
+  Dim values() As String
+  values() = Split("a,b", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  Erase values: Debug.Print vbNullString
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" && finding.Line == 5 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a composite-line Erase before the ByRef call must not be skipped by the source-order fallback: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227RejectsInlineEraseInSourceOrderFallback(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse(ByVal clearValues As Boolean)
+  Dim values() As String
+  values() = Split("a,b", ",")
+  If False Then Debug.Print vbNullString: Exit Sub
+  If clearValues Then Erase values
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse True
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" && finding.Line == 5 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an inline conditional Erase must not be ignored by the source-order fallback: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227RejectsMissingElseIfAllocationInSourceOrderFallback(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Parser.cls", `Attribute VB_Name = "Parser"
+Option Explicit
+
+Private Sub Consume(ByRef items() As String)
+  Debug.Print items(0)
+End Sub
+
+Private Sub Parse(ByVal first As Boolean, ByVal second As Boolean)
+  Dim values() As String
+  If first Then
+    ReDim values(0 To 1)
+  ElseIf second Then
+    Debug.Print vbNullString
+  Else
+    ReDim values(0 To 1)
+  End If
+  If False Then Debug.Print vbNullString: Exit Sub
+  Consume values
+End Sub
+
+Public Sub Run()
+  Parse False, True
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" && finding.Line == 5 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an ElseIf branch without allocation must keep the source-order ByRef call conservative: %+v", findingsByCode(findings, "VBA227"))
 	}
 }
 
@@ -6337,6 +10811,35 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesAllocatedArrayThroughRecursiveByRefHelperChain(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByRef values() As String)
+  Debug.Print values(0)
+End Sub
+
+Private Sub Forward(ByRef values() As String, ByVal depth As Long)
+  If depth > 0 Then Forward values, depth - 1
+  Consume values
+End Sub
+
+Public Sub Run()
+  Dim values() As String
+  values = Split("a,b", ",")
+  Forward values, 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a recursive ByRef helper cycle without array mutation should preserve allocation for its helper chain: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesAllocatedArrayThroughPrivateByRefHelperChain(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -6362,6 +10865,149 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("an allocated array should remain allocated through a private ByRef helper chain: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotPropagateConditionalByRefAllocation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub InitializeValues(ByRef values() As String)
+  ReDim values(0 To 1)
+End Sub
+
+Private Sub Consume(ByRef values() As String)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(ByVal shouldInitialize As Boolean)
+  Dim values() As String
+  If shouldInitialize Then InitializeValues values
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an inline conditional ByRef initializer must not allocate the false branch: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227CarriesTransitiveByRefOutputSummary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub AllocateValues(ByRef values() As String)
+  ReDim values(0 To 1)
+End Sub
+
+Private Sub ForwardValues(ByRef values() As String)
+  AllocateValues values
+End Sub
+
+Private Sub Consume(ByRef values() As String)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+  Dim values() As String
+  ForwardValues values
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a transitive private ByRef output allocation should reach the caller: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227TreatsUnresolvedByRefArrayCallAsInvalidating(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub ClearValues(ByRef values() As String)
+  Erase values
+End Sub
+
+Private Sub ForwardValues(ByRef values() As String)
+  ClearValues values
+End Sub
+
+Private Sub Consume(ByRef values() As String)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+  Dim values() As String
+  values = Split("a,b", ",")
+  ForwardValues values
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an unresolved public ByRef array call must invalidate the caller state: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227MapsMixedPositionalAndNamedByRefArguments(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub ClearValues(ByRef values() As String, ByVal force As Boolean)
+  Erase values
+End Sub
+
+Private Sub Consume(ByRef values() As String)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+  Dim values() As String
+  values = Split("a,b", ",")
+  ClearValues values, force:=True
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a positional array argument before a named argument must retain its ByRef invalidation effect: %+v", findingsByCode(findings, "VBA227"))
 	}
 }
 
@@ -6520,6 +11166,27 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesStdLambdaStackGetFunctionArgsThroughPrivateHelper(t *testing.T) {
+	t.Parallel()
+	sourcePath := filepath.Join("..", "..", "testdata", "static-analysis-corpus", "projects", "third_party", "std-vba", "src", "stdLambda.cls")
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	writeClass(t, dir, "stdLambda.cls", string(source))
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "stdCallByName" && (finding.Line == 1737 || finding.Line == 1739) {
+			t.Fatalf("StackGetFunctionArgs should allocate tempArgs before stdCallByName setter branches: %+v", finding)
+		}
+	}
+}
+
 func TestAnalyzerVBA227KeepsDeterministicAllocationOnResumeNextEdges(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -6658,6 +11325,418 @@ End Sub`)
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("a one-time module setup helper should establish allocation after its ready guard: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesModuleReadyGuardToPublicConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private readerReady As Boolean
+Private records() As String
+
+Private Sub OpenReader()
+  records = Split("record", ",")
+  readerReady = True
+End Sub
+
+Public Sub ReadRecord()
+  Dim result As Long
+  If Not readerReady Then Exit Sub
+  result = InStrB(1, records(0), ",")
+End Sub
+
+Public Sub ReadRecordWithoutGuard()
+  Dim result As Long
+  result = InStrB(1, records(0), ",")
+End Sub
+
+Public Sub Run()
+  OpenReader
+  ReadRecord
+End Sub`)
+
+	cfg := config.Default()
+	cfg.Analyze = analyzeConfigForRules("VBA227")
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "ReadRecordWithoutGuard" {
+		t.Fatalf("a module ready guard should prove the module array for a public consumer: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesModuleReadyGuardThroughByRefConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private readerReady As Boolean
+Private records() As String
+
+Private Sub OpenReader()
+  records = Split("record", ",")
+  readerReady = True
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  items(0) = "record"
+End Sub
+
+Public Sub ReadRecord()
+  If Not readerReady Then Exit Sub
+  records = Split( _
+    "record", _
+    ",")
+  Consume records
+End Sub
+
+Public Sub Run()
+  OpenReader
+  ReadRecord
+End Sub`)
+
+	cfg := config.Default()
+	cfg.Analyze = analyzeConfigForRules("VBA227")
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a module ready guard should prove a ByRef consumer argument: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustExternallySetModuleReadyGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private readerReady As Boolean
+Private records() As String
+
+Private Sub OpenReader()
+  records = Split("record", ",")
+  readerReady = True
+End Sub
+
+Public Sub ReadRecord()
+  Dim result As Long
+  If Not readerReady Then Exit Sub
+  result = InStrB(1, records(0), ",")
+End Sub
+
+Public Sub SpoofReady()
+  readerReady = True
+End Sub
+
+Public Sub Run()
+  SpoofReady
+  ReadRecord
+End Sub`)
+
+	cfg := config.Default()
+	cfg.Analyze = analyzeConfigForRules("VBA227")
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "ReadRecord" {
+		t.Fatalf("an externally writable ready guard must not prove the module array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustReadyGuardAfterModuleArrayErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private readerReady As Boolean
+Private records() As String
+
+Private Sub OpenReader()
+  records = Split("record", ",")
+  readerReady = True
+End Sub
+
+Private Sub ClearReader()
+  Erase records
+End Sub
+
+Public Sub ReadRecord()
+  Dim result As Long
+  If Not readerReady Then Exit Sub
+  result = InStrB(1, records(0), ",")
+End Sub
+
+Public Sub Run()
+  OpenReader
+  ClearReader
+  ReadRecord
+End Sub`)
+
+	cfg := config.Default()
+	cfg.Analyze = analyzeConfigForRules("VBA227")
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "ReadRecord" {
+		t.Fatalf("an erase without resetting the ready guard must remain reportable: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesIdempotentModuleSetupThroughByRefAllocator(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private ready As Boolean
+Private values() As Long
+
+Private Sub BuildValues(ByRef output() As Long)
+  ReDim output(0 To 1)
+End Sub
+
+Private Sub EnsureValues()
+  If ready Then Exit Sub
+  BuildValues values
+  ready = True
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  items(0) = 1
+End Sub
+
+Public Sub Run()
+  EnsureValues
+  Consume values
+End Sub`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a proven private ByRef allocator inside idempotent setup should establish the module allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustConditionalIdempotentModuleSetup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private ready As Boolean
+Private shouldBuild As Boolean
+Private values() As Long
+
+Private Sub EnsureValues()
+  If ready Then Exit Sub
+  If shouldBuild Then
+    ReDim values(0 To 1)
+  End If
+  ready = True
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  items(0) = 1
+End Sub
+
+Public Sub Run()
+  EnsureValues
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("a conditional ReDim must not establish an idempotent module allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustIdempotentModuleSetupAcrossPrivateErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private ready As Boolean
+Private values() As Long
+
+Private Sub ClearValues()
+  Erase values
+End Sub
+
+Private Sub EnsureValues()
+  If ready Then Exit Sub
+  ReDim values(0 To 1)
+  ClearValues
+  ready = True
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  items(0) = 1
+End Sub
+
+Public Sub Run()
+  EnsureValues
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("a private Erase between ReDim and the ready flag must invalidate the setup proof: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesNestedPrivateModuleInvalidation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As Long
+
+Private Sub InnerClear()
+  Erase values
+End Sub
+
+Private Sub OuterClear()
+  InnerClear
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  ReDim values(0 To 1)
+  OuterClear
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("a nested private Erase must invalidate the caller module array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesConditionalPrivateModuleInvalidation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private shouldClear As Boolean
+Private values() As Long
+
+Private Sub ClearValues()
+  Erase values
+End Sub
+
+Private Sub MaybeClear()
+  If shouldClear Then ClearValues
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  ReDim values(0 To 1)
+  MaybeClear
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("a conditional private Erase must invalidate the caller module array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227TracksPublicModuleInvalidationInCFG(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As Long
+
+Public Sub ClearValues()
+  Erase values
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  ReDim values(0 To 1)
+  ClearValues
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("a public module Erase on a normal CFG path must invalidate the caller array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227SummarizesNormalModuleArrayExitState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private fixed(0 To 1) As Long
+Private values() As Long
+
+Private Sub ClearFixed()
+  Erase fixed
+End Sub
+
+Private Sub RebuildValues()
+  Erase values
+  ReDim values(0 To 1)
+End Sub
+
+Private Sub DeadClear()
+  Exit Sub
+  Erase values
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  ReDim values(0 To 1)
+  ClearFixed
+  RebuildValues
+  DeadClear
+  Consume fixed
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("fixed arrays, guaranteed rebuilds, and unreachable Erase must retain safe normal exit state: %+v", got)
 	}
 }
 
@@ -8013,6 +13092,74 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesModuleCapacityReDimGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private buffer() As Byte
+Private bufferSize As Long
+
+Private Function Encode(ByVal text As String) As Byte()
+	Dim need As Long
+	Dim result() As Byte
+	If Len(text) = 0 Then Exit Function
+	need = Len(text) * 4
+  If need > bufferSize Then
+    ReDim buffer(0 To need - 1)
+    bufferSize = need
+  End If
+  buffer(0) = 1
+  ReDim result(0 To 0)
+  result(0) = buffer(0)
+  Encode = result
+End Function
+
+Public Sub Run()
+  Dim result() As Byte
+  result = Encode("text")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a module buffer guarded by its recorded capacity should be allocated: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsModuleCapacityReDimWithoutPositiveInputGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private buffer() As Byte
+Private bufferSize As Long
+
+Private Function Encode(ByVal text As String) As Byte()
+  Dim need As Long
+  Dim result() As Byte
+  need = Len(text) * 4
+  If need > bufferSize Then
+    ReDim buffer(0 To need - 1)
+    bufferSize = need
+  End If
+  buffer(0) = 1
+  ReDim result(0 To 0)
+  result(0) = buffer(0)
+  Encode = result
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) == 0 {
+		t.Fatal("a capacity guard without a proof that the requested length is positive must remain diagnosed")
+	}
+}
+
 func TestAnalyzerVBA227RecognizesImplicitZeroArrayLengthGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -8045,6 +13192,53 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("an allocation probe with an implicit zero recovery return should establish allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesArrayDimensionCountGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function DimensionCount(ByRef values() As Long) As Long
+  Const MAX_DIMENSION As Long = 60
+  Dim dimension As Long
+  Dim tempBound As Long
+  On Error GoTo FinalDimension
+  For dimension = 1 To MAX_DIMENSION
+    tempBound = LBound(values, dimension)
+  Next dimension
+FinalDimension:
+  DimensionCount = dimension - 1
+End Function
+
+Private Sub Guarded(ByRef values() As Long)
+  If DimensionCount(values) <> 1 Then Exit Sub
+  Debug.Print LBound(values)
+End Sub
+
+Private Sub Unguarded(ByRef values() As Long)
+  Debug.Print LBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Guarded" {
+			t.Fatalf("a successful dimension-count probe should establish the 1D array allocation: %+v", finding)
+		}
+	}
+	seenUnsafe := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Unguarded" {
+			seenUnsafe = true
+			break
+		}
+	}
+	if !seenUnsafe {
+		t.Fatalf("an unguarded LBound must remain diagnosed: %+v", findingsByCode(findings, "VBA227"))
 	}
 }
 
@@ -8211,6 +13405,79 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesStaticArrayThroughOneTimeInitializer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type ReadyState
+  isSet As Boolean
+End Type
+
+Private Sub InitReady(ByRef state As ReadyState)
+  If state.isSet Then Exit Sub
+  state.isSet = True
+End Sub
+
+Public Function Build(ByVal index As Long) As Long
+  Static values() As Long
+  Static state As ReadyState
+  If Not state.isSet Then
+    InitReady state
+    ReDim values(0 To 3)
+  End If
+  values(index) = 1
+  Build = values(0)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a static array initialized behind a resolved ByRef readiness helper must be carried to later uses: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryStaticArrayWithoutReadyFlagContract(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type ReadyState
+  isSet As Boolean
+End Type
+
+Private Sub InitReady(ByRef state As ReadyState)
+  state.isSet = False
+End Sub
+
+Public Function Build() As Long
+  Static values() As Long
+  Static state As ReadyState
+  If Not state.isSet Then
+    InitReady state
+    ReDim values(0 To 3)
+  End If
+  Build = values(0)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Build" {
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		t.Fatalf("a static array without the readiness helper contract must remain conservative: %+v", findings)
+	}
+}
+
 func TestAnalyzerVBA227UsesArrayFunctionReturnShape(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -8226,6 +13493,135 @@ End Function
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("dynamic array function return should be resizable: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesDescriptorBackedArrayReturnShape(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type ACCESSOR
+  isSet As Boolean
+End Type
+
+Private Sub InitMemoryAccessor(ByRef target As ACCESSOR)
+  target.isSet = True
+End Sub
+
+Private Function StringToIntegers(ByRef s As String, Optional ByVal startIndex As Long = 1, Optional ByVal outLength As Long = -1, Optional ByVal outLowBound As Long = 0) As Integer()
+  Static ma As ACCESSOR: If Not ma.isSet Then InitMemoryAccessor ma
+  If startIndex < 1 Then Err.Raise 9
+  If outLength < -1 Then Err.Raise 5
+  If outLength = -1 Or startIndex + outLength - 1 > Len(s) Then
+    outLength = Len(s) - startIndex + 1
+    If outLength < 0 Then outLength = 0
+  End If
+  ma.sa.pvData = StrPtr(s) + (startIndex - 1) * INT_SIZE
+  ma.sa.cbElements = INT_SIZE
+  ma.sa.rgsabound0.lLbound = outLowBound
+  ma.sa.rgsabound0.cElements = outLength
+  StringToIntegers = ma.ac.dInt
+  ma.sa.rgsabound0.cElements = 0
+  ma.sa.pvData = NULL_PTR
+End Function
+
+Public Sub Run()
+  Dim values() As Integer
+  values = StringToIntegers("ABC", 2, , 5)
+  Debug.Print values(5)
+  Debug.Print values(6)
+  Debug.Print values(7)
+  values = StringToIntegers("ABC", outLowBound:=5)
+  Debug.Print values(5)
+  Debug.Print values(6)
+  values = StringToIntegers(vbNullString, 1, 0, 5)
+  Debug.Print LBound(values)
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || !strings.Contains(strings.ToLower(got[0].Message), "outside its known bounds") {
+		t.Fatalf("descriptor-backed array returns should carry known bounds while retaining an out-of-range access: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustIncompleteDescriptorBackedArrayReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type ACCESSOR
+  isSet As Boolean
+End Type
+
+Private Sub InitMemoryAccessor(ByRef target As ACCESSOR)
+  target.isSet = True
+End Sub
+
+Private Function Broken(ByRef s As String, Optional ByVal outLowBound As Long = 0) As Integer()
+  Static ma As ACCESSOR: If Not ma.isSet Then InitMemoryAccessor ma
+  ma.sa.pvData = StrPtr(s)
+  ma.sa.cbElements = INT_SIZE
+  ma.sa.rgsabound0.lLbound = outLowBound
+  Broken = ma.ac.dInt
+End Function
+
+Public Sub Run()
+  Dim values() As Integer
+  values = Broken("ABC")
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Run" {
+		t.Fatalf("an incomplete descriptor setup must remain conservative: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustDescriptorReturnWithoutReadyHelperProof(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type ACCESSOR
+  isSet As Boolean
+End Type
+
+Private Sub InitMemoryAccessor(ByRef target As ACCESSOR)
+  target.isSet = False
+End Sub
+
+Private Function Broken(ByRef s As String, Optional ByVal outLowBound As Long = 0) As Integer()
+  Static ma As ACCESSOR: If Not ma.isSet Then InitMemoryAccessor ma
+  ma.sa.pvData = StrPtr(s)
+  ma.sa.cbElements = INT_SIZE
+  ma.sa.rgsabound0.lLbound = outLowBound
+  ma.sa.rgsabound0.cElements = Len(s)
+  Broken = ma.ac.dInt
+End Function
+
+Public Sub Run()
+  Dim values() As Integer
+  values = Broken("ABC")
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Run" {
+		t.Fatalf("a ready helper that does not set the flag must remain conservative: %+v", got)
 	}
 }
 
@@ -8417,6 +13813,39 @@ End Function
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("array-return helper chain should converge to an allocated summary: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227UsesQualifiedDocumentedArrayReturnInTypeNameBranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "stdEnumerator.cls", `Option Explicit
+'@returns Array<T> - The enumerator's data as an array
+Public Function AsArray() As Variant
+  Dim result() As Object
+  ReDim result(1 To 1)
+  AsArray = result
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal vFibers As Variant)
+  Select Case TypeName(vFibers)
+    Case "stdEnumerator"
+      Dim queue() As Object: queue = vFibers.AsArray()
+      Dim i As Long
+      For i = 1 To 1
+        Debug.Print queue(i)
+      Next
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a documented qualified array return should make the TypeName branch safe: %+v", got)
 	}
 }
 
@@ -10401,6 +15830,253 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("class-initialized module array passed through a private helper should not report VBA227: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesClassInitializerArrayToDirectConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Archive.cls", `Attribute VB_Name = "Archive"
+Option Explicit
+
+Private mBytes() As Byte
+
+Private Sub Class_Initialize()
+    ReDim mBytes(0 To 0)
+End Sub
+
+Public Sub Run()
+    If mBytes(0) = 0 Then Debug.Print "ok"
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("class-initialized module array should be safe for a direct consumer: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesFormInitializerArrayToDirectConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private values() As Long
+
+Private Sub UserForm_Initialize()
+    ReDim values(0 To 1)
+End Sub
+
+Private Sub cmdStart_Click()
+    If values(0) = 0 Then Debug.Print "ok"
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("form-initialized module array should be safe for a direct consumer: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesConditionalReDimThroughRepeatedScalarGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ReadStatus(ByVal value As Long) As Long
+  ReadStatus = value
+End Function
+
+Public Sub Safe()
+  Dim values() As Byte
+  Dim status As Long
+  status = ReadStatus(status)
+  If status = 0 Then
+    ReDim values(0 To 1)
+    status = ReadStatus(status)
+  End If
+  If status = 0 Then
+    Debug.Print values(0)
+  End If
+End Sub
+
+Public Sub Unsafe()
+  Dim values() As Byte
+  Dim status As Long
+  If status = 0 Then
+    ReDim values(0 To 1)
+  End If
+  status = 1
+  If status = 0 Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Safe" {
+			t.Fatalf("a matching scalar guard should carry the conditional ReDim proof: %+v", finding)
+		}
+	}
+	unsafe := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Unsafe" && finding.Line == 27 {
+			unsafe = true
+		}
+	}
+	if !unsafe {
+		t.Fatalf("an intervening scalar assignment must invalidate the conditional ReDim proof: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227CarriesNonEmptyHashInputThroughStrPtrResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function HashData(ByRef source() As Byte) As Byte()
+  Dim digest() As Byte
+  If StrPtr(source) <> 0 Then
+    ReDim digest(0 To 1)
+  End If
+  HashData = digest
+End Function
+
+Public Sub Run(ByRef source() As Byte)
+  Dim digest() As Byte
+  digest = HashData(source)
+  If StrPtr(digest) = 0 Then Exit Sub
+  Debug.Print UBound(source), source(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a non-empty HashData result should carry the input-array proof: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesPositiveArrayFactoryReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function RandomData(ByVal dataLength As Long)
+  Dim data() As Byte
+  If dataLength <= 0 Then
+  Else
+    ReDim data(0 To dataLength - 1)
+  End If
+  RandomData = data
+End Function
+
+Public Sub Run()
+  Const PositiveLength As Long = 16
+  Dim values() As Byte
+  values = RandomData(PositiveLength)
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a positive-length array factory return should establish a non-empty array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTreatNegativeOnlyCountGuardAsPositive(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function NegativeOnly(ByVal dataLength As Long) As Byte()
+  Dim data() As Byte
+  If dataLength < 0 Then
+  Else
+    ReDim data(0 To dataLength - 1)
+  End If
+  NegativeOnly = data
+End Function
+
+Public Sub Run()
+  Dim values() As Byte
+  values = NegativeOnly(0)
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Run" {
+			return
+		}
+	}
+	t.Fatalf("a count < 0 guard does not prove a non-empty zero-count array: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227KeepsConditionalArrayReturnsConservative(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function HashData(ByRef source() As Byte) As Byte()
+  Dim digest() As Byte
+  If StrPtr(source) <> 0 Then
+    ReDim digest(0 To 1)
+  End If
+  HashData = digest
+End Function
+
+Private Function RandomData(ByVal dataLength As Long)
+  Dim data() As Byte
+  If dataLength <= 0 Then
+  Else
+    ReDim data(0 To dataLength - 1)
+  End If
+  RandomData = data
+End Function
+
+Public Sub UnguardedHash(ByRef source() As Byte)
+  Dim digest() As Byte
+  digest = HashData(source)
+  Debug.Print source(0)
+End Sub
+
+Public Sub UnknownLength()
+  Dim values() As Byte
+  Dim dataLength As Long
+  values = RandomData(dataLength)
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	guarded := map[string]bool{}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "UnguardedHash" || finding.Procedure == "UnknownLength" {
+			guarded[finding.Procedure] = true
+		}
+	}
+	if !guarded["UnguardedHash"] || !guarded["UnknownLength"] {
+		t.Fatalf("conditional return facts must remain conservative without the matching caller proof: %+v", findingsByCode(findings, "VBA227"))
 	}
 }
 

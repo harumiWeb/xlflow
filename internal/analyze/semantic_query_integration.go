@@ -53,6 +53,7 @@ type semanticQueryRevisionFacts struct {
 type semanticArrayCapabilityIndex struct {
 	returns           map[string]string
 	allocationGuards  map[string]string
+	safeArrayLengths  map[string]string
 	byRefAllocations  map[string]string
 	conditional       map[string]string
 	length            map[string]string
@@ -155,6 +156,7 @@ func buildSemanticArrayCapabilityIndex(ctx analysisContext) *semanticArrayCapabi
 	return &semanticArrayCapabilityIndex{
 		returns:           normalizeSemanticCapabilityMap(ctx.arrayReturns),
 		allocationGuards:  normalizeSemanticCapabilityMap(ctx.arrayAllocationGuards),
+		safeArrayLengths:  normalizeSemanticCapabilityMap(ctx.arraySafeArrayLengthGuards),
 		byRefAllocations:  normalizeSemanticCapabilityMap(ctx.arrayByRefAllocations),
 		conditional:       normalizeSemanticCapabilityMap(ctx.arrayByRefConditionalAllocations),
 		length:            normalizeSemanticCapabilityMap(ctx.arrayByRefLengthAllocations),
@@ -596,6 +598,7 @@ func semanticAnalysisCapabilityUncached(ctx analysisContext, file parsedFile, pr
 			fmt.Sprintf("%t", proc.ArrayParticipantReady),
 			semanticProcedureEffectFingerprint(proc.Effects),
 			fmt.Sprintf("%#v", ctx.arrayModuleConfigurations[file.Path]),
+			semanticStableJSON(ctx.arrayModuleInitializationStates[file.Path]),
 		}
 		keys := []string{arrayProcedureKey(proc), strings.ToLower(proc.Name)}
 		if participantKey := ctx.arrayParticipantKeys[arrayProcedureKey(proc)]; participantKey != "" {
@@ -610,14 +613,15 @@ func semanticAnalysisCapabilityUncached(ctx analysisContext, file parsedFile, pr
 			}
 		}
 		var (
-			returns, allocationGuards, byRefAllocations map[string]string
-			conditional, length, moduleAllocations      map[string]string
-			moduleEntryStates, byRefEntryStates         map[string]string
-			byRefConditions, participants               map[string]string
+			returns, allocationGuards, safeArrayLengths, byRefAllocations map[string]string
+			conditional, length, moduleAllocations                        map[string]string
+			moduleEntryStates, byRefEntryStates                           map[string]string
+			byRefConditions, participants                                 map[string]string
 		)
 		if index := ctx.arrayCapabilityIndex; index != nil {
 			returns = index.returns
 			allocationGuards = index.allocationGuards
+			safeArrayLengths = index.safeArrayLengths
 			byRefAllocations = index.byRefAllocations
 			conditional = index.conditional
 			length = index.length
@@ -630,6 +634,7 @@ func semanticAnalysisCapabilityUncached(ctx analysisContext, file parsedFile, pr
 		parts = append(parts,
 			semanticArrayCapabilitySubset(returns, ctx.arrayReturns, keys),
 			semanticArrayCapabilitySubset(allocationGuards, ctx.arrayAllocationGuards, keys),
+			semanticArrayCapabilitySubset(safeArrayLengths, ctx.arraySafeArrayLengthGuards, keys),
 			semanticArrayCapabilitySubset(byRefAllocations, ctx.arrayByRefAllocations, keys),
 			semanticArrayCapabilitySubset(conditional, ctx.arrayByRefConditionalAllocations, keys),
 			semanticArrayCapabilitySubset(length, ctx.arrayByRefLengthAllocations, keys),

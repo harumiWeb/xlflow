@@ -225,3 +225,23 @@ func TestArrayLegacyExceptionalEdgeKeepsPredecessorInput(t *testing.T) {
 		t.Fatalf("exceptional handler state = %#v, want predecessor input %#v", handlerState, initial["values"])
 	}
 }
+
+func TestArrayConditionalAllocationBranchDoesNotMutateInput(t *testing.T) {
+	statement := &procedureir.Statement{
+		Kind:      procedureir.StatementIf,
+		Condition: &procedureir.Expression{Text: "count > 0"},
+	}
+	block := vbacfg.Block{Statement: statement}
+	edge := vbacfg.Edge{Kind: vbacfg.EdgeBranchTrue}
+	initial := arrayFlowState{
+		"values": {kind: arrayUnknown, knownArray: true, allocationCountSource: "count"},
+	}
+
+	got := applyArrayConditionalAllocationBranch(initial, nil, block, edge)
+	if got["values"].kind != arrayAllocated {
+		t.Fatalf("positive branch state = %#v, want allocated", got["values"])
+	}
+	if initial["values"].kind == arrayAllocated {
+		t.Fatalf("conditional refinement mutated its input state: %#v", initial["values"])
+	}
+}

@@ -27,7 +27,7 @@ no `#N/A`, and it is not the nearest value. The result may also be correct by
 accident on the data you tested with, and wrong on the data your user has.
 
 **Safe rule.** Approximate matching is only defined when the required order is
-established *and* verified. If you cannot show that it holds, pass exact matching
+established _and_ verified. If you cannot show that it holds, pass exact matching
 explicitly: `Match(key, rng, 0)`, `VLookup(key, tbl, 2, False)`. Prefer exact
 matching unless a banded or bucketed lookup is genuinely intended, and do not
 rely on any particular wrong answer.
@@ -98,8 +98,8 @@ addresses after inserting or deleting, or refer to the data through a defined
 name or a table column, which are maintained across the edit.
 
 **Safe rule for ranges.** A range reference may shift or resize, depending on
-where the structural edit meets it. An insert *above* `SUM(A1:A3)` shifts it to
-`SUM(A2:A4)`; an insert *inside* it resizes it to `SUM(A1:A4)`; a deletion across
+where the structural edit meets it. An insert _above_ `SUM(A1:A3)` shifts it to
+`SUM(A2:A4)`; an insert _inside_ it resizes it to `SUM(A1:A4)`; a deletion across
 it gives `SUM(A1:A2)`; an insert past its end leaves it exactly as it was; only a
 range removed in its entirety becomes `#REF!`. Either way the reference is
 adjusted silently, so do not treat the absence of `#REF!` as evidence that a
@@ -181,10 +181,10 @@ pair dangerous in one file. A refactor that adds or removes the
 `WorksheetFunction` qualifier changes the result without changing the intent, and
 nothing in the diff looks like a behavior change.
 
-| expression          | `WorksheetFunction`        | VBA                    |
-| ------------------- | -------------------------- | ---------------------- |
-| `Round(2.5, 0)`     | `3` — half away from zero  | `2` — half to even     |
-| `Trim("  a   b  ")` | `a b` — inner runs collapse | `a   b` — ends only   |
+| expression          | `WorksheetFunction`         | VBA                 |
+| ------------------- | --------------------------- | ------------------- |
+| `Round(2.5, 0)`     | `3` — half away from zero   | `2` — half to even  |
+| `Trim("  a   b  ")` | `a b` — inner runs collapse | `a   b` — ends only |
 
 **Safe rule.** Choose the rounding rule the requirement states, and write it so
 the choice is visible: qualify the call and say why in a comment, or wrap it in a

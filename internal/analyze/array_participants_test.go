@@ -145,6 +145,108 @@ func TestArrayReturnSummaryDuplicateNamesRemainUnknown(t *testing.T) {
 	}
 }
 
+func TestArrayReturnValueCompatibleIgnoresShape(t *testing.T) {
+	left := arrayValue{
+		kind:       arrayAllocated,
+		knownArray: true,
+		origin:     arrayOriginLocal,
+		dimensions: []arrayDimension{{}},
+	}
+	right := arrayValue{
+		kind:       arrayAllocated,
+		knownArray: true,
+		origin:     arrayOriginLocal,
+		dimensions: []arrayDimension{{lower: arrayBound{known: true, value: 1}, upper: arrayBound{known: true, value: 2}}},
+	}
+	if !arrayReturnValueCompatible(sourceProcedure{ProcedureKind: procedureir.ProcedurePropertyGet}, left, right) {
+		t.Fatalf("array return values with different shapes should retain allocation compatibility: left=%#v right=%#v", left, right)
+	}
+}
+
+func TestInlineArrayReturnAssignmentTextUsesArraySummary(t *testing.T) {
+	text, ok := inlineArrayReturnAssignmentText("Dim values() As Variant: values = source.arr", map[string]arrayValue{
+		"arr": {kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal},
+	})
+	if !ok || text != "values = source.arr" {
+		t.Fatalf("known array-return member assignment was not extracted: text=%q ok=%v", text, ok)
+	}
+}
+
+func TestInlineArrayQualifiedReturnAssignmentUsesTypeNameCase(t *testing.T) {
+	file := parsedFile{Lines: []string{
+		"Select Case TypeName(vFibers)",
+		"    Case \"stdEnumerator\"",
+		"        Dim queue() As Object: queue = vFibers.AsArray(vbObject)",
+	}}
+	proc := sourceProcedure{Module: "M", Name: "Run", StartLine: 1, EndLine: 3}
+	text, ok := inlineArrayQualifiedReturnAssignmentText(file, proc, 3, file.Lines[2], map[string]arrayValue{
+		"stdenumerator.asarray": {kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal},
+	})
+	if !ok || text != "queue = Array()" {
+		t.Fatalf("typed array-return member assignment was not normalized: text=%q ok=%v", text, ok)
+	}
+}
+
+func TestArrayDictionaryMemberAssignmentUsesHelperStopsAtReassignment(t *testing.T) {
+	file := parsedFile{Lines: []string{
+		`Set This.Lookups("EWndStyles") = CreateLookupDict(Array("key", 1))`,
+		`Set This.Lookups("EWndStyles") = CreateObject("Scripting.Dictionary")`,
+		`Dim keys As Variant: keys = This.Lookups("EWndStyles").keys()`,
+	}}
+	if arrayDictionaryMemberAssignmentUsesHelper(file, 3, "This.Lookups", `"EWndStyles"`) {
+		t.Fatal("a later reassignment must invalidate the helper non-empty fact")
+	}
+}
+
+func TestInferDocumentedArrayReturnSummariesRequiresArrayImplementation(t *testing.T) {
+	proc := sourceProcedure{Module: "M", Name: "AsArray", ProcedureKind: procedureir.ProcedureFunction, StartLine: 2, EndLine: 5}
+	file := parsedFile{
+		Lines: []string{
+			"' @returns Array<T>",
+			"Public Function AsArray() As Variant",
+			"    ReDim values(1 To 2)",
+			"    AsArray = values",
+			"End Function",
+		},
+		Procedures: []sourceProcedure{proc},
+	}
+	if got := inferDocumentedArrayReturnSummaries([]parsedFile{file}); !got["m.asarray"].knownArray {
+		t.Fatalf("documented allocated array return was not recognized: %#v", got)
+	}
+	file.Procedures[0].StartLine = 1
+	file.Lines[0] = "Public Function AsArray() As Variant"
+	if got := inferDocumentedArrayReturnSummaries([]parsedFile{file}); len(got) != 0 {
+		t.Fatalf("undocumented or non-array return was recognized: %#v", got)
+	}
+}
+
+func TestInferDocumentedNonEmptyArrayReturnSummariesRejectsConditionalAllocation(t *testing.T) {
+	source := []byte(`' @returns Array<Long>
+Private Function MaybeValues(ByVal enabled As Boolean) As Variant
+    Dim values As Variant
+    If enabled Then
+        ReDim values(0 To 1)
+    End If
+    MaybeValues = values
+End Function
+`)
+	ir, err := procedureir.BuildSource(procedureir.BuildOptions{
+		Path: "M.bas", ModuleName: "M", ModuleKind: "standard",
+	}, source)
+	if err != nil {
+		t.Fatalf("build source: %v", err)
+	}
+	flow := cfg.BuildDocument(ir)
+	file := parsedFile{
+		Path: "M.bas", Module: "M", ModuleKind: "standard", Source: source,
+		Lines: normalizedSourceLines(string(source)), IR: ir, CFG: flow,
+	}
+	file.Procedures = sourceProceduresFromIRRef(&file.IR, flow)
+	if got := inferDocumentedNonEmptyArrayReturnSummaries([]parsedFile{file}); len(got) != 0 {
+		t.Fatalf("conditional ReDim must not become a universal non-empty return contract: %#v", got)
+	}
+}
+
 func TestArrayCandidateKeyUsesProcedureKindForLineFallback(t *testing.T) {
 	procedure := sourceProcedure{
 		Module:        "M",

@@ -341,7 +341,10 @@ func (r *ArrayAnalysisResult) rangeShape() []Finding { return r.findings("range"
 
 func arrayEntryStateForProcedure(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration, variables map[string]arrayVariable) arrayFlowState {
 	state := arrayInitialState(variables)
+	state = applyArrayStaticInitializationState(state, file, proc, ctx, variables)
+	state = applyArrayModuleInitializationState(state, file, proc, variables, moduleDecls, ctx.arrayModuleInitializationStates)
 	state = applyArrayInternalStorageConfiguration(state, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 	state = applyArrayByRefEntryStates(state, proc, variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
+	state = applyArrayModuleReadyGuardState(state, file, proc, variables, moduleDecls, ctx.arrayModuleReadyGuards)
 	return applyArrayModuleEntryState(state, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates, ctx.arrayParticipantKeys)
 }

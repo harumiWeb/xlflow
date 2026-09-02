@@ -14,8 +14,10 @@ param(
 
     [switch]$SkipFetch,
 
-    [ValidateSet("auto", "base", "uncommitted")]
-    [string]$ReviewMode = "auto"
+    [ValidateSet("auto", "base", "commit", "uncommitted")]
+    [string]$ReviewMode = "auto",
+
+    [string]$Commit = "HEAD"
 )
 
 Set-StrictMode -Version Latest
@@ -94,10 +96,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Keep origin/main current before reviewing. Do this quietly because successful
-# setup output is not useful to the calling agent. An explicit uncommitted-only
-# review does not need the base reference.
+# setup output is not useful to the calling agent. Explicit uncommitted and
+# commit reviews do not need the base reference.
 if (
     $ReviewMode -ne "uncommitted" -and
+    $ReviewMode -ne "commit" -and
     -not $SkipFetch -and
     $Base -eq "origin/main"
 ) {
@@ -109,10 +112,28 @@ if (
 }
 
 $hasUncommittedChanges = $worktreeStatus.Count -gt 0
+$commitReviewArgument = $null
+
+if ($ReviewMode -eq "commit") {
+    if ([string]::IsNullOrWhiteSpace($Commit)) {
+        throw "-Commit is required when -ReviewMode commit is selected."
+    }
+
+    $commitSpec = $Commit.Trim() + "^{commit}"
+    $resolvedCommit = (& git rev-parse --verify $commitSpec 2>$null)
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($resolvedCommit)) {
+        throw "Review commit '$Commit' could not be resolved to a commit."
+    }
+
+    $commitReviewArgument = $resolvedCommit.Trim()
+}
 
 if (-not $hasUncommittedChanges) {
     if ($ReviewMode -eq "uncommitted") {
         $reviewModeArguments = @("--uncommitted")
+    } elseif ($ReviewMode -eq "commit") {
+        $reviewModeArguments = @("--commit", $commitReviewArgument)
     } else {
         $reviewModeArguments = @("--base", $Base)
     }
@@ -123,6 +144,11 @@ if (-not $hasUncommittedChanges) {
         "Codex review is using base mode; uncommitted worktree changes are excluded."
     )
     $reviewModeArguments = @("--base", $Base)
+} elseif ($ReviewMode -eq "commit") {
+    [Console]::Error.WriteLine(
+        "Codex review is using commit mode; uncommitted changes are excluded."
+    )
+    $reviewModeArguments = @("--commit", $commitReviewArgument)
 } else {
     & git diff --quiet ("{0}...HEAD" -f $Base) --
     $baseDiffExitCode = $LASTEXITCODE
@@ -135,7 +161,8 @@ if (-not $hasUncommittedChanges) {
         throw (
             "The worktree has uncommitted changes and committed changes relative to " +
             "'$Base'. Commit or stash one scope first, or select " +
-            "-ReviewMode base or -ReviewMode uncommitted explicitly."
+            "-ReviewMode base, -ReviewMode commit, or " +
+            "-ReviewMode uncommitted explicitly."
         )
     }
 

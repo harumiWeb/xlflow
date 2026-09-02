@@ -28,7 +28,9 @@ function Test-TaskArgumentTransport {
         "-Model",
         "gpt%PATH%model",
         "-ReviewMode",
-        "uncommitted"
+        "uncommitted",
+        "-Commit",
+        "HEAD"
     )
 
     Set-Content -LiteralPath $probeScript -Encoding utf8 -Value @'
@@ -93,6 +95,199 @@ tasks:
             }
         }
     } finally {
+        if ($hadPreviousOutputEnvironment) {
+            Set-Item `
+                -Path $outputEnvironmentPath `
+                -Value $previousOutputEnvironmentValue
+        } else {
+            Remove-Item `
+                -Path $outputEnvironmentPath `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Test-ReviewScopeSelection {
+    param(
+        [Parameter(Mandatory)]
+        [string]$TempRoot
+    )
+
+    $reviewScript = Join-Path $PSScriptRoot "codex-review.ps1"
+    $probeScript = Join-Path $TempRoot "review-scope-probe.ps1"
+    $shimPath = Join-Path $TempRoot "codex.cmd"
+    $previousPath = $env:PATH
+    $outputEnvironmentPath = "Env:XLFLOW_CODEX_REVIEW_SCOPE_OUTPUT"
+    $previousOutputEnvironmentItem = Get-Item `
+        -Path $outputEnvironmentPath `
+        -ErrorAction SilentlyContinue
+    $hadPreviousOutputEnvironment = $null -ne $previousOutputEnvironmentItem
+    $previousOutputEnvironmentValue = if ($hadPreviousOutputEnvironment) {
+        [string]$previousOutputEnvironmentItem.Value
+    } else {
+        $null
+    }
+
+    Set-Content -LiteralPath $probeScript -Encoding utf8 -Value @'
+param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Arguments
+)
+
+Set-Content `
+    -LiteralPath $env:XLFLOW_CODEX_REVIEW_SCOPE_OUTPUT `
+    -Value ($Arguments -join "`n") `
+    -Encoding utf8
+
+for ($index = 0; $index + 1 -lt $Arguments.Count; $index++) {
+    if ($Arguments[$index] -eq "--output-last-message") {
+        Set-Content `
+            -LiteralPath $Arguments[$index + 1] `
+            -Value "review scope probe" `
+            -Encoding utf8
+        break
+    }
+}
+'@
+
+    Set-Content -LiteralPath $shimPath -Encoding ascii -Value @"
+@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -File "$probeScript" %*
+"@
+
+    $powershellCommand = Get-Command powershell -ErrorAction Stop |
+        Select-Object -First 1
+    $repoRoot = (& git rev-parse --show-toplevel 2>$null).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoRoot)) {
+        throw "Review scope probe is not running inside a Git repository."
+    }
+
+    function Invoke-ReviewScopeProbe {
+        param(
+            [Parameter(Mandatory)]
+            [string]$OutputFile,
+            [Parameter(Mandatory)]
+            [string[]]$ReviewArguments
+        )
+
+        $stdoutFile = Join-Path $TempRoot "review-scope.stdout.log"
+        $stderrFile = Join-Path $TempRoot "review-scope.stderr.log"
+        $processArguments = @(
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            $reviewScript
+        ) + $ReviewArguments
+        $processArgumentString = (
+            $processArguments |
+                ForEach-Object {
+                    ConvertTo-ProcessArgument -Value ([string]$_)
+                }
+        ) -join " "
+
+        Set-Item -Path $outputEnvironmentPath -Value $OutputFile
+        $process = Start-Process `
+            -FilePath $powershellCommand.Source `
+            -ArgumentList $processArgumentString `
+            -WorkingDirectory $repoRoot `
+            -RedirectStandardOutput $stdoutFile `
+            -RedirectStandardError $stderrFile `
+            -WindowStyle Hidden `
+            -PassThru `
+            -Wait
+
+        if ($process.ExitCode -ne 0) {
+            $stderr = if (Test-Path -LiteralPath $stderrFile) {
+                Get-Content -LiteralPath $stderrFile -Raw
+            } else {
+                ""
+            }
+            throw (
+                "Review scope probe failed with exit code {0}: {1}" -f
+                    $process.ExitCode,
+                    $stderr
+            )
+        }
+
+        $reviewOutput = Get-Content -LiteralPath $stdoutFile -Raw
+        if ($reviewOutput -notmatch "review scope probe") {
+            throw "Review scope probe did not produce a final review message."
+        }
+
+        return @(Get-Content -LiteralPath $OutputFile -Encoding utf8)
+    }
+
+    try {
+        $env:PATH = "{0};{1}" -f $TempRoot, $previousPath
+
+        $baseOutputFile = Join-Path $TempRoot "review-base.args"
+        $baseReviewArguments = @(Invoke-ReviewScopeProbe `
+            -OutputFile $baseOutputFile `
+            -ReviewArguments @(
+                "-SkipFetch",
+                "-HeartbeatSeconds",
+                "5",
+                "-TimeoutSeconds",
+                "30",
+                "-ReviewMode",
+                "base",
+                "-Base",
+                "HEAD~1"
+            ))
+        $baseIndex = -1
+        for ($index = 0; $index -lt $baseReviewArguments.Count; $index++) {
+            if ($baseReviewArguments[$index] -eq "--base") {
+                $baseIndex = $index
+                break
+            }
+        }
+        if ($baseIndex -lt 0 -or $baseReviewArguments[$baseIndex + 1] -ne "HEAD~1") {
+            throw (
+                "Base review arguments did not select HEAD~1: {0}" -f
+                    ($baseReviewArguments -join "|")
+            )
+        }
+
+        $head = (& git rev-parse --verify "HEAD^{commit}").Trim()
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($head)) {
+            throw "Review scope probe could not resolve HEAD."
+        }
+        $commitOutputFile = Join-Path $TempRoot "review-commit.args"
+        $commitReviewArguments = @(Invoke-ReviewScopeProbe `
+            -OutputFile $commitOutputFile `
+            -ReviewArguments @(
+                "-SkipFetch",
+                "-HeartbeatSeconds",
+                "5",
+                "-TimeoutSeconds",
+                "30",
+                "-ReviewMode",
+                "commit",
+                "-Commit",
+                "HEAD"
+            ))
+        $commitIndex = -1
+        for ($index = 0; $index -lt $commitReviewArguments.Count; $index++) {
+            if ($commitReviewArguments[$index] -eq "--commit") {
+                $commitIndex = $index
+                break
+            }
+        }
+        if ($commitIndex -lt 0 -or $commitReviewArguments[$commitIndex + 1] -ne $head) {
+            throw (
+                "Commit review arguments did not select HEAD ({0}): {1}" -f
+                    $head,
+                    ($commitReviewArguments -join "|")
+            )
+        }
+        if ($commitReviewArguments -contains "--base" -or
+            $commitReviewArguments -contains "--uncommitted") {
+            throw "Commit review unexpectedly included another review scope."
+        }
+    } finally {
+        $env:PATH = $previousPath
         if ($hadPreviousOutputEnvironment) {
             Set-Item `
                 -Path $outputEnvironmentPath `
@@ -193,9 +388,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$probeScript" %*
     }
 
     Test-TaskArgumentTransport -TempRoot $tempRoot
+    Test-ReviewScopeSelection -TempRoot $tempRoot
 
     Write-Output (
-        "Codex review argument encoding and Task transport passed for {0} case(s)." -f
+        "Codex review argument encoding, Task transport, and scope selection passed for {0} case(s)." -f
             $cases.Count
     )
 } finally {

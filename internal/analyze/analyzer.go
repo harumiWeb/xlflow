@@ -335,21 +335,30 @@ var traceHelperDependencies = map[string]helperDependencyRule{
 }
 
 type analysisContext struct {
-	functionReturns                  map[string]string
-	functionShapes                   map[string]procedureir.ValueShapeKind
-	functionNamesSeen                map[string]bool
-	functionAmbiguous                map[string]bool
-	arrayReturns                     map[string]arrayValue
-	arrayAllocationGuards            map[string]bool
-	arrayByRefAllocations            arrayByRefAllocationSummaries
-	arrayByRefConditionalAllocations arrayByRefConditionalAllocations
-	arrayByRefLengthAllocations      arrayByRefLengthAllocations
-	arrayModuleAllocations           arrayModuleAllocationSummaries
-	arrayModuleConfigurations        map[string]arrayModuleConfigurationState
-	arrayModuleEntryStates           arrayModuleEntryStates
-	arrayPrivateTargets              map[string]sourceProcedure
-	arrayParticipants                map[string]bool
-	arrayParticipantKeys             map[string]string
+	functionReturns                      map[string]string
+	functionShapes                       map[string]procedureir.ValueShapeKind
+	functionNamesSeen                    map[string]bool
+	functionAmbiguous                    map[string]bool
+	arrayReturns                         map[string]arrayValue
+	arrayReturnsQualified                map[string]arrayValue
+	arrayAllowVariantRedim               bool
+	arrayAllocationGuards                map[string]bool
+	arraySafeArrayLengthGuards           map[string]bool
+	arraySafeBoundGuards                 map[string]bool
+	arrayByRefAllocations                arrayByRefAllocationSummaries
+	arrayByRefConditionalAllocations     arrayByRefConditionalAllocations
+	arrayByRefLengthAllocations          arrayByRefLengthAllocations
+	arrayModuleAllocations               arrayModuleAllocationSummaries
+	arrayModuleInvalidations             arrayModuleInvalidationSummaries
+	arrayModuleInvalidationCacheWritable bool
+	arraySkipModuleInvalidationEffects   bool
+	arrayModuleConfigurations            map[string]arrayModuleConfigurationState
+	arrayModuleInitializationStates      map[string]map[string]bool
+	arrayModuleEntryStates               arrayModuleEntryStates
+	arrayModuleReadyGuards               arrayModuleReadyGuardStates
+	arrayPrivateTargets                  map[string]sourceProcedure
+	arrayParticipants                    map[string]bool
+	arrayParticipantKeys                 map[string]string
 	// arrayInterproceduralParticipants excludes complete procedures whose only
 	// evidence is an unknown array capability. Those procedures remain in the
 	// local participant plan for fail-open diagnostics, but cannot by themselves
@@ -2361,13 +2370,19 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		functionNamesSeen:                map[string]bool{},
 		functionAmbiguous:                map[string]bool{},
 		arrayReturns:                     map[string]arrayValue{},
+		arrayReturnsQualified:            map[string]arrayValue{},
 		arrayAllocationGuards:            map[string]bool{},
+		arraySafeArrayLengthGuards:       map[string]bool{},
+		arraySafeBoundGuards:             map[string]bool{},
 		arrayByRefAllocations:            arrayByRefAllocationSummaries{},
 		arrayByRefConditionalAllocations: arrayByRefConditionalAllocations{},
 		arrayByRefLengthAllocations:      arrayByRefLengthAllocations{},
 		arrayModuleAllocations:           arrayModuleAllocationSummaries{},
+		arrayModuleInvalidations:         arrayModuleInvalidationSummaries{},
 		arrayModuleConfigurations:        map[string]arrayModuleConfigurationState{},
+		arrayModuleInitializationStates:  map[string]map[string]bool{},
 		arrayModuleEntryStates:           arrayModuleEntryStates{},
+		arrayModuleReadyGuards:           arrayModuleReadyGuardStates{},
 		arrayPrivateTargets:              map[string]sourceProcedure{},
 		arrayStats:                       &arrayInterproceduralStats{strategy: a.arrayStrategy},
 		arrayByRefEntryStates:            map[string]map[int]bool{},
@@ -2448,16 +2463,33 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	// open through buildProcedureAnalysisPlan.
 	if capabilityPlan.requires(projectCapabilityArrayInterprocedural) {
 		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
+		ctx.arraySafeArrayLengthGuards = inferArraySafeArrayLengthGuards(files)
+		ctx.arraySafeBoundGuards = inferArraySafeBoundGuards(files)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
 		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
 		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants, ctx.arrayParticipantKeys)
-		ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards, ctx)
+		ctx.arraySkipModuleInvalidationEffects = true
+		returnSummaries := inferArrayReturnSummarySet(files, ctx.arrayAllocationGuards, ctx)
+		ctx.arrayReturns = returnSummaries.bare
+		ctx.arrayReturnsQualified = returnSummaries.qualified
 		ctx.arrayByRefAllocations = inferArrayByRefAllocationSummaries(files, ctx, ctx.arrayPrivateTargets)
 		ctx.arrayByRefConditionalAllocations = inferArrayByRefConditionalAllocations(files)
 		ctx.arrayByRefLengthAllocations = inferArrayByRefLengthAllocations(files)
 		ctx.arrayModuleAllocations = inferArrayModuleAllocationSummaries(files, ctx, ctx.arrayPrivateTargets, ctx.arrayByRefAllocations)
+		ctx.arrayModuleInitializationStates = arrayModuleInitializationStates(files, ctx.arrayModuleAllocations)
+		ctx.arraySkipModuleInvalidationEffects = false
+		ctx.arrayModuleInvalidations = inferArrayModuleInvalidationSummaries(files, ctx)
 		ctx.arrayModuleConfigurations = inferArrayModuleConfigurationStates(files, ctx.arrayModuleAllocations)
+		ctx.arrayModuleReadyGuards = inferArrayModuleReadyGuardStates(files, ctx)
+		// Module entry inference collects allocations established by callers. Do
+		// not feed the normal-return invalidation summaries back into that fixed
+		// point: a helper's invalidation is a post-call fact, while using it here
+		// would turn the caller/callee allocation proof into a circular pessimism.
+		// The ordinary VBA227 transfer and the ByRef entry pass remain
+		// invalidation-aware after this phase completes.
+		ctx.arraySkipModuleInvalidationEffects = true
 		ctx.arrayModuleEntryStates = inferArrayModuleEntryStates(a, files, ctx)
+		ctx.arraySkipModuleInvalidationEffects = false
 		ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions = inferArrayByRefEntryStates(a, files, ctx)
 	}
 	return ctx

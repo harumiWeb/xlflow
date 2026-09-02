@@ -987,11 +987,94 @@ End Sub
 	}
 }
 
+func TestRecoveredUnparenthesizedCallWithQualifiedArguments(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Private Sub NDArrayToCollections(ByRef arr() As Variant, ByRef src As Variant, ByRef bounds As Variant, ByVal totalElem As Long, ByRef cDimsPtr As LongPtr)
+End Sub
+
+Public Sub Run()
+    NDArrayToCollections .arrItems, vars.arr(0), bounds _
+                         , totalElem, ptrs.arr(0)
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 2 || len(doc.Procedures[1].Calls) != 1 {
+		t.Fatalf("recovered call was not captured: %+v", doc.Procedures)
+	}
+	call := doc.Procedures[1].Calls[0]
+	if !strings.EqualFold(call.Callee.BaseName, "NDArrayToCollections") {
+		t.Fatalf("callee = %+v, want NDArrayToCollections", call.Callee)
+	}
+	if call.Arguments.Count != 5 || len(call.Arguments.ExpressionIDs) != 5 {
+		t.Fatalf("recovered call arguments = %+v, want five arguments", call.Arguments)
+	}
+	want := []string{".arrItems", "vars.arr(0)", "bounds", "totalElem", "ptrs.arr(0)"}
+	for i, text := range want {
+		expressionID := call.Arguments.ExpressionIDs[i]
+		if expressionID == 0 || expressionID > len(doc.Procedures[1].Expressions) {
+			t.Fatalf("argument %d has invalid expression ID %d: %+v", i, expressionID, call.Arguments)
+		}
+		expression := doc.Procedures[1].Expressions[expressionID-1]
+		if expression.Text != text || !expression.Recovered {
+			t.Fatalf("argument %d = %+v, want recovered expression %q", i, expression, text)
+		}
+	}
+}
+
+func TestRecoveredUnparenthesizedCallPreservesOmittedArgumentSlots(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Private Sub Target(Optional first As Variant, Optional second As Variant, Optional third As Variant)
+End Sub
+
+Public Sub Run()
+    Target .first, _
+           , third
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 2 || len(doc.Procedures[1].Calls) != 1 {
+		t.Fatalf("recovered call was not captured: %+v", doc.Procedures)
+	}
+	call := doc.Procedures[1].Calls[0]
+	if call.Arguments.Count != 3 || len(call.Arguments.ExpressionIDs) != 3 {
+		t.Fatalf("recovered call arguments = %+v, want three positional slots", call.Arguments)
+	}
+	if call.Arguments.ExpressionIDs[0] == 0 || call.Arguments.ExpressionIDs[1] != 0 || call.Arguments.ExpressionIDs[2] == 0 {
+		t.Fatalf("omitted argument slot was not preserved: %+v", call.Arguments)
+	}
+	for index, want := range []string{".first", "third"} {
+		expressionID := call.Arguments.ExpressionIDs[[]int{0, 2}[index]]
+		expression := doc.Procedures[1].Expressions[expressionID-1]
+		if expression.Text != want || !expression.Recovered {
+			t.Fatalf("recovered argument %d = %+v, want %q", index, expression, want)
+		}
+	}
+}
+
+func TestRecoveredCallArgumentsPreservesEmptyPositionalSegments(t *testing.T) {
+	t.Parallel()
+	source := []byte("first, , third")
+	arguments := recoveredCallArguments(string(source), 0, len(source), 0, source)
+	if len(arguments) != 3 {
+		t.Fatalf("recovered arguments = %#v, want three positional slots", arguments)
+	}
+	if arguments[0].text != "first" || arguments[1].text != "" || arguments[2].text != "third" {
+		t.Fatalf("recovered argument texts = %#v, want first/empty/third", arguments)
+	}
+	if arguments[1].rng.EndByte > arguments[1].rng.StartByte {
+		t.Fatalf("omitted argument received a source range: %#v", arguments[1].rng)
+	}
+}
+
 func TestPrintOutputListPositionsAreNotArguments(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
 	Debug.Print first; second("value"), third;
-End Sub
+	End Sub
 `))
 	if err != nil {
 		t.Fatal(err)

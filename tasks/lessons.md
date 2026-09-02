@@ -140,3 +140,4 @@
 - Cross-platform analysis tests that inspect `RunResult().Warnings` should assert the relevant warning code rather than require an empty warning set; Linux may legitimately lack the generated TypeLib manifest and emit `type_db_load_warning`.
 - On Windows, tests that need a path relative to the working directory must create their temporary directory on the working directory's volume; `t.TempDir()` may be on another drive where `filepath.Rel` cannot produce a relative path.
 - Filesystem adapters must keep absolute physical paths for discovery, deduplication, and reads separate from logical source paths used by filters, diagnostics, and public results; preserve the caller's absolute or relative `RootDir` form.
+- Keep strict-positive and non-negative branch proofs separate in array safety analysis; a zero-inclusive guard such as `count < 0` on its false edge must not suppress VBA227 for an unallocated zero-count result.
