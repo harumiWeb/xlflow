@@ -20,12 +20,13 @@ type queryIndex struct {
 }
 
 func buildQueryIndex(g Graph) *queryIndex {
+	blockCapacity := len(g.Blocks)
 	index := &queryIndex{
-		blocksByStatement:  make(map[int]int),
-		blocksByID:         make(map[BlockID]int, len(g.Blocks)),
-		outgoing:           make(map[BlockID][]Edge),
-		incoming:           make(map[BlockID][]Edge),
-		nonReturningRaise:  make(map[BlockID]bool),
+		blocksByStatement:  make(map[int]int, blockCapacity),
+		blocksByID:         make(map[BlockID]int, blockCapacity),
+		outgoing:           make(map[BlockID][]Edge, blockCapacity),
+		incoming:           make(map[BlockID][]Edge, blockCapacity),
+		nonReturningRaise:  make(map[BlockID]bool, blockCapacity),
 		blocksLen:          len(g.Blocks),
 		edgesLen:           len(g.Edges),
 		entry:              g.Entry,
@@ -49,9 +50,33 @@ func buildQueryIndex(g Graph) *queryIndex {
 			}
 		}
 	}
+	outgoingRemaining := make(map[BlockID]int, blockCapacity)
+	incomingRemaining := make(map[BlockID]int, blockCapacity)
 	for _, edge := range g.Edges {
-		index.outgoing[edge.From] = append(index.outgoing[edge.From], edge)
-		index.incoming[edge.To] = append(index.incoming[edge.To], edge)
+		outgoingRemaining[edge.From]++
+		incomingRemaining[edge.To]++
+	}
+	outgoingStorage := make([]Edge, len(g.Edges))
+	incomingStorage := make([]Edge, len(g.Edges))
+	outgoingOffset := 0
+	for from, count := range outgoingRemaining {
+		index.outgoing[from] = outgoingStorage[outgoingOffset : outgoingOffset+count : outgoingOffset+count]
+		outgoingOffset += count
+	}
+	incomingOffset := 0
+	for to, count := range incomingRemaining {
+		index.incoming[to] = incomingStorage[incomingOffset : incomingOffset+count : incomingOffset+count]
+		incomingOffset += count
+	}
+	for _, edge := range g.Edges {
+		outgoing := index.outgoing[edge.From]
+		outgoingIndex := len(outgoing) - outgoingRemaining[edge.From]
+		outgoing[outgoingIndex] = edge
+		outgoingRemaining[edge.From]--
+		incoming := index.incoming[edge.To]
+		incomingIndex := len(incoming) - incomingRemaining[edge.To]
+		incoming[incomingIndex] = edge
+		incomingRemaining[edge.To]--
 	}
 	return index
 }
