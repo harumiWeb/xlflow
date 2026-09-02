@@ -26,7 +26,8 @@ $valueParameters = @(
     "Effort",
     "HeartbeatSeconds",
     "TimeoutSeconds",
-    "ReviewMode"
+    "ReviewMode",
+    "Commit"
 )
 $reviewParameterMap = @{}
 
