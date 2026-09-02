@@ -72,3 +72,31 @@ End Sub
 		t.Fatalf("valid multiline WorksheetFunction calls should be diagnostic-free: %+v", diagnostics)
 	}
 }
+
+func TestParenlessCallOnLineValidatesCompleteTargets(t *testing.T) {
+	tests := []struct {
+		name       string
+		line       string
+		want       bool
+		wantTarget string
+	}{
+		{name: "identifier", line: "Foo value", want: true, wantTarget: "Foo"},
+		{name: "member", line: "Foo.Bar value", want: true, wantTarget: "Foo.Bar"},
+		{name: "with member", line: ".Bar value", want: true, wantTarget: ".Bar"},
+		{name: "parenthesized member", line: "Foo(1).Bar value", want: true, wantTarget: "Foo(1).Bar"},
+		{name: "trailing dot", line: "Foo. value"},
+		{name: "trailing text after parenthesized target", line: "Foo(1)Bar value"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			call, ok := parenlessCallOnLine(tc.line)
+			if ok != tc.want {
+				t.Fatalf("parenlessCallOnLine(%q) = (%+v, %t), want ok=%t", tc.line, call, ok, tc.want)
+			}
+			if tc.want && call.Target != tc.wantTarget {
+				t.Fatalf("parenlessCallOnLine(%q) target = %q, want %q", tc.line, call.Target, tc.wantTarget)
+			}
+		})
+	}
+}

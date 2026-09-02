@@ -308,6 +308,13 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 		if !ok || got.ReturnType != "Double" || len(got.Parameters) != 30 || got.Parameters[0].Optional || !got.Parameters[29].Optional {
 			t.Fatalf("Application.%s = %+v, %v", name, got, ok)
 		}
+		for i, parameter := range got.Parameters {
+			wantName := fmt.Sprintf("Arg%d", i+1)
+			wantOptional := i > 0
+			if parameter.Name != wantName || parameter.Type != "Variant" || parameter.Optional != wantOptional {
+				t.Fatalf("Application.%s parameter %d = %+v; want %s Variant optional=%t", name, i+1, parameter, wantName, wantOptional)
+			}
+		}
 	}
 	if got, ok := db.ResolveMember("Excel.Application", "Match"); !ok || len(got.Parameters) != 3 || !got.Parameters[2].Optional {
 		t.Fatalf("Application.Match parameters = %+v, %v", got, ok)

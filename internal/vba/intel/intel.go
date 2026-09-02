@@ -3178,7 +3178,11 @@ func parenlessCallOnLine(line string) (parsedCall, bool) {
 }
 
 func isParenlessCallTarget(target string) bool {
-	parts := splitMemberExpression(strings.TrimSpace(target))
+	target = strings.TrimSpace(target)
+	if target == "" || strings.HasSuffix(target, ".") {
+		return false
+	}
+	parts := splitMemberExpression(target)
 	if len(parts) == 0 {
 		return false
 	}
@@ -3193,6 +3197,9 @@ func isParenlessCallTarget(target string) bool {
 			return false
 		}
 		if open := strings.IndexByte(part, '('); open >= 0 {
+			if matchingParen(part, open) != len(part)-1 {
+				return false
+			}
 			part = strings.TrimSpace(part[:open])
 		}
 		if !isIdentifier(part) {
