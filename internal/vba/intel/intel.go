@@ -3197,10 +3197,24 @@ func isParenlessCallTarget(target string) bool {
 			return false
 		}
 		if open := strings.IndexByte(part, '('); open >= 0 {
-			if matchingParen(part, open) != len(part)-1 {
+			if !isIdentifier(strings.TrimSpace(part[:open])) {
 				return false
 			}
-			part = strings.TrimSpace(part[:open])
+			// VBA permits chained default-member/indexing calls such as
+			// dict("k")("1"). Reject anything other than another complete
+			// parenthesized suffix after each closing parenthesis.
+			suffix := strings.TrimSpace(part[open:])
+			for suffix != "" {
+				if suffix[0] != '(' {
+					return false
+				}
+				close := matchingParen(suffix, 0)
+				if close < 0 {
+					return false
+				}
+				suffix = strings.TrimSpace(suffix[close+1:])
+			}
+			continue
 		}
 		if !isIdentifier(part) {
 			return false

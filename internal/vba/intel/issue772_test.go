@@ -84,6 +84,7 @@ func TestParenlessCallOnLineValidatesCompleteTargets(t *testing.T) {
 		{name: "member", line: "Foo.Bar value", want: true, wantTarget: "Foo.Bar"},
 		{name: "with member", line: ".Bar value", want: true, wantTarget: ".Bar"},
 		{name: "parenthesized member", line: "Foo(1).Bar value", want: true, wantTarget: "Foo(1).Bar"},
+		{name: "chained parenthesized member", line: `dict("k")("1").Add value`, want: true, wantTarget: `dict("k")("1").Add`},
 		{name: "trailing dot", line: "Foo. value"},
 		{name: "trailing text after parenthesized target", line: "Foo(1)Bar value"},
 	}
