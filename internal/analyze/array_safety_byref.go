@@ -1344,6 +1344,21 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 	contributions := make(map[string]map[string]map[int]arrayByRefEntryEvidence, len(callers))
 	entries := map[string]map[int]bool{}
 	conditions := map[string]map[int]string{}
+	aggregateTargets := func(targets map[string]bool) map[string]map[int]arrayByRefEntryEvidence {
+		aggregated := map[string]map[int]arrayByRefEntryEvidence{}
+		for _, callerEvidence := range contributions {
+			for target, parameters := range callerEvidence {
+				if !targets[target] {
+					continue
+				}
+				if aggregated[target] == nil {
+					aggregated[target] = make(map[int]arrayByRefEntryEvidence, len(parameters))
+				}
+				mergeArrayByRefEntryParameters(aggregated[target], parameters)
+			}
+		}
+		return aggregated
+	}
 	queue := make([]int, len(callers))
 	queued := make([]bool, len(callers))
 	for index := range callers {
@@ -1362,40 +1377,61 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		if arrayByRefEvidenceMapsEqual(contributions[key], evidence) {
 			continue
 		}
+		oldEvidence := contributions[key]
 		contributions[key] = evidence
-		merged := map[string]map[int]arrayByRefEntryEvidence{}
-		for _, callerEvidence := range contributions {
-			mergeArrayByRefEntryEvidence(merged, callerEvidence)
+		affectedTargetSet := make(map[string]bool, len(oldEvidence)+len(evidence))
+		for target := range oldEvidence {
+			affectedTargetSet[target] = true
 		}
-		result := map[string]map[int]bool{}
-		conditionalResult := map[string]map[int]string{}
-		for targetKey, parameters := range merged {
+		for target := range evidence {
+			affectedTargetSet[target] = true
+		}
+		merged := aggregateTargets(affectedTargetSet)
+		changedTargets := make([]string, 0, len(affectedTargetSet))
+		updatedEntries := make(map[string]map[int]bool, len(affectedTargetSet))
+		updatedConditions := make(map[string]map[int]string, len(affectedTargetSet))
+		for target := range affectedTargetSet {
+			parameters := merged[target]
+			var targetEntries map[int]bool
+			var targetConditions map[int]string
 			for parameterIndex, fact := range parameters {
 				if !fact.seen {
 					continue
 				}
 				if fact.allocated {
-					if result[targetKey] == nil {
-						result[targetKey] = map[int]bool{}
+					if targetEntries == nil {
+						targetEntries = map[int]bool{}
 					}
-					result[targetKey][parameterIndex] = true
+					targetEntries[parameterIndex] = true
 				}
 				if !fact.allocated && fact.conditionCompatible && fact.condition != "" {
-					if conditionalResult[targetKey] == nil {
-						conditionalResult[targetKey] = map[int]string{}
+					if targetConditions == nil {
+						targetConditions = map[int]string{}
 					}
-					conditionalResult[targetKey][parameterIndex] = fact.condition
+					targetConditions[parameterIndex] = fact.condition
 				}
 			}
+			if !arrayByRefEntryParameterStatesEqual(entries[target], targetEntries) || !arrayByRefEntryParameterConditionsEqual(conditions[target], targetConditions) {
+				changedTargets = append(changedTargets, target)
+				updatedEntries[target] = targetEntries
+				updatedConditions[target] = targetConditions
+			}
 		}
-		changedTargets := arrayByRefEntryChangedTargets(entries, conditions, result, conditionalResult)
 		if len(changedTargets) == 0 {
 			continue
 		}
 		sortArrayProcedureKeys(changedTargets, indexByKey)
-		entries = result
-		conditions = conditionalResult
 		for _, target := range changedTargets {
+			if len(updatedEntries[target]) > 0 {
+				entries[target] = updatedEntries[target]
+			} else {
+				delete(entries, target)
+			}
+			if len(updatedConditions[target]) > 0 {
+				conditions[target] = updatedConditions[target]
+			} else {
+				delete(conditions, target)
+			}
 			if dependent, ok := indexByKey[target]; ok && !queued[dependent] {
 				queued[dependent] = true
 				queue = append(queue, dependent)
@@ -1411,37 +1447,25 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 	return entries, conditions
 }
 
-func arrayByRefEntryStatesEqual(left, right map[string]map[int]bool) bool {
+func arrayByRefEntryParameterStatesEqual(left, right map[int]bool) bool {
 	if len(left) != len(right) {
 		return false
 	}
-	for target, parameters := range left {
-		other, ok := right[target]
-		if !ok || len(parameters) != len(other) {
+	for index := range left {
+		if !right[index] {
 			return false
-		}
-		for index := range parameters {
-			if !other[index] {
-				return false
-			}
 		}
 	}
 	return true
 }
 
-func arrayByRefEntryConditionsEqual(left, right map[string]map[int]string) bool {
+func arrayByRefEntryParameterConditionsEqual(left, right map[int]string) bool {
 	if len(left) != len(right) {
 		return false
 	}
-	for target, parameters := range left {
-		other, ok := right[target]
-		if !ok || len(parameters) != len(other) {
+	for index, condition := range left {
+		if right[index] != condition {
 			return false
-		}
-		for index, condition := range parameters {
-			if other[index] != condition {
-				return false
-			}
 		}
 	}
 	return true
@@ -1465,72 +1489,28 @@ func arrayByRefEvidenceMapsEqual(left, right map[string]map[int]arrayByRefEntryE
 	return true
 }
 
-func mergeArrayByRefEntryEvidence(dst, src map[string]map[int]arrayByRefEntryEvidence) {
-	for target, parameters := range src {
-		for index, incoming := range parameters {
-			if dst[target] == nil {
-				dst[target] = map[int]arrayByRefEntryEvidence{}
-			}
-			current, exists := dst[target][index]
-			if !exists {
-				dst[target][index] = incoming
-				continue
-			}
-			current.allocated = current.allocated && incoming.allocated
-			if !incoming.allocated && incoming.condition == "" {
+func mergeArrayByRefEntryParameters(dst, src map[int]arrayByRefEntryEvidence) {
+	for index, incoming := range src {
+		current, exists := dst[index]
+		if !exists {
+			dst[index] = incoming
+			continue
+		}
+		current.allocated = current.allocated && incoming.allocated
+		if !incoming.allocated && incoming.condition == "" {
+			current.conditionCompatible = false
+		}
+		if incoming.condition != "" {
+			if current.condition == "" {
+				current.condition = incoming.condition
+			} else if !strings.EqualFold(current.condition, incoming.condition) {
 				current.conditionCompatible = false
 			}
-			if incoming.condition != "" {
-				if current.condition == "" {
-					current.condition = incoming.condition
-				} else if !strings.EqualFold(current.condition, incoming.condition) {
-					current.conditionCompatible = false
-				}
-			}
-			current.conditionCompatible = current.conditionCompatible && incoming.conditionCompatible
-			current.seen = current.seen || incoming.seen
-			dst[target][index] = current
 		}
+		current.conditionCompatible = current.conditionCompatible && incoming.conditionCompatible
+		current.seen = current.seen || incoming.seen
+		dst[index] = current
 	}
-}
-
-func arrayByRefEntryChangedTargets(oldEntries map[string]map[int]bool, oldConditions map[string]map[int]string, newEntries map[string]map[int]bool, newConditions map[string]map[int]string) []string {
-	keys := map[string]bool{}
-	for target := range oldEntries {
-		keys[target] = true
-	}
-	for target := range oldConditions {
-		keys[target] = true
-	}
-	for target := range newEntries {
-		keys[target] = true
-	}
-	for target := range newConditions {
-		keys[target] = true
-	}
-	changed := make([]string, 0, len(keys))
-	for target := range keys {
-		oldEntry := map[string]map[int]bool{}
-		newEntry := map[string]map[int]bool{}
-		if names := oldEntries[target]; len(names) > 0 {
-			oldEntry[target] = names
-		}
-		if names := newEntries[target]; len(names) > 0 {
-			newEntry[target] = names
-		}
-		oldCondition := map[string]map[int]string{}
-		newCondition := map[string]map[int]string{}
-		if conditions := oldConditions[target]; len(conditions) > 0 {
-			oldCondition[target] = conditions
-		}
-		if conditions := newConditions[target]; len(conditions) > 0 {
-			newCondition[target] = conditions
-		}
-		if !arrayByRefEntryStatesEqual(oldEntry, newEntry) || !arrayByRefEntryConditionsEqual(oldCondition, newCondition) {
-			changed = append(changed, target)
-		}
-	}
-	return changed
 }
 
 func sortArrayProcedureKeys(keys []string, indexByKey map[string]int) {

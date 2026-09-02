@@ -1927,6 +1927,26 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 
 	contributions := make(map[string]map[string]map[string]bool, len(procedures))
 	entries := arrayModuleEntryStates{}
+	aggregateTargets := func(targets map[string]bool) arrayModuleEntryStates {
+		aggregated := arrayModuleEntryStates{}
+		for _, caller := range procedures {
+			for target, names := range contributions[caller.key] {
+				if !targets[target] {
+					continue
+				}
+				if aggregated[target] == nil {
+					aggregated[target] = cloneArrayNameSet(names)
+					continue
+				}
+				for name := range aggregated[target] {
+					if !names[name] {
+						delete(aggregated[target], name)
+					}
+				}
+			}
+		}
+		return aggregated
+	}
 	queue := make([]int, len(procedures))
 	queued := make([]bool, len(procedures))
 	for index := range procedures {
@@ -1944,40 +1964,38 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		if arrayModuleEntryContributionsEqual(contributions[key], contribution) {
 			continue
 		}
+		oldContribution := contributions[key]
 		contributions[key] = contribution
-		next := arrayModuleEntryStates{}
-		for _, caller := range procedures {
-			for target, names := range contributions[caller.key] {
-				if next[target] == nil {
-					next[target] = cloneArrayNameSet(names)
-					continue
-				}
-				for name := range next[target] {
-					if !names[name] {
-						delete(next[target], name)
-					}
-				}
-			}
+		affectedTargetSet := make(map[string]bool, len(oldContribution)+len(contribution))
+		for target := range oldContribution {
+			affectedTargetSet[target] = true
 		}
-		changedTargetSet := make(map[string]bool, len(entries)+len(next))
-		for target := range entries {
-			changedTargetSet[target] = true
+		for target := range contribution {
+			affectedTargetSet[target] = true
 		}
-		for target := range next {
-			changedTargetSet[target] = true
-		}
-		changedTargets := make([]string, 0, len(changedTargetSet))
-		for target := range changedTargetSet {
-			if !arrayModuleEntryTargetEqual(entries, next, target) {
+		next := aggregateTargets(affectedTargetSet)
+		changedTargets := make([]string, 0, len(affectedTargetSet))
+		updates := make(map[string]map[string]bool, len(affectedTargetSet))
+		updatePresent := make(map[string]bool, len(affectedTargetSet))
+		for target := range affectedTargetSet {
+			names, present := next[target]
+			oldNames, oldPresent := entries[target]
+			if !arrayModuleEntryNamesEqual(oldNames, oldPresent, names, present) {
 				changedTargets = append(changedTargets, target)
+				updates[target] = names
+				updatePresent[target] = present
 			}
 		}
 		if len(changedTargets) == 0 {
 			continue
 		}
-		entries = next
 		sortArrayProcedureKeys(changedTargets, indexByKey)
 		for _, target := range changedTargets {
+			if updatePresent[target] {
+				entries[target] = updates[target]
+			} else {
+				delete(entries, target)
+			}
 			for _, dependent := range dependents[target] {
 				if !queued[dependent] {
 					queued[dependent] = true
@@ -2011,9 +2029,7 @@ func arrayModuleEntryContributionsEqual(left, right map[string]map[string]bool) 
 	return true
 }
 
-func arrayModuleEntryTargetEqual(left, right arrayModuleEntryStates, target string) bool {
-	leftNames, leftOK := left[target]
-	rightNames, rightOK := right[target]
+func arrayModuleEntryNamesEqual(leftNames map[string]bool, leftOK bool, rightNames map[string]bool, rightOK bool) bool {
 	if !leftOK || !rightOK {
 		return !leftOK && !rightOK
 	}
