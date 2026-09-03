@@ -5,7 +5,8 @@ allowBuilds:
 
 overrides:
   brace-expansion: 5.0.9
-  fast-uri: 3.1.5
+  fast-uri: 3.1.6
+  qs: 6.16.0
   undici: 7.29.0
   js-yaml: 4.3.1
   linkify-it: 5.0.2
