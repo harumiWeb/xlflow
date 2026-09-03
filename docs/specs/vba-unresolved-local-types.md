@@ -23,7 +23,10 @@ metadata, embedded enum groups, project `Type`/`Enum` declarations, class
 modules, UserForms, and document modules are accepted. Module-qualified names
 use the workspace index. A class qualified by the configured project name is
 resolved against the project's object modules; TypeLib-qualified names use the
-database lookup.
+database lookup. The embedded database includes a conservative common Outlook
+surface, including `Outlook.Application` and `Outlook.MailItem`; the installed
+Outlook TypeLib can be imported with `xlflow type db refresh --library outlook`
+when broader Outlook coverage is needed.
 
 Version 1 deliberately covers procedure-local declarations only. Parameters,
 function/property return types, module-level declarations, reference

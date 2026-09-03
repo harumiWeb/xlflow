@@ -5,6 +5,18 @@ namespace Xlflow.ExcelBridge.Tests;
 public sealed class TypeLibImporterServiceTests
 {
     [Fact]
+    public void ResolveLibrariesIncludesOutlookTypeLib()
+    {
+        var resolved = TypeLibImporterService.ResolveLibraries("outlook");
+        var target = Assert.Single(resolved.Targets);
+
+        Assert.Equal("Outlook", target.Name);
+        Assert.Equal("{00062FFF-0000-0000-C000-000000000046}", target.LibID);
+        Assert.Equal("outlook.generated.json", target.Output);
+        Assert.False(resolved.BestEffort);
+    }
+
+    [Fact]
     public void SelectProgIDsForTypeLibMapsRegisteredProgIDsToCoClassTypes()
     {
         var classID = Guid.Parse("{00024500-0000-0000-C000-000000000046}");

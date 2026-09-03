@@ -17,6 +17,29 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if _, ok := db.ResolveType("Excel.Application"); !ok {
 		t.Fatal("Excel.Application was not loaded")
 	}
+	for _, name := range []string{"Outlook.Application", "Outlook.MailItem"} {
+		if typ, ok := db.ResolveType(name); !ok || typ.Library != "Outlook" {
+			t.Fatalf("ResolveType(%s) = %+v, %v; want embedded Outlook type", name, typ, ok)
+		}
+	}
+	if typ, ok := db.ResolveProgID("Outlook.Application"); !ok || typ.Name != "Outlook.Application" {
+		t.Fatalf("ResolveProgID(Outlook.Application) = %+v, %v", typ, ok)
+	}
+	if typ, ok := db.ResolveType("Application"); !ok || typ.Name != "Excel.Application" {
+		t.Fatalf("ResolveType(Application) = %+v, %v; want Excel.Application alias", typ, ok)
+	}
+	if _, ok := db.ResolveType("_Application"); ok {
+		t.Fatal("ResolveType(_Application) must not use an unqualified Outlook alias")
+	}
+	if member, ok := db.ResolveMember("Outlook.Application", "CreateItem"); !ok || member.ReturnType != "Object" {
+		t.Fatalf("Outlook.Application.CreateItem = %+v, %v; want Object return type", member, ok)
+	}
+	if member, ok := db.ResolveMember("Outlook.MailItem", "Subject"); !ok || member.ReturnType != "String" {
+		t.Fatalf("Outlook.MailItem.Subject = %+v, %v; want String return type", member, ok)
+	}
+	if member, ok := db.ResolveMember("Outlook.NameSpace", "GetItemFromID"); !ok || len(member.Parameters) != 2 || member.Parameters[0].Name != "EntryIDItem" || member.Parameters[1].Name != "EntryIDStore" || !member.Parameters[1].Optional {
+		t.Fatalf("Outlook.NameSpace.GetItemFromID = %+v, %v; want optional EntryIDStore", member, ok)
+	}
 	if _, ok := db.ResolveType("Workbook"); !ok {
 		t.Fatal("Workbook alias did not resolve")
 	}

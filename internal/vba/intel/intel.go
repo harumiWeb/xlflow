@@ -2638,16 +2638,20 @@ func (a Analyzer) typeDiagnosticBaseType(doc Document, raw string, offset int) (
 	case a.DB != nil:
 		if typ, ok := a.DB.ResolveGlobal(base); ok {
 			current = typ.Name
-		} else if typ, ok := a.DB.ResolveType(base); ok {
-			current = typ.Name
 		}
 	}
 	if current == "" {
 		if inferred, ok := a.inferWordTypeInfoAt(doc, base, offset); ok {
 			current = inferred.Type
-		} else {
-			return "", false
 		}
+	}
+	if current == "" {
+		if typ, ok := a.DB.ResolveType(base); ok {
+			current = typ.Name
+		}
+	}
+	if current == "" {
+		return "", false
 	}
 	if called {
 		if typ, ok := a.collectionDefaultType(current); ok {
@@ -4827,14 +4831,16 @@ func (a Analyzer) resolveExpressionTypeAtContextWithState(doc Document, expr str
 		formMode = strings.EqualFold(current, "MSForms.UserForm")
 	} else if typ, ok := a.DB.ResolveGlobal(base); ok {
 		current = typ.Name
-	} else if typ, ok := a.DB.ResolveType(base); ok {
-		current = typ.Name
 	} else if useDocument {
 		if inferred, ok := a.inferWordTypeInfoAtContextWithState(doc, base, offset, ctx, state); ok {
 			current = inferred.Type
+		} else if typ, ok := a.DB.ResolveType(base); ok {
+			current = typ.Name
 		} else {
 			return "", false
 		}
+	} else if typ, ok := a.DB.ResolveType(base); ok {
+		current = typ.Name
 	} else {
 		return "", false
 	}

@@ -24,7 +24,7 @@ xlflow type db clean
 
 `init` generates the database only when it does not already exist. `refresh` always regenerates the generated database, so it is the one-command equivalent of `clean` followed by `init`. `clean` deletes the generated database directory.
 
-The default importer target is Excel. Use `--library all` to generate databases for every known library present on the machine, including Office, MSForms, Scripting, ADODB, and VBIDE when available. Generated entries include TypeLib-derived ProgID mappings when registry metadata can be matched to TypeLib CoClass GUIDs, so the LSP can infer common late-bound expressions such as `CreateObject("Excel.Application")`, `CreateObject("Scripting.FileSystemObject")`, and `CreateObject("ADODB.Connection")`.
+The default importer target is Excel. Use `--library all` to generate databases for every known library present on the machine, including Office, MSForms, Scripting, ADODB, VBIDE, and Outlook when available. You can also request Outlook directly with `--library outlook`. Generated entries include TypeLib-derived ProgID mappings when registry metadata can be matched to TypeLib CoClass GUIDs, so the LSP can infer common late-bound expressions such as `CreateObject("Excel.Application")`, `CreateObject("Scripting.FileSystemObject")`, `CreateObject("ADODB.Connection")`, and `CreateObject("Outlook.Application")`.
 
 Generated entries are loaded by `xlflow lsp` when present; if no generated DB exists, the LSP continues with the embedded built-in database.
 

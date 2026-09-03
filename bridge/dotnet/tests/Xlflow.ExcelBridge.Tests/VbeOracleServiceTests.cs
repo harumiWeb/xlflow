@@ -60,6 +60,68 @@ public sealed class VbeOracleServiceTests
     }
 
     [Fact]
+    public void SchemaV1AcceptsExternalTypeLibReference()
+    {
+        var plan = new
+        {
+            schema_version = 1,
+            case_id = "external-reference",
+            probe_mode = "compile",
+            references = new[]
+            {
+                new { name = "Outlook", libid = "{00062FFF-0000-0000-C000-000000000046}", major = 9, minor = 6 },
+            },
+            modules = new[]
+            {
+                new { name = "Main", kind = "standard", source = "Attribute VB_Name = \"Main\"\n" },
+            },
+        };
+
+        AssertPlanAccepted(plan);
+    }
+
+    [Fact]
+    public void OracleProvisioningAddsExternalTypeLibReference()
+    {
+        var plan = new
+        {
+            schema_version = 1,
+            case_id = "external-reference",
+            probe_mode = "compile",
+            references = new[]
+            {
+                new { name = "Outlook", libid = "{00062FFF-0000-0000-C000-000000000046}", major = 9, minor = 6 },
+            },
+            modules = new[]
+            {
+                new { name = "Main", kind = "standard", source = "Attribute VB_Name = \"Main\"\n" },
+            },
+        };
+        var json = JsonSerializer.Serialize(plan);
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        var serviceType = typeof(VbeOracleService);
+        var decode = serviceType.GetMethod("DecodePlan", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var provision = serviceType.GetMethod("ProvisionReferences", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var decoded = decode.Invoke(null, [encoded])!;
+        var references = decoded.GetType().GetProperty("References", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(decoded)!;
+        var project = new FakeProject();
+
+        provision.Invoke(null, [new FakeWorkbook(project), references, CancellationToken.None]);
+
+        Assert.Equal(("{00062FFF-0000-0000-C000-000000000046}", 9, 6), project.References.Added.Single());
+    }
+
+    [Theory]
+    [InlineData("provision_references")]
+    [InlineData("provision_components")]
+    public void ReferenceAndComponentProvisioningFailuresUseImportErrorCode(string stage)
+    {
+        var error = VbeOracleService.ClassifyInfrastructureCode(stage, new InvalidOperationException("provisioning failed"));
+
+        Assert.Equal("oracle_import_failed", error);
+    }
+
+    [Fact]
     public void OracleSanitizerRemovesExportHeadersBeforeInjection()
     {
         var sanitizer = typeof(VbeOracleService).GetMethod("SanitizeOracleSource", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
@@ -144,6 +206,27 @@ public sealed class VbeOracleServiceTests
         {
             text = Convert.ToString(value) + "' VBE mutation";
             return null;
+        }
+    }
+
+    private sealed class FakeWorkbook(FakeProject project)
+    {
+        public FakeProject VBProject { get; } = project;
+    }
+
+    private sealed class FakeProject
+    {
+        public FakeReferences References { get; } = new();
+    }
+
+    private sealed class FakeReferences
+    {
+        public List<(string LibID, int Major, int Minor)> Added { get; } = [];
+
+        public object AddFromGuid(string libID, int major, int minor)
+        {
+            Added.Add((libID, major, minor));
+            return new object();
         }
     }
 }

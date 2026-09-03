@@ -92,12 +92,20 @@ func (e *ExitError) Error() string {
 }
 
 type fixtureRequest struct {
-	SchemaVersion int             `json:"schema_version"`
-	CaseID        string          `json:"case_id"`
-	ProbeMode     string          `json:"probe_mode"`
-	Visible       bool            `json:"visible"`
-	TimeoutMS     int64           `json:"timeout_ms"`
-	Modules       []fixtureModule `json:"modules"`
+	SchemaVersion int                `json:"schema_version"`
+	CaseID        string             `json:"case_id"`
+	ProbeMode     string             `json:"probe_mode"`
+	Visible       bool               `json:"visible"`
+	TimeoutMS     int64              `json:"timeout_ms"`
+	References    []fixtureReference `json:"references,omitempty"`
+	Modules       []fixtureModule    `json:"modules"`
+}
+
+type fixtureReference struct {
+	Name  string `json:"name,omitempty"`
+	LibID string `json:"libid"`
+	Major int    `json:"major"`
+	Minor int    `json:"minor"`
 }
 
 type fixtureModule struct {
@@ -287,7 +295,11 @@ func runEntry(parent context.Context, root string, entry ManifestEntry, timeout 
 		}
 		modules = append(modules, fixtureModule{Name: module.Name, Kind: module.Kind, SourcePath: modulePath, DocumentTarget: module.DocumentTarget})
 	}
-	payload, err := json.Marshal(fixtureRequest{SchemaVersion: SchemaVersion, CaseID: c.ID, ProbeMode: c.Probe.Mode, TimeoutMS: timeout.Milliseconds(), Modules: modules})
+	references := make([]fixtureReference, 0, len(c.References))
+	for _, reference := range c.References {
+		references = append(references, fixtureReference(reference))
+	}
+	payload, err := json.Marshal(fixtureRequest{SchemaVersion: SchemaVersion, CaseID: c.ID, ProbeMode: c.Probe.Mode, TimeoutMS: timeout.Milliseconds(), References: references, Modules: modules})
 	if err != nil {
 		return CaseResult{ID: c.ID, Outcome: OutcomeInfrastructureFailure, Error: err.Error()}, &ExitError{Code: 3, Message: err.Error()}
 	}

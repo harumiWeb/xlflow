@@ -156,6 +156,26 @@ contract uses `analysis.expected_diagnostics` and
 optional source range, and (when needed) `surfaces` from `lint`, `analyze`, and
 `lsp`.
 
+A fixture that depends on an installed external VBA TypeLib may declare
+`references`. Each entry identifies the registered TypeLib by LIBID and
+version; the bridge calls `VBProject.References.AddFromGuid` before injecting
+the fixture modules. The reference is local-machine evidence, so the fixture
+must be run only on a Windows host where that exact TypeLib version is
+installed. For example:
+
+```json
+{
+  "references": [
+    {
+      "name": "Outlook",
+      "libid": "{00062FFF-0000-0000-C000-000000000046}",
+      "major": 9,
+      "minor": 6
+    }
+  ]
+}
+```
+
 Every fixture must also declare its diagnostic binding state and a non-empty
 `evidence_role` under `analysis`:
 
