@@ -4171,6 +4171,172 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA214AllowsCheckedProjectAndSeparateArrayBoundsProbes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ProbeCall(ByVal value As Long) As Long
+  ProbeCall = value
+End Function
+
+Public Function CheckedProjectProbe(ByVal value As Long) As Long
+  Dim probeResult As Long
+  On Error Resume Next
+  Dim ignored As Long: ignored = ProbeCall(value)
+  On Error GoTo 0
+  If ignored = 0 Then
+    CheckedProjectProbe = 0
+  Else
+    CheckedProjectProbe = ignored
+  End If
+End Function
+
+Public Function CheckedProjectProbeWithVarPtr(ByVal value As Long) As Long
+  On Error Resume Next
+  Dim ignored As Long: ignored = ProbeCall(VarPtr(value))
+  On Error GoTo 0
+  If ignored = 0 Then
+    CheckedProjectProbeWithVarPtr = 0
+  Else
+    CheckedProjectProbeWithVarPtr = ignored
+  End If
+End Function
+
+Public Function SeparateBounds(ByRef values() As Variant) As Long
+  Dim lowerBound As Long
+  Dim itemCount As Long
+  On Error Resume Next
+  lowerBound = LBound(values)
+  itemCount = UBound(values) - lowerBound + 1
+  If Err.Number <> 0 Or itemCount < 0 Then
+    itemCount = 0
+    lowerBound = 0
+  End If
+  Err.Clear
+  On Error GoTo 0
+  SeparateBounds = itemCount
+End Function
+
+Public Function LowerBoundOnly(ByRef values() As Variant) As Long
+  Dim lowerBound As Long
+  On Error Resume Next
+  lowerBound = LBound(values)
+  If Err.Number <> 0 Then
+    lowerBound = 0
+  End If
+  Err.Clear
+  On Error GoTo 0
+  LowerBoundOnly = lowerBound
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("checked project and separate bounds probes should not report VBA214: %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+		t.Fatalf("checked project and separate bounds probes should not report VBA237: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsStringAndWrongPolarityProbeChecks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ProbeCall(ByVal value As Long) As Long
+  ProbeCall = value
+End Function
+
+Private Function InnerProbeCall(ByVal value As Long) As Long
+  InnerProbeCall = value
+End Function
+
+Private Function OuterProbeCall(ByVal value As Long) As Long
+  OuterProbeCall = value
+End Function
+
+Public Sub StringNamedResult(ByVal value As Long)
+  Dim ignored As Long
+  On Error Resume Next
+  ignored = ProbeCall(value)
+  On Error GoTo 0
+  If "ignored" = "x" Then
+    Debug.Print "not a result check"
+End If
+End Sub
+
+Public Sub NestedProjectProbe(ByVal value As Long)
+  Dim ignored As Long
+  On Error Resume Next
+  ignored = OuterProbeCall(InnerProbeCall(value))
+  On Error GoTo 0
+  If ignored = 0 Then
+    Debug.Print "nested"
+  End If
+End Sub
+
+Public Sub QualifiedMemberProbe(ByVal value As Long)
+  Dim status As Long
+  On Error Resume Next
+  status = ProbeCall(value)
+  On Error GoTo 0
+  If other.Status = 0 Then
+    Debug.Print "member"
+  End If
+End Sub
+
+Public Function WrongPolarity(ByRef values() As Variant) As Long
+  Dim lowerBound As Long
+  Dim itemCount As Long
+  On Error Resume Next
+  lowerBound = LBound(values)
+  itemCount = UBound(values) - lowerBound + 1
+  If Err.Number = 0 Then
+    itemCount = 0
+    lowerBound = 0
+  End If
+  Err.Clear
+  On Error GoTo 0
+  WrongPolarity = itemCount
+End Function
+
+Public Function ElsePolarity(ByRef values() As Variant) As Long
+  Dim lowerBound As Long
+  Dim itemCount As Long
+  On Error Resume Next
+  lowerBound = LBound(values)
+  itemCount = UBound(values) - lowerBound + 1
+  If Err.Number = 0 Then
+  Else
+    itemCount = 0
+    lowerBound = 0
+  End If
+  Err.Clear
+  On Error GoTo 0
+  ElsePolarity = itemCount
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 4 {
+		t.Fatalf("unsafe project/string, nested, qualified-member, and wrong-polarity probes = %+v, want four findings", got)
+	}
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if !procedures["StringNamedResult"] || !procedures["NestedProjectProbe"] || !procedures["QualifiedMemberProbe"] || !procedures["WrongPolarity"] || procedures["ElsePolarity"] {
+		t.Fatalf("probe polarity findings = %+v", procedures)
+	}
+}
+
 func TestAnalyzerVBA214AllowsConditionalCompilationNarrowProbe(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

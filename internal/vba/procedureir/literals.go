@@ -8,6 +8,48 @@ import (
 )
 
 var safeProbeResultInspectionRE = regexp.MustCompile(`(?i)^isarray\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$`)
+var safeProbeIdentifierRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var safeArrayBoundsLowerBoundRE = regexp.MustCompile(`(?i)^lbound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$`)
+var safeArrayBoundsLengthRE = regexp.MustCompile(`(?i)^ubound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*-\s*([A-Za-z_][A-Za-z0-9_]*)\s*\+\s*1$`)
+var errorNumberNonZeroConditionRE = regexp.MustCompile(`(?i)^\s*\(?\s*(?:err\s*\.\s*number\s*<>\s*0|0\s*<>\s*err\s*\.\s*number)\s*\)?(?:\s+or\s+[^()]+)?\s*$`)
+var errorNumberZeroConditionRE = regexp.MustCompile(`(?i)^\s*\(?\s*(?:err\s*\.\s*number\s*=\s*0|0\s*=\s*err\s*\.\s*number)\s*\)?\s*$`)
+var errorConditionAndRE = regexp.MustCompile(`(?:^|[^a-z0-9_])and(?:$|[^a-z0-9_])`)
+var errorConditionNotRE = regexp.MustCompile(`(?:^|[^a-z0-9_])not(?:$|[^a-z0-9_])`)
+var errorConditionUnsupportedLogicalRE = regexp.MustCompile(`(?:^|[^a-z0-9_])(?:xor|eqv|imp)(?:$|[^a-z0-9_])`)
+
+// SafeArrayBoundsProbeKind identifies the two assignments that can make up a
+// checked array-bounds compatibility probe.
+type SafeArrayBoundsProbeKind uint8
+
+const (
+	SafeArrayBoundsProbeNone SafeArrayBoundsProbeKind = iota
+	SafeArrayBoundsProbeLowerBound
+	SafeArrayBoundsProbeLength
+)
+
+// SafeArrayBoundsProbeAssignment recognizes only the scalar, two-step shape
+// used to probe an unallocated/dynamic array safely:
+//
+//	lowerBound = LBound(values)
+//	itemCount = UBound(values) - lowerBound + 1
+//
+// The caller supplies the assignment target and right-hand side separately so
+// recovered or compound assignment syntax cannot be accepted accidentally.
+// It returns normalized identifiers for matching the two steps.
+func SafeArrayBoundsProbeAssignment(target, value string) (array, lowerTarget string, kind SafeArrayBoundsProbeKind, ok bool) {
+	target = strings.TrimSpace(target)
+	if !safeProbeIdentifierRE.MatchString(target) {
+		return "", "", SafeArrayBoundsProbeNone, false
+	}
+	value = strings.TrimSpace(value)
+	if match := safeArrayBoundsLowerBoundRE.FindStringSubmatch(value); len(match) == 2 {
+		return strings.ToLower(match[1]), strings.ToLower(target), SafeArrayBoundsProbeLowerBound, true
+	}
+	if match := safeArrayBoundsLengthRE.FindStringSubmatch(value); len(match) == 3 {
+		return strings.ToLower(match[1]), strings.ToLower(match[2]), SafeArrayBoundsProbeLength, true
+	}
+	return "", "", SafeArrayBoundsProbeNone, false
+}
 
 // SafeProbeResultInspection reports the narrow intrinsic inspection currently
 // supported after a single Resume Next probe. IsArray only observes the probe
@@ -21,6 +63,51 @@ func SafeProbeResultInspection(value, probeTarget string) bool {
 	}
 	match := safeProbeResultInspectionRE.FindStringSubmatch(strings.TrimSpace(value))
 	return len(match) == 2 && strings.EqualFold(match[1], probeTarget)
+}
+
+// ErrorNumberThenBranchIsFailure reports the branch polarity for the narrow
+// Err.Number zero comparisons used by checked Resume Next recovery. Unknown,
+// negated, and And-combined polarity is rejected so callers do not mistake a
+// success branch for an error fallback. A direct nonzero comparison may be
+// combined with Or because that arm alone guarantees the error branch.
+func ErrorNumberThenBranchIsFailure(condition string) (thenFailure, known bool) {
+	condition = strings.ToLower(maskVBALiterals(condition))
+	condition = strings.Join(strings.Fields(condition), " ")
+	if errorConditionAndRE.MatchString(condition) || errorConditionNotRE.MatchString(condition) || errorConditionUnsupportedLogicalRE.MatchString(condition) {
+		return false, false
+	}
+	switch {
+	case errorNumberNonZeroConditionRE.MatchString(condition):
+		return true, true
+	case errorNumberZeroConditionRE.MatchString(condition):
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func maskVBALiterals(value string) string {
+	var masked strings.Builder
+	masked.Grow(len(value))
+	inString := false
+	for index := 0; index < len(value); index++ {
+		if value[index] == '"' {
+			masked.WriteByte(' ')
+			if inString && index+1 < len(value) && value[index+1] == '"' {
+				masked.WriteByte(' ')
+				index++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			masked.WriteByte(' ')
+		} else {
+			masked.WriteByte(value[index])
+		}
+	}
+	return masked.String()
 }
 
 // SafeLiteralAssignment reports whether value can be assigned to targetType

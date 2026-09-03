@@ -726,6 +726,10 @@ func isIdentifierByte(value byte) bool {
 func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedureir.Statement, index int, reachable map[int]bool) bool {
 	faults, checked, restored := 0, false, false
 	probeTarget := ""
+	probeBoundsArray := ""
+	probeBoundsLowerTarget := ""
+	probeBoundsResultTarget := ""
+	probeBoundsFallbackUsed := uint8(0)
 	errCheckParent := 0
 	probeFallbackUsed := false
 	probeInspectionUsed := false
@@ -788,6 +792,33 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 			checked = true
 			continue
 		}
+		if !restored && (statement.Kind == procedureir.StatementAssignment || statement.Kind == procedureir.StatementSet) {
+			array, lowerTarget, kind, ok := procedureir.SafeArrayBoundsProbeAssignment(
+				assignmentProbeTarget(statement), assignmentProbeValue(statement),
+			)
+			switch {
+			case ok && kind == procedureir.SafeArrayBoundsProbeLowerBound && faults == 0 && !checked &&
+				errCheckParent == 0 && probeTarget == "":
+				// The lower-bound read is the first half of the same checked
+				// compatibility probe as the following UBound calculation.
+				faults = 1
+				probeTarget = assignmentProbeTarget(statement)
+				probeBoundsArray = array
+				probeBoundsLowerTarget = lowerTarget
+				continue
+			case ok && kind == procedureir.SafeArrayBoundsProbeLength && faults == 1 && !checked &&
+				errCheckParent == 0 && probeBoundsArray != "" && probeBoundsResultTarget == "" &&
+				strings.EqualFold(array, probeBoundsArray) && strings.EqualFold(lowerTarget, probeBoundsLowerTarget):
+				// UBound(array) - lowerBound + 1 completes the same probe;
+				// do not count it as a second protected operation.
+				probeBoundsResultTarget = assignmentProbeTarget(statement)
+				if probeBoundsResultTarget == "" || strings.EqualFold(probeBoundsResultTarget, probeBoundsLowerTarget) {
+					break
+				}
+				probeTarget = probeBoundsResultTarget
+				continue
+			}
+		}
 		if !probeInspectionUsed && faults == 1 && procedureir.SafeProbeResultInspection(assignmentProbeValue(statement), probeTarget) {
 			// A pure intrinsic predicate can inspect the value produced by the
 			// probe without becoming a second error-suppressed operation.
@@ -796,6 +827,13 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 			continue
 		}
 		if errClearReferenceRE.MatchString(code) || statement.Kind == procedureir.StatementLabel || statement.Kind == procedureir.StatementDeclaration {
+			continue
+		}
+		if fallbackBit := checkedResumeNextBoundsProbeFallback(
+			proc, statement, errCheckParent, statementsByID, probeBoundsLowerTarget,
+			probeBoundsResultTarget, probeBoundsFallbackUsed, checked,
+		); fallbackBit != 0 {
+			probeBoundsFallbackUsed |= fallbackBit
 			continue
 		}
 		if !probeFallbackUsed && checked && errCheckParent != 0 && probeTarget != "" &&
@@ -838,6 +876,27 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 	return faults == 1 && checked && restored
 }
 
+const (
+	checkedResumeNextBoundsLowerFallback uint8 = 1 << iota
+	checkedResumeNextBoundsResultFallback
+)
+
+func checkedResumeNextBoundsProbeFallback(proc procedureir.ProcedureIR, statement procedureir.Statement, errCheckParent int, statements map[int]procedureir.Statement, lowerTarget, resultTarget string, used uint8, checked bool) uint8 {
+	if !checked || errCheckParent == 0 || lowerTarget == "" || resultTarget == "" ||
+		(statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) ||
+		!statementInErrorBranch(statement.ID, errCheckParent, statements) || !safeLiteralAssignment(proc, statement) {
+		return 0
+	}
+	switch target := assignmentProbeTarget(statement); {
+	case strings.EqualFold(target, lowerTarget) && used&checkedResumeNextBoundsLowerFallback == 0:
+		return checkedResumeNextBoundsLowerFallback
+	case strings.EqualFold(target, resultTarget) && used&checkedResumeNextBoundsResultFallback == 0:
+		return checkedResumeNextBoundsResultFallback
+	default:
+		return 0
+	}
+}
+
 func checkedResumeNextBooleanStatusBranch(proc procedureir.ProcedureIR, statement procedureir.Statement, ancestorID int, statements map[int]procedureir.Statement) (int, bool) {
 	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
 		return 0, false
@@ -856,17 +915,39 @@ func checkedResumeNextBooleanStatusBranch(proc procedureir.ProcedureIR, statemen
 }
 
 func statementInErrorBranch(statementID, ancestorID int, statements map[int]procedureir.Statement) bool {
+	ancestor, ok := statements[ancestorID]
+	if !ok {
+		return false
+	}
+	condition := ancestor.Text
+	if ancestor.Condition != nil {
+		condition = ancestor.Condition.Text
+	}
+	thenFailure, known := procedureir.ErrorNumberThenBranchIsFailure(condition)
+	if !known {
+		return false
+	}
+	inElseBranch := false
 	for currentID := statementID; currentID != ancestorID; {
 		current, ok := statements[currentID]
 		if !ok {
 			return false
 		}
-		if current.Kind == procedureir.StatementElse || current.Kind == procedureir.StatementElseIf {
+		if current.Kind == procedureir.StatementElseIf {
 			return false
+		}
+		if current.Kind == procedureir.StatementElse {
+			if current.ParentID != ancestorID {
+				return false
+			}
+			inElseBranch = true
 		}
 		currentID = current.ParentID
 	}
-	return ancestorID != 0
+	if inElseBranch {
+		return !thenFailure
+	}
+	return thenFailure
 }
 
 func resumeNextProbeStatementHasCall(proc procedureir.ProcedureIR, statement procedureir.Statement) bool {
@@ -913,7 +994,8 @@ func assignmentProbeTarget(statement procedureir.Statement) string {
 		return ""
 	}
 	text := strings.TrimSpace(statement.Text)
-	if strings.HasPrefix(strings.ToLower(text), "set ") {
+	lowerText := strings.ToLower(text)
+	if strings.HasPrefix(lowerText, "set ") || strings.HasPrefix(lowerText, "let ") {
 		text = strings.TrimSpace(text[4:])
 	}
 	index := strings.IndexByte(text, '=')

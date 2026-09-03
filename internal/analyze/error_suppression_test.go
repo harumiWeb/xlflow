@@ -267,6 +267,38 @@ End Function
 	}
 }
 
+func TestVBA237AcceptsLetCheckedSeparateArrayBoundsProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function LetArrayCount(ParamArray values() As Variant) As Long
+  Dim lowerBound As Long
+  Dim itemCount As Long
+  On Error Resume Next
+  Let lowerBound = LBound(values)
+  Let itemCount = UBound(values) - lowerBound + 1
+  If Err.Number <> 0 Then
+    Let itemCount = 0
+    Let lowerBound = 0
+  End If
+  Err.Clear
+  On Error GoTo 0
+  Let LetArrayCount = itemCount
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("Let checked bounds probe should not report VBA214: %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+		t.Fatalf("Let checked bounds probe should not report VBA237: %+v", got)
+	}
+}
+
 func TestVBA237AcceptsProbeResultInspectionAndBooleanStatus(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

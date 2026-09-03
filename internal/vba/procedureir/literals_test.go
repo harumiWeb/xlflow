@@ -24,6 +24,85 @@ func TestSafeProbeResultInspectionRecognizesOnlyIsArrayOfProbeTarget(t *testing.
 	}
 }
 
+func TestSafeArrayBoundsProbeAssignmentRecognizesOnlyTwoStepShape(t *testing.T) {
+	tests := []struct {
+		name            string
+		target          string
+		value           string
+		wantArray       string
+		wantLowerTarget string
+		wantKind        SafeArrayBoundsProbeKind
+		wantOK          bool
+	}{
+		{
+			name:            "lower bound",
+			target:          "lowerBound",
+			value:           "LBound(values)",
+			wantArray:       "values",
+			wantLowerTarget: "lowerbound",
+			wantKind:        SafeArrayBoundsProbeLowerBound,
+			wantOK:          true,
+		},
+		{
+			name:            "length from lower bound",
+			target:          "itemCount",
+			value:           "UBound(values) - lowerBound + 1",
+			wantArray:       "values",
+			wantLowerTarget: "lowerbound",
+			wantKind:        SafeArrayBoundsProbeLength,
+			wantOK:          true,
+		},
+		{
+			name:     "compound value",
+			target:   "itemCount",
+			value:    "UBound(values) - lowerBound + 1 + 0",
+			wantKind: SafeArrayBoundsProbeNone,
+			wantOK:   false,
+		},
+		{
+			name:     "different lower target syntax",
+			target:   "itemCount",
+			value:    "UBound(values) - LBound(values) + 1",
+			wantKind: SafeArrayBoundsProbeNone,
+			wantOK:   false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			array, lowerTarget, kind, ok := SafeArrayBoundsProbeAssignment(test.target, test.value)
+			if array != test.wantArray || lowerTarget != test.wantLowerTarget || kind != test.wantKind || ok != test.wantOK {
+				t.Fatalf("SafeArrayBoundsProbeAssignment(%q, %q) = (%q, %q, %v, %v), want (%q, %q, %v, %v)", test.target, test.value, array, lowerTarget, kind, ok, test.wantArray, test.wantLowerTarget, test.wantKind, test.wantOK)
+			}
+		})
+	}
+}
+
+func TestErrorNumberThenBranchIsFailureRecognizesPolarityAndMasksStrings(t *testing.T) {
+	tests := []struct {
+		name        string
+		condition   string
+		thenFailure bool
+		known       bool
+	}{
+		{name: "nonzero then", condition: "Err.Number <> 0", thenFailure: true, known: true},
+		{name: "zero then", condition: "Err.Number = 0", thenFailure: false, known: true},
+		{name: "reversed nonzero then", condition: "0 <> Err.Number", thenFailure: true, known: true},
+		{name: "composite nonzero then", condition: "Err.Number <> 0 Or itemCount < 0", thenFailure: true, known: true},
+		{name: "and compound", condition: "Err.Number <> 0 And itemCount < 0", thenFailure: false, known: false},
+		{name: "not comparison", condition: "Not (Err.Number <> 0)", thenFailure: false, known: false},
+		{name: "outer comparison", condition: "(Err.Number <> 0) = False", thenFailure: false, known: false},
+		{name: "string literal", condition: `value = "Err.Number <> 0"`, thenFailure: false, known: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			thenFailure, known := ErrorNumberThenBranchIsFailure(test.condition)
+			if thenFailure != test.thenFailure || known != test.known {
+				t.Fatalf("ErrorNumberThenBranchIsFailure(%q) = (%v, %v), want (%v, %v)", test.condition, thenFailure, known, test.thenFailure, test.known)
+			}
+		})
+	}
+}
+
 func TestSafeLiteralAssignmentRequiresCompatibleCompleteLiterals(t *testing.T) {
 	tests := []struct {
 		name       string
