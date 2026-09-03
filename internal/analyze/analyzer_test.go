@@ -15704,6 +15704,28 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA229AcceptsOutlookCOMTypes(t *testing.T) {
+	useCompleteTestTypeDB(t)
+	dir := t.TempDir()
+	writeModule(t, dir, "ReproOutlook.bas", `Attribute VB_Name = "ReproOutlook"
+Option Explicit
+Public Sub ReproVBA229()
+    Dim outlookObj As Outlook.Application
+    Dim mailItemObj As Outlook.MailItem
+    Set outlookObj = CreateObject("Outlook.Application")
+    Set mailItemObj = outlookObj.CreateItem(0)
+    mailItemObj.Subject = "xlflow VBA229 reproduction"
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := findingsByCode(result.Findings, "VBA229"); len(findings) != 0 {
+		t.Fatalf("valid Outlook early-bound types should resolve: %+v", findings)
+	}
+}
+
 func TestAnalyzerVBA229FailsClosedWithoutTypeDBManifest(t *testing.T) {
 	typeDBDir := t.TempDir()
 	t.Setenv(typedb.EnvDir, typeDBDir)

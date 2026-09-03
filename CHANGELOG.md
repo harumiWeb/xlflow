@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed false-positive `VBA229` findings for early-bound Outlook COM types such
+  as `Outlook.Application` and `Outlook.MailItem`. The embedded COM database
+  now includes a practical Outlook surface, and `type db --library outlook`
+  (or `all`) can import the installed Outlook TypeLib for broader coverage.
+
 - Fixed false-positive VBA diagnostics for `Application.Min`/`Application.Max`
   and decimal literals in multiline `WorksheetFunction` calls.
 
