@@ -17,6 +17,7 @@ var (
 	errNumberReferenceRE = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*number\b`)
 	errValueReferenceRE  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*(?:number|description|source)\b`)
 	errClearReferenceRE  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*clear\b`)
+	errStatusConditionRE = regexp.MustCompile(`(?i)^\s*err\s*$`)
 )
 
 const (
@@ -55,7 +56,7 @@ func errorContractsFingerprint(loggerTargets map[string]loggerContract, rethrowT
 	return hex.EncodeToString(hash[:])
 }
 
-func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR, graph cfg.Graph, reachable map[int]bool, candidateKeys map[string]string, loggerTargets map[string]loggerContract, rethrowTargets, terminalTargets map[string]bool) {
+func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, graph cfg.Graph, reachable map[int]bool, candidateKeys map[string]string, loggerTargets map[string]loggerContract, rethrowTargets, terminalTargets map[string]bool) {
 	statements := append([]procedureir.Statement(nil), proc.Statements...)
 	sort.SliceStable(statements, func(i, j int) bool {
 		if statements[i].Range.StartByte != statements[j].Range.StartByte {
@@ -85,7 +86,7 @@ func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR
 		switch statement.Control.Transfer {
 		case procedureir.TransferOnErrorResumeNext:
 			addErrorEvidence(summary, statement.Range, statement.ID, 0, ErrorUsesResumeNext, errorTargetResumeNext, "")
-			if checkedResumeNextProbe(proc, statements, i, reachable) || explicitResumeNextFallback(proc, graph, statements, i, reachable) {
+			if checkedResumeNextProbe(proc, moduleDeclarations, graph, statements, i, reachable) || explicitResumeNextFallback(proc, graph, statements, i, reachable) {
 				checkedResumeNext = true
 			} else {
 				addErrorEvidence(summary, statement.Range, statement.ID, 0, ErrorSuppresses, errorTargetResumeNext, "unchecked or broad scope")
@@ -723,9 +724,10 @@ func isIdentifierByte(value byte) bool {
 	return value == '_' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
 }
 
-func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedureir.Statement, index int, reachable map[int]bool) bool {
+func checkedResumeNextProbe(proc procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, graph cfg.Graph, statements []procedureir.Statement, index int, reachable map[int]bool) bool {
 	faults, checked, restored := 0, false, false
 	probeTarget := ""
+	probeStatementID := 0
 	probeBoundsArray := ""
 	probeBoundsLowerTarget := ""
 	probeBoundsResultTarget := ""
@@ -769,16 +771,23 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 			conditionText = statement.Condition.Text
 		}
 		conditionCode := stripVBStringLiterals(strings.ToLower(conditionText))
+		errStatusCondition := errStatusConditionRE.MatchString(strings.TrimSpace(conditionCode))
 		probeObserved := errorProbeConditionKind(statement.Kind) &&
-			(errValueReferenceRE.MatchString(code) || probeTarget != "" && identifierInExpression(conditionCode, probeTarget))
+			(errValueReferenceRE.MatchString(code) || errStatusCondition || probeTarget != "" && identifierInExpression(conditionCode, probeTarget))
 		assertsErr := strings.HasPrefix(strings.TrimSpace(code), "debug.assert") && errValueReferenceRE.MatchString(code)
 		if probeObserved || assertsErr {
+			if probeStatementID == 0 || !normalFlowTo(graph, probeStatementID, statement.ID, statementsByID) {
+				continue
+			}
 			checked = true
 			hasCall := probeObserved && resumeNextProbeStatementHasCall(proc, statement)
 			if !restored && hasCall {
 				faults++
+				if faults == 1 {
+					probeStatementID = statement.ID
+				}
 			}
-			if !restored && probeObserved && !hasCall && errNumberReferenceRE.MatchString(code) {
+			if !restored && probeObserved && !hasCall && (errNumberReferenceRE.MatchString(code) || errStatusCondition) {
 				errCheckParent = statement.ID
 			}
 			if restored {
@@ -802,6 +811,7 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 				// The lower-bound read is the first half of the same checked
 				// compatibility probe as the following UBound calculation.
 				faults = 1
+				probeStatementID = statement.ID
 				probeTarget = assignmentProbeTarget(statement)
 				probeBoundsArray = array
 				probeBoundsLowerTarget = lowerTarget
@@ -816,6 +826,7 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 					break
 				}
 				probeTarget = probeBoundsResultTarget
+				probeStatementID = statement.ID
 				continue
 			}
 		}
@@ -838,7 +849,7 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 		}
 		if !probeFallbackUsed && checked && errCheckParent != 0 && probeTarget != "" &&
 			strings.EqualFold(assignmentProbeTarget(statement), probeTarget) &&
-			statementInErrorBranch(statement.ID, errCheckParent, statementsByID) && safeLiteralAssignment(proc, statement) {
+			statementInErrorBranch(statement.ID, errCheckParent, statementsByID) && safeProbeFallbackAssignment(proc, moduleDeclarations, statement) {
 			// A checked probe may assign a safe fallback to the same result
 			// once inside the error branch. It is recovery for the probe, not a
 			// second unchecked operation.
@@ -858,10 +869,12 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 			if probeTarget != "" && identifierInExpression(assignmentProbeValue(statement), probeTarget) {
 				if derived := assignmentProbeTarget(statement); derived != "" {
 					probeTarget = derived
+					probeStatementID = statement.ID
 					continue
 				}
 			}
 			if safeLiteralAssignment(proc, statement) {
+				probeStatementID = statement.ID
 				continue
 			}
 			break
@@ -870,10 +883,94 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 			faults++
 			if faults == 1 {
 				probeTarget = assignmentProbeTarget(statement)
+				probeStatementID = statement.ID
 			}
 		}
 	}
 	return faults == 1 && checked && restored
+}
+
+func safeProbeFallbackAssignment(proc procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, statement procedureir.Statement) bool {
+	if safeLiteralAssignment(proc, statement) {
+		return true
+	}
+	if !strings.EqualFold(assignmentTargetType(proc, statement), "Boolean") {
+		return false
+	}
+	return procedureir.SafeBooleanComparison(assignmentProbeValue(statement), func(operand string) bool {
+		return safeBooleanComparisonOperand(proc, moduleDeclarations, operand)
+	})
+}
+
+func safeBooleanComparisonOperand(proc procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, operand string) bool {
+	for _, declaration := range proc.Declarations {
+		if strings.EqualFold(declaration.Name, strings.TrimSpace(operand)) {
+			return procedureir.SafeBooleanComparisonOperandType(
+				declaration.Type,
+				declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+				declaration.IsObject,
+			)
+		}
+	}
+	if strings.EqualFold(proc.Symbol.Name, strings.TrimSpace(operand)) {
+		return procedureir.SafeBooleanComparisonOperandType(proc.Symbol.ReturnType, proc.Symbol.IsArray, false)
+	}
+	for _, declaration := range moduleDeclarations {
+		if strings.EqualFold(declaration.Name, strings.TrimSpace(operand)) {
+			return procedureir.SafeBooleanComparisonOperandType(
+				declaration.Type,
+				declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+				declaration.IsObject,
+			)
+		}
+	}
+	return false
+}
+
+func normalFlowTo(graph cfg.Graph, fromStatementID, targetStatementID int, statements map[int]procedureir.Statement) bool {
+	from, ok := graph.BlockForStatement(fromStatementID)
+	if !ok {
+		return false
+	}
+	target, ok := graph.BlockForStatement(targetStatementID)
+	if !ok {
+		return false
+	}
+	queue := []cfg.BlockID{from.ID}
+	visited := map[cfg.BlockID]bool{from.ID: true}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range graph.OutgoingEdges(current) {
+			if edge.Class != cfg.EdgeNormal {
+				continue
+			}
+			if edge.To == target.ID {
+				return true
+			}
+			block, ok := graph.BlockByID(edge.To)
+			if !ok || block.Kind != cfg.BlockStatement || block.StatementID == targetStatementID {
+				continue
+			}
+			statement, ok := statements[block.StatementID]
+			if !ok || !normalFlowIgnorable(statement) {
+				continue
+			}
+			if !visited[block.ID] {
+				visited[block.ID] = true
+				queue = append(queue, block.ID)
+			}
+		}
+	}
+	return false
+}
+
+func normalFlowIgnorable(statement procedureir.Statement) bool {
+	if statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel {
+		return true
+	}
+	return statement.Kind == procedureir.StatementOnError && statement.Control != nil &&
+		(statement.Control.Transfer == procedureir.TransferOnErrorDisable || statement.Control.Transfer == procedureir.TransferOnErrorGoto)
 }
 
 const (

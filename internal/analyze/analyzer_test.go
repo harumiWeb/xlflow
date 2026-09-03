@@ -4171,6 +4171,189 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA214AllowsCheckedBooleanAndIDEProbes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function LikeProbe(ByVal value As String, ByVal pattern As String) As Boolean
+  On Error Resume Next
+  LikeProbe = (value Like pattern)
+  If Err.Number <> 0 Then
+    Err.Clear
+    LikeProbe = (value = pattern)
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function CBoolProbe(ByVal envelope As Object) As Boolean
+  If envelope Is Nothing Then Exit Function
+  If Not envelope.Exists("defer") Then Exit Function
+  On Error Resume Next
+  CBoolProbe = CBool(envelope("defer"))
+  If Err.Number <> 0 Then
+    Err.Clear
+    CBoolProbe = False
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function IDEProbe(ByVal value As Long) As LongPtr
+  Dim lEbMode As LongPtr
+  On Error Resume Next
+  Debug.Print 1 / 0
+  If Err Then
+    Err.Clear: On Error GoTo 0
+    Dim hVBE As LongPtr
+    hVBE = GetModuleHandle("vbe7.dll")
+    If hVBE <> 0 Then
+      lEbMode = GetProcAddress(hVBE, "EbMode")
+    End If
+  End If
+  On Error GoTo 0
+  IDEProbe = lEbMode + value
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("checked boolean and IDE probes should not report VBA214: %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+		t.Fatalf("checked IDE probe should not report VBA237: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsUnresolvedBooleanHelperProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function UnresolvedBooleanProbe(ByVal envelope As Object) As Boolean
+  On Error Resume Next
+  UnresolvedBooleanProbe = CBool(ReadValue("defer"))
+  If Err.Number <> 0 Then
+    UnresolvedBooleanProbe = False
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) == 0 {
+		t.Fatalf("unresolved helper was accepted as an Object default-member probe: %+v", findings)
+	}
+}
+
+func TestAnalyzerVBA214RejectsMultipleBooleanProbesInOneScope(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MultipleBooleanProbes(ByVal envelope As Object) As Boolean
+  On Error Resume Next
+  MultipleBooleanProbes = CBool(envelope("first"))
+  If Err.Number <> 0 Then
+    MultipleBooleanProbes = False
+  End If
+  MultipleBooleanProbes = CBool(envelope("second"))
+  If Err.Number <> 0 Then
+    MultipleBooleanProbes = False
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) == 0 {
+		t.Fatalf("multiple Boolean probes were accepted in one Resume Next scope: %+v", findings)
+	}
+}
+
+func TestAnalyzerVBA214AllowsBareErrLoopProbeChecks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub DoWhileErrProbe()
+  On Error Resume Next
+  Workbooks.Open "optional.xlsx"
+  Do While Err
+  Loop
+  On Error GoTo 0
+End Sub
+
+Public Sub WhileErrProbe()
+  On Error Resume Next
+  Workbooks.Open "optional.xlsx"
+  While Err
+  Wend
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("bare Err loop checks should not report VBA214: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsSiblingElseIfAsBooleanProbeCheck(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function SiblingElseIfProbe(ByVal envelope As Object, ByVal enabled As Boolean) As Boolean
+  On Error Resume Next
+  If enabled Then
+    SiblingElseIfProbe = CBool(envelope("defer"))
+  ElseIf Err Then
+    SiblingElseIfProbe = False
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) == 0 {
+		t.Fatalf("sibling ElseIf is not a check for the probe: %+v", findings)
+	}
+}
+
+func TestAnalyzerVBA214RejectsNullableBooleanFallbackOperands(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function NullableBooleanProbe(ByVal envelope As Object, ByVal left As Variant, ByVal right As Variant) As Boolean
+  On Error Resume Next
+  NullableBooleanProbe = CBool(envelope("defer"))
+  If Err.Number <> 0 Then
+    NullableBooleanProbe = (left = right)
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) == 0 {
+		t.Fatalf("nullable comparison fallback was accepted: %+v", findings)
+	}
+}
+
 func TestAnalyzerVBA214AllowsCheckedProjectAndSeparateArrayBoundsProbes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

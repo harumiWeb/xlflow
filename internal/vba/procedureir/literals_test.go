@@ -1,6 +1,9 @@
 package procedureir
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSafeProbeResultInspectionRecognizesOnlyIsArrayOfProbeTarget(t *testing.T) {
 	tests := []struct {
@@ -21,6 +24,82 @@ func TestSafeProbeResultInspectionRecognizesOnlyIsArrayOfProbeTarget(t *testing.
 				t.Fatalf("SafeProbeResultInspection(%q, %q) = %v, want %v", test.value, test.probeTarget, got, test.want)
 			}
 		})
+	}
+}
+
+func TestSafeBooleanComparisonRequiresProvenNonNullableOperands(t *testing.T) {
+	safeOperands := map[string]bool{"left": true, "right": true}
+	operandIsSafe := func(name string) bool { return safeOperands[name] }
+	tests := []struct {
+		name  string
+		value string
+		check func(string) bool
+		want  bool
+	}{
+		{name: "known operands", value: "left = right", check: operandIsSafe, want: true},
+		{name: "parenthesized known operands", value: "(left = right)", check: operandIsSafe, want: true},
+		{name: "unknown variant operand", value: "left = nullable", check: operandIsSafe, want: false},
+		{name: "Null literal", value: "left = Null", check: operandIsSafe, want: false},
+		{name: "member access", value: "obj.Value = right", check: operandIsSafe, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := SafeBooleanComparison(test.value, test.check); got != test.want {
+				t.Fatalf("SafeBooleanComparison(%q) = %v, want %v", test.value, got, test.want)
+			}
+		})
+	}
+}
+
+func TestSafeBooleanComparisonOperandTypeRejectsNullableAndUnknownValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		typeName string
+		array    bool
+		object   bool
+		want     bool
+	}{
+		{name: "String", typeName: "String", want: true},
+		{name: "Long", typeName: "Long", want: true},
+		{name: "LongPtr", typeName: "LongPtr", want: true},
+		{name: "Variant", typeName: "Variant", want: false},
+		{name: "Object", typeName: "Object", object: true, want: false},
+		{name: "array", typeName: "String", array: true, want: false},
+		{name: "user type", typeName: "CustomValue", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := SafeBooleanComparisonOperandType(test.typeName, test.array, test.object); got != test.want {
+				t.Fatalf("SafeBooleanComparisonOperandType(%q, %v, %v) = %v, want %v", test.typeName, test.array, test.object, got, test.want)
+			}
+		})
+	}
+}
+
+func TestSafeBooleanCoercionProbeRecognizesCheckedDictionaryConversions(t *testing.T) {
+	objectTargets := func(name string) bool { return strings.EqualFold(name, "envelope") }
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "string key", value: `CBool(envelope("defer"))`, want: true},
+		{name: "identifier key", value: "CBool(envelope(key))", want: false},
+		{name: "direct value is not keyed probe", value: "CBool(value)", want: false},
+		{name: "member chain", value: "CBool(envelope.Item(\"defer\"))", want: false},
+		{name: "helper call", value: "CBool(ReadValue(envelope))", want: false},
+		{name: "compound expression", value: `CBool(envelope("defer")) Or True`, want: false},
+		{name: "unresolved helper with string key", value: `CBool(ReadValue("defer"))`, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := SafeBooleanCoercionProbe(test.value, objectTargets); got != test.want {
+				t.Fatalf("SafeBooleanCoercionProbe(%q) = %v, want %v", test.value, got, test.want)
+			}
+		})
+	}
+	if SafeBooleanCoercionProbe(`CBool(envelope("defer"))`, nil) {
+		t.Fatal("SafeBooleanCoercionProbe accepted a probe without an Object declaration proof")
 	}
 }
 

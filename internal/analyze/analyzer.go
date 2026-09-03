@@ -4817,18 +4817,19 @@ const (
 )
 
 type resumeNextScopeState struct {
-	block                   vbacfg.BlockID
-	operations              uint8
-	flags                   resumeNextScopeFlag
-	conditionalBranches     []resumeNextScopeConditionalBranch
-	probeTarget             string
-	probeBoundsArray        string
-	probeBoundsLowerTarget  string
-	probeBoundsResultTarget string
-	probeBoundsFallbackUsed uint8
-	errCheckParent          int
-	probeFallbackUsed       bool
-	probeInspectionUsed     bool
+	block                    vbacfg.BlockID
+	operations               uint8
+	flags                    resumeNextScopeFlag
+	conditionalBranches      []resumeNextScopeConditionalBranch
+	probeTarget              string
+	probeBoundsArray         string
+	probeBoundsLowerTarget   string
+	probeBoundsResultTarget  string
+	probeBoundsFallbackUsed  uint8
+	errCheckParent           int
+	probeFallbackUsed        bool
+	probeInspectionUsed      bool
+	probeBooleanCoercionUsed bool
 }
 
 type resumeNextScopeConditionalBranch struct {
@@ -4965,18 +4966,19 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID, moduleD
 				continue
 			}
 			queue = append(queue, resumeNextScopeState{
-				block:                   edge.To,
-				operations:              state.operations,
-				flags:                   state.flags,
-				conditionalBranches:     append([]resumeNextScopeConditionalBranch(nil), state.conditionalBranches...),
-				probeTarget:             state.probeTarget,
-				probeBoundsArray:        state.probeBoundsArray,
-				probeBoundsLowerTarget:  state.probeBoundsLowerTarget,
-				probeBoundsResultTarget: state.probeBoundsResultTarget,
-				probeBoundsFallbackUsed: state.probeBoundsFallbackUsed,
-				errCheckParent:          state.errCheckParent,
-				probeFallbackUsed:       state.probeFallbackUsed,
-				probeInspectionUsed:     state.probeInspectionUsed,
+				block:                    edge.To,
+				operations:               state.operations,
+				flags:                    state.flags,
+				conditionalBranches:      append([]resumeNextScopeConditionalBranch(nil), state.conditionalBranches...),
+				probeTarget:              state.probeTarget,
+				probeBoundsArray:         state.probeBoundsArray,
+				probeBoundsLowerTarget:   state.probeBoundsLowerTarget,
+				probeBoundsResultTarget:  state.probeBoundsResultTarget,
+				probeBoundsFallbackUsed:  state.probeBoundsFallbackUsed,
+				errCheckParent:           state.errCheckParent,
+				probeFallbackUsed:        state.probeFallbackUsed,
+				probeInspectionUsed:      state.probeInspectionUsed,
+				probeBooleanCoercionUsed: state.probeBooleanCoercionUsed,
 			})
 		}
 	}
@@ -4992,11 +4994,15 @@ func resumeNextScopeStateKey(state resumeNextScopeState) string {
 	if state.probeInspectionUsed {
 		inspectionUsed = "1"
 	}
+	booleanCoercionUsed := "0"
+	if state.probeBooleanCoercionUsed {
+		booleanCoercionUsed = "1"
+	}
 	parts := []string{
 		strconvItoa(int(state.block)), strconvItoa(int(state.operations)), strconvItoa(int(state.flags)),
 		state.probeTarget, state.probeBoundsArray, state.probeBoundsLowerTarget,
 		state.probeBoundsResultTarget, strconvItoa(int(state.probeBoundsFallbackUsed)),
-		strconvItoa(state.errCheckParent), fallbackUsed, inspectionUsed,
+		strconvItoa(state.errCheckParent), fallbackUsed, inspectionUsed, booleanCoercionUsed,
 	}
 	for _, branch := range state.conditionalBranches {
 		parts = append(parts,
@@ -5033,12 +5039,16 @@ func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeSt
 	call, projectCall := resumeNextScopeCallRisk(proc.Calls, statement.ID)
 	conditionCall := resumeNextScopeConditionHasCall(proc.Calls, statement)
 	checkedProjectProbe := projectCall && resumeNextScopeCheckedProjectProbe(proc, state, statement, statementsByID, moduleDecls)
+	checkedBooleanCoercionProbe := call && !projectCall && resumeNextScopeCheckedBooleanCoercionProbe(proc, state, statement, statementsByID, moduleDecls)
+	if checkedBooleanCoercionProbe {
+		state.probeBooleanCoercionUsed = true
+	}
 	if resumeNextScopeArrayBoundsContinuation(&state, statement) {
 		return state
 	}
 	probeInspection := !state.probeInspectionUsed && !projectCall &&
 		resumeNextScopeProbeResultInspection(state, statement)
-	if !probeInspection && !checkedProjectProbe && (!errProbe || conditionCall) {
+	if !probeInspection && !checkedProjectProbe && !checkedBooleanCoercionProbe && (!errProbe || conditionCall) {
 		if call || conditionCall {
 			state.flags |= resumeNextScopeCall
 		}
@@ -5096,9 +5106,26 @@ func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeSt
 
 func resumeNextScopeErrCheckStatement(statement procedureir.Statement) bool {
 	switch statement.Kind {
-	case procedureir.StatementIf, procedureir.StatementElseIf, procedureir.StatementSelect, procedureir.StatementCase:
+	case procedureir.StatementIf, procedureir.StatementElseIf, procedureir.StatementSelect, procedureir.StatementCase,
+		procedureir.StatementDo, procedureir.StatementWhile:
 		code := maskStringLiterals(gui.StripComment(statement.Text))
-		return errNumberReferenceRe.MatchString(code)
+		if errNumberReferenceRe.MatchString(code) {
+			return true
+		}
+		condition := statement.Text
+		if statement.Condition != nil {
+			condition = statement.Condition.Text
+		} else if statement.Kind == procedureir.StatementDo || statement.Kind == procedureir.StatementWhile {
+			condition = strings.TrimSpace(excelLoopHeaderText(condition))
+			lower := strings.ToLower(condition)
+			for _, prefix := range []string{"do while", "do until", "while"} {
+				if strings.HasPrefix(lower, prefix) {
+					condition = strings.TrimSpace(condition[len(prefix):])
+					break
+				}
+			}
+		}
+		return strings.EqualFold(strings.TrimSpace(condition), "Err")
 	default:
 		return false
 	}
@@ -5113,10 +5140,22 @@ func resumeNextScopeProbeFallback(proc sourceProcedure, state resumeNextScopeSta
 	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
 		return false
 	}
-	if strings.EqualFold(resumeNextScopeAssignmentTarget(statement), state.probeTarget) && resumeNextScopeSafeLiteralAssignment(proc, statement, moduleDecls) {
+	if strings.EqualFold(resumeNextScopeAssignmentTarget(statement), state.probeTarget) && resumeNextScopeSafeProbeFallback(proc, statement, moduleDecls) {
 		return true
 	}
 	return resumeNextScopeBooleanStatusBranch(proc, state, statement, statementsByID, moduleDecls)
+}
+
+func resumeNextScopeSafeProbeFallback(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if resumeNextScopeSafeLiteralAssignment(proc, statement, moduleDecls) {
+		return true
+	}
+	if !strings.EqualFold(resumeNextScopeTargetType(proc, statement, moduleDecls), "Boolean") {
+		return false
+	}
+	return procedureir.SafeBooleanComparison(resumeNextScopeAssignmentValue(statement), func(operand string) bool {
+		return resumeNextScopeSafeBooleanComparisonOperand(proc, operand, moduleDecls)
+	})
 }
 
 const (
@@ -5224,6 +5263,120 @@ func resumeNextScopeCheckedProjectProbe(proc sourceProcedure, state resumeNextSc
 		return false
 	}
 	return true
+}
+
+func resumeNextScopeCheckedBooleanCoercionProbe(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if state.probeBooleanCoercionUsed || resumeNextScopeCurrentOperations(state) != 0 || statement.Recovered ||
+		(statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) ||
+		statement.Target == nil || statement.Value == nil || statement.Value.Recovered ||
+		statement.Value.Kind != procedureir.ExpressionCall ||
+		!procedureir.SafeBooleanCoercionProbe(resumeNextScopeAssignmentValue(statement), func(name string) bool {
+			return resumeNextScopeBooleanCoercionTargetIsObject(proc, name, moduleDecls)
+		}) ||
+		!strings.EqualFold(resumeNextScopeTargetType(proc, statement, moduleDecls), "Boolean") {
+		return false
+	}
+	call, projectCall := resumeNextScopeCallRisk(proc.Calls, statement.ID)
+	if !call || projectCall {
+		return false
+	}
+	if !resumeNextScopeCheckedBooleanCoercionCallShape(proc.Calls, statement.ID, func(name string) bool {
+		return resumeNextScopeBooleanCoercionTargetIsObject(proc, name, moduleDecls)
+	}) {
+		return false
+	}
+	ordered := make([]procedureir.Statement, 0, len(statementsByID))
+	for _, candidate := range statementsByID {
+		ordered = append(ordered, candidate)
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Range.StartByte != ordered[j].Range.StartByte {
+			return ordered[i].Range.StartByte < ordered[j].Range.StartByte
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	index := -1
+	for i, candidate := range ordered {
+		if candidate.ID == statement.ID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return false
+	}
+	for i := index + 1; i < len(ordered); i++ {
+		candidate := ordered[i]
+		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+			continue
+		}
+		return resumeNextScopeNormalFlowTo(proc.Graph, statement.ID, candidate.ID, statementsByID) &&
+			resumeNextScopeErrCheckStatement(candidate) && !resumeNextScopeConditionHasCall(proc.Calls, candidate)
+	}
+	return false
+}
+
+func resumeNextScopeCheckedBooleanCoercionCallShape(calls readOnlySpan[procedureir.CallSite], statementID int, targetIsObject func(string) bool) bool {
+	if targetIsObject == nil {
+		return false
+	}
+	outerCalls := 0
+	objectReads := 0
+	for candidate := range calls.All() {
+		if candidate.StatementID != statementID {
+			continue
+		}
+		switch {
+		case candidate.Callee.Receiver == nil && strings.EqualFold(candidate.Callee.BaseName, "CBool") && candidate.Arguments.Count == 1 && candidate.Resolution.Status == procedureir.ResolutionBuiltinLike:
+			outerCalls++
+		case candidate.Callee.Receiver == nil && candidate.Arguments.Count == 1 && candidate.Resolution.Status == procedureir.ResolutionUnresolved && targetIsObject(candidate.Callee.BaseName):
+			objectReads++
+		default:
+			return false
+		}
+	}
+	return outerCalls == 1 && objectReads == 1
+}
+
+func resumeNextScopeNormalFlowTo(graph *vbacfg.Graph, fromStatementID, targetStatementID int, statements map[int]procedureir.Statement) bool {
+	if graph == nil {
+		return false
+	}
+	from, ok := graph.BlockForStatement(fromStatementID)
+	if !ok {
+		return false
+	}
+	target, ok := graph.BlockForStatement(targetStatementID)
+	if !ok {
+		return false
+	}
+	queue := []vbacfg.BlockID{from.ID}
+	visited := map[vbacfg.BlockID]bool{from.ID: true}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range graph.OutgoingEdges(current) {
+			if edge.Class != vbacfg.EdgeNormal {
+				continue
+			}
+			if edge.To == target.ID {
+				return true
+			}
+			block, ok := graph.BlockByID(edge.To)
+			if !ok || block.Kind != vbacfg.BlockStatement || block.StatementID == targetStatementID {
+				continue
+			}
+			statement, ok := statements[block.StatementID]
+			if !ok || statement.Kind != procedureir.StatementDeclaration && statement.Kind != procedureir.StatementLabel {
+				continue
+			}
+			if !visited[block.ID] {
+				visited[block.ID] = true
+				queue = append(queue, block.ID)
+			}
+		}
+	}
+	return false
 }
 
 func resumeNextScopeHasSingleResolvedCall(calls readOnlySpan[procedureir.CallSite], statementID int) bool {
@@ -5345,6 +5498,9 @@ func resumeNextScopeProbeResultInspection(state resumeNextScopeState, statement 
 }
 
 func resumeNextScopeAssignmentValue(statement procedureir.Statement) string {
+	if _, value, ok := resumeNextScopeAssignmentText(statement); ok {
+		return value
+	}
 	if statement.Value != nil {
 		return strings.TrimSpace(statement.Value.Text)
 	}
@@ -5388,13 +5544,12 @@ func resumeNextScopeInErrorBranch(statementID, ancestorID int, statements map[in
 }
 
 func resumeNextScopeAssignmentTarget(statement procedureir.Statement) string {
-	if statement.Target == nil {
-		return ""
+	target, _, ok := resumeNextScopeAssignmentText(statement)
+	if !ok && statement.Target != nil {
+		target = strings.TrimSpace(statement.Target.Text)
 	}
-	target := strings.TrimSpace(statement.Target.Text)
-	lowerTarget := strings.ToLower(target)
-	if strings.HasPrefix(lowerTarget, "set ") || strings.HasPrefix(lowerTarget, "let ") {
-		target = strings.TrimSpace(target[4:])
+	if target == "" {
+		return ""
 	}
 	if !errorSuccessIdentifierRE.MatchString(target) {
 		return ""
@@ -5402,11 +5557,74 @@ func resumeNextScopeAssignmentTarget(statement procedureir.Statement) string {
 	return strings.ToLower(target)
 }
 
+func resumeNextScopeAssignmentText(statement procedureir.Statement) (target, value string, ok bool) {
+	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
+		return "", "", false
+	}
+	text := strings.TrimSpace(statement.Text)
+	lowerText := strings.ToLower(text)
+	if strings.HasPrefix(lowerText, "set ") || strings.HasPrefix(lowerText, "let ") {
+		text = strings.TrimSpace(text[4:])
+	}
+	index := strings.IndexByte(text, '=')
+	if index <= 0 || index+1 > len(text) {
+		return "", "", false
+	}
+	return strings.TrimSpace(text[:index]), strings.TrimSpace(text[index+1:]), true
+}
+
 func resumeNextScopeSafeLiteralAssignment(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
 	if statement.Value == nil || statement.Value.Recovered {
 		return false
 	}
 	return procedureir.SafeLiteralAssignment(statement.Value.Text, resumeNextScopeTargetType(proc, statement, moduleDecls))
+}
+
+func resumeNextScopeSafeBooleanComparisonOperand(proc sourceProcedure, operand string, moduleDecls map[string]sourceDeclaration) bool {
+	operand = strings.TrimSpace(operand)
+	if operand == "" {
+		return false
+	}
+	if strings.EqualFold(operand, proc.Name) {
+		return procedureir.SafeBooleanComparisonOperandType(
+			proc.ReturnType,
+			proc.ReturnValueShape == procedureir.ValueShapeFixedArray || proc.ReturnValueShape == procedureir.ValueShapeDynamicArray || proc.IR != nil && proc.IR.Symbol.IsArray,
+			isObjectType(proc.ReturnType),
+		)
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(declaration.Name, operand) {
+			return procedureir.SafeBooleanComparisonOperandType(
+				declaration.Type,
+				declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+				declaration.IsObject,
+			)
+		}
+	}
+	for name, declaration := range moduleDecls {
+		if strings.EqualFold(name, operand) || strings.EqualFold(declaration.Name, operand) {
+			return procedureir.SafeBooleanComparisonOperandType(declaration.Type, declaration.Array, declaration.Object)
+		}
+	}
+	return false
+}
+
+func resumeNextScopeBooleanCoercionTargetIsObject(proc sourceProcedure, target string, moduleDecls map[string]sourceDeclaration) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(declaration.Name, target) {
+			return declaration.IsObject || isObjectType(declaration.Type)
+		}
+	}
+	for name, declaration := range moduleDecls {
+		if strings.EqualFold(name, target) || strings.EqualFold(declaration.Name, target) {
+			return declaration.Object || isObjectType(declaration.Type)
+		}
+	}
+	return false
 }
 
 func resumeNextScopeTargetType(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) string {
@@ -5562,7 +5780,7 @@ func resumeNextScopeSaturatedAdd(left, right uint8) uint8 {
 
 func resumeNextScopeErrProbeStatement(statement procedureir.Statement) bool {
 	code := maskStringLiterals(gui.StripComment(statement.Text))
-	return errProbeReferenceRe.MatchString(code)
+	return errProbeReferenceRe.MatchString(code) || resumeNextScopeErrCheckStatement(statement)
 }
 
 func resumeNextScopeControlStatement(statement procedureir.Statement) bool {

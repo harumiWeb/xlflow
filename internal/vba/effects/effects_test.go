@@ -672,6 +672,34 @@ Public Function ImplicitFallback(ParamArray values() As Variant)
     On Error GoTo 0
 End Function
 
+Public Function SiblingElseIfProbe(ByVal envelope As Object, ByVal enabled As Boolean) As Boolean
+    On Error Resume Next
+    If enabled Then
+        SiblingElseIfProbe = CBool(envelope("defer"))
+    ElseIf Err Then
+        SiblingElseIfProbe = False
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function NullableBooleanComparison(ByVal envelope As Object, ByVal left As Variant, ByVal right As Variant) As Boolean
+    On Error Resume Next
+    NullableBooleanComparison = CBool(envelope("defer"))
+    If Err.Number <> 0 Then
+        NullableBooleanComparison = (left = right)
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function ModuleBooleanComparison(ByVal envelope As Object, ByVal left As Long) As Boolean
+    On Error Resume Next
+    ModuleBooleanComparison = CBool(envelope("defer"))
+    If Err.Number <> 0 Then
+        ModuleBooleanComparison = (ModuleLong = left)
+    End If
+    On Error GoTo 0
+End Function
+
 Public Sub CapturedErrProbe()
     Dim failed As Boolean
     Dim detail As String
@@ -768,6 +796,18 @@ End Function
 	implicitFallback := find(t, summary, "Probe.ImplicitFallback")
 	if implicitFallback.Error.SuppressesErrors {
 		t.Fatalf("implicit Variant fallback rejected as checked probe: %#v", implicitFallback.Error)
+	}
+	siblingElseIf := find(t, summary, "Probe.SiblingElseIfProbe")
+	if !siblingElseIf.Error.SuppressesErrors {
+		t.Fatalf("sibling ElseIf accepted as checked probe: %#v", siblingElseIf.Error)
+	}
+	nullableComparison := find(t, summary, "Probe.NullableBooleanComparison")
+	if !nullableComparison.Error.SuppressesErrors {
+		t.Fatalf("nullable comparison accepted as checked probe: %#v", nullableComparison.Error)
+	}
+	moduleComparison := find(t, summary, "Probe.ModuleBooleanComparison")
+	if moduleComparison.Error.SuppressesErrors {
+		t.Fatalf("module-scope comparison was not recognized as checked probe: %#v", moduleComparison.Error)
 	}
 	moduleNullFallback := find(t, summary, "Probe.ModuleNullFallback")
 	if !moduleNullFallback.Error.SuppressesErrors {

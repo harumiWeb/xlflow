@@ -9,8 +9,11 @@ import (
 
 var safeProbeResultInspectionRE = regexp.MustCompile(`(?i)^isarray\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$`)
 var safeProbeIdentifierRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var safeBooleanComparisonRE = regexp.MustCompile(`(?i)^\s*\(?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)?\s*$`)
+var safeBooleanCoercionProbeRE = regexp.MustCompile(`(?i)^cbool\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*"(?:[^"]|"")*"\s*\)\s*\)$`)
 var safeArrayBoundsLowerBoundRE = regexp.MustCompile(`(?i)^lbound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$`)
 var safeArrayBoundsLengthRE = regexp.MustCompile(`(?i)^ubound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*-\s*([A-Za-z_][A-Za-z0-9_]*)\s*\+\s*1$`)
+var errorStatusConditionRE = regexp.MustCompile(`(?i)^\s*err\s*$`)
 var errorNumberNonZeroConditionRE = regexp.MustCompile(`(?i)^\s*\(?\s*(?:err\s*\.\s*number\s*<>\s*0|0\s*<>\s*err\s*\.\s*number)\s*\)?(?:\s+or\s+[^()]+)?\s*$`)
 var errorNumberZeroConditionRE = regexp.MustCompile(`(?i)^\s*\(?\s*(?:err\s*\.\s*number\s*=\s*0|0\s*=\s*err\s*\.\s*number)\s*\)?\s*$`)
 var errorConditionAndRE = regexp.MustCompile(`(?:^|[^a-z0-9_])and(?:$|[^a-z0-9_])`)
@@ -65,6 +68,50 @@ func SafeProbeResultInspection(value, probeTarget string) bool {
 	return len(match) == 2 && strings.EqualFold(match[1], probeTarget)
 }
 
+// SafeBooleanComparison reports the narrow deterministic fallback expression
+// used by a checked Boolean compatibility probe. Calls, member access, and
+// compound expressions are intentionally excluded because they can introduce
+// another failure while Resume Next is still active. The caller must also
+// prove that both operands are non-nullable through operandIsSafe; an
+// identifier-only shape is not enough because Variant operands may contain
+// Null.
+func SafeBooleanComparison(value string, operandIsSafe func(string) bool) bool {
+	if operandIsSafe == nil {
+		return false
+	}
+	match := safeBooleanComparisonRE.FindStringSubmatch(strings.TrimSpace(value))
+	return len(match) == 3 && operandIsSafe(match[1]) && operandIsSafe(match[2])
+}
+
+// SafeBooleanComparisonOperandType reports whether a declared scalar type can
+// participate in a Boolean comparison without the VBA Null result hazard.
+// Variant, Object, arrays, and unknown/user-defined types remain rejected so
+// callers cannot suppress a failure without an explicit type proof.
+func SafeBooleanComparisonOperandType(typeName string, array, object bool) bool {
+	if array || object {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(typeName)) {
+	case "byte", "integer", "long", "longlong", "longptr", "single", "double", "currency", "date", "string", "boolean":
+		return true
+	default:
+		return false
+	}
+}
+
+// SafeBooleanCoercionProbe reports the narrow CBool conversion of a string-keyed
+// object value used by a checked compatibility probe. The outer conversion and
+// the single keyed read are the only calls admitted here; arbitrary helper
+// calls and member chains remain risky under Resume Next. The callback supplies
+// the declaration proof that the inner call is an Object default-member read.
+func SafeBooleanCoercionProbe(value string, targetIsObject func(string) bool) bool {
+	if targetIsObject == nil {
+		return false
+	}
+	match := safeBooleanCoercionProbeRE.FindStringSubmatch(strings.TrimSpace(value))
+	return len(match) == 2 && targetIsObject(match[1])
+}
+
 // ErrorNumberThenBranchIsFailure reports the branch polarity for the narrow
 // Err.Number zero comparisons used by checked Resume Next recovery. Unknown,
 // negated, and And-combined polarity is rejected so callers do not mistake a
@@ -73,6 +120,9 @@ func SafeProbeResultInspection(value, probeTarget string) bool {
 func ErrorNumberThenBranchIsFailure(condition string) (thenFailure, known bool) {
 	condition = strings.ToLower(maskVBALiterals(condition))
 	condition = strings.Join(strings.Fields(condition), " ")
+	if errorStatusConditionRE.MatchString(condition) {
+		return true, true
+	}
 	if errorConditionAndRE.MatchString(condition) || errorConditionNotRE.MatchString(condition) || errorConditionUnsupportedLogicalRE.MatchString(condition) {
 		return false, false
 	}
