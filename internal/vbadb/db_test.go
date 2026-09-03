@@ -37,6 +37,9 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if member, ok := db.ResolveMember("Outlook.MailItem", "Subject"); !ok || member.ReturnType != "String" {
 		t.Fatalf("Outlook.MailItem.Subject = %+v, %v; want String return type", member, ok)
 	}
+	if member, ok := db.ResolveMember("Outlook.NameSpace", "GetItemFromID"); !ok || len(member.Parameters) != 2 || member.Parameters[0].Name != "EntryIDItem" || member.Parameters[1].Name != "EntryIDStore" || !member.Parameters[1].Optional {
+		t.Fatalf("Outlook.NameSpace.GetItemFromID = %+v, %v; want optional EntryIDStore", member, ok)
+	}
 	if _, ok := db.ResolveType("Workbook"); !ok {
 		t.Fatal("Workbook alias did not resolve")
 	}

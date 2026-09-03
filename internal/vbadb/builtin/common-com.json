@@ -478,7 +478,10 @@
         {
           "name": "GetItemFromID",
           "return_type": "Object",
-          "parameters": [{ "name": "EntryIDItem", "type": "String" }]
+          "parameters": [
+            { "name": "EntryIDItem", "type": "String" },
+            { "name": "EntryIDStore", "type": "String", "optional": true }
+          ]
         }
       ],
       "confidence": "curated",
