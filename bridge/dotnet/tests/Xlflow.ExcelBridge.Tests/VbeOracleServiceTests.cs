@@ -111,6 +111,16 @@ public sealed class VbeOracleServiceTests
         Assert.Equal(("{00062FFF-0000-0000-C000-000000000046}", 9, 6), project.References.Added.Single());
     }
 
+    [Theory]
+    [InlineData("provision_references")]
+    [InlineData("provision_components")]
+    public void ReferenceAndComponentProvisioningFailuresUseImportErrorCode(string stage)
+    {
+        var error = VbeOracleService.ClassifyInfrastructureCode(stage, new InvalidOperationException("provisioning failed"));
+
+        Assert.Equal("oracle_import_failed", error);
+    }
+
     [Fact]
     public void OracleSanitizerRemovesExportHeadersBeforeInjection()
     {

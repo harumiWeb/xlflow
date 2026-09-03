@@ -844,7 +844,7 @@ public sealed class VbeOracleService : IVbeOracleService
         {
             return "oracle_excel_startup_failed";
         }
-        if (stage == "provision_components")
+        if (stage is "provision_references" or "provision_components")
         {
             return "oracle_import_failed";
         }
