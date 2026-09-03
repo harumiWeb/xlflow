@@ -4015,6 +4015,54 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA214AllowsConditionalCompilationNarrowProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub ConditionalProbe(ByVal ThisButton As Object)
+  On Error Resume Next
+#If Mac Then
+  ThisButton.ControlTipText = "mac"
+#Else
+  ThisButton.ControlTipText = "windows"
+#End If
+  On Error GoTo 0
+End Sub
+
+Public Sub ConditionalBroad(ByVal ThisButton As Object)
+  On Error Resume Next
+#If Mac Then
+  ThisButton.ControlTipText = "mac"
+  ThisButton.ControlTipText = "mac again"
+#Else
+  ThisButton.ControlTipText = "windows"
+  ThisButton.ControlTipText = "windows again"
+#End If
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	for _, finding := range got {
+		if finding.Procedure == "ConditionalProbe" {
+			t.Fatalf("mutually-exclusive conditional probe should not report VBA214: %+v", got)
+		}
+	}
+	var broad int
+	for _, finding := range got {
+		if finding.Procedure == "ConditionalBroad" {
+			broad++
+		}
+	}
+	if broad != 1 {
+		t.Fatalf("conditional branch with multiple operations should report once: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA214ReportsScopeBoundsAndEarlyExits(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -852,4 +852,4 @@
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"analyze","code":"VBA249","severity":"error","line":674,"column":0}
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"analyze","code":"VBA241","severity":"information","line":676,"column":0}
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"analyze","code":"VBA241","severity":"information","line":681,"column":0}
-{"project":"third_party/iguana-tex","file":"Utils.bas","surface":"analyze","code":"VBA214","severity":"warning","line":954,"column":0}
+{"project":"third_party/iguana-tex","file":"Utils.bas","surface":"analyze","code":"VBA237","severity":"warning","line":954,"column":0}

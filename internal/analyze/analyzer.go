@@ -4816,9 +4816,18 @@ const (
 )
 
 type resumeNextScopeState struct {
-	block      vbacfg.BlockID
-	operations uint8
-	flags      resumeNextScopeFlag
+	block               vbacfg.BlockID
+	operations          uint8
+	flags               resumeNextScopeFlag
+	conditionalBranches []resumeNextScopeConditionalBranch
+}
+
+type resumeNextScopeConditionalBranch struct {
+	group               string
+	branch              int
+	baseOperations      uint8
+	branchOperations    uint8
+	maxBranchOperations uint8
 }
 
 type resumeNextScopeOutcome struct {
@@ -4830,7 +4839,9 @@ type resumeNextScopeOutcome struct {
 // leakedOnErrorResumeNextFindings follows each reachable Resume Next scope until
 // it is explicitly replaced or leaves the procedure. The small state domain is
 // deliberately saturated at two operations: the rule only needs to distinguish
-// a single compatibility probe from a wider protected region.
+// a single compatibility probe from a wider protected region. Conditional
+// compilation alternatives are tracked independently because ProcedureIR's CFG
+// is source-sequential while only one branch can exist in a compiled module.
 func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourceProcedure) []Finding {
 	if proc.Graph == nil {
 		return nil
@@ -4906,7 +4917,7 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resum
 	for len(queue) > 0 {
 		state := queue[0]
 		queue = queue[1:]
-		key := strings.Join([]string{strconvItoa(int(state.block)), strconvItoa(int(state.operations)), strconvItoa(int(state.flags))}, ":")
+		key := resumeNextScopeStateKey(state)
 		if seen[key] {
 			continue
 		}
@@ -4939,10 +4950,29 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resum
 				})
 				continue
 			}
-			queue = append(queue, resumeNextScopeState{block: edge.To, operations: state.operations, flags: state.flags})
+			queue = append(queue, resumeNextScopeState{
+				block:               edge.To,
+				operations:          state.operations,
+				flags:               state.flags,
+				conditionalBranches: append([]resumeNextScopeConditionalBranch(nil), state.conditionalBranches...),
+			})
 		}
 	}
 	return outcomes
+}
+
+func resumeNextScopeStateKey(state resumeNextScopeState) string {
+	parts := []string{strconvItoa(int(state.block)), strconvItoa(int(state.operations)), strconvItoa(int(state.flags))}
+	for _, branch := range state.conditionalBranches {
+		parts = append(parts,
+			branch.group,
+			strconvItoa(branch.branch),
+			strconvItoa(int(branch.baseOperations)),
+			strconvItoa(int(branch.branchOperations)),
+			strconvItoa(int(branch.maxBranchOperations)),
+		)
+	}
+	return strings.Join(parts, ":")
 }
 
 func isOnErrorResumeNext(statement procedureir.Statement) bool {
@@ -4959,6 +4989,8 @@ func restoresErrorHandling(statement procedureir.Statement) bool {
 }
 
 func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement) resumeNextScopeState {
+	state.conditionalBranches = append([]resumeNextScopeConditionalBranch(nil), state.conditionalBranches...)
+	state = resumeNextScopeSyncConditionalBranches(state, statement.ConditionalBranches)
 	if isOnErrorResumeNext(statement) || resumeNextScopeErrProbeStatement(statement) ||
 		statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel {
 		return state
@@ -4974,13 +5006,113 @@ func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeSt
 		state.flags |= resumeNextScopeControlFlow
 		return state
 	}
-	if state.operations < 2 {
-		state.operations++
+	resumeNextScopeRecordOperation(&state)
+	return state
+}
+
+func resumeNextScopeSyncConditionalBranches(state resumeNextScopeState, branches []procedureir.ConditionalBranch) resumeNextScopeState {
+	common := 0
+	for common < len(state.conditionalBranches) && common < len(branches) {
+		current := state.conditionalBranches[common]
+		target := branches[common]
+		if current.group != target.Group || current.branch != target.Branch {
+			break
+		}
+		common++
 	}
-	if state.operations >= 2 {
-		state.flags |= resumeNextScopeMultipleOperations
+
+	// If the active branch changes, finish nested alternatives belonging to the
+	// old branch before switching. Their maximum operation count belongs to the
+	// old branch and must not be carried into its mutually-exclusive sibling.
+	for len(state.conditionalBranches) > common {
+		if common < len(branches) && len(state.conditionalBranches) == common+1 &&
+			state.conditionalBranches[common].group == branches[common].Group {
+			break
+		}
+		resumeNextScopeCommitConditionalBranch(&state)
+	}
+
+	if common < len(branches) && common < len(state.conditionalBranches) &&
+		state.conditionalBranches[common].group == branches[common].Group {
+		branch := &state.conditionalBranches[common]
+		resumeNextScopeRememberConditionalOperation(branch)
+		branch.branch = branches[common].Branch
+		branch.branchOperations = 0
+	}
+
+	for len(state.conditionalBranches) < len(branches) {
+		branch := branches[len(state.conditionalBranches)]
+		state.conditionalBranches = append(state.conditionalBranches, resumeNextScopeConditionalBranch{
+			group:          branch.Group,
+			branch:         branch.Branch,
+			baseOperations: resumeNextScopeCurrentOperations(state),
+		})
 	}
 	return state
+}
+
+func resumeNextScopeCurrentOperations(state resumeNextScopeState) uint8 {
+	if len(state.conditionalBranches) == 0 {
+		return state.operations
+	}
+	branch := state.conditionalBranches[len(state.conditionalBranches)-1]
+	return resumeNextScopeSaturatedAdd(branch.baseOperations, branch.branchOperations)
+}
+
+func resumeNextScopeRecordOperation(state *resumeNextScopeState) {
+	if len(state.conditionalBranches) == 0 {
+		if state.operations < 2 {
+			state.operations++
+		}
+		if state.operations >= 2 {
+			state.flags |= resumeNextScopeMultipleOperations
+		}
+		return
+	}
+	branch := &state.conditionalBranches[len(state.conditionalBranches)-1]
+	if branch.branchOperations < 2 {
+		branch.branchOperations++
+	}
+	if resumeNextScopeCurrentOperations(*state) >= 2 {
+		state.flags |= resumeNextScopeMultipleOperations
+	}
+}
+
+func resumeNextScopeRememberConditionalOperation(branch *resumeNextScopeConditionalBranch) {
+	if branch.branchOperations > branch.maxBranchOperations {
+		branch.maxBranchOperations = branch.branchOperations
+	}
+}
+
+func resumeNextScopeCommitConditionalBranch(state *resumeNextScopeState) {
+	if len(state.conditionalBranches) == 0 {
+		return
+	}
+	index := len(state.conditionalBranches) - 1
+	branch := &state.conditionalBranches[index]
+	resumeNextScopeRememberConditionalOperation(branch)
+	completed := resumeNextScopeSaturatedAdd(branch.baseOperations, branch.maxBranchOperations)
+	state.conditionalBranches = state.conditionalBranches[:index]
+	if len(state.conditionalBranches) == 0 {
+		state.operations = completed
+		return
+	}
+	parent := &state.conditionalBranches[len(state.conditionalBranches)-1]
+	if completed <= parent.baseOperations {
+		parent.branchOperations = 0
+		return
+	}
+	parent.branchOperations = completed - parent.baseOperations
+	if parent.branchOperations > 2 {
+		parent.branchOperations = 2
+	}
+}
+
+func resumeNextScopeSaturatedAdd(left, right uint8) uint8 {
+	if left >= 2 || right >= 2 || left+right >= 2 {
+		return 2
+	}
+	return left + right
 }
 
 func resumeNextScopeErrProbeStatement(statement procedureir.Statement) bool {
