@@ -51,20 +51,20 @@ End Sub
 	}
 
 	shadowDoc := Document{
-		Path:       filepath.Join(t.TempDir(), "ShadowedMailItem.bas"),
+		Path:       filepath.Join(t.TempDir(), "ShadowedWorkbook.bas"),
 		ModuleKind: "standard",
 		Source: `Option Explicit
 Public Sub Probe()
-    Dim mailItem As String
-    Debug.Print mailItem
+    Dim workbook As String
+    Debug.Print workbook
 End Sub
 `,
 	}
-	offset := strings.Index(shadowDoc.Source, "Debug.Print mailItem") + len("Debug.Print ")
-	if got, ok := analyzer.resolveDocumentExpressionTypeAt(shadowDoc, "mailItem", offset); !ok || got != "String" {
-		t.Fatalf("local MailItem shadowing = %q, %v; want String, true", got, ok)
+	offset := strings.Index(shadowDoc.Source, "Debug.Print workbook") + len("Debug.Print ")
+	if got, ok := analyzer.resolveDocumentExpressionTypeAt(shadowDoc, "workbook", offset); !ok || got != "String" {
+		t.Fatalf("local Workbook shadowing = %q, %v; want String, true", got, ok)
 	}
-	if got, ok := analyzer.typeDiagnosticBaseType(shadowDoc, "mailItem", offset); !ok || got != "String" {
-		t.Fatalf("local MailItem diagnostic shadowing = %q, %v; want String, true", got, ok)
+	if got, ok := analyzer.typeDiagnosticBaseType(shadowDoc, "workbook", offset); !ok || got != "String" {
+		t.Fatalf("local Workbook diagnostic shadowing = %q, %v; want String, true", got, ok)
 	}
 }

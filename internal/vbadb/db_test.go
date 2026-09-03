@@ -22,6 +22,9 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 			t.Fatalf("ResolveType(%s) = %+v, %v; want embedded Outlook type", name, typ, ok)
 		}
 	}
+	if typ, ok := db.ResolveProgID("Outlook.Application"); !ok || typ.Name != "Outlook.Application" {
+		t.Fatalf("ResolveProgID(Outlook.Application) = %+v, %v", typ, ok)
+	}
 	if typ, ok := db.ResolveType("Application"); !ok || typ.Name != "Excel.Application" {
 		t.Fatalf("ResolveType(Application) = %+v, %v; want Excel.Application alias", typ, ok)
 	}
