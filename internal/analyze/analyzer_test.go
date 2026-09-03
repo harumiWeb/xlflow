@@ -4136,6 +4136,41 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA214AllowsProbeResultInspection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function IsJagged(ByRef value As Variant) As Boolean
+  Dim testVal As Variant
+  On Error Resume Next
+  testVal = value(LBound(value))
+  IsJagged = IsArray(testVal)
+  On Error GoTo 0
+End Function
+
+Public Function KeyExists(ByVal cache As Object, ByVal key As String) As Boolean
+  Dim itemVal As Variant
+  On Error Resume Next
+  itemVal = cache(key)
+  If Err.Number <> 0 Then
+    KeyExists = False
+    Err.Clear
+  Else
+    KeyExists = True
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("probe result inspection should not report VBA214: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA214AllowsConditionalCompilationNarrowProbe(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -3,8 +3,25 @@ package procedureir
 import (
 	"math"
 	"math/big"
+	"regexp"
 	"strings"
 )
+
+var safeProbeResultInspectionRE = regexp.MustCompile(`(?i)^isarray\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$`)
+
+// SafeProbeResultInspection reports the narrow intrinsic inspection currently
+// supported after a single Resume Next probe. IsArray only observes the probe
+// value and does not itself introduce another potentially failing operation.
+// Keep this allowlist narrow: callers use it to avoid treating an inspection
+// as a second protected operation.
+func SafeProbeResultInspection(value, probeTarget string) bool {
+	probeTarget = strings.TrimSpace(probeTarget)
+	if probeTarget == "" {
+		return false
+	}
+	match := safeProbeResultInspectionRE.FindStringSubmatch(strings.TrimSpace(value))
+	return len(match) == 2 && strings.EqualFold(match[1], probeTarget)
+}
 
 // SafeLiteralAssignment reports whether value can be assigned to targetType
 // without relying on a potentially failing VBA coercion. It is intentionally

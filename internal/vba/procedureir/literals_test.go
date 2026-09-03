@@ -2,6 +2,28 @@ package procedureir
 
 import "testing"
 
+func TestSafeProbeResultInspectionRecognizesOnlyIsArrayOfProbeTarget(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		probeTarget string
+		want        bool
+	}{
+		{name: "matching target", value: "IsArray(testVal)", probeTarget: "testVal", want: true},
+		{name: "case insensitive", value: "isarray( testVal )", probeTarget: "TESTVAL", want: true},
+		{name: "different target", value: "IsArray(other)", probeTarget: "testVal", want: false},
+		{name: "different intrinsic", value: "IsObject(testVal)", probeTarget: "testVal", want: false},
+		{name: "compound expression", value: "IsArray(testVal) And True", probeTarget: "testVal", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := SafeProbeResultInspection(test.value, test.probeTarget); got != test.want {
+				t.Fatalf("SafeProbeResultInspection(%q, %q) = %v, want %v", test.value, test.probeTarget, got, test.want)
+			}
+		})
+	}
+}
+
 func TestSafeLiteralAssignmentRequiresCompatibleCompleteLiterals(t *testing.T) {
 	tests := []struct {
 		name       string

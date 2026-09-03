@@ -4824,6 +4824,7 @@ type resumeNextScopeState struct {
 	probeTarget         string
 	errCheckParent      int
 	probeFallbackUsed   bool
+	probeInspectionUsed bool
 }
 
 type resumeNextScopeConditionalBranch struct {
@@ -4967,6 +4968,7 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID, moduleD
 				probeTarget:         state.probeTarget,
 				errCheckParent:      state.errCheckParent,
 				probeFallbackUsed:   state.probeFallbackUsed,
+				probeInspectionUsed: state.probeInspectionUsed,
 			})
 		}
 	}
@@ -4978,9 +4980,13 @@ func resumeNextScopeStateKey(state resumeNextScopeState) string {
 	if state.probeFallbackUsed {
 		fallbackUsed = "1"
 	}
+	inspectionUsed := "0"
+	if state.probeInspectionUsed {
+		inspectionUsed = "1"
+	}
 	parts := []string{
 		strconvItoa(int(state.block)), strconvItoa(int(state.operations)), strconvItoa(int(state.flags)),
-		state.probeTarget, strconvItoa(state.errCheckParent), fallbackUsed,
+		state.probeTarget, strconvItoa(state.errCheckParent), fallbackUsed, inspectionUsed,
 	}
 	for _, branch := range state.conditionalBranches {
 		parts = append(parts,
@@ -5013,15 +5019,20 @@ func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeSt
 	if isOnErrorResumeNext(statement) {
 		return state
 	}
+	errProbe := resumeNextScopeErrProbeStatement(statement)
 	call, projectCall := resumeNextScopeCallRisk(proc.Calls, statement.ID)
 	conditionCall := resumeNextScopeConditionHasCall(proc.Calls, statement)
-	if call || conditionCall {
-		state.flags |= resumeNextScopeCall
+	probeInspection := !state.probeInspectionUsed && !projectCall &&
+		resumeNextScopeProbeResultInspection(state, statement)
+	if !probeInspection && (!errProbe || conditionCall) {
+		if call || conditionCall {
+			state.flags |= resumeNextScopeCall
+		}
+		if projectCall {
+			state.flags |= resumeNextScopeProjectCall
+		}
 	}
-	if projectCall {
-		state.flags |= resumeNextScopeProjectCall
-	}
-	if resumeNextScopeErrProbeStatement(statement) {
+	if errProbe {
 		if !conditionCall && resumeNextScopeErrCheckStatement(statement) {
 			state.errCheckParent = statement.ID
 		}
@@ -5029,6 +5040,17 @@ func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeSt
 	}
 	if resumeNextScopeProbeFallback(proc, state, statement, statementsByID, moduleDecls) {
 		state.probeFallbackUsed = true
+		if !projectCall {
+			state.flags &^= resumeNextScopeCall
+		}
+		return state
+	}
+	if probeInspection {
+		state.probeInspectionUsed = true
+		state.flags &^= resumeNextScopeCall
+		return state
+	}
+	if resumeNextScopeErrCheckBranchMarker(state, statement, statementsByID) {
 		return state
 	}
 	if statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel ||
@@ -5059,13 +5081,62 @@ func resumeNextScopeErrCheckStatement(statement procedureir.Statement) bool {
 
 func resumeNextScopeProbeFallback(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
 	if state.probeFallbackUsed || state.errCheckParent == 0 || state.probeTarget == "" || resumeNextScopeCurrentOperations(state) != 1 ||
-		!resumeNextScopeInErrorBranch(statement.ID, state.errCheckParent, statementsByID) {
+		!resumeNextScopeInErrorBranch(statement.ID, state.errCheckParent, statementsByID) &&
+			!resumeNextScopeBooleanStatusBranch(proc, state, statement, statementsByID, moduleDecls) {
 		return false
 	}
 	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
 		return false
 	}
-	return strings.EqualFold(resumeNextScopeAssignmentTarget(statement), state.probeTarget) && resumeNextScopeSafeLiteralAssignment(proc, statement, moduleDecls)
+	if strings.EqualFold(resumeNextScopeAssignmentTarget(statement), state.probeTarget) && resumeNextScopeSafeLiteralAssignment(proc, statement, moduleDecls) {
+		return true
+	}
+	return resumeNextScopeBooleanStatusBranch(proc, state, statement, statementsByID, moduleDecls)
+}
+
+func resumeNextScopeBooleanStatusBranch(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
+		return false
+	}
+	if !resumeNextScopeDirectCheckedBranch(statement.ID, state.errCheckParent, statementsByID) {
+		return false
+	}
+	if !strings.EqualFold(resumeNextScopeTargetType(proc, statement, moduleDecls), "Boolean") {
+		return false
+	}
+	return resumeNextScopeSafeLiteralAssignment(proc, statement, moduleDecls)
+}
+
+func resumeNextScopeDirectCheckedBranch(statementID, ancestorID int, statements map[int]procedureir.Statement) bool {
+	statement, ok := statements[statementID]
+	if !ok || ancestorID == 0 {
+		return false
+	}
+	if statement.ParentID == ancestorID {
+		return true
+	}
+	parent, ok := statements[statement.ParentID]
+	return ok && parent.Kind == procedureir.StatementElse && parent.ParentID == ancestorID
+}
+
+func resumeNextScopeErrCheckBranchMarker(state resumeNextScopeState, statement procedureir.Statement, statements map[int]procedureir.Statement) bool {
+	return state.errCheckParent != 0 && statement.Kind == procedureir.StatementElse && statement.ParentID == state.errCheckParent &&
+		statements[state.errCheckParent].Kind == procedureir.StatementIf
+}
+
+func resumeNextScopeProbeResultInspection(state resumeNextScopeState, statement procedureir.Statement) bool {
+	if resumeNextScopeCurrentOperations(state) != 1 || state.probeTarget == "" ||
+		(statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) {
+		return false
+	}
+	return procedureir.SafeProbeResultInspection(resumeNextScopeAssignmentValue(statement), state.probeTarget)
+}
+
+func resumeNextScopeAssignmentValue(statement procedureir.Statement) string {
+	if statement.Value != nil {
+		return strings.TrimSpace(statement.Value.Text)
+	}
+	return ""
 }
 
 func resumeNextScopeInErrorBranch(statementID, ancestorID int, statements map[int]procedureir.Statement) bool {

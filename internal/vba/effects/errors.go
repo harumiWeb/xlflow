@@ -728,6 +728,8 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 	probeTarget := ""
 	errCheckParent := 0
 	probeFallbackUsed := false
+	probeInspectionUsed := false
+	probeStatusBranches := map[int]bool{}
 	skipParent := 0
 	parents := make(map[int]int, len(statements))
 	statementsByID := make(map[int]procedureir.Statement, len(statements))
@@ -786,6 +788,13 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 			checked = true
 			continue
 		}
+		if !probeInspectionUsed && faults == 1 && procedureir.SafeProbeResultInspection(assignmentProbeValue(statement), probeTarget) {
+			// A pure intrinsic predicate can inspect the value produced by the
+			// probe without becoming a second error-suppressed operation.
+			checked = true
+			probeInspectionUsed = true
+			continue
+		}
 		if errClearReferenceRE.MatchString(code) || statement.Kind == procedureir.StatementLabel || statement.Kind == procedureir.StatementDeclaration {
 			continue
 		}
@@ -797,6 +806,15 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 			// second unchecked operation.
 			probeFallbackUsed = true
 			continue
+		}
+		if faults == 1 && checked && errCheckParent != 0 {
+			if branchID, ok := checkedResumeNextBooleanStatusBranch(proc, statement, errCheckParent, statementsByID); ok && !probeStatusBranches[branchID] {
+				// A Boolean status assignment in one side of the Err check is
+				// recovery for the probe. Track each mutually-exclusive branch
+				// separately so both True and False arms remain admissible.
+				probeStatusBranches[branchID] = true
+				continue
+			}
 		}
 		if restored {
 			if probeTarget != "" && identifierInExpression(assignmentProbeValue(statement), probeTarget) {
@@ -818,6 +836,23 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedure
 		}
 	}
 	return faults == 1 && checked && restored
+}
+
+func checkedResumeNextBooleanStatusBranch(proc procedureir.ProcedureIR, statement procedureir.Statement, ancestorID int, statements map[int]procedureir.Statement) (int, bool) {
+	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
+		return 0, false
+	}
+	if !strings.EqualFold(assignmentTargetType(proc, statement), "Boolean") || !safeLiteralAssignment(proc, statement) {
+		return 0, false
+	}
+	if statement.ParentID == ancestorID {
+		return ancestorID, true
+	}
+	parent, ok := statements[statement.ParentID]
+	if ok && parent.Kind == procedureir.StatementElse && parent.ParentID == ancestorID {
+		return parent.ID, true
+	}
+	return 0, false
 }
 
 func statementInErrorBranch(statementID, ancestorID int, statements map[int]procedureir.Statement) bool {
