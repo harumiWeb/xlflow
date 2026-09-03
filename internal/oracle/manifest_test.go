@@ -127,6 +127,50 @@ func TestValidateCaseRequiresDocumentTarget(t *testing.T) {
 	}
 }
 
+func TestValidateCaseReferences(t *testing.T) {
+	tests := []struct {
+		name       string
+		references []Reference
+		wantErr    bool
+	}{
+		{
+			name: "valid",
+			references: []Reference{{
+				Name: "Outlook", LibID: "{00062FFF-0000-0000-C000-000000000046}", Major: 9, Minor: 6,
+			}},
+		},
+		{
+			name:       "invalid libid",
+			references: []Reference{{Name: "broken", LibID: "not-a-guid", Major: 1, Minor: 0}},
+			wantErr:    true,
+		},
+		{
+			name:       "negative version",
+			references: []Reference{{Name: "broken", LibID: "00062fff-0000-0000-c000-000000000046", Major: -1, Minor: 0}},
+			wantErr:    true,
+		},
+		{
+			name: "duplicate",
+			references: []Reference{
+				{Name: "Outlook", LibID: "{00062FFF-0000-0000-C000-000000000046}", Major: 9, Minor: 6},
+				{Name: "OutlookAgain", LibID: "00062fff-0000-0000-c000-000000000046", Major: 9, Minor: 6},
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := validAssertedCase(ExpectedAccepted)
+			c.VBE.DiagnosticMeaning = MeaningSpecification
+			c.References = tt.references
+			err := ValidateCase(c, c.ID, t.TempDir())
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateCase() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func analysisNote(value string) *string {
 	return &value
 }

@@ -147,6 +147,9 @@ public sealed class VbeOracleService : IVbeOracleService
             }
 
             excelMetadata = ReadExcelMetadata(excel, excelProcessId);
+            stage = "provision_references";
+            ProvisionReferences(workbook, plan.References ?? [], cancellationToken);
+
             stage = "provision_components";
             ProvisionComponents(workbook, plan.Modules ?? [], cancellationToken);
 
@@ -396,6 +399,71 @@ public sealed class VbeOracleService : IVbeOracleService
             {
                 throw new VbeOracleValidationException($"module '{module.Name}' source Attribute VB_Name does not match");
             }
+        }
+
+        plan.References ??= [];
+        var referenceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var reference in plan.References)
+        {
+            if (reference is null)
+            {
+                throw new VbeOracleValidationException("oracle plan contains a null reference entry");
+            }
+            if (string.IsNullOrWhiteSpace(reference.LibID) || !Guid.TryParse(reference.LibID, out _))
+            {
+                throw new VbeOracleValidationException($"reference '{reference.Name}' must provide a valid libid GUID");
+            }
+            if (reference.Major < 0 || reference.Minor < 0)
+            {
+                throw new VbeOracleValidationException($"reference '{reference.Name}' cannot use a negative TypeLib version");
+            }
+            var key = $"{reference.LibID.Trim().ToUpperInvariant()}/{reference.Major}/{reference.Minor}";
+            if (!referenceKeys.Add(key))
+            {
+                throw new VbeOracleValidationException($"reference '{reference.Name}' is duplicated");
+            }
+        }
+    }
+
+    private static void ProvisionReferences(object workbook, IReadOnlyList<OracleReference> references, CancellationToken cancellationToken)
+    {
+        if (references.Count == 0)
+        {
+            return;
+        }
+
+        object? project = null;
+        object? referenceCollection = null;
+        try
+        {
+            project = ExcelBridgeSupport.Get(workbook, "VBProject")
+                ?? throw new InvalidOperationException("VBProject access is denied; enable trusted access to the VBA project object model");
+            referenceCollection = ExcelBridgeSupport.Get(project, "References")
+                ?? throw new InvalidOperationException("VBProject References collection is unavailable");
+
+            foreach (var reference in references)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                object? addedReference = null;
+                try
+                {
+                    addedReference = ExcelBridgeSupport.InvokeMethod(
+                        referenceCollection,
+                        "AddFromGuid",
+                        reference.LibID,
+                        reference.Major,
+                        reference.Minor);
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(addedReference);
+                }
+            }
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(referenceCollection);
+            ExcelBridgeSupport.ReleaseComObject(project);
         }
     }
 
@@ -839,6 +907,9 @@ public sealed class VbeOracleService : IVbeOracleService
 
         [JsonPropertyName("modules")]
         public List<OracleModule>? Modules { get; set; } = [];
+
+        [JsonPropertyName("references")]
+        public List<OracleReference>? References { get; set; } = [];
     }
 
     private sealed class OracleProbe
@@ -867,5 +938,20 @@ public sealed class VbeOracleService : IVbeOracleService
         [JsonPropertyName("source")]
         public string Source { get; init; } = "";
 
+    }
+
+    private sealed class OracleReference
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; init; } = "";
+
+        [JsonPropertyName("libid")]
+        public string LibID { get; init; } = "";
+
+        [JsonPropertyName("major")]
+        public int Major { get; init; }
+
+        [JsonPropertyName("minor")]
+        public int Minor { get; init; }
     }
 }

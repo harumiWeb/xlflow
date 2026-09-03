@@ -79,6 +79,31 @@ func TestFixtureRequestCarriesDocumentTarget(t *testing.T) {
 	}
 }
 
+func TestFixtureRequestCarriesReferences(t *testing.T) {
+	payload, err := json.Marshal(fixtureRequest{
+		SchemaVersion: SchemaVersion,
+		CaseID:        "external-reference",
+		ProbeMode:     ProbeCompile,
+		References: []fixtureReference{{
+			Name:  "Outlook",
+			LibID: "{00062FFF-0000-0000-C000-000000000046}",
+			Major: 9,
+			Minor: 6,
+		}},
+		Modules: []fixtureModule{{Name: "Main", Kind: "standard", SourcePath: "C:/x/Main.bas"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan fixtureRequest
+	if err := json.Unmarshal(payload, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.References) != 1 || plan.References[0].Name != "Outlook" || plan.References[0].LibID != "{00062FFF-0000-0000-C000-000000000046}" || plan.References[0].Major != 9 || plan.References[0].Minor != 6 {
+		t.Fatalf("plan=%+v, want Outlook TypeLib reference", plan)
+	}
+}
+
 type oracleFakeBridge struct{ calls []string }
 
 func (f *oracleFakeBridge) Execute(_ context.Context, req excelbridge.Request) (excelbridge.Response, error) {
