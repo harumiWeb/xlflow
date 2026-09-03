@@ -3,6 +3,7 @@ package effects
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,6 +11,12 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+)
+
+var (
+	errNumberReferenceRE = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*number\b`)
+	errValueReferenceRE  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*(?:number|description|source)\b`)
+	errClearReferenceRE  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*clear\b`)
 )
 
 const (
@@ -78,7 +85,7 @@ func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR
 		switch statement.Control.Transfer {
 		case procedureir.TransferOnErrorResumeNext:
 			addErrorEvidence(summary, statement.Range, statement.ID, 0, ErrorUsesResumeNext, errorTargetResumeNext, "")
-			if checkedResumeNextProbe(statements, i, reachable) || explicitResumeNextFallback(proc, graph, statements, i, reachable) {
+			if checkedResumeNextProbe(proc, statements, i, reachable) || explicitResumeNextFallback(proc, graph, statements, i, reachable) {
 				checkedResumeNext = true
 			} else {
 				addErrorEvidence(summary, statement.Range, statement.ID, 0, ErrorSuppresses, errorTargetResumeNext, "unchecked or broad scope")
@@ -178,7 +185,7 @@ func immediateLiteralResultFallback(proc procedureir.ProcedureIR, statements []p
 		if !resultAssignment(proc, statement) || statement.Value == nil {
 			return procedureir.Statement{}, false
 		}
-		if safeLiteralAssignment(statement) {
+		if safeLiteralAssignment(proc, statement) {
 			return statement, true
 		}
 		return procedureir.Statement{}, false
@@ -186,19 +193,45 @@ func immediateLiteralResultFallback(proc procedureir.ProcedureIR, statements []p
 	return procedureir.Statement{}, false
 }
 
-func isNumericLiteral(value string) bool {
-	if value == "" {
-		return false
-	}
-	_, err := strconv.ParseFloat(strings.TrimRight(strings.TrimSpace(value), "%&^!#@"), 64)
-	return err == nil
+func safeLiteralAssignment(proc procedureir.ProcedureIR, statement procedureir.Statement) bool {
+	return procedureir.SafeLiteralAssignment(assignmentProbeValue(statement), assignmentTargetType(proc, statement))
 }
 
-func safeLiteralAssignment(statement procedureir.Statement) bool {
-	value := strings.TrimSpace(assignmentProbeValue(statement))
-	lower := strings.ToLower(value)
-	return lower == "true" || lower == "false" || lower == "nothing" || lower == "empty" || lower == "null" ||
-		strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") || isNumericLiteral(value)
+func assignmentTargetType(proc procedureir.ProcedureIR, statement procedureir.Statement) string {
+	target := assignmentProbeTarget(statement)
+	if target == "" {
+		return ""
+	}
+	if strings.EqualFold(target, proc.Symbol.Name) {
+		return literalAssignmentTargetType(proc.Symbol.ReturnType, proc.Symbol.IsArray, false)
+	}
+	for _, declaration := range proc.Declarations {
+		if strings.EqualFold(declaration.Name, target) {
+			return literalAssignmentTargetType(
+				declaration.Type,
+				declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+				declaration.IsObject,
+			)
+		}
+	}
+	return ""
+}
+
+func literalAssignmentTargetType(typeName string, array, object bool) string {
+	typeName = strings.TrimSpace(typeName)
+	if typeName == "" {
+		typeName = "Variant"
+	}
+	if array {
+		if !strings.HasSuffix(typeName, "()") {
+			typeName += "()"
+		}
+		return typeName
+	}
+	if object {
+		return "Object"
+	}
+	return typeName
 }
 
 func dominatingResultFallback(proc procedureir.ProcedureIR, graph cfg.Graph, handlerSetupStatementID int) (procedureir.Statement, bool) {
@@ -485,7 +518,7 @@ func handlerSubgraphHasRaise(proc procedureir.ProcedureIR, graph cfg.CFGView, st
 }
 
 func containsErrorNumber(text string) bool {
-	return strings.Contains(strings.ToLower(stripVBStringLiterals(text)), "err.number")
+	return errNumberReferenceRE.MatchString(stripVBStringLiterals(text))
 }
 
 func expectedErrorRecoveryBranch(statement *procedureir.Statement, copiedNumber string) (cfg.EdgeKind, bool) {
@@ -690,13 +723,17 @@ func isIdentifierByte(value byte) bool {
 	return value == '_' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
 }
 
-func checkedResumeNextProbe(statements []procedureir.Statement, index int, reachable map[int]bool) bool {
+func checkedResumeNextProbe(proc procedureir.ProcedureIR, statements []procedureir.Statement, index int, reachable map[int]bool) bool {
 	faults, checked, restored := 0, false, false
 	probeTarget := ""
+	errCheckParent := 0
+	probeFallbackUsed := false
 	skipParent := 0
 	parents := make(map[int]int, len(statements))
+	statementsByID := make(map[int]procedureir.Statement, len(statements))
 	for _, statement := range statements {
 		parents[statement.ID] = statement.ParentID
+		statementsByID[statement.ID] = statement
 	}
 	for _, statement := range statements[index+1:] {
 		if !reachable[statement.ID] || statement.Recovered {
@@ -720,15 +757,24 @@ func checkedResumeNextProbe(statements []procedureir.Statement, index int, reach
 			break
 		}
 		lower := strings.ToLower(statement.Text)
+		code := stripVBStringLiterals(lower)
 		conditionText := statement.Text
 		if statement.Condition != nil {
 			conditionText = statement.Condition.Text
 		}
+		conditionCode := stripVBStringLiterals(strings.ToLower(conditionText))
 		probeObserved := errorProbeConditionKind(statement.Kind) &&
-			(strings.Contains(lower, "err.") || probeTarget != "" && identifierInExpression(conditionText, probeTarget))
-		assertsErr := strings.HasPrefix(strings.TrimSpace(lower), "debug.assert") && strings.Contains(lower, "err.")
+			(errValueReferenceRE.MatchString(code) || probeTarget != "" && identifierInExpression(conditionCode, probeTarget))
+		assertsErr := strings.HasPrefix(strings.TrimSpace(code), "debug.assert") && errValueReferenceRE.MatchString(code)
 		if probeObserved || assertsErr {
 			checked = true
+			hasCall := probeObserved && resumeNextProbeStatementHasCall(proc, statement)
+			if !restored && hasCall {
+				faults++
+			}
+			if !restored && probeObserved && !hasCall && errNumberReferenceRE.MatchString(code) {
+				errCheckParent = statement.ID
+			}
 			if restored {
 				break
 			}
@@ -740,7 +786,16 @@ func checkedResumeNextProbe(statements []procedureir.Statement, index int, reach
 			checked = true
 			continue
 		}
-		if strings.Contains(lower, "err.clear") || statement.Kind == procedureir.StatementLabel || statement.Kind == procedureir.StatementDeclaration {
+		if errClearReferenceRE.MatchString(code) || statement.Kind == procedureir.StatementLabel || statement.Kind == procedureir.StatementDeclaration {
+			continue
+		}
+		if !probeFallbackUsed && checked && errCheckParent != 0 && probeTarget != "" &&
+			strings.EqualFold(assignmentProbeTarget(statement), probeTarget) &&
+			statementInErrorBranch(statement.ID, errCheckParent, statementsByID) && safeLiteralAssignment(proc, statement) {
+			// A checked probe may assign a safe fallback to the same result
+			// once inside the error branch. It is recovery for the probe, not a
+			// second unchecked operation.
+			probeFallbackUsed = true
 			continue
 		}
 		if restored {
@@ -750,7 +805,7 @@ func checkedResumeNextProbe(statements []procedureir.Statement, index int, reach
 					continue
 				}
 			}
-			if safeLiteralAssignment(statement) {
+			if safeLiteralAssignment(proc, statement) {
 				continue
 			}
 			break
@@ -763,6 +818,37 @@ func checkedResumeNextProbe(statements []procedureir.Statement, index int, reach
 		}
 	}
 	return faults == 1 && checked && restored
+}
+
+func statementInErrorBranch(statementID, ancestorID int, statements map[int]procedureir.Statement) bool {
+	for currentID := statementID; currentID != ancestorID; {
+		current, ok := statements[currentID]
+		if !ok {
+			return false
+		}
+		if current.Kind == procedureir.StatementElse || current.Kind == procedureir.StatementElseIf {
+			return false
+		}
+		currentID = current.ParentID
+	}
+	return ancestorID != 0
+}
+
+func resumeNextProbeStatementHasCall(proc procedureir.ProcedureIR, statement procedureir.Statement) bool {
+	if statement.Condition == nil {
+		return false
+	}
+	for _, call := range proc.Calls {
+		if statement.Condition.Range.EndByte > statement.Condition.Range.StartByte &&
+			call.Range.StartByte >= statement.Condition.Range.StartByte &&
+			call.Range.EndByte <= statement.Condition.Range.EndByte {
+			return true
+		}
+		if statement.Condition.Range.EndByte <= statement.Condition.Range.StartByte && call.StatementID == statement.ID {
+			return true
+		}
+	}
+	return false
 }
 
 func statementDescendsFrom(statement procedureir.Statement, ancestor int, parents map[int]int) bool {
@@ -797,9 +883,14 @@ func assignmentProbeTarget(statement procedureir.Statement) string {
 	}
 	index := strings.IndexByte(text, '=')
 	if index <= 0 {
-		return ""
+		if statement.Target == nil {
+			return ""
+		}
+		text = strings.TrimSpace(statement.Target.Text)
+	} else {
+		text = strings.TrimSpace(text[:index])
 	}
-	target := strings.ToLower(strings.TrimSpace(text[:index]))
+	target := strings.ToLower(text)
 	for i := 0; i < len(target); i++ {
 		if !isIdentifierByte(target[i]) {
 			return ""
@@ -918,7 +1009,7 @@ func recognizedLogSink(text string) bool {
 
 func containsErrorValue(lower, copied string) bool {
 	lower = stripVBStringLiterals(strings.ToLower(lower))
-	if strings.Contains(lower, "err.number") || strings.Contains(lower, "err.description") || strings.Contains(lower, "err.source") || identifierInExpression(lower, "erl") {
+	if errValueReferenceRE.MatchString(lower) || identifierInExpression(lower, "erl") {
 		return true
 	}
 	return copied != "" && identifierInExpression(lower, copied)

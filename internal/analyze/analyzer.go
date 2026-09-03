@@ -264,6 +264,7 @@ var (
 	dictionaryCreateRe            = regexp.MustCompile(`(?i)^\s*createobject\s*\(\s*"scripting\.dictionary"\s*\)\s*$`)
 	dictionaryNewRe               = regexp.MustCompile(`(?i)^\s*new\s+scripting\.dictionary\s*$`)
 	errProbeReferenceRe           = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*(?:number|description|clear)\b`)
+	errNumberReferenceRe          = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*number\b`)
 )
 
 var objectTypes = map[string]bool{
@@ -4820,6 +4821,9 @@ type resumeNextScopeState struct {
 	operations          uint8
 	flags               resumeNextScopeFlag
 	conditionalBranches []resumeNextScopeConditionalBranch
+	probeTarget         string
+	errCheckParent      int
+	probeFallbackUsed   bool
 }
 
 type resumeNextScopeConditionalBranch struct {
@@ -4846,6 +4850,7 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 	if proc.Graph == nil {
 		return nil
 	}
+	moduleDecls := file.moduleDecls()
 	reachable := map[vbacfg.BlockID]bool{}
 	for _, id := range proc.Graph.Reachable(vbacfg.EdgeFilter{}) {
 		reachable[id] = true
@@ -4859,7 +4864,7 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 		if !ok || !reachable[start.ID] {
 			continue
 		}
-		for _, outcome := range resumeNextScopeOutcomes(proc, start.ID) {
+		for _, outcome := range resumeNextScopeOutcomes(proc, start.ID, moduleDecls) {
 			if outcome.flags == 0 {
 				continue
 			}
@@ -4896,8 +4901,12 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 	return findings
 }
 
-func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resumeNextScopeOutcome {
+func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID, moduleDecls map[string]sourceDeclaration) []resumeNextScopeOutcome {
 	graph := proc.Graph
+	statementsByID := make(map[int]procedureir.Statement)
+	for statement := range proc.Statements.All() {
+		statementsByID[statement.ID] = statement
+	}
 	queue := make([]resumeNextScopeState, 0)
 	var outcomes []resumeNextScopeOutcome
 	for _, edge := range graph.Edges {
@@ -4933,7 +4942,7 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resum
 			}
 			continue
 		}
-		state = applyResumeNextScopeStatement(proc, state, statement)
+		state = applyResumeNextScopeStatement(proc, state, statement, statementsByID, moduleDecls)
 		for _, edge := range graph.Edges {
 			if edge.From != state.block {
 				continue
@@ -4955,6 +4964,9 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resum
 				operations:          state.operations,
 				flags:               state.flags,
 				conditionalBranches: append([]resumeNextScopeConditionalBranch(nil), state.conditionalBranches...),
+				probeTarget:         state.probeTarget,
+				errCheckParent:      state.errCheckParent,
+				probeFallbackUsed:   state.probeFallbackUsed,
 			})
 		}
 	}
@@ -4962,7 +4974,14 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resum
 }
 
 func resumeNextScopeStateKey(state resumeNextScopeState) string {
-	parts := []string{strconvItoa(int(state.block)), strconvItoa(int(state.operations)), strconvItoa(int(state.flags))}
+	fallbackUsed := "0"
+	if state.probeFallbackUsed {
+		fallbackUsed = "1"
+	}
+	parts := []string{
+		strconvItoa(int(state.block)), strconvItoa(int(state.operations)), strconvItoa(int(state.flags)),
+		state.probeTarget, strconvItoa(state.errCheckParent), fallbackUsed,
+	}
 	for _, branch := range state.conditionalBranches {
 		parts = append(parts,
 			branch.group,
@@ -4988,26 +5007,143 @@ func restoresErrorHandling(statement procedureir.Statement) bool {
 		statement.Control.Transfer == procedureir.TransferOnErrorGoto
 }
 
-func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement) resumeNextScopeState {
+func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) resumeNextScopeState {
 	state.conditionalBranches = append([]resumeNextScopeConditionalBranch(nil), state.conditionalBranches...)
 	state = resumeNextScopeSyncConditionalBranches(state, statement.ConditionalBranches)
-	if isOnErrorResumeNext(statement) || resumeNextScopeErrProbeStatement(statement) ||
-		statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel {
+	if isOnErrorResumeNext(statement) {
 		return state
 	}
 	call, projectCall := resumeNextScopeCallRisk(proc.Calls, statement.ID)
-	if call {
+	conditionCall := resumeNextScopeConditionHasCall(proc.Calls, statement)
+	if call || conditionCall {
 		state.flags |= resumeNextScopeCall
 	}
 	if projectCall {
 		state.flags |= resumeNextScopeProjectCall
 	}
+	if resumeNextScopeErrProbeStatement(statement) {
+		if !conditionCall && resumeNextScopeErrCheckStatement(statement) {
+			state.errCheckParent = statement.ID
+		}
+		return state
+	}
+	if resumeNextScopeProbeFallback(proc, state, statement, statementsByID, moduleDecls) {
+		state.probeFallbackUsed = true
+		return state
+	}
+	if statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel ||
+		statement.Kind == procedureir.StatementEnd {
+		return state
+	}
 	if resumeNextScopeControlStatement(statement) {
 		state.flags |= resumeNextScopeControlFlow
 		return state
 	}
+	before := resumeNextScopeCurrentOperations(state)
 	resumeNextScopeRecordOperation(&state)
+	if before == 0 && state.probeTarget == "" {
+		state.probeTarget = resumeNextScopeAssignmentTarget(statement)
+	}
 	return state
+}
+
+func resumeNextScopeErrCheckStatement(statement procedureir.Statement) bool {
+	switch statement.Kind {
+	case procedureir.StatementIf, procedureir.StatementElseIf, procedureir.StatementSelect, procedureir.StatementCase:
+		code := maskStringLiterals(gui.StripComment(statement.Text))
+		return errNumberReferenceRe.MatchString(code)
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeProbeFallback(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if state.probeFallbackUsed || state.errCheckParent == 0 || state.probeTarget == "" || resumeNextScopeCurrentOperations(state) != 1 ||
+		!resumeNextScopeInErrorBranch(statement.ID, state.errCheckParent, statementsByID) {
+		return false
+	}
+	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
+		return false
+	}
+	return strings.EqualFold(resumeNextScopeAssignmentTarget(statement), state.probeTarget) && resumeNextScopeSafeLiteralAssignment(proc, statement, moduleDecls)
+}
+
+func resumeNextScopeInErrorBranch(statementID, ancestorID int, statements map[int]procedureir.Statement) bool {
+	for currentID := statementID; currentID != ancestorID; {
+		current, ok := statements[currentID]
+		if !ok {
+			return false
+		}
+		if current.Kind == procedureir.StatementElse || current.Kind == procedureir.StatementElseIf {
+			return false
+		}
+		currentID = current.ParentID
+	}
+	return ancestorID != 0
+}
+
+func resumeNextScopeAssignmentTarget(statement procedureir.Statement) string {
+	if statement.Target == nil {
+		return ""
+	}
+	target := strings.TrimSpace(statement.Target.Text)
+	if !errorSuccessIdentifierRE.MatchString(target) {
+		return ""
+	}
+	return strings.ToLower(target)
+}
+
+func resumeNextScopeSafeLiteralAssignment(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if statement.Value == nil || statement.Value.Recovered {
+		return false
+	}
+	return procedureir.SafeLiteralAssignment(statement.Value.Text, resumeNextScopeTargetType(proc, statement, moduleDecls))
+}
+
+func resumeNextScopeTargetType(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) string {
+	target := resumeNextScopeAssignmentTarget(statement)
+	if target == "" {
+		return ""
+	}
+	if strings.EqualFold(target, proc.Name) {
+		return resumeNextScopeLiteralTargetType(
+			proc.ReturnType,
+			proc.ReturnValueShape == procedureir.ValueShapeFixedArray || proc.ReturnValueShape == procedureir.ValueShapeDynamicArray || proc.IR != nil && proc.IR.Symbol.IsArray,
+			isObjectType(proc.ReturnType),
+		)
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(declaration.Name, target) {
+			return resumeNextScopeLiteralTargetType(
+				declaration.Type,
+				declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+				declaration.IsObject,
+			)
+		}
+	}
+	for name, declaration := range moduleDecls {
+		if strings.EqualFold(name, target) || strings.EqualFold(declaration.Name, target) {
+			return resumeNextScopeLiteralTargetType(declaration.Type, declaration.Array, declaration.Object)
+		}
+	}
+	return ""
+}
+
+func resumeNextScopeLiteralTargetType(typeName string, array, object bool) string {
+	typeName = strings.TrimSpace(typeName)
+	if typeName == "" {
+		typeName = "Variant"
+	}
+	if array {
+		if !strings.HasSuffix(typeName, "()") {
+			typeName += "()"
+		}
+		return typeName
+	}
+	if object {
+		return "Object"
+	}
+	return typeName
 }
 
 func resumeNextScopeSyncConditionalBranches(state resumeNextScopeState, branches []procedureir.ConditionalBranch) resumeNextScopeState {
@@ -5148,6 +5284,23 @@ func resumeNextScopeCallRisk(calls readOnlySpan[procedureir.CallSite], statement
 		}
 	}
 	return call, projectCall
+}
+
+func resumeNextScopeConditionHasCall(calls readOnlySpan[procedureir.CallSite], statement procedureir.Statement) bool {
+	if statement.Condition == nil {
+		return false
+	}
+	for candidate := range calls.All() {
+		if statement.Condition.Range.EndByte > statement.Condition.Range.StartByte &&
+			candidate.Range.StartByte >= statement.Condition.Range.StartByte &&
+			candidate.Range.EndByte <= statement.Condition.Range.EndByte {
+			return true
+		}
+		if statement.Condition.Range.EndByte <= statement.Condition.Range.StartByte && candidate.StatementID == statement.ID {
+			return true
+		}
+	}
+	return false
 }
 
 func isResumeNextScopeExit(graph vbacfg.Graph, id vbacfg.BlockID) bool {

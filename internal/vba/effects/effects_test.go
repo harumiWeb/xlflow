@@ -550,10 +550,12 @@ End Function
 }
 
 func TestErrorSummaryDistinguishesCheckedAndUncheckedResumeNext(t *testing.T) {
-	summary := buildSources(t, sourceFile{"Probe.bas", "Probe", `Public Sub CheckedProbe()
+	summary := buildSources(t, sourceFile{"Probe.bas", "Probe", `Public ModuleLong As Long
+
+Public Sub CheckedProbe()
     On Error Resume Next
     Workbooks.Open "optional.xlsx"
-    If Err.Number <> 0 Then Exit Sub
+    If Err . Number <> 0 Then Exit Sub
     On Error GoTo 0
 End Sub
 
@@ -569,6 +571,106 @@ Public Sub UnrelatedCheck()
     If ThisWorkbook.Saved Then Debug.Print "saved"
     On Error GoTo 0
 End Sub
+
+Public Function CompositeCondition(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    CompositeCondition = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Or RiskyCall() Then
+        Err.Clear
+        CompositeCondition = 0
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function CompositeMemberCondition(ByVal obj As Object, ParamArray values() As Variant) As Long
+    On Error Resume Next
+    CompositeMemberCondition = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Or obj.Check() Then
+        Err.Clear
+        CompositeMemberCondition = 0
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function RiskyCall() As Boolean
+    RiskyCall = True
+End Function
+
+Public Function NullFallback(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    NullFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        NullFallback = Null
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function ModuleNullFallback(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    ModuleLong = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        ModuleLong = Null
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function RepeatedFallback(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    RepeatedFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        RepeatedFallback = 0
+        RepeatedFallback = 1
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function OutsideFallback(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    OutsideFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        OutsideFallback = 0
+    End If
+    OutsideFallback = 1
+    On Error GoTo 0
+End Function
+
+Public Function ElseFallback(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    ElseFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        Err.Clear
+    Else
+        ElseFallback = 0
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function ArrayReturnFallback(ParamArray values() As Variant) As Long()
+    On Error Resume Next
+    ArrayReturnFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        ArrayReturnFallback = 0
+    End If
+    On Error GoTo 0
+End Function
+
+Public Sub StringErrText()
+    On Error Resume Next
+    Workbooks.Open "optional.xlsx"
+    If "Err . Number" = "x" Then
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Sub
+
+Public Function ImplicitFallback(ParamArray values() As Variant)
+    On Error Resume Next
+    ImplicitFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        ImplicitFallback = 0
+    End If
+    On Error GoTo 0
+End Function
 
 Public Sub CapturedErrProbe()
     Dim failed As Boolean
@@ -650,6 +752,38 @@ End Function
 	unrelated := find(t, summary, "Probe.UnrelatedCheck")
 	if !unrelated.Error.SuppressesErrors {
 		t.Fatalf("unrelated condition accepted as probe check: %#v", unrelated.Error)
+	}
+	composite := find(t, summary, "Probe.CompositeCondition")
+	if !composite.Error.SuppressesErrors {
+		t.Fatalf("composite condition accepted as checked probe: %#v", composite.Error)
+	}
+	compositeMember := find(t, summary, "Probe.CompositeMemberCondition")
+	if !compositeMember.Error.SuppressesErrors {
+		t.Fatalf("composite member condition accepted as checked probe: %#v", compositeMember.Error)
+	}
+	nullFallback := find(t, summary, "Probe.NullFallback")
+	if !nullFallback.Error.SuppressesErrors {
+		t.Fatalf("Null fallback accepted as checked probe: %#v", nullFallback.Error)
+	}
+	implicitFallback := find(t, summary, "Probe.ImplicitFallback")
+	if implicitFallback.Error.SuppressesErrors {
+		t.Fatalf("implicit Variant fallback rejected as checked probe: %#v", implicitFallback.Error)
+	}
+	moduleNullFallback := find(t, summary, "Probe.ModuleNullFallback")
+	if !moduleNullFallback.Error.SuppressesErrors {
+		t.Fatalf("unknown module fallback incorrectly accepted as checked probe: %#v", moduleNullFallback.Error)
+	}
+	for _, name := range []string{"Probe.RepeatedFallback", "Probe.OutsideFallback", "Probe.ElseFallback"} {
+		probe := find(t, summary, name)
+		if !probe.Error.SuppressesErrors {
+			t.Fatalf("unsafe fallback scope %s accepted as checked probe: %#v", name, probe.Error)
+		}
+	}
+	for _, name := range []string{"Probe.ArrayReturnFallback", "Probe.StringErrText"} {
+		probe := find(t, summary, name)
+		if !probe.Error.SuppressesErrors {
+			t.Fatalf("unsafe fallback or string-only check %s accepted: %#v", name, probe.Error)
+		}
 	}
 	captured := find(t, summary, "Probe.CapturedErrProbe")
 	if !captured.Error.UsesResumeNext || captured.Error.SuppressesErrors {

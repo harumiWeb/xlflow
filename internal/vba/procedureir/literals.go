@@ -1,0 +1,167 @@
+package procedureir
+
+import (
+	"math"
+	"math/big"
+	"strings"
+)
+
+// SafeLiteralAssignment reports whether value can be assigned to targetType
+// without relying on a potentially failing VBA coercion. It is intentionally
+// conservative because callers use it to recognize recovery assignments made
+// while On Error Resume Next is active.
+func SafeLiteralAssignment(value, targetType string) bool {
+	value = strings.TrimSpace(value)
+	targetType = normalizeLiteralTargetType(targetType)
+	if value == "" || targetType == "" {
+		return false
+	}
+	if strings.HasSuffix(targetType, "()") {
+		return false
+	}
+
+	lower := strings.ToLower(value)
+	switch lower {
+	case "true", "false":
+		return targetType == "variant" || targetType == "string" || isNumericLiteralTarget(targetType) || targetType == "boolean"
+	case "nothing":
+		return targetType == "variant" || isObjectLiteralTarget(targetType)
+	case "empty":
+		return targetType == "variant" || isScalarLiteralTarget(targetType)
+	case "null":
+		return targetType == "variant"
+	}
+	if isCompleteStringLiteral(value) {
+		return targetType == "variant" || targetType == "string"
+	}
+
+	numeric, ok := parseNumericLiteral(value)
+	if !ok {
+		return false
+	}
+	if targetType == "variant" || targetType == "string" || targetType == "boolean" {
+		// Even a Variant or a string assignment must start with a valid VBA
+		// numeric literal. Values beyond Double's range are rejected by VBA
+		// before the target conversion can make them safe.
+		return rationalAbsWithin(numeric, new(big.Rat).SetFloat64(math.MaxFloat64))
+	}
+	switch targetType {
+	case "byte":
+		return integerLiteralWithin(numeric, "0", "255")
+	case "integer":
+		return integerLiteralWithin(numeric, "-32768", "32767")
+	case "long":
+		return integerLiteralWithin(numeric, "-2147483648", "2147483647")
+	case "longlong":
+		return integerLiteralWithin(numeric, "-9223372036854775808", "9223372036854775807")
+	case "longptr":
+		// The analyzer does not know whether the workbook runs in 32-bit or
+		// 64-bit Office, so use the narrower ABI-compatible range.
+		return integerLiteralWithin(numeric, "-2147483648", "2147483647")
+	case "single":
+		return rationalAbsWithin(numeric, new(big.Rat).SetFloat64(float64(math.MaxFloat32)))
+	case "double":
+		return rationalAbsWithin(numeric, new(big.Rat).SetFloat64(math.MaxFloat64))
+	case "currency":
+		return rationalWithin(numeric, "-922337203685477.5808", "922337203685477.5807")
+	case "decimal":
+		return rationalWithin(numeric, "-79228162514264337593543950335", "79228162514264337593543950335")
+	case "date":
+		return rationalWithin(numeric, "-657434", "2958465")
+	default:
+		return false
+	}
+}
+
+func normalizeLiteralTargetType(targetType string) string {
+	targetType = strings.ToLower(strings.TrimSpace(targetType))
+	targetType = strings.TrimPrefix(targetType, "byref ")
+	return targetType
+}
+
+func isNumericLiteralTarget(targetType string) bool {
+	switch targetType {
+	case "byte", "integer", "long", "longlong", "longptr", "single", "double", "currency", "decimal":
+		return true
+	default:
+		return false
+	}
+}
+
+func isScalarLiteralTarget(targetType string) bool {
+	return targetType == "variant" || targetType == "string" || targetType == "boolean" || targetType == "date" || isNumericLiteralTarget(targetType)
+}
+
+func isObjectLiteralTarget(targetType string) bool {
+	switch targetType {
+	case "object", "application", "workbook", "worksheet", "range", "chart", "pivot table", "pivottable", "listobject", "dictionary", "collection", "window":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCompleteStringLiteral(value string) bool {
+	if len(value) < 2 || value[0] != '"' {
+		return false
+	}
+	for index := 1; index < len(value); index++ {
+		if value[index] != '"' {
+			continue
+		}
+		if index+1 < len(value) && value[index+1] == '"' {
+			index++
+			continue
+		}
+		return index == len(value)-1
+	}
+	return false
+}
+
+func integerLiteralWithin(value *big.Rat, minText, maxText string) bool {
+	min, minOK := new(big.Int).SetString(minText, 10)
+	max, maxOK := new(big.Int).SetString(maxText, 10)
+	if !minOK || !maxOK {
+		return false
+	}
+	rounded := roundVBANumeric(value)
+	return rounded.Cmp(min) >= 0 && rounded.Cmp(max) <= 0
+}
+
+func roundVBANumeric(value *big.Rat) *big.Int {
+	abs := new(big.Rat).Abs(value)
+	quotient := new(big.Int)
+	remainder := new(big.Int)
+	quotient.QuoRem(abs.Num(), abs.Denom(), remainder)
+	twiceRemainder := new(big.Int).Lsh(new(big.Int).Set(remainder), 1)
+	if twiceRemainder.Cmp(abs.Denom()) > 0 ||
+		twiceRemainder.Cmp(abs.Denom()) == 0 && quotient.Bit(0) == 1 {
+		quotient.Add(quotient, big.NewInt(1))
+	}
+	if value.Sign() < 0 {
+		quotient.Neg(quotient)
+	}
+	return quotient
+}
+
+func rationalWithin(value *big.Rat, minText, maxText string) bool {
+	min, minOK := new(big.Rat).SetString(minText)
+	max, maxOK := new(big.Rat).SetString(maxText)
+	return minOK && maxOK && value.Cmp(min) >= 0 && value.Cmp(max) <= 0
+}
+
+func rationalAbsWithin(value, max *big.Rat) bool {
+	return new(big.Rat).Abs(value).Cmp(max) <= 0
+}
+
+func parseNumericLiteral(value string) (*big.Rat, bool) {
+	value = strings.TrimRight(strings.TrimSpace(value), "%&^!#@")
+	if value == "" {
+		return nil, false
+	}
+	numeric, ok := new(big.Rat).SetString(value)
+	if !ok || numeric == nil {
+		return nil, false
+	}
+	return numeric, true
+}

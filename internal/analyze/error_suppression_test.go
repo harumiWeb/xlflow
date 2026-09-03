@@ -243,6 +243,30 @@ End Sub
 	}
 }
 
+func TestVBA237AcceptsCheckedResumeNextFallback(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function ArrayCount(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  ArrayCount = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+    ArrayCount = 0
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+		t.Fatalf("checked Resume Next fallback should not report VBA237: %+v", got)
+	}
+}
+
 func TestVBA237DoesNotTreatOrdinaryBooleanPredicateAsSuccessContract(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -3951,6 +3951,8 @@ func TestAnalyzerVBA214AllowsNarrowCompatibilityProbes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
+Public ModuleLong As Long
+
 Public Sub DirectProbe()
   Dim ws As Worksheet
   On Error Resume Next
@@ -3963,11 +3965,122 @@ Public Sub CheckedProbe()
   Dim ws As Worksheet
   On Error Resume Next
   Set ws = ThisWorkbook.Worksheets("Data")
-  If Err.Number <> 0 Then
+  If Err . Number <> 0 Then
     Err.Clear
   End If
   On Error GoTo 0
 End Sub
+
+Public Function BoundedArrayProbe(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  BoundedArrayProbe = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+    BoundedArrayProbe = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function CapacityProbe(ByRef target() As Byte) As Long
+  On Error Resume Next
+  CapacityProbe = UBound(target) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+    CapacityProbe = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function CompositeCondition(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  CompositeCondition = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Or RiskyCall() Then
+    Err.Clear
+    CompositeCondition = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function CompositeMemberCondition(ByVal obj As Object, ParamArray values() As Variant) As Long
+  On Error Resume Next
+  CompositeMemberCondition = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Or obj.Check() Then
+    Err.Clear
+    CompositeMemberCondition = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function RiskyCall() As Boolean
+  RiskyCall = True
+End Function
+
+Public Function NullFallback(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  NullFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    NullFallback = Null
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function ModuleNullFallback(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  ModuleLong = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    ModuleLong = Null
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function RepeatedFallback(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  RepeatedFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    RepeatedFallback = 0
+    RepeatedFallback = 1
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function OutsideFallback(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  OutsideFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    OutsideFallback = 0
+  End If
+  OutsideFallback = 1
+  On Error GoTo 0
+End Function
+
+Public Function ElseFallback(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  ElseFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+  Else
+    ElseFallback = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function ArrayReturnFallback(ParamArray values() As Variant) As Long()
+  On Error Resume Next
+  ArrayReturnFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    ArrayReturnFallback = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function ImplicitFallback(ParamArray values() As Variant)
+  On Error Resume Next
+  ImplicitFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    ImplicitFallback = 0
+  End If
+  On Error GoTo 0
+End Function
 
 Public Sub ReplacedByHandler()
   Dim ws As Worksheet
@@ -3983,8 +4096,16 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
-		t.Fatalf("narrow probes should not report VBA214: %+v", got)
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 8 {
+		t.Fatalf("narrow probes should only report the unsafe cases: %+v", got)
+	}
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if !procedures["CompositeCondition"] || !procedures["CompositeMemberCondition"] || !procedures["NullFallback"] || !procedures["ModuleNullFallback"] || !procedures["RepeatedFallback"] || !procedures["OutsideFallback"] || !procedures["ElseFallback"] || !procedures["ArrayReturnFallback"] {
+		t.Fatalf("unsafe probe procedures = %#v, findings = %+v", procedures, got)
 	}
 }
 
