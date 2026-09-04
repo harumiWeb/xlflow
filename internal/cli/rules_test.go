@@ -27,7 +27,7 @@ func TestRulesCommandWritesV2JSONEnvelope(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("decode rules JSON: %v\n%s", err, stdout.String())
 	}
-	if got.Status != output.StatusOK || got.Command != "rules" || got.Rules.SchemaVersion != staticrules.SchemaVersion {
+	if got.Status != output.StatusOK || got.Command != "rules" || got.Rules.SchemaVersion != 2 {
 		t.Fatalf("rules envelope = %#v", got)
 	}
 	if len(got.Rules.Items) == 0 || got.Rules.Items[0].ID == "" {
