@@ -1046,7 +1046,12 @@ async function assertRulesRegistryBehavior(): Promise<void> {
   assert.strictEqual(parsed.get("VB020")?.inlineSuppressible, true);
   assert.strictEqual(parsed.get("VB029")?.inlineSuppressible, false);
   assert.strictEqual(parsed.get("VB059")?.inlineSuppressible, false);
-  assert.throws(() => parseRulesEnvelope(rulesEnvelope([], 2)), /unsupported response schema/);
+  assert.throws(() => parseRulesEnvelope(rulesEnvelope([], 3)), /unsupported response schema/);
+  assert.strictEqual(
+    parseRulesEnvelope(rulesEnvelope([{ id: "VB020", inline_suppressible: true }], 1)).get("VB020")
+      ?.inlineSuppressible,
+    true,
+  );
 
   let executable = "xlflow-one";
   const calls: string[] = [];
@@ -1059,6 +1064,10 @@ async function assertRulesRegistryBehavior(): Promise<void> {
           { id: "VB020", inline_suppressible: true },
           { id: "VB029", inline_suppressible: false },
           { id: "VB059", inline_suppressible: false },
+          { id: "VB066", inline_suppressible: true },
+          { id: "VBA201", inline_suppressible: true },
+          { id: "VBA216", inline_suppressible: false },
+          { id: "VBA249", inline_suppressible: true },
         ]),
       ),
       stderr: "",
@@ -1068,8 +1077,23 @@ async function assertRulesRegistryBehavior(): Promise<void> {
   assert.strictEqual(await service.isInlineSuppressible("vb020"), true);
   assert.strictEqual(await service.isInlineSuppressible("VB029"), false);
   assert.strictEqual(await service.isInlineSuppressible("VB059"), false);
+  assert.strictEqual(await service.isInlineSuppressible("VB066"), true);
+  assert.strictEqual(await service.isInlineSuppressible("VBA201"), true);
+  assert.strictEqual(await service.isInlineSuppressible("VBA216"), false);
+  assert.strictEqual(await service.isInlineSuppressible("VBA249"), true);
   assert.strictEqual(await service.isInlineSuppressible("VB999"), false);
   assert.deepStrictEqual(calls, ["xlflow-one --json rules"]);
+
+  const metadataDiagnostics = ["VB066", "VBA201", "VBA216", "VBA249"].map((code) => {
+    const diagnostic = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 1), code);
+    diagnostic.source = "xlflow";
+    diagnostic.code = code;
+    return diagnostic;
+  });
+  assert.deepStrictEqual(
+    (await inlineSuppressibleDiagnostics(service, metadataDiagnostics)).map(({ code }) => code),
+    ["VB066", "VBA201", "VBA249"],
+  );
 
   executable = "xlflow-two";
   assert.strictEqual(await service.isInlineSuppressible("VB020"), true);
@@ -1119,7 +1143,7 @@ async function assertRulesRegistryBehavior(): Promise<void> {
         exitCode: 0,
         stdout: JSON.stringify(
           attempts === 1
-            ? rulesEnvelope([], 2)
+            ? rulesEnvelope([], 3)
             : rulesEnvelope([{ id: "VBA200", inline_suppressible: true }]),
         ),
         stderr: "",
@@ -1148,7 +1172,7 @@ async function assertRulesRegistryBehavior(): Promise<void> {
   assert.strictEqual(attempts, 1, "one provider batch must attempt registry discovery once");
 }
 
-function rulesEnvelope(items: unknown[], schemaVersion = 1): unknown {
+function rulesEnvelope(items: unknown[], schemaVersion = 2): unknown {
   return {
     status: "ok",
     command: "rules",

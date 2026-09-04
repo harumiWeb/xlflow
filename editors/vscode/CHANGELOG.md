@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed inline-suppression Quick Fix discovery with the current v2 rule
+  metadata while retaining fail-closed behavior for unsupported schemas.
+
 ## v0.10.1
 
 - Keep completion, signature help, hover, and definition responsive while Full

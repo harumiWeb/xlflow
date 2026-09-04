@@ -10,7 +10,7 @@ import (
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 )
 
-func TestRulesCommandWritesV1JSONEnvelope(t *testing.T) {
+func TestRulesCommandWritesV2JSONEnvelope(t *testing.T) {
 	var stdout bytes.Buffer
 	a := &app{cwd: t.TempDir(), stdout: &stdout, stderr: &bytes.Buffer{}}
 	root := a.rootCommand()
