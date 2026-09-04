@@ -296,6 +296,34 @@ End Sub
 	}
 }
 
+func TestAnalyzerDoesNotTreatFileDialogConstructionAsBoundary(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+    Dim fd As FileDialog
+    Set fd = Application.FileDialog(msoFileDialogFilePicker)
+    With Application.FileDialog(msoFileDialogFolderPicker)
+        .Title = "Choose a folder"
+    End With
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 0 {
+		t.Fatalf("FileDialog construction must not be reported before Show, got %+v", boundaries)
+	}
+}
+
 func TestAnalyzerDoesNotTreatShellEscapeAsShell(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")

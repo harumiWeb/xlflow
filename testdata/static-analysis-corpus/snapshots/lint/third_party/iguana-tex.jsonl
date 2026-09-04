@@ -89,9 +89,7 @@
 {"project":"third_party/iguana-tex","file":"TextWindowFont.cls","surface":"lint","code":"VB006","severity":"warning","line":26,"column":1}
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":138,"column":0}
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":213,"column":0}
-{"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":269,"column":0}
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":279,"column":0}
-{"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":299,"column":0}
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":307,"column":0}
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":329,"column":0}
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":736,"column":0}
