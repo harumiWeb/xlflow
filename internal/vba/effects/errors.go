@@ -801,6 +801,12 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, moduleDeclarations []p
 			checked = true
 			continue
 		}
+		if !restored && faults == 0 && !checked && errCheckParent == 0 && probeTarget == "" && safeResumeNextProbeInitialization(proc, statement) {
+			// Initializing an object result to Nothing gives a checked member
+			// probe a deterministic failure value; it does not itself probe the
+			// object while Resume Next is active.
+			continue
+		}
 		if !restored && (statement.Kind == procedureir.StatementAssignment || statement.Kind == procedureir.StatementSet) {
 			array, lowerTarget, kind, ok := procedureir.SafeArrayBoundsProbeAssignment(
 				assignmentProbeTarget(statement), assignmentProbeValue(statement),
@@ -888,6 +894,22 @@ func checkedResumeNextProbe(proc procedureir.ProcedureIR, moduleDeclarations []p
 		}
 	}
 	return faults == 1 && checked && restored
+}
+
+func safeResumeNextProbeInitialization(proc procedureir.ProcedureIR, statement procedureir.Statement) bool {
+	if statement.Kind != procedureir.StatementSet {
+		return false
+	}
+	target := assignmentProbeTarget(statement)
+	if target == "" || !strings.EqualFold(strings.TrimSpace(assignmentProbeValue(statement)), "nothing") {
+		return false
+	}
+	for _, declaration := range proc.Declarations {
+		if declaration.Scope == procedureir.ScopeLocal && strings.EqualFold(declaration.Name, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func safeProbeFallbackAssignment(proc procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, statement procedureir.Statement) bool {

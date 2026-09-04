@@ -164,6 +164,8 @@ type Declaration struct {
 	Parent              string              `json:"parent,omitempty"`
 	IsArray             bool                `json:"isArray,omitempty"`
 	IsObject            bool                `json:"isObject,omitempty"`
+	IsStatic            bool                `json:"isStatic,omitempty"`
+	IsNew               bool                `json:"isNew,omitempty"`
 	IsConst             bool                `json:"isConst,omitempty"`
 	ParamArray          bool                `json:"paramArray,omitempty"`
 	ValueShape          ValueShapeKind      `json:"valueShape,omitempty"`

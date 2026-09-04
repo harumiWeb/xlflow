@@ -16,7 +16,7 @@ var errorSuccessIdentifierRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // contract. Procedure summaries retain every origin, but findings are emitted
 // only by the procedure that owns the loss site so transitive callers do not
 // repeat the same root cause.
-func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure, project effects.ProjectSummary) []Finding {
+func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure, project effects.ProjectSummary, projectResolver procedureir.Resolver) []Finding {
 	if !a.Config.Analyze.DetectErrorSuppressionPropagation || proc.Name == "" || proc.Effects == nil {
 		return nil
 	}
@@ -26,7 +26,7 @@ func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure
 	identitiesReady := false
 	resumeNextOwnedByVBA214 := map[int]bool{}
 	if a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
-		for _, existing := range a.leakedOnErrorResumeNextFindings(file, proc) {
+		for _, existing := range a.leakedOnErrorResumeNextFindings(file, proc, projectResolver) {
 			resumeNextOwnedByVBA214[existing.Line] = true
 		}
 	}

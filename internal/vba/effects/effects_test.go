@@ -559,6 +559,29 @@ Public Sub CheckedProbe()
     On Error GoTo 0
 End Sub
 
+Public Sub CheckedObjectProbe(ByVal ws As Worksheet)
+    Dim resultName As Name
+    On Error Resume Next
+    Set resultName = Nothing
+    Set resultName = ws.Names("Results")
+    On Error GoTo 0
+    If Not resultName Is Nothing Then Debug.Print resultName.Name
+End Sub
+
+Public Property Get StoredObject() As Object
+End Property
+
+Public Property Set StoredObject(ByVal value As Object)
+End Property
+
+Public Sub PropertySetObjectProbe(ByVal ws As Worksheet)
+    On Error Resume Next
+    Set StoredObject = Nothing
+    Set StoredObject = ws.Names("Results")
+    On Error GoTo 0
+    If Not StoredObject Is Nothing Then Debug.Print "stored"
+End Sub
+
 Public Sub UncheckedProbe()
     On Error Resume Next
     Workbooks.Open "one.xlsx"
@@ -769,6 +792,14 @@ End Function
 	checked := find(t, summary, "Probe.CheckedProbe")
 	if !checked.Error.UsesResumeNext || checked.Error.SuppressesErrors {
 		t.Fatalf("checked probe summary = %#v", checked.Error)
+	}
+	checkedObject := find(t, summary, "Probe.CheckedObjectProbe")
+	if !checkedObject.Error.UsesResumeNext || checkedObject.Error.SuppressesErrors {
+		t.Fatalf("checked object probe summary = %#v", checkedObject.Error)
+	}
+	propertySetObject := find(t, summary, "Probe.PropertySetObjectProbe")
+	if !propertySetObject.Error.UsesResumeNext || !propertySetObject.Error.SuppressesErrors {
+		t.Fatalf("property-set initialization must remain a protected operation = %#v", propertySetObject.Error)
 	}
 	unchecked := find(t, summary, "Probe.UncheckedProbe")
 	if !unchecked.Error.UsesResumeNext || !unchecked.Error.SuppressesErrors {

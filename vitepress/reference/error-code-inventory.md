@@ -388,6 +388,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enum_declaration`
 - `enum_group`
 - `enum_member`
+- `enum_type`
 - `environment_variable`
 - `error_candidate_procedures`
 - `error_cfg_walks`
