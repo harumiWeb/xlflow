@@ -654,8 +654,9 @@ module_top_n = 0
 procedure_score_threshold = 0
 module_score_threshold = 0
 
-# 自動バックアップ保持はデフォルトで無効です。コメントを外すと、設定されたワークブックに対する
-# バックアップ生成を伴うpushとrollbackの成功後に、古いメタデータ付きバックアップを削除します。
+# 自動バックアップ保持はデフォルトで無効です。セクションのコメントを外し、enabled = true にすると、
+# 設定されたワークブックに対するバックアップ生成を伴うpushとrollbackの成功後に、古いメタデータ付き
+# バックアップを削除します。
 # [backup.retention]
 # enabled = false
 # max_count = 20
@@ -715,7 +716,10 @@ disabled_rules = []
 # ]
 disabled_rules = []
 
-# 開発用途で明示的に許可するplain HTTP origin。
+# この正規化された http://host[:port] のorigin完全一致allowlistは、VBA246の
+# plain_http_credentials 検出だけを抑制します。HTTPリクエストを許可するものではなく、
+# credentials_in_url、authorization_logging、TLS/証明書、sensitive_module_constant、
+# download_and_execute の検出は抑制しません。
 development_http_origins = []
 
 # オプションのdataflow対応 analyzerルールはデフォルトで無効です。

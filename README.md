@@ -683,9 +683,9 @@ module_top_n = 0
 procedure_score_threshold = 0
 module_score_threshold = 0
 
-# Automatic backup retention is disabled by default. Uncomment to prune old
-# metadata-backed backups for the configured workbook after successful backup-
-# producing push and rollback operations.
+# Automatic backup retention is disabled by default. Uncomment the section and
+# set enabled = true to prune old metadata-backed backups for the configured
+# workbook after successful backup-producing push and rollback operations.
 # [backup.retention]
 # enabled = false
 # max_count = 20
@@ -740,7 +740,10 @@ disabled_rules = []
 # Disable specific analyzer rules by diagnostic ID.
 disabled_rules = []
 
-# Plain HTTP origins explicitly allowed for development use.
+# This exact normalized http://host[:port] allowlist only suppresses VBA246
+# plain_http_credentials findings. It does not permit HTTP requests or suppress
+# credentials_in_url, authorization_logging, TLS/certificate,
+# sensitive_module_constant, or download_and_execute findings.
 development_http_origins = []
 
 # Optional dataflow-sensitive analyzer rules are disabled by default.
