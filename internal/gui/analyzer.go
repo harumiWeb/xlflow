@@ -40,8 +40,9 @@ type detector struct {
 }
 
 var (
-	msgBoxFunctionRe   = regexp.MustCompile(`(?i)\b(?:(?:public|private|friend)\s+)?function\s+msgbox\b`)
-	inputBoxFunctionRe = regexp.MustCompile(`(?i)\b(?:(?:public|private|friend)\s+)?function\s+inputbox\b`)
+	msgBoxFunctionRe      = regexp.MustCompile(`(?i)\b(?:(?:public|private|friend)\s+)?function\s+msgbox\b`)
+	inputBoxFunctionRe    = regexp.MustCompile(`(?i)\b(?:(?:public|private|friend)\s+)?function\s+inputbox\b`)
+	showBooleanPropertyRe = regexp.MustCompile(`(?i)\.\s*show\s*(?:=\s*(?:true|false)\b|\bthen\b)`)
 )
 
 var detectors = []detector{
@@ -86,6 +87,8 @@ func shouldIgnoreDetectorLine(detector detector, code string) bool {
 			return true
 		}
 		return inputBoxFunctionRe.MatchString(code)
+	case "UserForm.Show":
+		return showBooleanPropertyRe.MatchString(code)
 	default:
 		return false
 	}

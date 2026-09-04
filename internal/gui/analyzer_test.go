@@ -264,6 +264,38 @@ End Sub
 	}
 }
 
+func TestAnalyzerIgnoresShowPropertyAssignments(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+    If Me.Show = False Then
+    End If
+    If Not Me.Show Then
+    End If
+    YAxis.Show = True
+    Options.DataLabels.Show = True
+    If fd.Show = -1 Then
+    End If
+    UserForm1.Show
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 2 || boundaries[0].Symbol != "UserForm.Show" || boundaries[0].Line != 9 || boundaries[1].Symbol != "UserForm.Show" || boundaries[1].Line != 11 {
+		t.Fatalf("expected only the file-dialog and UserForm display calls, got %+v", boundaries)
+	}
+}
+
 func TestStripCommentKeepsApostropheInsideStrings(t *testing.T) {
 	got := StripComment(`MsgBox "it''s ""done""" ' trailing`)
 	if got != `MsgBox "it''s ""done""" ` {
