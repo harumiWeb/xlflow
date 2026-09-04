@@ -5286,6 +5286,7 @@ func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextSco
 	}
 	lhsMemberProbe := false
 	rhsMemberProbe := false
+	arrayElementProbe := false
 	switch statement.Kind {
 	case procedureir.StatementAssignment, procedureir.StatementSet:
 		if statement.Target == nil || statement.Value == nil || statement.Value.Recovered {
@@ -5302,13 +5303,14 @@ func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextSco
 		rhsMemberProbe = !lhsMemberProbe &&
 			resumeNextScopeHasSingleRHSMemberCallProbe(proc, statement, moduleDecls, projectResolver) &&
 			resumeNextScopeMemberCallArgumentsSafe(proc, statement, moduleDecls, projectResolver)
+		arrayElementProbe = !lhsMemberProbe && !rhsMemberProbe && resumeNextScopeHasSingleArrayElementProbe(proc, statement, moduleDecls)
 	case procedureir.StatementCall:
 		lhsMemberProbe = resumeNextScopeHasSingleMemberCallProbe(proc, statement, moduleDecls, projectResolver) &&
 			resumeNextScopeMemberCallArgumentsSafe(proc, statement, moduleDecls, projectResolver)
 	default:
 		return false
 	}
-	if !lhsMemberProbe && !rhsMemberProbe {
+	if !lhsMemberProbe && !rhsMemberProbe && !arrayElementProbe {
 		return false
 	}
 	ordered := make([]procedureir.Statement, 0, len(statementsByID))
@@ -5330,6 +5332,9 @@ func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextSco
 	}
 	if index < 0 {
 		return false
+	}
+	if arrayElementProbe && resumeNextScopeConditionalErrAssertionProbe(proc, statement, ordered, index, statementsByID, moduleDecls, projectResolver) {
+		return true
 	}
 	next := func(start int) (procedureir.Statement, int, bool) {
 		for i := start; i < len(ordered); i++ {
@@ -5425,6 +5430,121 @@ func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextSco
 		return false
 	}
 	return true
+}
+
+// Conditional compilation can provide different expected error numbers for
+// different VBA dialects. Treat those assertions as one checked probe only
+// when every branch of a single #If group is covered and all paths reach one
+// unconditional restore without another executable statement in between.
+func resumeNextScopeConditionalErrAssertionProbe(proc sourceProcedure, statement procedureir.Statement, ordered []procedureir.Statement, index int, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	if len(statement.ConditionalBranches) != 0 {
+		return false
+	}
+	assertions := make([]procedureir.Statement, 0, 2)
+	branches := make(map[int]bool)
+	group := ""
+	maxBranch := -1
+	for i := index + 1; i < len(ordered); i++ {
+		candidate := ordered[i]
+		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+			continue
+		}
+		if restoresErrorHandling(candidate) {
+			if len(candidate.ConditionalBranches) != 0 || len(assertions) < 2 || maxBranch < 1 {
+				return false
+			}
+			for branch := 0; branch <= maxBranch; branch++ {
+				if !branches[branch] {
+					return false
+				}
+			}
+			previousID := statement.ID
+			for _, assertion := range assertions {
+				if !resumeNextScopeNormalFlowTo(proc.Graph, previousID, assertion.ID, statementsByID) {
+					return false
+				}
+				previousID = assertion.ID
+			}
+			return resumeNextScopeNormalFlowTo(proc.Graph, previousID, candidate.ID, statementsByID)
+		}
+		if !resumeNextScopeErrAssertion(proc, moduleDecls, candidate, projectResolver) || len(candidate.ConditionalBranches) != 1 {
+			return false
+		}
+		branch := candidate.ConditionalBranches[0]
+		if branch.Group == "" || (group != "" && group != branch.Group) || branch.Branch < 0 || branches[branch.Branch] {
+			return false
+		}
+		group = branch.Group
+		branches[branch.Branch] = true
+		if branch.Branch > maxBranch {
+			maxBranch = branch.Branch
+		}
+		assertions = append(assertions, candidate)
+	}
+	return false
+}
+
+// A typed or Variant array element read/write is one compatibility operation
+// when its subscript contains no nested call or member access. Keep this
+// separate from member-call probes because the IR represents arr(index) as a
+// call-like expression even when arr is an array rather than a procedure.
+func resumeNextScopeHasSingleArrayElementProbe(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet || statement.Recovered {
+		return false
+	}
+	variables := resumeNextScopeArrayProbeVariables(proc, moduleDecls)
+	uses := arrayIndexedUses(maskStringLiterals(gui.StripComment(statement.Text)), variables)
+	if len(uses) != 1 || len(uses[0].args) == 0 {
+		return false
+	}
+	for _, argument := range uses[0].args {
+		if strings.ContainsAny(argument, "().!") {
+			return false
+		}
+	}
+	callCount := 0
+	for call := range proc.Calls.All() {
+		if call.StatementID != statement.ID || call.Callee.Receiver != nil || strings.EqualFold(strings.TrimSpace(call.Callee.BaseName), "Let") {
+			continue
+		}
+		if call.IsRaiseEvent || !strings.EqualFold(cleanIdentifier(strings.TrimSpace(call.Callee.BaseName)), cleanIdentifier(strings.TrimSpace(uses[0].name))) {
+			return false
+		}
+		callCount++
+	}
+	return callCount == 1
+}
+
+func resumeNextScopeArrayProbeVariables(proc sourceProcedure, moduleDecls map[string]sourceDeclaration) map[string]arrayVariable {
+	variables := make(map[string]arrayVariable, len(moduleDecls)+proc.Declarations.Len()+proc.Params.Len())
+	for name, declaration := range moduleDecls {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" {
+			continue
+		}
+		variables[key] = arrayVariable{isArray: declaration.Array, isVariant: declaration.Type == "" || strings.EqualFold(strings.TrimSpace(declaration.Type), "Variant")}
+	}
+	for declaration := range proc.Declarations.All() {
+		key := strings.ToLower(strings.TrimSpace(declaration.Name))
+		if key == "" {
+			continue
+		}
+		variables[key] = arrayVariable{
+			isArray:   declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+			isVariant: declaration.ValueShape == procedureir.ValueShapeVariant || declaration.Type == "" || strings.EqualFold(strings.TrimSpace(declaration.Type), "Variant"),
+		}
+	}
+	for parameter := range proc.Params.All() {
+		key := strings.ToLower(strings.TrimSpace(parameter.Name))
+		if key == "" {
+			continue
+		}
+		variables[key] = arrayVariable{
+			isArray:   parameterIsArray(parameter),
+			isVariant: parameter.Type == "" || strings.EqualFold(strings.TrimSpace(parameter.Type), "Variant"),
+		}
+	}
+	return variables
 }
 
 func resumeNextScopeMemberProbeTarget(target string) bool {

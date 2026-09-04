@@ -154,11 +154,11 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 2307 || metrics.TP != 1129 || metrics.FP != 1178 {
-		t.Fatalf("committed review metrics = %#v, want Reviewed=2307 TP=1129 FP=1178", metrics)
+	if metrics.Reviewed != 2313 || metrics.TP != 1134 || metrics.FP != 1179 {
+		t.Fatalf("committed review metrics = %#v, want Reviewed=2313 TP=1134 FP=1179", metrics)
 	}
-	// This review pass expanded the ledger with confirmed VBA227 false
-	// positives, so the observed precision remains close to the review floor.
+	// This review pass expanded the ledger with confirmed VBA214 and VBA227
+	// false positives, so the observed precision remains close to the review floor.
 	// Keep a small margin below the current precision to catch a material
 	// regression without blocking legitimate review progress.
 	if precision := float64(metrics.TP) / float64(metrics.TP+metrics.FP); precision < 0.400 {

@@ -4627,6 +4627,62 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA214AllowsCheckedArrayElementProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CheckedArrayElementProbe()
+  Dim values() As Integer
+  ReDim values(0 To 2)
+  On Error Resume Next
+  Dim value As Integer: value = values(3)
+  #If TWINBASIC Then
+    Debug.Assert Err.Number <> 0
+  #Else
+    Debug.Assert Err.Number = 9
+  #End If
+  On Error GoTo 0
+End Sub
+
+Private Function IndexValue() As Integer
+  IndexValue = 3
+End Function
+
+Public Sub NestedArrayElementProbe()
+  Dim values() As Integer
+  ReDim values(0 To 2)
+  On Error Resume Next
+  Dim value As Integer: value = values(IndexValue())
+  Debug.Assert Err.Number <> 0
+  On Error GoTo 0
+End Sub
+
+Public Sub MissingConditionalAssertion()
+  Dim values() As Integer
+  ReDim values(0 To 2)
+  On Error Resume Next
+  Dim value As Integer: value = values(3)
+  #If TWINBASIC Then
+    Debug.Assert Err.Number <> 0
+  #End If
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := make(map[string]bool, len(got))
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if len(got) != 2 || !procedures["NestedArrayElementProbe"] || !procedures["MissingConditionalAssertion"] || procedures["CheckedArrayElementProbe"] {
+		t.Fatalf("only nested or incomplete-conditional array probes should report VBA214: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA214AllowsScalarMemberProbeResultInspection(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
