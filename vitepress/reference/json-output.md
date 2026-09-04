@@ -344,7 +344,7 @@ by `id`.
   "status": "ok",
   "command": "rules",
   "rules": {
-    "schema_version": 1,
+    "schema_version": 2,
     "items": [
       {
         "id": "VB001",
@@ -372,7 +372,8 @@ by `id`.
 }
 ```
 
-Version 1 is additive: new rules and fields may appear without changing
+Version 2 adds the `information` severity while retaining the catalog fields and
+suppression semantics. New rules and fields may appear without changing
 `schema_version`, and consumers must ignore fields they do not recognize. A
 breaking field removal or meaning change requires a new version. An unavailable
 command, malformed response, unsupported version, or unknown rule ID means the

@@ -756,7 +756,7 @@ integrations must treat an unavailable, invalid, failed, or unsupported-version
 response as unavailable advisory metadata, not infer safety from command names.
 See `docs/specs/workbook-coordination.md` for the complete capability contract.
 
-`rules --json` returns top-level `rules` with `schema_version: 1` and an `items`
+`rules --json` returns top-level `rules` with `schema_version: 2` and an `items`
 array sorted by diagnostic ID. The command is project-independent and is
 registered in the coordination policy as a source-scoped read operation that is
 parallel-safe, does not require Excel, and is not subject to workbook wait or
@@ -771,18 +771,20 @@ Each item publishes the canonical rule `id`, `title`, `description`, `family`,
 `surfaces` identifies the supported `lint`, `analyze`, and `lsp` projections;
 `supported_severities` is constrained by evidence class: compile-equivalent
 and runtime-error rules expose only `error`, while advisory evidence classes
-expose only `warning`. Compile-equivalent errors are unsuppressible and block
-source preflight; runtime-error errors remain inline-suppressible and
-non-blocking because the source may compile and fail only when the expression
-executes. Version 1 evolves additively: new rule entries
-and fields may be added, clients must ignore fields and IDs they do not recognize, and a
-field removal or incompatible meaning change requires a new `schema_version`.
+expose `warning` or `information` as declared by each rule. Compile-equivalent
+errors are unsuppressible and block source preflight; runtime-error errors
+remain inline-suppressible and non-blocking because the source may compile and
+fail only when the expression executes. Version 2 evolves additively from the
+original catalog: new rule
+entries and fields may be added, clients must ignore fields and IDs they do not
+recognize, and a field removal or incompatible meaning change requires a new
+`schema_version`.
 Unavailable, failed, malformed, or unsupported-version metadata must be treated
 as unknown; a client must not infer that an unknown rule is suppressible.
 
 The registry covers normal `VB...` lint/LSP rules and `VBA...` analyzer rules.
 `VBA000` is a synthetic analysis-failure diagnostic rather than a rule, and
-UserForm `FRM...` / `UFY...` diagnostics remain outside schema version 1.
+UserForm `FRM...` / `UFY...` diagnostics remain outside schema version 2.
 
 Workbook lock contention uses the stable error code `workbook_busy`. It fails
 immediately by default and uses the same envelope for every workbook-bound

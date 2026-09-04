@@ -29,6 +29,11 @@ export type ExecutableResolver = (configured: string) => ResolvedExecutable;
 const rulesTimeoutMs = 5000;
 const resolutionTtlMs = 1000;
 
+// The inline_suppressible field is stable across the v1 and v2 catalog
+// schemas. Keep compatibility with older installed CLIs while rejecting
+// future schemas until their suppression semantics have been reviewed.
+const supportedRulesSchemaVersions = new Set([1, 2]);
+
 export class XlflowRulesRegistryService {
   private cache: { identity: string; rules: ReadonlyMap<string, RuleMetadata> } | undefined;
   private pending:
@@ -198,7 +203,8 @@ export function parseRulesEnvelope(value: unknown): ReadonlyMap<string, RuleMeta
     value.status !== "ok" ||
     value.command !== "rules" ||
     !isObject(rules) ||
-    rules.schema_version !== 1 ||
+    typeof rules.schema_version !== "number" ||
+    !supportedRulesSchemaVersions.has(rules.schema_version) ||
     !Array.isArray(rules.items)
   ) {
     throw new Error("xlflow rules returned an unsupported response schema.");
