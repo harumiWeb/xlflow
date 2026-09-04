@@ -105,8 +105,8 @@ func TestCommittedDiagnosticReviews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reviews) != 2069 {
-		t.Fatalf("committed reviews = %d, want 2069", len(reviews))
+	if len(reviews) != 2116 {
+		t.Fatalf("committed reviews = %d, want 2116", len(reviews))
 	}
 	if err := ValidateReviewSources(repoRoot, corpusRoot, reviews); err != nil {
 		t.Fatal(err)
@@ -154,11 +154,11 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 2320 || metrics.TP != 1141 || metrics.FP != 1179 {
-		t.Fatalf("committed review metrics = %#v, want Reviewed=2320 TP=1141 FP=1179", metrics)
+	if metrics.Reviewed != 2355 || metrics.TP != 1147 || metrics.FP != 1208 {
+		t.Fatalf("committed review metrics = %#v, want Reviewed=2355 TP=1147 FP=1208", metrics)
 	}
-	// This review pass expanded the ledger with confirmed VBA214 and VBA227
-	// false positives, so the observed precision remains close to the review floor.
+	// This review pass expanded the ledger with confirmed VB045 and VBA206
+	// findings, so the observed precision remains close to the review floor.
 	// Keep a small margin below the current precision to catch a material
 	// regression without blocking legitimate review progress.
 	if precision := float64(metrics.TP) / float64(metrics.TP+metrics.FP); precision < 0.400 {

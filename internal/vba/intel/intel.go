@@ -1867,6 +1867,11 @@ func (a Analyzer) resolveCallSignatureAtContextWithLocalPriority(doc Document, t
 			if strings.EqualFold(receiverType, "Object") && sheetsDefaultExpression(receiver) {
 				receiverType = "Excel.Worksheet"
 			}
+			if preferLocal {
+				if sig, found := a.resolveProjectMemberSignature(doc, receiverType, memberName, pos); found {
+					return sig, true, nil
+				}
+			}
 			if member, found := a.DB.ResolveMember(receiverType, memberName); found {
 				if len(member.Parameters) == 0 {
 					if sig, found := a.defaultMemberSignatureForCall(receiverType, memberName); found {
@@ -1874,11 +1879,6 @@ func (a Analyzer) resolveCallSignatureAtContextWithLocalPriority(doc Document, t
 					}
 				}
 				return a.signatureFromMember(receiverType, member, a.memberKind(receiverType, memberName)), true, nil
-			}
-			if preferLocal {
-				if sig, found := a.resolveProjectMemberSignature(doc, receiverType, memberName, pos); found {
-					return sig, true, nil
-				}
 			}
 			if sig, found := a.defaultMemberSignatureForCall(receiverType, memberName); found {
 				return sig, true, nil
@@ -1910,9 +1910,6 @@ func (a Analyzer) resolveProjectMemberSignature(doc Document, receiverType, memb
 	receiverType = strings.TrimSpace(receiverType)
 	if receiverType == "" || memberName == "" {
 		return Signature{}, false
-	}
-	if idx := strings.LastIndex(receiverType, "."); idx >= 0 {
-		receiverType = receiverType[idx+1:]
 	}
 	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, []Document{doc}, WorkspaceSymbolQuery{Text: memberName, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
@@ -2604,7 +2601,7 @@ func (a Analyzer) unknownMemberDiagnosticForExpression(doc Document, lineNo int,
 			}
 			current = info.ReturnType
 			if called {
-				if typ, ok := a.collectionDefaultType(current); ok {
+				if typ, ok := a.indexedMemberResultType(current); ok {
 					current = typ
 				}
 			}
@@ -2650,7 +2647,7 @@ func (a Analyzer) typeDiagnosticBaseType(doc Document, raw string, offset int) (
 		}
 	}
 	if called {
-		if typ, ok := a.collectionDefaultType(current); ok {
+		if typ, ok := a.indexedMemberResultType(current); ok {
 			current = typ
 		}
 		if strings.EqualFold(current, "Object") {
@@ -3077,12 +3074,30 @@ func callsOnLine(line string) []parsedCall {
 	if isDeclarationCallPrefix(line) {
 		return nil
 	}
+	parenCalls := parenCallsOnLine(line)
 	var out []parsedCall
-	out = append(out, parenCallsOnLine(line)...)
 	if call, ok := parenlessCallOnLine(line); ok {
+		for _, parenCall := range parenCalls {
+			if parenthesizedArgumentPrefix(parenCall, call) {
+				continue
+			}
+			out = append(out, parenCall)
+		}
 		out = append(out, call)
+	} else {
+		out = append(out, parenCalls...)
 	}
 	return out
+}
+
+func parenthesizedArgumentPrefix(inner, outer parsedCall) bool {
+	if !strings.EqualFold(inner.Target, outer.Target) || inner.Start != outer.Start || inner.End >= outer.End {
+		return false
+	}
+	if len(inner.Arguments) != 1 || len(outer.Arguments) <= 1 {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(outer.Arguments[0].Text), "(")
 }
 
 func isDeclarationCallPrefix(text string) bool {
@@ -3117,8 +3132,19 @@ func isDeclarationCallPrefix(text string) bool {
 func parenCallsOnLine(line string) []parsedCall {
 	var out []parsedCall
 	inString := false
+	bracketDepth := 0
 	for i := 0; i < len(line); i++ {
+		if bracketDepth > 0 {
+			if line[i] == ']' {
+				bracketDepth--
+			}
+			continue
+		}
 		switch line[i] {
+		case '[':
+			if !inString {
+				bracketDepth++
+			}
 		case '"':
 			if inString && i+1 < len(line) && line[i+1] == '"' {
 				i++
@@ -3137,11 +3163,15 @@ func parenCallsOnLine(line string) []parsedCall {
 			if close < 0 {
 				continue
 			}
+			start := strings.LastIndex(line[:i], target)
+			if start < 0 {
+				start = max(0, i-len(target))
+			}
 			out = append(out, parsedCall{
 				Target:    target,
 				Arguments: parseArguments(line[i+1 : close]),
 				Line:      line,
-				Start:     max(0, i-len(target)),
+				Start:     start,
 				End:       close + 1,
 			})
 		}
@@ -3167,7 +3197,7 @@ func parenlessCallOnLine(line string) (parsedCall, bool) {
 	head := strings.TrimSpace(text[:sep])
 	argsText := strings.TrimSpace(text[sep+1:])
 	target := callTargetBeforeOpenLike(head)
-	if target == "" || strings.Contains(argsText, "=") && !strings.Contains(argsText, ":=") {
+	if target == "" || hasTopLevelAssignmentOperator(argsText) {
 		return parsedCall{}, false
 	}
 	start := strings.LastIndex(line, target)
@@ -3180,8 +3210,19 @@ func parenlessCallOnLine(line string) (parsedCall, bool) {
 func firstTopLevelWhitespace(text string) int {
 	inString := false
 	depth := 0
+	bracketDepth := 0
 	for i := 0; i < len(text); i++ {
+		if bracketDepth > 0 {
+			if text[i] == ']' {
+				bracketDepth--
+			}
+			continue
+		}
 		switch text[i] {
+		case '[':
+			if !inString {
+				bracketDepth++
+			}
 		case '"':
 			if inString && i+1 < len(text) && text[i+1] == '"' {
 				i++
@@ -3217,8 +3258,19 @@ func callTargetBeforeOpenLike(prefix string) string {
 func matchingParen(line string, open int) int {
 	inString := false
 	depth := 0
+	bracketDepth := 0
 	for i := open; i < len(line); i++ {
+		if bracketDepth > 0 {
+			if line[i] == ']' {
+				bracketDepth--
+			}
+			continue
+		}
 		switch line[i] {
+		case '[':
+			if !inString {
+				bracketDepth++
+			}
 		case '"':
 			if inString && i+1 < len(line) && line[i+1] == '"' {
 				i++
@@ -3618,10 +3670,21 @@ func parseArguments(text string) []argument {
 func splitTopLevel(text string, sep byte) []string {
 	inString := false
 	depth := 0
+	bracketDepth := 0
 	start := 0
 	var out []string
 	for i := 0; i < len(text); i++ {
+		if bracketDepth > 0 {
+			if text[i] == ']' {
+				bracketDepth--
+			}
+			continue
+		}
 		switch text[i] {
+		case '[':
+			if !inString {
+				bracketDepth++
+			}
 		case '"':
 			if inString && i+1 < len(text) && text[i+1] == '"' {
 				i++
@@ -3645,6 +3708,45 @@ func splitTopLevel(text string, sep byte) []string {
 	}
 	out = append(out, text[start:])
 	return out
+}
+
+func hasTopLevelAssignmentOperator(text string) bool {
+	inString := false
+	depth := 0
+	bracketDepth := 0
+	for i := 0; i < len(text); i++ {
+		if bracketDepth > 0 {
+			if text[i] == ']' {
+				bracketDepth--
+			}
+			continue
+		}
+		switch text[i] {
+		case '[':
+			if !inString {
+				bracketDepth++
+			}
+		case '"':
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case '=':
+			if !inString && depth == 0 && (i == 0 || text[i-1] != ':') {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isIdentifier(value string) bool {
@@ -4793,7 +4895,7 @@ func (a Analyzer) resolveExpressionTypeAtContextWithState(doc Document, expr str
 		return "", false
 	}
 	if strings.Contains(parts[0], "(") {
-		if typ, ok := a.collectionDefaultType(current); ok {
+		if typ, ok := a.indexedMemberResultType(current); ok {
 			current = typ
 		}
 		if strings.EqualFold(current, "Object") && sheetsDefaultExpression(parts[0]) {
@@ -4839,7 +4941,7 @@ func (a Analyzer) resolveExpressionTypeAtContextWithState(doc Document, expr str
 			return "", false
 		}
 		if called {
-			if typ, ok := a.collectionDefaultType(current); ok {
+			if typ, ok := a.indexedMemberResultType(current); ok {
 				current = typ
 			}
 			if strings.EqualFold(current, "Object") && strings.EqualFold(member, "Sheets") {
@@ -4937,7 +5039,7 @@ func (a Analyzer) resolveMemberChainFromType(baseType, expr string) (string, boo
 		}
 		current = info.ReturnType
 		if called {
-			if typ, ok := a.collectionDefaultType(current); ok {
+			if typ, ok := a.indexedMemberResultType(current); ok {
 				current = typ
 			}
 		}
@@ -4964,12 +5066,21 @@ func stripLineComment(line string) string {
 	return line
 }
 
-func (a Analyzer) collectionDefaultType(name string) (string, bool) {
+func (a Analyzer) indexedMemberResultType(name string) (string, bool) {
 	typ, ok := a.DB.ResolveType(name)
-	if !ok || !strings.EqualFold(typ.Kind, "collection") || typ.ElementType == "" {
+	if !ok {
 		return "", false
 	}
-	return typ.ElementType, true
+	if strings.EqualFold(typ.Kind, "collection") && typ.ElementType != "" {
+		return typ.ElementType, true
+	}
+	if typ.DefaultMember == "" {
+		return "", false
+	}
+	if member, ok := a.DB.ResolveMember(typ.Name, typ.DefaultMember); ok && member.ReturnType != "" {
+		return member.ReturnType, true
+	}
+	return typ.DefaultMemberType, typ.DefaultMemberType != ""
 }
 
 func (a Analyzer) formControlSymbols(doc Document) []Symbol {
@@ -5367,7 +5478,7 @@ func (a Analyzer) resolveRelativeMemberExpressionType(receiverType, expr string)
 		}
 		current = info.ReturnType
 		if called {
-			if typ, ok := a.collectionDefaultType(current); ok {
+			if typ, ok := a.indexedMemberResultType(current); ok {
 				current = typ
 			}
 		}
