@@ -54,7 +54,7 @@ var detectors = []detector{
 	detect(`(?i)\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*show\b`, "user_form", "UserForm.Show", "UserForm display requires human interaction.", "Keep UserForm entrypoints interactive-only and extract core logic into parameterized procedures."),
 	detect(`(?i)\.\s*show\s+vbmodal\b`, "user_form", ".Show vbModal", "Modal form display requires human interaction.", "Keep modal UI entrypoints interactive-only and extract core logic into parameterized procedures."),
 	detect(`(?i)\bdoevents\b`, "message_pump", "DoEvents", "DoEvents can hide GUI waits or message-pump dependent behavior.", "Avoid message-pump dependent control flow in headless macros."),
-	detect(`(?i)^\s*shell\s*(?:\(|")?`, "external_process", "Shell", "Shell starts an external process from VBA.", "Prefer explicit CLI orchestration or document this macro as interactive/external-process dependent."),
+	detect(`(?i)^\s*shell\b\s*(?:\(|")?`, "external_process", "Shell", "Shell starts an external process from VBA.", "Prefer explicit CLI orchestration or document this macro as interactive/external-process dependent."),
 	detectWithStrings(`(?i)\bcreateobject\s*\(\s*"wscript\.shell"\s*\)\s*\.\s*popup\b`, "modal_dialog", `CreateObject("WScript.Shell").Popup`, "WScript popup blocks unattended execution.", "If this is just a confirmation dialog, prefer XlflowUI.MsgBox with a stable dialog id; otherwise keep it behind an interactive-only adapter."),
 }
 

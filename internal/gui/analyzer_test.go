@@ -296,6 +296,38 @@ End Sub
 	}
 }
 
+func TestAnalyzerDoesNotTreatShellEscapeAsShell(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+    Dim options As String
+    Dim shellWait As Long
+    Dim shellExtensions As Collection
+    Dim shellFolder As Object
+    options = ShellEscapeBatchmodeOptionsList(1)
+    shellWait = 1
+    shellExtensions = Nothing
+    shellFolder = Nothing
+ShellError:
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 0 {
+		t.Fatalf("ShellEscape function names must not be reported as Shell launches, got %+v", boundaries)
+	}
+}
+
 func TestStripCommentKeepsApostropheInsideStrings(t *testing.T) {
 	got := StripComment(`MsgBox "it''s ""done""" ' trailing`)
 	if got != `MsgBox "it''s ""done""" ` {
