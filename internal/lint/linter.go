@@ -118,9 +118,13 @@ const (
 	maxParserRecoveryTokenRunes        = 80
 	maxParserRecoveryContextRunes      = 160
 	// VB004 recovery limits bound the forward statement scan and the short
-	// reset scope that is accepted without an Err.Number probe.
-	resumeNextScanLimit  = 16
-	resumeNextShortScope = 5
+	// reset scope that is accepted without an Err.Number probe. The scope
+	// count excludes multiline block structure, so nested guard clauses do
+	// not make a small bounded probe look broad; it still permits at most two
+	// recovery statements plus the reset itself.
+	resumeNextScanLimit    = 16
+	resumeNextShortScope   = 5
+	resumeNextGuardedScope = 3
 )
 
 func (l Linter) Run() ([]Issue, error) {
@@ -1639,25 +1643,29 @@ func (l Linter) onErrorIssuesFromProcedureIR(ctx context.Context, path string, i
 }
 
 func hasNarrowResumeNextRecovery(statements []procedureir.Statement, start int) bool {
-	seen := 0
+	scanned := 0
+	scopeStatements := 0
 	sawErrNumberCheck := false
 	sawLoop := false
-	for i := start + 1; i < len(statements) && seen < resumeNextScanLimit; i++ {
+	for i := start + 1; i < len(statements) && scanned < resumeNextScanLimit; i++ {
 		statement := statements[i]
 		if statement.Recovered || strings.TrimSpace(statement.Text) == "" {
 			continue
 		}
-		seen++
+		scanned++
 		switch statement.Kind {
 		case procedureir.StatementFor, procedureir.StatementForEach, procedureir.StatementDo, procedureir.StatementWhile:
 			sawLoop = true
+		}
+		if !isResumeNextStructuralStatement(statement) {
+			scopeStatements++
 		}
 		if statement.Kind == procedureir.StatementOnError && statement.Control != nil {
 			switch statement.Control.Transfer {
 			case procedureir.TransferOnErrorDisable, procedureir.TransferOnErrorGoto:
 				// Both forms replace Resume Next with an explicit error mode.
 				// Keep the existing short-scope and Err.Number probe allowances.
-				return sawErrNumberCheck || (!sawLoop && seen <= resumeNextShortScope)
+				return sawErrNumberCheck || (!sawLoop && (scanned <= resumeNextShortScope || scopeStatements <= resumeNextGuardedScope))
 			}
 		}
 		if strings.Contains(strings.ToLower(normalizedCodeLine(statement.Text)), "err.number") {
@@ -1665,6 +1673,20 @@ func hasNarrowResumeNextRecovery(statements []procedureir.Statement, start int) 
 		}
 	}
 	return false
+}
+
+func isResumeNextStructuralStatement(statement procedureir.Statement) bool {
+	switch statement.Kind {
+	case procedureir.StatementIf:
+		// A single-line If can contain executable statements in its own Text;
+		// only multiline block headers are structural here.
+		return statement.SyntaxKind != "single_line_if_statement"
+	case procedureir.StatementElseIf, procedureir.StatementElse,
+		procedureir.StatementSelect, procedureir.StatementCase, procedureir.StatementWith:
+		return true
+	default:
+		return false
+	}
 }
 
 func (l Linter) forEachIssuesFromProcedureIR(ctx context.Context, path string, ir procedureir.DocumentIR) ([]Issue, error) {

@@ -600,6 +600,25 @@ End Sub
 `,
 		},
 		{
+			name: "nested-bounded-probe",
+			source: `Option Explicit
+Public Sub NestedBoundedProbe(ByVal providerValue As Object)
+  Dim errorsObject As Object
+  Dim errorItem As Object
+  On Error Resume Next
+  If Not providerValue Is Nothing Then
+    Set errorsObject = CallByName(providerValue, "Errors", VbGet)
+    If Not errorsObject Is Nothing Then
+      If CLng(CallByName(errorsObject, "Count", VbGet)) > 0 Then
+        Set errorItem = CallByName(errorsObject, "Item", VbGet, 0)
+      End If
+    End If
+  End If
+  On Error GoTo 0
+End Sub
+`,
+		},
+		{
 			name: "broad-scope",
 			source: `Option Explicit
 Public Sub BroadScope()
@@ -610,6 +629,42 @@ Public Sub BroadScope()
   Debug.Print 4
   Debug.Print 5
   On Error GoTo 0
+End Sub
+`,
+			wantCount: 1,
+		},
+		{
+			name: "nested-broad-scope",
+			source: `Option Explicit
+Public Sub NestedBroadScope(ByVal ready As Boolean, ByVal enabled As Boolean)
+  On Error Resume Next
+  If ready Then
+    If enabled Then
+      Debug.Print 1
+      Debug.Print 2
+      Debug.Print 3
+      Debug.Print 4
+      Debug.Print 5
+    End If
+  End If
+  On Error GoTo 0
+End Sub
+`,
+			wantCount: 1,
+		},
+		{
+			name: "loop-local-broad-scope",
+			source: `Option Explicit
+Public Sub LoopLocalBroadScope(ByVal values As Variant)
+  For i = 1 To 2
+    On Error Resume Next
+    value = values(i)
+    value = values(i + 1)
+    value = values(i + 2)
+    value = values(i + 3)
+    value = values(i + 4)
+    On Error GoTo 0
+  Next i
 End Sub
 `,
 			wantCount: 1,
