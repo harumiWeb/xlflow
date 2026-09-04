@@ -105,8 +105,8 @@ func TestCommittedDiagnosticReviews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reviews) != 2136 {
-		t.Fatalf("committed reviews = %d, want 2136", len(reviews))
+	if len(reviews) != 2156 {
+		t.Fatalf("committed reviews = %d, want 2156", len(reviews))
 	}
 	if err := ValidateReviewSources(repoRoot, corpusRoot, reviews); err != nil {
 		t.Fatal(err)
@@ -154,8 +154,8 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 2375 || metrics.TP != 1167 || metrics.FP != 1208 {
-		t.Fatalf("committed review metrics = %#v, want Reviewed=2375 TP=1167 FP=1208", metrics)
+	if metrics.Reviewed != 2395 || metrics.TP != 1187 || metrics.FP != 1208 {
+		t.Fatalf("committed review metrics = %#v, want Reviewed=2395 TP=1187 FP=1208", metrics)
 	}
 	// This review pass expanded the ledger with confirmed VB001, VB045, and VBA206
 	// findings, so the observed precision remains close to the review floor.
