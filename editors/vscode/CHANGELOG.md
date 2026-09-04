@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.10.2
+
 - Fixed inline-suppression Quick Fix discovery with the current v2 rule
   metadata while retaining fail-closed behavior for unsupported schemas.
 
