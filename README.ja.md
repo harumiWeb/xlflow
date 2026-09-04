@@ -135,7 +135,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 > `lint`、`fmt`、一部の `diff`、Go のユニットテストなど、Excel COM を使わない処理は非 Excel 環境でも検証できます。
 
 > [!NOTE]
-> xlflow は COM 操作を .NET bridge で行います。レガシー PowerShell bridge は v0.15.0 で deprecated になり、互換性のための明示 opt-in としてのみ利用できます。v0.16.0 で削除予定です。
+> xlflow は COM 操作を .NET bridge で行います。レガシー PowerShell bridge は v0.16.0 で削除され、対応する bridge mode は `auto` と `dotnet` です。
 
 > [!WARNING]
 > Excel の設定で **VBA プロジェクト オブジェクト モデルへのアクセスを信頼する** を有効にしてください。これが無効だと、Excel がインストールされていても `pull` / `push` / `run` などが失敗する場合があります。
@@ -578,7 +578,7 @@ path = "build/Book.xlsm"
 visible = false
 # Excelの警告ダイアログ（上書き確認など）を抑制します。
 display_alerts = false
-# Excel bridge mode。Valid values: "auto", "dotnet"。"powershell" は deprecated で、v0.16.0 で削除予定です。
+# Excel bridge mode。指定可能な値は "auto" と "dotnet" です。
 bridge = "auto"
 
 # ソースツリーのディレクトリ
@@ -605,6 +605,11 @@ folder_annotation = "update"
 # ソースパスに基づいてデフォルトのフォルダアノテーションを自動的に割り当てます。
 default_component_folders = true
 
+# オプションのErl計測。有効にすると、push時の一時インポートコピーにのみ
+# 行番号を付与し、追跡対象のソースは番号なしのまま維持します。
+# [vba.line_numbers]
+# enabled = true
+
 # ユーザーフォームのソースモード
 [userform]
 # ユーザーフォームのコードビハインドがソースツリーのどこに配置されるか。
@@ -613,14 +618,109 @@ default_component_folders = true
 #   "sidecar" – コードは src/forms/code/<フォーム名>.bas に分離されます。
 code_source = "sidecar"
 
+# リリース用ビルドのソースフィルタリング。これは `build` のみに適用され、
+# `push` と `pack` では常にソースツリー全体が使用されます。
+[build]
+# `xlflow build` から除外するプロジェクトルート相対のdoublestar glob。
+exclude = [
+  "src/modules/Tests/**",
+  "src/modules/Xlflow/XlflowAssert.bas",
+]
+
+# procedureの複雑度メトリクス。
+[metrics]
+# メトリクス収集から除外するプロジェクトルート相対のdoublestar glob。
+exclude = []
+
+# 0はその閾値を無効化し、正の値は厳密な上限値として扱われます。
+[metrics.thresholds]
+cyclomatic_complexity = 0
+max_nesting_depth = 0
+statement_count = 0
+source_line_count = 0
+branch_count = 0
+loop_count = 0
+goto_count = 0
+exit_point_count = 0
+parameter_count = 0
+byref_parameter_count = 0
+local_variable_count = 0
+call_fan_out = 0
+
+# オプションのhotspotランキング。top-Nまたはスコア閾値が0の場合は無効です。
+[metrics.hotspots]
+procedure_top_n = 0
+module_top_n = 0
+procedure_score_threshold = 0
+module_score_threshold = 0
+
+# 自動バックアップ保持はデフォルトで無効です。コメントを外すと、設定されたワークブックに対する
+# バックアップ生成を伴うpushとrollbackの成功後に、古いメタデータ付きバックアップを削除します。
+# [backup.retention]
+# enabled = false
+# max_count = 20
+# max_age_days = 30
+# min_keep = 5
+# max_total_size_mb = 2048
+
+# VBA formatterの設定
+[fmt]
+# xlflow fmtで安全な二項演算子の前後の空白を正規化します。
+operator_spacing = true
+# xlflow fmtで安全なVBA宣言の空白を正規化します。
+declaration_spacing = true
+# VBAキーワードの大文字・小文字を正規化します。
+keyword_casing = true
+# 既知のVBA/Excel/Office組み込み識別子の大文字・小文字を正規化します。
+builtin_casing = true
+
+# source-preflight診断のwaiver
+[preflight]
+# ここで許可した診断も表示されますが、source-preflightをブロックする効果だけを
+# 解除します。Excel/VBEのコンパイルが失敗する可能性は残ります。
+allowed_diagnostics = []
+
 # 静的解析ルール
 [lint]
 # 診断 ID で特定の lint ルールを無効化します。
+#
+# 例:
+# disabled_rules = [
+#   "VB006", # このレガシープロジェクトでpublicなモジュールフィールドを許可します。
+# ]
 disabled_rules = []
 
+# VB020（未使用ローカル変数）の警告はデフォルトで有効です。
+# スクラッチ用ローカル変数を意図的に残すプロジェクトでは disabled_rules に "VB020" を追加します。
+#
+# プロジェクト全体に適用するオプションのlintルールです。callback中心または
+# workbook駆動のVBAではノイズになりやすいため、デフォルトでは無効です。
+# 個別の設定のコメントを外して有効化してください。
+# detect_scope_shadowing = true          # VB018
+# detect_unused_private_procedures = true # VB021
+# detect_nested_with_ambiguity = true    # VB027
+
+# オプションのprocedure名定数チェック（VB044）。
+# [lint.procedure_name_constant]
+# enabled = true
+# constant_name = "PROCEDURE_NAME"
+
+# runtime-risk analyzerルール
 [analyze]
 # 診断 ID で特定の analyzer ルールを無効化します。
+#
+# 例:
+# disabled_rules = [
+#   "VBA205", # このレガシープロジェクトでactive worksheet依存を許可します。
+# ]
 disabled_rules = []
+
+# 開発用途で明示的に許可するplain HTTP origin。
+development_http_origins = []
+
+# オプションのdataflow対応 analyzerルールはデフォルトで無効です。
+# FunctionおよびProperty Getのreturn pathを検査するには、次の設定のコメントを外してください。
+# detect_function_return_path = true # VBA210
 ```
 
 `project.entry` は `xlflow run` の macro 名を省略した場合に使われます。

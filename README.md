@@ -634,6 +634,11 @@ folder_annotation = "update"
 # Automatically assign default folder annotations based on source paths.
 default_component_folders = true
 
+# Optional Erl instrumentation. When enabled, push numbers only temporary
+# import copies; tracked source remains unnumbered.
+# [vba.line_numbers]
+# enabled = true
+
 # UserForm source mode.
 [userform]
 # Where UserForm code-behind lives in the source tree.
@@ -642,7 +647,45 @@ default_component_folders = true
 #   "sidecar" – code is split into src/forms/code/<FormName>.bas.
 code_source = "sidecar"
 
-# Automatic backup retention is disabled by default.
+# Release build source filtering. This affects `build` only; `push` and `pack`
+# always use the complete source tree.
+[build]
+# Project-root-relative doublestar globs excluded from `xlflow build`.
+exclude = [
+  "src/modules/Tests/**",
+  "src/modules/Xlflow/XlflowAssert.bas",
+]
+
+# Procedure complexity metrics.
+[metrics]
+# Project-root-relative doublestar globs excluded from metric collection.
+exclude = []
+
+# A value of zero disables that threshold; positive values are strict upper bounds.
+[metrics.thresholds]
+cyclomatic_complexity = 0
+max_nesting_depth = 0
+statement_count = 0
+source_line_count = 0
+branch_count = 0
+loop_count = 0
+goto_count = 0
+exit_point_count = 0
+parameter_count = 0
+byref_parameter_count = 0
+local_variable_count = 0
+call_fan_out = 0
+
+# Optional hotspot ranking. A zero top-N or score threshold disables it.
+[metrics.hotspots]
+procedure_top_n = 0
+module_top_n = 0
+procedure_score_threshold = 0
+module_score_threshold = 0
+
+# Automatic backup retention is disabled by default. Uncomment to prune old
+# metadata-backed backups for the configured workbook after successful backup-
+# producing push and rollback operations.
 # [backup.retention]
 # enabled = false
 # max_count = 20
@@ -650,14 +693,59 @@ code_source = "sidecar"
 # min_keep = 5
 # max_total_size_mb = 2048
 
+# VBA formatter settings.
+[fmt]
+# Normalize spacing around safe binary operators in xlflow fmt.
+operator_spacing = true
+# Normalize spacing in safe VBA declarations in xlflow fmt.
+declaration_spacing = true
+# Normalize VBA keyword casing in xlflow fmt.
+keyword_casing = true
+# Normalize known VBA/Excel/Office built-in identifier casing in xlflow fmt.
+builtin_casing = true
+
+# Source-preflight diagnostic waivers.
+[preflight]
+# Diagnostics remain enabled and visible when allowed here; only their
+# source-preflight blocking effect is waived. Excel/VBE compilation may still fail.
+allowed_diagnostics = []
+
 # Static analysis rules.
 [lint]
 # Disable specific lint rules by diagnostic ID.
+#
+# Example:
+# disabled_rules = [
+#   "VB006", # Allow public module-level fields in this legacy project.
+# ]
 disabled_rules = []
 
+# VB020 unused-local-variable warnings are enabled by default.
+# Add "VB020" to disabled_rules if a project intentionally keeps scratch locals.
+#
+# Optional project-wide lint rules. They are disabled by default because
+# they can be noisy in projects with callback-heavy or workbook-driven VBA.
+# Uncomment individual rules to enable them.
+# detect_scope_shadowing = true          # VB018
+# detect_unused_private_procedures = true # VB021
+# detect_nested_with_ambiguity = true    # VB027
+
+# Optional local procedure-name constant check (VB044).
+# [lint.procedure_name_constant]
+# enabled = true
+# constant_name = "PROCEDURE_NAME"
+
+# Runtime-risk analysis rules.
 [analyze]
 # Disable specific analyzer rules by diagnostic ID.
 disabled_rules = []
+
+# Plain HTTP origins explicitly allowed for development use.
+development_http_origins = []
+
+# Optional dataflow-sensitive analyzer rules are disabled by default.
+# Uncomment the following setting to check Function and Property Get return paths.
+# detect_function_return_path = true # VBA210
 ```
 
 `project.entry` is used when `xlflow run` is invoked without a macro name.
