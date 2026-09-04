@@ -1008,6 +1008,14 @@ func (c *astLintContext) visit(node *tree_sitter.Node, inProcedure bool, inType 
 	}
 	kind := node.Kind()
 	switch kind {
+	case "preprocessor_if", "type_preprocessor_if":
+		c.visitConditional(node, inProcedure, inType)
+		return
+	case "preprocessor_else", "preprocessor_elseif", "type_preprocessor_else", "type_preprocessor_elseif":
+		if body := node.ChildByFieldName("body"); body != nil {
+			c.visit(body, inProcedure, inType)
+		}
+		return
 	case "option_statement":
 		if strings.EqualFold(normalizedNodeText(node, c.source), "Option Explicit") {
 			c.hasOptionExplicit = true
@@ -1031,6 +1039,43 @@ func (c *astLintContext) visit(node *tree_sitter.Node, inProcedure bool, inType 
 			return
 		}
 		c.visit(node.NamedChild(i), inProcedure, inType)
+	}
+}
+
+func (c *astLintContext) visitConditional(node *tree_sitter.Node, inProcedure bool, inType bool) {
+	if known, value := conditionalConstant(node, c.source); known {
+		if value {
+			if body := node.ChildByFieldName("body"); body != nil {
+				c.visit(body, inProcedure, inType)
+			}
+			return
+		}
+		c.visitConditionalAlternatives(node, inProcedure, inType)
+		return
+	}
+	if body := node.ChildByFieldName("body"); body != nil {
+		c.visit(body, inProcedure, inType)
+	}
+	c.visitConditionalAlternatives(node, inProcedure, inType)
+}
+
+func (c *astLintContext) visitConditionalAlternatives(node *tree_sitter.Node, inProcedure bool, inType bool) {
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		kind := child.Kind()
+		if strings.Contains(kind, "elseif") {
+			if known, value := conditionalConstant(child, c.source); known && !value {
+				continue
+			}
+		} else if !strings.Contains(kind, "else") {
+			continue
+		}
+		if body := child.ChildByFieldName("body"); body != nil {
+			c.visit(body, inProcedure, inType)
+		}
 	}
 }
 

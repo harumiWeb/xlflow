@@ -1515,6 +1515,29 @@ End Type
 	}
 }
 
+func TestLinterIgnoresImplicitVariantsInsideDisabledConditionalBranches(t *testing.T) {
+	t.Parallel()
+	source := `Option Explicit
+Private Enum API
+  S_OK = 0
+#If False Then
+  Dim ignoredOne, ignoredTwo
+#End If
+End Enum
+Sub Main()
+  Dim liveValue
+End Sub
+`
+	issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb005 := issuesByCode(issues, "VB005")
+	if len(vb005) != 1 || vb005[0].Line != 9 || vb005[0].Column != 7 {
+		t.Fatalf("disabled conditional declarations should be ignored while live declarations remain visible: %+v", vb005)
+	}
+}
+
 func TestLinterAllowsInteractiveInputWhenDisabled(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
