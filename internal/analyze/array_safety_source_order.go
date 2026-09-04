@@ -1170,6 +1170,10 @@ func arrayCallArgumentTexts(proc sourceProcedure, call procedureir.CallSite) []s
 	facts := proc.analysisFacts()
 	texts := make([]string, 0, len(call.Arguments.ExpressionIDs))
 	for _, id := range call.Arguments.ExpressionIDs {
+		if id == 0 {
+			texts = append(texts, "")
+			continue
+		}
 		expression, ok := facts.Expression(id)
 		if !ok {
 			return nil

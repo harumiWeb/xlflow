@@ -4627,6 +4627,238 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA214AllowsScalarMemberProbeResultInspection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+#If Win64 Then
+Private Const NullPtr As LongLong = 0^
+#Else
+Private Const NullPtr As Long = 0&
+#End If
+
+Public Function FindDescriptor(ByVal key As Long) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = NullPtr Then Exit Function
+  FindDescriptor = descriptor
+End Function
+
+Public Function StaticDescriptor(ByVal key As String) As LongPtr
+  Static descriptors As New Collection
+  Static descriptor As LongPtr
+  On Error Resume Next
+  descriptor = descriptors(key)
+  On Error GoTo 0
+  If descriptor = NullPtr Then Exit Function
+  StaticDescriptor = descriptor
+End Function
+
+Public Function VariantDescriptor(ByVal key As Variant) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = NullPtr Then Exit Function
+  VariantDescriptor = descriptor
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if len(got) != 2 || !procedures["StaticDescriptor"] || !procedures["VariantDescriptor"] || procedures["FindDescriptor"] {
+		t.Fatalf("only the fresh primitive scalar probe should be accepted: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214KeepsByRefProbeResultWarning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub SetDescriptor(ByRef value As LongPtr)
+  value = 99
+End Sub
+
+Private Sub PreserveDescriptor(ByVal value As LongPtr)
+End Sub
+
+Private Sub SetDescriptorWithGap(ByVal first As LongPtr, Optional middle As LongPtr, ByRef value As LongPtr)
+  value = 99
+End Sub
+
+Public Function ByRefDescriptor(ByVal key As Long) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  SetDescriptor descriptor
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = 0 Then Exit Function
+  ByRefDescriptor = descriptor
+End Function
+
+Public Function ByValDescriptor(ByVal key As Long) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  PreserveDescriptor descriptor
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = 0 Then Exit Function
+  ByValDescriptor = descriptor
+End Function
+
+Public Function OmittedByRefDescriptor(ByVal key As Long) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  SetDescriptorWithGap 1, , descriptor
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = 0 Then Exit Function
+  OmittedByRefDescriptor = descriptor
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if len(got) != 2 || !procedures["ByRefDescriptor"] || !procedures["OmittedByRefDescriptor"] || procedures["ByValDescriptor"] {
+		t.Fatalf("a prior ByRef call must invalidate the implicit zero proof: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214KeepsRaiseEventProbeResultWarning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Emitter.cls", `Option Explicit
+Public Event Changed(ByRef value As LongPtr)
+
+Public Sub Fire(ByVal key As Long)
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  RaiseEvent Changed(descriptor)
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = 0 Then Exit Sub
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "Fire" {
+		t.Fatalf("a RaiseEvent with a ByRef argument must invalidate the implicit zero proof: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsNonScalarProbeResultInspection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub VariantScalarResult(ByVal ws As Object)
+  Dim result As Variant
+  On Error Resume Next
+  Set result = Nothing
+  Set result = ws.Names("Results")
+  On Error GoTo 0
+  If result = 0 Then Exit Sub
+End Sub
+
+Public Sub ObjectScalarResult(ByVal ws As Object)
+  Dim result As Object
+  On Error Resume Next
+  Set result = Nothing
+  Set result = ws.Names("Results")
+  On Error GoTo 0
+  If result = 0 Then Exit Sub
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if len(got) != 2 || !procedures["VariantScalarResult"] || !procedures["ObjectScalarResult"] {
+		t.Fatalf("non-scalar probe results must not satisfy scalar inspection: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214KeepsDateStringConversionWarning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function DateDescriptor(ByVal key As Date) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = 0 Then Exit Function
+  DateDescriptor = descriptor
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "DateDescriptor" {
+		t.Fatalf("CStr(Date) must remain a potentially failing operation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214KeepsNonZeroSentinelWarning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function NonZeroSentinel(ByVal key As Long) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = -1 Then Exit Function
+  NonZeroSentinel = descriptor
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "NonZeroSentinel" {
+		t.Fatalf("a non-zero sentinel must not satisfy the implicit zero proof: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA214RecognizesImplicitNothingForFreshObjectProbe(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

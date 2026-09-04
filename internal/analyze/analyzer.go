@@ -4877,6 +4877,7 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 		return nil
 	}
 	moduleDecls := file.moduleDecls()
+	constantValues := resumeNextScopeConstantValues(a, file)
 	reachable := map[vbacfg.BlockID]bool{}
 	for _, id := range proc.Graph.Reachable(vbacfg.EdgeFilter{}) {
 		reachable[id] = true
@@ -4890,7 +4891,7 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 		if !ok || !reachable[start.ID] {
 			continue
 		}
-		for _, outcome := range resumeNextScopeOutcomes(proc, start.ID, moduleDecls, projectResolver) {
+		for _, outcome := range resumeNextScopeOutcomes(proc, start.ID, moduleDecls, projectResolver, constantValues) {
 			if outcome.flags == 0 {
 				continue
 			}
@@ -4927,7 +4928,128 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 	return findings
 }
 
-func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) []resumeNextScopeOutcome {
+func resumeNextScopeConstantValues(a Analyzer, file parsedFile) map[string]constexpr.Value {
+	values := file.ConstantValues
+	if len(values) == 0 && len(file.Source) > 0 {
+		values = lint.ConstantValuesFromSource(string(file.Source), &file.IR, nil)
+	}
+	if len(a.visibleConstantValues) > 0 {
+		merged := make(map[string]constexpr.Value, len(values)+len(a.visibleConstantValues))
+		for name, value := range a.visibleConstantValues {
+			merged[name] = value
+		}
+		for name, value := range values {
+			merged[name] = value
+		}
+		values = merged
+	}
+	values = resumeNextScopeAddConditionalZeroConstants(file, values)
+	return values
+}
+
+// Conditional-compilation branches can leave the resolver with multiple
+// candidates. Preserve a module constant only when every source definition is
+// known and agrees on the same integral value.
+func resumeNextScopeAddConditionalZeroConstants(file parsedFile, values map[string]constexpr.Value) map[string]constexpr.Value {
+	if len(file.Lines) == 0 {
+		return values
+	}
+	insideProcedure := make([]bool, len(file.Lines)+1)
+	for _, procedure := range file.IR.Procedures {
+		start := procedure.Symbol.DeclarationRange.StartLine
+		end := procedure.Symbol.DeclarationRange.EndLine
+		if start < 1 {
+			start = 1
+		}
+		if end > len(file.Lines) {
+			end = len(file.Lines)
+		}
+		for line := start; line <= end; line++ {
+			insideProcedure[line] = true
+		}
+	}
+	type constantState struct {
+		value      constexpr.Value
+		seen       bool
+		consistent bool
+	}
+	states := map[string]constantState{}
+	environment := make(map[string]constexpr.Value, len(values)+8)
+	for name, value := range values {
+		environment[name] = value
+	}
+	for lineNumber, rawLine := range file.Lines {
+		line := lineNumber + 1
+		if line < len(insideProcedure) && insideProcedure[line] {
+			continue
+		}
+		match := runtimeConstAssignmentRe.FindStringSubmatch(normalizedCodeLine(rawLine))
+		if len(match) == 0 {
+			continue
+		}
+		name := runtimeSimpleIdentifier(match[1])
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		state := states[key]
+		if !state.seen {
+			state.consistent = true
+		}
+		result := constexpr.Evaluate(strings.TrimSpace(match[2]), constexpr.NewValues(environment))
+		if result.Kind != constexpr.Known {
+			state.consistent = false
+			state.seen = true
+			states[key] = state
+			continue
+		}
+		if state.seen && !resumeNextScopeConstantValuesEqual(state.value, result.Typed) {
+			state.consistent = false
+		}
+		state.value = result.Typed
+		state.seen = true
+		states[key] = state
+		environment[key] = result.Typed
+	}
+	if len(states) == 0 {
+		return values
+	}
+	additions := make(map[string]constexpr.Value)
+	for name, state := range states {
+		if state.consistent && state.seen && state.value.Integer == 0 &&
+			(state.value.Kind == constexpr.ValueInteger || state.value.Kind == constexpr.ValueLong || state.value.Kind == constexpr.ValueLongLong) {
+			additions[name] = state.value
+		}
+	}
+	if len(additions) == 0 {
+		return values
+	}
+	merged := make(map[string]constexpr.Value, len(values)+len(additions))
+	for name, value := range values {
+		merged[name] = value
+	}
+	for name, value := range additions {
+		merged[name] = value
+	}
+	return merged
+}
+
+func resumeNextScopeConstantValuesEqual(left, right constexpr.Value) bool {
+	integral := func(value constexpr.Value) bool {
+		switch value.Kind {
+		case constexpr.ValueInteger, constexpr.ValueLong, constexpr.ValueLongLong:
+			return true
+		default:
+			return false
+		}
+	}
+	if integral(left) && integral(right) {
+		return left.Integer == right.Integer
+	}
+	return left == right
+}
+
+func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver, constantValues map[string]constexpr.Value) []resumeNextScopeOutcome {
 	graph := proc.Graph
 	statementsByID := make(map[int]procedureir.Statement)
 	for statement := range proc.Statements.All() {
@@ -4968,7 +5090,7 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID, moduleD
 			}
 			continue
 		}
-		state = applyResumeNextScopeStatement(proc, state, statement, statementsByID, moduleDecls, projectResolver)
+		state = applyResumeNextScopeStatement(proc, state, statement, statementsByID, moduleDecls, projectResolver, constantValues)
 		for _, edge := range graph.Edges {
 			if edge.From != state.block {
 				continue
@@ -5049,7 +5171,7 @@ func restoresErrorHandling(statement procedureir.Statement) bool {
 		statement.Control.Transfer == procedureir.TransferOnErrorGoto
 }
 
-func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) resumeNextScopeState {
+func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver, constantValues map[string]constexpr.Value) resumeNextScopeState {
 	state.conditionalBranches = append([]resumeNextScopeConditionalBranch(nil), state.conditionalBranches...)
 	state = resumeNextScopeSyncConditionalBranches(state, statement.ConditionalBranches)
 	if isOnErrorResumeNext(statement) {
@@ -5062,9 +5184,9 @@ func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeSt
 		return state
 	}
 	unsafeMemberProbeValue := resumeNextScopeMemberProbeHasUnsafeValue(proc, statement, moduleDecls, projectResolver)
-	unsafeObjectInspection := resumeNextScopeRHSMemberProbeHasUnsafeObjectInspection(proc, statement, statementsByID, moduleDecls)
+	unsafeObjectInspection := resumeNextScopeRHSMemberProbeHasUnsafeResultInspection(proc, statement, statementsByID, moduleDecls, constantValues)
 	unsafeMemberProbeValue = unsafeMemberProbeValue || unsafeObjectInspection
-	if resumeNextScopeCheckedMemberProbe(proc, state, statement, statementsByID, moduleDecls, projectResolver) {
+	if resumeNextScopeCheckedMemberProbe(proc, state, statement, statementsByID, moduleDecls, projectResolver, constantValues) {
 		resumeNextScopeRecordOperation(&state)
 		return state
 	}
@@ -5158,7 +5280,7 @@ func resumeNextScopeSafeProbeInitialization(proc sourceProcedure, statement proc
 // mode. This covers expected-error compatibility checks such as a Dictionary
 // default-member assignment without making an unresolved or nested RHS call
 // disappear from the scope analysis.
-func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver, constantValues map[string]constexpr.Value) bool {
 	if resumeNextScopeCurrentOperations(state) != 0 || statement.Recovered {
 		return false
 	}
@@ -5252,8 +5374,17 @@ func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextSco
 				if rhsMemberProbe {
 					target, _, targetOK := resumeNextScopeAssignmentText(statement)
 					inspection, _, inspectionOK := next(candidateIndex + 1)
+					if targetOK && inspectionOK && resumeNextScopeScalarResultInspectionShape(proc, inspection, target, constantValues) &&
+						!resumeNextScopeScalarResultTargetIsValid(proc, target) {
+						return false
+					}
 					if targetOK && inspectionOK && resumeNextScopeObjectResultInspection(inspection, target) &&
 						!resumeNextScopeMemberProbeHasHostReceiver(proc, statement) &&
+						!resumeNextScopeHasPriorSafeProbeInitialization(proc, statement, ordered, index, statementsByID) {
+						return false
+					}
+					if targetOK && inspectionOK && resumeNextScopeScalarResultInspection(proc, inspection, target, constantValues) &&
+						resumeNextScopeNormalFlowTo(proc.Graph, candidate.ID, inspection.ID, statementsByID) &&
 						!resumeNextScopeHasPriorSafeProbeInitialization(proc, statement, ordered, index, statementsByID) {
 						return false
 					}
@@ -5281,7 +5412,15 @@ func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextSco
 	}
 	inspection, _, ok := next(restoreIndex + 1)
 	target, _, targetOK := resumeNextScopeAssignmentText(statement)
-	if !ok || !targetOK || !resumeNextScopeObjectResultInspection(inspection, target) ||
+	if !ok || !targetOK {
+		return false
+	}
+	if resumeNextScopeScalarResultInspectionShape(proc, inspection, target, constantValues) &&
+		!resumeNextScopeScalarResultTargetIsValid(proc, target) {
+		return false
+	}
+	if (!resumeNextScopeObjectResultInspection(inspection, target) &&
+		!resumeNextScopeScalarResultInspection(proc, inspection, target, constantValues)) ||
 		!resumeNextScopeNormalFlowTo(proc.Graph, restore.ID, inspection.ID, statementsByID) {
 		return false
 	}
@@ -5352,29 +5491,36 @@ func resumeNextScopeMemberProbeHasUnsafeValue(proc sourceProcedure, statement pr
 	}
 }
 
-func resumeNextScopeRHSMemberProbeHasUnsafeObjectInspection(proc sourceProcedure, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+func resumeNextScopeRHSMemberProbeHasUnsafeResultInspection(proc sourceProcedure, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration, constantValues map[string]constexpr.Value) bool {
 	if statement.Target == nil || statement.Value == nil || statement.Value.Recovered || statement.Value.Kind != procedureir.ExpressionCall {
 		return false
 	}
 	target, _, ok := resumeNextScopeAssignmentText(statement)
-	if !ok || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) ||
-		!resumeNextScopeBooleanCoercionTargetIsObject(proc, target, moduleDecls) {
+	if !ok || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
 		return false
 	}
 	if resumeNextScopeMemberProbeHasHostReceiver(proc, statement) {
 		return false
 	}
+	objectTarget := resumeNextScopeBooleanCoercionTargetIsObject(proc, target, moduleDecls)
 	inspection := false
 	for _, candidate := range statementsByID {
 		if candidate.Range.StartByte <= statement.Range.StartByte ||
-			!resumeNextScopeConditionalPathsCompatible(statement.ConditionalBranches, candidate.ConditionalBranches) ||
-			!resumeNextScopeObjectResultInspection(candidate, target) {
+			!resumeNextScopeConditionalPathsCompatible(statement.ConditionalBranches, candidate.ConditionalBranches) {
 			continue
 		}
-		inspection = true
-		break
+		if resumeNextScopeScalarResultInspectionShape(proc, candidate, target, constantValues) {
+			if !resumeNextScopeScalarResultTargetIsValid(proc, target) {
+				return true
+			}
+			continue
+		}
+		if objectTarget && resumeNextScopeObjectResultInspection(candidate, target) {
+			inspection = true
+			break
+		}
 	}
-	if !inspection {
+	if !objectTarget || !inspection {
 		return false
 	}
 	ordered := make([]procedureir.Statement, 0, len(statementsByID))
@@ -5474,8 +5620,14 @@ func resumeNextScopeHasSingleRHSMemberCallProbe(proc sourceProcedure, statement 
 		if candidate.Callee.Receiver == nil && strings.EqualFold(candidate.Callee.BaseName, "Let") {
 			continue
 		}
+		if !resumeNextScopeCallBelongsToTarget(candidate, statement.Value.Range) {
+			return false
+		}
+		if resumeNextScopeSafeStringConversionCall(proc, candidate, statement.Value.Range, moduleDecls, projectResolver) {
+			continue
+		}
 		count++
-		if count > 1 || !resumeNextScopeCallBelongsToTarget(candidate, statement.Value.Range) {
+		if count > 1 {
 			return false
 		}
 		expectedReceiver := ""
@@ -5527,7 +5679,8 @@ func resumeNextScopeHasPriorSafeProbeInitialization(proc sourceProcedure, statem
 	if !ok || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
 		return false
 	}
-	if resumeNextScopeHasImplicitObjectNothing(proc, target, statement, ordered, index) {
+	if resumeNextScopeHasImplicitObjectNothing(proc, target, statement, ordered, index) ||
+		resumeNextScopeHasImplicitScalarZero(proc, target, statement, ordered, index) {
 		return true
 	}
 	if proc.Graph == nil {
@@ -5585,6 +5738,9 @@ func resumeNextScopeHasImplicitObjectNothing(proc sourceProcedure, target string
 	if !found {
 		return false
 	}
+	if resumeNextScopeHasPriorPotentialByRefCall(proc, target, statement) {
+		return false
+	}
 	for candidateIndex := 0; candidateIndex < index; candidateIndex++ {
 		candidate := ordered[candidateIndex]
 		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
@@ -5606,6 +5762,132 @@ func resumeNextScopeHasImplicitObjectNothing(proc sourceProcedure, target string
 		}
 	}
 	return true
+}
+
+func resumeNextScopeHasImplicitScalarZero(proc sourceProcedure, target string, statement procedureir.Statement, ordered []procedureir.Statement, index int) bool {
+	if index < 0 || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	found := false
+	for declaration := range proc.Declarations.All() {
+		if !strings.EqualFold(strings.TrimSpace(declaration.Name), strings.TrimSpace(target)) ||
+			declaration.Scope != procedureir.ScopeLocal || declaration.IsArray || declaration.IsStatic || declaration.IsNew ||
+			declaration.IsObject || isObjectType(declaration.Type) || !resumeNextScopeZeroDefaultScalarType(declaration.Type) {
+			continue
+		}
+		found = true
+		break
+	}
+	if !found {
+		return false
+	}
+	if resumeNextScopeHasPriorPotentialByRefCall(proc, target, statement) {
+		return false
+	}
+	for candidateIndex := 0; candidateIndex < index; candidateIndex++ {
+		candidate := ordered[candidateIndex]
+		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+			continue
+		}
+		candidateTarget, _, candidateOK := resumeNextScopeAssignmentText(candidate)
+		if candidateOK && strings.EqualFold(strings.TrimSpace(candidateTarget), strings.TrimSpace(target)) {
+			return false
+		}
+	}
+	for access := range proc.Accesses.All() {
+		if !strings.EqualFold(strings.TrimSpace(access.Name), strings.TrimSpace(target)) ||
+			(access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) {
+			continue
+		}
+		if access.Range.StartByte < statement.Range.StartByte ||
+			(access.StatementID > 0 && statement.ID > 0 && access.StatementID < statement.ID) {
+			return false
+		}
+	}
+	return true
+}
+
+// A direct argument to a non-builtin call may alias the probe result through
+// VBA's default ByRef parameter passing. The IR does not retain callee
+// parameter passing modes on CallSite, so unresolved and project calls are
+// conservatively treated as possible writes. This prevents an earlier helper
+// call from invalidating the implicit zero/Nothing proof.
+func resumeNextScopeHasPriorPotentialByRefCall(proc sourceProcedure, target string, statement procedureir.Statement) bool {
+	target = strings.ToLower(cleanIdentifier(strings.TrimSpace(target)))
+	if target == "" {
+		return false
+	}
+	for call := range proc.Calls.All() {
+		if !resumeNextScopeCallMayMutateTarget(proc, call, target) ||
+			!resumeNextScopeCallPrecedesStatement(call, statement) {
+			continue
+		}
+		for _, argument := range call.Arguments.Named {
+			if directArrayArgumentName(argument.ValueText) == target {
+				return true
+			}
+		}
+		for _, argument := range arrayCallArgumentTexts(proc, call) {
+			if directArrayArgumentName(argument) == target {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func resumeNextScopeCallMayMutateTarget(proc sourceProcedure, call procedureir.CallSite, target string) bool {
+	if call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+		return false
+	}
+	if call.IsRaiseEvent {
+		return true
+	}
+	if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 || proc.Document == nil {
+		return true
+	}
+	qualifiedName := strings.TrimSpace(call.Resolution.Candidates[0].QualifiedName)
+	for _, candidate := range proc.Document.Procedures {
+		if !strings.EqualFold(strings.TrimSpace(candidate.Symbol.QualifiedName), qualifiedName) {
+			continue
+		}
+		callee := sourceProcedure{Params: newReadOnlySpan(candidate.Symbol.Parameters)}
+		bindings, ok := arrayCallArgumentBindings(proc, callee, call)
+		if !ok {
+			return true
+		}
+		for _, binding := range bindings {
+			if directArrayArgumentName(binding.text) == strings.ToLower(cleanIdentifier(strings.TrimSpace(target))) &&
+				binding.parameterIndex >= 0 && binding.parameterIndex < callee.Params.Len() &&
+				parameterIsByRefScalar(callee.Params.valueAt(binding.parameterIndex)) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func resumeNextScopeCallPrecedesStatement(call procedureir.CallSite, statement procedureir.Statement) bool {
+	if call.StatementID > 0 && statement.ID > 0 && call.StatementID != statement.ID {
+		return call.StatementID < statement.ID
+	}
+	if call.Range.StartByte > 0 && statement.Range.StartByte > 0 {
+		return call.Range.StartByte < statement.Range.StartByte
+	}
+	if call.Range.StartLine != statement.Range.StartLine {
+		return call.Range.StartLine < statement.Range.StartLine
+	}
+	return call.Range.StartColumn < statement.Range.StartColumn
+}
+
+func resumeNextScopeZeroDefaultScalarType(typ string) bool {
+	switch strings.ToLower(cleanIdentifier(strings.TrimSpace(typ))) {
+	case "byte", "integer", "long", "longlong", "longptr", "single", "double", "currency", "decimal", "date", "boolean":
+		return true
+	default:
+		return false
+	}
 }
 
 func resumeNextScopeMemberCallReceiverIsValid(proc sourceProcedure, call procedureir.CallSite, moduleDecls map[string]sourceDeclaration, expectedReceiver string, projectResolver procedureir.Resolver) bool {
@@ -5745,10 +6027,78 @@ func resumeNextScopeSafeMemberCallArgumentExpression(proc sourceProcedure, expre
 	if expression.Kind == procedureir.ExpressionMember {
 		return resumeNextScopeCompileTimeValueMember(proc, expression, projectResolver)
 	}
+	if expression.Kind == procedureir.ExpressionCall {
+		return resumeNextScopeSafeStringConversion(proc, expression, moduleDecls, projectResolver)
+	}
 	if expression.Kind == procedureir.ExpressionIdentifier {
 		return resumeNextScopeKnownValueIdentifier(proc, moduleDecls, expression.Text, projectResolver)
 	}
 	return expression.Kind == procedureir.ExpressionLiteral
+}
+
+func resumeNextScopeSafeStringConversion(proc sourceProcedure, expression procedureir.Expression, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	text := strings.TrimSpace(expression.Text)
+	open := strings.IndexByte(text, '(')
+	if open <= 0 || matchingParen(text, open) != len(text)-1 || !strings.EqualFold(strings.TrimSpace(text[:open]), "CStr") {
+		return false
+	}
+	argument := strings.TrimSpace(text[open+1 : len(text)-1])
+	if _, err := strconv.ParseInt(argument, 10, 64); err == nil || resumeNextScopeMaskedStringLiteral(argument) {
+		return true
+	}
+	if !errorSuccessIdentifierRE.MatchString(argument) {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(strings.TrimSpace(declaration.Name), argument) {
+			return resumeNextScopeSafeScalarConversionType(proc, declaration.Type, declaration.IsArray, declaration.IsObject, projectResolver)
+		}
+	}
+	for name, declaration := range moduleDecls {
+		if strings.EqualFold(strings.TrimSpace(name), argument) || strings.EqualFold(strings.TrimSpace(declaration.Name), argument) {
+			return resumeNextScopeSafeScalarConversionType(proc, declaration.Type, declaration.Array, declaration.Object, projectResolver)
+		}
+	}
+	return false
+}
+
+func resumeNextScopeSafeStringConversionCall(proc sourceProcedure, call procedureir.CallSite, target vbaast.Range, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	if call.Callee.Receiver != nil || !strings.EqualFold(strings.TrimSpace(call.Callee.BaseName), "CStr") ||
+		!resumeNextScopeCallBelongsToTarget(call, target) {
+		return false
+	}
+	for expression := range proc.Expressions.All() {
+		if expression.StatementID == call.StatementID && expression.Kind == procedureir.ExpressionCall && expression.Range == call.Range {
+			return resumeNextScopeSafeStringConversion(proc, expression, moduleDecls, projectResolver)
+		}
+	}
+	return false
+}
+
+func resumeNextScopeSafeScalarConversionType(proc sourceProcedure, typ string, array, object bool, projectResolver procedureir.Resolver) bool {
+	if array || object || strings.EqualFold(strings.TrimSpace(typ), "Variant") {
+		return false
+	}
+	normalizedType := strings.ToLower(cleanIdentifier(strings.TrimSpace(typ)))
+	if normalizedType == "date" || strings.HasSuffix(normalizedType, ".date") {
+		return false
+	}
+	if procedureir.SafeBooleanComparisonOperandType(typ, false, false) {
+		return true
+	}
+	if projectResolver == nil || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(typ)) {
+		return false
+	}
+	caller := procedureir.ProcedureRef{Name: proc.Name, Kind: proc.ProcedureKind}
+	if proc.IR != nil {
+		caller.QualifiedName = proc.IR.Symbol.QualifiedName
+	}
+	resolution := projectResolver.ResolveSymbol(procedureir.SymbolReference{Name: strings.TrimSpace(typ), Module: proc.Module, Caller: caller})
+	if resolution.Status != procedureir.ResolutionMatched || len(resolution.Candidates) != 1 {
+		return false
+	}
+	kind := strings.ToLower(strings.TrimSpace(resolution.Candidates[0].Kind))
+	return kind == "enum" || kind == "enum_type"
 }
 
 func resumeNextScopeCompileTimeEnumMember(proc sourceProcedure, expression procedureir.Expression, projectResolver procedureir.Resolver) bool {
@@ -5873,6 +6223,86 @@ func resumeNextScopeObjectResultInspection(statement procedureir.Statement, targ
 	return condition == target+" is nothing" || condition == "not "+target+" is nothing"
 }
 
+func resumeNextScopeScalarResultInspection(proc sourceProcedure, statement procedureir.Statement, target string, constantValues map[string]constexpr.Value) bool {
+	if statement.Kind != procedureir.StatementIf || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	if !resumeNextScopeScalarResultTargetIsValid(proc, target) {
+		return false
+	}
+	return resumeNextScopeScalarResultInspectionShape(proc, statement, target, constantValues)
+}
+
+func resumeNextScopeScalarResultInspectionShape(proc sourceProcedure, statement procedureir.Statement, target string, constantValues map[string]constexpr.Value) bool {
+	if statement.Kind != procedureir.StatementIf || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	condition := statement.Text
+	if statement.Condition != nil {
+		condition = statement.Condition.Text
+	} else {
+		condition = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(condition), "if"))
+		if thenIndex := strings.Index(condition, " then"); thenIndex >= 0 {
+			condition = condition[:thenIndex]
+		}
+	}
+	condition = strings.TrimSpace(strings.ToLower(maskStringLiterals(gui.StripComment(condition))))
+	left, operator, right, ok := resumeNextScopeComparison(condition)
+	if !ok || operator != "=" && operator != "<>" {
+		return false
+	}
+	target = strings.ToLower(strings.TrimSpace(target))
+	if strings.EqualFold(left, target) {
+		return resumeNextScopeScalarResultOperandSafe(proc, right, constantValues)
+	}
+	if strings.EqualFold(right, target) {
+		return resumeNextScopeScalarResultOperandSafe(proc, left, constantValues)
+	}
+	return false
+}
+
+func resumeNextScopeScalarResultTargetIsValid(proc sourceProcedure, target string) bool {
+	target = strings.TrimSpace(target)
+	if !errorSuccessIdentifierRE.MatchString(target) {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if !strings.EqualFold(strings.TrimSpace(declaration.Name), target) {
+			continue
+		}
+		return declaration.Scope == procedureir.ScopeLocal && !declaration.IsArray &&
+			declaration.ValueShape != procedureir.ValueShapeFixedArray &&
+			declaration.ValueShape != procedureir.ValueShapeDynamicArray &&
+			declaration.ValueShape != procedureir.ValueShapeVariant && !declaration.IsStatic &&
+			!declaration.IsNew && !declaration.IsObject && !isObjectType(declaration.Type) &&
+			resumeNextScopeZeroDefaultScalarType(declaration.Type)
+	}
+	return false
+}
+
+func resumeNextScopeScalarResultOperandSafe(proc sourceProcedure, value string, constantValues map[string]constexpr.Value) bool {
+	value = strings.TrimSpace(value)
+	if value == "0" {
+		return true
+	}
+	if !errorSuccessIdentifierRE.MatchString(value) {
+		return false
+	}
+	return resumeNextScopeKnownZeroConstantIdentifier(proc, value, constantValues)
+}
+
+func resumeNextScopeKnownZeroConstantIdentifier(proc sourceProcedure, name string, constantValues map[string]constexpr.Value) bool {
+	name = strings.ToLower(cleanIdentifier(strings.TrimSpace(name)))
+	if name == "" {
+		return false
+	}
+	value, ok := constantValues[name]
+	if !ok && !strings.Contains(name, ".") && proc.Module != "" {
+		value, ok = constantValues[strings.ToLower(cleanIdentifier(strings.TrimSpace(proc.Module)))+"."+name]
+	}
+	return ok && value.Integer == 0 && (value.Kind == constexpr.ValueInteger || value.Kind == constexpr.ValueLong || value.Kind == constexpr.ValueLongLong)
+}
+
 func resumeNextScopeDebugAssertComparison(statement procedureir.Statement) (left, right string, ok bool) {
 	if statement.Kind != procedureir.StatementCall {
 		return "", "", false
@@ -5974,20 +6404,10 @@ func resumeNextScopeDirectErrNumberGuard(proc sourceProcedure, moduleDecls map[s
 }
 
 func resumeNextScopeErrNumberComparison(expression string, operandSafe func(string) bool) bool {
-	expression = strings.TrimSpace(expression)
-	operatorStart := strings.IndexAny(expression, "=<>")
-	if operatorStart < 0 {
+	left, _, right, ok := resumeNextScopeComparison(expression)
+	if !ok {
 		return false
 	}
-	operatorEnd := operatorStart + 1
-	if operatorEnd < len(expression) && ((expression[operatorStart] == '<' || expression[operatorStart] == '>') && (expression[operatorEnd] == '>' || expression[operatorEnd] == '=')) {
-		operatorEnd++
-	}
-	if strings.ContainsAny(expression[operatorEnd:], "=<>") {
-		return false
-	}
-	left := strings.TrimSpace(expression[:operatorStart])
-	right := strings.TrimSpace(expression[operatorEnd:])
 	if resumeNextScopeExactErrNumber(left) {
 		return operandSafe(right)
 	}
@@ -5995,6 +6415,22 @@ func resumeNextScopeErrNumberComparison(expression string, operandSafe func(stri
 		return operandSafe(left)
 	}
 	return false
+}
+
+func resumeNextScopeComparison(expression string) (left, operator, right string, ok bool) {
+	expression = strings.TrimSpace(expression)
+	operatorStart := strings.IndexAny(expression, "=<>")
+	if operatorStart < 0 {
+		return "", "", "", false
+	}
+	operatorEnd := operatorStart + 1
+	if operatorEnd < len(expression) && ((expression[operatorStart] == '<' || expression[operatorStart] == '>') && (expression[operatorEnd] == '>' || expression[operatorEnd] == '=')) {
+		operatorEnd++
+	}
+	if strings.ContainsAny(expression[operatorEnd:], "=<>") {
+		return "", "", "", false
+	}
+	return strings.TrimSpace(expression[:operatorStart]), expression[operatorStart:operatorEnd], strings.TrimSpace(expression[operatorEnd:]), true
 }
 
 func resumeNextScopeErrGuardRestores(proc sourceProcedure, guard procedureir.Statement, guardIndex int, ordered []procedureir.Statement, statementsByID map[int]procedureir.Statement) bool {
