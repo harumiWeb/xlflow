@@ -2281,6 +2281,7 @@ Private Function BuildCommand(Optional ByVal dataRow As Object) As Object
   Dim commandObject As Object
   Dim parametersObject As Object
   Set commandObject = CreateObject("Scripting.Dictionary")
+  CallByName commandObject, "CompareMode", VbLet, 0
   Set parametersObject = CallByName(commandObject, "Item", VbGet, "parameters")
   Set BuildCommand = commandObject
 End Function

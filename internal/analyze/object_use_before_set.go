@@ -3607,7 +3607,7 @@ func applyObjectCallEffects(proc sourceProcedure, call procedureir.CallSite, sta
 	// ByRef object arguments, so they must invalidate those arguments just like
 	// an unresolved statement-level call.  A unique same-module summary was
 	// applied above even when the resolver did not attach a candidate.
-	if call.Resolution.Status != procedureir.ResolutionMatched && call.ExpressionID != 0 && len(candidates) == 0 && objectUnresolvedExpressionCallReadOnly(call) {
+	if call.Resolution.Status != procedureir.ResolutionMatched && len(candidates) == 0 && objectUnresolvedExpressionCallReadOnly(call) {
 		return
 	}
 	// Module fields are represented without a module qualifier in VariableAccess.
@@ -3715,15 +3715,21 @@ func applyObjectCallEffects(proc sourceProcedure, call procedureir.CallSite, sta
 }
 
 func objectUnresolvedExpressionCallReadOnly(call procedureir.CallSite) bool {
-	if call.Resolution.Status == procedureir.ResolutionMatched || call.ExpressionID == 0 {
-		return false
-	}
 	name := strings.ToLower(cleanIdentifier(call.Callee.BaseName))
 	if name == "" {
 		name = strings.ToLower(objectBareCallName(call.Callee.Text))
 	}
+	if name == "callbyname" {
+		return true
+	}
+	if call.Resolution.Status == procedureir.ResolutionMatched {
+		return false
+	}
+	if call.ExpressionID == 0 {
+		return false
+	}
 	switch name {
-	case "typename", "strcomp", "isobject", "array", "callbyname":
+	case "typename", "strcomp", "isobject", "array":
 		return true
 	default:
 		return false
