@@ -1777,6 +1777,66 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksRegExpExecuteResultThroughModuleInitializer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.cls", `Option Explicit
+Private Const REGEX_PROG_ID As String = "VBScript.RegExp"
+Private mProviderObject As Object
+
+Private Sub ConfigureRegex()
+  Set mProviderObject = CreateObject(REGEX_PROG_ID)
+  On Error GoTo BadPattern
+  mProviderObject.Test vbNullString
+  On Error GoTo 0
+  Exit Sub
+BadPattern:
+  Set mProviderObject = Nothing
+  Err.Raise 5
+End Sub
+
+Public Function MatchCount(ByVal inputText As String) As Long
+  Dim matches As Object
+  ConfigureRegex
+  Set matches = mProviderObject.Execute(inputText)
+  MatchCount = matches.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("RegExp.Execute should establish a MatchCollection after the module initializer: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotTreatRegExpExecuteUnderResumeNextAsAssigned(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal inputText As String) As Long
+  Dim expression As Object
+  Dim matches As Object
+  Set expression = CreateObject("VBScript.RegExp")
+  On Error Resume Next
+  Set matches = expression.Execute(inputText)
+  On Error GoTo 0
+  MatchCount = matches.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("RegExp.Execute under Resume Next must remain nullable: %+v", got)
+	}
+}
+
 func TestVBA202Issue448TracksExcelFactoryAfterPublicBoundaryGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
