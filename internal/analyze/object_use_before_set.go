@@ -1604,6 +1604,9 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		}
 	case procedureir.ExpressionIdentifier:
 		name := cleanIdentifier(text)
+		if objectIntrinsicIdentifierAssigned(proc, name) {
+			return true
+		}
 		declaration, scope, ok := objectDeclarationBinding(name, declarations)
 		if !ok || !declaration.Object {
 			if isObjectType(proc.ReturnType) && strings.EqualFold(name, cleanIdentifier(proc.Name)) {
@@ -1649,6 +1652,23 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 func objectConstructorCallText(text string) bool {
 	text = strings.TrimSpace(text)
 	return strings.HasPrefix(text, "createobject(") || strings.HasPrefix(text, "getobject(")
+}
+
+func objectIntrinsicIdentifierAssigned(proc sourceProcedure, name string) bool {
+	switch strings.ToLower(cleanIdentifier(name)) {
+	case "thisworkbook", "application":
+		// These VBA intrinsic object identifiers are always bound by the host.
+		// Treating them as nullable when passed to a private object helper
+		// loses the same proof that direct member access already has.
+		return true
+	case "me":
+		// Me is the live instance for class, document, and UserForm
+		// procedures. It is not available as an object in standard modules,
+		// so keep the scope check explicit.
+		return strings.EqualFold(proc.ModuleKind, "class") || strings.EqualFold(proc.ModuleKind, "form")
+	default:
+		return false
+	}
 }
 
 func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, flowContext objectFlowContext, declarations declarationScope, summaries map[string]objectProcedureSummary) bool {
@@ -1947,10 +1967,21 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 		return
 	}
 	actuals := objectCallActuals(call, facts)
+	if objectAddCallPreservesContainerArguments(call, actuals, declarations) {
+		// Collection/Dictionary Add accepts its item by value; the built-in
+		// operation cannot replace a Collection or Dictionary argument with
+		// Nothing.  Do not model an unresolved member call as an arbitrary
+		// ByRef mutation when the object argument has one of those declared
+		// container types.
+		actuals = nil
+	}
 	var candidates []objectProcedureSummary
 	if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
 		if summary, ok := objectSummaryForCandidate(call.Resolution.Candidates[0], summaries); ok {
-			if !strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) {
+			if !strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) || objectRecursiveSummaryHasByValObjectActual(call, summary, actuals) {
+				// Recursive summaries are useful only when they carry a ByVal
+				// object reference.  A recursive ByRef edge remains an unknown
+				// mutation boundary and must stay conservative.
 				candidates = append(candidates, summary)
 			}
 		}
@@ -1964,7 +1995,9 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 			matches = nil
 		}
 		for _, summary := range matches {
-			if !strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) {
+			if !strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) || objectRecursiveSummaryHasByValObjectActual(call, summary, actuals) {
+				// Preserve the recursive procedure summary so its ByVal object
+				// parameters retain the caller's state across the recursive edge.
 				candidates = append(candidates, summary)
 			}
 		}
@@ -2021,6 +2054,13 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 				continue
 			}
 			known = true
+			if strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) && summary.Params[formalIndex].ByRef {
+				// A recursive ByRef call may mutate the caller's object
+				// reference, so do not use the recursive summary to prove it
+				// remains assigned.
+				assigned = false
+				break
+			}
 			if !summary.Params[formalIndex].ByRef {
 				// ByVal receives a copy and cannot alter the caller's object
 				// reference; preserve its existing state.
@@ -2060,6 +2100,45 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 	}
 }
 
+func objectAddCallPreservesContainerArguments(call procedureir.CallSite, actuals []objectCallActual, declarations declarationScope) bool {
+	if call.Callee.Receiver == nil || !strings.EqualFold(cleanIdentifier(call.Callee.Member), "add") {
+		return false
+	}
+	objectArgument := false
+	for _, actual := range actuals {
+		name := cleanIdentifier(actual.text)
+		if name == "" {
+			continue
+		}
+		declaration, _, ok := objectDeclarationBinding(name, declarations)
+		if !ok || !declaration.Object {
+			continue
+		}
+		objectArgument = true
+		if kind := dcKindFromType(declaration.Type); kind != dcCollection && kind != dcDictionary {
+			return false
+		}
+	}
+	return objectArgument
+}
+
+func objectRecursiveSummaryHasByValObjectActual(call procedureir.CallSite, summary objectProcedureSummary, actuals []objectCallActual) bool {
+	if !strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) {
+		return false
+	}
+	for actualIndex := range actuals {
+		formalIndex := objectFormalIndex(call, summary, actualIndex)
+		if formalIndex < 0 || formalIndex >= len(summary.Params) {
+			continue
+		}
+		parameter := summary.Params[formalIndex]
+		if parameter.Object && !parameter.ByRef {
+			return true
+		}
+	}
+	return false
+}
+
 type objectCallActual struct {
 	expressionID  int
 	text          string
@@ -2083,6 +2162,9 @@ func objectCallParameterAssigned(proc sourceProcedure, declarations declarationS
 		name := cleanIdentifier(actual.text)
 		if name == "" {
 			return false, true
+		}
+		if objectIntrinsicIdentifierAssigned(proc, name) {
+			return true, true
 		}
 		declaration, scope, ok := objectDeclarationBinding(name, declarations)
 		if !ok && proc.Name != "" && strings.EqualFold(name, cleanIdentifier(proc.Name)) && isObjectType(proc.ReturnType) {

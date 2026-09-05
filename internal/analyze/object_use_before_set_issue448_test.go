@@ -395,6 +395,118 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RecognizesIntrinsicObjectByValArgument(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub ObserveWorkbook(ByVal target As Workbook)
+  Debug.Print target.Name
+End Sub
+
+Private Sub ObserveApplication(ByVal target As Object)
+  Debug.Print target.Name
+End Sub
+
+Public Sub Run()
+  ObserveWorkbook ThisWorkbook
+  ObserveApplication Application
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("intrinsic object arguments must preserve their non-Nothing state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotInvalidateObjectStoredInDictionary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function BuildNode(ByVal textValue As String) As Object
+  Dim node As Object
+  Set node = CreateObject("Scripting.Dictionary")
+
+  Dim children As Collection
+  Set children = New Collection
+  node.Add "children", children
+  If Len(textValue) > 0 Then children.Add textValue
+
+  Set BuildNode = node
+End Function
+
+Public Sub Run()
+  Dim node As Object
+  Set node = BuildNode("value")
+  Debug.Print node("children").Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a Dictionary Add must not invalidate an object argument: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PreservesNestedPrivateByValObjectArguments(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub AppendRow(ByVal rows As Collection)
+  AddRow rows
+End Sub
+
+Private Sub AddRow(ByVal rows As Collection)
+  rows.Add "value"
+End Sub
+
+Public Sub Run()
+  Dim rows As Collection
+  Set rows = New Collection
+  AppendRow rows
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("nested private ByVal object arguments must preserve their state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PreservesRecursivePrivateByValObjectArguments(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub AppendRows(ByVal rows As Collection, ByVal depth As Long)
+  If depth > 0 Then AppendRows rows, depth - 1
+  rows.Add "value"
+End Sub
+
+Public Sub Run()
+  Dim rows As Collection
+  Set rows = New Collection
+  AppendRows rows, 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("recursive private ByVal object arguments must preserve their state: %+v", got)
+	}
+}
+
 func TestVBA202Issue448PreservesStateAcrossReadOnlyByRefObjectArgument(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
