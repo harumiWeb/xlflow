@@ -2838,6 +2838,9 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 	if objectCollectionMemberItemAssigned(call, state, declarations) {
 		return true
 	}
+	if objectRegExpMatchItemAssigned(proc, statementID, call, state, declarations) {
+		return true
+	}
 	if objectDictionaryItemAssigned(proc, statementID, call, state, declarations) {
 		return true
 	}
@@ -3409,6 +3412,47 @@ func objectCollectionMemberItemAssigned(call procedureir.CallSite, state map[str
 		return false
 	}
 	return state[(objectVariable{Scope: scope, Name: root}).key()]
+}
+
+func objectRegExpMatchItemAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {
+	if call.Callee.Receiver == nil || !strings.EqualFold(cleanIdentifier(call.Callee.Member), "item") || call.Arguments.Count == 0 || objectErrorResumeNextAt(proc, statementID) {
+		return false
+	}
+	if proc.Graph == nil {
+		return false
+	}
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	callBlock, ok := graph.BlockForStatement(statementID)
+	if !ok {
+		return false
+	}
+	dominators := graph.Dominators()
+	receiver := objectCallWithReceiverName(proc, call)
+	if receiver == "" || strings.Contains(receiver, ".") {
+		return false
+	}
+	declaration, scope, ok := objectDeclarationBinding(receiver, declarations)
+	if !ok || !declaration.Object || !state[(objectVariable{Scope: scope, Name: receiver}).key()] {
+		return false
+	}
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementSet || statement.Target == nil || !strings.EqualFold(cleanIdentifier(statement.Target.Text), receiver) {
+			continue
+		}
+		assignmentBlock, assignmentOK := graph.BlockForStatement(statement.ID)
+		if !assignmentOK || !objectBlockSetContains(dominators[callBlock.ID], assignmentBlock.ID) || assignmentBlock.ID == callBlock.ID && statement.ID >= statementID {
+			continue
+		}
+		for sourceCall := range proc.Calls.All() {
+			if sourceCall.StatementID != statement.ID || !strings.EqualFold(cleanIdentifier(sourceCall.Callee.Member), "execute") {
+				continue
+			}
+			if objectRegExpExecuteAssigned(proc, sourceCall, state, declarations) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func objectDictionaryItemAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {

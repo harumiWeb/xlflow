@@ -1812,6 +1812,101 @@ End Function
 	}
 }
 
+func TestVBA202Issue448PropagatesForEachObjectIntoHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub ConsumeMatch(ByVal rawMatch As Object)
+  Debug.Print rawMatch.Value
+End Sub
+
+Public Sub Run(ByVal inputText As String)
+  Dim expression As Object
+  Dim rawMatch As Object
+  Set expression = CreateObject("VBScript.RegExp")
+  For Each rawMatch In expression.Execute(inputText)
+    ConsumeMatch rawMatch
+  Next rawMatch
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a For Each object should remain non-Nothing when passed to a helper: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesForEachObjectIntoExpressionHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ReadMatch(ByVal rawMatch As Object) As String
+  ReadMatch = CStr(rawMatch.Value)
+End Function
+
+Public Sub Run(ByVal inputText As String)
+  Dim expression As Object
+  Dim rawMatch As Object
+  Dim results As Collection
+  Set expression = CreateObject("VBScript.RegExp")
+  Set results = New Collection
+  For Each rawMatch In expression.Execute(inputText)
+    results.Add ReadMatch(rawMatch)
+  Next rawMatch
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a For Each object should remain non-Nothing in an expression helper: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesRegexMatchIntoBuilder(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Regex.cls", `Attribute VB_Name = "Regex"
+Option Explicit
+
+Private Function BuildRegexMatch(ByVal rawMatch As Object) As String
+  BuildRegexMatch = CStr(rawMatch.Value)
+End Function
+
+Public Function Matches(ByVal inputText As String) As String
+  Dim expression As Object
+  Dim rawMatch As Object
+  Set expression = CreateObject("VBScript.RegExp")
+  For Each rawMatch In expression.Execute(inputText)
+    Matches = BuildRegexMatch(rawMatch)
+  Next rawMatch
+End Function
+
+Public Function Match(ByVal inputText As String) As String
+  Dim expression As Object
+  Dim firstMatches As Object
+  Set expression = CreateObject("VBScript.RegExp")
+  Set firstMatches = expression.Execute(inputText)
+  If firstMatches.Count > 0 Then
+    Match = BuildRegexMatch(firstMatches.Item(0))
+  End If
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a Match object from Execute should remain non-Nothing in the builder: %+v", got)
+	}
+}
+
 func TestVBA202Issue448DoesNotTreatRegExpExecuteUnderResumeNextAsAssigned(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
