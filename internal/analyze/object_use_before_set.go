@@ -108,6 +108,7 @@ type objectAnalysisContext struct {
 	entryOutgoing       map[string][]*objectEntryCall
 	entryIncoming       map[string][]*objectEntryCall
 	moduleProcedureKeys map[string][]string
+	callReachable       map[string]bool
 
 	summaryEvaluations   int
 	entryFlowEvaluations int
@@ -137,6 +138,7 @@ func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 	sort.Strings(analysis.order)
 	analysis.initializeObjectSummaries()
 	analysis.buildObjectIndexes()
+	analysis.buildObjectCallReachability()
 	analysis.buildObjectDependencies()
 	analysis.prepareTerminalCallGraphs()
 	return analysis
@@ -184,6 +186,66 @@ func (analysis *objectAnalysisContext) buildObjectIndexes() {
 		plan.classIndexBuilt = true
 		plan.flowContext.predicateContracts = predicateContracts
 	}
+}
+
+// buildObjectCallReachability identifies procedures that can contribute an
+// entry-state edge to the reachable project call graph.  Object entry states
+// are contracts at private procedure boundaries, so an uncalled private
+// helper must not poison the state of a shared callee merely because it has a
+// nullable ByVal Object parameter.  Public procedures and host-invoked event
+// procedures are roots; private procedures become reachable through resolved
+// project-local calls from those roots.
+func (analysis *objectAnalysisContext) buildObjectCallReachability() {
+	analysis.callReachable = map[string]bool{}
+	queue := make([]string, 0, len(analysis.order))
+	for _, key := range analysis.order {
+		plan := analysis.plans[key]
+		if !objectProcedureIsCallRoot(plan) {
+			continue
+		}
+		analysis.callReachable[key] = true
+		queue = append(queue, key)
+	}
+	for len(queue) > 0 {
+		key := queue[0]
+		queue = queue[1:]
+		plan := analysis.plans[key]
+		if plan == nil {
+			continue
+		}
+		for call := range plan.proc.Calls.All() {
+			calleeKey, ok := analysis.objectCalleeKey(call)
+			if !ok || analysis.callReachable[calleeKey] {
+				continue
+			}
+			analysis.callReachable[calleeKey] = true
+			queue = append(queue, calleeKey)
+		}
+	}
+}
+
+func objectProcedureIsCallRoot(plan *objectProcedurePlan) bool {
+	if plan == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(plan.proc.Visibility), "private") {
+		return true
+	}
+	if plan.proc.IR != nil && plan.proc.IR.Symbol.IsEventHandler {
+		return true
+	}
+	// Bare function calls used in expressions are not always represented as
+	// CallSite facts by the VBA IR. An object-returning private function can
+	// therefore be an implicit root even when no explicit call edge is
+	// available to prove its reachability.
+	if isObjectType(plan.proc.ReturnType) {
+		return true
+	}
+	if !strings.EqualFold(strings.TrimSpace(plan.proc.ModuleKind), "class") {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(plan.proc.Name), "Class_Initialize") ||
+		strings.EqualFold(strings.TrimSpace(plan.proc.Name), "Class_Terminate")
 }
 
 func objectNonNothingPredicateContracts(plans map[string]*objectProcedurePlan) map[string]bool {
@@ -533,9 +595,11 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 			for _, receiverKey := range analysis.objectReceiverCalleeKeys(caller, call) {
 				addSummaryDependency(receiverKey, callerKey)
 			}
-			if !ok || calleeKey == callerKey {
+			if !ok || calleeKey == callerKey || !analysis.callReachable[callerKey] {
 				// Recursive entry-state calls are deliberately excluded. Summary
 				// propagation keeps the self edge so recursive summaries converge.
+				// Calls from unreachable private helpers likewise cannot establish a
+				// runtime entry contract for the shared callee.
 				continue
 			}
 			callee := analysis.plans[calleeKey]

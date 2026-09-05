@@ -858,6 +858,79 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PropagatesGuardThroughTypeNameDispatch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub WriteObjectValue(ByVal value As Object)
+  If value Is Nothing Then Exit Sub
+  Select Case TypeName(value)
+    Case "Collection"
+      WriteCollection value
+    Case "Dictionary"
+      WriteDictionary value
+  End Select
+End Sub
+
+Private Function StringifyCollection(ByVal value As Object) As String
+  WriteCollection value
+End Function
+
+Private Sub WriteCollection(ByVal value As Object)
+  If value.Count = 0 Then Exit Sub
+End Sub
+
+Private Function StringifyDictionary(ByVal value As Object) As String
+  WriteDictionary value
+End Function
+
+Private Sub WriteDictionary(ByVal value As Object)
+  If value.Count = 0 Then Exit Sub
+End Sub
+
+Public Sub Run(ByVal value As Object)
+  WriteObjectValue value
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a caller-side Nothing guard must propagate through TypeName dispatch to private ByVal object helpers: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesClassFunctionResultToPrivateCollectionHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "ROneCOne.cls", `Option Explicit
+Public Property Get NewEnum() As IUnknown
+  Set NewEnum = MaterializeValues
+End Property
+
+Private Function MaterializeValues() As Collection
+  Dim values As Collection
+  Set values = New Collection
+  AddUnwrappedValue values
+  Set MaterializeValues = values
+End Function
+
+Private Sub AddUnwrappedValue(ByVal values As Collection)
+  values.Add "item"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a collection created by a reachable class helper must reach its private consumer as non-Nothing: %+v", got)
+	}
+}
+
 func TestVBA202Issue448KeepsNullablePublicCollectionReceiver(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
