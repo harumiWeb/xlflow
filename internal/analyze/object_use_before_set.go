@@ -1785,6 +1785,7 @@ type objectFlowResult struct {
 
 type objectFlowContext struct {
 	facts               *procedureAnalysisFacts
+	graph               vbacfg.CFGView
 	predecessors        map[vbacfg.BlockID][]vbacfg.Edge
 	vars                map[string]objectVariable
 	receiverSummaryKeys map[string][]string
@@ -1796,6 +1797,7 @@ type objectFlowContext struct {
 func newObjectFlowContext(proc sourceProcedure, graph vbacfg.CFGView) objectFlowContext {
 	context := objectFlowContext{
 		facts:        proc.analysisFacts(),
+		graph:        graph,
 		predecessors: make(map[vbacfg.BlockID][]vbacfg.Edge),
 		vars:         map[string]objectVariable{},
 	}
@@ -2005,6 +2007,9 @@ func objectClassLifecycleAssignedPlan(plan *objectProcedurePlan, variable object
 // expressions are deliberately ignored; VBA212 remains responsible for
 // short-circuit/eager Boolean diagnostics and this analysis stays conservative.
 func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, edge vbacfg.Edge, declarations declarationScope) map[string]bool {
+	if edge.Kind == vbacfg.EdgeCase {
+		return objectFlowApplySelectCaseTypeGuard(state, flowContext, edge, declarations)
+	}
 	if edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
 		return state
 	}
@@ -2098,6 +2103,36 @@ func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, 
 		return updated
 	}
 	return state
+}
+
+func objectFlowApplySelectCaseTypeGuard(state map[string]bool, flowContext objectFlowContext, edge vbacfg.Edge, declarations declarationScope) map[string]bool {
+	caseBlock, ok := flowContext.graph.BlockByID(edge.To)
+	if !ok || caseBlock.Statement == nil || caseBlock.Statement.Kind != procedureir.StatementCase {
+		return state
+	}
+	selectStatement, ok := flowContext.facts.Statement(caseBlock.Statement.ParentID)
+	if !ok {
+		return state
+	}
+	name, ok := objectSelectCaseTypeName(selectStatement.Text)
+	if !ok {
+		return state
+	}
+	key := objectGuardVariableKey(name, state, declarations)
+	if key == "" {
+		return state
+	}
+	expected := objectSelectCaseStringValues(caseBlock.Statement.Text)
+	if len(expected) == 0 {
+		return state
+	}
+	updated := cloneObjectState(state)
+	for _, typeName := range expected {
+		if objectDynamicExcelTypeName(typeName) {
+			updated[objectTypeNameFactKey(key, typeName)] = true
+		}
+	}
+	return updated
 }
 
 func objectFlowPredicateHasContract(flowContext objectFlowContext, statementID int, argumentName string) bool {
@@ -2257,6 +2292,65 @@ func objectTypeNameGuard(text string) (string, string, bool, bool) {
 		return "", "", false, false
 	}
 	return name, expected, operator == "=", true
+}
+
+func objectSelectCaseTypeName(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if end := strings.IndexAny(text, "\r\n"); end >= 0 {
+		text = strings.TrimSpace(text[:end])
+	}
+	prefix := "select case "
+	if len(text) < len(prefix) || !strings.EqualFold(text[:len(prefix)], prefix) {
+		return "", false
+	}
+	expression := strings.TrimSpace(text[len(prefix):])
+	const typeNamePrefix = "typename("
+	if len(expression) < len(typeNamePrefix)+1 || !strings.HasPrefix(strings.ToLower(expression), typeNamePrefix) || !strings.HasSuffix(expression, ")") {
+		return "", false
+	}
+	name := cleanIdentifier(strings.TrimSpace(expression[len(typeNamePrefix) : len(expression)-1]))
+	return name, name != ""
+}
+
+func objectSelectCaseStringValues(text string) []string {
+	text = strings.TrimSpace(text)
+	if end := strings.IndexAny(text, "\r\n"); end >= 0 {
+		text = strings.TrimSpace(text[:end])
+	}
+	const prefix = "case "
+	if len(text) < len(prefix) || !strings.EqualFold(text[:len(prefix)], prefix) {
+		return nil
+	}
+	text = strings.TrimSpace(text[len(prefix):])
+	if strings.EqualFold(text, "else") {
+		return nil
+	}
+	parts := strings.Split(text, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if len(part) < 2 || part[0] != '"' || part[len(part)-1] != '"' {
+			continue
+		}
+		value, err := strconv.Unquote(part)
+		if err == nil && value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func objectDynamicExcelTypeName(typeName string) bool {
+	switch strings.ToLower(strings.TrimSpace(typeName)) {
+	case "listobject", "listcolumn":
+		return true
+	default:
+		return false
+	}
+}
+
+func objectTypeNameFactKey(variableKey, typeName string) string {
+	return "typename:" + variableKey + ":" + strings.ToLower(cleanIdentifier(typeName))
 }
 
 func objectNonNothingPredicateGuard(text string) (string, bool, bool) {
@@ -2470,6 +2564,9 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		if objectExcelMemberExpressionAssigned(expression.Text, proc, declarations) {
 			return true
 		}
+		if !objectErrorResumeNextAt(proc, statementID) && objectDynamicExcelMemberExpressionAssigned(expression.Text, state, declarations) {
+			return true
+		}
 		if objectMemberFunctionAssigned(proc, expression.Text, declarations, summaries) {
 			return true
 		}
@@ -2624,6 +2721,9 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 			return true
 		}
 		if objectExcelMemberChainAssigned(call, state, declarations) {
+			return true
+		}
+		if !objectErrorResumeNextAt(proc, statementID) && objectDynamicExcelMemberCallAssigned(call, state, declarations) {
 			return true
 		}
 		if !objectErrorResumeNextAt(proc, statementID) && objectExcelMemberFactoryAssigned(call, declarations) {
@@ -3523,6 +3623,54 @@ func objectExcelMemberFactoryAssigned(call procedureir.CallSite, declarations de
 	return excelObjectFactoryMember(call.Callee.Member)
 }
 
+func objectDynamicExcelMemberExpressionAssigned(text string, state map[string]bool, declarations declarationScope) bool {
+	parts := strings.Split(strings.TrimSpace(text), ".")
+	if len(parts) < 2 {
+		return false
+	}
+	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(parts[0], "(", 2)[0]))
+	declaration, scope, ok := objectDeclarationBinding(root, declarations)
+	if !ok || !declaration.Object || !state[(objectVariable{Scope: scope, Name: root}).key()] || !objectStateHasDynamicExcelType(state, objectVariable{Scope: scope, Name: root}) {
+		return false
+	}
+	for _, part := range parts[1:] {
+		if !excelObjectFactoryMember(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func objectDynamicExcelMemberCallAssigned(call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {
+	if call.Callee.Receiver == nil {
+		return false
+	}
+	parts := strings.Split(strings.TrimSpace(*call.Callee.Receiver), ".")
+	if len(parts) == 0 {
+		return false
+	}
+	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(parts[0], "(", 2)[0]))
+	declaration, scope, ok := objectDeclarationBinding(root, declarations)
+	if !ok || !declaration.Object || !state[(objectVariable{Scope: scope, Name: root}).key()] || !objectStateHasDynamicExcelType(state, objectVariable{Scope: scope, Name: root}) {
+		return false
+	}
+	for _, part := range parts[1:] {
+		if !excelObjectFactoryMember(part) {
+			return false
+		}
+	}
+	return excelObjectFactoryMember(call.Callee.Member)
+}
+
+func objectStateHasDynamicExcelType(state map[string]bool, variable objectVariable) bool {
+	for _, typeName := range []string{"ListObject", "ListColumn"} {
+		if state[objectTypeNameFactKey(variable.key(), typeName)] {
+			return true
+		}
+	}
+	return false
+}
+
 func objectDeclarationByName(name string, declarations declarationScope) (sourceDeclaration, bool) {
 	declaration, _, ok := objectDeclarationBinding(name, declarations)
 	return declaration, ok
@@ -4037,6 +4185,13 @@ func objectStateAllTrue(vars map[string]objectVariable) map[string]bool {
 
 func objectFlowIntersection(states []map[string]bool, vars map[string]objectVariable) map[string]bool {
 	out := objectStateAllTrue(vars)
+	for _, state := range states {
+		for key := range state {
+			if _, exists := out[key]; !exists {
+				out[key] = true
+			}
+		}
+	}
 	for key := range out {
 		for _, state := range states {
 			if !state[key] {

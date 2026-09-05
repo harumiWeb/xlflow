@@ -1616,6 +1616,75 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksTypeNameExcelTableBranchState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ResolveTableRange(ByVal source As Object, ByVal wantHeaders As Boolean) As Object
+  Dim owner As Object
+  Dim resolved As Object
+  If source Is Nothing Then Err.Raise 5
+  Select Case TypeName(source)
+    Case "ListObject"
+      Set owner = source
+    Case "ListColumn"
+      Set owner = source.Parent
+    Case Else
+      Set ResolveTableRange = source
+      Exit Function
+  End Select
+  If wantHeaders Then
+    Set resolved = source.Range.Resize(1 + owner.ListRows.Count)
+  Else
+    Set resolved = source.DataBodyRange
+  End If
+  If resolved Is Nothing Then Err.Raise 5
+  Set ResolveTableRange = resolved
+End Function
+
+Public Sub Run(ByVal source As Object)
+  Dim result As Object
+  Set result = ResolveTableRange(source, True)
+  Debug.Print result.Address
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("TypeName Excel table branches should preserve source and owner state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotAssumeTypeNameExcelMemberUnderResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal source As Object)
+  Dim owner As Object
+  If source Is Nothing Then Exit Sub
+  Select Case TypeName(source)
+    Case "ListColumn"
+      On Error Resume Next
+      Set owner = source.Parent
+      On Error GoTo 0
+      Debug.Print owner.Name
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 10 {
+		t.Fatalf("Resume Next may leave a TypeName Excel member result Nothing: %+v", got)
+	}
+}
+
 func TestVBA202Issue448TracksExcelFactoryAfterPublicBoundaryGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
