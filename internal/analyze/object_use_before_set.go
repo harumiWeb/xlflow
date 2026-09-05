@@ -218,12 +218,13 @@ func (analysis *objectAnalysisContext) buildObjectCallReachability() {
 			continue
 		}
 		for call := range plan.proc.Calls.All() {
-			calleeKey, ok := analysis.objectCalleeKey(call)
-			if !ok || analysis.callReachable[calleeKey] {
-				continue
+			for _, calleeKey := range analysis.objectCallCalleeKeys(plan, call) {
+				if analysis.callReachable[calleeKey] {
+					continue
+				}
+				analysis.callReachable[calleeKey] = true
+				queue = append(queue, calleeKey)
 			}
-			analysis.callReachable[calleeKey] = true
-			queue = append(queue, calleeKey)
 		}
 	}
 }
@@ -644,59 +645,62 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 	for _, callerKey := range analysis.order {
 		caller := analysis.plans[callerKey]
 		for call := range caller.proc.Calls.All() {
-			calleeKey, ok := analysis.objectCalleeKey(call)
-			if ok {
+			calleeKeys := analysis.objectCallCalleeKeys(caller, call)
+			for _, calleeKey := range calleeKeys {
 				addSummaryDependency(calleeKey, callerKey)
 			}
-			for _, receiverKey := range analysis.objectReceiverCalleeKeys(caller, call) {
-				addSummaryDependency(receiverKey, callerKey)
-			}
-			if !ok || calleeKey == callerKey || !analysis.callReachable[callerKey] {
+			if len(calleeKeys) == 0 || !analysis.callReachable[callerKey] {
 				// Recursive entry-state calls are deliberately excluded. Summary
 				// propagation keeps the self edge so recursive summaries converge.
 				// Calls from unreachable private helpers likewise cannot establish a
 				// runtime entry contract for the shared callee.
 				continue
 			}
-			callee := analysis.plans[calleeKey]
-			if callee == nil || caller.proc.Graph == nil {
-				continue
-			}
-			block, found := caller.proc.Graph.BlockForStatement(call.StatementID)
-			if !found || !caller.reachable[block.ID] {
-				continue
-			}
-			entryCall := &objectEntryCall{
-				caller:        caller,
-				callee:        callee,
-				call:          call,
-				actuals:       objectCallActuals(call, caller.flowContext.facts),
-				contributions: map[string]bool{},
-			}
-			analysis.entryOutgoing[callerKey] = append(analysis.entryOutgoing[callerKey], entryCall)
-			analysis.entryIncoming[calleeKey] = append(analysis.entryIncoming[calleeKey], entryCall)
-			calleeSummary := analysis.summaries[calleeKey]
-			for actualIndex, actual := range entryCall.actuals {
-				formalIndex := objectFormalIndex(entryCall.call, calleeSummary, actualIndex)
-				if formalIndex < 0 || formalIndex >= len(calleeSummary.Params) || !calleeSummary.Params[formalIndex].Object {
+			for _, calleeKey := range calleeKeys {
+				if calleeKey == callerKey {
 					continue
 				}
-				statementIDs := map[int]bool{entryCall.call.StatementID: true}
-				name := cleanIdentifier(actual.text)
-				if name != "" {
-					for statement := range caller.proc.Statements.All() {
-						if statement.Kind == procedureir.StatementSet && statement.Target != nil && strings.EqualFold(cleanIdentifier(statement.Target.Text), name) {
-							statementIDs[statement.ID] = true
-						}
-					}
+				callee := analysis.plans[calleeKey]
+				if callee == nil || caller.proc.Graph == nil {
+					continue
 				}
-				for nestedCall := range caller.proc.Calls.All() {
-					if !statementIDs[nestedCall.StatementID] {
+				block, found := caller.proc.Graph.BlockForStatement(call.StatementID)
+				if !found || !caller.reachable[block.ID] {
+					continue
+				}
+				entryCall := &objectEntryCall{
+					caller:        caller,
+					callee:        callee,
+					call:          call,
+					actuals:       objectCallActuals(call, caller.flowContext.facts),
+					contributions: map[string]bool{},
+				}
+				analysis.entryOutgoing[callerKey] = append(analysis.entryOutgoing[callerKey], entryCall)
+				analysis.entryIncoming[calleeKey] = append(analysis.entryIncoming[calleeKey], entryCall)
+				calleeSummary := analysis.summaries[calleeKey]
+				for actualIndex, actual := range entryCall.actuals {
+					formalIndex := objectFormalIndex(entryCall.call, calleeSummary, actualIndex)
+					if formalIndex < 0 || formalIndex >= len(calleeSummary.Params) || !calleeSummary.Params[formalIndex].Object {
 						continue
 					}
-					factoryKey, factoryOK := analysis.objectCalleeKey(nestedCall)
-					if factoryOK && factoryKey != calleeKey {
-						addSummaryDependency(factoryKey, calleeKey)
+					statementIDs := map[int]bool{entryCall.call.StatementID: true}
+					name := cleanIdentifier(actual.text)
+					if name != "" {
+						for statement := range caller.proc.Statements.All() {
+							if statement.Kind == procedureir.StatementSet && statement.Target != nil && strings.EqualFold(cleanIdentifier(statement.Target.Text), name) {
+								statementIDs[statement.ID] = true
+							}
+						}
+					}
+					for nestedCall := range caller.proc.Calls.All() {
+						if !statementIDs[nestedCall.StatementID] {
+							continue
+						}
+						for _, factoryKey := range analysis.objectCallCalleeKeys(caller, nestedCall) {
+							if factoryKey != calleeKey {
+								addSummaryDependency(factoryKey, calleeKey)
+							}
+						}
 					}
 				}
 			}
@@ -852,6 +856,16 @@ func (analysis *objectAnalysisContext) objectReceiverCalleeKeys(caller *objectPr
 	typeName := strings.ToLower(cleanIdentifier(lastName(strings.TrimSpace(declaration.Type))))
 	member := strings.ToLower(cleanIdentifier(call.Callee.Member))
 	return append([]string(nil), caller.receiverSummaryKeys[objectReceiverSummaryIndexKey(typeName, member)]...)
+}
+
+func (analysis *objectAnalysisContext) objectCallCalleeKeys(caller *objectProcedurePlan, call procedureir.CallSite) []string {
+	keys := make([]string, 0, 1)
+	if key, ok := analysis.objectCalleeKey(call); ok {
+		keys = append(keys, key)
+	}
+	keys = append(keys, analysis.objectReceiverCalleeKeys(caller, call)...)
+	sort.Strings(keys)
+	return uniqueStrings(keys)
 }
 
 func objectReceiverSummaryIndexKey(module, member string) string {
@@ -4310,9 +4324,66 @@ func objectCallParameterAssigned(proc sourceProcedure, declarations declarationS
 		if _, exists := vars[variable.key()]; !exists {
 			return false, false
 		}
-		return state[variable.key()], true
+		if state[variable.key()] || objectDominatingObjectAssignment(proc, variable, call.StatementID, declarations, flowContext) {
+			return true, true
+		}
+		return false, true
 	}
 	return false, false
+}
+
+func objectDominatingObjectAssignment(proc sourceProcedure, variable objectVariable, statementID int, declarations declarationScope, flowContext objectFlowContext) bool {
+	if proc.Graph == nil {
+		return false
+	}
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	callBlock, ok := graph.BlockForStatement(statementID)
+	if !ok {
+		return false
+	}
+	dominators := graph.Dominators()
+	type assignment struct {
+		statement procedureir.Statement
+	}
+	assignments := make([]assignment, 0)
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementSet && statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementReDim && statement.Kind != procedureir.StatementForEach {
+			continue
+		}
+		target, targetOK := objectFlowTarget(proc, statement, declarations, flowContext)
+		if !targetOK || target.key() != variable.key() {
+			continue
+		}
+		block, blockOK := graph.BlockForStatement(statement.ID)
+		if !blockOK || !objectBlockSetContains(dominators[callBlock.ID], block.ID) {
+			continue
+		}
+		if block.ID == callBlock.ID && statement.ID >= statementID {
+			continue
+		}
+		assignments = append(assignments, assignment{statement: statement})
+	}
+	sort.SliceStable(assignments, func(i, j int) bool {
+		return assignments[i].statement.ID < assignments[j].statement.ID
+	})
+	assigned := false
+	for _, candidate := range assignments {
+		statement := candidate.statement
+		switch statement.Kind {
+		case procedureir.StatementSet:
+			if statement.Value == nil {
+				assigned = false
+				continue
+			}
+			value := strings.ToLower(strings.TrimSpace(statement.Value.Text))
+			assigned = statement.Value.Kind == procedureir.ExpressionNew || strings.HasPrefix(value, "new ") || objectConstructorCallText(value)
+		case procedureir.StatementForEach:
+			assigned = true
+		default:
+			assigned = false
+		}
+	}
+	return assigned
 }
 
 func objectCallActuals(call procedureir.CallSite, facts *procedureAnalysisFacts) []objectCallActual {

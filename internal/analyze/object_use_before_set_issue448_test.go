@@ -2763,3 +2763,136 @@ End Sub
 		t.Fatalf("a nullable public Collection must remain nullable through a private ByVal helper: %+v", got)
 	}
 }
+
+func TestVBA202Issue448PropagatesCollectionReturnThroughValidationHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Normalize(ByVal candidate As Variant) As Collection
+  Dim result As Collection
+  Set result = New Collection
+  If Not IsObject(candidate) Then RaiseContractError
+  Set Normalize = result
+End Function
+
+Private Sub Configure(ByVal values As Collection)
+  Dim item As Object
+  Set item = values.Item(1)
+End Sub
+
+Private Sub RaiseContractError()
+  Err.Raise 5
+End Sub
+
+Public Sub Run(ByVal candidate As Variant)
+  Dim values As Collection
+  Set values = Normalize(candidate)
+  Configure values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a validated Collection return should reach the ByVal helper: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesCollectionReturnIntoClassFriendHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Factory.cls", `Attribute VB_Name = "Factory"
+Option Explicit
+
+Private Function Normalize(ByVal candidate As Variant) As Collection
+  Dim result As Collection
+  Set result = New Collection
+  If Not IsObject(candidate) Then RaiseContractError
+  Set Normalize = result
+End Function
+
+Friend Sub Configure(ByVal values As Collection)
+  Dim item As Object
+  Set item = values.Item(1)
+End Sub
+
+Private Sub RaiseContractError()
+  Err.Raise 5
+End Sub
+
+Public Sub Run(ByVal candidate As Variant)
+  Dim values As Collection
+  Dim target As Factory
+  Set values = Normalize(candidate)
+  Set target = New Factory
+  target.Configure values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a validated Collection return should reach a class Friend helper: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PreservesCollectionAfterLoopForReceiverCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Worker.cls", `Attribute VB_Name = "Worker"
+Option Explicit
+
+Friend Sub Consume(ByVal values As Collection)
+  Debug.Print values.Count
+End Sub
+
+Public Sub Run(ParamArray arguments() As Variant)
+  Dim raw As Variant
+  Dim target As Worker
+  Dim values As Collection
+  Set values = New Collection
+  For Each raw In arguments
+    values.Add raw
+  Next raw
+  Set target = New Worker
+  target.Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a Collection assigned before a loop should reach a receiver helper: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotUseLaterConstructorAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByVal values As Collection)
+  Dim item As Object
+  Set item = values.Item(1)
+End Sub
+
+Public Sub Run()
+  Dim values As Collection
+  Consume values
+  Set values = New Collection
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a constructor assigned after the call must not establish entry state: %+v", got)
+	}
+}
