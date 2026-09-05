@@ -36,6 +36,7 @@ type objectProcedureSummary struct {
 	ParamNonNothing               map[int]bool
 	ModuleAssigned                map[string]bool
 	ModuleWritten                 map[string]bool
+	ReturnObject                  bool
 	ReturnCollection              bool
 	ReturnAssigned                bool
 	ReturnProgID                  string
@@ -549,6 +550,7 @@ func (analysis *objectAnalysisContext) initializeObjectSummaries() {
 			ParamNonNothing:               map[int]bool{},
 			ModuleAssigned:                map[string]bool{},
 			ModuleWritten:                 map[string]bool{},
+			ReturnObject:                  isObjectType(plan.proc.ReturnType),
 			ReturnCollection:              dcKindFromType(plan.proc.ReturnType) == dcCollection,
 			ReturnParameter:               -1,
 			ReturnCollectionItemParameter: -1,
@@ -587,6 +589,41 @@ func objectInitialEntryState(plan *objectProcedurePlan) map[string]bool {
 func (analysis *objectAnalysisContext) buildObjectDependencies() {
 	addSummaryDependency := func(calleeKey, callerKey string) {
 		analysis.summaryDependents[calleeKey] = append(analysis.summaryDependents[calleeKey], callerKey)
+	}
+	for _, callerKey := range analysis.order {
+		caller := analysis.plans[callerKey]
+		if caller == nil {
+			continue
+		}
+		for expression := range caller.proc.Expressions.All() {
+			switch expression.Kind {
+			case procedureir.ExpressionIdentifier:
+				name := cleanIdentifier(expression.Text)
+				if name == "" || objectIntrinsicIdentifierAssigned(caller.proc, name) {
+					continue
+				}
+				if _, ok := objectDeclarationByName(name, caller.declarations); ok {
+					continue
+				}
+				for summaryKey, summary := range analysis.summaries {
+					if summaryKey == callerKey || !summary.ReturnObject || !strings.EqualFold(summary.Module, caller.proc.Module) || !strings.EqualFold(lastName(summary.QualifiedName), name) {
+						continue
+					}
+					addSummaryDependency(summaryKey, callerKey)
+				}
+			case procedureir.ExpressionMember:
+				typeName, member, ok := objectMemberFunctionTarget(caller.proc, expression.Text, caller.declarations)
+				if !ok {
+					continue
+				}
+				for summaryKey, summary := range analysis.summaries {
+					if summaryKey == callerKey || !summary.ReturnObject || !strings.EqualFold(cleanIdentifier(summary.Module), cleanIdentifier(typeName)) || !strings.EqualFold(lastName(summary.QualifiedName), member) {
+						continue
+					}
+					addSummaryDependency(summaryKey, callerKey)
+				}
+			}
+		}
 	}
 	for _, callerKey := range analysis.order {
 		caller := analysis.plans[callerKey]
@@ -2461,7 +2498,7 @@ func objectBareObjectFunctionAssigned(proc sourceProcedure, name string, summari
 	var match objectProcedureSummary
 	found := false
 	for _, summary := range summaries {
-		if !summary.ReturnCollection || !strings.EqualFold(summary.Module, proc.Module) {
+		if !summary.ReturnObject || !strings.EqualFold(summary.Module, proc.Module) {
 			continue
 		}
 		qualifiedName := strings.TrimSpace(summary.QualifiedName)
@@ -2481,30 +2518,14 @@ func objectBareObjectFunctionAssigned(proc sourceProcedure, name string, summari
 }
 
 func objectMemberFunctionAssigned(proc sourceProcedure, text string, declarations declarationScope, summaries map[string]objectProcedureSummary) bool {
-	text = strings.TrimSpace(text)
-	dot := strings.LastIndexByte(text, '.')
-	if dot < 0 {
-		return false
-	}
-	receiver := strings.TrimSpace(text[:dot])
-	member := cleanIdentifier(strings.TrimSpace(text[dot+1:]))
-	if receiver == "" || member == "" {
-		return false
-	}
-	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(strings.SplitN(receiver, ".", 2)[0], "(", 2)[0]))
-	typeName := ""
-	if strings.EqualFold(root, "me") && (strings.EqualFold(proc.ModuleKind, "class") || strings.EqualFold(proc.ModuleKind, "form")) {
-		typeName = proc.Module
-	} else if declaration, ok := objectDeclarationByName(root, declarations); ok {
-		typeName = lastName(strings.TrimSpace(declaration.Type))
-	}
-	if typeName == "" {
+	typeName, member, ok := objectMemberFunctionTarget(proc, text, declarations)
+	if !ok {
 		return false
 	}
 	var match objectProcedureSummary
 	found := false
 	for _, summary := range summaries {
-		if !summary.ReturnCollection || !strings.EqualFold(cleanIdentifier(summary.Module), cleanIdentifier(typeName)) || !strings.EqualFold(lastName(summary.QualifiedName), member) {
+		if !summary.ReturnObject || !strings.EqualFold(cleanIdentifier(summary.Module), cleanIdentifier(typeName)) || !strings.EqualFold(lastName(summary.QualifiedName), member) {
 			continue
 		}
 		if found {
@@ -2514,6 +2535,27 @@ func objectMemberFunctionAssigned(proc sourceProcedure, text string, declaration
 		found = true
 	}
 	return found && match.ReturnAssigned
+}
+
+func objectMemberFunctionTarget(proc sourceProcedure, text string, declarations declarationScope) (string, string, bool) {
+	text = strings.TrimSpace(text)
+	dot := strings.LastIndexByte(text, '.')
+	if dot < 0 {
+		return "", "", false
+	}
+	receiver := strings.TrimSpace(text[:dot])
+	member := cleanIdentifier(strings.TrimSpace(text[dot+1:]))
+	if receiver == "" || member == "" {
+		return "", "", false
+	}
+	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(strings.SplitN(receiver, ".", 2)[0], "(", 2)[0]))
+	typeName := ""
+	if strings.EqualFold(root, "me") && (strings.EqualFold(proc.ModuleKind, "class") || strings.EqualFold(proc.ModuleKind, "form")) {
+		typeName = proc.Module
+	} else if declaration, ok := objectDeclarationByName(root, declarations); ok {
+		typeName = lastName(strings.TrimSpace(declaration.Type))
+	}
+	return typeName, member, typeName != ""
 }
 
 func objectConstructorCallText(text string) bool {

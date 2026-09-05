@@ -2245,6 +2245,34 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksImplicitObjectFunctionResults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function NewDictionary() As Object
+  Set NewDictionary = CreateObject("Scripting.Dictionary")
+End Function
+
+Private Function ForwardDictionary() As Object
+  Set ForwardDictionary = NewDictionary
+End Function
+
+Public Sub Run()
+  Dim dictionary As Object
+  Set dictionary = ForwardDictionary
+  Debug.Print dictionary.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("bare object-returning function results should preserve Object state: %+v", got)
+	}
+}
+
 func TestVBA202Issue448RejectsUninitializedCollectionReturnCycle(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -2300,5 +2328,33 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("a typed Collection member result should preserve Collection state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksTypedObjectMemberResults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Factory.cls", `Attribute VB_Name = "Factory"
+Option Explicit
+Public Function BuildDictionary() As Object
+  Set BuildDictionary = CreateObject("Scripting.Dictionary")
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim factory As Factory
+  Dim dictionary As Object
+  Set factory = New Factory
+  Set dictionary = factory.BuildDictionary
+  Debug.Print dictionary.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a typed Object member result should preserve object state: %+v", got)
 	}
 }
