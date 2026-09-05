@@ -1712,6 +1712,120 @@ func objectErrorResumeNextAt(proc sourceProcedure, statementID int) bool {
 	return active
 }
 
+// objectResumeNextSelectNodesChecked recognizes the normal-continuation side
+// of a guarded compatibility probe:
+//
+//	On Error Resume Next
+//	Set nodes = provider.SelectNodes(xpath)
+//	If Err.Number <> 0 Then RaiseXmlError ...
+//	On Error GoTo 0
+//	nodes.Length
+//
+// Resume Next keeps the assignment nullable in general, but a non-returning
+// error branch removes the failed call from the normal continuation.  The
+// existing negative test deliberately omits that Err.Number guard and must
+// remain nullable.
+func objectResumeNextSelectNodesChecked(proc sourceProcedure, statementID int, flowContext objectFlowContext) bool {
+	if proc.Graph == nil || !objectErrorResumeNextAt(proc, statementID) {
+		return false
+	}
+	assignmentBlock, ok := flowContext.graph.BlockForStatement(statementID)
+	if !ok {
+		return false
+	}
+	dominators := flowContext.graph.Dominators()
+	successors := make(map[vbacfg.BlockID][]vbacfg.BlockID)
+	flowContext.graph.ForEachEdge(func(edge vbacfg.Edge) bool {
+		if edge.Class != vbacfg.EdgeExceptional {
+			successors[edge.From] = append(successors[edge.From], edge.To)
+		}
+		return true
+	})
+
+	seenAssignment := false
+	for statement := range proc.Statements.All() {
+		if !seenAssignment {
+			if statement.ID == statementID {
+				seenAssignment = true
+			}
+			continue
+		}
+		if statement.Kind == procedureir.StatementOnError {
+			return false
+		}
+		if statement.Kind != procedureir.StatementIf || statement.Condition == nil {
+			continue
+		}
+		comparison, ok := objectErrNumberGuard(statement.Condition.Text)
+		if !ok {
+			return false
+		}
+		guardBlock, ok := flowContext.graph.BlockForStatement(statement.ID)
+		if !ok || !objectBlockSetContains(dominators[guardBlock.ID], assignmentBlock.ID) {
+			return false
+		}
+		failureBranch := vbacfg.EdgeBranchTrue
+		if comparison == "zero" {
+			failureBranch = vbacfg.EdgeBranchFalse
+		}
+		failureReachable := false
+		failureFallsThrough := false
+		flowContext.graph.ForEachOutgoing(guardBlock.ID, func(edge vbacfg.Edge) bool {
+			if edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
+				return true
+			}
+			if edge.Kind != failureBranch {
+				return true
+			}
+			failureReachable = true
+			failureFallsThrough = objectFlowCanReach(successors, edge.To, flowContext.graph.NormalExit()) ||
+				objectFlowCanReach(successors, edge.To, flowContext.graph.UnknownExit())
+			return true
+		})
+		return failureReachable && !failureFallsThrough
+	}
+	return false
+}
+
+func objectResumeNextSelectNodesGuardVariable(proc sourceProcedure, guardStatementID int, flowContext objectFlowContext, declarations declarationScope) (objectVariable, bool) {
+	var statements []procedureir.Statement
+	for _, statement := range proc.Statements.AllIndexed() {
+		statements = append(statements, statement)
+	}
+	guardIndex := -1
+	for index, statement := range statements {
+		if statement.ID == guardStatementID {
+			guardIndex = index
+			break
+		}
+	}
+	if guardIndex <= 0 {
+		return objectVariable{}, false
+	}
+	for index := guardIndex - 1; index >= 0; index-- {
+		statement := statements[index]
+		if statement.Kind == procedureir.StatementOnError {
+			continue
+		}
+		if statement.Kind != procedureir.StatementSet {
+			return objectVariable{}, false
+		}
+		target, ok := objectFlowTarget(proc, statement, declarations, flowContext)
+		if !ok {
+			return objectVariable{}, false
+		}
+		selectNodes := false
+		flowContext.facts.forEachCallForStatement(statement.ID, func(call procedureir.CallSite) {
+			selectNodes = selectNodes || objectXMLSelectNodesAssigned(call)
+		})
+		if !selectNodes || !objectResumeNextSelectNodesChecked(proc, statement.ID, flowContext) {
+			return objectVariable{}, false
+		}
+		return target, true
+	}
+	return objectVariable{}, false
+}
+
 type objectFlowGuardCache struct {
 	graph      vbacfg.CFGView
 	graphReady bool
@@ -2012,7 +2126,7 @@ func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectP
 				if (edge.Uncertain || objectFlowForEachZeroIteration(flowContext, edge)) && !terminalExceptional {
 					state = result.in[edge.From]
 				}
-				state = objectFlowApplyGuard(state, flowContext, edge, plan.declarations)
+				state = objectFlowApplyGuard(flowProc, state, flowContext, edge, plan.declarations)
 				incoming = append(incoming, state)
 			}
 			if len(incoming) == 0 {
@@ -2111,11 +2225,39 @@ func objectClassLifecycleAssignedPlan(plan *objectProcedurePlan, variable object
 // `obj Is Nothing`/`Not obj Is Nothing` condition.  Compound boolean
 // expressions are deliberately ignored; VBA212 remains responsible for
 // short-circuit/eager Boolean diagnostics and this analysis stays conservative.
-func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, edge vbacfg.Edge, declarations declarationScope) map[string]bool {
+func objectFlowApplyGuard(proc sourceProcedure, state map[string]bool, flowContext objectFlowContext, edge vbacfg.Edge, declarations declarationScope) map[string]bool {
 	if edge.Kind == vbacfg.EdgeCase {
 		return objectFlowApplySelectCaseTypeGuard(state, flowContext, edge, declarations)
 	}
 	if edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
+		if edge.Class == vbacfg.EdgeExceptional {
+			if statement, ok := flowContext.facts.Statement(edge.StatementID); ok && statement.Condition != nil {
+				text := objectTrimOuterParens(strings.ToLower(strings.TrimSpace(statement.Condition.Text)))
+				if strings.HasPrefix(text, "not ") {
+					text = "not " + objectTrimOuterParens(strings.TrimSpace(strings.TrimPrefix(text, "not ")))
+				}
+				if comparison, ok := objectErrNumberGuard(text); ok {
+					if variable, checked := objectResumeNextSelectNodesGuardVariable(proc, edge.StatementID, flowContext, declarations); checked {
+						successKind := vbacfg.EdgeBranchFalse
+						if comparison == "zero" {
+							successKind = vbacfg.EdgeBranchTrue
+						}
+						successTarget := vbacfg.BlockID(-1)
+						flowContext.graph.ForEachOutgoing(edge.From, func(candidate vbacfg.Edge) bool {
+							if candidate.Class == vbacfg.EdgeNormal && candidate.Kind == successKind {
+								successTarget = candidate.To
+							}
+							return true
+						})
+						if edge.To == successTarget {
+							updated := cloneObjectState(state)
+							updated[variable.key()] = true
+							return updated
+						}
+					}
+				}
+			}
+		}
 		return state
 	}
 	statement, ok := flowContext.facts.Statement(edge.StatementID)
@@ -2125,6 +2267,18 @@ func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, 
 	text := objectTrimOuterParens(strings.ToLower(strings.TrimSpace(statement.Condition.Text)))
 	if strings.HasPrefix(text, "not ") {
 		text = "not " + objectTrimOuterParens(strings.TrimSpace(strings.TrimPrefix(text, "not ")))
+	}
+	if comparison, ok := objectErrNumberGuard(text); ok {
+		if variable, checked := objectResumeNextSelectNodesGuardVariable(proc, edge.StatementID, flowContext, declarations); checked {
+			success := (comparison == "nonzero" && edge.Kind == vbacfg.EdgeBranchFalse) ||
+				(comparison == "zero" && edge.Kind == vbacfg.EdgeBranchTrue)
+			if success {
+				updated := cloneObjectState(state)
+				updated[variable.key()] = true
+				return updated
+			}
+			return state
+		}
 	}
 	if comparison, ok := objectErrNumberGuard(text); ok && objectFlowExceptionalOnly(flowContext, edge.From) {
 		possible := (comparison == "nonzero" && edge.Kind == vbacfg.EdgeBranchTrue) ||
@@ -2885,10 +3039,13 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 			// mode can continue with an unchanged Nothing target.
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectXMLSelectNodesAssigned(call) {
+		if objectXMLSelectNodesAssigned(call) &&
+			(!objectErrorResumeNextAt(proc, statementID) || objectResumeNextSelectNodesChecked(proc, statementID, flowContext)) {
 			// MSXML's SelectNodes returns an IXMLDOMNodeList, including an
-			// empty list when the XPath matches no nodes.  A successful late-
-			// bound call therefore establishes a non-Nothing object result.
+			// empty list when the XPath matches no nodes.  A successful late-bound
+			// call therefore establishes a non-Nothing object result.  A Resume
+			// Next probe is accepted only when its Err.Number failure branch is
+			// proven terminal.
 			return true
 		}
 		if !objectErrorResumeNextAt(proc, statementID) && objectRegExpExecuteAssigned(proc, call, state, declarations) {

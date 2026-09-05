@@ -1777,6 +1777,38 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448AcceptsCheckedMsxmlSelectNodesResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub RaiseXmlError(ByVal message As String)
+  Err.Raise 5, "XML", message
+End Sub
+
+Public Sub Run()
+  Dim provider As Object
+  Dim nodes As Object
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  On Error Resume Next
+  Set nodes = provider.SelectNodes("//item")
+  If Err.Number <> 0 Then
+    On Error GoTo 0
+    RaiseXmlError "XPath failed"
+  End If
+  On Error GoTo 0
+  Debug.Print nodes.Length
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a checked SelectNodes failure must not leave a nullable result on normal continuation: %+v", got)
+	}
+}
+
 func TestVBA202Issue448TracksRegExpExecuteResultThroughModuleInitializer(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
