@@ -146,6 +146,70 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RecognizesChartObjectAndSeriesFactories(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub RenderChart(ByVal targetSheet As Worksheet)
+  Dim chartObject As ChartObject
+  Dim chart As Chart
+  Dim chartSeries As Series
+
+  Set chartObject = targetSheet.ChartObjects.Add(0, 0, 100, 100)
+  chartObject.Placement = xlMoveAndSize
+  Set chart = chartObject.Chart
+  chart.ChartType = xlLine
+  Set chartSeries = chart.SeriesCollection.NewSeries
+  chartSeries.Name = "Trend"
+End Sub
+
+Public Sub Run()
+  RenderChart ThisWorkbook.Worksheets(1)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Excel ChartObject and Series factories should establish object state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesUserFormControlsItem(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub TintGhostSprite(ByVal spriteContainer As Object, ByVal bodyColor As Long)
+  Dim controlIndex As Long
+  Dim pixelControl As Object
+
+  If spriteContainer Is Nothing Then Exit Sub
+  For controlIndex = 0 To spriteContainer.Controls.Count - 1
+    Set pixelControl = spriteContainer.Controls.Item(controlIndex)
+    If pixelControl.Tag = "body" Then
+      pixelControl.BackColor = bodyColor
+    End If
+  Next controlIndex
+End Sub
+
+Public Sub Run()
+  Dim frame As Object
+  Set frame = CreateObject("Forms.Frame.1")
+  TintGhostSprite frame, RGB(80, 120, 255)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a bounded UserForm Controls.Item result should establish object state: %+v", got)
+	}
+}
+
 func TestVBA202Issue448PropagatesCollectionItemFunctionResult(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

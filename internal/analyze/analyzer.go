@@ -270,7 +270,7 @@ var (
 
 var objectTypes = map[string]bool{
 	"application": true, "workbook": true, "worksheet": true, "range": true,
-	"chart": true, "pivot table": true, "pivottable": true, "listobject": true,
+	"chart": true, "chartobject": true, "series": true, "pivot table": true, "pivottable": true, "listobject": true,
 	"dictionary": true, "collection": true, "object": true, "window": true,
 }
 

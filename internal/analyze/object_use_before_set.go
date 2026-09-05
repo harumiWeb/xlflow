@@ -1702,6 +1702,12 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 		if strings.EqualFold(call.Callee.Member, "Add") && strings.HasSuffix(receiver, ".controls") {
 			return true
 		}
+		if strings.EqualFold(call.Callee.Member, "Item") && strings.HasSuffix(receiver, ".controls") {
+			// A valid Controls index returns the existing control object.  The
+			// caller's loop bounds are responsible for proving the index; this
+			// branch only models the non-Nothing result of the collection lookup.
+			return true
+		}
 		if objectExcelMemberChainAssigned(call, state, declarations) {
 			return true
 		}
@@ -2089,7 +2095,7 @@ func objectDeclarationByName(name string, declarations declarationScope) (source
 func excelObjectUseType(typ string) bool {
 	typ = strings.ToLower(cleanIdentifier(strings.TrimSpace(typ)))
 	switch typ {
-	case "application", "workbook", "worksheet", "range", "chart", "pivot table", "pivottable", "listobject", "window", "shape":
+	case "application", "workbook", "worksheet", "range", "chart", "chartobject", "series", "pivot table", "pivottable", "listobject", "window", "shape":
 		return true
 	default:
 		return strings.HasSuffix(typ, ".application") || strings.HasSuffix(typ, ".workbook") || strings.HasSuffix(typ, ".worksheet") || strings.HasSuffix(typ, ".range") || strings.HasSuffix(typ, ".shape")
@@ -2099,7 +2105,7 @@ func excelObjectUseType(typ string) bool {
 func excelObjectUseMember(member string) bool {
 	member = strings.ToLower(cleanIdentifier(strings.TrimSpace(strings.SplitN(member, "(", 2)[0])))
 	switch member {
-	case "application", "workbooks", "worksheets", "sheets", "range", "cells", "rows", "columns", "shapes", "parent", "resize", "offset", "addshape", "selection", "usedrange", "interior", "borders", "font", "textframe", "characters", "fill", "line", "controls", "add":
+	case "application", "workbooks", "worksheets", "sheets", "range", "cells", "rows", "columns", "shapes", "chartobjects", "chart", "seriescollection", "newseries", "parent", "resize", "offset", "addshape", "selection", "usedrange", "interior", "borders", "font", "textframe", "characters", "fill", "line", "controls", "add":
 		return true
 	default:
 		return false
@@ -2109,7 +2115,7 @@ func excelObjectUseMember(member string) bool {
 func excelObjectFactoryMember(member string) bool {
 	member = strings.ToLower(cleanIdentifier(strings.TrimSpace(strings.SplitN(member, "(", 2)[0])))
 	switch member {
-	case "application", "workbooks", "worksheets", "sheets", "range", "cells", "rows", "columns", "shapes", "usedrange", "interior", "borders", "font", "textframe", "characters", "fill", "line", "controls", "add", "addshape", "parent", "resize", "offset":
+	case "application", "workbooks", "worksheets", "sheets", "range", "cells", "rows", "columns", "shapes", "chartobjects", "chart", "seriescollection", "newseries", "usedrange", "interior", "borders", "font", "textframe", "characters", "fill", "line", "controls", "add", "addshape", "parent", "resize", "offset":
 		return true
 	default:
 		return false

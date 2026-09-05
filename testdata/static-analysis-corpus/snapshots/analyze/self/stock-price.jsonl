@@ -17,9 +17,7 @@
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA225","severity":"warning","line":378,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA225","severity":"warning","line":388,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA203","severity":"warning","line":511,"column":0}
-{"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA202","severity":"warning","line":530,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA225","severity":"warning","line":536,"column":0}
-{"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA202","severity":"warning","line":553,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA221","severity":"warning","line":568,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA221","severity":"warning","line":577,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA203","severity":"warning","line":709,"column":0}
