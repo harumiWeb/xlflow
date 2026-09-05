@@ -2462,6 +2462,9 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 				return true
 			}
 		}
+		if objectBareObjectFunctionAssigned(proc, objectBareCallName(text), summaries) {
+			return true
+		}
 		return objectConstructorCallText(lower)
 	case procedureir.ExpressionMember:
 		if objectExcelMemberExpressionAssigned(expression.Text, proc, declarations) {
@@ -3720,7 +3723,7 @@ func objectUnresolvedExpressionCallReadOnly(call procedureir.CallSite) bool {
 		name = strings.ToLower(objectBareCallName(call.Callee.Text))
 	}
 	switch name {
-	case "typename", "strcomp", "isobject", "array":
+	case "typename", "strcomp", "isobject", "array", "callbyname":
 		return true
 	default:
 		return false
@@ -3852,7 +3855,8 @@ type objectCallActual struct {
 }
 
 func objectProcedureAllowsParameterEntry(proc sourceProcedure) bool {
-	return strings.EqualFold(strings.TrimSpace(proc.Visibility), "private")
+	visibility := strings.TrimSpace(proc.Visibility)
+	return strings.EqualFold(visibility, "private") || strings.EqualFold(visibility, "friend")
 }
 
 func objectCallParameterAssigned(proc sourceProcedure, declarations declarationScope, call procedureir.CallSite, summary objectProcedureSummary, formalIndex int, actuals []objectCallActual, state map[string]bool, vars map[string]objectVariable, flowContext objectFlowContext, summaries map[string]objectProcedureSummary) (bool, bool) {

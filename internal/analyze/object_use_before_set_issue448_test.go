@@ -2273,6 +2273,67 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksImplicitObjectFunctionWithOptionalArgument(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function BuildCommand(Optional ByVal dataRow As Object) As Object
+  Dim commandObject As Object
+  Dim parametersObject As Object
+  Set commandObject = CreateObject("Scripting.Dictionary")
+  Set parametersObject = CallByName(commandObject, "Item", VbGet, "parameters")
+  Set BuildCommand = commandObject
+End Function
+
+Public Sub Run()
+  Dim commandObject As Object
+  Set commandObject = BuildCommand
+  Debug.Print commandObject.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an optional-argument object-returning function should preserve Object state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksObjectFactoryMemberResults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CreateFileSystemObject() As Object
+  Dim fileSystem As Object
+  Set fileSystem = CreateObject("Scripting.FileSystemObject")
+  Set CreateFileSystemObject = fileSystem
+End Function
+
+Private Sub WalkFolder(ByVal folderPath As String)
+  Dim folder As Object
+  Dim item As Object
+  Set folder = CreateFileSystemObject().GetFolder(folderPath)
+  For Each item In folder.Files
+    Debug.Print item.Path
+  Next item
+End Sub
+
+Public Sub Run(ByVal folderPath As String)
+  WalkFolder folderPath
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an object factory member result should preserve Object state: %+v", got)
+	}
+}
+
 func TestVBA202Issue448RejectsUninitializedCollectionReturnCycle(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -2356,5 +2417,30 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("a typed Object member result should preserve object state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesInitializedCollectionIntoFriendHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Worker.cls", `Attribute VB_Name = "Worker"
+Option Explicit
+Friend Sub Consume(ByVal values As Collection)
+  Debug.Print values.Count
+End Sub
+
+Public Sub Run()
+  Dim values As Collection
+  Set values = New Collection
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an initialized Collection should reach a Friend helper: %+v", got)
 	}
 }
