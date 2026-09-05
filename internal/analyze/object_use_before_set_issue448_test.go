@@ -1685,6 +1685,41 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PropagatesIsExcelTableTypeIntoPrivateHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function IsExcelTable(ByVal candidate As Object) As Boolean
+  If candidate Is Nothing Then Exit Function
+  IsExcelTable = (TypeName(candidate) = "ListObject")
+End Function
+
+Private Function WriteToListObject(ByVal listObject As Object) As Long
+  Dim sheet As Object
+  Set sheet = listObject.Parent
+  sheet.Cells(1, 1).Value = 1
+  WriteToListObject = 1
+End Function
+
+Public Function ToRange(ByVal target As Object) As Long
+  If Not IsExcelTable(target) Then Err.Raise 5
+  ToRange = WriteToListObject(target)
+End Function
+
+Public Sub Run(ByVal target As Object)
+  ToRange target
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("IsExcelTable should propagate ListObject state into the private helper: %+v", got)
+	}
+}
+
 func TestVBA202Issue448TracksExcelFactoryAfterPublicBoundaryGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

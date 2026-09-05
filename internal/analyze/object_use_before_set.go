@@ -575,12 +575,20 @@ func objectInitialEntryState(plan *objectProcedurePlan) map[string]bool {
 	state := map[string]bool{}
 	for name, declaration := range plan.moduleDecls {
 		if declaration.Object {
-			state[(objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()] = false
+			variableKey := (objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()
+			state[variableKey] = false
+			for _, typeName := range []string{"ListObject", "ListColumn"} {
+				state[objectTypeNameFactKey(variableKey, typeName)] = false
+			}
 		}
 	}
 	for parameter := range plan.proc.Params.All() {
 		if isObjectType(parameter.Type) {
-			state[(objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}).key()] = false
+			variableKey := (objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}).key()
+			state[variableKey] = false
+			for _, typeName := range []string{"ListObject", "ListColumn"} {
+				state[objectTypeNameFactKey(variableKey, typeName)] = false
+			}
 		}
 	}
 	return state
@@ -1214,6 +1222,21 @@ func (analysis *objectAnalysisContext) buildEntryStates() map[string]map[string]
 					parameterKey := (objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}).key()
 					assigned, present := objectCallParameterAssigned(caller.proc, caller.declarations, entryCall.call, calleeSummary, index, entryCall.actuals, blockState, flow.vars, flowContext, analysis.summaries)
 					contributions[parameterKey] = assigned && present
+					for actualIndex, actual := range entryCall.actuals {
+						if objectFormalIndex(entryCall.call, calleeSummary, actualIndex) != index {
+							continue
+						}
+						actualName := cleanIdentifier(actual.text)
+						_, actualScope, actualOK := objectDeclarationBinding(actualName, caller.declarations)
+						if !actualOK {
+							continue
+						}
+						actualKey := (objectVariable{Scope: actualScope, Name: actualName}).key()
+						for _, typeName := range []string{"ListObject", "ListColumn"} {
+							contributions[objectTypeNameFactKey(parameterKey, typeName)] = blockState[objectTypeNameFactKey(actualKey, typeName)]
+						}
+						break
+					}
 				}
 			}
 			if strings.EqualFold(callee.proc.Module, caller.proc.Module) {
@@ -1227,6 +1250,9 @@ func (analysis *objectAnalysisContext) buildEntryStates() map[string]map[string]
 					}
 					fieldKey := (objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()
 					contributions[fieldKey] = blockState[fieldKey]
+					for _, typeName := range []string{"ListObject", "ListColumn"} {
+						contributions[objectTypeNameFactKey(fieldKey, typeName)] = blockState[objectTypeNameFactKey(fieldKey, typeName)]
+					}
 				}
 			}
 			if !entryCall.evaluated || !objectBoolMapEqual(entryCall.contributions, contributions) {
@@ -1871,6 +1897,11 @@ func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectP
 		// caller can pass Nothing, and only a dominating Set or a proven ByRef
 		// initializer establishes a safe value.
 	}
+	for key, value := range options.Entry {
+		if _, exists := initial[key]; !exists {
+			initial[key] = value
+		}
+	}
 	reachable := plan.reachable
 	flowGraph.ForEachBlock(func(block vbacfg.Block) bool {
 		if !reachable[block.ID] {
@@ -2068,6 +2099,9 @@ func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, 
 		}
 		updated := cloneObjectState(state)
 		updated[key] = true
+		if strings.Contains(text, "isexceltable(") {
+			updated[objectTypeNameFactKey(key, "ListObject")] = true
+		}
 		return updated
 	}
 	marker := " is nothing"
