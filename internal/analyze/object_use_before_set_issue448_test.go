@@ -1720,6 +1720,63 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksMsxmlSelectNodesResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function RunXPath(ByVal provider As Object) As Object
+  If provider Is Nothing Then Err.Raise 5
+  Set RunXPath = provider.SelectNodes("//item")
+End Function
+
+Public Function FirstMatch(ByVal provider As Object) As Object
+  Dim matched As Object
+  Set matched = RunXPath(provider)
+  If matched.Length > 0 Then Set FirstMatch = matched.Item(0)
+End Function
+
+Public Sub DirectSelectNodes(ByVal provider As Object)
+  Dim nodes As Object
+  If provider Is Nothing Then Exit Sub
+  Set nodes = provider.SelectNodes("//item")
+  If nodes.Length = 0 Then Exit Sub
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("successful MSXML SelectNodes should establish a NodeList result: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotTreatMsxmlSelectNodesUnderResumeNextAsAssigned(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim provider As Object
+  Dim nodes As Object
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  On Error Resume Next
+  Set nodes = provider.SelectNodes("//item")
+  On Error GoTo 0
+  Debug.Print nodes.Length
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("SelectNodes under Resume Next must remain nullable: %+v", got)
+	}
+}
+
 func TestVBA202Issue448TracksExcelFactoryAfterPublicBoundaryGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

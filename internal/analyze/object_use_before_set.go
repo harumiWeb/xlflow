@@ -2601,6 +2601,9 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		if !objectErrorResumeNextAt(proc, statementID) && objectDynamicExcelMemberExpressionAssigned(expression.Text, state, declarations) {
 			return true
 		}
+		if !objectErrorResumeNextAt(proc, statementID) && objectXMLSelectNodesExpressionAssigned(expression.Text) {
+			return true
+		}
 		if objectMemberFunctionAssigned(proc, expression.Text, declarations, summaries) {
 			return true
 		}
@@ -2766,6 +2769,12 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 			// were Nothing, VBA would raise before the assignment's normal
 			// continuation.  On Error Resume Next is excluded because that
 			// mode can continue with an unchanged Nothing target.
+			return true
+		}
+		if !objectErrorResumeNextAt(proc, statementID) && objectXMLSelectNodesAssigned(call) {
+			// MSXML's SelectNodes returns an IXMLDOMNodeList, including an
+			// empty list when the XPath matches no nodes.  A successful late-
+			// bound call therefore establishes a non-Nothing object result.
 			return true
 		}
 		if receiver == "thisworkbook" || receiver == "application" || receiver == "excel.application" ||
@@ -3655,6 +3664,16 @@ func objectExcelMemberFactoryAssigned(call procedureir.CallSite, declarations de
 		}
 	}
 	return excelObjectFactoryMember(call.Callee.Member)
+}
+
+func objectXMLSelectNodesAssigned(call procedureir.CallSite) bool {
+	return call.Callee.Receiver != nil && strings.EqualFold(cleanIdentifier(call.Callee.Member), "selectnodes")
+}
+
+func objectXMLSelectNodesExpressionAssigned(text string) bool {
+	base := strings.TrimSpace(strings.SplitN(text, "(", 2)[0])
+	dot := strings.LastIndexByte(base, '.')
+	return dot >= 0 && strings.EqualFold(cleanIdentifier(strings.TrimSpace(base[dot+1:])), "selectnodes")
 }
 
 func objectDynamicExcelMemberExpressionAssigned(text string, state map[string]bool, declarations declarationScope) bool {
