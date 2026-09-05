@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"maps"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -35,6 +36,7 @@ type objectProcedureSummary struct {
 	ParamNonNothing               map[int]bool
 	ModuleAssigned                map[string]bool
 	ModuleWritten                 map[string]bool
+	ReturnCollection              bool
 	ReturnAssigned                bool
 	ReturnProgID                  string
 	ReturnParameter               int
@@ -547,6 +549,7 @@ func (analysis *objectAnalysisContext) initializeObjectSummaries() {
 			ParamNonNothing:               map[int]bool{},
 			ModuleAssigned:                map[string]bool{},
 			ModuleWritten:                 map[string]bool{},
+			ReturnCollection:              dcKindFromType(plan.proc.ReturnType) == dcCollection,
 			ReturnParameter:               -1,
 			ReturnCollectionItemParameter: -1,
 		}
@@ -919,74 +922,137 @@ func objectIsCurrentModuleReceiver(call procedureir.CallSite) bool {
 }
 
 func (analysis *objectAnalysisContext) buildSummaries() map[string]objectProcedureSummary {
-	queue := append([]string(nil), analysis.order...)
-	queued := make(map[string]bool, len(queue))
-	for _, key := range queue {
-		queued[key] = true
-	}
-	for len(queue) > 0 {
-		key := queue[0]
-		queue = queue[1:]
-		queued[key] = false
-		plan := analysis.plans[key]
-		if plan == nil || !plan.relevant {
-			continue
+	for {
+		queue := append([]string(nil), analysis.order...)
+		queued := make(map[string]bool, len(queue))
+		for _, key := range queue {
+			queued[key] = true
 		}
-		analysis.summaryEvaluations++
-		previous := analysis.summaries[key]
-		flow := objectStateFlowPlan(plan, analysis.summaries, objectFlowOptions{})
-		updated := previous
-		updated.ByRefAssigned = cloneIntBoolMap(previous.ByRefAssigned)
-		updated.ByRefWritten = cloneIntBoolMap(previous.ByRefWritten)
-		updated.ParamProgID = analysis.objectParameterProgIDs(plan)
-		updated.ParamNonNothing = cloneIntBoolMap(previous.ParamNonNothing)
-		updated.ModuleAssigned = cloneBoolMap(previous.ModuleAssigned)
-		updated.ModuleWritten = cloneBoolMap(previous.ModuleWritten)
-		for index, parameter := range previous.Params {
-			if !parameter.Object || !parameter.ByRef {
+		for len(queue) > 0 {
+			key := queue[0]
+			queue = queue[1:]
+			queued[key] = false
+			plan := analysis.plans[key]
+			if plan == nil || !plan.relevant {
 				continue
 			}
-			variable := objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}
-			updated.ByRefAssigned[index] = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
-			updated.ByRefWritten[index] = plan.unknownFlow || objectProcedureWritesParameterIndexed(plan.proc, parameter.Name, analysis.summaries, plan.flowContext.facts)
-			updated.ParamNonNothing[index] = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
-		}
-		for index, parameter := range previous.Params {
-			if !parameter.Object || parameter.ByRef {
-				continue
+			analysis.summaryEvaluations++
+			previous := analysis.summaries[key]
+			flow := objectStateFlowPlan(plan, analysis.summaries, objectFlowOptions{})
+			updated := previous
+			updated.ByRefAssigned = cloneIntBoolMap(previous.ByRefAssigned)
+			updated.ByRefWritten = cloneIntBoolMap(previous.ByRefWritten)
+			updated.ParamProgID = analysis.objectParameterProgIDs(plan)
+			updated.ParamNonNothing = cloneIntBoolMap(previous.ParamNonNothing)
+			updated.ModuleAssigned = cloneBoolMap(previous.ModuleAssigned)
+			updated.ModuleWritten = cloneBoolMap(previous.ModuleWritten)
+			for index, parameter := range previous.Params {
+				if !parameter.Object || !parameter.ByRef {
+					continue
+				}
+				variable := objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}
+				updated.ByRefAssigned[index] = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
+				updated.ByRefWritten[index] = plan.unknownFlow || objectProcedureWritesParameterIndexed(plan.proc, parameter.Name, analysis.summaries, plan.flowContext.facts)
+				updated.ParamNonNothing[index] = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
 			}
-			variable := objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}
-			updated.ParamNonNothing[index] = !plan.unknownFlow &&
-				!objectProcedureWritesParameterIndexed(plan.proc, parameter.Name, analysis.summaries, plan.flowContext.facts) &&
-				objectFlowExitDefinitelyAssigned(flow, variable)
-		}
-		for name, declaration := range plan.moduleDecls {
-			if !declaration.Object {
-				continue
+			for index, parameter := range previous.Params {
+				if !parameter.Object || parameter.ByRef {
+					continue
+				}
+				variable := objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}
+				updated.ParamNonNothing[index] = !plan.unknownFlow &&
+					!objectProcedureWritesParameterIndexed(plan.proc, parameter.Name, analysis.summaries, plan.flowContext.facts) &&
+					objectFlowExitDefinitelyAssigned(flow, variable)
 			}
-			variable := objectVariable{Scope: procedureir.ScopeModule, Name: declaration.Name}
-			updated.ModuleAssigned[strings.ToLower(name)] = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
-			updated.ModuleWritten[strings.ToLower(name)] = objectProcedureWritesModuleFieldIndexed(plan.proc, declaration.Name, plan.flowContext.facts)
-		}
-		if isObjectType(plan.proc.ReturnType) {
-			variable := objectVariable{Scope: procedureir.ScopeLocal, Name: plan.proc.Name}
-			updated.ReturnAssigned = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
-		}
-		updated.ReturnCollectionItemParameter = objectReturnCollectionItemParameter(plan)
-		updated.ReturnParameter = objectReturnParameter(plan)
-		updated.ReturnParameterPreservesInput = objectReturnParameterPreservesInput(plan, updated.ReturnParameter, analysis.summaries)
-		updated.ReturnProgID = objectReturnProgID(plan, analysis.summaries)
-		if !objectSummaryEqual(previous, updated) {
-			analysis.summaries[key] = updated
-			for _, dependent := range analysis.summaryDependents[key] {
-				if !queued[dependent] {
-					queue = append(queue, dependent)
-					queued[dependent] = true
+			for name, declaration := range plan.moduleDecls {
+				if !declaration.Object {
+					continue
+				}
+				variable := objectVariable{Scope: procedureir.ScopeModule, Name: declaration.Name}
+				updated.ModuleAssigned[strings.ToLower(name)] = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
+				updated.ModuleWritten[strings.ToLower(name)] = objectProcedureWritesModuleFieldIndexed(plan.proc, declaration.Name, plan.flowContext.facts)
+			}
+			if isObjectType(plan.proc.ReturnType) {
+				variable := objectVariable{Scope: procedureir.ScopeLocal, Name: plan.proc.Name}
+				updated.ReturnAssigned = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
+			}
+			updated.ReturnCollectionItemParameter = objectReturnCollectionItemParameter(plan)
+			updated.ReturnParameter = objectReturnParameter(plan)
+			updated.ReturnParameterPreservesInput = objectReturnParameterPreservesInput(plan, updated.ReturnParameter, analysis.summaries)
+			updated.ReturnProgID = objectReturnProgID(plan, analysis.summaries)
+			if !objectSummaryEqual(previous, updated) {
+				analysis.summaries[key] = updated
+				for _, dependent := range analysis.summaryDependents[key] {
+					if !queued[dependent] {
+						queue = append(queue, dependent)
+						queued[dependent] = true
+					}
+				}
+				if previous.ReturnAssigned != updated.ReturnAssigned && (previous.ReturnCollection || updated.ReturnCollection) {
+					// Bare object-returning function calls are represented as
+					// identifier expressions by the VBA IR and therefore have no
+					// explicit summary dependency edge. Revisit the full object
+					// worklist when a return contract changes so those implicit
+					// callers observe the new fixed-point value as well.
+					for _, dependent := range analysis.order {
+						if !queued[dependent] {
+							queue = append(queue, dependent)
+							queued[dependent] = true
+						}
+					}
 				}
 			}
 		}
+		if !analysis.seedRecursiveCollectionSummaries() {
+			return analysis.summaries
+		}
 	}
-	return analysis.summaries
+}
+
+func (analysis *objectAnalysisContext) seedRecursiveCollectionSummaries() bool {
+	optimistic := maps.Clone(analysis.summaries)
+	for key, summary := range optimistic {
+		if summary.ReturnCollection {
+			summary.ReturnAssigned = true
+			optimistic[key] = summary
+		}
+	}
+	seeds := make([]string, 0)
+	for _, key := range analysis.order {
+		plan := analysis.plans[key]
+		summary := analysis.summaries[key]
+		if plan == nil || !plan.relevant || !summary.ReturnCollection || summary.ReturnAssigned || plan.unknownFlow || !objectPlanHasCollectionAllocation(plan) {
+			continue
+		}
+		flow := objectStateFlowPlan(plan, optimistic, objectFlowOptions{})
+		variable := objectVariable{Scope: procedureir.ScopeLocal, Name: plan.proc.Name}
+		if objectFlowExitDefinitelyAssigned(flow, variable) {
+			seeds = append(seeds, key)
+		}
+	}
+	for _, key := range seeds {
+		summary := analysis.summaries[key]
+		summary.ReturnAssigned = true
+		analysis.summaries[key] = summary
+	}
+	return len(seeds) > 0
+}
+
+func objectPlanHasCollectionAllocation(plan *objectProcedurePlan) bool {
+	if plan == nil {
+		return false
+	}
+	for expression := range plan.proc.Expressions.All() {
+		if expression.Kind != procedureir.ExpressionNew {
+			continue
+		}
+		text := strings.TrimSpace(expression.Text)
+		newType, ok := strings.CutPrefix(strings.ToLower(text), "new ")
+		if ok && dcKindFromType(strings.TrimSpace(newType)) == dcCollection {
+			return true
+		}
+	}
+	return false
 }
 
 func (analysis *objectAnalysisContext) objectParameterProgIDs(plan *objectProcedurePlan) map[int]string {
@@ -2336,10 +2402,13 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 			return true
 		}
 		declaration, scope, ok := objectDeclarationBinding(name, declarations)
-		if !ok || !declaration.Object {
+		if !ok {
 			if isObjectType(proc.ReturnType) && strings.EqualFold(name, cleanIdentifier(proc.Name)) {
 				return state[(objectVariable{Scope: procedureir.ScopeLocal, Name: name}).key()]
 			}
+			return objectBareObjectFunctionAssigned(proc, name, summaries)
+		}
+		if !declaration.Object {
 			return false
 		}
 		return state[(objectVariable{Scope: scope, Name: name}).key()]
@@ -2361,6 +2430,9 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		if objectExcelMemberExpressionAssigned(expression.Text, proc, declarations) {
 			return true
 		}
+		if objectMemberFunctionAssigned(proc, expression.Text, declarations, summaries) {
+			return true
+		}
 		// A member rooted at an intrinsic workbook/application object is a
 		// non-Nothing factory value.  For a user object, the member may itself be
 		// Nothing; keep the assignment nullable and report a later dereference.
@@ -2379,6 +2451,69 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		return true
 	}
 	return objectConstructorCallText(lower)
+}
+
+func objectBareObjectFunctionAssigned(proc sourceProcedure, name string, summaries map[string]objectProcedureSummary) bool {
+	name = cleanIdentifier(name)
+	if name == "" {
+		return false
+	}
+	var match objectProcedureSummary
+	found := false
+	for _, summary := range summaries {
+		if !summary.ReturnCollection || !strings.EqualFold(summary.Module, proc.Module) {
+			continue
+		}
+		qualifiedName := strings.TrimSpace(summary.QualifiedName)
+		if dot := strings.LastIndexByte(qualifiedName, '.'); dot >= 0 {
+			qualifiedName = qualifiedName[dot+1:]
+		}
+		if !strings.EqualFold(cleanIdentifier(qualifiedName), name) {
+			continue
+		}
+		if found {
+			return false
+		}
+		match = summary
+		found = true
+	}
+	return found && match.ReturnAssigned
+}
+
+func objectMemberFunctionAssigned(proc sourceProcedure, text string, declarations declarationScope, summaries map[string]objectProcedureSummary) bool {
+	text = strings.TrimSpace(text)
+	dot := strings.LastIndexByte(text, '.')
+	if dot < 0 {
+		return false
+	}
+	receiver := strings.TrimSpace(text[:dot])
+	member := cleanIdentifier(strings.TrimSpace(text[dot+1:]))
+	if receiver == "" || member == "" {
+		return false
+	}
+	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(strings.SplitN(receiver, ".", 2)[0], "(", 2)[0]))
+	typeName := ""
+	if strings.EqualFold(root, "me") && (strings.EqualFold(proc.ModuleKind, "class") || strings.EqualFold(proc.ModuleKind, "form")) {
+		typeName = proc.Module
+	} else if declaration, ok := objectDeclarationByName(root, declarations); ok {
+		typeName = lastName(strings.TrimSpace(declaration.Type))
+	}
+	if typeName == "" {
+		return false
+	}
+	var match objectProcedureSummary
+	found := false
+	for _, summary := range summaries {
+		if !summary.ReturnCollection || !strings.EqualFold(cleanIdentifier(summary.Module), cleanIdentifier(typeName)) || !strings.EqualFold(lastName(summary.QualifiedName), member) {
+			continue
+		}
+		if found {
+			return false
+		}
+		match = summary
+		found = true
+	}
+	return found && match.ReturnAssigned
 }
 
 func objectConstructorCallText(text string) bool {
@@ -2408,6 +2543,9 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 		return true
 	}
 	if objectCollectionItemAssigned(call, state, declarations) {
+		return true
+	}
+	if objectCollectionMemberItemAssigned(call, state, declarations) {
 		return true
 	}
 	if objectDictionaryItemAssigned(proc, statementID, call, state, declarations) {
@@ -2916,6 +3054,22 @@ func objectCollectionItemAssigned(call procedureir.CallSite, state map[string]bo
 		return false
 	}
 	return state[(objectVariable{Scope: scope, Name: name}).key()]
+}
+
+func objectCollectionMemberItemAssigned(call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {
+	if call.Callee.Receiver == nil || !strings.EqualFold(cleanIdentifier(call.Callee.Member), "item") {
+		return false
+	}
+	receiver := strings.TrimSpace(*call.Callee.Receiver)
+	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(strings.SplitN(receiver, ".", 2)[0], "(", 2)[0]))
+	if root == "" {
+		return false
+	}
+	declaration, scope, ok := objectDeclarationBinding(root, declarations)
+	if !ok || !declaration.Object || dcKindFromType(declaration.Type) != dcCollection {
+		return false
+	}
+	return state[(objectVariable{Scope: scope, Name: root}).key()]
 }
 
 func objectDictionaryItemAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {

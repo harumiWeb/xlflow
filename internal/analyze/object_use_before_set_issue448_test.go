@@ -2216,3 +2216,89 @@ End Sub
 		t.Fatalf("a terminal invalid branch must not make a Collection factory nullable: %+v", got)
 	}
 }
+
+func TestVBA202Issue448TracksImplicitCollectionFunctionResults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function NewValues() As Collection
+  Set NewValues = New Collection
+End Function
+
+Private Function ForwardValues() As Collection
+  Set ForwardValues = NewValues
+End Function
+
+Public Sub Run()
+  Dim values As Collection
+  Set values = ForwardValues
+  Debug.Print values.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("bare object-returning function results should preserve Collection state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsUninitializedCollectionReturnCycle(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function FirstValues() As Collection
+  Set FirstValues = SecondValues
+End Function
+
+Private Function SecondValues() As Collection
+  Set SecondValues = FirstValues
+End Function
+
+Public Sub Run()
+  Dim values As Collection
+  Set values = FirstValues
+  Debug.Print values.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a collection return cycle without an allocating base must remain nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksTypedCollectionMemberResults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Factory.cls", `Attribute VB_Name = "Factory"
+Option Explicit
+Public Function BuildValues() As Collection
+  Set BuildValues = New Collection
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim factory As Factory
+  Dim values As Collection
+  Set factory = New Factory
+  Set values = factory.BuildValues
+  values.Add "item"
+  Debug.Print values.Count
+  Debug.Print values.Item(1)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a typed Collection member result should preserve Collection state: %+v", got)
+	}
+}
