@@ -18,17 +18,18 @@ import (
 // The same rule is used for an object function result; an object-returning
 // function with an omitted or Nothing result remains nullable.
 type objectProcedureSummary struct {
-	QualifiedName  string
-	File           string
-	Module         string
-	Kind           string
-	Line           int
-	Params         []objectParameterSummary
-	ByRefAssigned  map[int]bool
-	ByRefWritten   map[int]bool
-	ModuleAssigned map[string]bool
-	ModuleWritten  map[string]bool
-	ReturnAssigned bool
+	QualifiedName                 string
+	File                          string
+	Module                        string
+	Kind                          string
+	Line                          int
+	Params                        []objectParameterSummary
+	ByRefAssigned                 map[int]bool
+	ByRefWritten                  map[int]bool
+	ModuleAssigned                map[string]bool
+	ModuleWritten                 map[string]bool
+	ReturnAssigned                bool
+	ReturnCollectionItemParameter int
 }
 
 type objectParameterSummary struct {
@@ -243,15 +244,16 @@ func (analysis *objectAnalysisContext) initializeObjectSummaries() {
 	for _, key := range analysis.order {
 		plan := analysis.plans[key]
 		summary := objectProcedureSummary{
-			QualifiedName:  objectProcedureQualifiedName(plan.proc),
-			File:           plan.file.IR.Path,
-			Module:         plan.proc.Module,
-			Kind:           string(plan.proc.ProcedureKind),
-			Line:           plan.proc.StartLine,
-			ByRefAssigned:  map[int]bool{},
-			ByRefWritten:   map[int]bool{},
-			ModuleAssigned: map[string]bool{},
-			ModuleWritten:  map[string]bool{},
+			QualifiedName:                 objectProcedureQualifiedName(plan.proc),
+			File:                          plan.file.IR.Path,
+			Module:                        plan.proc.Module,
+			Kind:                          string(plan.proc.ProcedureKind),
+			Line:                          plan.proc.StartLine,
+			ByRefAssigned:                 map[int]bool{},
+			ByRefWritten:                  map[int]bool{},
+			ModuleAssigned:                map[string]bool{},
+			ModuleWritten:                 map[string]bool{},
+			ReturnCollectionItemParameter: -1,
 		}
 		for index, parameter := range plan.proc.Params.AllIndexed() {
 			summary.Params = append(summary.Params, objectParameterSummary{
@@ -488,6 +490,7 @@ func (analysis *objectAnalysisContext) buildSummaries() map[string]objectProcedu
 			variable := objectVariable{Scope: procedureir.ScopeLocal, Name: plan.proc.Name}
 			updated.ReturnAssigned = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
 		}
+		updated.ReturnCollectionItemParameter = objectReturnCollectionItemParameter(plan)
 		if !objectSummaryEqual(previous, updated) {
 			analysis.summaries[key] = updated
 			for _, dependent := range analysis.summaryDependents[key] {
@@ -625,7 +628,7 @@ func objectBoolMapEqual(a, b map[string]bool) bool {
 }
 
 func objectSummaryEqual(a, b objectProcedureSummary) bool {
-	if a.ReturnAssigned != b.ReturnAssigned || len(a.ByRefAssigned) != len(b.ByRefAssigned) || len(a.ByRefWritten) != len(b.ByRefWritten) || len(a.ModuleAssigned) != len(b.ModuleAssigned) || len(a.ModuleWritten) != len(b.ModuleWritten) {
+	if a.ReturnAssigned != b.ReturnAssigned || a.ReturnCollectionItemParameter != b.ReturnCollectionItemParameter || len(a.ByRefAssigned) != len(b.ByRefAssigned) || len(a.ByRefWritten) != len(b.ByRefWritten) || len(a.ModuleAssigned) != len(b.ModuleAssigned) || len(a.ModuleWritten) != len(b.ModuleWritten) {
 		return false
 	}
 	for index, value := range a.ByRefAssigned {
@@ -1675,9 +1678,15 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 	if objectConstructorCallText(strings.ToLower(call.Callee.Text)) || strings.EqualFold(call.Callee.BaseName, "CreateObject") || strings.EqualFold(call.Callee.BaseName, "GetObject") {
 		return true
 	}
+	if objectCollectionItemAssigned(call, state, declarations) {
+		return true
+	}
+	if objectDictionaryItemAssigned(proc, statementID, call, state, declarations) {
+		return true
+	}
 	if call.Callee.Receiver == nil {
 		if summary, ok := objectDirectCallSummary(proc, call, summaries); ok {
-			return summary.ReturnAssigned
+			return objectCallSummaryReturnsAssigned(proc, call, state, flowContext, declarations, summaries, summary)
 		}
 	}
 	if call.Callee.Receiver != nil {
@@ -1710,7 +1719,7 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 		}
 		if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
 			summary, ok := objectSummaryForCandidate(call.Resolution.Candidates[0], summaries)
-			return ok && summary.ReturnAssigned
+			return ok && objectCallSummaryReturnsAssigned(proc, call, state, flowContext, declarations, summaries, summary)
 		}
 		var summary objectProcedureSummary
 		var ok bool
@@ -1720,7 +1729,7 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 			summary, ok = objectReceiverReturnSummary(call, declarations, summaries)
 		}
 		if ok {
-			return summary.ReturnAssigned
+			return objectCallSummaryReturnsAssigned(proc, call, state, flowContext, declarations, summaries, summary)
 		}
 		return false
 	}
@@ -1728,7 +1737,150 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 		return false
 	}
 	summary, ok := objectSummaryForCandidate(call.Resolution.Candidates[0], summaries)
-	return ok && summary.ReturnAssigned
+	return ok && objectCallSummaryReturnsAssigned(proc, call, state, flowContext, declarations, summaries, summary)
+}
+
+func objectCallSummaryReturnsAssigned(proc sourceProcedure, call procedureir.CallSite, state map[string]bool, flowContext objectFlowContext, declarations declarationScope, summaries map[string]objectProcedureSummary, summary objectProcedureSummary) bool {
+	if summary.ReturnAssigned {
+		return true
+	}
+	parameterIndex := summary.ReturnCollectionItemParameter
+	if parameterIndex < 0 {
+		return false
+	}
+	actuals := objectCallActuals(call, flowContext.facts)
+	assigned, present := objectCallParameterAssigned(proc, declarations, call, summary, parameterIndex, actuals, state, flowContext.vars, flowContext, summaries)
+	return present && assigned
+}
+
+func objectReturnCollectionItemParameter(plan *objectProcedurePlan) int {
+	if plan == nil || !isObjectType(plan.proc.ReturnType) || plan.flowContext.facts == nil {
+		return -1
+	}
+	returnName := cleanIdentifier(plan.proc.Name)
+	collectionParameters := map[string]int{}
+	for index, parameter := range plan.proc.Params.AllIndexed() {
+		if dcKindFromType(parameter.Type) == dcCollection {
+			collectionParameters[strings.ToLower(cleanIdentifier(parameter.Name))] = index
+		}
+	}
+	if len(collectionParameters) == 0 {
+		return -1
+	}
+	collectionSources := map[string]int{}
+	parameterIndex := -1
+	sawReturnAssignment := false
+	for statement := range plan.proc.Statements.All() {
+		if statement.Kind != procedureir.StatementSet || statement.Target == nil {
+			continue
+		}
+		targetName := strings.ToLower(cleanIdentifier(statement.Target.Text))
+		itemParameter, classified := objectCollectionItemSourceForStatement(plan, statement, collectionParameters, collectionSources)
+		if targetName == strings.ToLower(returnName) {
+			sawReturnAssignment = true
+			if !classified {
+				return -1
+			}
+			if itemParameter >= 0 {
+				if parameterIndex >= 0 && parameterIndex != itemParameter {
+					return -1
+				}
+				parameterIndex = itemParameter
+			}
+		}
+		if itemParameter >= 0 {
+			collectionSources[targetName] = itemParameter
+		} else {
+			delete(collectionSources, targetName)
+		}
+	}
+	if !sawReturnAssignment {
+		return -1
+	}
+	return parameterIndex
+}
+
+func objectCollectionItemSourceForStatement(plan *objectProcedurePlan, statement procedureir.Statement, collectionParameters, collectionSources map[string]int) (int, bool) {
+	itemParameter := -1
+	plan.flowContext.facts.forEachCallForStatement(statement.ID, func(call procedureir.CallSite) {
+		if itemParameter >= 0 || call.Callee.Receiver != nil || call.Arguments.Count == 0 {
+			return
+		}
+		if index, ok := collectionParameters[strings.ToLower(cleanIdentifier(call.Callee.BaseName))]; ok {
+			itemParameter = index
+		}
+	})
+	if itemParameter >= 0 {
+		return itemParameter, true
+	}
+	lower := ""
+	if statement.Value != nil {
+		lower = strings.ToLower(strings.TrimSpace(statement.Value.Text))
+	}
+	if objectConstructorCallText(lower) || strings.HasPrefix(lower, "new ") {
+		return -1, true
+	}
+	if statement.Value != nil && statement.Value.Kind == procedureir.ExpressionIdentifier {
+		if source, ok := collectionSources[strings.ToLower(cleanIdentifier(statement.Value.Text))]; ok {
+			return source, true
+		}
+	}
+	return -1, false
+}
+
+func objectCollectionItemAssigned(call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {
+	if call.Callee.Receiver != nil || call.Arguments.Count == 0 || strings.TrimSpace(call.Callee.BaseName) == "" {
+		return false
+	}
+	name := cleanIdentifier(call.Callee.BaseName)
+	declaration, scope, ok := objectDeclarationBinding(name, declarations)
+	if !ok || !declaration.Object || dcKindFromType(declaration.Type) != dcCollection {
+		return false
+	}
+	return state[(objectVariable{Scope: scope, Name: name}).key()]
+}
+
+func objectDictionaryItemAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {
+	if call.Callee.Receiver != nil || call.Arguments.Count == 0 || strings.TrimSpace(call.Callee.BaseName) == "" {
+		return false
+	}
+	name := cleanIdentifier(call.Callee.BaseName)
+	declaration, scope, ok := objectDeclarationBinding(name, declarations)
+	if !ok || !declaration.Object || dcKindFromType(declaration.Type) != dcDictionary && !strings.EqualFold(cleanIdentifier(declaration.Type), "object") {
+		return false
+	}
+	if !state[(objectVariable{Scope: scope, Name: name}).key()] || !objectDictionaryItemGuarded(proc, statementID, name) {
+		return false
+	}
+	return objectDictionaryItemTargetIsCollection(proc, statementID, declarations)
+}
+
+func objectDictionaryItemTargetIsCollection(proc sourceProcedure, statementID int, declarations declarationScope) bool {
+	for statement := range proc.Statements.All() {
+		if statement.ID != statementID || statement.Target == nil {
+			continue
+		}
+		name := cleanIdentifier(statement.Target.Text)
+		if declaration, _, ok := objectDeclarationBinding(name, declarations); ok && dcKindFromType(declaration.Type) == dcCollection {
+			return true
+		}
+		return strings.EqualFold(name, cleanIdentifier(proc.Name)) && dcKindFromType(proc.ReturnType) == dcCollection
+	}
+	return false
+}
+
+func objectDictionaryItemGuarded(proc sourceProcedure, statementID int, receiver string) bool {
+	for statement := range proc.Statements.All() {
+		if statement.ID != statementID {
+			continue
+		}
+		guardReceiver, keyText, ok := dcDefaultAccess(statement.Text)
+		if !ok || !strings.EqualFold(guardReceiver, receiver) {
+			return false
+		}
+		return dcAccessGuarded(proc, statement, receiver, keyText)
+	}
+	return false
 }
 
 func objectDirectCallSummary(proc sourceProcedure, call procedureir.CallSite, summaries map[string]objectProcedureSummary) (objectProcedureSummary, bool) {
@@ -1739,11 +1891,17 @@ func objectDirectCallSummary(proc sourceProcedure, call procedureir.CallSite, su
 	if len(matches) == 0 {
 		return objectProcedureSummary{}, false
 	}
+	if len(matches) == 1 {
+		return matches[0], true
+	}
 	returnAssigned := true
 	for _, summary := range matches {
 		returnAssigned = returnAssigned && summary.ReturnAssigned
 	}
-	return objectProcedureSummary{ReturnAssigned: returnAssigned}, true
+	if !returnAssigned {
+		return objectProcedureSummary{}, false
+	}
+	return objectProcedureSummary{ReturnAssigned: true, ReturnCollectionItemParameter: -1}, true
 }
 
 func objectSummaryCandidatesForDirectCall(module, name, callFile string, summaries map[string]objectProcedureSummary) []objectProcedureSummary {
@@ -1969,10 +2127,10 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 	actuals := objectCallActuals(call, facts)
 	if objectAddCallPreservesContainerArguments(call, actuals, declarations) {
 		// Collection/Dictionary Add accepts its item by value; the built-in
-		// operation cannot replace a Collection or Dictionary argument with
-		// Nothing.  Do not model an unresolved member call as an arbitrary
-		// ByRef mutation when the object argument has one of those declared
-		// container types.
+		// operation cannot replace a container argument with Nothing.  A late-
+		// bound Object is included here because this is the normal VBA shape for
+		// Scripting.Dictionary values.  Resolved project procedures remain
+		// conservative and use their actual ByRef summaries.
 		actuals = nil
 	}
 	var candidates []objectProcedureSummary
@@ -2101,7 +2259,7 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 }
 
 func objectAddCallPreservesContainerArguments(call procedureir.CallSite, actuals []objectCallActual, declarations declarationScope) bool {
-	if call.Callee.Receiver == nil || !strings.EqualFold(cleanIdentifier(call.Callee.Member), "add") {
+	if call.Callee.Receiver == nil || !strings.EqualFold(cleanIdentifier(call.Callee.Member), "add") || call.Resolution.Status == procedureir.ResolutionMatched {
 		return false
 	}
 	objectArgument := false
@@ -2115,7 +2273,7 @@ func objectAddCallPreservesContainerArguments(call procedureir.CallSite, actuals
 			continue
 		}
 		objectArgument = true
-		if kind := dcKindFromType(declaration.Type); kind != dcCollection && kind != dcDictionary {
+		if kind := dcKindFromType(declaration.Type); kind != dcCollection && kind != dcDictionary && !strings.EqualFold(cleanIdentifier(declaration.Type), "object") {
 			return false
 		}
 	}

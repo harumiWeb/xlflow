@@ -146,6 +146,88 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PropagatesCollectionItemFunctionResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function EnsureRow(ByVal rows As Collection, ByVal rowIndex As Long) As Object
+  Dim rowValues As Object
+  Do While rows.Count < rowIndex
+    Set rowValues = CreateObject("Scripting.Dictionary")
+    rows.Add rowValues
+  Loop
+  Set EnsureRow = rows(rowIndex)
+End Function
+
+Public Sub Run()
+  Dim rows As Collection
+  Set rows = New Collection
+  rows.Add CreateObject("Scripting.Dictionary")
+
+  Dim directValue As Object
+  Set directValue = rows(1)
+  Debug.Print directValue.Exists("key")
+
+  Dim helperValue As Object
+  Set helperValue = EnsureRow(rows, 1)
+  Debug.Print helperValue.Exists("key")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a Collection item and a helper returning one should establish object state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesGuardedDictionaryCollectionItems(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub AddIndexRow(ByVal targetIndex As Object, ByVal indexKey As String, ByVal rowIndex As Long)
+  Dim rows As Collection
+  If targetIndex.Exists(indexKey) Then
+    Set rows = targetIndex(indexKey)
+  Else
+    Set rows = New Collection
+    targetIndex.Add indexKey, rows
+  End If
+  rows.Add rowIndex
+End Sub
+
+Private Function IndexedRows(ByVal targetIndex As Object, ByVal indexKey As String) As Collection
+  If Not targetIndex Is Nothing Then
+    If targetIndex.Exists(indexKey) Then
+      Set IndexedRows = targetIndex(indexKey)
+      Exit Function
+    End If
+  End If
+  Set IndexedRows = New Collection
+End Function
+
+Public Sub Run()
+  Dim targetIndex As Object
+  Set targetIndex = CreateObject("Scripting.Dictionary")
+  AddIndexRow targetIndex, "key", 1
+
+  Dim rows As Collection
+  Set rows = IndexedRows(targetIndex, "key")
+  Debug.Print rows.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("guarded Dictionary Collection items should establish object state: %+v", got)
+	}
+}
+
 func TestVBA202Issue448PropagatesModuleFieldInitializationFromCallee(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -451,6 +533,33 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("a Dictionary Add must not invalidate an object argument: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PreservesObjectArgumentToLateBoundAdd(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub SetJsonAttr(ByVal node As Object, ByVal attrName As String, ByVal attrValue As String)
+  Dim attributes As Object
+  Set attributes = CreateObject("Scripting.Dictionary")
+  node.Add "attr", attributes
+  attributes(attrName) = attrValue
+End Sub
+
+Public Sub Run()
+  Dim node As Object
+  Set node = CreateObject("Scripting.Dictionary")
+  SetJsonAttr node, "key", "value"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a late-bound Dictionary Add must not invalidate its object argument: %+v", got)
 	}
 }
 
