@@ -1,8 +1,9 @@
 package coordination
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -109,7 +110,7 @@ func All() []Descriptor {
 	for i, descriptor := range descriptors {
 		result[i] = cloneDescriptor(descriptor)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	slices.SortFunc(result, func(a, b Descriptor) int { return cmp.Compare(a.ID, b.ID) })
 	return result
 }
 
@@ -126,7 +127,7 @@ func PublicCapabilities() Capabilities {
 		for _, selector := range descriptor.CLI {
 			paths = append(paths, normalizeCLIPath(selector.Path))
 		}
-		sort.Strings(paths)
+		slices.Sort(paths)
 		result.Commands[descriptor.ID] = CommandCapability{
 			CLIPaths:          paths,
 			ResourceScope:     descriptor.Policy.ResourceScope,
@@ -178,7 +179,7 @@ func bridgeDisplayValue(command string, args map[string]string) string {
 	for key := range args {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	parts := make([]string, 0, len(keys)+1)
 	parts = append(parts, command)
 	for _, key := range keys {
@@ -250,7 +251,7 @@ func bridgeSelectorKey(selector BridgeSelector) string {
 	for key := range selector.Args {
 		keys = append(keys, strings.ToLower(strings.TrimSpace(key)))
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	parts := []string{strings.ToLower(strings.TrimSpace(selector.Command))}
 	for _, key := range keys {
 		var value string
