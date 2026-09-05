@@ -1189,6 +1189,29 @@ func objectActualFactoryProgID(caller *objectProcedurePlan, call procedureir.Cal
 }
 
 func (analysis *objectAnalysisContext) buildEntryStates() map[string]map[string]bool {
+	// Start private ByVal object-parameter cycles at the optimistic top fact.
+	// A mutually recursive helper family can have one initialized caller and a
+	// back-edge between its helpers; starting every parameter at false makes the
+	// back-edge poison the initialized caller before the fixed point propagates
+	// through the cycle.  Only private/friend ByVal parameters are eligible: a
+	// public boundary remains nullable, and ByRef parameters must retain the
+	// existing conservative treatment.  Any nullable incoming edge lowers this
+	// seed during the same meet iteration.
+	for key, incoming := range analysis.entryIncoming {
+		if len(incoming) == 0 {
+			continue
+		}
+		plan := analysis.plans[key]
+		if plan == nil || !objectProcedureAllowsParameterEntry(plan.proc) {
+			continue
+		}
+		for parameter := range plan.proc.Params.All() {
+			parameterKey := (objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}).key()
+			if objectEntryParameterSeeded(plan, parameterKey) {
+				analysis.entries[key][parameterKey] = true
+			}
+		}
+	}
 	queue := append([]string(nil), analysis.order...)
 	queued := make(map[string]bool, len(queue))
 	for _, key := range queue {
@@ -1291,16 +1314,18 @@ func (analysis *objectAnalysisContext) recomputeEntry(key string) bool {
 	next := objectInitialEntryState(plan)
 	incoming := analysis.entryIncoming[key]
 	for fieldKey := range next {
+		if objectEntryParameterSeeded(plan, fieldKey) && len(incoming) > 0 {
+			next[fieldKey] = true
+		}
+	}
+	for fieldKey := range next {
 		seen := false
 		value := true
 		for _, call := range incoming {
 			if !call.evaluated {
-				// An unprocessed incoming call is conservatively treated as a
-				// failing contribution. Once it is evaluated, an inapplicable
-				// field is removed from the meet by the `present` check below.
-				seen = true
-				value = false
-				break
+				// The seeded private ByVal cycle starts at the lattice top;
+				// wait for this edge to be evaluated before lowering it.
+				continue
 			}
 			contribution, present := call.contributions[fieldKey]
 			if !present {
@@ -1321,6 +1346,21 @@ func (analysis *objectAnalysisContext) recomputeEntry(key string) bool {
 	}
 	analysis.entries[key] = next
 	return true
+}
+
+func objectEntryParameterSeeded(plan *objectProcedurePlan, variableKey string) bool {
+	if plan == nil || !objectProcedureAllowsParameterEntry(plan.proc) {
+		return false
+	}
+	for parameter := range plan.proc.Params.All() {
+		if !isObjectType(parameter.Type) || !strings.EqualFold(strings.TrimSpace(parameter.Passing), "ByVal") {
+			continue
+		}
+		if (objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}).key() == variableKey {
+			return true
+		}
+	}
+	return false
 }
 
 func objectBoolMapEqual(a, b map[string]bool) bool {

@@ -2666,3 +2666,100 @@ End Sub
 		t.Fatalf("an initialized Collection should reach a Friend helper: %+v", got)
 	}
 }
+
+func TestVBA202Issue448PropagatesCollectionThroughExpressionHelpers(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Query.cls", `Attribute VB_Name = "Query"
+Option Explicit
+
+Private mBodies As Collection
+Private mRole As Long
+
+Private Sub RequireQueryable(ByVal memberName As String)
+  If mRole <> 1 Then
+    RaiseContractError memberName
+  End If
+End Sub
+
+Private Sub RaiseContractError(ByVal memberName As String)
+  Err.Raise 5, "Query", memberName
+End Sub
+
+Private Function RenderNode(ByVal node As Query, ByVal values As Collection) As String
+  Select Case 1
+    Case 1
+      RenderNode = RenderValue(node, values)
+    Case 2
+      RenderNode = RenderOperator(node, values)
+  End Select
+End Function
+
+Private Function RenderOperator(ByVal node As Query, ByVal values As Collection) As String
+  RenderOperator = RenderNode(node, values)
+End Function
+
+Private Function RenderValue(ByVal node As Query, ByVal values As Collection) As String
+  If IsNullValueNode(node) Then Exit Function
+  values.Add "value"
+  RenderValue = "?"
+End Function
+
+Private Function IsNullValueNode(ByVal node As Query) As Boolean
+  If node Is Nothing Then Exit Function
+  IsNullValueNode = False
+End Function
+
+Private Function BuildSql() As String
+  Dim body As Query
+  Dim values As Collection
+  Set values = New Collection
+  For Each body In mBodies
+    BuildSql = BuildSql & RenderNode(body, values)
+  Next body
+End Function
+
+Public Function ToSqlString() As String
+  RequireQueryable "ToSqlString"
+  ToSqlString = BuildSql()
+End Function
+
+Public Function RunSql(ByVal node As Query) As String
+  mRole = 1
+  Set mBodies = New Collection
+  mBodies.Add node
+  RunSql = ToSqlString()
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an initialized Collection should reach expression helper parameters: %+v", got)
+	}
+}
+
+func TestVBA202Issue448KeepsNullablePublicCollectionThroughPrivateByValHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByVal values As Collection)
+  values.Add "item"
+End Sub
+
+Public Sub Run(ByVal values As Collection)
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("a nullable public Collection must remain nullable through a private ByVal helper: %+v", got)
+	}
+}
