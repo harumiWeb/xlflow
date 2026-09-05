@@ -2841,7 +2841,7 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 	if objectDictionaryItemAssigned(proc, statementID, call, state, declarations) {
 		return true
 	}
-	if objectLateBoundFactoryMemberAssigned(proc, call) {
+	if objectLateBoundFactoryMemberAssigned(proc, call, summaries) {
 		return true
 	}
 	if call.Callee.Receiver == nil {
@@ -3454,12 +3454,12 @@ func objectDictionaryItemGuarded(proc sourceProcedure, statementID int, receiver
 	return false
 }
 
-func objectLateBoundFactoryMemberAssigned(proc sourceProcedure, call procedureir.CallSite) bool {
+func objectLateBoundFactoryMemberAssigned(proc sourceProcedure, call procedureir.CallSite, summaries map[string]objectProcedureSummary) bool {
 	receiver := objectCallWithReceiverName(proc, call)
 	if receiver == "" || strings.Contains(receiver, ".") {
 		return false
 	}
-	progid := objectCreateObjectReceiverProgID(proc, receiver, call.StatementID)
+	progid := objectReceiverFactoryProgID(proc, receiver, call.StatementID, summaries)
 	if !strings.EqualFold(progid, "scripting.filesystemobject") {
 		return false
 	}

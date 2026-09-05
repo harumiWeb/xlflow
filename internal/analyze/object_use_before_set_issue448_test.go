@@ -2556,6 +2556,53 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksSplitObjectFactoryMemberResults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CreateFileSystemObject() As Object
+  Dim fileSystem As Object
+  Set fileSystem = CreateObject("Scripting.FileSystemObject")
+  Set CreateFileSystemObject = fileSystem
+End Function
+
+Private Sub CollectFolderEntries(ByVal folderObject As Object)
+  Dim entry As Object
+  For Each entry In folderObject.Files
+    Debug.Print entry.Name
+  Next entry
+End Sub
+
+Private Sub DeleteFolder(ByVal directoryPath As String, ByVal recursive As Boolean)
+  Dim folderObject As Object
+  Dim fso As Object
+  Set fso = CreateFileSystemObject()
+  If Not recursive Then
+    Set folderObject = fso.GetFolder(directoryPath)
+    If folderObject.Files.Count > 0 Or folderObject.SubFolders.Count > 0 Then
+      Err.Raise 5
+    End If
+  End If
+  fso.DeleteFolder directoryPath, True
+End Sub
+
+Public Sub Run(ByVal directoryPath As String)
+  Dim fso As Object
+  Set fso = CreateFileSystemObject()
+  CollectFolderEntries fso.GetFolder(directoryPath)
+  DeleteFolder directoryPath, False
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a helper-returned FileSystemObject member result should preserve Object state: %+v", got)
+	}
+}
+
 func TestVBA202Issue448RejectsUninitializedCollectionReturnCycle(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
