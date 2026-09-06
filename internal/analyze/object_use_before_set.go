@@ -3080,6 +3080,13 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 			// proven terminal.
 			return true
 		}
+		if !objectErrorResumeNextAt(proc, statementID) && objectWMIExecQueryAssigned(proc, call) {
+			// WMI's SWbemServices.ExecQuery always returns an SWbemObjectSet
+			// on a successful call, including when the result is empty.  Keep
+			// this contract scoped to a service obtained from a WMI moniker;
+			// arbitrary late-bound user objects remain nullable.
+			return true
+		}
 		if !objectErrorResumeNextAt(proc, statementID) && objectRegExpExecuteAssigned(proc, call, state, declarations) {
 			return true
 		}
@@ -3108,6 +3115,63 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 	}
 	summary, ok := objectSummaryForCandidate(call.Resolution.Candidates[0], summaries)
 	return ok && objectCallSummaryReturnsAssigned(proc, call, state, flowContext, declarations, summaries, summary)
+}
+
+func objectWMIExecQueryAssigned(proc sourceProcedure, call procedureir.CallSite) bool {
+	if call.Callee.Receiver == nil || !strings.EqualFold(call.Callee.Member, "ExecQuery") {
+		return false
+	}
+	receiver := strings.ToLower(cleanIdentifier(strings.TrimSpace(*call.Callee.Receiver)))
+	if receiver == "" || strings.Contains(receiver, ".") {
+		return false
+	}
+	return objectReceiverWMIService(proc, receiver, call.StatementID)
+}
+
+func objectReceiverWMIService(proc sourceProcedure, receiver string, statementID int) bool {
+	if proc.Graph == nil {
+		return false
+	}
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	callBlock, ok := graph.BlockForStatement(statementID)
+	if !ok {
+		return false
+	}
+	dominators := graph.Dominators()
+	assignmentCount := 0
+	dominatingAssignmentCount := 0
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementSet || statement.Target == nil || statement.Value == nil ||
+			!strings.EqualFold(cleanIdentifier(statement.Target.Text), receiver) {
+			continue
+		}
+		assignmentBlock, ok := graph.BlockForStatement(statement.ID)
+		if !ok || !objectBlockCanReach(graph, assignmentBlock.ID, callBlock.ID) || objectErrorResumeNextAt(proc, statement.ID) {
+			continue
+		}
+		assignmentCount++
+		if !objectGetObjectWMIService(statement.Value.Text) {
+			return false
+		}
+		if objectBlockSetContains(dominators[callBlock.ID], assignmentBlock.ID) {
+			dominatingAssignmentCount++
+		}
+	}
+	return assignmentCount == 1 && dominatingAssignmentCount == 1
+}
+
+func objectGetObjectWMIService(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	const prefix = "getobject("
+	if !strings.HasPrefix(text, prefix) || !strings.HasSuffix(text, ")") {
+		return false
+	}
+	argument := strings.TrimSpace(text[len(prefix) : len(text)-1])
+	if len(argument) < 2 || argument[0] != '"' || argument[len(argument)-1] != '"' {
+		return false
+	}
+	value, err := strconv.Unquote(argument)
+	return err == nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), "winmgmts:")
 }
 
 func objectCallSummaryReturnsAssigned(proc sourceProcedure, call procedureir.CallSite, state map[string]bool, flowContext objectFlowContext, declarations declarationScope, summaries map[string]objectProcedureSummary, summary objectProcedureSummary) bool {

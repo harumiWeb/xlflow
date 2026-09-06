@@ -154,7 +154,6 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriverManager.cls","surface":"analyze","code":"VBA245","severity":"warning","line":640,"column":4}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriverManager.cls","surface":"analyze","code":"VBA245","severity":"warning","line":643,"column":29}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriverManager.cls","surface":"analyze","code":"VBA245","severity":"warning","line":697,"column":4}
-{"project":"third_party/selenium-vba","file":"src/VBA/WebDriverManager.cls","surface":"analyze","code":"VBA202","severity":"warning","line":708,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriverManager.cls","surface":"analyze","code":"VBA214","severity":"warning","line":719,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriverManager.cls","surface":"analyze","code":"VBA224","severity":"warning","line":720,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":209,"column":43}

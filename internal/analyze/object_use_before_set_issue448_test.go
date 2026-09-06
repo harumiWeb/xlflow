@@ -839,6 +839,53 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RecognizesWMIExecQueryResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal processName As String)
+  Dim services As Object
+  Dim processList As Object
+  Set services = GetObject("winmgmts:")
+  Set processList = services.ExecQuery("select * from win32_process where name='" & processName & "'")
+  Debug.Print processList.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a successful WMI ExecQuery must establish an SWbemObjectSet: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotTreatResumeNextWMIExecQueryAsAssigned(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim services As Object
+  Dim processList As Object
+  Set services = GetObject("winmgmts:")
+  On Error Resume Next
+  Set processList = services.ExecQuery("select * from win32_process")
+  On Error GoTo 0
+  Debug.Print processList.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("a WMI ExecQuery under Resume Next must remain nullable: %+v", got)
+	}
+}
+
 func TestVBA202Issue448InvalidatesUnresolvedExpressionByRefObject(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
