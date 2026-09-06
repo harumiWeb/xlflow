@@ -855,15 +855,17 @@ marker; it does not stop VBA or repair Excel state.
 
 ## Exit codes
 
-| Code | Meaning                                                           |
-| ---: | ----------------------------------------------------------------- |
-|  `0` | Success                                                           |
-|  `1` | Validation failure, such as lint, macro, or test failure          |
-|  `2` | CLI argument or configuration error                               |
-|  `3` | Operational/environment failure, including busy or recovery state |
+| Code | Meaning                                                                                    |
+| ---: | ------------------------------------------------------------------------------------------ |
+|  `0` | Success                                                                                    |
+|  `1` | Validation failure, such as an error-level lint/analyze diagnostic, macro, or test failure |
+|  `2` | CLI argument or configuration error                                                        |
+|  `3` | Operational/environment failure, including busy or recovery state                          |
 
 > [!NOTE]
 > `diff` returns exit code `0` even when differences are found. Inspect `diff.summary.total_diffs` to determine whether inputs differ.
+
+> Lint/analyze results containing only warning or information diagnostics return exit code `0`; inspect the diagnostics in the output to review them.
 
 ---
 

@@ -826,15 +826,17 @@ xlflow module install --push
 
 ## Exit code
 
-| Code | 意味                                                           |
-| ---: | -------------------------------------------------------------- |
-|  `0` | 成功                                                           |
-|  `1` | lint、macro、test などの検証失敗                               |
-|  `2` | CLI 引数または設定エラー                                       |
-|  `3` | busy/recovery state、Excel、COM、bridge などの操作・環境エラー |
+| Code | 意味                                                            |
+| ---: | --------------------------------------------------------------- |
+|  `0` | 成功                                                            |
+|  `1` | error severity の lint/analyze 診断、macro、test などの検証失敗 |
+|  `2` | CLI 引数または設定エラー                                        |
+|  `3` | busy/recovery state、Excel、COM、bridge などの操作・環境エラー  |
 
 > [!NOTE]
 > `diff` は差分が見つかった場合でも exit code `0` を返します。差分の有無は `diff.summary.total_diffs` を確認してください。
+
+> lint/analyze の結果が warning または information の診断だけの場合、診断は出力に残したまま exit code `0` を返します。
 
 ---
 

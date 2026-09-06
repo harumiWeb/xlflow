@@ -52,7 +52,9 @@ are not treated as proof of restoration. This internal analysis does not add
 fields to JSON output or report new caller-level diagnostics.
 
 > [!IMPORTANT]
-> Findings that block automation return a failure status and exit code `1`.
+> Error-level findings return a failure status and exit code `1`. Warning- and
+> information-level findings remain visible in the output but return status
+> `ok` and exit code `0`.
 
 ### Performance logging
 
@@ -498,13 +500,13 @@ Failed `--json` output uses the xlflow envelope plus command-specific fields.
   },
   "analysis": [
     {
-      "code": "VBA201",
-      "severity": "warning",
+      "code": "VBA104",
+      "severity": "error",
       "file": "src/modules/Main.bas",
       "module": "Main",
       "procedure": "Run",
       "line": 12,
-      "message": "Range.Find result found is dereferenced before a Nothing check."
+      "message": "Known Excel object/member mismatch such as Worksheet.DisplayGridlines."
     }
   ]
 }

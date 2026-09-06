@@ -894,6 +894,43 @@ func TestLintCommandJSONIncludesConfigWarnings(t *testing.T) {
 	}
 }
 
+func TestLintCommandReturnsSuccessForWarningOnlyIssues(t *testing.T) {
+	dir := writeCLIInlineSuppressionProject(t, "lint", `Option Explicit
+Public Sub Run()
+  Range("A1").Select
+End Sub
+`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "lint"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("lint warning-only command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status string        `json:"status"`
+		Error  *output.Error `json:"error"`
+		Issues []lint.Issue  `json:"issues"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != output.StatusOK || got.Error != nil {
+		t.Fatalf("warning-only lint output = %+v, want status ok without error", got)
+	}
+	if len(got.Issues) != 1 || got.Issues[0].Code != "VB002" || got.Issues[0].Severity != "warning" {
+		t.Fatalf("warning-only lint issues = %+v, want one VB002 warning", got.Issues)
+	}
+}
+
 func TestLintCommandPlainIncludesConfigWarnings(t *testing.T) {
 	dir := writeCLIWarningLintProject(t, `forbid_public_module_fields = true
 disabled_rules = ["VB006"]`)
@@ -972,19 +1009,24 @@ func TestAnalyzeCommandJSONRedactsVBA223Secrets(t *testing.T) {
 	}
 	root := a.rootCommand()
 	root.SetArgs([]string{"--json", "analyze"})
-	if err := root.Execute(); err == nil || output.ExitCode(err) != output.ExitValidation {
-		t.Fatalf("analyze command error = %v, exit = %d; want validation failure", err, output.ExitCode(err))
+	if err := root.Execute(); err != nil {
+		t.Fatalf("analyze warning-only command error = %v, exit = %d", err, output.ExitCode(err))
 	}
 	if strings.Contains(stdout.String(), secret) {
 		t.Fatalf("analyze JSON contains the hardcoded secret: %s", stdout.String())
 	}
 	var got struct {
+		Status   string            `json:"status"`
+		Error    *output.Error     `json:"error"`
 		Analysis []analyze.Finding `json:"analysis"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("decode analyze JSON: %v\n%s", err, stdout.String())
 	}
-	if len(got.Analysis) != 1 || got.Analysis[0].Code != "VBA223" {
+	if got.Status != output.StatusOK || got.Error != nil {
+		t.Fatalf("warning-only analyze output = %+v, want status ok without error", got)
+	}
+	if len(got.Analysis) != 1 || got.Analysis[0].Code != "VBA223" || got.Analysis[0].Severity != "warning" {
 		t.Fatalf("VBA223 JSON analysis = %+v", got.Analysis)
 	}
 	if !strings.Contains(stdout.String(), "[REDACTED]") {
@@ -1021,16 +1063,21 @@ End Sub
 	}
 	root := a.rootCommand()
 	root.SetArgs([]string{"--json", "analyze"})
-	if err := root.Execute(); err == nil || output.ExitCode(err) != output.ExitValidation {
-		t.Fatalf("analyze command error = %v, exit = %d; want validation failure", err, output.ExitCode(err))
+	if err := root.Execute(); err != nil {
+		t.Fatalf("analyze warning-only command error = %v, exit = %d", err, output.ExitCode(err))
 	}
 	var got struct {
+		Status   string            `json:"status"`
+		Error    *output.Error     `json:"error"`
 		Analysis []analyze.Finding `json:"analysis"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Analysis) != 1 || got.Analysis[0].Code != "VBA214" || got.Analysis[0].Line != 3 || got.Analysis[0].ScopeEndLine != 6 {
+	if got.Status != output.StatusOK || got.Error != nil {
+		t.Fatalf("warning-only analyze output = %+v, want status ok without error", got)
+	}
+	if len(got.Analysis) != 1 || got.Analysis[0].Code != "VBA214" || got.Analysis[0].Severity != "warning" || got.Analysis[0].Line != 3 || got.Analysis[0].ScopeEndLine != 6 {
 		t.Fatalf("VBA214 JSON analysis = %+v", got.Analysis)
 	}
 }
@@ -7332,7 +7379,7 @@ func TestAnalyzeCommandReturnsValidationForFindings(t *testing.T) {
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "Option Explicit\nPublic Sub Run()\n  Dim ws As Worksheet\n  ws = ThisWorkbook.Worksheets(1)\nEnd Sub\n"
+	body := "Option Explicit\nPublic Sub Run()\n  Dim ws As Worksheet\n  Set ws = ThisWorkbook.Worksheets(1)\n  ws.DisplayGridlines = False\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -7213,12 +7213,14 @@ func (a *app) lintCommand() *cobra.Command {
 			env := output.New("lint")
 			env.Issues = issues
 			env.Warnings = lintResult.Warnings
-			if len(issues) > 0 {
+			if hasBlockingLintIssues(issues) {
 				env.Status = output.StatusFailed
 				env.Error = &output.Error{Code: "lint_failed", Message: fmt.Sprintf("%d lint issue(s) found", len(issues))}
 				return a.write(env, output.ExitValidation)
 			}
-			env.Logs = []string{"no lint issues found"}
+			if len(issues) == 0 {
+				env.Logs = []string{"no lint issues found"}
+			}
 			return a.write(env, output.ExitSuccess)
 		},
 	}
@@ -7379,12 +7381,14 @@ func (a *app) analyzeCommand() *cobra.Command {
 			env.Analysis = findings
 			env.AnalysisMetrics = analyzeResult.AnalysisMetrics
 			env.Warnings = analyzeResult.Warnings
-			if len(findings) > 0 {
+			if hasBlockingAnalysisFindings(findings) {
 				env.Status = output.StatusFailed
 				env.Error = &output.Error{Code: "analyze_failed", Message: fmt.Sprintf("%d analysis finding(s) found", len(findings))}
 				return a.write(env, output.ExitValidation)
 			}
-			env.Logs = []string{"no analysis findings found"}
+			if len(findings) == 0 {
+				env.Logs = []string{"no analysis findings found"}
+			}
 			return a.write(env, output.ExitSuccess)
 		},
 	}
@@ -7433,13 +7437,13 @@ func (a *app) checkCommand() *cobra.Command {
 				return a.writeFailure("check", output.ExitEnvironment, "lint_failed", err)
 			}
 			issues := lintResult.Issues
-			check["lint"] = map[string]any{"status": statusForCount(len(issues)), "count": len(issues)}
+			check["lint"] = map[string]any{"status": statusForBlocking(hasBlockingLintIssues(issues)), "count": len(issues)}
 			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("check", output.ExitEnvironment, "analyze_failed", err)
 			}
 			findings := analyzeResult.Findings
-			check["analyze"] = map[string]any{"status": statusForCount(len(findings)), "count": len(findings)}
+			check["analyze"] = map[string]any{"status": statusForBlocking(hasBlockingAnalysisFindings(findings)), "count": len(findings)}
 			env.Warnings = mergeWarningsUnique(lintResult.Warnings, analyzeResult.Warnings)
 			var doctor output.Envelope
 			var doctorCode int
@@ -7463,7 +7467,7 @@ func (a *app) checkCommand() *cobra.Command {
 				env.Error = doctor.Error
 				return a.write(env, output.ExitEnvironment)
 			}
-			if len(issues) > 0 || len(findings) > 0 {
+			if hasBlockingLintIssues(issues) || hasBlockingAnalysisFindings(findings) {
 				env.Status = output.StatusFailed
 				env.Error = &output.Error{Code: "check_failed", Message: "lint or analysis findings found", Source: "xlflow"}
 				return a.write(env, output.ExitValidation)
@@ -7475,11 +7479,34 @@ func (a *app) checkCommand() *cobra.Command {
 	return cmd
 }
 
-func statusForCount(count int) string {
-	if count == 0 {
-		return output.StatusOK
+func statusForBlocking(blocking bool) string {
+	if blocking {
+		return output.StatusFailed
 	}
-	return output.StatusFailed
+	return output.StatusOK
+}
+
+func hasBlockingLintIssues(issues []lint.Issue) bool {
+	return slices.IndexFunc(issues, func(issue lint.Issue) bool {
+		return isBlockingDiagnosticSeverity(issue.Severity)
+	}) >= 0
+}
+
+func hasBlockingAnalysisFindings(findings []analyze.Finding) bool {
+	return slices.IndexFunc(findings, func(finding analyze.Finding) bool {
+		return isBlockingDiagnosticSeverity(finding.Severity)
+	}) >= 0
+}
+
+func isBlockingDiagnosticSeverity(severity string) bool {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "warning", "information":
+		return false
+	case "error":
+		return true
+	default:
+		return true
+	}
 }
 
 func mergeWarningsUnique(warningSets ...any) []any {

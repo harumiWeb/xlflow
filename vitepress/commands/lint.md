@@ -179,6 +179,10 @@ constant_name = "PROCEDURE_NAME"
 
 The rule checks existing direct string literals only; it never inserts a missing constant or rewrites source during `xlflow lint`. It supports `Sub`, `Function`, and all `Property` procedures in standard, class, document, and UserForm modules. The LSP offers a Quick Fix that updates only the mismatched string literal.
 
+Warning- and information-level lint issues are advisory: they remain in the
+JSON or human-readable output, but do not change the successful status or exit
+code. An error-level issue returns status `failed` and exit code `1`.
+
 ## JSON Output Example
 
 Failed `--json` output uses the xlflow envelope plus command-specific fields.
@@ -194,12 +198,12 @@ Failed `--json` output uses the xlflow envelope plus command-specific fields.
   "logs": [],
   "issues": [
     {
-      "code": "VB005",
-      "severity": "warning",
+      "code": "VB008",
+      "severity": "error",
       "file": "src/modules/Main.bas",
       "line": 7,
       "column": 7,
-      "message": "Declare an explicit type with As <Type>."
+      "message": "Typographic quote found in VBA source. Use straight double quotes for string delimiters before pushing to Excel."
     }
   ]
 }

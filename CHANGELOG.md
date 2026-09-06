@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Changed `lint`, `analyze`, and the diagnostic portion of `check` to return
+  exit code `0` when all reported diagnostics are warnings or information;
+  error-level diagnostics continue to return validation exit code `1`.
+
 ## v0.31.2
 
 - Fixed false-positive `VBA229` findings for early-bound Outlook COM types such
