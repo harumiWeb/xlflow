@@ -3070,3 +3070,4079 @@ End Sub
 		t.Fatalf("a constructor assigned after the call must not establish entry state: %+v", got)
 	}
 }
+
+func TestVBA202Issue448TracksDictionaryObjectsThroughVariantArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Public Sub AddChannel()
+  Dim storedChannel As Object
+  Dim inputChans() As Variant
+  Dim actions As Collection
+  Set storedChannel = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  storedChannel.Add "actions", actions
+  If data_.Exists("actions") Then
+    inputChans = data_.Item("actions")
+    data_.Item("actions") = appendInputChannel(inputChans, storedChannel)
+  Else
+    data_.Add "actions", Array(storedChannel)
+  End If
+  Set storedChannel = Nothing
+End Sub
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  If UBound(inputChans) = 0 Then
+    Set syncChannels = data
+    Exit Function
+  End If
+
+  Dim i As Long
+  For i = 0 To UBound(inputChans)
+    Set inputChan = inputChans(i)
+    Set actionsToAppend = inputChan.Item("actions")
+    Debug.Print actionsToAppend.Count
+  Next i
+  Set syncChannels = data
+End Function
+
+Public Sub Perform()
+  AddChannel
+  AddChannel
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Dictionary objects stored in a Variant array must remain assigned: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsUnknownDictionaryArrayElementShape(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 17 {
+		t.Fatalf("an unknown Dictionary array element shape must remain nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalVariantArrayAppendProof(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  If CreateObject("Scripting.Dictionary").Exists("append") Then
+    ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+    Set inputChans(UBound(inputChans)) = inputChan
+  End If
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  data.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a conditional array append must not establish a definite element shape")
+	}
+}
+
+func TestVBA202Issue448RejectsDictionaryCollectionOverwrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  inputChan("actions") = Nothing
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a Dictionary key overwritten with Nothing must remain nullable")
+	}
+}
+
+func TestVBA202Issue448RejectsVariantArrayElementOverwrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChans(0) = Nothing
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an overwritten Variant array element must remain nullable")
+	}
+}
+
+func TestVBA202Issue448RejectsVariantArrayElementUnderResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  On Error Resume Next
+  Set inputChan = inputChans(0)
+  On Error GoTo 0
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an array element read under Resume Next must remain nullable")
+	}
+}
+
+func TestVBA202Issue448RejectsByRefAppendObjectReset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  Set inputChan = Nothing
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  data.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a ByRef append object reset must remain nullable")
+	}
+}
+
+func TestVBA202Issue448RejectsDictionaryWriteUnderResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  On Error Resume Next
+  data.Add "actions", Array(inputChan)
+  On Error GoTo 0
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a Dictionary write under Resume Next must not establish a container contract")
+	}
+}
+
+func TestVBA202Issue448RejectsDictionaryAliasMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim aliasData As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set aliasData = data
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  aliasData("actions") = Array(inputChan)
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a Dictionary alias mutation must invalidate the container contract")
+	}
+}
+
+func TestVBA202Issue448DoesNotUseUncalledPrivateContainerWriter(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Sub UncalledWriter()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an uncalled private writer must not establish a container contract")
+	}
+}
+
+func TestVBA202Issue448IgnoresUncalledPrivateContainerRemoval(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Sub AddChannel()
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Private Sub ResetActions()
+  If data_.Exists("actions") Then data_.Remove "actions"
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  AddChannel
+  If data_.Exists("actions") Then
+    Dim result As Object
+    Set result = syncChannels(data_)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an uncalled private removal must not invalidate a guarded container contract: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsNonDominatingContainerWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  If data.Exists("seed") Then
+    data.Add "actions", Array(inputChan)
+  End If
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a non-dominating container write must not establish a contract")
+	}
+}
+
+func TestVBA202Issue448RejectsArrayMutationThroughByRefHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Sub ClearValues(ByRef values() As Variant)
+  Erase values
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  ClearValues inputChans
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an array passed to a ByRef helper must invalidate the container contract")
+	}
+}
+
+func TestVBA202Issue448RejectsElementMutationThroughHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Sub ResetChannel(ByVal channel As Object)
+  channel("actions") = Nothing
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  ResetChannel inputChan
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an array element passed to another procedure must invalidate the nested collection contract")
+	}
+}
+
+func TestVBA202Issue448RejectsRecursiveParameterContainerCycle(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncA(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncA = syncB(data)
+End Function
+
+Private Function syncB(data As Object) As Object
+  Set syncB = syncA(data)
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncA(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a recursive parameter contract must fail closed")
+	}
+}
+
+func TestVBA202Issue448RejectsEmptyForEachContainerElement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Sub AddChannel(channels As Collection)
+  Dim inputChan As Object
+  For Each inputChan In channels
+    Debug.Print channels.Count
+  Next inputChan
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim channels As Collection
+  Set channels = New Collection
+  AddChannel channels
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a For Each variable must not be constructed when the collection is empty")
+	}
+}
+
+func TestVBA202Issue448DoesNotUseUncalledPublicContainerWriter(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Public Sub Writer()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an uncalled public writer must not establish a container contract")
+	}
+}
+
+func TestVBA202Issue448UsesUncalledPublicFluentContainerWriter(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Public Function Writer() As ActionChain
+  Dim inputChan As New Dictionary
+  Dim inputChans() As Variant
+  Dim actions As Collection
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  If data_.Exists("actions") Then
+    inputChans = data_.Item("actions")
+    data_.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Else
+    data_.Add "actions", Array(inputChan)
+  End If
+  Set Writer = Me
+End Function
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Dictionary) As Dictionary
+  Dim inputChan As Dictionary
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an uncalled public fluent writer must establish the container contract: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsDiscardedExistsBeforeObservation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Sub AddChannel()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Public Sub ResetActions()
+  If Not data_.Exists("actions") Then data_.Remove "actions"
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Perform()
+  AddChannel
+  ResetActions
+  Debug.Print data_.Exists("actions")
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a discarded Exists result must not establish a key-presence guard")
+	}
+}
+
+func TestVBA202Issue448RejectsNegatedExistsBeforeObservation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Sub AddChannel()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Public Sub ResetActions()
+  If Not data_.Exists("actions") Then data_.Remove "actions"
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Perform()
+  AddChannel
+  ResetActions
+  If Not data_.Exists("actions") Then
+    Debug.Print "missing"
+  End If
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a negated Exists condition must not establish a positive key-presence guard")
+	}
+}
+
+func TestVBA202Issue448RejectsDictionaryKeyCaseMismatch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "Actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a BinaryCompare Dictionary key mismatch must not establish a container contract")
+	}
+}
+
+func TestVBA202Issue448RejectsResumeNextContainerConstructor(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  On Error Resume Next
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  On Error GoTo 0
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a constructor under Resume Next must not establish a definite object element")
+	}
+}
+
+func TestVBA202Issue448RejectsAppendHelperElementMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  inputChan.Item("actions") = Nothing
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  data.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an append helper that mutates the element Dictionary must invalidate the contract")
+	}
+}
+
+func TestVBA202Issue448RejectsAppendHelperArrayMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Sub ClearValues(ByRef values() As Variant)
+  Erase values
+End Sub
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  ClearValues inputChans
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  data.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an append helper that mutates the array ByRef must invalidate the contract")
+	}
+}
+
+func TestVBA202Issue448RejectsElementAliasMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim aliasChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set aliasChan = inputChan
+  aliasChan("actions") = Nothing
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an alias of an array element must invalidate the nested collection contract")
+	}
+}
+
+func TestVBA202Issue448RejectsNamedArgumentContainerMismatch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object, other As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim safe As Object
+  Dim unknown As Object
+  Dim inputChan As Object
+  Set safe = CreateObject("Scripting.Dictionary")
+  Set unknown = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  safe.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(other:=safe, data:=unknown)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("named arguments must bind the actual Dictionary to the matching parameter")
+	}
+}
+
+func TestVBA202Issue448RejectsTrailingDictionaryItemExpression(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions").GetArray()
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a Dictionary Item expression with a trailing member must not establish a container source")
+	}
+}
+
+func TestVBA202Issue448RejectsUncalledPublicWriterForPublicModuleObject(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Public data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Public Sub Writer()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  If data_.Exists("actions") Then
+    Dim result As Object
+    Set result = syncChannels(data_)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a public module object must not use an uncalled writer even under Exists")
+	}
+}
+
+func TestVBA202Issue448RejectsContainerReconstruction(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Set data = CreateObject("Scripting.Dictionary")
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a reconstructed Dictionary must not retain the old container element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsRemoveAfterExistsGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Sub AddChannel()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Private Sub ResetActions()
+  If data_.Exists("actions") Then data_.Remove "actions"
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Perform()
+  AddChannel
+  If data_.Exists("actions") Then
+    ResetActions
+    Dim result As Object
+    Set result = syncChannels(data_)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a called Remove after Exists must invalidate the container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsNonDominatingElementReassignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  If data.Exists("reset") Then Set inputChan = Nothing
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a conditional array element reassignment must invalidate the element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsSetDictionaryItemWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set inputChan.Item("actions") = Nothing
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a Set Dictionary Item write must invalidate the nested collection proof")
+	}
+}
+
+func TestVBA202Issue448RejectsWrappedVariantArrayElement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function Wrong(ByVal candidate As Object) As Object
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = Wrong(inputChans(0))
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a wrapper around a Variant array element must not inherit the element contract")
+	}
+}
+
+func TestVBA202Issue448RejectsAppendHelperElementAliasMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  Dim aliasChan As Object
+  Set aliasChan = inputChan
+  aliasChan.Item("actions") = Nothing
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  data.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an append helper alias mutation must invalidate the element contract")
+	}
+}
+
+func TestVBA202Issue448RejectsByRefVariantArrayElementMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Sub ClearValue(ByRef value As Variant)
+  Set value = Nothing
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  ClearValue inputChans(0)
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a ByRef mutation of a Variant array element must invalidate the element contract")
+	}
+}
+
+func TestVBA202Issue448RejectsOutOfRangeVariantArrayIndex(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(99)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an unproven Variant array index must not establish an object contract")
+	}
+}
+
+func TestVBA202Issue448RejectsUnknownDictionaryArrayElementObject(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Other.Component")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an unknown constructed Object must not establish a Dictionary element contract")
+	}
+}
+
+func TestVBA202Issue448RejectsElementReassignmentBeforeStorage(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an element reassigned before storage must not retain the old Collection proof")
+	}
+}
+
+func TestVBA202Issue448RejectsConsumerElementMutationHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Sub ResetChannel(ByVal channel As Object)
+  channel("actions") = Nothing
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  ResetChannel inputChan
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an element passed to a consumer helper must invalidate the Collection proof")
+	}
+}
+
+func TestVBA202Issue448PreservesVBABackslashesInDictionaryKeys(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("aA")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "a\x41", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("VBA backslashes must remain literal in Dictionary keys")
+	}
+}
+
+func TestVBA202Issue448RejectsMutuallyExclusiveArrayCardinality(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(2)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run(ByVal chooseFirst As Boolean)
+  Dim data As Object
+  Dim firstChan As Object
+  Dim secondChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set firstChan = CreateObject("Scripting.Dictionary")
+  Set secondChan = CreateObject("Scripting.Dictionary")
+  If chooseFirst Then
+    data.Add "actions", Array(firstChan)
+  Else
+    data.Add "actions", Array(secondChan)
+  End If
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("mutually exclusive array writes must not establish a merged out-of-range contract")
+	}
+}
+
+func TestVBA202Issue448RejectsParameterContainerMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+	Dim inputChan As Object
+	Dim inputChans() As Variant
+	data.Remove "actions"
+	inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a parameter container mutation must invalidate the delegated array contract")
+	}
+}
+
+func TestVBA202Issue448RejectsReflectiveDictionaryMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  CallByName inputChan, "Remove", VbMethod, "actions"
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("CallByName Dictionary mutation must invalidate the nested Collection proof")
+	}
+}
+
+func TestVBA202Issue448RejectsUnconstructedTypedDictionary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Dictionary) As Dictionary
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Dictionary
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Dictionary
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a typed Dictionary without construction must remain nullable")
+	}
+}
+
+func TestVBA202Issue448RejectsUnknownObjectContainerShape(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "FakeContainer.cls", `Attribute VB_Name = "FakeContainer"
+Option Explicit
+`)
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = New FakeContainer
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an unknown Object container must not be treated as a Dictionary")
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalDictionaryConstruction(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run(ByVal initialize As Boolean)
+  Dim data As Object
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  If initialize Then
+    Set data = CreateObject("Scripting.Dictionary")
+  End If
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a conditionally constructed Dictionary must not establish a container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsUncalledModuleDictionaryConstruction(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub InitializeData()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an uncalled module initializer must not establish a Dictionary proof")
+	}
+}
+
+func TestVBA202Issue448RejectsAppendHelperWithExtraSlots(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 2)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  data.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an append helper that creates extra slots must not establish an array proof")
+	}
+}
+
+func TestVBA202Issue448RejectsDuplicateArrayStoragePath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run(ByVal chooseFirst As Boolean)
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  If chooseFirst Then
+    Set actions = New Collection
+    inputChan.Add "actions", actions
+    data.Add "actions", Array(inputChan)
+  Else
+    data.Add "actions", Array(inputChan)
+  End If
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("separate Dictionary array storage paths must not share one element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsLoopIndexReassignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Dim i As Long
+  For i = 0 To UBound(inputChans)
+    i = UBound(inputChans) + 1
+    Set inputChan = inputChans(i)
+    Debug.Print inputChan.Name
+  Next i
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a loop index reassigned in the loop body must not establish a safe array access")
+	}
+}
+
+func TestVBA202Issue448RejectsArrayRetrievalUnderResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  On Error Resume Next
+  inputChans = data.Item("actions")
+  On Error GoTo 0
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an array retrieval under Resume Next must remain nullable")
+	}
+}
+
+func TestObjectDictionaryMemberItemAssignedRejectsIncompleteArgumentProjection(t *testing.T) {
+	t.Parallel()
+	receiver := "data"
+	proc := sourceProcedure{
+		Statements: newReadOnlySpan([]procedureir.Statement{{
+			ID:     1,
+			Kind:   procedureir.StatementSet,
+			Target: &procedureir.Expression{Text: "actions"},
+		}}),
+	}
+	call := procedureir.CallSite{
+		StatementID: 1,
+		Callee: procedureir.Callee{
+			Receiver: &receiver,
+			Member:   "Item",
+		},
+		Arguments: procedureir.Arguments{Count: 1},
+	}
+	declarations := declarationScope{
+		local: map[string]sourceDeclaration{
+			"data":    {Name: "data", Type: "Object", Object: true},
+			"actions": {Name: "actions", Type: "Collection", Object: true},
+		},
+	}
+	if objectDictionaryMemberItemAssigned(proc, 1, call, objectFlowContext{containerIndex: &objectContainerIndex{}}, declarations) {
+		t.Fatal("an incomplete argument projection must fail closed")
+	}
+}
+
+func TestVBA202Issue448RejectsAppendHelperErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  Erase inputChans
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  data.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an append helper that erases its array must not establish an array proof")
+	}
+}
+
+func TestVBA202Issue448RejectsAppendHelperAdditionalObjectAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object, ByRef aliasInput As Object) As Variant()
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  aliasInput("actions") = Nothing
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  data.Item("actions") = appendInputChannel(inputChans, inputChan, inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an append helper with an additional object alias must not establish an array proof")
+	}
+}
+
+func TestVBA202Issue448RejectsArrayAccessAfterLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Dim i As Long
+  For i = 0 To UBound(inputChans)
+  Next i
+  Set inputChan = inputChans(i)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an array access after a UBound loop must not reuse the loop-bound proof")
+	}
+}
+
+func TestVBA202Issue448RejectsNonDominatingElementReset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run(ByVal clearValue As Boolean)
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  If clearValue Then
+    Set inputChan = Nothing
+  End If
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a non-dominating Nothing reset must invalidate the array element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsForEachElementReassignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Dim candidates As Collection
+  Set candidates = New Collection
+  For Each inputChan In candidates
+  Next inputChan
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a For Each reassignment must invalidate the element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsIndexedElementAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  Dim aliases() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  ReDim aliases(0 To 0)
+  Set aliases(0) = inputChan
+  aliases(0).Item("actions") = Nothing
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an indexed alias of an element must invalidate its shape proof")
+	}
+}
+
+func TestVBA202Issue448RejectsWriteAfterArrayObservation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Dim i As Long
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  For i = 0 To 0
+    inputChans = data.Item("actions")
+    data.Add "actions", Array(inputChan)
+    Set inputChan = inputChans(0)
+    Debug.Print inputChan.Name
+  Next i
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a write after the array observation must not establish the initial element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsDictionaryArrayAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim aliases() As Variant
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  ReDim aliases(0 To 0)
+  Set aliases(0) = data
+  aliases(0).Item("actions") = Nothing
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an indexed alias of a Dictionary receiver must invalidate its container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsByRefDictionaryArrayAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Dim aliases() As Variant
+  ReDim aliases(0 To 0)
+  Set aliases(0) = data
+  aliases(0).Remove "actions"
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an indexed alias of a ByRef Dictionary receiver must invalidate its container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsByRefDictionaryAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim aliasData As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set aliasData = data
+  aliasData.Remove "actions"
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a simple alias of a ByRef Dictionary receiver must invalidate its container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsAppendHelperIndexedElementAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  Dim aliases() As Variant
+  ReDim aliases(0 To 0)
+  Set aliases(0) = inputChan
+  aliases(0).Item("actions") = Nothing
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  data.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an indexed alias in an append helper must invalidate the element contract")
+	}
+}
+
+func TestVBA202Issue448RejectsProducerIndexedElementAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Dim aliases() As Variant
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  ReDim aliases(0 To 0)
+  Set aliases(0) = inputChan
+  aliases(0).Item("actions") = Nothing
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actions = inputChan.Item("actions")
+  Debug.Print actions.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an indexed alias in the producer must invalidate the element contract")
+	}
+}
+
+func TestVBA202Issue448RejectsDictionaryPropertyAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Dim holder As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  Set holder.Value = data
+  holder.Value.Remove "actions"
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a property alias of a Dictionary receiver must invalidate its container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsConsumerPropertyAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  Dim holder As Object
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set holder.Value = inputChan
+  holder.Value.Item("actions") = Nothing
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a property alias of an array element must invalidate the nested collection contract")
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalCollectionReset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(ByVal clearActions As Boolean) As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  If clearActions Then
+    Set actions = Nothing
+  End If
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actions = inputChan.Item("actions")
+  Debug.Print actions.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run(ByVal clearActions As Boolean)
+  Dim result As Object
+  Set result = syncChannels(clearActions)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a conditional Nothing reset must invalidate the Collection proof")
+	}
+}
+
+func TestVBA202Issue448RejectsWithDictionaryMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  With data
+    .Remove "actions"
+  End With
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a Dictionary mutation through an implicit With receiver must invalidate the container proof")
+	}
+}
+
+func TestVBA202Issue448AllowsDefaultDictionaryItemArrayReadAndWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim inputChan As Object
+  Dim data As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data("actions") = Array(inputChan)
+  inputChans = data("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a known default Item array write and read must preserve the object proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsUnknownDefaultDictionaryItemWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  data("actions") = Array(Nothing)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an unknown default Item write must invalidate the object-array proof")
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalContainerMutationHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub ResetActions()
+  data_.Remove "actions"
+End Sub
+
+Private Function syncChannels(clearActions As Boolean) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data_ = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+  If clearActions Then ResetActions
+  inputChans = data_.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data_
+End Function
+
+Public Sub Run(ByVal clearActions As Boolean)
+  Dim result As Object
+  Set result = syncChannels(clearActions)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a conditional helper call that removes the key must invalidate the container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalObjectReplacementBeforeStorage(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(replaceObject As Boolean) As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim replacement As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  If replaceObject Then Set inputChan = replacement
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run(ByVal replaceObject As Boolean)
+  Dim result As Object
+  Set result = syncChannels(replaceObject)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a conditional non-constructor replacement before storage must invalidate the object proof")
+	}
+}
+
+func TestVBA202Issue448RejectsUnknownByRefClearBeforeStorage(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Sub ClearObject(ByRef value As Object)
+  Set value = Nothing
+End Sub
+
+Private Function syncChannels(clearObject As Boolean) As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  If clearObject Then ClearObject inputChan
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run(ByVal clearObject As Boolean)
+  Dim result As Object
+  Set result = syncChannels(clearObject)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an unknown ByRef clear before storage must invalidate the object proof")
+	}
+}
+
+func TestVBA202Issue448RejectsForEachParameterReceiverReassignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim candidates As Collection
+  Dim inputChans() As Variant
+  Dim inputChan As Object
+  Set candidates = New Collection
+  For Each data In candidates
+  Next data
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a For Each reassignment of a Dictionary parameter must invalidate the container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsForEachAppendObjectParameterReassignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  Dim candidates As Collection
+  Set candidates = New Collection
+  For Each inputChan In candidates
+  Next inputChan
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChans() As Variant
+  Dim inputChan As Object
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim firstChan As Object
+  Dim secondChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set firstChan = CreateObject("Scripting.Dictionary")
+  Set secondChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(firstChan)
+  inputChans = data.Item("actions")
+  data.Item("actions") = appendInputChannel(inputChans, secondChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a For Each reassignment of an append helper object parameter must invalidate the container proof")
+	}
+}
+
+func TestVBA202Issue448AllowsMixedCaseArrayLoopBound(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim data As Object
+  Dim inputChans() As Variant
+  Dim inputChan As Object
+  Dim i As Long
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  For i = 0 tO UBound(inputChans)
+    Set inputChan = inputChans(i)
+    Debug.Print inputChan.Name
+  Next i
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("mixed-case For loop bounds must preserve the proven array element: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsByRefArrayLoopIndexMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Sub SetIndex(ByRef value As Long)
+  value = 0
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChans() As Variant
+  Dim inputChan As Object
+  Dim i As Long
+  inputChans = data.Item("actions")
+  For i = 0 To UBound(inputChans)
+    SetIndex i
+    Set inputChan = inputChans(i)
+    Debug.Print inputChan.Name
+  Next i
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a ByRef helper that mutates the array loop index must invalidate the element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsUnprovenObjectArrayElementBeforeStorage(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(tryEmpty As Boolean) As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim values() As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  ReDim values(0 To 0)
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  If tryEmpty Then Set inputChan = values(0)
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run(ByVal tryEmpty As Boolean)
+  Dim result As Object
+  Set result = syncChannels(tryEmpty)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an uninitialized Object array element must not establish a non-Nothing container element")
+	}
+}
+
+func TestVBA202Issue448RejectsStandardModuleClassInitializeProof(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("Class_Initialize in a standard module must not establish implicit initialization")
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalModuleDictionaryInitializer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub InitializeData()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run(ByVal shouldInit As Boolean)
+  Dim inputChan As Object
+  If shouldInit Then InitializeData
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a conditional module Dictionary initializer must not dominate later container use")
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalContainerAddHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub AddChannel()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run(ByVal shouldAdd As Boolean)
+  If shouldAdd Then AddChannel
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a conditional container add helper must not establish a required array contract")
+	}
+}
+
+func TestVBA202Issue448RejectsForEachModuleReceiverReassignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function syncChannels() As Object
+  Dim candidates As Collection
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set candidates = New Collection
+  For Each data_ In candidates
+  Next data_
+  inputChans = data_.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data_
+End Function
+
+Public Sub Run()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a For Each reassignment of the module receiver must invalidate its container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsShadowedAppendHelperCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim appendInputChannel As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  Set appendInputChannel = Nothing
+  data.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a shadowed append helper must not establish an array element contract")
+	}
+}
+
+func TestVBA202Issue448RejectsUnknownReceiverMutationOfArrayElement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Dim foo As Object
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Call foo.Add(inputChan)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim data As Object
+  Dim inputChan As Object
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an unknown receiver call must invalidate the array element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsUnknownDictionaryItemWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim inputChan As Object
+  Dim key As String
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+  key = "actions"
+  data_.Item(key) = Array(Nothing)
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an unknown Dictionary Item key must invalidate the array element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsBareDictionaryItemMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Dim actionsToAppend As Collection
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  inputChan("actions") = Nothing
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data_.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a bare Dictionary Item mutation must invalidate the element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsArrayElementAliasMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim otherChan As Object
+  Dim inputChans() As Variant
+  Dim actionsToAppend As Collection
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set otherChan = inputChans(0)
+  otherChan.Item("actions") = Nothing
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data_.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an alias created from an array element must invalidate the element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsArrayElementAssignmentUnderResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Dim actionsToAppend As Collection
+  inputChans = data.Item("actions")
+  On Error Resume Next
+  Set inputChan = inputChans(0)
+  On Error GoTo 0
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data_.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an array element assignment under Resume Next must invalidate the element proof")
+	}
+}
+
+func TestVBA202Issue448RejectsMutationBeforeArrayElementReassignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Dim actionsToAppend As Collection
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  inputChan.Item("actions") = Nothing
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim inputChan As Object
+  Dim actions As Collection
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data_.Add "actions", Array(inputChan)
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a mutation before reassigning an array element must remain unsafe")
+	}
+}
+
+func TestVBA202Issue448RejectsCallerResumeNextContainerInitializer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Sub AddChannel()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  On Error Resume Next
+  AddChannel
+  On Error GoTo 0
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a caller protected by Resume Next must not establish a container contract")
+	}
+}
+
+func TestVBA202Issue448RejectsCallerHandlerContainerInitializer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Sub AddChannel()
+  Dim inputChan As Object
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  data_.Add "actions", Array(inputChan)
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  On Error GoTo Handler
+  AddChannel
+  On Error GoTo 0
+  Dim result As Object
+  Set result = syncChannels(data_)
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a caller handler that resumes into normal flow must not establish a container contract")
+	}
+}
+
+func TestVBA202Issue448RejectsAppendHelperUnderResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  On Error Resume Next
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  On Error GoTo 0
+  appendInputChannel = inputChans
+End Function
+
+Private Sub AddChannel()
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  If data_.Exists("actions") Then
+    inputChans = data_.Item("actions")
+    data_.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Else
+    data_.Add "actions", Array(inputChan)
+  End If
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Debug.Print inputChan.Name
+  Set syncChannels = data
+End Function
+
+Public Sub Perform()
+  AddChannel
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an append helper that writes under Resume Next must not establish an array contract")
+	}
+}
+
+func TestVBA202Issue448AcceptsLaterArrayLoopWithSameIndex(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actionsToAppend As Collection
+  Dim inputChans() As Variant
+  Dim i As Long
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actionsToAppend = New Collection
+  inputChan.Add "actions", actionsToAppend
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  For i = 0 To UBound(inputChans)
+    Debug.Print i
+  Next i
+  For i = 0 To UBound(inputChans)
+    Set inputChan = inputChans(i)
+    Set actionsToAppend = inputChan.Item("actions")
+    Debug.Print actionsToAppend.Count
+  Next i
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a later safe loop must not be invalidated by an earlier loop with the same index: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsCaseVariantDictionaryItemMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Dim inputChans() As Variant
+  Dim actionsToAppend As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  inputChan.Item("ACTIONS") = Nothing
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a case-variant Dictionary item write must invalidate the container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsDynamicDefaultItemMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Dim inputChans() As Variant
+  Dim actionsToAppend As Collection
+  Dim dynamicKey As String
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  dynamicKey = "actions"
+  inputChan(dynamicKey) = Nothing
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a dynamic default Dictionary item write must invalidate the container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsIndexedDictionaryItemMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private Function syncChannels() As Object
+  Dim data As Object
+  Dim inputChan As Object
+  Dim actions As Collection
+  Dim inputChans() As Variant
+  Dim actionsToAppend As Collection
+  Set data = CreateObject("Scripting.Dictionary")
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  data.Add "actions", Array(inputChan)
+  inputChans = data.Item("actions")
+  inputChans(0).Item("actions") = Nothing
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Run()
+  Dim result As Object
+  Set result = syncChannels()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an indexed Dictionary item write must invalidate the container proof")
+	}
+}
+
+func TestVBA202Issue448RejectsAppendHelperIndexedDictionaryItemMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Object
+
+Private Sub Class_Initialize()
+  Set data_ = CreateObject("Scripting.Dictionary")
+End Sub
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  inputChans(0).Item("actions") = Nothing
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Sub AddChannel()
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Dim actions As Collection
+  Set inputChan = CreateObject("Scripting.Dictionary")
+  Set actions = New Collection
+  inputChan.Add "actions", actions
+  If data_.Exists("actions") Then
+    inputChans = data_.Item("actions")
+    data_.Item("actions") = appendInputChannel(inputChans, inputChan)
+  Else
+    data_.Add "actions", Array(inputChan)
+  End If
+End Sub
+
+Private Function syncChannels(data As Object) As Object
+  Dim inputChan As Object
+  Dim inputChans() As Variant
+  Dim actionsToAppend As Collection
+  inputChans = data.Item("actions")
+  Set inputChan = inputChans(0)
+  Set actionsToAppend = inputChan.Item("actions")
+  Debug.Print actionsToAppend.Count
+  Set syncChannels = data
+End Function
+
+Public Sub Perform()
+  AddChannel
+  AddChannel
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an indexed mutation inside an append helper must invalidate the element contract")
+	}
+}

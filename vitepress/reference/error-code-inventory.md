@@ -606,6 +606,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invalid_withevents_shape`
 - `invoke_macro`
 - `is_wsl`
+- `iunknown_getwindow`
 - `keyword_casing`
 - `known_accept`
 - `known_reject`

@@ -73,11 +73,12 @@ type objectProcedurePlan struct {
 	declarations   declarationScope
 	procedureDecls map[string]sourceDeclaration
 
-	flowProc    sourceProcedure
-	flowGraph   vbacfg.CFGView
-	flowContext objectFlowContext
-	reachable   map[vbacfg.BlockID]bool
-	vars        map[string]objectVariable
+	flowProc       sourceProcedure
+	flowGraph      vbacfg.CFGView
+	flowContext    objectFlowContext
+	containerIndex *objectContainerIndex
+	reachable      map[vbacfg.BlockID]bool
+	vars           map[string]objectVariable
 	// receiverSummaryKeys and classInitializerKeys are immutable indexes built
 	// once for the containing batch.  They keep summary lookups inside the
 	// fixed-point iterations O(1) instead of rescanning every procedure.
@@ -131,10 +132,11 @@ func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 	for _, file := range files {
 		procedures := file.procedureView()
 		moduleDecls := file.moduleDecls()
+		containerIndex := buildObjectContainerIndex(file)
 		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
 			proc := procedures.valueAt(procedureIndex)
 			key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
-			plan := newObjectProcedurePlan(file, proc, moduleDecls, key)
+			plan := newObjectProcedurePlan(file, proc, moduleDecls, key, containerIndex)
 			analysis.plans[key] = plan
 			analysis.order = append(analysis.order, key)
 		}
@@ -470,7 +472,7 @@ func objectPredicateApplyGuard(plan *objectProcedurePlan, variable objectVariabl
 	return false
 }
 
-func newObjectProcedurePlan(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, key string) *objectProcedurePlan {
+func newObjectProcedurePlan(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, key string, containerIndex *objectContainerIndex) *objectProcedurePlan {
 	plan := &objectProcedurePlan{
 		key:            key,
 		file:           file,
@@ -478,6 +480,7 @@ func newObjectProcedurePlan(file parsedFile, proc sourceProcedure, moduleDecls m
 		moduleDecls:    moduleDecls,
 		declarations:   objectFlowDeclarations(file, proc, moduleDecls),
 		procedureDecls: file.procedureDeclarationsFor(proc),
+		containerIndex: containerIndex,
 		reachable:      map[vbacfg.BlockID]bool{},
 		vars:           map[string]objectVariable{},
 	}
@@ -487,7 +490,7 @@ func newObjectProcedurePlan(file parsedFile, proc sourceProcedure, moduleDecls m
 		for _, id := range plan.flowGraph.Reachable() {
 			plan.reachable[id] = true
 		}
-		plan.flowContext = newObjectFlowContext(plan.flowProc, plan.flowGraph)
+		plan.flowContext = newObjectFlowContext(plan.flowProc, plan.flowGraph, plan.containerIndex)
 	}
 	addObjectVariables := func(scope procedureir.SymbolScope, declarations map[string]sourceDeclaration) {
 		for _, declaration := range declarations {
@@ -793,7 +796,7 @@ func (analysis *objectAnalysisContext) prepareTerminalCallGraphs() {
 		}
 		receiverSummaryKeys := plan.flowContext.receiverSummaryKeys
 		predicateContracts := plan.flowContext.predicateContracts
-		plan.flowContext = newObjectFlowContext(plan.flowProc, plan.flowGraph)
+		plan.flowContext = newObjectFlowContext(plan.flowProc, plan.flowGraph, plan.containerIndex)
 		plan.flowContext.vars = plan.vars
 		plan.flowContext.receiverSummaryKeys = receiverSummaryKeys
 		plan.flowContext.predicateContracts = predicateContracts
@@ -2002,18 +2005,20 @@ type objectFlowContext struct {
 	graph               vbacfg.CFGView
 	predecessors        map[vbacfg.BlockID][]vbacfg.Edge
 	vars                map[string]objectVariable
+	containerIndex      *objectContainerIndex
 	receiverSummaryKeys map[string][]string
 	valueState          map[string]bool
 	predicateContracts  map[string]bool
 	terminalCalls       map[int]bool
 }
 
-func newObjectFlowContext(proc sourceProcedure, graph vbacfg.CFGView) objectFlowContext {
+func newObjectFlowContext(proc sourceProcedure, graph vbacfg.CFGView, containerIndex *objectContainerIndex) objectFlowContext {
 	context := objectFlowContext{
-		facts:        proc.analysisFacts(),
-		graph:        graph,
-		predecessors: make(map[vbacfg.BlockID][]vbacfg.Edge),
-		vars:         map[string]objectVariable{},
+		facts:          proc.analysisFacts(),
+		graph:          graph,
+		predecessors:   make(map[vbacfg.BlockID][]vbacfg.Edge),
+		vars:           map[string]objectVariable{},
+		containerIndex: containerIndex,
 	}
 	if proc.Graph != nil {
 		graph.ForEachEdge(func(edge vbacfg.Edge) bool {
@@ -2986,10 +2991,16 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 	if objectConstructorCallText(strings.ToLower(call.Callee.Text)) || strings.EqualFold(call.Callee.BaseName, "CreateObject") || strings.EqualFold(call.Callee.BaseName, "GetObject") {
 		return true
 	}
+	if objectArrayElementAssigned(proc, statementID, call, flowContext, declarations) {
+		return true
+	}
 	if objectCollectionItemAssigned(call, state, declarations) {
 		return true
 	}
 	if objectCollectionMemberItemAssigned(call, state, declarations) {
+		return true
+	}
+	if objectDictionaryMemberItemAssigned(proc, statementID, call, flowContext, declarations) {
 		return true
 	}
 	if objectRegExpMatchItemAssigned(proc, statementID, call, state, declarations) {
