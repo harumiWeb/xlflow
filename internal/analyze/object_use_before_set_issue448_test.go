@@ -1097,6 +1097,81 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TreatsTypeNameCaseAsNonNothing(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CountResponse(ByVal responseValue As Object) As Long
+  Select Case TypeName(responseValue)
+    Case "Collection"
+      CountResponse = responseValue.Count
+  End Select
+End Function
+
+Public Sub Run(ByVal responseValue As Object)
+  Debug.Print CountResponse(responseValue)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a concrete TypeName case proves the Object is non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448KeepsNothingTypeNameCaseNullable(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CountNothing(ByVal responseValue As Object) As Long
+  Select Case TypeName(responseValue)
+    Case "Nothing"
+      CountNothing = responseValue.Count
+  End Select
+End Function
+
+Public Sub Run(ByVal responseValue As Object)
+  Debug.Print CountNothing(responseValue)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("the Nothing TypeName case must remain nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448KeepsMixedTypeNameCaseNullable(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CountMixed(ByVal responseValue As Object) As Long
+  Select Case TypeName(responseValue)
+    Case "Nothing", "Collection"
+      CountMixed = responseValue.Count
+  End Select
+End Function
+
+Public Sub Run(ByVal responseValue As Object)
+  Debug.Print CountMixed(responseValue)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a mixed TypeName case must remain nullable: %+v", got)
+	}
+}
+
 func TestVBA202Issue448PropagatesClassFunctionResultToPrivateCollectionHelper(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

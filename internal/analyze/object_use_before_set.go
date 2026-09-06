@@ -2398,9 +2398,23 @@ func objectFlowApplySelectCaseTypeGuard(state map[string]bool, flowContext objec
 		return state
 	}
 	updated := cloneObjectState(state)
+	caseProvesNonNothing := len(expected) > 0
 	for _, typeName := range expected {
-		if objectDynamicExcelTypeName(typeName) {
-			updated[objectTypeNameFactKey(key, typeName)] = true
+		if strings.EqualFold(strings.TrimSpace(typeName), "nothing") {
+			caseProvesNonNothing = false
+			break
+		}
+	}
+	if caseProvesNonNothing {
+		// TypeName(Nothing) returns "Nothing" in VBA.  A case containing
+		// only concrete types therefore proves that an Object value is
+		// non-Nothing, even when the type is not one of the Excel types
+		// tracked separately.
+		updated[key] = true
+		for _, typeName := range expected {
+			if objectDynamicExcelTypeName(typeName) {
+				updated[objectTypeNameFactKey(key, typeName)] = true
+			}
 		}
 	}
 	return updated
