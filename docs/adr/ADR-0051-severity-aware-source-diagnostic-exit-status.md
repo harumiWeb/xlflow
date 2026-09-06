@@ -18,16 +18,17 @@ avoid presenting a different result for the same project.
 
 ## Decision
 
-Treat only `error`-severity source diagnostics as validation failures for the
-`lint`, `analyze`, and source-diagnostic portion of `check` commands. Warning
-and information diagnostics remain in the JSON and human-readable output, but
-the command reports status `ok` and returns exit code `0` when no error-level
-diagnostic is present.
+Treat `error`-severity source diagnostics, and diagnostics with unknown or empty
+severity, as validation failures for the `lint`, `analyze`, and
+source-diagnostic portion of `check` commands. Warning and information
+diagnostics remain in the JSON and human-readable output, but the command
+reports status `ok` and returns exit code `0` when no blocking diagnostic is
+present.
 
-An unknown or empty severity is treated as blocking so a malformed diagnostic
-cannot silently become a successful result. Configuration, analysis/lint
-execution, and Excel environment failures retain their existing exit-code
-classes. The diagnostic payload and ordering are unchanged.
+The fail-closed treatment of unknown or empty severity prevents a malformed
+diagnostic from silently becoming a successful result. Configuration,
+analysis/lint execution, and Excel environment failures retain their existing
+exit-code classes. The diagnostic payload and ordering are unchanged.
 
 ## Consequences
 

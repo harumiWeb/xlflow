@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -928,6 +929,77 @@ End Sub
 	}
 	if len(got.Issues) != 1 || got.Issues[0].Code != "VB002" || got.Issues[0].Severity != "warning" {
 		t.Fatalf("warning-only lint issues = %+v, want one VB002 warning", got.Issues)
+	}
+}
+
+func TestCheckCommandReturnsSuccessForWarningOnlyDiagnostics(t *testing.T) {
+	dir := writeCLIInlineSuppressionProject(t, "check", `Option Explicit
+Public Sub Run()
+  On Error Resume Next
+  Debug.Print "one"
+  Debug.Print "two"
+  On Error GoTo 0
+  Range("A1").Select
+End Sub
+`)
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+		checkDoctor: func(config.Config, excel.CommandOptions) (output.Envelope, int, error) {
+			return output.New("doctor"), output.ExitSuccess, nil
+		},
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "check"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("check warning-only command error = %v, exit = %d", err, output.ExitCode(err))
+	}
+
+	var got struct {
+		Status   string            `json:"status"`
+		Error    *output.Error     `json:"error"`
+		Check    map[string]any    `json:"check"`
+		Issues   []lint.Issue      `json:"issues"`
+		Analysis []analyze.Finding `json:"analysis"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode check JSON: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusOK || got.Error != nil {
+		t.Fatalf("warning-only check output = %+v, want status ok without error", got)
+	}
+	wantCounts := map[string]int{"lint": len(got.Issues), "analyze": len(got.Analysis)}
+	for name, wantCount := range wantCounts {
+		result, ok := got.Check[name].(map[string]any)
+		if !ok {
+			t.Fatalf("check[%q] = %#v, want result", name, got.Check[name])
+		}
+		status, statusOK := result["status"].(string)
+		count, countOK := result["count"].(float64)
+		if !statusOK || !countOK || status != output.StatusOK || int(count) != wantCount {
+			t.Fatalf("check[%q] = %#v, want status ok and count %d", name, result, wantCount)
+		}
+	}
+	if len(got.Issues) != 1 || got.Issues[0].Code != "VB002" || got.Issues[0].Severity != "warning" {
+		t.Fatalf("warning-only check issues = %+v, want one VB002 warning", got.Issues)
+	}
+	if len(got.Analysis) == 0 {
+		t.Fatal("warning-only check analysis is empty")
+	}
+	for _, finding := range got.Analysis {
+		if finding.Severity != "warning" && finding.Severity != "information" {
+			t.Fatalf("warning-only check analysis contains blocking finding: %+v", finding)
+		}
+	}
+	if !slices.ContainsFunc(got.Analysis, func(finding analyze.Finding) bool {
+		return finding.Code == "VBA214" && finding.Severity == "warning"
+	}) {
+		t.Fatalf("warning-only check analysis = %+v, want VBA214 warning", got.Analysis)
 	}
 }
 

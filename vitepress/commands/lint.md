@@ -181,7 +181,8 @@ The rule checks existing direct string literals only; it never inserts a missing
 
 Warning- and information-level lint issues are advisory: they remain in the
 JSON or human-readable output, but do not change the successful status or exit
-code. An error-level issue returns status `failed` and exit code `1`.
+code. An error-level, unknown-severity, or empty-severity issue returns status
+`failed` and exit code `1`.
 
 ## JSON Output Example
 

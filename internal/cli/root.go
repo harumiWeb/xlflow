@@ -71,6 +71,7 @@ type app struct {
 	preflightWaivers map[string]preflightWaiver
 	buildInfo        BuildInfo
 	updateChecker    releaseChecker
+	checkDoctor      func(config.Config, excel.CommandOptions) (output.Envelope, int, error)
 	coordination     *coordination.Manager
 	activeLeases     *coordination.LeaseSet
 }
@@ -7449,7 +7450,11 @@ func (a *app) checkCommand() *cobra.Command {
 			var doctorCode int
 			err = a.withExcelProgress("Checking Excel automation", commandOpts, func() error {
 				var runErr error
-				doctor, doctorCode, runErr = a.excelRunnerForConfig(cfg).Doctor(cfg, commandOpts)
+				if a.checkDoctor != nil {
+					doctor, doctorCode, runErr = a.checkDoctor(cfg, commandOpts)
+				} else {
+					doctor, doctorCode, runErr = a.excelRunnerForConfig(cfg).Doctor(cfg, commandOpts)
+				}
 				return runErr
 			})
 			if err != nil {

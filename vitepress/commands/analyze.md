@@ -52,9 +52,9 @@ are not treated as proof of restoration. This internal analysis does not add
 fields to JSON output or report new caller-level diagnostics.
 
 > [!IMPORTANT]
-> Error-level findings return a failure status and exit code `1`. Warning- and
-> information-level findings remain visible in the output but return status
-> `ok` and exit code `0`.
+> Error-level, unknown-severity, or empty-severity findings return a failure
+> status and exit code `1`. Warning- and information-level findings remain
+> visible in the output but return status `ok` and exit code `0`.
 
 ### Performance logging
 
