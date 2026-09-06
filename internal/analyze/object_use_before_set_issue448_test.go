@@ -386,6 +386,201 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksNestedDictionaryCollectionMaterialization(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Capabilities.cls", `Attribute VB_Name = "Capabilities"
+Option Explicit
+
+Private data_ As New Dictionary
+Private browserOptionKey As String
+
+Private Sub SetOption(ByVal key As String, val As Variant)
+  If IsObject(val) Then
+    Set data_.Item("alwaysMatch")(browserOptionKey)(key) = val
+  End If
+End Sub
+
+Private Sub AddLocalStateFlags()
+  Dim flags As Collection
+  Dim localState As New Dictionary
+  Dim browser As New Dictionary
+
+  If Not data_.Item("alwaysMatch")(browserOptionKey).Exists("localState") Then
+    browser.Add "enabled_labs_experiments", New Collection
+    localState.Add "browser", browser
+    SetOption "localState", localState
+  Else
+    If Not data_.Item("alwaysMatch")(browserOptionKey)("localState").Exists("browser") Then
+      browser.Add "enabled_labs_experiments", New Collection
+      data_.Item("alwaysMatch")(browserOptionKey)("localState").Add "browser", browser
+    Else
+      If Not data_.Item("alwaysMatch")(browserOptionKey)("localState")("browser").Exists("enabled_labs_experiments") Then
+        data_.Item("alwaysMatch")(browserOptionKey)("localState")("browser").Add "enabled_labs_experiments", New Collection
+      End If
+    End If
+  End If
+
+  Set flags = data_.Item("alwaysMatch")(browserOptionKey)("localState")("browser")("enabled_labs_experiments")
+  Debug.Print flags.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a nested Dictionary Collection item materialized on every branch should establish object state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsNestedDictionaryCollectionMissingBranchMaterialization(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Capabilities.cls", `Attribute VB_Name = "Capabilities"
+Option Explicit
+
+Private Sub Unsafe()
+  Dim data As New Dictionary
+  Dim values As Collection
+  If Not data.Exists("values") Then
+  Else
+    Set values = data("values")
+  End If
+  Debug.Print values.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a nested Dictionary Collection item without all-branch materialization must remain nullable")
+	}
+}
+
+func TestVBA202Issue448RejectsAddOnUnknownObjectReceiver(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Capabilities.cls", `Attribute VB_Name = "Capabilities"
+Option Explicit
+
+Private Sub Unsafe()
+  Dim data As Object
+  Dim values As Collection
+  data.Add "values", New Collection
+  Set values = data("values")
+  Debug.Print values.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if finding.Line == 9 {
+			return
+		}
+	}
+	t.Fatalf("an Add call on an unknown object receiver must not establish a Collection item: %+v", findingsByCode(findings, "VBA202"))
+}
+
+func TestVBA202Issue448RejectsConditionalHelperItemWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Capabilities.cls", `Attribute VB_Name = "Capabilities"
+Option Explicit
+
+Private data_ As New Dictionary
+
+Private Sub WriteItem(ByVal key As String, ByVal value As Object, ByVal enabled As Boolean)
+  If enabled Then
+    Set data_.Item(key) = value
+  End If
+End Sub
+
+Private Sub Unsafe()
+  Dim value As New Collection
+  Dim result As Collection
+  Dim enabled As Boolean
+  WriteItem "values", value, enabled
+  Set result = data_.Item("values")
+  Debug.Print result.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if finding.Line == 18 {
+			return
+		}
+	}
+	t.Fatalf("a conditional helper item write must not establish a definite Collection: %+v", findingsByCode(findings, "VBA202"))
+}
+
+func TestVBA202Issue448RejectsUnsupportedHelperDictionaryMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Capabilities.cls", `Attribute VB_Name = "Capabilities"
+Option Explicit
+
+Private data_ As New Dictionary
+
+Private Sub ClearItem(ByVal key As String)
+  data_.Item(key) = Nothing
+End Sub
+
+Private Sub Unsafe()
+  Dim values As New Collection
+  Dim result As Collection
+  data_.Add "values", values
+  ClearItem "values"
+  Set result = data_.Item("values")
+  Debug.Print result.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if finding.Line == 16 {
+			return
+		}
+	}
+	t.Fatalf("an unsupported helper Dictionary mutation must invalidate the prior Collection proof: %+v", findingsByCode(findings, "VBA202"))
+}
+
+func TestVBA202Issue448RejectsCopyFromUnknownObjectSource(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Capabilities.cls", `Attribute VB_Name = "Capabilities"
+Option Explicit
+
+Private Sub Unsafe()
+  Dim source As Object
+  Dim target As Object
+  Set target = source
+  Debug.Print target.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("copying from an unknown object source must not establish a non-Nothing target")
+	}
+}
+
 func TestVBA202Issue448PropagatesModuleFieldInitializationFromCallee(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

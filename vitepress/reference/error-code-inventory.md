@@ -380,6 +380,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enable_events_before`
 - `enable_vba_object_model_access`
 - `enabled_count`
+- `enabled_labs_experiments`
 - `end_column`
 - `end_if_fragment`
 - `end_line`

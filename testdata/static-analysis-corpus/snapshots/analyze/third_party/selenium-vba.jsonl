@@ -1,6 +1,5 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebCapabilities.cls","surface":"analyze","code":"VBA206","severity":"warning","line":180,"column":5}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebCapabilities.cls","surface":"analyze","code":"VBA206","severity":"warning","line":188,"column":5}
-{"project":"third_party/selenium-vba","file":"src/VBA/WebCapabilities.cls","surface":"analyze","code":"VBA202","severity":"warning","line":276,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebCapabilities.cls","surface":"analyze","code":"VBA206","severity":"warning","line":303,"column":5}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebCapabilities.cls","surface":"analyze","code":"VBA206","severity":"warning","line":387,"column":9}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebCapabilities.cls","surface":"analyze","code":"VBA245","severity":"warning","line":483,"column":13}

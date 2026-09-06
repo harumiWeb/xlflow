@@ -2010,15 +2010,19 @@ type objectFlowContext struct {
 	valueState          map[string]bool
 	predicateContracts  map[string]bool
 	terminalCalls       map[int]bool
+	shapeStates         map[int]objectCollectionShapeState
+	shapeStateReady     map[int]bool
 }
 
 func newObjectFlowContext(proc sourceProcedure, graph vbacfg.CFGView, containerIndex *objectContainerIndex) objectFlowContext {
 	context := objectFlowContext{
-		facts:          proc.analysisFacts(),
-		graph:          graph,
-		predecessors:   make(map[vbacfg.BlockID][]vbacfg.Edge),
-		vars:           map[string]objectVariable{},
-		containerIndex: containerIndex,
+		facts:           proc.analysisFacts(),
+		graph:           graph,
+		predecessors:    make(map[vbacfg.BlockID][]vbacfg.Edge),
+		vars:            map[string]objectVariable{},
+		containerIndex:  containerIndex,
+		shapeStates:     map[int]objectCollectionShapeState{},
+		shapeStateReady: map[int]bool{},
 	}
 	if proc.Graph != nil {
 		graph.ForEachEdge(func(edge vbacfg.Edge) bool {
@@ -2818,6 +2822,9 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 	lower := strings.ToLower(text)
 	if lower == "nothing" || strings.HasPrefix(lower, "nothing ") {
 		return false
+	}
+	if objectCollectionShapeExpressionAssigned(proc, expression, statementID, flowContext, declarations) {
+		return true
 	}
 	switch expression.Kind {
 	case procedureir.ExpressionNew:
