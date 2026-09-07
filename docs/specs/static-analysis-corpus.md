@@ -1786,6 +1786,69 @@ the sparse fixture rather than hidden behind a sparse-only threshold. These
 checks concern work shape only and do not authorize diagnostic, snapshot, or
 review-ledger changes.
 
+### Issue #781 regression and closure evidence
+
+The v0.31.2 regression was reproduced on Windows amd64 with Go 1.26.6 and an
+Intel Core(TM) i7-12700. The tag comparison used the same cold/warm leaf and
+`-benchtime=1x -count=2 -benchmem` command for both tags; the values below are
+the two-sample medians. The intermediate commit checks used one sample per
+commit and are included to attribute the regression stage rather than as a
+noise-resistant performance baseline.
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm)$' -benchmem -benchtime=1x -count=2 -timeout=25m
+```
+
+| ref                    | cold ns/op |     cold B/op | cold allocs/op | warm ns/op |     warm B/op | warm allocs/op |
+| ---------------------- | ---------: | ------------: | -------------: | ---------: | ------------: | -------------: |
+| `v0.31.1` (`64e5fa97`) |    8.709 s | 6,921,876,908 |     66,922,219 |    8.111 s | 5,565,054,676 |     55,969,625 |
+| `v0.31.2` (`0b8ca0eb`) |   10.243 s | 9,955,100,196 |     73,576,801 |    9.374 s | 7,448,673,216 |     59,255,722 |
+
+The v0.31.2 tag is therefore +43.82% in cold `B/op` and +33.85% in warm
+`B/op` relative to v0.31.1. The stage attribution is consistent with the
+intermediate spot checks:
+
+| ref                              | cold ns/op |     cold B/op | cold allocs/op | warm ns/op |     warm B/op | warm allocs/op |
+| -------------------------------- | ---------: | ------------: | -------------: | ---------: | ------------: | -------------: |
+| #770 `dfc26822`                  |    9.098 s | 6,933,842,848 |     67,078,268 |    8.129 s | 5,548,051,176 |     56,024,967 |
+| #771 `cf5d3cd4`                  |   10.339 s | 9,968,561,960 |     73,669,702 |    9.450 s | 7,432,012,776 |     59,084,242 |
+| Issue #781 fix `b1a42590`        |    9.713 s | 9,150,427,008 |     72,183,228 |    9.893 s | 6,671,153,152 |     57,734,713 |
+| shared-path follow-up `8c0b4005` |    9.277 s | 7,338,414,352 |     69,209,692 |    8.322 s | 5,483,707,176 |     54,848,816 |
+
+The #770 to #771 step is where the large allocation increase appears. The
+Issue #781 participant-boundary fix reduces the v0.31.2 allocation profile by
+about 8.1% cold and 10.4% warm; the shared-path follow-up reduces the remaining
+profile further. The combined current revision is about 26.3% below v0.31.2
+for both cold and warm `B/op`. The retained raw logs are local developer
+artifacts under
+`%LOCALAPPDATA%\Temp\xlflow-issue781-bench-{0311,0312,770,771,b1a42590,8c0b4005}.log`;
+all runs finished with `PASS`.
+
+The single-module telemetry matrix was also executed on the current revision
+with `-benchtime=1x -count=1`:
+
+| fixture              | procedures |         ns/op |          B/op |  allocs/op | module-effect participants | invalidation summaries / CFG walks |
+| -------------------- | ---------: | ------------: | ------------: | ---------: | -------------------------: | ---------------------------------: |
+| `array-chain`        |        500 |   213,684,600 |   197,946,912 |  1,596,742 |                          2 |                              2 / 2 |
+| `array-chain`        |      1,000 |   452,607,100 |   405,566,056 |  3,661,323 |                          2 |                              2 / 2 |
+| `array-chain`        |      2,000 | 1,125,445,700 |   843,783,000 |  9,292,853 |                          2 |                              2 / 2 |
+| `module-array-heavy` |        500 |   244,055,900 |   278,426,264 |  3,395,234 |                        500 |                          500 / 500 |
+| `module-array-heavy` |      1,000 |   571,718,400 |   615,311,904 |  9,262,991 |                      1,000 |                      1,000 / 1,000 |
+| `module-array-heavy` |      2,000 | 1,413,022,700 | 1,449,068,536 | 28,523,928 |                      2,000 |                      2,000 / 2,000 |
+
+Thus unrelated scalar procedures leave module-array CFG work at two summaries
+and two walks across all three sparse scales, while the positive-control
+workload expands linearly with genuine effect participants.
+
+The relevant strict local VBE oracle regression batch also passed, with Excel
+16.0 build 17932 (x64, ja-JP) and cleanup confirmed for every case:
+`fixed-array-reversed-bound`, `fixed-array-valid-bound`,
+`declaration-redim-after-comma`, `declaration-keyword-valid-controls`,
+`redim-fixed-array`, `redim-scalar`, `redim-reversed-bound`,
+`variant-redim-array`, `erase-scalar`, `lbound-scalar`, and
+`foreach-scalar`. Runtime-only cases remain unbound as required; no new VBE
+fixture was promoted.
+
 ### Indexed semantic-state solver verification record (#713)
 
 Issue #713 introduced the first incremental shared-solver migration. The
