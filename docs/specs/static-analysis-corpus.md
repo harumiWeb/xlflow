@@ -1790,21 +1790,21 @@ review-ledger changes.
 
 The v0.31.2 regression was reproduced on Windows amd64 with Go 1.26.6 and an
 Intel Core(TM) i7-12700. The tag comparison used the same cold/warm leaf and
-`-benchtime=1x -count=2 -benchmem` command for both tags; the values below are
-the two-sample medians. The intermediate commit checks used one sample per
+`-benchtime=1x -count=3 -benchmem` command for both tags; the values below are
+the three-sample medians. The intermediate commit checks used one sample per
 commit and are included to attribute the regression stage rather than as a
 noise-resistant performance baseline.
 
 ```powershell
-rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm)$' -benchmem -benchtime=1x -count=2 -timeout=25m
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm)$' -benchmem -benchtime=1x -count=3 -timeout=25m
 ```
 
 | ref                    | cold ns/op |     cold B/op | cold allocs/op | warm ns/op |     warm B/op | warm allocs/op |
 | ---------------------- | ---------: | ------------: | -------------: | ---------: | ------------: | -------------: |
-| `v0.31.1` (`64e5fa97`) |    8.709 s | 6,921,876,908 |     66,922,219 |    8.111 s | 5,565,054,676 |     55,969,625 |
-| `v0.31.2` (`0b8ca0eb`) |   10.243 s | 9,955,100,196 |     73,576,801 |    9.374 s | 7,448,673,216 |     59,255,722 |
+| `v0.31.1` (`64e5fa97`) |    8.503 s | 6,919,953,504 |     66,883,503 |    7.972 s | 5,560,451,144 |     55,904,134 |
+| `v0.31.2` (`0b8ca0eb`) |   10.196 s | 9,956,490,848 |     73,611,923 |    9.304 s | 7,448,993,472 |     59,142,199 |
 
-The v0.31.2 tag is therefore +43.82% in cold `B/op` and +33.85% in warm
+The v0.31.2 tag is therefore +43.88% in cold `B/op` and +33.96% in warm
 `B/op` relative to v0.31.1. The stage attribution is consistent with the
 intermediate spot checks:
 
@@ -1819,10 +1819,8 @@ The #770 to #771 step is where the large allocation increase appears. The
 Issue #781 participant-boundary fix reduces the v0.31.2 allocation profile by
 about 8.1% cold and 10.4% warm; the shared-path follow-up reduces the remaining
 profile further. The combined current revision is about 26.3% below v0.31.2
-for both cold and warm `B/op`. The retained raw logs are local developer
-artifacts under
-`%LOCALAPPDATA%\Temp\xlflow-issue781-bench-{0311,0312,770,771,b1a42590,8c0b4005}.log`;
-all runs finished with `PASS`.
+for both cold and warm `B/op`. The three-sample tag runs and the one-sample
+intermediate commit spot checks all finished with `PASS`.
 
 The single-module telemetry matrix was also executed on the current revision
 with `-benchtime=1x -count=1`:
