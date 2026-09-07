@@ -366,24 +366,38 @@ start its explicitly separate secondary shape pass, which is reflected in
 These counters are emitted only in stderr performance records and never count
 findings.
 
-Array participant planning adds three developer-only counters:
-`array_participant_procedures` is the unique number of procedures in the
-resolved array dependency closure for an analysis revision,
-`array_interprocedural_cfg_walks` counts CFG walks actually started by array
-return/ByRef/module-entry fixed points, and `array_worklist_revisits` counts
-participant evaluations after their initial visit. The participant closure
+Array participant planning adds developer-only counters:
+`array_participant_procedures` and `array_local_participants` are the unique
+sizes of the local fail-open participant closure,
+`array_interprocedural_participants` is the unique size of the bounded
+fixed-point closure, and `array_module_effect_participants` is the unique size
+of the dedicated module-array effect closure. The general participant closure
 is seeded by direct array operations, array parameters/returns,
 object-array operations, and module-array accesses, then follows semantically
 array-shaped resolved calls, reverse callers, ByRef/return edges, module state,
-and initializer or helper edges. Resolved scalar helpers that cannot affect an
-array state are excluded. Ambiguous calls retain all resolved candidates and
-their related SCC/dependency boundary. Ambiguous, unresolved, dynamic,
-recovered, or incomplete inputs fail open at the smallest known
-module/SCC/dependency boundary; unknown ownership keeps the complete-project
-fallback. The counters are additive stderr telemetry,
-are deterministic for one revision, and never appear in normal JSON, LSP, or
-diagnostic payloads. Existing `array_candidate_procedures` and
+and initializer or helper edges. The module-array effect closure is narrower:
+direct whole-array assignment, `ReDim`, `Erase`, relevant module-array `ByRef`
+arguments, and conservative recovered module-array uses seed it, and resolved
+or candidate-bounded reverse callers are added only within the same module. Indexed reads and
+scalar helper callees do not enter this specialized closure. The fixed-point
+work counters are `array_interprocedural_cfg_walks`, which counts CFG walks
+actually started by array return/ByRef/module-entry fixed points, and
+`array_worklist_revisits`, which excludes each participant's initial visit.
+Ambiguous, unresolved, dynamic, recovered, or incomplete inputs fail open at
+the smallest known module/SCC/dependency boundary; unknown ownership keeps the
+complete-project fallback. Existing `array_candidate_procedures` and
 `array_cfg_walks` retain their procedure-local meanings.
+
+Module-array stage telemetry adds
+`array_module_invalidation_summaries`,
+`array_module_invalidation_cfg_walks`,
+`array_module_ready_guard_candidates`, and
+`array_module_ready_guard_cfg_walks`. Immutable lookup telemetry adds
+`array_calls_by_line_index_builds`, `array_calls_by_line_index_hits`,
+`procedure_range_index_builds`, and `procedure_range_index_hits`.
+All participant and module-stage counters are additive, deterministic for one
+revision, stderr-only telemetry and never appear in normal JSON, LSP, or
+diagnostic payloads.
 
 Applicability planning adds additive decision counters for each gated semantic
 domain: `planned_runtime_runs` / `skipped_runtime_runs`,

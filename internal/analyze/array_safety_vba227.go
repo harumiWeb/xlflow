@@ -627,12 +627,7 @@ func arrayVBA227StatementLineDominates(proc sourceProcedure, line int, target pr
 	if sourceBlock.ID == targetBlock.ID {
 		return source.Range.StartLine < target.Range.StartLine
 	}
-	for _, dominator := range proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).DominatorsOf(targetBlock.ID) {
-		if dominator == sourceBlock.ID {
-			return true
-		}
-	}
-	return false
+	return proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).Dominates(sourceBlock.ID, targetBlock.ID)
 }
 
 // arrayVBA227FilterForBodyIndexFindings removes only the unallocated/empty
@@ -1629,13 +1624,20 @@ func arrayVBA227StatementMayMutateArray(proc sourceProcedure, statement procedur
 	if arrayVBA227MutatesArray(statement.Text, arrayName) {
 		return true
 	}
-	for _, call := range arrayCallsAtLine(proc.Calls, statement.Range.StartLine) {
+	mutates := false
+	forEachArrayCallAtLine(proc, statement.Range.StartLine, func(call procedureir.CallSite) {
+		if mutates {
+			return
+		}
 		if call.StatementID != 0 && statement.ID != 0 && call.StatementID != statement.ID {
-			continue
+			return
 		}
 		if arrayCallPassesDirectArrayArgument(proc, call, arrayName) {
-			return true
+			mutates = true
 		}
+	})
+	if mutates {
+		return true
 	}
 	// Recovered or unresolved call statements may not have a CallSite with
 	// usable argument expression IDs. A whole-array mention is therefore
@@ -2212,7 +2214,7 @@ func arrayVBA227SelectCaseRegionStable(file parsedFile, proc sourceProcedure, st
 		if text == "" || strings.HasPrefix(text, "'") || strings.HasPrefix(text, "#") {
 			continue
 		}
-		if !arrayVBA227SelectCaseStraightLine(text) || len(arrayCallsAtLine(proc.Calls, line)) > 0 {
+		if !arrayVBA227SelectCaseStraightLine(text) || arrayHasCallsAtLine(proc, line) {
 			return false
 		}
 		lhs, _, indexed, assigned := arrayAssignment(text)

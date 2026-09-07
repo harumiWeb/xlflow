@@ -260,6 +260,38 @@ show that
 the production fixed-point path. Any diagnostic, snapshot, ordering, or
 review-ledger delta requires investigation before the record is completed.
 
+### Amendment: shared hot-path allocation reduction
+
+The solver now exposes internal `Run` and `RunContext` entry points for fixed
+point executions whose callers need only transfer side effects and statistics.
+These entry points reuse mutable scratch state and do not materialize the
+immutable `Result` snapshot; `Solve` and `SolveContext` retain their complete
+snapshot contract for HTTP and any caller that reads converged states.
+
+`State.CloneFrom` and `State.JoinFrom` traverse dense bitsets and sorted sparse
+entries directly. They preserve ascending SymbolID order, lattice clone and
+join ownership, and caller-owned changed-slot ordering without allocating a
+callback closure for each propagation.
+
+CFG dominator computation uses revision-local dense bitsets and materializes
+sorted BlockID lists only at the compatibility query boundary. `CFGView.Dominates`
+provides membership queries without copying a list. Unknown-flow inputs,
+exceptional/uncertain edge policy, cache ownership, and deterministic output
+remain unchanged. The in-progress CFG builder also reads its contiguous block
+slice directly before the query index is complete; public Graph lookup
+fallback behavior is unchanged.
+
+The constexpr package adds `IntegerValues` and
+`EvaluateIntegerEnvironment` for analyzer-owned, already-normalized integer
+constant tables. The compatibility `EvaluateInteger` path still performs the
+historical normalization and collision policy. Array, runtime-error, and
+Excel-loop consumers use the allocation-free adapter only after their existing
+constant-table construction has established the normalization boundary.
+
+These are representation and ownership optimizations only. Diagnostic identity,
+severity, ranges, evidence, ordering, cancellation, JSON/LSP projections, and
+the bounded worker model remain outside the change.
+
 ## Evidence
 
 - `internal/analyze/http_transport.go` (`httpAnalysisState`,

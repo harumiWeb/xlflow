@@ -188,26 +188,6 @@ func idSet(ids []BlockID) map[BlockID]bool {
 	return out
 }
 
-func copySet(in map[BlockID]bool) map[BlockID]bool {
-	out := map[BlockID]bool{}
-	for key := range in {
-		out[key] = true
-	}
-	return out
-}
-
-func sameSet(a, b map[BlockID]bool) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for key := range a {
-		if !b[key] {
-			return false
-		}
-	}
-	return true
-}
-
 func copyVariableSet(in map[Variable]bool) map[Variable]bool {
 	out := map[Variable]bool{}
 	for key := range in {

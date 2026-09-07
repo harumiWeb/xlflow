@@ -33,6 +33,14 @@ active diagnostics from the procedure domains that merely inspect their local
 inputs. It must also preserve the complete-project semantics of any capability
 whose propagation cannot safely be restricted to a participant subset.
 
+Issue #781 found a narrower version of the same scalability failure in the
+module-array part of `VBA227`. Module invalidation and lifecycle proofs were
+allowed to approach the complete procedure population of a giant module even
+when only a small set of procedures could mutate or propagate the relevant
+module-array state. The fix must restore a semantic boundary without weakening
+the correctness improvements from #771, and must make the remaining indexed
+transfer work observable in developer telemetry.
+
 ## Decision
 
 Derive one immutable, procedure-local applicability summary from the owned IR
@@ -343,6 +351,61 @@ participant's initial visit). Existing `array_candidate_procedures`,
 local meanings. None of these counters is part of normal CLI JSON, LSP
 payloads, diagnostic output, or the public rule registry.
 
+### Amendment: dedicated module-array effect participants and indexed transfer (#781)
+
+The module-array invalidation and lifecycle paths now use a dedicated effect
+participant boundary rather than treating every general array participant as a
+module-state mutator. Direct effect seeds are procedures with a visible direct
+module-array mutation: whole-array assignment, `ReDim`, or `Erase`. A procedure
+that passes a module array as an argument is also a seed when the available
+signature/effect evidence permits a relevant `ByRef` mutation; candidate-bearing
+uncertain calls retain the known project-local candidates. Recovered or
+incomplete syntax that touches a module array is retained as an effect seed
+because the missing structure may hide one of those mutations. Indexed reads
+alone, read-only module-array users, and scalar helper callees are not effect
+seeds.
+
+The effect closure follows resolved and candidate-bounded reverse callers only
+within the same VBA module. It is deliberately caller-closed and does not walk the ordinary
+callee adjacency, so a mutating procedure's scalar helper does not enter the
+module-array fixed points. A same-module caller that can reach an effect seed
+is included even when it does not itself mutate the array, because its call
+may invalidate the caller's module-state proof. A different-module caller,
+an external/member boundary, and a call with no usable target identity do not
+open an unrelated project-wide effect closure.
+
+Module invalidation summaries are built only for modules with a dynamic
+module-array declaration and for procedures in this effect closure. A lookup
+that hits the immutable summary cache returns the stored summary. A cache miss
+for a nonparticipant has no effect and returns no invalidation summary; it does
+not trigger an all-procedure rescan. A participant cache miss may still compute
+the summary on demand for compatibility callers, using the same boundary.
+
+Uncertainty remains conservative at the smallest available boundary: direct
+module-array arguments and recovered module-array uses seed the owning
+procedure, known candidates are retained when a `ByRef` target is available,
+and only project-local same-module callers with resolved or bounded candidate
+identity are closed over. This can retain extra
+effect participants for incomplete syntax or a conservative caller chain, but
+it avoids the false-negative risk of treating unknown module-array mutation as
+read-only. The trade-off is intentional: read-only module-array procedures
+skip the specialized invalidation CFG work, while effect seeds and their
+same-module callers may still pay for a summary even when a later proof shows
+that the call is harmless.
+
+The hot transfer lookups use immutable indexes attached to the existing facts:
+procedure facts provide source-line-to-call lookup for array transfers, and
+module facts provide source-line procedure ownership. These indexes remove
+repeated whole-call and whole-procedure scans without adding a second IR,
+persistent cache, or public API. The recorder adds the developer-only counters
+`array_local_participants`, `array_interprocedural_participants`,
+`array_module_effect_participants`, `array_module_invalidation_summaries`,
+`array_module_invalidation_cfg_walks`, `array_module_ready_guard_candidates`,
+`array_module_ready_guard_cfg_walks`, `array_calls_by_line_index_builds`,
+`array_calls_by_line_index_hits`, `procedure_range_index_builds`, and
+`procedure_range_index_hits`. They remain stderr-only and do not change
+diagnostic output or normal CLI/LSP schemas.
+
 ## Rationale
 
 The IR and fact ownership boundaries already make procedure inputs immutable
@@ -382,6 +445,15 @@ produce a finding.
 - Participant filtering can reduce domain work, but fail-open boundaries may
   deliberately retain complete-project work when resolution or module-state
   certainty is unavailable.
+- Module-array effect filtering is narrower than general array participation:
+  direct mutation/`ByRef` seeds and same-module caller closure preserve the
+  module-state proof while excluding read-only users and scalar callees. The
+  trade-off is conservative extra work at uncertain boundaries in exchange
+  for avoiding whole-giant-module invalidation scans.
+- Nonparticipant summary-cache misses are an explicit no-effect result; only
+  effect participants may compute or reuse module-array invalidation summaries.
+- Source-line call and procedure-owner indexes add bounded immutable facts and
+  telemetry, with no persistent cache or public schema commitment.
 - An explicit plan makes the relationship between rule count, semantic kernel
   work, and diagnostic projections visible without allowing rule implementations
   to hide applicability or construct duplicate semantic state.
@@ -426,6 +498,13 @@ produce a finding.
     an execution-boundary change, not an incremental or cross-process cache
     design; persistent invalidation and compatibility policy require a separate
     decision.
+12. **Reuse the general array participant set for module-array invalidation** -
+    Rejected because indexed reads and scalar callees would reintroduce
+    specialized module-state work that cannot affect a module-array
+    invalidation proof.
+13. **Run invalidation summaries for every procedure in a module** - Rejected
+    because giant modules would again make specialized CFG work proportional to
+    the complete procedure population rather than semantic effect participants.
 
 ## Evidence
 
@@ -459,6 +538,9 @@ produce a finding.
   counter, and module-fact benchmark requirements.
 - Issue #712's semantic array participant closure, bounded fail-open policy,
   deterministic fixed-point worklist, and participant telemetry requirements.
+- Issue #781's dedicated module-array effect boundary, indexed call/procedure
+  lookup requirements, telemetry contract, and 500/1,000/2,000-procedure
+  synthetic scalability matrix.
 
 ## Related
 
@@ -468,6 +550,7 @@ produce a finding.
 - Issue #697
 - Issue #701
 - Issue #711
+- Issue #781
 - ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0043, ADR-0045
 - ADR-0040
 - ADR-0048

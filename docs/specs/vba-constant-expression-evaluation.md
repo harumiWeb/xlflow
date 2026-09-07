@@ -21,11 +21,19 @@ type Result struct {
 func Evaluate(expression string, env Environment) Result
 func EvaluateValues(expression string, values map[string]Value) Result
 func EvaluateInteger(expression string, constants map[string]int) Result
+type IntegerValues map[string]int
+func EvaluateIntegerEnvironment(expression string, env Environment) Result
 ```
 
 `EvaluateInteger` is a compatibility adapter. It returns `Known` only when the
 typed result is integral and representable by the host `int`; otherwise it
 returns `Unknown`.
+
+`IntegerValues` is an immutable, analyzer-owned view over a table whose keys
+were already normalized to trimmed, case-insensitive names. It is intended for
+repeated expression evaluation in array bounds, runtime-error, and Excel-loop
+analysis. Callers with arbitrary maps must continue to use `EvaluateInteger`,
+which retains the historical normalization and duplicate-spelling behavior.
 
 ## Supported subset
 

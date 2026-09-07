@@ -134,7 +134,7 @@ func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analys
 	visit := func(text string, line int, in arrayFlowState) arrayFlowState {
 		out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line, nil, nil)
 		out = applyArrayLocalGoSubStatementEffects(out, text, localGoSubAllocations)
-		for _, call := range arrayCallsAtLine(proc.Calls, line) {
+		forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 			out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 			out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 			if arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) {
@@ -143,7 +143,7 @@ func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analys
 				out = applyArrayByRefCallEffects(out, proc, call, ctx)
 			}
 			out = applyArrayLocalGoSubEffects(out, proc, call, localGoSubAllocations)
-		}
+		}, ctx.arrayStats)
 		return out
 	}
 	edgeState := func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
@@ -248,13 +248,7 @@ func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditi
 				if !guardBlockOK || !redimBlockOK {
 					continue
 				}
-				guardDominatesRedim := false
-				for _, candidate := range proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).DominatorsOf(redimBlock.ID) {
-					if candidate == guardBlock.ID {
-						guardDominatesRedim = true
-						break
-					}
-				}
+				guardDominatesRedim := proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).Dominates(guardBlock.ID, redimBlock.ID)
 				if !guardDominatesRedim {
 					continue
 				}
@@ -597,20 +591,26 @@ func arrayByRefParameterMayInvalidate(proc sourceProcedure, parameterIndex int, 
 				return true
 			}
 		}
-		for _, nested := range arrayCallsAtLine(proc.Calls, statement.Range.StartLine) {
+		invalidated := false
+		forEachArrayCallAtLine(proc, statement.Range.StartLine, func(nested procedureir.CallSite) {
+			if invalidated {
+				return
+			}
 			if arrayByRefCallIsReadOnly(nested) {
-				continue
+				return
 			}
 			if !arrayCallPassesDirectArrayArgument(proc, nested, name) {
-				continue
+				return
 			}
 			nestedKey, nestedTarget, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, nested)
 			if !resolved {
-				return true
+				invalidated = true
+				return
 			}
 			bindings, mapped := arrayCallArgumentBindings(proc, nestedTarget, nested)
 			if !mapped {
-				return true
+				invalidated = true
+				return
 			}
 			for _, binding := range bindings {
 				if directArrayArgumentName(binding.text) != name || binding.parameterIndex >= nestedTarget.Params.Len() || !parameterIsByRefArray(nestedTarget.Params.valueAt(binding.parameterIndex)) {
@@ -620,8 +620,115 @@ func arrayByRefParameterMayInvalidate(proc sourceProcedure, parameterIndex int, 
 					continue
 				}
 				if arrayByRefParameterMayInvalidate(nestedTarget, binding.parameterIndex, ctx, visiting) {
-					return true
+					invalidated = true
+					return
 				}
+			}
+		}, ctx.arrayStats)
+		if invalidated {
+			return true
+		}
+	}
+	return false
+}
+
+// arrayByRefParameterMayMutate reports whether a ByRef array parameter can be
+// changed in any way, including an indexed element write or ReDim Preserve.
+// Module-array effect planning needs this broader question than the ordinary
+// allocation invalidation summary, because a caller passing a module array
+// still belongs to the effect boundary even when allocation is preserved.
+func arrayByRefParameterMayMutate(proc sourceProcedure, parameterIndex int, ctx analysisContext, visiting map[string]bool) bool {
+	if parameterIndex < 0 || parameterIndex >= proc.Params.Len() || !parameterIsByRefArray(proc.Params.valueAt(parameterIndex)) {
+		return true
+	}
+	key := strings.ToLower(arrayProcedureKey(proc)) + "#mutate#" + strconv.Itoa(parameterIndex)
+	if visiting[key] {
+		return false
+	}
+	visiting[key] = true
+	defer delete(visiting, key)
+	name := strings.ToLower(cleanIdentifier(proc.Params.valueAt(parameterIndex).Name))
+	names := map[string]bool{name: true}
+	if proc.Features.unknown&featureArray != 0 ||
+		proc.IR != nil && proc.IR.Symbol.Recovered ||
+		proc.Document != nil && (proc.Document.Parse.HasError || proc.Document.Parse.HasMissing) ||
+		proc.Graph != nil && len(proc.Graph.UnknownFlowSources) > 0 {
+		return true
+	}
+	for statement := range proc.Statements.All() {
+		if !arrayByRefStatementReachable(proc, statement) {
+			continue
+		}
+		if statement.Recovered {
+			return true
+		}
+		for _, part := range splitRangeValueSourceStatements(statement.Text) {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if arrayByRefParameterMutationStatement(part, names, ctx) {
+				return true
+			}
+		}
+		nestedMutation := false
+		forEachArrayCallAtLine(proc, statement.Range.StartLine, func(nested procedureir.CallSite) {
+			if nestedMutation || arrayByRefCallIsReadOnly(nested) || !arrayCallPassesDirectArrayArgument(proc, nested, name) {
+				return
+			}
+			nestedKey, nestedTarget, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, nested)
+			if !resolved {
+				nestedMutation = true
+				return
+			}
+			bindings, mapped := arrayCallArgumentBindings(proc, nestedTarget, nested)
+			if !mapped {
+				nestedMutation = true
+				return
+			}
+			for _, binding := range bindings {
+				if directArrayArgumentName(binding.text) != name || binding.parameterIndex < 0 || binding.parameterIndex >= nestedTarget.Params.Len() || !parameterIsByRefArray(nestedTarget.Params.valueAt(binding.parameterIndex)) {
+					continue
+				}
+				if ctx.arrayByRefAllocations[nestedKey][binding.parameterIndex] {
+					continue
+				}
+				if arrayByRefParameterMayMutate(nestedTarget, binding.parameterIndex, ctx, visiting) {
+					nestedMutation = true
+					return
+				}
+			}
+		}, ctx.arrayStats)
+		if nestedMutation {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayByRefParameterMutationStatement(text string, names map[string]bool, ctx analysisContext) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	if lhs, _, _, ok := arrayAssignment(text); ok {
+		return names[strings.ToLower(cleanIdentifier(lhs))]
+	}
+	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if direct && names[strings.ToLower(cleanIdentifier(redim.name))] {
+				return true
+			}
+		}
+	}
+	if arrayByRefParameterInlineMutation(text, names, ctx) {
+		return true
+	}
+	if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
+		for _, target := range splitArgs(match[1]) {
+			if names[strings.ToLower(cleanIdentifier(strings.TrimSpace(target)))] {
+				return true
 			}
 		}
 	}
@@ -1187,7 +1294,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 				return in
 			}
 			var eligible []arrayByRefCallCandidate
-			for _, call := range arrayCallsAtLine(proc.Calls, line) {
+			forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 				// A physical line can own more than one CFG statement, such as
 				// `If Not SendFrameFor(...) Then Exit Function`.  Only the
 				// statement block that owns the call site may contribute entry
@@ -1195,19 +1302,19 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 				// call with its pre-call state and poisons the caller contract.
 				if ownerStatementID > 0 && call.StatementID != ownerStatementID {
 					if !filterNestedCalls {
-						continue
+						return
 					}
 					owner, ownerOK := baseView.BlockForStatement(call.StatementID)
 					if ownerOK && worklistReachable[owner.ID] {
-						continue
+						return
 					}
 				}
 				key, target, ok := arrayPrivateTargetForCall(localCtx, targets, call)
 				if !ok || !procedureHasByRefArrayParameter(target) || !arrayProcedureIsParticipant(localCtx, target) {
-					continue
+					return
 				}
 				eligible = append(eligible, arrayByRefCallCandidate{key: key, target: target, call: call})
-			}
+			}, localCtx.arrayStats)
 			if len(eligible) > 0 {
 				allSameTarget := true
 				for _, entry := range eligible[1:] {
@@ -1249,10 +1356,10 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 			// later call-site argument look unallocated.
 			out, _ := a.arrayVBA227Transfer(file, proc, localCtx, variables, in, text, line, constants, nil, nil)
 			out = applyArrayLocalGoSubStatementEffects(out, text, localGoSubAllocations)
-			for _, call := range arrayCallsAtLine(proc.Calls, line) {
+			forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 				if ownerStatementID > 0 && call.StatementID != ownerStatementID {
 					if !filterNestedCalls {
-						continue
+						return
 					}
 					owner, ownerOK := baseView.BlockForStatement(call.StatementID)
 					if ownerOK && worklistReachable[owner.ID] {
@@ -1260,7 +1367,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 						// source range. Nested calls are visited again by their own
 						// CFG block, so applying their post-call effect here would
 						// leak one branch into its siblings.
-						continue
+						return
 					}
 				}
 				out = applyArrayModuleCallEffects(out, file, proc, call, localCtx, variables, moduleDecls)
@@ -1271,7 +1378,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 					out = applyArrayByRefCallEffects(out, proc, call, localCtx)
 				}
 				out = applyArrayLocalGoSubEffects(out, proc, call, localGoSubAllocations)
-			}
+			}, localCtx.arrayStats)
 			return out
 		}
 		visit := func(text string, line int, in arrayFlowState) arrayFlowState {
@@ -1530,7 +1637,44 @@ func sortArrayProcedureKeys(keys []string, indexByKey map[string]int) {
 	})
 }
 
-func arrayCallsAtLine(calls readOnlySpan[procedureir.CallSite], line int) []procedureir.CallSite {
+func arrayCallsAtLine(proc sourceProcedure, line int, stats ...*arrayInterproceduralStats) []procedureir.CallSite {
+	if proc.Facts != nil && proc.Facts.callsByLineBuilt {
+		if len(stats) > 0 {
+			stats[0].addCallLineIndexHit()
+		}
+		return proc.Facts.CallsAtLine(line)
+	}
+	return arrayCallsAtLineFallback(proc.Calls, line)
+}
+
+func forEachArrayCallAtLine(proc sourceProcedure, line int, visit func(procedureir.CallSite), stats ...*arrayInterproceduralStats) {
+	if proc.Facts != nil && proc.Facts.callsByLineBuilt {
+		if len(stats) > 0 {
+			stats[0].addCallLineIndexHit()
+		}
+		proc.Facts.forEachCallAtLine(line, visit)
+		return
+	}
+	if visit == nil {
+		return
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine != line {
+			continue
+		}
+		visit(call)
+	}
+}
+
+func arrayHasCallsAtLine(proc sourceProcedure, line int) bool {
+	found := false
+	forEachArrayCallAtLine(proc, line, func(procedureir.CallSite) { found = true })
+	return found
+}
+
+// arrayCallsAtLineFallback is retained for package-local synthetic callers
+// that construct a sourceProcedure without attaching immutable facts.
+func arrayCallsAtLineFallback(calls readOnlySpan[procedureir.CallSite], line int) []procedureir.CallSite {
 	matched := make([]procedureir.CallSite, 0, 1)
 	for call := range calls.All() {
 		if call.IsRaiseEvent || call.Range.StartLine != line {

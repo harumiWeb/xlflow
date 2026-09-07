@@ -1737,6 +1737,116 @@ non-deterministic participant/worklist order is a stop-and-investigate
 condition. The three new counters are developer-only stderr telemetry and
 must never be copied into snapshots or the diagnostic review ledger.
 
+### Dedicated module-array effect participant verification record (#781)
+
+Issue #781 restores the participant boundary for the `VBA227` module-array
+invalidation and lifecycle paths. The dedicated effect closure is seeded by
+direct module-array mutation (`ReDim`, `Erase`, or whole-array assignment),
+relevant module-array `ByRef` arguments, and recovered/incomplete module-array
+uses. It follows resolved or candidate-bounded callers only within the same
+module. Indexed reads
+and scalar helper callees are not effect participants, and a nonparticipant
+summary-cache miss has no effect rather than triggering a module-wide rescan.
+
+The current implementation records the following stderr-only telemetry for
+this boundary and its indexed transfer helpers:
+`array_candidate_procedures`, `array_participant_procedures`,
+`array_local_participants`, `array_interprocedural_participants`,
+`array_module_effect_participants`, `array_interprocedural_cfg_walks`,
+`array_worklist_revisits`, `array_module_invalidation_summaries`,
+`array_module_invalidation_cfg_walks`, `array_module_ready_guard_candidates`,
+`array_module_ready_guard_cfg_walks`, `array_calls_by_line_index_builds`,
+`array_calls_by_line_index_hits`, `procedure_range_index_builds`, and
+`procedure_range_index_hits`. Record these together with `ns/op`, `B/op`, and
+`allocs/op`; none belongs in corpus snapshots or `reviews/diagnostics.jsonl`.
+
+The focused synthetic matrix covers both sparse and genuinely effect-heavy
+single-module workloads:
+
+| fixture              | sizes                        | purpose                                                                                         |
+| -------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------- |
+| `array-chain`        | 500, 1,000, 2,000 procedures | a small module-array dependency closure plus unrelated scalar procedures                        |
+| `module-array-heavy` | 500, 1,000, 2,000 procedures | each generated procedure mutates the shared module array, exercising required broad effect work |
+
+Run the focused telemetry contract and benchmark matrix with the Windows Go
+wrapper:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^TestArrayParticipantSyntheticTelemetryExcludesScalarProcedures$' -count=1
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^$' -bench '^BenchmarkSingleModuleSynthetic/(array-chain|module-array-heavy)/(500|1000|2000)-procedures$' -benchmem -benchtime=1x -count=5
+```
+
+The current sparse-fixture structural invariant is checked at all three
+scales: participant and module-effect counts are nonzero but remain below one
+tenth of the generated procedure population, and
+`array_module_invalidation_cfg_walks` is identical for 500, 1,000, and 2,000
+procedures. The `module-array-heavy` fixture is the positive control for
+legitimate broad participation; its benchmark numbers should be reported with
+the sparse fixture rather than hidden behind a sparse-only threshold. These
+checks concern work shape only and do not authorize diagnostic, snapshot, or
+review-ledger changes.
+
+### Issue #781 regression and closure evidence
+
+The v0.31.2 regression was reproduced on Windows amd64 with Go 1.26.6 and an
+Intel Core(TM) i7-12700. The tag comparison used the same cold/warm leaf and
+`-benchtime=1x -count=3 -benchmem` command for both tags; the values below are
+the three-sample medians. The intermediate commit checks used one sample per
+commit and are included to attribute the regression stage rather than as a
+noise-resistant performance baseline.
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm)$' -benchmem -benchtime=1x -count=3 -timeout=25m
+```
+
+| ref                    | cold ns/op |     cold B/op | cold allocs/op | warm ns/op |     warm B/op | warm allocs/op |
+| ---------------------- | ---------: | ------------: | -------------: | ---------: | ------------: | -------------: |
+| `v0.31.1` (`64e5fa97`) |    8.503 s | 6,919,953,504 |     66,883,503 |    7.972 s | 5,560,451,144 |     55,904,134 |
+| `v0.31.2` (`0b8ca0eb`) |   10.196 s | 9,956,490,848 |     73,611,923 |    9.304 s | 7,448,993,472 |     59,142,199 |
+
+The v0.31.2 tag is therefore +43.88% in cold `B/op` and +33.96% in warm
+`B/op` relative to v0.31.1. The stage attribution is consistent with the
+intermediate spot checks:
+
+| ref                              | cold ns/op |     cold B/op | cold allocs/op | warm ns/op |     warm B/op | warm allocs/op |
+| -------------------------------- | ---------: | ------------: | -------------: | ---------: | ------------: | -------------: |
+| #770 `dfc26822`                  |    9.098 s | 6,933,842,848 |     67,078,268 |    8.129 s | 5,548,051,176 |     56,024,967 |
+| #771 `cf5d3cd4`                  |   10.339 s | 9,968,561,960 |     73,669,702 |    9.450 s | 7,432,012,776 |     59,084,242 |
+| Issue #781 fix `b1a42590`        |    9.713 s | 9,150,427,008 |     72,183,228 |    9.893 s | 6,671,153,152 |     57,734,713 |
+| shared-path follow-up `8c0b4005` |    9.277 s | 7,338,414,352 |     69,209,692 |    8.322 s | 5,483,707,176 |     54,848,816 |
+
+The #770 to #771 step is where the large allocation increase appears. The
+Issue #781 participant-boundary fix reduces the v0.31.2 allocation profile by
+about 8.1% cold and 10.4% warm; the shared-path follow-up reduces the remaining
+profile further. The combined current revision is about 26.3% below v0.31.2
+for both cold and warm `B/op`. The three-sample tag runs and the one-sample
+intermediate commit spot checks all finished with `PASS`.
+
+The single-module telemetry matrix was also executed on the current revision
+with `-benchtime=1x -count=1`:
+
+| fixture              | procedures |         ns/op |          B/op |  allocs/op | module-effect participants | invalidation summaries / CFG walks |
+| -------------------- | ---------: | ------------: | ------------: | ---------: | -------------------------: | ---------------------------------: |
+| `array-chain`        |        500 |   213,684,600 |   197,946,912 |  1,596,742 |                          2 |                              2 / 2 |
+| `array-chain`        |      1,000 |   452,607,100 |   405,566,056 |  3,661,323 |                          2 |                              2 / 2 |
+| `array-chain`        |      2,000 | 1,125,445,700 |   843,783,000 |  9,292,853 |                          2 |                              2 / 2 |
+| `module-array-heavy` |        500 |   244,055,900 |   278,426,264 |  3,395,234 |                        500 |                          500 / 500 |
+| `module-array-heavy` |      1,000 |   571,718,400 |   615,311,904 |  9,262,991 |                      1,000 |                      1,000 / 1,000 |
+| `module-array-heavy` |      2,000 | 1,413,022,700 | 1,449,068,536 | 28,523,928 |                      2,000 |                      2,000 / 2,000 |
+
+Thus unrelated scalar procedures leave module-array CFG work at two summaries
+and two walks across all three sparse scales, while the positive-control
+workload expands linearly with genuine effect participants.
+
+The relevant strict local VBE oracle regression batch also passed, with Excel
+16.0 build 17932 (x64, ja-JP) and cleanup confirmed for every case:
+`fixed-array-reversed-bound`, `fixed-array-valid-bound`,
+`declaration-redim-after-comma`, `declaration-keyword-valid-controls`,
+`redim-fixed-array`, `redim-scalar`, `redim-reversed-bound`,
+`variant-redim-array`, `erase-scalar`, `lbound-scalar`, and
+`foreach-scalar`. Runtime-only cases remain unbound as required; no new VBE
+fixture was promoted.
+
 ### Indexed semantic-state solver verification record (#713)
 
 Issue #713 introduced the first incremental shared-solver migration. The
@@ -1835,6 +1945,41 @@ final leaf profile is the evidence used for the allocation comparison:
 
 The profiled one-sample result was 9,085,157,800 ns/op,
 10,419,480,376 B/op, and 92,125,359 allocs/op.
+
+### Shared generic-path allocation verification record
+
+The follow-up shared-path optimization keeps `SolveContext`'s immutable result
+contract for state-reading callers while allowing Array's result-discarding
+lane to use `RunContext`. Dense and sparse semantic-state copies and joins now
+use direct storage traversal. CFG dominator intersections use dense bitsets,
+and normalized integer constant tables use the non-copying constexpr adapter.
+These changes are representation-only; the ordered diagnostic record and
+developer-only counter payloads are unchanged.
+
+The pre-change one-sample profile on the same Windows amd64 host (commit
+`b1a42590`) measured approximately `9,150,751,488 B/op` and `72,089,371
+allocs/op` for ROneCOne cold analysis. The first post-change samples measured:
+
+| scenario |         ns/op |          B/op |  allocs/op |
+| -------- | ------------: | ------------: | ---------: |
+| cold     | 9,551,717,300 | 7,331,414,072 | 69,095,833 |
+| warm     | 9,063,135,200 | 5,485,490,688 | 54,855,203 |
+
+The single-sample allocation reduction is approximately 20% for cold and 17%
+for warm against that profile baseline. Wall time remains an observational
+measurement because the host-load variance documented above is larger than the
+small solver/query changes. The required follow-up command matrix is:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -race ./internal/analyze ./internal/analyze/semanticstate ./internal/vba/cfg ./internal/vba/constexpr
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm)$' -benchmem -benchtime=1x -count=10 -timeout=25m
+rtk task corpus:test
+rtk task corpus:test
+rtk task corpus:metrics
+```
+
+Any diagnostic, snapshot, JSON/LSP, cancellation, race, or deterministic-order
+difference requires investigation before refreshing corpus artifacts.
 
 | measure                         |            #713 post-migration baseline |                      #721 result | status                                           |
 | ------------------------------- | --------------------------------------: | -------------------------------: | ------------------------------------------------ |

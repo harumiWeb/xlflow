@@ -466,10 +466,41 @@ func (s *State[T]) CloneFrom(src StateView[T], clone func(T) T) {
 	if clone == nil {
 		clone = func(value T) T { return value }
 	}
-	src.ForEach(func(id SymbolID, value T) bool {
-		s.Set(id, clone(value))
-		return true
-	})
+	if src.state == nil {
+		return
+	}
+	if s.layout.representation == RepresentationDense {
+		if src.state.layout.representation == RepresentationDense {
+			for id := range min(len(s.dense), len(src.state.dense)) {
+				if src.state.bit(id) {
+					s.dense[id] = clone(src.state.dense[id])
+					s.setBit(id)
+				}
+			}
+			return
+		}
+		for _, entry := range src.state.sparse {
+			if int(entry.id) >= s.layout.symbols {
+				continue
+			}
+			s.dense[entry.id] = clone(entry.value)
+			s.setBit(int(entry.id))
+		}
+		return
+	}
+	if src.state.layout.representation == RepresentationSparse {
+		for _, entry := range src.state.sparse {
+			if int(entry.id) < s.layout.symbols {
+				s.sparse = append(s.sparse, slot[T]{id: entry.id, value: clone(entry.value)})
+			}
+		}
+		return
+	}
+	for id := range min(len(src.state.dense), s.layout.symbols) {
+		if src.state.bit(id) {
+			s.sparse = append(s.sparse, slot[T]{id: SymbolID(id), value: clone(src.state.dense[id])})
+		}
+	}
 }
 
 // JoinFrom joins src into the destination in place. Each changed SymbolID is
@@ -480,26 +511,46 @@ func (s *State[T]) JoinFrom(src StateView[T], lattice Lattice[T], changed *[]Sym
 		return false
 	}
 	changedAny := false
-	src.ForEach(func(id SymbolID, value T) bool {
-		if !s.has(id) {
-			s.Set(id, lattice.Clone(value))
-			if changed != nil {
-				*changed = append(*changed, id)
+	if src.state == nil {
+		return false
+	}
+	if src.state.layout.representation == RepresentationDense {
+		for id := range min(len(src.state.dense), s.layout.symbols) {
+			if src.state.bit(id) {
+				if s.joinValue(SymbolID(id), src.state.dense[id], lattice, changed) {
+					changedAny = true
+				}
 			}
-			changedAny = true
-			return true
 		}
-		current, _ := s.value(id)
-		if lattice.Join(&current, value) {
-			s.Set(id, current)
-			if changed != nil {
-				*changed = append(*changed, id)
+		return changedAny
+	}
+	for _, entry := range src.state.sparse {
+		if int(entry.id) < s.layout.symbols {
+			if s.joinValue(entry.id, entry.value, lattice, changed) {
+				changedAny = true
 			}
-			changedAny = true
+		}
+	}
+	return changedAny
+}
+
+func (s *State[T]) joinValue(id SymbolID, value T, lattice Lattice[T], changed *[]SymbolID) bool {
+	if !s.has(id) {
+		s.Set(id, lattice.Clone(value))
+		if changed != nil {
+			*changed = append(*changed, id)
 		}
 		return true
-	})
-	return changedAny
+	}
+	current, _ := s.value(id)
+	if !lattice.Join(&current, value) {
+		return false
+	}
+	s.Set(id, current)
+	if changed != nil {
+		*changed = append(*changed, id)
+	}
+	return true
 }
 
 func (s *State[T]) has(id SymbolID) bool {

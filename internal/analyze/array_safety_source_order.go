@@ -633,11 +633,7 @@ func arraySourceOrderProcedureExitStatementText(text string) bool {
 }
 
 func arraySourceOrderConstantBoolean(expression string, constants map[string]int) (bool, bool) {
-	values := make(map[string]constexpr.Value, len(constants))
-	for name, value := range constants {
-		values[name] = constexpr.Value{Kind: constexpr.ValueLongLong, Integer: int64(value)}
-	}
-	result := constexpr.Evaluate(expression, constexpr.NewValues(values))
+	result := constexpr.Evaluate(expression, constexpr.IntegerValues(constants))
 	if result.Kind != constexpr.Known || result.Typed.Kind != constexpr.ValueBoolean {
 		return false, false
 	}
@@ -874,7 +870,7 @@ func (a Analyzer) arrayByRefCallSourceOrderProof(file parsedFile, facts arraySou
 	// later call cannot be hidden by passing the whole physical line to transfer.
 	for line := caller.StartLine; line < call.Range.StartLine && line <= len(file.Lines); line++ {
 		segments := splitRangeValueSourceStatementsWithOffsets(arraySourceOrderStripComment(file.Lines[line-1]))
-		callsBySegment, unassignedCalls := arraySourceOrderCallsBySegment(file, line, arrayCallsAtLine(caller.Calls, line), lineStarts)
+		callsBySegment, unassignedCalls := arraySourceOrderCallsBySegment(file, line, arrayCallsAtLine(caller, line, ctx.arrayStats), lineStarts)
 		if len(unassignedCalls) > 0 && len(segments) > 1 {
 			// A call without a trustworthy source offset cannot be placed among
 			// colon-separated statements. Continuing would apply its side effect
@@ -2026,12 +2022,7 @@ func arrayStatementDominatesCall(proc sourceProcedure, statementID, statementLin
 	if statementBlock.ID == callBlock.ID {
 		return statementLine < call.Range.StartLine
 	}
-	for _, dominator := range proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).DominatorsOf(callBlock.ID) {
-		if dominator == statementBlock.ID {
-			return true
-		}
-	}
-	return false
+	return proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).Dominates(statementBlock.ID, callBlock.ID)
 }
 
 func parameterIsByRefArray(parameter parameterInfo) bool {

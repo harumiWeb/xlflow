@@ -422,7 +422,7 @@ type singleModuleBenchmarkWorkload struct {
 }
 
 func singleModuleBenchmarkWorkloads() []singleModuleBenchmarkWorkload {
-	workloads := make([]singleModuleBenchmarkWorkload, 0, 29)
+	workloads := make([]singleModuleBenchmarkWorkload, 0, 34)
 	for _, shape := range []string{"independent", "chain", "declarations", "recovered", "unknown"} {
 		for _, size := range []int{100, 500, 1000, 2000} {
 			workloads = append(workloads, singleModuleBenchmarkWorkload{shape: shape, size: size})
@@ -433,9 +433,14 @@ func singleModuleBenchmarkWorkloads() []singleModuleBenchmarkWorkload {
 			workloads = append(workloads, singleModuleBenchmarkWorkload{shape: shape, size: size})
 		}
 	}
-	// Issue #712 workload: one small array dependency chain in a giant module
-	// with otherwise independent scalar procedures.
-	workloads = append(workloads, singleModuleBenchmarkWorkload{shape: "array-chain", size: 2000})
+	// Issue #781 workloads contrast a small module-array effect closure with a
+	// module where every procedure genuinely mutates the shared array.
+	for _, size := range []int{500, 1000, 2000} {
+		workloads = append(workloads,
+			singleModuleBenchmarkWorkload{shape: "array-chain", size: size},
+			singleModuleBenchmarkWorkload{shape: "module-array-heavy", size: size},
+		)
+	}
 	for _, size := range []int{100, 500, 1000, 2000} {
 		workloads = append(workloads, singleModuleBenchmarkWorkload{shape: "cfg-independent", size: size})
 	}
@@ -468,7 +473,7 @@ func (w singleModuleBenchmarkWorkload) expectedModuleDeclarations() int {
 	switch w.shape {
 	case "declarations":
 		return w.size
-	case "array-chain":
+	case "array-chain", "module-array-heavy":
 		return 1
 	default:
 		return 0
@@ -586,6 +591,11 @@ func singleModuleBenchmarkSource(workload singleModuleBenchmarkWorkload) string 
 		source.WriteString("Private Sub ArrayEntry()\n    Call ArrayAllocate\n    Call ArrayConsume\nEnd Sub\n\n")
 		for index := 3; index < workload.size; index++ {
 			fmt.Fprintf(&source, "Private Sub Independent%04d()\n    Dim value As Long\n    value = %d\nEnd Sub\n\n", index, index)
+		}
+	case "module-array-heavy":
+		source.WriteString("Private moduleValues() As Long\n\n")
+		for index := range workload.size {
+			fmt.Fprintf(&source, "Private Sub Mutate%04d()\n    Erase moduleValues\n    ReDim moduleValues(0 To %d)\nEnd Sub\n\n", index, index+1)
 		}
 	case "recovered":
 		for index := 0; index < workload.size; index++ {

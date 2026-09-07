@@ -320,7 +320,7 @@ func TestArrayParticipantGraphRetainsSameNamedPropertyAccessors(t *testing.T) {
 		Path: "M.cls", Module: "M", ModuleDeclarations: map[string]sourceDeclaration{},
 		Procedures: []sourceProcedure{getter, setter},
 	}
-	participants, _, keys := buildArrayParticipantSets([]parsedFile{file}, analysisContext{})
+	participants, _, _, keys := buildArrayParticipantSets([]parsedFile{file}, analysisContext{})
 	getterKey := keys[arrayParticipantProcedureIdentity(getter)]
 	setterKey := keys[arrayParticipantProcedureIdentity(setter)]
 	if getterKey == "" || setterKey == "" || getterKey == setterKey {
@@ -379,6 +379,75 @@ func TestBuildArrayParticipantSetSeedsModuleArrayAccess(t *testing.T) {
 	got := buildArrayParticipantSet([]parsedFile{file}, analysisContext{})
 	if !got["m.readmodulearray"] || got["m.scalar"] {
 		t.Fatalf("module-array access seeds = %#v, want only reader", got)
+	}
+}
+
+func TestBuildArrayModuleEffectParticipantSetExcludesReadersAndScalarCallees(t *testing.T) {
+	matched := func(callee, caller string) procedureir.CallSite {
+		return procedureir.CallSite{
+			Caller: procedureir.ProcedureRef{QualifiedName: caller},
+			Callee: procedureir.Callee{BaseName: callee, Text: callee},
+			Resolution: procedureir.CallResolution{
+				Status:     procedureir.ResolutionMatched,
+				Candidates: []procedureir.Candidate{{QualifiedName: "M." + callee}},
+			},
+		}
+	}
+	mutator := sourceProcedure{
+		Module: "M", Name: "Mutator", StartLine: 1, EndLine: 2,
+		Statements: newReadOnlySpan([]procedureir.Statement{{Text: "Erase values"}}),
+		Calls:      newReadOnlySpan([]procedureir.CallSite{matched("ScalarHelper", "M.Mutator")}),
+	}
+	caller := sourceProcedure{Module: "M", Name: "Caller", Calls: newReadOnlySpan([]procedureir.CallSite{matched("Mutator", "M.Caller")})}
+	wrapper := sourceProcedure{Module: "M", Name: "Wrapper", Calls: newReadOnlySpan([]procedureir.CallSite{matched("Mutator", "M.Wrapper")})}
+	outer := sourceProcedure{Module: "M", Name: "Outer", Calls: newReadOnlySpan([]procedureir.CallSite{matched("Wrapper", "M.Outer")})}
+	ambiguousCaller := sourceProcedure{Module: "M", Name: "AmbiguousCaller", Calls: newReadOnlySpan([]procedureir.CallSite{{
+		Caller: procedureir.ProcedureRef{QualifiedName: "M.AmbiguousCaller"},
+		Callee: procedureir.Callee{BaseName: "Mutator", Text: "Mutator"},
+		Resolution: procedureir.CallResolution{
+			Status:     procedureir.ResolutionAmbiguous,
+			Candidates: []procedureir.Candidate{{QualifiedName: "M.Mutator"}},
+		},
+	}})}
+	reader := sourceProcedure{Module: "M", Name: "Reader", Accesses: newReadOnlySpan([]procedureir.VariableAccess{{Name: "values", Scope: procedureir.ScopeModule, Mode: procedureir.AccessRead}})}
+	conditionalMutator := sourceProcedure{
+		Module: "M", Name: "ConditionalMutator",
+		Statements: newReadOnlySpan([]procedureir.Statement{{Text: "If ready Then Erase values"}}),
+	}
+	scalarHelper := sourceProcedure{Module: "M", Name: "ScalarHelper"}
+	file := parsedFile{
+		Path: "M.bas", Module: "M", ModuleDeclarations: map[string]sourceDeclaration{"values": {Name: "values", Array: true}},
+		Procedures: []sourceProcedure{mutator, caller, wrapper, outer, ambiguousCaller, reader, conditionalMutator, scalarHelper},
+	}
+	file.ModuleFacts = &moduleAnalysisFacts{
+		moduleDeclarations: file.ModuleDeclarations,
+		procedureDecls:     map[int]map[string]sourceDeclaration{0: {}},
+	}
+
+	participants := buildArrayModuleEffectParticipantSet([]parsedFile{file}, analysisContext{})
+	for _, key := range []string{"m.mutator", "m.caller", "m.wrapper", "m.outer", "m.ambiguouscaller", "m.conditionalmutator"} {
+		if !participants[key] {
+			t.Errorf("module effect participant %q missing from %#v", key, participants)
+		}
+	}
+	for _, key := range []string{"m.reader", "m.scalarhelper"} {
+		if participants[key] {
+			t.Errorf("non-mutating procedure %q entered module effect closure %#v", key, participants)
+		}
+	}
+}
+
+func TestArrayByRefParameterMayMutateFailsOpenForUnknownFlow(t *testing.T) {
+	proc := sourceProcedure{
+		Module: "M",
+		Name:   "MaybeMutate",
+		Params: newReadOnlySpan([]parameterInfo{{
+			Name: "values", Type: "Variant()", Passing: "ByRef", ValueShape: procedureir.ValueShapeDynamicArray,
+		}}),
+		Graph: &cfg.Graph{UnknownFlowSources: []cfg.BlockID{1}},
+	}
+	if !arrayByRefParameterMayMutate(proc, 0, analysisContext{}, map[string]bool{}) {
+		t.Fatal("unknown control flow must remain a conservative ByRef mutation boundary")
 	}
 }
 
@@ -540,38 +609,50 @@ func TestBuildArrayParticipantSetBoundsUncertainty(t *testing.T) {
 }
 
 func TestArrayParticipantSyntheticTelemetryExcludesScalarProcedures(t *testing.T) {
-	root := t.TempDir()
-	fixture := writeSingleModuleBenchmarkProject(t, root, singleModuleBenchmarkWorkload{shape: "array-chain", size: 2000})
-	t.Setenv(typedb.EnvDir, t.TempDir())
-	recorder := analysisstats.NewRecorder()
-	_, err := (Analyzer{RootDir: root, Config: config.Default()}).RunResultContext(analysisstats.WithRecorder(context.Background(), recorder))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, counters := recorder.Totals()
-	values := make(map[string]uint64, len(counters))
-	for _, counter := range counters {
-		values[counter.Name] = counter.Value
-	}
-	for _, name := range []string{
-		analysisstats.ArrayParticipantProceduresCounter,
-		analysisstats.ArrayCandidateProceduresCounter,
-		analysisstats.ArrayInterproceduralCFGWalksCounter,
-	} {
-		if _, ok := values[name]; !ok {
-			t.Fatalf("telemetry counter %q is missing: %v", name, values)
+	var wantInvalidationWalks uint64
+	for _, size := range []int{500, 1000, 2000} {
+		root := t.TempDir()
+		fixture := writeSingleModuleBenchmarkProject(t, root, singleModuleBenchmarkWorkload{shape: "array-chain", size: size})
+		t.Setenv(typedb.EnvDir, t.TempDir())
+		recorder := analysisstats.NewRecorder()
+		_, err := (Analyzer{RootDir: root, Config: config.Default()}).RunResultContext(analysisstats.WithRecorder(context.Background(), recorder))
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if values[analysisstats.ArrayParticipantProceduresCounter] == 0 {
-		t.Fatalf("array participant counter is zero for array fixture: %v", values)
-	}
-	if values[analysisstats.ArrayParticipantProceduresCounter] >= uint64(fixture.procedures/10) {
-		t.Fatalf("array participants = %d for %d-procedure fixture, want a small dependency closure; counters=%v", values[analysisstats.ArrayParticipantProceduresCounter], fixture.procedures, values)
-	}
-	if values[analysisstats.ArrayCandidateProceduresCounter] >= uint64(fixture.procedures/10) {
-		t.Fatalf("array candidates = %d for %d-procedure fixture, want unrelated scalar procedures excluded; counters=%v", values[analysisstats.ArrayCandidateProceduresCounter], fixture.procedures, values)
-	}
-	if values[analysisstats.ArrayInterproceduralCFGWalksCounter] >= uint64(fixture.procedures/10) {
-		t.Fatalf("interprocedural CFG walks = %d for %d-procedure fixture, want bounded participant work; counters=%v", values[analysisstats.ArrayInterproceduralCFGWalksCounter], fixture.procedures, values)
+		_, counters := recorder.Totals()
+		values := make(map[string]uint64, len(counters))
+		for _, counter := range counters {
+			values[counter.Name] = counter.Value
+		}
+		for _, name := range []string{
+			analysisstats.ArrayParticipantProceduresCounter,
+			analysisstats.ArrayLocalParticipantsCounter,
+			analysisstats.ArrayInterproceduralParticipantsCounter,
+			analysisstats.ArrayModuleEffectParticipantsCounter,
+			analysisstats.ArrayCandidateProceduresCounter,
+			analysisstats.ArrayInterproceduralCFGWalksCounter,
+			"array_module_invalidation_summaries",
+			"array_module_invalidation_cfg_walks",
+			"array_calls_by_line_index_builds",
+			"array_calls_by_line_index_hits",
+			"procedure_range_index_builds",
+			"procedure_range_index_hits",
+		} {
+			if _, ok := values[name]; !ok {
+				t.Fatalf("%d procedures: telemetry counter %q is missing: %v", size, name, values)
+			}
+		}
+		if values[analysisstats.ArrayParticipantProceduresCounter] == 0 || values[analysisstats.ArrayModuleEffectParticipantsCounter] == 0 {
+			t.Fatalf("%d procedures: array participant counter is zero: %v", size, values)
+		}
+		if values[analysisstats.ArrayParticipantProceduresCounter] >= uint64(fixture.procedures/10) || values[analysisstats.ArrayModuleEffectParticipantsCounter] >= uint64(fixture.procedures/10) {
+			t.Fatalf("%d procedures: participant closure widened with unrelated scalar procedures: %v", size, values)
+		}
+		walks := values["array_module_invalidation_cfg_walks"]
+		if size == 500 {
+			wantInvalidationWalks = walks
+		} else if walks != wantInvalidationWalks {
+			t.Fatalf("%d procedures: module invalidation CFG walks = %d, want size-independent %d", size, walks, wantInvalidationWalks)
+		}
 	}
 }

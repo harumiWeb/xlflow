@@ -74,6 +74,12 @@ type arrayParticipantGraph struct {
 	uncertainFacts   map[bool]map[string]bool
 	uncertainCalls   map[string]bool
 	moduleArrayUsers map[string][]string
+	// moduleEffectSeeds contains procedures that can directly mutate a
+	// module-owned array (including a possible ByRef mutation).  It is kept
+	// separate from the general array seeds because an indexed read is enough
+	// for VBA227 applicability but must not activate module-state summaries.
+	moduleEffectSeeds        map[string]bool
+	moduleEffectParticipants map[string]bool
 }
 
 type arrayCandidateLineKey struct {

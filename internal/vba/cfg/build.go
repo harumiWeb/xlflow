@@ -640,7 +640,10 @@ func (b *builder) propagateErrorModes(modes map[BlockID]map[errorMode]bool) {
 		queued[current] = false
 		out := b.transferErrorMode(current, modes[current])
 		targets := successors[current]
-		block := b.graph.block(current)
+		// The builder assigns contiguous IDs and the graph query index is not
+		// complete until finish.  Read the in-progress block slice directly so
+		// propagation does not rebuild a query index for every work item.
+		block := b.blockAtID(current)
 		if block.Statement != nil && block.Statement.Control != nil &&
 			block.Statement.Control.Transfer == procedureir.TransferOnErrorGoto {
 			candidates := b.labels[normalizedTarget(block.Statement.Control.Target)]
@@ -656,6 +659,18 @@ func (b *builder) propagateErrorModes(modes map[BlockID]map[errorMode]bool) {
 			queued[target] = true
 		}
 	}
+}
+
+func (b *builder) blockAtID(id BlockID) Block {
+	index := int(id) - 1
+	if index < 0 || index >= len(b.graph.Blocks) {
+		return Block{}
+	}
+	block := b.graph.Blocks[index]
+	if block.ID != id {
+		return Block{}
+	}
+	return block
 }
 
 func reachableFromEdges(entry BlockID, edges []Edge) map[BlockID]bool {

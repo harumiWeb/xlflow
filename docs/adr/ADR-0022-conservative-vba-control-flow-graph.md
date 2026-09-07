@@ -157,6 +157,22 @@ behavior of `VBA204`, `VBA210`, and related consumers. Exceptional flow and
 uncertainty remain conservative, and performance telemetry remains
 observability rather than a new user-facing contract.
 
+### Amendment: compact dominator queries and builder lookup
+
+The revision-local dominator cache stores reachable-set membership as dense
+bitsets indexed by sorted BlockID ordinals. Fixed-point intersections operate
+on machine words; `Dominators` and `DominatorsOf` continue to return owned,
+sorted BlockID slices, while `CFGView.Dominates` serves membership-only callers
+without an intermediate copy. Unknown-flow dominator inputs, normal-only
+filters, sparse IDs, unreachable blocks, and concurrent lazy cache publication
+retain their previous semantics.
+
+During error-mode propagation the builder reads its own contiguous block slice
+through a checked private accessor. The query index is still built and guarded
+for completed Graph revisions, but it is no longer rebuilt while the graph is
+being assembled. This does not relax the immutable revision or defensive
+fallback contracts at the public Graph boundary.
+
 ## Consequences
 
 - Positive: batch and LSP reliability checks share one deterministic
