@@ -950,7 +950,7 @@ func excelLoopIsSmall(text string, constants map[string]int) bool {
 }
 
 func constantIntegerExpression(text string, constants map[string]int) (int, error) {
-	result := constexpr.EvaluateInteger(text, constants)
+	result := constexpr.EvaluateIntegerEnvironment(text, constexpr.IntegerValues(constants))
 	if result.Kind != constexpr.Known {
 		return 0, strconv.ErrSyntax
 	}

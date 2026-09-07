@@ -439,6 +439,10 @@ func TestCFGViewCachesCanonicalQueriesAndCustomMasks(t *testing.T) {
 		},
 		Entry: 1,
 	}
+	chainView := chainGraph.View(EdgeFilter{})
+	if !chainView.Dominates(1, 4) || chainView.Dominates(2, 3) {
+		t.Fatalf("Dominates membership is incorrect: entry->exit=%v, branch->branch=%v", chainView.Dominates(1, 4), chainView.Dominates(2, 3))
+	}
 	chained := chainGraph.View(EdgeFilter{}).
 		WithoutNormalContinuationsFrom(map[BlockID]bool{2: true}).
 		WithoutNormalContinuationsFrom(map[BlockID]bool{3: true})

@@ -1390,10 +1390,8 @@ func arrayModuleReadyGuardFalseWriteDominates(file parsedFile, proc sourceProced
 		if !falseBlockOK {
 			continue
 		}
-		for _, dominator := range normalGraph.DominatorsOf(eraseBlock.ID) {
-			if dominator == falseBlock.ID {
-				return true
-			}
+		if normalGraph.Dominates(falseBlock.ID, eraseBlock.ID) {
+			return true
 		}
 	}
 	return false
@@ -1534,13 +1532,7 @@ func arrayModuleSetupReDimIsReliable(file parsedFile, proc sourceProcedure, guar
 	if !normalGraph.IsReachable(redimBlock.ID) || !normalGraph.IsReachable(readyBlock.ID) {
 		return false
 	}
-	dominatesReady := false
-	for _, dominator := range normalGraph.DominatorsOf(readyBlock.ID) {
-		if dominator == redimBlock.ID {
-			dominatesReady = true
-			break
-		}
-	}
+	dominatesReady := normalGraph.Dominates(redimBlock.ID, readyBlock.ID)
 	if !dominatesReady || !arrayFalseBranchRequiresBlock(*proc.Graph, guardBlock.ID, redimBlock.ID) {
 		return false
 	}

@@ -627,12 +627,7 @@ func arrayVBA227StatementLineDominates(proc sourceProcedure, line int, target pr
 	if sourceBlock.ID == targetBlock.ID {
 		return source.Range.StartLine < target.Range.StartLine
 	}
-	for _, dominator := range proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).DominatorsOf(targetBlock.ID) {
-		if dominator == sourceBlock.ID {
-			return true
-		}
-	}
-	return false
+	return proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).Dominates(sourceBlock.ID, targetBlock.ID)
 }
 
 // arrayVBA227FilterForBodyIndexFindings removes only the unallocated/empty

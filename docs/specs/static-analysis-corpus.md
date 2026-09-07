@@ -1885,6 +1885,41 @@ final leaf profile is the evidence used for the allocation comparison:
 The profiled one-sample result was 9,085,157,800 ns/op,
 10,419,480,376 B/op, and 92,125,359 allocs/op.
 
+### Shared generic-path allocation verification record
+
+The follow-up shared-path optimization keeps `SolveContext`'s immutable result
+contract for state-reading callers while allowing Array's result-discarding
+lane to use `RunContext`. Dense and sparse semantic-state copies and joins now
+use direct storage traversal. CFG dominator intersections use dense bitsets,
+and normalized integer constant tables use the non-copying constexpr adapter.
+These changes are representation-only; the ordered diagnostic record and
+developer-only counter payloads are unchanged.
+
+The pre-change one-sample profile on the same Windows amd64 host (commit
+`b1a42590`) measured approximately `9,150,751,488 B/op` and `72,089,371
+allocs/op` for ROneCOne cold analysis. The first post-change samples measured:
+
+| scenario |         ns/op |          B/op |  allocs/op |
+| -------- | ------------: | ------------: | ---------: |
+| cold     | 9,551,717,300 | 7,331,414,072 | 69,095,833 |
+| warm     | 9,063,135,200 | 5,485,490,688 | 54,855,203 |
+
+The single-sample allocation reduction is approximately 20% for cold and 17%
+for warm against that profile baseline. Wall time remains an observational
+measurement because the host-load variance documented above is larger than the
+small solver/query changes. The required follow-up command matrix is:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -race ./internal/analyze ./internal/analyze/semanticstate ./internal/vba/cfg ./internal/vba/constexpr
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm)$' -benchmem -benchtime=1x -count=10 -timeout=25m
+rtk task corpus:test
+rtk task corpus:test
+rtk task corpus:metrics
+```
+
+Any diagnostic, snapshot, JSON/LSP, cancellation, race, or deterministic-order
+difference requires investigation before refreshing corpus artifacts.
+
 | measure                         |            #713 post-migration baseline |                      #721 result | status                                           |
 | ------------------------------- | --------------------------------------: | -------------------------------: | ------------------------------------------------ |
 | ROneCOne `ns/op`                |                                  8.93e9 |  9,700,135,400 (five-run median) | measured; high host-load variance                |

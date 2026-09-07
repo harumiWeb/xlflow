@@ -1,6 +1,7 @@
 package cfg
 
 import (
+	"slices"
 	"sort"
 	"sync"
 
@@ -390,99 +391,130 @@ func (v CFGView) DominatorsOf(block BlockID) []BlockID {
 	return append([]BlockID(nil), v.dominatorSet()[block]...)
 }
 
+// Dominates reports whether dominator is in block's cached dominator set.
+// Dominator lists are materialized in sorted order, so membership does not
+// require copying the list returned by DominatorsOf.
+func (v CFGView) Dominates(dominator, block BlockID) bool {
+	values := v.dominatorSet()[block]
+	index := sort.Search(len(values), func(index int) bool { return values[index] >= dominator })
+	return index < len(values) && values[index] == dominator
+}
+
 func (v CFGView) dominatorSet() map[BlockID][]BlockID {
-	v.cache.dominatorsOnce.Do(func() { v.cache.dominators = v.computeDominators() })
+	v.cache.dominatorsOnce.Do(func() { v.cache.dominators = v.computeDominatorsBitset() })
 	return v.cache.dominators
 }
 
-func (v CFGView) computeDominators() map[BlockID][]BlockID {
+func (v CFGView) computeDominatorsBitset() map[BlockID][]BlockID {
 	reachable := v.reachableSet()
-	all := map[BlockID]bool{}
+	ids := make([]BlockID, 0, len(reachable))
 	for id := range reachable {
-		all[id] = true
+		ids = append(ids, id)
 	}
-	dom := map[BlockID]map[BlockID]bool{}
-	for id := range reachable {
+	slices.Sort(ids)
+	if len(ids) == 0 {
+		return map[BlockID][]BlockID{}
+	}
+	indexByID := make(map[BlockID]int, len(ids))
+	for index, id := range ids {
+		indexByID[id] = index
+	}
+	wordCount := (len(ids) + 63) / 64
+	dom := make([][]uint64, len(ids))
+	for index, id := range ids {
+		dom[index] = make([]uint64, wordCount)
 		if id == v.graph.Entry {
-			dom[id] = map[BlockID]bool{id: true}
-		} else {
-			dom[id] = copySet(all)
+			dom[index][index/64] |= uint64(1) << uint(index%64)
+			continue
+		}
+		for candidate := range ids {
+			dom[index][candidate/64] |= uint64(1) << uint(candidate%64)
 		}
 	}
+	pred := make([][]int, len(ids))
+	for index, id := range ids {
+		for _, predecessor := range v.predecessors(id, reachable) {
+			if predecessorIndex, ok := indexByID[predecessor]; ok {
+				pred[index] = append(pred[index], predecessorIndex)
+			}
+		}
+	}
+	unknownSources := make([]int, 0, len(v.graph.UnknownFlowSources))
+	for _, source := range v.graph.UnknownFlowSources {
+		if sourceIndex, ok := indexByID[source]; ok {
+			unknownSources = append(unknownSources, sourceIndex)
+		}
+	}
+	next := make([]uint64, wordCount)
+	unknown := make([]uint64, wordCount)
 	changed := true
 	for changed {
 		changed = false
-		unknownDominators, hasUnknown := v.unknownDominatorInput(reachable, dom)
-		for id := range reachable {
+		hasUnknown := len(unknownSources) > 0
+		if hasUnknown {
+			copy(unknown, dom[unknownSources[0]])
+			for _, source := range unknownSources[1:] {
+				for word := range unknown {
+					unknown[word] &= dom[source][word]
+				}
+			}
+		}
+		for index, id := range ids {
 			if id == v.graph.Entry {
 				continue
 			}
-			preds := v.predecessors(id, reachable)
-			next := map[BlockID]bool{id: true}
-			var intersection map[BlockID]bool
-			if len(preds) > 0 {
-				intersection = copySet(dom[preds[0]])
-				for _, pred := range preds[1:] {
-					for candidate := range intersection {
-						if !dom[pred][candidate] {
-							delete(intersection, candidate)
-						}
+			clear(next)
+			predecessors := pred[index]
+			if len(predecessors) > 0 {
+				copy(next, dom[predecessors[0]])
+				for _, predecessor := range predecessors[1:] {
+					for word := range next {
+						next[word] &= dom[predecessor][word]
 					}
 				}
 			}
 			if hasUnknown {
 				block, ok := v.blockByID(id)
 				if ok && block.Kind == BlockStatement {
-					if intersection == nil {
-						intersection = copySet(unknownDominators)
+					if len(predecessors) == 0 {
+						copy(next, unknown)
 					} else {
-						for candidate := range intersection {
-							if !unknownDominators[candidate] {
-								delete(intersection, candidate)
-							}
+						for word := range next {
+							next[word] &= unknown[word]
 						}
 					}
 				}
 			}
-			for candidate := range intersection {
-				next[candidate] = true
-			}
-			if !sameSet(dom[id], next) {
-				dom[id] = next
+			next[index/64] |= uint64(1) << uint(index%64)
+			if !equalBitsets(dom[index], next) {
+				copy(dom[index], next)
 				changed = true
 			}
 		}
 	}
-	out := map[BlockID][]BlockID{}
-	for id, set := range dom {
-		for candidate := range set {
-			out[id] = append(out[id], candidate)
+	out := make(map[BlockID][]BlockID, len(ids))
+	for index, id := range ids {
+		values := make([]BlockID, 0, len(ids))
+		for candidateIndex, candidate := range ids {
+			if dom[index][candidateIndex/64]&(uint64(1)<<uint(candidateIndex%64)) != 0 {
+				values = append(values, candidate)
+			}
 		}
-		sort.Slice(out[id], func(i, j int) bool { return out[id][i] < out[id][j] })
+		out[id] = values
 	}
 	return out
 }
 
-func (v CFGView) unknownDominatorInput(
-	reachable map[BlockID]bool,
-	dominators map[BlockID]map[BlockID]bool,
-) (map[BlockID]bool, bool) {
-	var intersection map[BlockID]bool
-	for _, source := range v.graph.UnknownFlowSources {
-		if !reachable[source] {
-			continue
-		}
-		if intersection == nil {
-			intersection = copySet(dominators[source])
-			continue
-		}
-		for candidate := range intersection {
-			if !dominators[source][candidate] {
-				delete(intersection, candidate)
-			}
+func equalBitsets(left, right []uint64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
 		}
 	}
-	return intersection, intersection != nil
+	return true
 }
 
 func (v CFGView) predecessors(id BlockID, reachable map[BlockID]bool) []BlockID {

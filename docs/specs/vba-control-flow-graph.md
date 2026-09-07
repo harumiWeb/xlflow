@@ -211,6 +211,13 @@ values; `IsReachable` and equivalent hot queries do not materialize a copied
 filtered graph. APIs that intentionally materialize reachability data continue
 to receive independently owned copies.
 
+Dominator fixed points use dense bitsets over the reachable BlockID ordinal
+set. `Dominators` and `DominatorsOf` preserve the existing owned,
+BlockID-sorted slice contract, and `CFGView.Dominates` is the allocation-free
+membership query for callers that do not need the full list. Unknown-flow
+sources, normal-only filtering, sparse IDs, and unreachable blocks remain part
+of the same conservative calculation.
+
 The derived-query cache is scoped to one procedure/revision lifetime and is
 bounded to the supported filter identities. A result from one graph revision
 or filter identity must never be reused for another. Cache initialization and
