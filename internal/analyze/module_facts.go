@@ -13,7 +13,12 @@ import (
 type moduleAnalysisFacts struct {
 	moduleDeclarations  map[string]sourceDeclaration
 	procedureLineOwners []int
-	procedureDecls      map[int]map[string]sourceDeclaration
+	// procedureRanges is sorted by source range in the same order used to fill
+	// procedureLineOwners. Keeping the immutable projection beside the owner
+	// table turns a line owner into a procedure value without rescanning all
+	// procedures.
+	procedureRanges []sourceProcedure
+	procedureDecls  map[int]map[string]sourceDeclaration
 	// procedureFactsByStart is a compact declaration-start index to the
 	// already-owned procedure facts. It stores pointers, not another copy of
 	// procedure IR, so module consumers can resolve a procedure revision
@@ -102,6 +107,7 @@ func buildModuleAnalysisFacts(lines []string, document procedureir.DocumentIR, p
 		}
 		return ordered[i].StartByte < ordered[j].StartByte
 	})
+	facts.procedureRanges = ordered
 	coveredThrough := 0
 	for index, procedure := range ordered {
 		start := procedure.StartLine

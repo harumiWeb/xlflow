@@ -359,6 +359,10 @@ type analysisContext struct {
 	arrayPrivateTargets                  map[string]sourceProcedure
 	arrayParticipants                    map[string]bool
 	arrayParticipantKeys                 map[string]string
+	// arrayModuleEffectParticipants is the narrower caller-closed boundary
+	// used by module-array invalidation/lifecycle summaries. It intentionally
+	// excludes procedures that only read an indexed module array.
+	arrayModuleEffectParticipants map[string]bool
 	// arrayInterproceduralParticipants excludes complete procedures whose only
 	// evidence is an unknown array capability. Those procedures remain in the
 	// local participant plan for fail-open diagnostics, but cannot by themselves
@@ -382,16 +386,91 @@ type analysisContext struct {
 }
 
 type arrayInterproceduralStats struct {
-	mu                  sync.Mutex
-	cfgWalks            uint64
-	revisits            uint64
-	compactWalks        uint64
-	legacyWalks         uint64
-	fallbackWalks       uint64
-	fallbackEmptyState  uint64
-	fallbackIndex       uint64
-	fallbackUnsupported uint64
-	strategy            arrayCFGStrategy
+	mu                          sync.Mutex
+	cfgWalks                    uint64
+	revisits                    uint64
+	moduleInvalidationSummaries uint64
+	moduleInvalidationCFGWalks  uint64
+	moduleReadyGuardCandidates  uint64
+	moduleReadyGuardCFGWalks    uint64
+	callLineIndexBuilds         uint64
+	callLineIndexHits           uint64
+	procedureRangeIndexBuilds   uint64
+	procedureRangeIndexHits     uint64
+	compactWalks                uint64
+	legacyWalks                 uint64
+	fallbackWalks               uint64
+	fallbackEmptyState          uint64
+	fallbackIndex               uint64
+	fallbackUnsupported         uint64
+	strategy                    arrayCFGStrategy
+}
+
+func (s *arrayInterproceduralStats) addModuleInvalidationSummary(hasCFG bool) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.moduleInvalidationSummaries++
+	if hasCFG {
+		s.moduleInvalidationCFGWalks++
+	}
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addModuleReadyGuardCandidate() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.moduleReadyGuardCandidates++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addModuleReadyGuardCFGWalk() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.moduleReadyGuardCFGWalks++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addArrayIndexBuilds(callLines, procedureRanges uint64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.callLineIndexBuilds += callLines
+	s.procedureRangeIndexBuilds += procedureRanges
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addCallLineIndexHit() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.callLineIndexHits++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addProcedureRangeIndexHit() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.procedureRangeIndexHits++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) moduleSnapshot() (invalidationSummaries, invalidationCFGWalks, readyGuardCandidates, readyGuardCFGWalks, callLineIndexBuilds, callLineIndexHits, procedureRangeIndexBuilds, procedureRangeIndexHits uint64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.moduleInvalidationSummaries, s.moduleInvalidationCFGWalks, s.moduleReadyGuardCandidates, s.moduleReadyGuardCFGWalks, s.callLineIndexBuilds, s.callLineIndexHits, s.procedureRangeIndexBuilds, s.procedureRangeIndexHits
 }
 
 // Array CFG walks can be materialized concurrently while a procedure plan is
@@ -2466,7 +2545,8 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arraySafeArrayLengthGuards = inferArraySafeArrayLengthGuards(files)
 		ctx.arraySafeBoundGuards = inferArraySafeBoundGuards(files)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
-		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
+		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayModuleEffectParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
+		recordArrayIndexBuilds(files, ctx.arrayStats)
 		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants, ctx.arrayParticipantKeys)
 		ctx.arraySkipModuleInvalidationEffects = true
 		returnSummaries := inferArrayReturnSummarySet(files, ctx.arrayAllocationGuards, ctx)
@@ -2543,6 +2623,9 @@ func recordArrayInterproceduralTelemetry(ctx context.Context, analysisCtx analys
 		return
 	}
 	recorder.AddSum(analysisstats.ArrayParticipantProceduresCounter, uint64(len(analysisCtx.arrayParticipants)))
+	recorder.AddSum(analysisstats.ArrayLocalParticipantsCounter, uint64(len(analysisCtx.arrayParticipants)))
+	recorder.AddSum(analysisstats.ArrayInterproceduralParticipantsCounter, uint64(len(analysisCtx.arrayInterproceduralParticipants)))
+	recorder.AddSum(analysisstats.ArrayModuleEffectParticipantsCounter, uint64(len(analysisCtx.arrayModuleEffectParticipants)))
 	if analysisCtx.arrayStats != nil {
 		cfgWalks, revisits, compactWalks, legacyWalks, fallbackWalks, fallbackEmptyState, fallbackIndex, fallbackUnsupported := analysisCtx.arrayStats.snapshot()
 		recorder.AddSum(analysisstats.ArrayInterproceduralCFGWalksCounter, cfgWalks)
@@ -2553,7 +2636,34 @@ func recordArrayInterproceduralTelemetry(ctx context.Context, analysisCtx analys
 		recorder.AddSum("array_cfg_fallback_empty_state", fallbackEmptyState)
 		recorder.AddSum("array_cfg_fallback_index", fallbackIndex)
 		recorder.AddSum("array_cfg_fallback_unsupported", fallbackUnsupported)
+		invalidationSummaries, invalidationCFGWalks, readyGuardCandidates, readyGuardCFGWalks, callLineIndexBuilds, callLineIndexHits, procedureRangeIndexBuilds, procedureRangeIndexHits := analysisCtx.arrayStats.moduleSnapshot()
+		recorder.AddSum("array_module_invalidation_summaries", invalidationSummaries)
+		recorder.AddSum("array_module_invalidation_cfg_walks", invalidationCFGWalks)
+		recorder.AddSum("array_module_ready_guard_candidates", readyGuardCandidates)
+		recorder.AddSum("array_module_ready_guard_cfg_walks", readyGuardCFGWalks)
+		recorder.AddSum("array_calls_by_line_index_builds", callLineIndexBuilds)
+		recorder.AddSum("array_calls_by_line_index_hits", callLineIndexHits)
+		recorder.AddSum("procedure_range_index_builds", procedureRangeIndexBuilds)
+		recorder.AddSum("procedure_range_index_hits", procedureRangeIndexHits)
 	}
+}
+
+func recordArrayIndexBuilds(files []parsedFile, stats *arrayInterproceduralStats) {
+	if stats == nil {
+		return
+	}
+	var callLines, procedureRanges uint64
+	for _, file := range files {
+		if facts := file.moduleAnalysisFacts(); facts != nil && len(facts.procedureRanges) > 0 {
+			procedureRanges++
+		}
+		for procedure := range file.procedureView().All() {
+			if procedure.Facts != nil && procedure.Calls.Len() > 0 {
+				callLines++
+			}
+		}
+	}
+	stats.addArrayIndexBuilds(callLines, procedureRanges)
 }
 
 func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analysisContext, file parsedFile, projectEffects effects.ProjectSummary, filePermitHeld bool) ([]Finding, error) {

@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `analyze` performance regressions on giant VBA modules by restricting
+  module-array invalidation CFG work to relevant effect participants and
+  reusing indexed call/procedure lookups; conservative array diagnostics remain
+  unchanged.
+
 - Changed `lint`, `analyze`, and the diagnostic portion of `check` to return
   exit code `0` when all source diagnostics are warnings or information;
   error-level, unknown, or empty-severity diagnostics continue to return

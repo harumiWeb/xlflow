@@ -874,7 +874,7 @@ func (a Analyzer) arrayByRefCallSourceOrderProof(file parsedFile, facts arraySou
 	// later call cannot be hidden by passing the whole physical line to transfer.
 	for line := caller.StartLine; line < call.Range.StartLine && line <= len(file.Lines); line++ {
 		segments := splitRangeValueSourceStatementsWithOffsets(arraySourceOrderStripComment(file.Lines[line-1]))
-		callsBySegment, unassignedCalls := arraySourceOrderCallsBySegment(file, line, arrayCallsAtLine(caller.Calls, line), lineStarts)
+		callsBySegment, unassignedCalls := arraySourceOrderCallsBySegment(file, line, arrayCallsAtLine(caller, line, ctx.arrayStats), lineStarts)
 		if len(unassignedCalls) > 0 && len(segments) > 1 {
 			// A call without a trustworthy source offset cannot be placed among
 			// colon-separated statements. Continuing would apply its side effect

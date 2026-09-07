@@ -27,6 +27,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `argument_list`
 - `array_bound`
 - `array_bounds`
+- `array_calls_by_line_index_builds`
+- `array_calls_by_line_index_hits`
 - `array_candidate_procedures`
 - `array_cfg_fallback_empty_state`
 - `array_cfg_fallback_index`
@@ -35,8 +37,15 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `array_cfg_walks`
 - `array_compact_cfg_walks`
 - `array_interprocedural_cfg_walks`
+- `array_interprocedural_participants`
 - `array_kernel_runs`
 - `array_legacy_cfg_walks`
+- `array_local_participants`
+- `array_module_effect_participants`
+- `array_module_invalidation_cfg_walks`
+- `array_module_invalidation_summaries`
+- `array_module_ready_guard_candidates`
+- `array_module_ready_guard_cfg_walks`
 - `array_participant_procedures`
 - `array_projection_runs`
 - `array_subscript_out_of_bounds`
@@ -875,6 +884,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_modifier`
 - `procedure_name`
 - `procedure_name_constant`
+- `procedure_range_index_builds`
+- `procedure_range_index_hits`
 - `procedure_score_threshold`
 - `procedure_top_n`
 - `process_architecture`

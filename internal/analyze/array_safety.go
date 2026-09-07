@@ -153,10 +153,10 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 			Graph: &baseView, Initial: initial, Stats: ctx.arrayStats,
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
 				out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, capacityGuards)
-				for _, call := range arrayCallsAtLine(proc.Calls, line) {
+				forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 					out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
-				}
+				}, ctx.arrayStats)
 				for _, finding := range issues {
 					if finding.Code == "VBA227" {
 						continue
@@ -186,10 +186,10 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 			},
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
 				out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, capacityGuards, vba227ResumeNextBefore)
-				for _, call := range arrayCallsAtLine(proc.Calls, line) {
+				forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
 					out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
-				}
+				}, ctx.arrayStats)
 				for _, finding := range issues {
 					if finding.Code != "VBA227" {
 						continue

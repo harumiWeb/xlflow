@@ -1737,6 +1737,55 @@ non-deterministic participant/worklist order is a stop-and-investigate
 condition. The three new counters are developer-only stderr telemetry and
 must never be copied into snapshots or the diagnostic review ledger.
 
+### Dedicated module-array effect participant verification record (#781)
+
+Issue #781 restores the participant boundary for the `VBA227` module-array
+invalidation and lifecycle paths. The dedicated effect closure is seeded by
+direct module-array mutation (`ReDim`, `Erase`, or whole-array assignment),
+relevant module-array `ByRef` arguments, and recovered/incomplete module-array
+uses. It follows resolved or candidate-bounded callers only within the same
+module. Indexed reads
+and scalar helper callees are not effect participants, and a nonparticipant
+summary-cache miss has no effect rather than triggering a module-wide rescan.
+
+The current implementation records the following stderr-only telemetry for
+this boundary and its indexed transfer helpers:
+`array_candidate_procedures`, `array_participant_procedures`,
+`array_local_participants`, `array_interprocedural_participants`,
+`array_module_effect_participants`, `array_interprocedural_cfg_walks`,
+`array_worklist_revisits`, `array_module_invalidation_summaries`,
+`array_module_invalidation_cfg_walks`, `array_module_ready_guard_candidates`,
+`array_module_ready_guard_cfg_walks`, `array_calls_by_line_index_builds`,
+`array_calls_by_line_index_hits`, `procedure_range_index_builds`, and
+`procedure_range_index_hits`. Record these together with `ns/op`, `B/op`, and
+`allocs/op`; none belongs in corpus snapshots or `reviews/diagnostics.jsonl`.
+
+The focused synthetic matrix covers both sparse and genuinely effect-heavy
+single-module workloads:
+
+| fixture              | sizes                        | purpose                                                                                         |
+| -------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------- |
+| `array-chain`        | 500, 1,000, 2,000 procedures | a small module-array dependency closure plus unrelated scalar procedures                        |
+| `module-array-heavy` | 500, 1,000, 2,000 procedures | each generated procedure mutates the shared module array, exercising required broad effect work |
+
+Run the focused telemetry contract and benchmark matrix with the Windows Go
+wrapper:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^TestArrayParticipantSyntheticTelemetryExcludesScalarProcedures$' -count=1
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^$' -bench '^BenchmarkSingleModuleSynthetic/(array-chain|module-array-heavy)/(500|1000|2000)-procedures$' -benchmem -benchtime=1x -count=5
+```
+
+The current sparse-fixture structural invariant is checked at all three
+scales: participant and module-effect counts are nonzero but remain below one
+tenth of the generated procedure population, and
+`array_module_invalidation_cfg_walks` is identical for 500, 1,000, and 2,000
+procedures. The `module-array-heavy` fixture is the positive control for
+legitimate broad participation; its benchmark numbers should be reported with
+the sparse fixture rather than hidden behind a sparse-only threshold. These
+checks concern work shape only and do not authorize diagnostic, snapshot, or
+review-ledger changes.
+
 ### Indexed semantic-state solver verification record (#713)
 
 Issue #713 introduced the first incremental shared-solver migration. The
