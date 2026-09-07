@@ -1,6 +1,7 @@
 package cfg
 
 import (
+	"math/bits"
 	"slices"
 	"sort"
 	"sync"
@@ -494,7 +495,11 @@ func (v CFGView) computeDominatorsBitset() map[BlockID][]BlockID {
 	}
 	out := make(map[BlockID][]BlockID, len(ids))
 	for index, id := range ids {
-		values := make([]BlockID, 0, len(ids))
+		cardinality := 0
+		for _, word := range dom[index] {
+			cardinality += bits.OnesCount64(word)
+		}
+		values := make([]BlockID, 0, cardinality)
 		for candidateIndex, candidate := range ids {
 			if dom[index][candidateIndex/64]&(uint64(1)<<uint(candidateIndex%64)) != 0 {
 				values = append(values, candidate)

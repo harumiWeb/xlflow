@@ -219,6 +219,22 @@ func TestArrayCallsAtLineFallsBackForPartialFacts(t *testing.T) {
 	}
 }
 
+func TestRecordArrayIndexBuildsRequiresBuiltCallLineIndex(t *testing.T) {
+	calls := []procedureir.CallSite{{ID: 1, Range: vbaast.Range{StartLine: 4}}}
+	builtFacts := newProcedureAnalysisFacts(nil, nil, calls, nil)
+	file := parsedFile{ModuleFacts: &moduleAnalysisFacts{}, Procedures: []sourceProcedure{
+		{Facts: &procedureAnalysisFacts{}, Calls: newReadOnlySpan(calls)},
+		{Facts: builtFacts, Calls: newReadOnlySpan(calls)},
+		{Calls: newReadOnlySpan(calls)},
+	}}
+	stats := &arrayInterproceduralStats{}
+	recordArrayIndexBuilds([]parsedFile{file}, stats)
+	_, _, _, _, callLineBuilds, _, _, _ := stats.moduleSnapshot()
+	if callLineBuilds != 1 {
+		t.Fatalf("call-line index builds = %d, want only the built index", callLineBuilds)
+	}
+}
+
 func TestProcedureAnalysisFactsMemberExpressionsPreserveRecoveryAndFallback(t *testing.T) {
 	statements := []procedureir.Statement{{ID: 10, ExpressionIDs: []int{1}}}
 	expressions := []procedureir.Expression{

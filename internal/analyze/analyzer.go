@@ -2658,7 +2658,7 @@ func recordArrayIndexBuilds(files []parsedFile, stats *arrayInterproceduralStats
 			procedureRanges++
 		}
 		for procedure := range file.procedureView().All() {
-			if procedure.Facts != nil && procedure.Calls.Len() > 0 {
+			if procedure.Facts != nil && procedure.Facts.callsByLineBuilt && procedure.Calls.Len() > 0 {
 				callLines++
 			}
 		}

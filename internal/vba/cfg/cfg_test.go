@@ -451,6 +451,18 @@ func TestCFGViewCachesCanonicalQueriesAndCustomMasks(t *testing.T) {
 	}
 }
 
+func TestCFGViewDominatorListsUseExactCapacity(t *testing.T) {
+	t.Parallel()
+	graph := benchmarkQueryGraph(100)
+	view := graph.View(EdgeFilter{})
+
+	for id, values := range view.dominatorSet() {
+		if got, want := cap(values), len(values); got != want {
+			t.Fatalf("dominator list for block %d has capacity %d, want exact capacity %d", id, got, want)
+		}
+	}
+}
+
 func TestCFGViewConcurrentReadsAreDeterministic(t *testing.T) {
 	graph := benchmarkQueryGraph(500)
 	view := graph.View(EdgeFilter{})
