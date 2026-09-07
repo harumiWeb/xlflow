@@ -905,6 +905,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	finishStage = analysisstats.Measure(ctx, "object_entry_states")
 	if objectAnalysis != nil {
 		objectAnalysis.buildEntryStates()
+		objectAnalysis.buildObjectMemberEntryContracts()
 		finishObjectCapability(nil)
 		finishStage(len(objectAnalysis.entries), nil)
 		if recorder := analysisstats.FromContext(ctx); recorder != nil {

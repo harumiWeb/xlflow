@@ -1248,6 +1248,213 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PropagatesCollectionItemMemberGuardToHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ROneCOne.cls", `Attribute VB_Name = "ROneCOne"
+Option Explicit
+
+Private mSource As ROneCOne
+
+Public Property Get InternalSource() As ROneCOne
+  Set InternalSource = mSource
+End Property
+
+Public Property Get InternalDataRows() As Collection
+  Set InternalDataRows = New Collection
+End Property
+
+Public Property Get InternalRelationParentColumns() As Collection
+  Set InternalRelationParentColumns = New Collection
+End Property
+
+Private Sub ValidateRelationOwnership(ByVal relation As ROneCOne)
+  Dim parentColumn As ROneCOne
+  Dim parentColumns As Collection
+  Dim parentTable As ROneCOne
+  Set parentColumns = relation.InternalRelationParentColumns
+  Set parentColumn = parentColumns.Item(1)
+  Set parentTable = parentColumn.InternalSource
+  If parentTable Is Nothing Then RaiseContractError
+  ValidateExistingUniqueRelation parentColumns
+End Sub
+
+Private Sub ValidateExistingUniqueRelation(ByVal columns As Collection)
+  Dim firstColumn As ROneCOne
+  Dim rows As Collection
+  Set firstColumn = columns.Item(1)
+  Set rows = firstColumn.InternalSource.InternalDataRows
+  Debug.Print rows.Count
+End Sub
+
+Private Sub RaiseContractError()
+  Err.Raise 5
+End Sub
+
+Public Sub Run()
+  Dim relation As ROneCOne
+  Set relation = New ROneCOne
+  ValidateRelationOwnership relation
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a guarded Collection item member should remain non-Nothing in the helper: %+v", got)
+	}
+}
+
+func TestVBA202Issue448ResolvesNestedClassFunctionResults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Driver.cls", `Attribute VB_Name = "Driver"
+Option Explicit
+
+Public Function Windows() As WebWindows
+  Set Windows = New WebWindows
+End Function
+
+Public Function ActiveWindow() As WebWindow
+  Set ActiveWindow = New WebWindow
+End Function
+
+Public Function GetByName(ByVal name As String) As WebWindows
+  Set GetByName = New WebWindows
+End Function
+`)
+	writeClass(t, dir, "WebWindows.cls", `Attribute VB_Name = "WebWindows"
+Option Explicit
+
+Public Function Handles() As Collection
+  Dim values As Collection
+  Set values = New Collection
+  Set Handles = values
+End Function
+`)
+	writeClass(t, dir, "WebWindow.cls", `Attribute VB_Name = "WebWindow"
+Option Explicit
+
+Public Property Get Bounds() As Collection
+  Dim values As Collection
+  Set values = New Collection
+  Set Bounds = values
+End Property
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run()
+  Dim driver As Driver
+  Dim allHandles As Collection
+  Dim bounds As Collection
+  Dim dottedHandles As Collection
+  Set driver = New Driver
+  Set allHandles = driver.Windows.Handles
+  Set bounds = driver.ActiveWindow.Bounds
+  Set dottedHandles = driver.GetByName("a.b").Handles
+  Debug.Print allHandles.Count
+  Debug.Print bounds.Count
+  Debug.Print dottedHandles.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("nested project-local object results should establish object state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448KeepsNullableNestedClassFunctionResults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Driver.cls", `Attribute VB_Name = "Driver"
+Option Explicit
+
+Public Function Windows(ByVal createWindows As Boolean) As WebWindows
+  If createWindows Then Set Windows = New WebWindows
+End Function
+`)
+	writeClass(t, dir, "WebWindows.cls", `Attribute VB_Name = "WebWindows"
+Option Explicit
+
+Public Function Handles() As Collection
+  Dim values As Collection
+  Set values = New Collection
+  Set Handles = values
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run()
+  Dim driver As Driver
+  Dim allHandles As Collection
+  Set driver = New Driver
+  Set allHandles = driver.Windows(False).Handles
+  Debug.Print allHandles.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 || got[0].Line != 8 {
+		t.Fatalf("a nullable intermediate class result must remain unsafe: %+v", got)
+	}
+}
+
+func TestVBA202Issue448KeepsNullableNestedClassRoot(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Driver.cls", `Attribute VB_Name = "Driver"
+Option Explicit
+
+Public Function Windows() As WebWindows
+  Set Windows = New WebWindows
+End Function
+`)
+	writeClass(t, dir, "WebWindows.cls", `Attribute VB_Name = "WebWindows"
+Option Explicit
+
+Public Function Handles() As Collection
+  Dim values As Collection
+  Set values = New Collection
+  Set Handles = values
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run(ByVal createDriver As Boolean)
+  Dim driver As Driver
+  Dim allHandles As Collection
+  If createDriver Then Set driver = New Driver
+  Set allHandles = driver.Windows.Handles
+  Debug.Print allHandles.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	rootFinding := false
+	for _, finding := range got {
+		if finding.Line == 8 {
+			rootFinding = true
+			break
+		}
+	}
+	if !rootFinding {
+		t.Fatalf("a nullable root object must remain unsafe through a nested member chain: %+v", got)
+	}
+}
+
 func TestVBA202Issue448KeepsNullablePublicCollectionReceiver(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
