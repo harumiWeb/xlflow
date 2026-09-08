@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"maps"
 	"regexp"
 	"sort"
 	"strings"
@@ -8,7 +9,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
-var redimWhileEqualityRe = regexp.MustCompile(`(?i)^\s*while\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*=\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?|[-+]?[0-9]+)\s*$`)
+var redimWhileEqualityRe = regexp.MustCompile(`(?i)^\s*while\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?|[-+]?[0-9]+)\s*$`)
 var redimSelectCaseRe = regexp.MustCompile(`(?i)^\s*select\s+case\s+(.+?)\s*$`)
 
 // redimPreserveLoopFinding reports a ReDim Preserve which executes on a
@@ -35,7 +36,7 @@ func (a Analyzer) redimPreserveLoopFindingsPreparedWithApplicability(file parsed
 	applicable := false
 	seen := map[string]bool{}
 	statements := redimProcedureStatements(proc)
-	constants := excelIntegerConstants(proc)
+	constants := redimIntegerConstants(file, proc)
 	for statement := range proc.Statements.All() {
 		if statement.Recovered || !arrayRedimPreserveStatement(statement.Text) {
 			continue
@@ -47,12 +48,18 @@ func (a Analyzer) redimPreserveLoopFindingsPreparedWithApplicability(file parsed
 		// A loop header itself is not a repeated body operation. The CFG
 		// region's Body map is also what excludes unreachable statements.
 		bodyLoops := containing[:0]
+		unreachable := false
 		for _, loop := range containing {
-			if loop.Body[statement.ID] && !redimPreserveLoopBodyImpossible(proc, statements, constants, loop.StatementID) {
-				bodyLoops = append(bodyLoops, loop)
+			if !loop.Body[statement.ID] {
+				continue
 			}
+			if redimPreserveLoopBodyImpossible(proc, statements, constants, loop.StatementID) {
+				unreachable = true
+				break
+			}
+			bodyLoops = append(bodyLoops, loop)
 		}
-		if len(bodyLoops) == 0 {
+		if unreachable || len(bodyLoops) == 0 {
 			continue
 		}
 
@@ -135,11 +142,12 @@ func (a Analyzer) redimPreserveLoopFindingsPreparedWithApplicability(file parsed
 
 // redimPreserveLoopBodyImpossible recognizes a narrow, source-proven
 // unreachable loop shape: a simple While equality under a Select Case clause
-// compares the unchanged selector with a different enum member (or known
-// integer). The CFG remains structurally conservative around Select Case, but
-// VBA's case entry establishes the selector value before the loop condition is
-// evaluated. Do not generalize this to arbitrary expressions or modified
-// selectors; unknown paths must remain eligible for the advisory.
+// compares the unchanged selector with a resolved, different enum member (or
+// known integer). The CFG remains structurally conservative around Select Case,
+// but VBA's case entry establishes the selector value before the loop condition
+// is evaluated. Do not generalize this to arbitrary expressions, modified or
+// qualified selectors, or unresolved values; unknown paths must remain eligible
+// for the advisory.
 func redimPreserveLoopBodyImpossible(proc sourceProcedure, statements map[int]procedureir.Statement, constants map[string]int, loopID int) bool {
 	loop, ok := statements[loopID]
 	if !ok {
@@ -172,6 +180,82 @@ func redimProcedureStatements(proc sourceProcedure) map[int]procedureir.Statemen
 		statements[statement.ID] = statement
 	}
 	return statements
+}
+
+func redimIntegerConstants(file parsedFile, proc sourceProcedure) map[string]int {
+	base := arrayIntegerModuleConstants(file)
+	constants := make(map[string]int, len(base)+4)
+	maps.Copy(constants, base)
+	maps.Copy(constants, excelIntegerConstants(proc))
+	redimQualifiedEnumConstants(file, constants)
+	return constants
+}
+
+func redimQualifiedEnumConstants(file parsedFile, constants map[string]int) {
+	enumName := ""
+	nextValue := 0
+	nextKnown := false
+	conditionalDepth := 0
+	for _, line := range file.Lines {
+		code := strings.TrimSpace(normalizedCodeLine(line))
+		lower := strings.ToLower(code)
+		if strings.HasPrefix(lower, "#if ") {
+			conditionalDepth++
+			continue
+		}
+		if strings.HasPrefix(lower, "#end if") {
+			if conditionalDepth > 0 {
+				conditionalDepth--
+			}
+			continue
+		}
+		if conditionalDepth > 0 || strings.HasPrefix(lower, "#elseif ") || strings.HasPrefix(lower, "#else") {
+			continue
+		}
+		if strings.HasPrefix(lower, "enum ") || strings.HasPrefix(lower, "public enum ") || strings.HasPrefix(lower, "private enum ") || strings.HasPrefix(lower, "friend enum ") {
+			fields := strings.Fields(code)
+			if len(fields) >= 2 {
+				enumName = cleanIdentifier(fields[len(fields)-1])
+				nextValue = 0
+				nextKnown = true
+			}
+			continue
+		}
+		if strings.HasPrefix(lower, "end enum") {
+			enumName = ""
+			nextKnown = false
+			continue
+		}
+		if enumName == "" || code == "" {
+			continue
+		}
+		parts := strings.SplitN(code, "=", 2)
+		fields := strings.Fields(parts[0])
+		if len(fields) == 0 {
+			continue
+		}
+		memberName := cleanIdentifier(fields[0])
+		if memberName == "" {
+			continue
+		}
+		value := 0
+		if len(parts) == 2 {
+			parsed, err := constantIntegerExpression(strings.TrimSpace(parts[1]), constants)
+			if err != nil {
+				nextKnown = false
+				continue
+			}
+			value = parsed
+		} else {
+			if !nextKnown {
+				continue
+			}
+			value = nextValue
+		}
+		constants[strings.ToLower(enumName+"."+memberName)] = value
+		nextValue = value + 1
+		nextKnown = true
+	}
 }
 
 func redimEnclosingCase(proc sourceProcedure, statements map[int]procedureir.Statement, loop procedureir.Statement) (caseClause, caseValue, selectHeader procedureir.Statement, ok bool) {
@@ -212,13 +296,27 @@ func redimCaseSelectorWrittenBeforeLoop(proc sourceProcedure, statements map[int
 		if access.StatementID == loopID {
 			continue
 		}
-		statement, ok := statements[access.StatementID]
-		if !ok || statement.Range.StartLine >= loop.Range.StartLine || !redimStatementDescendsFrom(statements, access.StatementID, caseClauseID) {
+		if !redimAccessBeforeLoop(access, loop) || !redimStatementDescendsFrom(statements, access.StatementID, caseClauseID) {
 			continue
 		}
 		return true
 	}
 	return false
+}
+
+func redimAccessBeforeLoop(access procedureir.VariableAccess, loop procedureir.Statement) bool {
+	if access.Range.EndByte > access.Range.StartByte && loop.Range.EndByte > loop.Range.StartByte {
+		return access.Range.StartByte < loop.Range.StartByte
+	}
+	if access.Range.StartLine != loop.Range.StartLine {
+		return access.Range.StartLine < loop.Range.StartLine
+	}
+	if access.Range.StartColumn != loop.Range.StartColumn {
+		return access.Range.StartColumn < loop.Range.StartColumn
+	}
+	// Equal or incomplete ranges cannot prove that the write follows the
+	// loop header. Treat the write as preceding it and stay conservative.
+	return true
 }
 
 func redimStatementDescendsFrom(statements map[int]procedureir.Statement, statementID, ancestorID int) bool {
@@ -244,17 +342,21 @@ func redimDistinctCaseValues(caseValue, loopValue string, constants map[string]i
 	if strings.EqualFold(caseValue, loopValue) {
 		return false
 	}
-	if caseNumber, err := constantIntegerExpression(caseValue, constants); err == nil {
-		if loopNumber, err := constantIntegerExpression(loopValue, constants); err == nil {
-			return caseNumber != loopNumber
-		}
+	caseNumber, caseKnown := redimKnownInteger(caseValue, constants)
+	loopNumber, loopKnown := redimKnownInteger(loopValue, constants)
+	if caseKnown && loopKnown {
+		return caseNumber != loopNumber
 	}
-	caseDot := strings.LastIndex(caseValue, ".")
-	loopDot := strings.LastIndex(loopValue, ".")
-	if caseDot <= 0 || loopDot <= 0 {
-		return false
+	return false
+}
+
+func redimKnownInteger(text string, constants map[string]int) (int, bool) {
+	key := strings.ToLower(strings.TrimSpace(text))
+	if value, ok := constants[key]; ok {
+		return value, true
 	}
-	return strings.EqualFold(caseValue[:caseDot], loopValue[:loopDot]) && !strings.EqualFold(caseValue[caseDot+1:], loopValue[loopDot+1:])
+	value, err := constantIntegerExpression(text, constants)
+	return value, err == nil
 }
 
 // redimLoopVariables extends the shared loop-variable extraction for Do loops.

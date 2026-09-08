@@ -175,14 +175,52 @@ func TestVBA241ExcludesLoopContradictedByEnclosingEnumCase(t *testing.T) {
 Private Enum EBufferType
     BinaryFragment = 1
     Utf8Fragment = 3
+    Utf8FragmentAlias = 3
 End Enum
 
 Public Sub Receive()
     Dim state As EBufferType
     Dim values() As Long
+    Dim i As Long
     Select Case state
     Case EBufferType.Utf8Fragment
+        For i = 1 To 2
+            While state = EBufferType.BinaryFragment
+                ReDim Preserve values(1 To 10)
+            Wend
+        Next i
+    End Select
+End Sub
+
+Public Sub ReceiveAlias()
+    Dim state As EBufferType
+    Dim values() As Long
+    Select Case state
+    Case EBufferType.Utf8Fragment
+        While state = EBufferType.Utf8FragmentAlias
+            ReDim Preserve values(1 To 10)
+        Wend
+    End Select
+End Sub
+
+Public Sub ReceiveAfterChange()
+    Dim state As EBufferType
+    Dim values() As Long
+    Select Case state
+    Case EBufferType.Utf8Fragment
+        state = EBufferType.BinaryFragment
         While state = EBufferType.BinaryFragment
+            ReDim Preserve values(1 To 10)
+        Wend
+    End Select
+End Sub
+
+Public Sub ReceiveQualified()
+    Dim holder As Object
+    Dim values() As Long
+    Select Case holder.State
+    Case EBufferType.Utf8Fragment
+        While holder.State = EBufferType.BinaryFragment
             ReDim Preserve values(1 To 10)
         Wend
     End Select
@@ -192,8 +230,8 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA241"); len(got) != 0 {
-		t.Fatalf("enum-case-contradicted loop produced VBA241: %+v", got)
+	if got := findingsByCode(findings, "VBA241"); len(got) != 3 {
+		t.Fatalf("enum-case reachability findings = %+v, want alias, post-write, and qualified-selector loops", got)
 	}
 }
 
