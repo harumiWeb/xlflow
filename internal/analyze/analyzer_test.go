@@ -536,6 +536,27 @@ End Sub
 	}
 }
 
+func TestVBA225IgnoresInMemoryCollectionItemLoops(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal cells As Collection, ByVal columns As Collection)
+  Dim index As Long
+  For index = 1 To 100
+    Debug.Print cells.Item(index)
+    Debug.Print columns.Item(index)
+  Next index
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 0 {
+		t.Fatalf("in-memory Collection.Item loops should not produce VBA225: %+v", got)
+	}
+}
+
 func TestVBA225SupportsForEachOffsetWorksheetFunctionsAndBorders(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

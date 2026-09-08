@@ -4571,9 +4571,6 @@ func (a Analyzer) inferWordTypeInfoAtContextWithState(doc Document, word string,
 	if control, ok := a.resolveFormControl(doc, word); ok {
 		return inferredType{Type: control.Type, Source: "UserForm control"}, true
 	}
-	if typ, ok := a.DB.ResolveGlobal(word); ok {
-		return inferredType{Type: typ.Name, Source: "built-in global"}, true
-	}
 	var declared inferredType
 	if offset >= 0 {
 		if inferred, ok := a.visibleSymbolTypeInfoAtContext(doc, word, offset, ctx); ok {
@@ -4582,6 +4579,9 @@ func (a Analyzer) inferWordTypeInfoAtContextWithState(doc Document, word string,
 				return inferred, true
 			}
 		} else if currentProcedureNameAt(doc, positionForDocumentByteOffset(doc, offset), ctx) != "" {
+			if typ, ok := a.DB.ResolveGlobal(word); ok {
+				return inferredType{Type: typ.Name, Source: "built-in global"}, true
+			}
 			return inferredType{}, false
 		}
 	}
@@ -4636,6 +4636,9 @@ func (a Analyzer) inferWordTypeInfoAtContextWithState(doc Document, word string,
 	}
 	if declared.Type != "" {
 		return declared, true
+	}
+	if typ, ok := a.DB.ResolveGlobal(word); ok {
+		return inferredType{Type: typ.Name, Source: "built-in global"}, true
 	}
 	return inferredType{}, false
 }
@@ -4943,16 +4946,18 @@ func (a Analyzer) resolveExpressionTypeAtContextWithState(doc Document, expr str
 		}
 		current = instance.Type
 		formMode = strings.EqualFold(current, "MSForms.UserForm")
-	} else if typ, ok := a.DB.ResolveGlobal(base); ok {
-		current = typ.Name
 	} else if useDocument {
 		if inferred, ok := a.inferWordTypeInfoAtContextWithState(doc, base, offset, ctx, state); ok {
 			current = inferred.Type
+		} else if typ, ok := a.DB.ResolveGlobal(base); ok {
+			current = typ.Name
 		} else if typ, ok := a.DB.ResolveType(base); ok {
 			current = typ.Name
 		} else {
 			return "", false
 		}
+	} else if typ, ok := a.DB.ResolveGlobal(base); ok {
+		current = typ.Name
 	} else if typ, ok := a.DB.ResolveType(base); ok {
 		current = typ.Name
 	} else {
