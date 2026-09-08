@@ -120,6 +120,61 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RecognizesColonSeparatedFactoryInitialization(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CreateDictionary(ParamArray args()) As Object
+  Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+  Dim i As Long
+  For i = 0 To UBound(args) Step 2
+    dict.Add args(i), args(i + 1)
+  Next
+  Set CreateDictionary = dict
+End Function
+
+Private Function CreateCollection() As Collection
+  Dim values As Collection: Set values = New Collection
+  values.Add "item"
+  Set CreateCollection = values
+End Function
+
+Private Function DispatchObject() As Object
+  Dim response As Object: Set response = CreateObject("Scripting.Dictionary")
+  Set DispatchObject = response
+End Function
+
+Private Function ForwardObject() As Object
+  Dim response As Object: Set response = DispatchObject()
+  Set ForwardObject = response
+End Function
+
+Private Sub ConsumeCollection(ByVal values As Collection)
+  Debug.Print values.Count
+End Sub
+
+Public Sub Run()
+  Dim ast As Object
+  Set ast = CreateDictionary("value", New Collection)
+  ast("value").Add "item"
+
+  Dim values As Collection: Set values = CreateCollection()
+  ConsumeCollection values
+
+  Dim request As Object: Set request = ForwardObject()
+  Debug.Print request.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("colon-separated object factories and their callers must establish returned objects: %+v", got)
+	}
+}
+
 func TestVBA202Issue448ChecksCollectionAndDictionaryDefaultItems(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

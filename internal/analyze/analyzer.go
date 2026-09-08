@@ -3593,6 +3593,14 @@ func declarationNameAndType(text string) (string, string, bool, bool) {
 		namePart = strings.TrimSpace(text[:idx])
 		typ = strings.TrimSpace(text[idx+4:])
 	}
+	// A declaration may share a physical line with the next VBA statement,
+	// for example `Dim value As Object: Set value = ...`. The declaration
+	// parser receives the complete colon-separated segment; keep only the type
+	// before the following statement so object flow does not lose the Object
+	// classification.
+	if colon := strings.IndexByte(typ, ':'); colon >= 0 {
+		typ = strings.TrimSpace(typ[:colon])
+	}
 	newExpr := false
 	if strings.HasPrefix(strings.ToLower(typ), "new ") {
 		newExpr = true
