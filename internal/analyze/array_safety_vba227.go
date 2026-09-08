@@ -2126,15 +2126,22 @@ func arrayVBA227ResumeNextContinuations(graph vbacfg.CFGView) map[vbacfg.BlockID
 	errorSources := map[vbacfg.BlockID]map[vbacfg.BlockID]bool{}
 	blocksByID := map[vbacfg.BlockID]vbacfg.Block{}
 	statementBlocks := map[int]vbacfg.BlockID{}
+	statementKinds := map[int]procedureir.StatementKind{}
 	parents := map[int]int{}
+	children := map[int][]int{}
 	graph.ForEachBlock(func(block vbacfg.Block) bool {
 		blocksByID[block.ID] = block
 		if block.Statement != nil {
 			statementBlocks[block.Statement.ID] = block.ID
+			statementKinds[block.Statement.ID] = block.Statement.Kind
 			parents[block.Statement.ID] = block.Statement.ParentID
+			children[block.Statement.ParentID] = append(children[block.Statement.ParentID], block.Statement.ID)
 		}
 		return true
 	})
+	for parent := range children {
+		slices.Sort(children[parent])
+	}
 
 	compoundAncestors := map[vbacfg.BlockID][]vbacfg.BlockID{}
 	compoundBlocks := map[vbacfg.BlockID]bool{}
@@ -2163,7 +2170,8 @@ func arrayVBA227ResumeNextContinuations(graph vbacfg.CFGView) map[vbacfg.BlockID
 	graph.ForEachEdge(func(edge vbacfg.Edge) bool {
 		if edge.Class == vbacfg.EdgeNormal {
 			normalOutgoing[edge.From] = append(normalOutgoing[edge.From], edge.To)
-			if arrayVBA227NaturalContinuationEdge(edge.Kind) {
+			if arrayVBA227NaturalContinuationEdge(edge.Kind) &&
+				(edge.Kind != vbacfg.EdgeLoopExit || !arrayVBA227ExplicitLoopExit(blocksByID[edge.From])) {
 				for _, compoundID := range compoundAncestors[edge.From] {
 					compound := blocksByID[compoundID]
 					target := blocksByID[edge.To]
@@ -2206,11 +2214,30 @@ func arrayVBA227ResumeNextContinuations(graph vbacfg.CFGView) map[vbacfg.BlockID
 		return nil
 	}
 
+	handlerLabels := map[int]bool{}
+	for handler := range errorSources {
+		if block := blocksByID[handler]; block.Statement != nil {
+			handlerLabels[block.Statement.ID] = true
+		}
+	}
+	compoundFallbacks := make(map[vbacfg.BlockID]vbacfg.BlockID, len(compoundBlocks))
+	for compoundID := range compoundBlocks {
+		compound := blocksByID[compoundID]
+		if compound.Statement == nil {
+			continue
+		}
+		if target := arrayVBA227SyntaxContinuation(compound.Statement.ID, graph.NormalExit(), statementBlocks, statementKinds, parents, children, handlerLabels); target != 0 {
+			compoundFallbacks[compoundID] = target
+		}
+	}
+
 	compoundTargets := make(map[vbacfg.BlockID][]vbacfg.BlockID, len(compoundBlocks))
 	for compoundID := range compoundBlocks {
 		targets := compoundTargetSets[compoundID]
 		if len(targets) == 0 {
-			if exit := graph.NormalExit(); exit != 0 {
+			if fallback := compoundFallbacks[compoundID]; fallback != 0 {
+				compoundTargets[compoundID] = []vbacfg.BlockID{fallback}
+			} else if exit := graph.NormalExit(); exit != 0 {
 				compoundTargets[compoundID] = []vbacfg.BlockID{exit}
 			}
 			continue
@@ -2280,6 +2307,18 @@ func arrayVBA227NaturalContinuationEdge(kind vbacfg.EdgeKind) bool {
 	}
 }
 
+func arrayVBA227ExplicitLoopExit(block vbacfg.Block) bool {
+	if block.Statement == nil || block.Statement.Control == nil {
+		return false
+	}
+	switch block.Statement.Control.Transfer {
+	case procedureir.TransferExitFor, procedureir.TransferExitDo:
+		return true
+	default:
+		return false
+	}
+}
+
 func arrayVBA227CompoundStatement(kind procedureir.StatementKind) bool {
 	switch kind {
 	case procedureir.StatementIf, procedureir.StatementElseIf, procedureir.StatementSelect,
@@ -2303,6 +2342,55 @@ func arrayVBA227WithinStatement(statementID, ancestorID int, parents map[int]int
 		seen[current] = true
 	}
 	return false
+}
+
+func arrayVBA227SyntaxContinuation(statementID int, normalExit vbacfg.BlockID, statementBlocks map[int]vbacfg.BlockID, statementKinds map[int]procedureir.StatementKind, parents map[int]int, children map[int][]int, handlerLabels map[int]bool) vbacfg.BlockID {
+	seen := map[int]bool{}
+	current := statementID
+	for current != 0 && !seen[current] {
+		seen[current] = true
+		parent := parents[current]
+		for _, candidate := range children[parent] {
+			if candidate <= current || arrayVBA227AlternativeChild(statementKinds[parent], statementKinds[candidate]) {
+				continue
+			}
+			if handlerLabels[candidate] {
+				break
+			}
+			if statementKinds[candidate] == procedureir.StatementLabel {
+				continue
+			}
+			if block, ok := statementBlocks[candidate]; ok {
+				return block
+			}
+		}
+		if parent == 0 {
+			break
+		}
+		if arrayVBA227LoopStatement(statementKinds[parent]) {
+			if block, ok := statementBlocks[parent]; ok {
+				return block
+			}
+		}
+		current = parent
+	}
+	return normalExit
+}
+
+func arrayVBA227AlternativeChild(parent, child procedureir.StatementKind) bool {
+	if parent == procedureir.StatementIf || parent == procedureir.StatementElseIf {
+		return child == procedureir.StatementElse || child == procedureir.StatementElseIf
+	}
+	return parent == procedureir.StatementSelect && child == procedureir.StatementCase
+}
+
+func arrayVBA227LoopStatement(kind procedureir.StatementKind) bool {
+	switch kind {
+	case procedureir.StatementFor, procedureir.StatementForEach, procedureir.StatementDo, procedureir.StatementWhile:
+		return true
+	default:
+		return false
+	}
 }
 
 func arrayVBA227ResumeNextAfterStatement(active bool, text string) bool {

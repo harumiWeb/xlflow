@@ -10063,6 +10063,52 @@ func TestAnalyzerVBA227ResumeNextTerminalCompoundUsesNormalExit(t *testing.T) {
 	}
 }
 
+func TestAnalyzerVBA227ResumeNextCompoundSkipsExplicitLoopExit(t *testing.T) {
+	t.Parallel()
+	compound := &procedureir.Statement{ID: 1, Kind: procedureir.StatementIf, Text: "If condition Then", Range: vbaast.Range{StartLine: 2}}
+	exitLoop := &procedureir.Statement{
+		ID: 2, ParentID: compound.ID, Kind: procedureir.StatementExit, Text: "Exit For",
+		Control: &procedureir.ControlFlowMetadata{Transfer: procedureir.TransferExitFor},
+		Range:   vbaast.Range{StartLine: 3},
+	}
+	postCompound := &procedureir.Statement{ID: 3, Kind: procedureir.StatementCall, Text: "AfterIf", Range: vbaast.Range{StartLine: 5}}
+	handler := &procedureir.Statement{ID: 4, Kind: procedureir.StatementLabel, Text: "Handler:", Range: vbaast.Range{StartLine: 7}}
+	resume := &procedureir.Statement{
+		ID: 5, Kind: procedureir.StatementResume, Text: "Resume Next",
+		Control: &procedureir.ControlFlowMetadata{Transfer: procedureir.TransferResumeNext},
+		Range:   vbaast.Range{StartLine: 8},
+	}
+	afterLoop := &procedureir.Statement{ID: 6, Kind: procedureir.StatementCall, Text: "AfterLoop", Range: vbaast.Range{StartLine: 10}}
+	graph := vbacfg.Graph{
+		Blocks: []vbacfg.Block{
+			{ID: 1, Kind: vbacfg.BlockEntry},
+			{ID: 2, Kind: vbacfg.BlockStatement, StatementID: compound.ID, Statement: compound},
+			{ID: 3, Kind: vbacfg.BlockStatement, StatementID: exitLoop.ID, Statement: exitLoop},
+			{ID: 4, Kind: vbacfg.BlockStatement, StatementID: postCompound.ID, Statement: postCompound},
+			{ID: 5, Kind: vbacfg.BlockStatement, StatementID: handler.ID, Statement: handler},
+			{ID: 6, Kind: vbacfg.BlockStatement, StatementID: resume.ID, Statement: resume},
+			{ID: 7, Kind: vbacfg.BlockStatement, StatementID: afterLoop.ID, Statement: afterLoop},
+			{ID: 8, Kind: vbacfg.BlockNormalExit},
+			{ID: 9, Kind: vbacfg.BlockUnknownExit},
+		},
+		Edges: []vbacfg.Edge{
+			{From: 1, To: 2, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 3, Kind: vbacfg.EdgeBranchTrue, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 5, Kind: vbacfg.EdgeError, Class: vbacfg.EdgeExceptional},
+			{From: 3, To: 7, Kind: vbacfg.EdgeLoopExit, Class: vbacfg.EdgeNormal},
+			{From: 4, To: 8, Class: vbacfg.EdgeNormal},
+			{From: 5, To: 6, Class: vbacfg.EdgeNormal},
+			{From: 6, To: 9, Kind: vbacfg.EdgeResume, Class: vbacfg.EdgeExceptional, Uncertain: true},
+			{From: 7, To: 8, Class: vbacfg.EdgeNormal},
+		},
+		Entry: 1, NormalExit: 8, UnknownExit: 9,
+	}
+	continuations := arrayVBA227ResumeNextContinuations(graph.View(vbacfg.EdgeFilter{}))[6]
+	if len(continuations) != 1 || continuations[0] != 4 {
+		t.Fatalf("compound Resume Next continuations = %v, want post-compound block 4", continuations)
+	}
+}
+
 func TestAnalyzerVBA227SuccessfulBoundsClearResumeNextFailure(t *testing.T) {
 	t.Parallel()
 	state := arrayFlowState{
