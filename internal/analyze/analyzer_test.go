@@ -9861,7 +9861,6 @@ Public Sub Run()
   Debug.Print UBound(values)
   Exit Sub
 Handler:
-  On Error Resume Next
   Resume Next
 End Sub
 
@@ -9877,6 +9876,65 @@ End Sub
 	got := findingsByCode(findings, "VBA227")
 	if len(got) != 1 || got[0].Procedure != "Run" || got[0].Line != 11 {
 		t.Fatalf("Resume Next from an error handler must reach the following array-return assignment: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227ResumeNextCompoundSourceUsesPostCompoundContinuation(t *testing.T) {
+	t.Parallel()
+	compound := &procedureir.Statement{
+		ID: 1, Kind: procedureir.StatementIf, Text: "If condition Then",
+		Range: vbaast.Range{StartLine: 2, EndLine: 5, StartByte: 10, EndByte: 50},
+	}
+	thenBranch := &procedureir.Statement{
+		ID: 2, ParentID: compound.ID, Kind: procedureir.StatementCall, Text: "ThenWork",
+		Range: vbaast.Range{StartLine: 3, EndLine: 3, StartByte: 20, EndByte: 28},
+	}
+	elseBranch := &procedureir.Statement{
+		ID: 3, ParentID: compound.ID, Kind: procedureir.StatementCall, Text: "ElseWork",
+		Range: vbaast.Range{StartLine: 4, EndLine: 4, StartByte: 30, EndByte: 38},
+	}
+	continuation := &procedureir.Statement{
+		ID: 4, Kind: procedureir.StatementCall, Text: "ContinueWork",
+		Range: vbaast.Range{StartLine: 6, EndLine: 6, StartByte: 60, EndByte: 72},
+	}
+	handler := &procedureir.Statement{
+		ID: 5, Kind: procedureir.StatementLabel, Label: "Handler", Text: "Handler:",
+		Range: vbaast.Range{StartLine: 8, EndLine: 8, StartByte: 80, EndByte: 88},
+	}
+	resume := &procedureir.Statement{
+		ID: 6, Kind: procedureir.StatementResume, Text: "Resume Next",
+		Control: &procedureir.ControlFlowMetadata{Transfer: procedureir.TransferResumeNext},
+		Range:   vbaast.Range{StartLine: 9, EndLine: 9, StartByte: 90, EndByte: 101},
+	}
+	graph := vbacfg.Graph{
+		Blocks: []vbacfg.Block{
+			{ID: 1, Kind: vbacfg.BlockEntry},
+			{ID: 2, Kind: vbacfg.BlockStatement, StatementID: compound.ID, Statement: compound},
+			{ID: 3, Kind: vbacfg.BlockStatement, StatementID: thenBranch.ID, Statement: thenBranch},
+			{ID: 4, Kind: vbacfg.BlockStatement, StatementID: elseBranch.ID, Statement: elseBranch},
+			{ID: 5, Kind: vbacfg.BlockStatement, StatementID: continuation.ID, Statement: continuation},
+			{ID: 6, Kind: vbacfg.BlockStatement, StatementID: handler.ID, Statement: handler},
+			{ID: 7, Kind: vbacfg.BlockStatement, StatementID: resume.ID, Statement: resume},
+			{ID: 8, Kind: vbacfg.BlockNormalExit},
+			{ID: 9, Kind: vbacfg.BlockUnknownExit},
+		},
+		Edges: []vbacfg.Edge{
+			{From: 1, To: 2, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 3, Kind: vbacfg.EdgeBranchTrue, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 4, Kind: vbacfg.EdgeBranchFalse, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 5, Kind: vbacfg.EdgeFallthrough, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 6, Kind: vbacfg.EdgeError, Class: vbacfg.EdgeExceptional},
+			{From: 3, To: 5, Class: vbacfg.EdgeNormal},
+			{From: 4, To: 5, Class: vbacfg.EdgeNormal},
+			{From: 5, To: 8, Class: vbacfg.EdgeNormal},
+			{From: 6, To: 7, Class: vbacfg.EdgeNormal},
+			{From: 7, To: 9, Kind: vbacfg.EdgeResume, Class: vbacfg.EdgeExceptional, Uncertain: true},
+		},
+		Entry: 1, NormalExit: 8, UnknownExit: 9,
+	}
+	continuations := arrayVBA227ResumeNextContinuations(graph.View(vbacfg.EdgeFilter{}))[7]
+	if len(continuations) != 1 || continuations[0] != 5 {
+		t.Fatalf("compound Resume Next continuations = %v, want only post-compound block 5", continuations)
 	}
 }
 

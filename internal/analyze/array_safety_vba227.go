@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/gui"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
@@ -2092,12 +2093,10 @@ func arrayVBA227ResumeNextPrefixes(file parsedFile, proc sourceProcedure) []bool
 				}
 				return true
 			})
-			if out {
-				for _, target := range resumeNextContinuations[id] {
-					if !inStates[target] {
-						inStates[target] = true
-						queued[target] = true
-					}
+			for _, target := range resumeNextContinuations[id] {
+				if !inStates[target] {
+					inStates[target] = true
+					queued[target] = true
 				}
 			}
 		}
@@ -2119,10 +2118,14 @@ func arrayVBA227ResumeNextPrefixes(file parsedFile, proc sourceProcedure) []bool
 // edge to UnknownExit because its target depends on the statement that
 // raised the error. Error edges retain that missing association: when a
 // Resume Next statement is reachable through a handler, its targets are the
-// normal successors of the fault sites that enter that handler.
+// normal successors of the fault sites that enter that handler. Compound
+// fault sites use the first non-nested statement after their source range,
+// because their direct CFG successors are branch entries rather than the
+// statement after the compound construct.
 func arrayVBA227ResumeNextContinuations(graph vbacfg.CFGView) map[vbacfg.BlockID][]vbacfg.BlockID {
 	normalOutgoing := map[vbacfg.BlockID][]vbacfg.BlockID{}
 	errorSources := map[vbacfg.BlockID]map[vbacfg.BlockID]bool{}
+	parents := map[int]int{}
 	graph.ForEachEdge(func(edge vbacfg.Edge) bool {
 		if edge.Class == vbacfg.EdgeNormal {
 			normalOutgoing[edge.From] = append(normalOutgoing[edge.From], edge.To)
@@ -2136,6 +2139,12 @@ func arrayVBA227ResumeNextContinuations(graph vbacfg.CFGView) map[vbacfg.BlockID
 				errorSources[edge.To] = map[vbacfg.BlockID]bool{}
 			}
 			errorSources[edge.To][edge.From] = true
+		}
+		return true
+	})
+	graph.ForEachBlock(func(block vbacfg.Block) bool {
+		if block.Statement != nil {
+			parents[block.Statement.ID] = block.Statement.ParentID
 		}
 		return true
 	})
@@ -2178,7 +2187,11 @@ func arrayVBA227ResumeNextContinuations(graph vbacfg.CFGView) map[vbacfg.BlockID
 				continuationSets[resumeBlock] = map[vbacfg.BlockID]bool{}
 			}
 			for source := range sources {
-				for _, target := range normalOutgoing[source] {
+				sourceBlock, ok := graph.BlockByID(source)
+				if !ok {
+					continue
+				}
+				for _, target := range arrayVBA227ResumeNextSourceTargets(graph, sourceBlock, normalOutgoing[source], parents) {
 					continuationSets[resumeBlock][target] = true
 				}
 			}
@@ -2197,6 +2210,76 @@ func arrayVBA227ResumeNextContinuations(graph vbacfg.CFGView) map[vbacfg.BlockID
 		slices.Sort(continuations[resumeBlock])
 	}
 	return continuations
+}
+
+func arrayVBA227ResumeNextSourceTargets(graph vbacfg.CFGView, source vbacfg.Block, normalOutgoing []vbacfg.BlockID, parents map[int]int) []vbacfg.BlockID {
+	if source.Statement == nil || !arrayVBA227CompoundStatement(source.Statement.Kind) {
+		return normalOutgoing
+	}
+
+	var best vbacfg.Block
+	found := false
+	graph.ForEachBlock(func(block vbacfg.Block) bool {
+		if block.Kind != vbacfg.BlockStatement || block.Statement == nil || block.ID == source.ID ||
+			arrayVBA227NestedStatement(block.Statement.ID, source.Statement.ID, parents) ||
+			!arrayVBA227AfterStatement(block.Statement.Range, source.Statement.Range) {
+			return true
+		}
+		if !found || arrayVBA227BlockOrderBefore(block, best) {
+			best = block
+			found = true
+		}
+		return true
+	})
+	if !found {
+		return normalOutgoing
+	}
+	return []vbacfg.BlockID{best.ID}
+}
+
+func arrayVBA227CompoundStatement(kind procedureir.StatementKind) bool {
+	switch kind {
+	case procedureir.StatementIf, procedureir.StatementElseIf, procedureir.StatementSelect,
+		procedureir.StatementCase, procedureir.StatementFor, procedureir.StatementForEach,
+		procedureir.StatementWhile, procedureir.StatementDo:
+		return true
+	default:
+		return false
+	}
+}
+
+func arrayVBA227NestedStatement(statementID, ancestorID int, parents map[int]int) bool {
+	seen := map[int]bool{}
+	for current := parents[statementID]; current != 0 && !seen[current]; current = parents[current] {
+		if current == ancestorID {
+			return true
+		}
+		seen[current] = true
+	}
+	return false
+}
+
+func arrayVBA227AfterStatement(target, source vbaast.Range) bool {
+	if source.EndByte > source.StartByte && target.StartByte > 0 {
+		return target.StartByte >= source.EndByte
+	}
+	return target.StartLine > source.EndLine
+}
+
+func arrayVBA227BlockOrderBefore(first, second vbacfg.Block) bool {
+	if first.Statement == nil {
+		return false
+	}
+	if second.Statement == nil {
+		return true
+	}
+	if first.Statement.Range.StartByte != second.Statement.Range.StartByte {
+		return first.Statement.Range.StartByte < second.Statement.Range.StartByte
+	}
+	if first.Statement.Range.StartLine != second.Statement.Range.StartLine {
+		return first.Statement.Range.StartLine < second.Statement.Range.StartLine
+	}
+	return first.ID < second.ID
 }
 
 func arrayVBA227ResumeNextAfterStatement(active bool, text string) bool {
