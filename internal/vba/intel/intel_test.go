@@ -1334,6 +1334,60 @@ End Sub
 	}
 }
 
+func TestArgumentDiagnosticsPreferProjectClassOverBuiltinAlias(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		var parameters []Parameter
+		switch strings.ToLower(query.Text) {
+		case "add":
+			parameters = []Parameter{{Name: "Key"}, {Name: "Item"}, {Name: "IgnoreErrors", Optional: true}}
+		case "exists", "remove":
+			parameters = []Parameter{{Name: "Key"}, {Name: "IgnoreErrors", Optional: true}}
+		default:
+			return nil, nil
+		}
+		return []Symbol{{
+			Name: query.Text, Kind: "function", Module: "Dictionary", ModuleKind: "class", Visibility: "Public", Parameters: parameters,
+		}}, nil
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim custom As New Dictionary
+    custom.Add "key", 1, IgnoreErrors:=True
+    custom.Exists "key", IgnoreErrors:=True
+    custom.Remove "key", IgnoreErrors:=True
+    Dim builtin As Scripting.Dictionary
+    builtin.Add "key", 1, IgnoreErrors:=True
+End Sub
+`,
+	}
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045")
+	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "expects at most 2 argument") {
+		t.Fatalf("project Dictionary and qualified Scripting.Dictionary resolution = %+v, want only the qualified built-in error", diagnostics)
+	}
+}
+
+func TestArgumentDiagnosticsTreatIndexedDefaultMemberAsItsResult(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim dict As Scripting.Dictionary
+    dict("items").Add 1
+End Sub
+`,
+	}
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(diagnostics) != 0 {
+		t.Fatalf("indexed Dictionary.Item result was validated as the container: %+v", diagnostics)
+	}
+	if got, ok := analyzer.resolveDocumentExpressionTypeAt(doc, `dict("items")`, strings.Index(doc.Source, `dict("items")`)); !ok || !strings.EqualFold(got, "Variant") {
+		t.Fatalf("indexed Dictionary.Item type = %q, %v; want Variant, true", got, ok)
+	}
+}
+
 func TestProjectMemberSignatureCompletenessRejectsTruncatedSymbol(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	path := filepath.Join(t.TempDir(), "Widget.cls")
@@ -2212,6 +2266,114 @@ func TestDiagnosticsIncludeParenlessCallAfterSpace(t *testing.T) {
 	vb045 := diagnosticsByCode(diagnostics, "VB045")
 	if !hasDiagnosticMessage(vb045, "expects at least 2 argument") {
 		t.Fatalf("missing parenless empty argument diagnostic: %+v", diagnostics)
+	}
+}
+
+func TestArgumentDiagnosticsDoNotDoubleCountParenthesizedByRefArguments(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "DecryptData") {
+			return nil, nil
+		}
+		return []Symbol{{
+			Name: "DecryptData", Kind: "sub", Module: "Main", ModuleKind: "standard", Visibility: "Public",
+			Parameters: []Parameter{{Name: "EncryptedData"}, {Name: "KeyData"}, {Name: "DecryptedData"}},
+		}}, nil
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim first As Long
+    Dim second As Long
+    Dim third As Long
+    DecryptData (first), (second), third
+End Sub
+`,
+	}
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(diagnostics) != 0 {
+		t.Fatalf("parenthesized ByRef arguments were double-counted as a nested call: %+v", diagnostics)
+	}
+	calls := callsOnLine("    DecryptData (first), (second), third")
+	if len(calls) != 1 || !strings.EqualFold(calls[0].Target, "DecryptData") || len(calls[0].Arguments) != 3 {
+		t.Fatalf("parsed ByRef call = %+v, want one three-argument call", calls)
+	}
+}
+
+func TestArgumentDiagnosticsDoNotDoubleCountSingleParenthesizedArgument(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "Foo") {
+			return nil, nil
+		}
+		return []Symbol{{
+			Name: "Foo", Kind: "sub", Module: "Main", ModuleKind: "standard", Visibility: "Public",
+			Parameters: []Parameter{{Name: "First"}, {Name: "Second"}},
+		}}, nil
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim value As Long
+    Foo (value)
+End Sub
+`,
+	}
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045")
+	if len(diagnostics) != 1 || !hasDiagnosticMessage(diagnostics, "expects at least 2 argument") {
+		t.Fatalf("single parenthesized argument should produce one arity diagnostic: diagnostics=%+v calls=%+v", diagnostics, callsOnLine("    Foo (value)"))
+	}
+	if calls := callsOnLine("    Foo (value)"); len(calls) != 1 || len(calls[0].Arguments) != 1 {
+		t.Fatalf("parsed call = %+v, want one one-argument call", calls)
+	}
+}
+
+func TestCallParserIgnoresBracketedMemberTextAndAssignments(t *testing.T) {
+	bracketed := callsOnLine(`    sb.[string which can even include " ' # ! / \ without    ]`)
+	if len(bracketed) != 0 {
+		t.Fatalf("bracketed member text was parsed as a call: %+v", bracketed)
+	}
+	assignment := callsOnLine(`web_GetUrlEncodedKeyValue = UrlEncode(Key, EncodingMode:=EncodingMode) & "=" & UrlEncode(Value, EncodingMode:=EncodingMode)`)
+	for _, call := range assignment {
+		if strings.EqualFold(call.Target, "web_GetUrlEncodedKeyValue") {
+			t.Fatalf("assignment target was parsed as a parenless call: %+v", assignment)
+		}
+	}
+}
+
+func TestArgumentDiagnosticsAcceptSeekStatementAndFunctionForms(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim position As Long
+    Seek #1, position
+    position = Seek(1)
+End Sub
+`,
+	}
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(diagnostics) != 0 {
+		t.Fatalf("Seek statement/function forms produced argument diagnostics: %+v", diagnostics)
+	}
+}
+
+func TestArgumentDiagnosticsRejectInvalidSeekStatementAndFunctionArities(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim position As Long
+    Seek #1
+    position = Seek(1, 2)
+End Sub
+`,
+	}
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045")
+	if len(diagnostics) != 2 {
+		t.Fatalf("invalid Seek statement/function forms should each produce one argument diagnostic: %+v", diagnostics)
 	}
 }
 

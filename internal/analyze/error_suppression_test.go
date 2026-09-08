@@ -243,6 +243,97 @@ End Sub
 	}
 }
 
+func TestVBA237AcceptsCheckedResumeNextFallback(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function ArrayCount(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  ArrayCount = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+    ArrayCount = 0
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+		t.Fatalf("checked Resume Next fallback should not report VBA237: %+v", got)
+	}
+}
+
+func TestVBA237AcceptsLetCheckedSeparateArrayBoundsProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function LetArrayCount(ParamArray values() As Variant) As Long
+  Dim lowerBound As Long
+  Dim itemCount As Long
+  On Error Resume Next
+  Let lowerBound = LBound(values)
+  Let itemCount = UBound(values) - lowerBound + 1
+  If Err.Number <> 0 Then
+    Let itemCount = 0
+    Let lowerBound = 0
+  End If
+  Err.Clear
+  On Error GoTo 0
+  Let LetArrayCount = itemCount
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("Let checked bounds probe should not report VBA214: %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+		t.Fatalf("Let checked bounds probe should not report VBA237: %+v", got)
+	}
+}
+
+func TestVBA237AcceptsProbeResultInspectionAndBooleanStatus(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function IsJagged(ByRef value As Variant) As Boolean
+  Dim testVal As Variant
+  On Error Resume Next
+  testVal = value(LBound(value))
+  IsJagged = IsArray(testVal)
+  On Error GoTo 0
+End Function
+
+Public Function KeyExists(ByVal cache As Object, ByVal key As String) As Boolean
+  Dim itemVal As Variant
+  On Error Resume Next
+  itemVal = cache(key)
+  If Err.Number <> 0 Then
+    KeyExists = False
+    Err.Clear
+  Else
+    KeyExists = True
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+		t.Fatalf("checked probe observation should not report VBA237: %+v", got)
+	}
+}
+
 func TestVBA237DoesNotTreatOrdinaryBooleanPredicateAsSuccessContract(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

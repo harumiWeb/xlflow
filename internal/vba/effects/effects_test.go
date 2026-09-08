@@ -550,11 +550,36 @@ End Function
 }
 
 func TestErrorSummaryDistinguishesCheckedAndUncheckedResumeNext(t *testing.T) {
-	summary := buildSources(t, sourceFile{"Probe.bas", "Probe", `Public Sub CheckedProbe()
+	summary := buildSources(t, sourceFile{"Probe.bas", "Probe", `Public ModuleLong As Long
+
+Public Sub CheckedProbe()
     On Error Resume Next
     Workbooks.Open "optional.xlsx"
-    If Err.Number <> 0 Then Exit Sub
+    If Err . Number <> 0 Then Exit Sub
     On Error GoTo 0
+End Sub
+
+Public Sub CheckedObjectProbe(ByVal ws As Worksheet)
+    Dim resultName As Name
+    On Error Resume Next
+    Set resultName = Nothing
+    Set resultName = ws.Names("Results")
+    On Error GoTo 0
+    If Not resultName Is Nothing Then Debug.Print resultName.Name
+End Sub
+
+Public Property Get StoredObject() As Object
+End Property
+
+Public Property Set StoredObject(ByVal value As Object)
+End Property
+
+Public Sub PropertySetObjectProbe(ByVal ws As Worksheet)
+    On Error Resume Next
+    Set StoredObject = Nothing
+    Set StoredObject = ws.Names("Results")
+    On Error GoTo 0
+    If Not StoredObject Is Nothing Then Debug.Print "stored"
 End Sub
 
 Public Sub UncheckedProbe()
@@ -569,6 +594,134 @@ Public Sub UnrelatedCheck()
     If ThisWorkbook.Saved Then Debug.Print "saved"
     On Error GoTo 0
 End Sub
+
+Public Function CompositeCondition(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    CompositeCondition = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Or RiskyCall() Then
+        Err.Clear
+        CompositeCondition = 0
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function CompositeMemberCondition(ByVal obj As Object, ParamArray values() As Variant) As Long
+    On Error Resume Next
+    CompositeMemberCondition = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Or obj.Check() Then
+        Err.Clear
+        CompositeMemberCondition = 0
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function RiskyCall() As Boolean
+    RiskyCall = True
+End Function
+
+Public Function NullFallback(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    NullFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        NullFallback = Null
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function ModuleNullFallback(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    ModuleLong = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        ModuleLong = Null
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function RepeatedFallback(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    RepeatedFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        RepeatedFallback = 0
+        RepeatedFallback = 1
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function OutsideFallback(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    OutsideFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        OutsideFallback = 0
+    End If
+    OutsideFallback = 1
+    On Error GoTo 0
+End Function
+
+Public Function ElseFallback(ParamArray values() As Variant) As Long
+    On Error Resume Next
+    ElseFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        Err.Clear
+    Else
+        ElseFallback = 0
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function ArrayReturnFallback(ParamArray values() As Variant) As Long()
+    On Error Resume Next
+    ArrayReturnFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        ArrayReturnFallback = 0
+    End If
+    On Error GoTo 0
+End Function
+
+Public Sub StringErrText()
+    On Error Resume Next
+    Workbooks.Open "optional.xlsx"
+    If "Err . Number" = "x" Then
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Sub
+
+Public Function ImplicitFallback(ParamArray values() As Variant)
+    On Error Resume Next
+    ImplicitFallback = UBound(values) - LBound(values) + 1
+    If Err.Number <> 0 Then
+        ImplicitFallback = 0
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function SiblingElseIfProbe(ByVal envelope As Object, ByVal enabled As Boolean) As Boolean
+    On Error Resume Next
+    If enabled Then
+        SiblingElseIfProbe = CBool(envelope("defer"))
+    ElseIf Err Then
+        SiblingElseIfProbe = False
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function NullableBooleanComparison(ByVal envelope As Object, ByVal left As Variant, ByVal right As Variant) As Boolean
+    On Error Resume Next
+    NullableBooleanComparison = CBool(envelope("defer"))
+    If Err.Number <> 0 Then
+        NullableBooleanComparison = (left = right)
+    End If
+    On Error GoTo 0
+End Function
+
+Public Function ModuleBooleanComparison(ByVal envelope As Object, ByVal left As Long) As Boolean
+    On Error Resume Next
+    ModuleBooleanComparison = CBool(envelope("defer"))
+    If Err.Number <> 0 Then
+        ModuleBooleanComparison = (ModuleLong = left)
+    End If
+    On Error GoTo 0
+End Function
 
 Public Sub CapturedErrProbe()
     Dim failed As Boolean
@@ -640,6 +793,14 @@ End Function
 	if !checked.Error.UsesResumeNext || checked.Error.SuppressesErrors {
 		t.Fatalf("checked probe summary = %#v", checked.Error)
 	}
+	checkedObject := find(t, summary, "Probe.CheckedObjectProbe")
+	if !checkedObject.Error.UsesResumeNext || checkedObject.Error.SuppressesErrors {
+		t.Fatalf("checked object probe summary = %#v", checkedObject.Error)
+	}
+	propertySetObject := find(t, summary, "Probe.PropertySetObjectProbe")
+	if !propertySetObject.Error.UsesResumeNext || !propertySetObject.Error.SuppressesErrors {
+		t.Fatalf("property-set initialization must remain a protected operation = %#v", propertySetObject.Error)
+	}
 	unchecked := find(t, summary, "Probe.UncheckedProbe")
 	if !unchecked.Error.UsesResumeNext || !unchecked.Error.SuppressesErrors {
 		t.Fatalf("unchecked probe summary = %#v", unchecked.Error)
@@ -650,6 +811,50 @@ End Function
 	unrelated := find(t, summary, "Probe.UnrelatedCheck")
 	if !unrelated.Error.SuppressesErrors {
 		t.Fatalf("unrelated condition accepted as probe check: %#v", unrelated.Error)
+	}
+	composite := find(t, summary, "Probe.CompositeCondition")
+	if !composite.Error.SuppressesErrors {
+		t.Fatalf("composite condition accepted as checked probe: %#v", composite.Error)
+	}
+	compositeMember := find(t, summary, "Probe.CompositeMemberCondition")
+	if !compositeMember.Error.SuppressesErrors {
+		t.Fatalf("composite member condition accepted as checked probe: %#v", compositeMember.Error)
+	}
+	nullFallback := find(t, summary, "Probe.NullFallback")
+	if !nullFallback.Error.SuppressesErrors {
+		t.Fatalf("Null fallback accepted as checked probe: %#v", nullFallback.Error)
+	}
+	implicitFallback := find(t, summary, "Probe.ImplicitFallback")
+	if implicitFallback.Error.SuppressesErrors {
+		t.Fatalf("implicit Variant fallback rejected as checked probe: %#v", implicitFallback.Error)
+	}
+	siblingElseIf := find(t, summary, "Probe.SiblingElseIfProbe")
+	if !siblingElseIf.Error.SuppressesErrors {
+		t.Fatalf("sibling ElseIf accepted as checked probe: %#v", siblingElseIf.Error)
+	}
+	nullableComparison := find(t, summary, "Probe.NullableBooleanComparison")
+	if !nullableComparison.Error.SuppressesErrors {
+		t.Fatalf("nullable comparison accepted as checked probe: %#v", nullableComparison.Error)
+	}
+	moduleComparison := find(t, summary, "Probe.ModuleBooleanComparison")
+	if moduleComparison.Error.SuppressesErrors {
+		t.Fatalf("module-scope comparison was not recognized as checked probe: %#v", moduleComparison.Error)
+	}
+	moduleNullFallback := find(t, summary, "Probe.ModuleNullFallback")
+	if !moduleNullFallback.Error.SuppressesErrors {
+		t.Fatalf("unknown module fallback incorrectly accepted as checked probe: %#v", moduleNullFallback.Error)
+	}
+	for _, name := range []string{"Probe.RepeatedFallback", "Probe.OutsideFallback", "Probe.ElseFallback"} {
+		probe := find(t, summary, name)
+		if !probe.Error.SuppressesErrors {
+			t.Fatalf("unsafe fallback scope %s accepted as checked probe: %#v", name, probe.Error)
+		}
+	}
+	for _, name := range []string{"Probe.ArrayReturnFallback", "Probe.StringErrText"} {
+		probe := find(t, summary, name)
+		if !probe.Error.SuppressesErrors {
+			t.Fatalf("unsafe fallback or string-only check %s accepted: %#v", name, probe.Error)
+		}
 	}
 	captured := find(t, summary, "Probe.CapturedErrProbe")
 	if !captured.Error.UsesResumeNext || captured.Error.SuppressesErrors {

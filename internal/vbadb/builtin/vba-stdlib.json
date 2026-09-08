@@ -613,7 +613,10 @@
         {
           "name": "Seek",
           "return_type": "Long",
-          "parameters": [{ "name": "FileNumber", "type": "Integer" }]
+          "parameters": [
+            { "name": "FileNumber", "type": "Integer" },
+            { "name": "Position", "type": "Long", "optional": true }
+          ]
         },
         {
           "name": "SendKeys",

@@ -109,6 +109,15 @@ their stated conditions:
   `On Error GoTo 0` (an optional `Err.Clear` is accepted). The inspection may
   immediately follow restoration and may pass through a local derived value
   or an untaken sibling branch; or
+- A probe may initialize an object-result local with `Set result = Nothing`,
+  or use a non-`Static` local object whose implicit initial value is still
+  `Nothing` because no earlier write reaches the probe. A single object
+  member/index operation is accepted when its `Err.Number` state is checked
+  directly before immediate restoration (including a direct `Debug.Assert` or
+  a single-condition `If` guard); a pure `Err.Description` assertion may
+  follow the number assertion. Nested calls and any continuation remain
+  unsafe; object-result inspection after restoration additionally requires one
+  of these `Nothing` initialization proofs; or
 - a Boolean Function explicitly initializes its fallback and returns the
   single resume-next probe result after restoring error mode; or
 - a result is assigned to a Boolean local and that exact value reaches a

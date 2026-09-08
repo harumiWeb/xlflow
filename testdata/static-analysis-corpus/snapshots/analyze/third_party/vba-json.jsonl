@@ -23,11 +23,4 @@
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":653,"column":43}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":659,"column":43}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":926,"column":20}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":926,"column":55}
 {"project":"third_party/vba-json","file":"specs/Specs.bas","surface":"analyze","code":"VBA214","severity":"warning","line":6,"column":0}
-{"project":"third_party/vba-json","file":"specs/Specs.bas","surface":"analyze","code":"VB045","severity":"error","line":175,"column":9}
-{"project":"third_party/vba-json","file":"specs/Specs.bas","surface":"analyze","code":"VB045","severity":"error","line":176,"column":9}
-{"project":"third_party/vba-json","file":"specs/Specs.bas","surface":"analyze","code":"VB045","severity":"error","line":177,"column":9}
-{"project":"third_party/vba-json","file":"specs/Specs.bas","surface":"analyze","code":"VB045","severity":"error","line":178,"column":9}
-{"project":"third_party/vba-json","file":"specs/Specs.bas","surface":"analyze","code":"VB045","severity":"error","line":179,"column":9}
-{"project":"third_party/vba-json","file":"specs/Specs.bas","surface":"analyze","code":"VB045","severity":"error","line":180,"column":9}

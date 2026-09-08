@@ -264,6 +264,130 @@ End Sub
 	}
 }
 
+func TestAnalyzerIgnoresShowPropertyAssignments(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+    If Me.Show = False Then
+    End If
+    If Not Me.Show Then
+    End If
+    YAxis.Show = True
+    Options.DataLabels.Show = True
+    YAxis.Show = -1
+    Options.DataLabels.Show = 0
+    If fd.Show = -1 Then
+    End If
+    UserForm1.Show
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 2 || boundaries[0].Symbol != "UserForm.Show" || boundaries[0].Line != 11 || boundaries[1].Symbol != "UserForm.Show" || boundaries[1].Line != 13 {
+		t.Fatalf("expected only the file-dialog and UserForm display calls, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerDetectsFileDialogShowInsideWithBlock(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+    Const actionButton As Long = -1
+    With Application.FileDialog(msoFileDialogFolderPicker)
+        .Title = "Choose a folder"
+        If .Show = actionButton Then
+            Debug.Print .SelectedItems.Item(1)
+        End If
+    End With
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 1 || boundaries[0].Symbol != "Application.FileDialog" || boundaries[0].Kind != "file_picker" || boundaries[0].Line != 6 {
+		t.Fatalf("expected the implicit FileDialog.Show call, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerDoesNotTreatFileDialogConstructionAsBoundary(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+    Dim fd As FileDialog
+    Set fd = Application.FileDialog(msoFileDialogFilePicker)
+    With Application.FileDialog(msoFileDialogFolderPicker)
+        .Title = "Choose a folder"
+    End With
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 0 {
+		t.Fatalf("FileDialog construction must not be reported before Show, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerDoesNotTreatShellEscapeAsShell(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+    Dim options As String
+    Dim shellWait As Long
+    Dim shellExtensions As Collection
+    Dim shellFolder As Object
+    options = ShellEscapeBatchmodeOptionsList(1)
+    shellWait = 1
+    shellExtensions = Nothing
+    shellFolder = Nothing
+ShellError:
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 0 {
+		t.Fatalf("ShellEscape function names must not be reported as Shell launches, got %+v", boundaries)
+	}
+}
+
 func TestStripCommentKeepsApostropheInsideStrings(t *testing.T) {
 	got := StripComment(`MsgBox "it''s ""done""" ' trailing`)
 	if got != `MsgBox "it''s ""done""" ` {

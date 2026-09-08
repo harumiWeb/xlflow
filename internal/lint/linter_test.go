@@ -600,6 +600,25 @@ End Sub
 `,
 		},
 		{
+			name: "nested-bounded-probe",
+			source: `Option Explicit
+Public Sub NestedBoundedProbe(ByVal providerValue As Object)
+  Dim errorsObject As Object
+  Dim errorItem As Object
+  On Error Resume Next
+  If Not providerValue Is Nothing Then
+    Set errorsObject = CallByName(providerValue, "Errors", VbGet)
+    If Not errorsObject Is Nothing Then
+      If CLng(CallByName(errorsObject, "Count", VbGet)) > 0 Then
+        Set errorItem = CallByName(errorsObject, "Item", VbGet, 0)
+      End If
+    End If
+  End If
+  On Error GoTo 0
+End Sub
+`,
+		},
+		{
 			name: "broad-scope",
 			source: `Option Explicit
 Public Sub BroadScope()
@@ -610,6 +629,42 @@ Public Sub BroadScope()
   Debug.Print 4
   Debug.Print 5
   On Error GoTo 0
+End Sub
+`,
+			wantCount: 1,
+		},
+		{
+			name: "nested-broad-scope",
+			source: `Option Explicit
+Public Sub NestedBroadScope(ByVal ready As Boolean, ByVal enabled As Boolean)
+  On Error Resume Next
+  If ready Then
+    If enabled Then
+      Debug.Print 1
+      Debug.Print 2
+      Debug.Print 3
+      Debug.Print 4
+      Debug.Print 5
+    End If
+  End If
+  On Error GoTo 0
+End Sub
+`,
+			wantCount: 1,
+		},
+		{
+			name: "loop-local-broad-scope",
+			source: `Option Explicit
+Public Sub LoopLocalBroadScope(ByVal values As Variant)
+  For i = 1 To 2
+    On Error Resume Next
+    value = values(i)
+    value = values(i + 1)
+    value = values(i + 2)
+    value = values(i + 3)
+    value = values(i + 4)
+    On Error GoTo 0
+  Next i
 End Sub
 `,
 			wantCount: 1,
@@ -1457,6 +1512,36 @@ End Type
 	}
 	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
 		t.Fatalf("legal UDT implicit Variant fallback should not also trigger VB014: %+v", got)
+	}
+}
+
+func TestLinterIgnoresImplicitVariantsInsideDisabledConditionalBranches(t *testing.T) {
+	t.Parallel()
+	source := `Option Explicit
+Private Enum API
+  S_OK = 0
+#If False Then
+  Dim ignoredOne, ignoredTwo
+#End If
+End Enum
+#If False Then
+Dim ignoredFalse
+#ElseIf True Then
+Dim liveElseIf
+#Else
+Dim ignoredElse
+#End If
+Sub Main()
+  Dim liveValue
+End Sub
+`
+	issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb005 := issuesByCode(issues, "VB005")
+	if len(vb005) != 2 || vb005[0].Line != 11 || vb005[0].Column != 5 || vb005[1].Line != 16 || vb005[1].Column != 7 {
+		t.Fatalf("disabled conditional declarations should be ignored while live declarations remain visible: %+v", vb005)
 	}
 }
 

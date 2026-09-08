@@ -3951,6 +3951,8 @@ func TestAnalyzerVBA214AllowsNarrowCompatibilityProbes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
+Public ModuleLong As Long
+
 Public Sub DirectProbe()
   Dim ws As Worksheet
   On Error Resume Next
@@ -3963,11 +3965,122 @@ Public Sub CheckedProbe()
   Dim ws As Worksheet
   On Error Resume Next
   Set ws = ThisWorkbook.Worksheets("Data")
-  If Err.Number <> 0 Then
+  If Err . Number <> 0 Then
     Err.Clear
   End If
   On Error GoTo 0
 End Sub
+
+Public Function BoundedArrayProbe(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  BoundedArrayProbe = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+    BoundedArrayProbe = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function CapacityProbe(ByRef target() As Byte) As Long
+  On Error Resume Next
+  CapacityProbe = UBound(target) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+    CapacityProbe = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function CompositeCondition(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  CompositeCondition = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Or RiskyCall() Then
+    Err.Clear
+    CompositeCondition = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function CompositeMemberCondition(ByVal obj As Object, ParamArray values() As Variant) As Long
+  On Error Resume Next
+  CompositeMemberCondition = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Or obj.Check() Then
+    Err.Clear
+    CompositeMemberCondition = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function RiskyCall() As Boolean
+  RiskyCall = True
+End Function
+
+Public Function NullFallback(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  NullFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    NullFallback = Null
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function ModuleNullFallback(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  ModuleLong = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    ModuleLong = Null
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function RepeatedFallback(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  RepeatedFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    RepeatedFallback = 0
+    RepeatedFallback = 1
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function OutsideFallback(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  OutsideFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    OutsideFallback = 0
+  End If
+  OutsideFallback = 1
+  On Error GoTo 0
+End Function
+
+Public Function ElseFallback(ParamArray values() As Variant) As Long
+  On Error Resume Next
+  ElseFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+  Else
+    ElseFallback = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function ArrayReturnFallback(ParamArray values() As Variant) As Long()
+  On Error Resume Next
+  ArrayReturnFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    ArrayReturnFallback = 0
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function ImplicitFallback(ParamArray values() As Variant)
+  On Error Resume Next
+  ImplicitFallback = UBound(values) - LBound(values) + 1
+  If Err.Number <> 0 Then
+    ImplicitFallback = 0
+  End If
+  On Error GoTo 0
+End Function
 
 Public Sub ReplacedByHandler()
   Dim ws As Worksheet
@@ -3983,8 +4096,16 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
-		t.Fatalf("narrow probes should not report VBA214: %+v", got)
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 8 {
+		t.Fatalf("narrow probes should only report the unsafe cases: %+v", got)
+	}
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if !procedures["CompositeCondition"] || !procedures["CompositeMemberCondition"] || !procedures["NullFallback"] || !procedures["ModuleNullFallback"] || !procedures["RepeatedFallback"] || !procedures["OutsideFallback"] || !procedures["ElseFallback"] || !procedures["ArrayReturnFallback"] {
+		t.Fatalf("unsafe probe procedures = %#v, findings = %+v", procedures, got)
 	}
 }
 
@@ -4012,6 +4133,1251 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
 		t.Fatalf("Err.Description probe should not report VBA214: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214AllowsCheckedMemberProbesAndSafeInitialization(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Dictionary.cls", `Option Explicit
+Public Sub Add(ByVal key As String, ByVal value As Variant)
+End Sub
+
+Public Property Let Item(ByVal key As String, ByVal value As Variant)
+End Property
+`)
+	writeModule(t, dir, "ProbeWorksheet.cls", `Option Explicit
+Public Function Names(ByVal key As String) As ProbeName
+End Function
+`)
+	writeModule(t, dir, "ProbeName.cls", `Option Explicit
+`)
+	writeClass(t, dir, "Selector.cls", `Option Explicit
+Public Enum By
+  ID = 0
+End Enum
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CheckedMemberProbes(ByVal d As Dictionary, ByVal c As Collection)
+  On Error Resume Next
+  d.Add "key", c
+  Debug.Assert Err.Number = 0
+  Err.Clear
+  On Error GoTo 0
+
+  On Error Resume Next
+  d("key") = c
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+
+Public Sub NestedCallProbe(ByVal d As Dictionary)
+  On Error Resume Next
+  d.Add "key", New Collection
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+
+Public Sub CheckedMemberProbeWithInitialization(ByVal ws As Worksheet)
+  Dim resultName As Name
+  On Error Resume Next
+  Set resultName = Nothing
+  Set resultName = ws.Names("Results")
+  On Error GoTo 0
+  If resultName Is Nothing Then Exit Sub
+End Sub
+
+Public Sub ResolvedRHSMemberProbe(ByVal ws As ProbeWorksheet)
+  Dim result As ProbeName
+  On Error Resume Next
+  Set result = Nothing
+  Set result = ws.Names("Results")
+  On Error GoTo 0
+  If result Is Nothing Then Exit Sub
+End Sub
+
+Public Sub ParenthesizedMemberProbe(ByVal selectElem As Object)
+  On Error Resume Next
+  selectElem.DeSelectByIndex (2)
+  Debug.Assert Err.Description = "expected failure"
+  On Error GoTo 0
+End Sub
+
+Public Sub EnumMemberArgumentProbe(ByVal driver As Object)
+  On Error Resume Next
+  driver.FindElement(By.ID, "css1")
+  Debug.Assert Err.Number = 404
+  On Error GoTo 0
+End Sub
+
+Public Sub CheckedRHSMemberAssertions(ByVal driver As Object)
+  Dim elem As Object
+  On Error Resume Next
+  Set elem = driver.FindElement(By.ID, "css1")
+  Debug.Assert Err.Number = 404
+  Debug.Assert Left(Err.Description, 12) = "not found"
+  On Error GoTo 0
+End Sub
+
+Public Sub CheckedSimpleMemberGetter(ByVal ws As Object)
+  Dim result As Object
+  On Error Resume Next
+  Set result = ws.Name
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+
+Public Sub CheckedVariantPropertySetter(ByVal regex As Object, ByVal pattern As Variant)
+  Dim probeFailed As Boolean
+  On Error Resume Next
+  regex.Pattern = CStr(pattern)
+  probeFailed = Err.Number <> 0
+  Err.Clear
+  On Error GoTo 0
+End Sub
+
+Public Sub CheckedNestedMemberGetter(ByVal actualRange As Object)
+  Dim sheetName As String
+  Dim probeFailed As Boolean
+  On Error Resume Next
+  sheetName = actualRange.Worksheet.Name
+  probeFailed = Err.Number <> 0
+  Err.Clear
+  On Error GoTo 0
+End Sub
+
+Public Sub UncheckedNestedMemberFallback(ByVal app As Object)
+  Dim fileName As String
+  fileName = vbNullString
+  On Error Resume Next
+  fileName = app.VBE.ActiveVBProject.fileName
+  On Error GoTo 0
+  If fileName = vbNullString Then Exit Sub
+End Sub
+
+Public Sub DefaultMemberRHSProbe(ByVal d As Dictionary)
+  Dim value As Variant
+  On Error Resume Next
+  value = d("missing")
+  Debug.Assert Err.Number = 5
+  On Error GoTo 0
+End Sub
+
+Public Sub CheckedMemberErrGuard(ByVal dom As Object, ByVal rowsPath As String)
+  Dim rowNodes As Object
+  On Error Resume Next
+  Set rowNodes = dom.SelectNodes(rowsPath)
+  If Err.Number <> 0 Then
+    On Error GoTo 0
+    Err.Raise 5, "CheckedMemberErrGuard", "invalid path"
+  End If
+  On Error GoTo 0
+End Sub
+
+Public Sub CheckedMemberNamedErrGuard(ByVal dom As Object, ByVal rowsPath As String)
+  Dim rowNodes As Object
+  Dim expectedError As Long
+  expectedError = 5
+  On Error Resume Next
+  Set rowNodes = dom.SelectNodes(rowsPath)
+  If Err.Number <> expectedError Then
+    On Error GoTo 0
+    Err.Raise 5, "CheckedMemberNamedErrGuard", "invalid path"
+  End If
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if len(got) != 2 || !procedures["NestedCallProbe"] || !procedures["UncheckedNestedMemberFallback"] {
+		t.Fatalf("checked member probes should leave only nested-call and unchecked-chain warnings: %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+		t.Fatalf("checked object probe should not report VBA237: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsMultipleCheckedMemberProbes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Dictionary.cls", `Option Explicit
+Public Property Let Item(ByVal key As String, ByVal value As Variant)
+End Property
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub MultipleCheckedMemberProbes(ByVal d As Dictionary, ByVal c As Collection)
+  On Error Resume Next
+  d("first") = c
+  Debug.Assert Err.Number = 0
+  d("second") = c
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "MultipleCheckedMemberProbes" {
+		t.Fatalf("multiple checked member probes must remain unsafe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsRHSCallInMemberAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Dictionary.cls", `Option Explicit
+Public Property Let Item(ByVal value As Variant)
+End Property
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function MakeValue() As Variant
+  MakeValue = 1
+End Function
+
+Public Sub RHSCallInMemberAssignment(ByVal d As Dictionary)
+  On Error Resume Next
+  d.Item = MakeValue()
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "RHSCallInMemberAssignment" {
+		t.Fatalf("RHS call in a member assignment must remain unsafe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214AllowsResolvedMemberCallProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "MyDictionary.cls", `Option Explicit
+Public Sub Add(ByVal key As String, ByVal value As Variant)
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub ResolvedMemberCallProbe(ByVal d As MyDictionary, ByVal key As String, ByVal value As Variant)
+  On Error Resume Next
+  d.Add key, value
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("single resolved member call probe should not report VBA214: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsQualifiedStandardModuleCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Public Sub DoWork()
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub QualifiedStandardModuleCall()
+  On Error Resume Next
+  Helpers.DoWork
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "QualifiedStandardModuleCall" {
+		t.Fatalf("qualified standard-module call must remain unsafe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214AllowsProjectConstantsInProbeChecks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Dictionary.cls", `Option Explicit
+Public Property Let Item(ByVal key As String, ByVal value As Variant)
+End Property
+`)
+	writeModule(t, dir, "Settings.bas", `Option Explicit
+Public Const ExpectedCode As Long = 5
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CrossModuleErrConstant(ByVal d As Dictionary)
+  On Error Resume Next
+  d("key") = 1
+  Debug.Assert Err.Number = ExpectedCode
+  On Error GoTo 0
+End Sub
+
+Public Sub QualifiedConstArgument(ByVal dom As Object)
+  On Error Resume Next
+  dom.SelectNodes Settings.ExpectedCode
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("project constants should be accepted in checked probes: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsUnrestrictedCheckedMemberAssertions(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Dictionary.cls", `Option Explicit
+Public Property Let Item(ByVal key As String, ByVal value As Variant)
+End Property
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ExpectedError() As Long
+  ExpectedError = 0
+End Function
+
+Private Function MakeValue() As Variant
+  MakeValue = 1
+End Function
+
+Private Function MakeObject() As Object
+  Set MakeObject = Nothing
+End Function
+
+Public Property Get StoredObject() As Object
+End Property
+
+Public Property Set StoredObject(ByVal value As Object)
+End Property
+
+Public Sub CompoundAssertion(ByVal d As Dictionary, ByVal c As Collection, ByVal ws As Worksheet)
+  On Error Resume Next
+  d("compound") = c
+  Debug.Assert Err.Number = 0 And ws.Visible
+  On Error GoTo 0
+End Sub
+
+Public Sub NoParenthesesFunctionAssertion(ByVal d As Dictionary, ByVal c As Collection)
+  On Error Resume Next
+  d("function") = c
+  Debug.Assert Err.Number = ExpectedError
+  On Error GoTo 0
+End Sub
+
+Public Sub UnparenthesizedFunctionArgument(ByVal d As Dictionary)
+  On Error Resume Next
+  d.Add "function", MakeValue
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+
+Public Sub UnresolvedFunctionArgument(ByVal d As Dictionary)
+  On Error Resume Next
+  d.Add "unresolved", ExternalFunction
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+
+Public Sub ObjectAssertion(ByVal d As Dictionary, ByVal c As Collection, ByVal code As Object)
+  On Error Resume Next
+  d("object") = c
+  Debug.Assert Err.Number = code
+  On Error GoTo 0
+End Sub
+
+Public Sub RHSPropertyAssertion(ByVal d As Dictionary, ByVal c As Collection, ByVal ws As Worksheet)
+  On Error Resume Next
+  d("property") = ws.Name
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+
+Public Sub NestedTargetMember(ByVal d As Dictionary, ByVal c As Collection, ByVal ws As Object)
+  On Error Resume Next
+  d(ws.Name) = c
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+
+Public Sub NestedRHSMember(ByVal ws As Object, ByVal key As Object)
+  Dim result As Object
+  On Error Resume Next
+  Set result = Nothing
+  Set result = ws.Names(key.Name)
+  On Error GoTo 0
+  If result Is Nothing Then Exit Sub
+End Sub
+
+Public Sub ChainedRHSMember(ByVal ws As Object)
+  Dim result As Object
+  On Error Resume Next
+  Set result = Nothing
+  Set result = ws.Names("Results").Parent
+  On Error GoTo 0
+  If result Is Nothing Then Exit Sub
+End Sub
+
+Public Sub ExistingRHSReference(ByVal ws As Object)
+  Dim result As Object
+  Set result = CreateObject("Scripting.Dictionary")
+  On Error Resume Next
+  Set result = ws.Names("Results")
+  On Error GoTo 0
+  If result Is Nothing Then Exit Sub
+End Sub
+
+Public Sub ReassignedAfterSafeInitialization(ByVal ws As Object)
+  Dim result As Object
+  On Error Resume Next
+  Set result = Nothing
+  Set result = New Collection
+  Set result = ws.Names("Results")
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+  If result Is Nothing Then Exit Sub
+End Sub
+
+Public Sub CalledMemberReceiver(ByVal value As String)
+  On Error Resume Next
+  MakeObject().Name = value
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+End Sub
+
+Public Sub RHSAssertionObjectInspection(ByVal ws As Object)
+  Dim result As Object
+  On Error Resume Next
+  Set result = ws.Names("Results")
+  Debug.Assert Err.Number = 0
+  On Error GoTo 0
+  If result Is Nothing Then Exit Sub
+End Sub
+
+Public Sub ConditionalResultInitialization(ByVal ws As Object, ByVal reset As Boolean)
+  Dim result As Object
+  On Error Resume Next
+  If reset Then
+    Set result = Nothing
+  End If
+  Set result = ws.Names("Results")
+  On Error GoTo 0
+  If result Is Nothing Then Exit Sub
+End Sub
+
+Public Sub PropertySetInitialization(ByVal ws As Worksheet)
+  On Error Resume Next
+  Set StoredObject = Nothing
+  Set StoredObject = ws.Names("Results")
+  On Error GoTo 0
+  If StoredObject Is Nothing Then Exit Sub
+End Sub
+
+Public Sub ConditionalBranchAssertion(ByVal d As Dictionary, ByVal c As Collection)
+  On Error Resume Next
+#If Mac Then
+  d("mac") = c
+#Else
+  Debug.Assert Err.Number = 0
+#End If
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	for _, procedure := range []string{"CompoundAssertion", "NoParenthesesFunctionAssertion", "UnparenthesizedFunctionArgument", "UnresolvedFunctionArgument", "ObjectAssertion", "RHSPropertyAssertion", "NestedTargetMember", "NestedRHSMember", "ChainedRHSMember", "ExistingRHSReference", "ReassignedAfterSafeInitialization", "CalledMemberReceiver", "ConditionalResultInitialization", "PropertySetInitialization", "ConditionalBranchAssertion"} {
+		if !procedures[procedure] {
+			t.Fatalf("unsafe checked member assertion in %s was accepted: %+v", procedure, got)
+		}
+	}
+}
+
+func TestAnalyzerVBA214AllowsProbeResultInspection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function IsJagged(ByRef value As Variant) As Boolean
+  Dim testVal As Variant
+  On Error Resume Next
+  testVal = value(LBound(value))
+  IsJagged = IsArray(testVal)
+  On Error GoTo 0
+End Function
+
+Public Function KeyExists(ByVal cache As Object, ByVal key As String) As Boolean
+  Dim itemVal As Variant
+  On Error Resume Next
+  itemVal = cache(key)
+  If Err.Number <> 0 Then
+    KeyExists = False
+    Err.Clear
+  Else
+    KeyExists = True
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("probe result inspection should not report VBA214: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214AllowsCheckedArrayElementProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CheckedArrayElementProbe()
+  Dim values() As Integer
+  ReDim values(0 To 2)
+  On Error Resume Next
+  Dim value As Integer: value = values(3)
+  #If TWINBASIC Then
+    Debug.Assert Err.Number <> 0
+  #Else
+    Debug.Assert Err.Number = 9
+  #End If
+  On Error GoTo 0
+End Sub
+
+Private Function IndexValue() As Integer
+  IndexValue = 3
+End Function
+
+Public Sub NestedArrayElementProbe()
+  Dim values() As Integer
+  ReDim values(0 To 2)
+  On Error Resume Next
+  Dim value As Integer: value = values(IndexValue())
+  Debug.Assert Err.Number <> 0
+  On Error GoTo 0
+End Sub
+
+Public Sub MissingConditionalAssertion()
+  Dim values() As Integer
+  ReDim values(0 To 2)
+  On Error Resume Next
+  Dim value As Integer: value = values(3)
+  #If TWINBASIC Then
+    Debug.Assert Err.Number <> 0
+  #End If
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := make(map[string]bool, len(got))
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if len(got) != 2 || !procedures["NestedArrayElementProbe"] || !procedures["MissingConditionalAssertion"] || procedures["CheckedArrayElementProbe"] {
+		t.Fatalf("only nested or incomplete-conditional array probes should report VBA214: %+v", got)
+	}
+}
+
+func TestPrepareResumeNextScopeConstantValuesCachesFileEnvironment(t *testing.T) {
+	file := parsedFile{Lines: []string{"Private Const NullPtr As Long = 0"}}
+	prepareResumeNextScopeConstantValues(Analyzer{}, &file)
+
+	file.Lines = []string{"Private Const NullPtr As Long = 1"}
+	prepareResumeNextScopeConstantValues(Analyzer{}, &file)
+	values := resumeNextScopePreparedConstantValues(Analyzer{}, file)
+	value, ok := values["nullptr"]
+	if !ok || value.Integer != 0 {
+		t.Fatalf("prepared Resume Next constants = %#v, want cached NullPtr=0", values)
+	}
+}
+
+func TestAnalyzerVBA214AllowsScalarMemberProbeResultInspection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+#If Win64 Then
+Private Const NullPtr As LongLong = 0^
+#Else
+Private Const NullPtr As Long = 0&
+#End If
+
+Public Function FindDescriptor(ByVal key As Long) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = NullPtr Then Exit Function
+  FindDescriptor = descriptor
+End Function
+
+Public Function StaticDescriptor(ByVal key As String) As LongPtr
+  Static descriptors As New Collection
+  Static descriptor As LongPtr
+  On Error Resume Next
+  descriptor = descriptors(key)
+  On Error GoTo 0
+  If descriptor = NullPtr Then Exit Function
+  StaticDescriptor = descriptor
+End Function
+
+Public Function VariantDescriptor(ByVal key As Variant) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = NullPtr Then Exit Function
+  VariantDescriptor = descriptor
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if len(got) != 2 || !procedures["StaticDescriptor"] || !procedures["VariantDescriptor"] || procedures["FindDescriptor"] {
+		t.Fatalf("only the fresh primitive scalar probe should be accepted: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214KeepsByRefProbeResultWarning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub SetDescriptor(ByRef value As LongPtr)
+  value = 99
+End Sub
+
+Private Sub PreserveDescriptor(ByVal value As LongPtr)
+End Sub
+
+Private Sub SetDescriptorWithGap(ByVal first As LongPtr, Optional middle As LongPtr, ByRef value As LongPtr)
+  value = 99
+End Sub
+
+Public Function ByRefDescriptor(ByVal key As Long) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  SetDescriptor descriptor
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = 0 Then Exit Function
+  ByRefDescriptor = descriptor
+End Function
+
+Public Function ByValDescriptor(ByVal key As Long) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  PreserveDescriptor descriptor
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = 0 Then Exit Function
+  ByValDescriptor = descriptor
+End Function
+
+Public Function OmittedByRefDescriptor(ByVal key As Long) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  SetDescriptorWithGap 1, , descriptor
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = 0 Then Exit Function
+  OmittedByRefDescriptor = descriptor
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if len(got) != 2 || !procedures["ByRefDescriptor"] || !procedures["OmittedByRefDescriptor"] || procedures["ByValDescriptor"] {
+		t.Fatalf("a prior ByRef call must invalidate the implicit zero proof: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214KeepsRaiseEventProbeResultWarning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Emitter.cls", `Option Explicit
+Public Event Changed(ByRef value As LongPtr)
+
+Public Sub Fire(ByVal key As Long)
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  RaiseEvent Changed(descriptor)
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = 0 Then Exit Sub
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "Fire" {
+		t.Fatalf("a RaiseEvent with a ByRef argument must invalidate the implicit zero proof: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsNonScalarProbeResultInspection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub VariantScalarResult(ByVal ws As Object)
+  Dim result As Variant
+  On Error Resume Next
+  Set result = Nothing
+  Set result = ws.Names("Results")
+  On Error GoTo 0
+  If result = 0 Then Exit Sub
+End Sub
+
+Public Sub ObjectScalarResult(ByVal ws As Object)
+  Dim result As Object
+  On Error Resume Next
+  Set result = Nothing
+  Set result = ws.Names("Results")
+  On Error GoTo 0
+  If result = 0 Then Exit Sub
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if len(got) != 2 || !procedures["VariantScalarResult"] || !procedures["ObjectScalarResult"] {
+		t.Fatalf("non-scalar probe results must not satisfy scalar inspection: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214KeepsDateStringConversionWarning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function DateDescriptor(ByVal key As Date) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = 0 Then Exit Function
+  DateDescriptor = descriptor
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "DateDescriptor" {
+		t.Fatalf("CStr(Date) must remain a potentially failing operation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214KeepsNonZeroSentinelWarning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function NonZeroSentinel(ByVal key As Long) As LongPtr
+  Static descriptors As New Collection
+  Dim descriptor As LongPtr
+  On Error Resume Next
+  descriptor = descriptors(CStr(key))
+  On Error GoTo 0
+  If descriptor = -1 Then Exit Function
+  NonZeroSentinel = descriptor
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "NonZeroSentinel" {
+		t.Fatalf("a non-zero sentinel must not satisfy the implicit zero proof: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RecognizesImplicitNothingForFreshObjectProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub FreshObjectProbe()
+  Dim obj As Object
+  On Error Resume Next
+  Set obj = CreateObject("Scripting.Dictionary")
+  On Error GoTo 0
+  If Not obj Is Nothing Then Debug.Print obj.Count
+End Sub
+
+Public Sub StaticObjectProbe()
+  Static obj As Object
+  On Error Resume Next
+  Set obj = CreateObject("Scripting.Dictionary")
+  On Error GoTo 0
+  If Not obj Is Nothing Then Debug.Print obj.Count
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "StaticObjectProbe" {
+		t.Fatalf("only the Static object probe should remain unsafe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214AllowsCheckedBooleanAndIDEProbes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function LikeProbe(ByVal value As String, ByVal pattern As String) As Boolean
+  On Error Resume Next
+  LikeProbe = (value Like pattern)
+  If Err.Number <> 0 Then
+    Err.Clear
+    LikeProbe = (value = pattern)
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function CBoolProbe(ByVal envelope As Object) As Boolean
+  If envelope Is Nothing Then Exit Function
+  If Not envelope.Exists("defer") Then Exit Function
+  On Error Resume Next
+  CBoolProbe = CBool(envelope("defer"))
+  If Err.Number <> 0 Then
+    Err.Clear
+    CBoolProbe = False
+  End If
+  On Error GoTo 0
+End Function
+
+Public Function IDEProbe(ByVal value As Long) As LongPtr
+  Dim lEbMode As LongPtr
+  On Error Resume Next
+  Debug.Print 1 / 0
+  If Err Then
+    Err.Clear: On Error GoTo 0
+    Dim hVBE As LongPtr
+    hVBE = GetModuleHandle("vbe7.dll")
+    If hVBE <> 0 Then
+      lEbMode = GetProcAddress(hVBE, "EbMode")
+    End If
+  End If
+  On Error GoTo 0
+  IDEProbe = lEbMode + value
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("checked boolean and IDE probes should not report VBA214: %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+		t.Fatalf("checked IDE probe should not report VBA237: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsUnresolvedBooleanHelperProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function UnresolvedBooleanProbe(ByVal envelope As Object) As Boolean
+  On Error Resume Next
+  UnresolvedBooleanProbe = CBool(ReadValue("defer"))
+  If Err.Number <> 0 Then
+    UnresolvedBooleanProbe = False
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) == 0 {
+		t.Fatalf("unresolved helper was accepted as an Object default-member probe: %+v", findings)
+	}
+}
+
+func TestAnalyzerVBA214RejectsMultipleBooleanProbesInOneScope(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MultipleBooleanProbes(ByVal envelope As Object) As Boolean
+  On Error Resume Next
+  MultipleBooleanProbes = CBool(envelope("first"))
+  If Err.Number <> 0 Then
+    MultipleBooleanProbes = False
+  End If
+  MultipleBooleanProbes = CBool(envelope("second"))
+  If Err.Number <> 0 Then
+    MultipleBooleanProbes = False
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) == 0 {
+		t.Fatalf("multiple Boolean probes were accepted in one Resume Next scope: %+v", findings)
+	}
+}
+
+func TestAnalyzerVBA214AllowsBareErrLoopProbeChecks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub DoWhileErrProbe()
+  On Error Resume Next
+  Workbooks.Open "optional.xlsx"
+  Do While Err
+  Loop
+  On Error GoTo 0
+End Sub
+
+Public Sub WhileErrProbe()
+  On Error Resume Next
+  Workbooks.Open "optional.xlsx"
+  While Err
+  Wend
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("bare Err loop checks should not report VBA214: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsSiblingElseIfAsBooleanProbeCheck(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function SiblingElseIfProbe(ByVal envelope As Object, ByVal enabled As Boolean) As Boolean
+  On Error Resume Next
+  If enabled Then
+    SiblingElseIfProbe = CBool(envelope("defer"))
+  ElseIf Err Then
+    SiblingElseIfProbe = False
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) == 0 {
+		t.Fatalf("sibling ElseIf is not a check for the probe: %+v", findings)
+	}
+}
+
+func TestAnalyzerVBA214RejectsNullableBooleanFallbackOperands(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function NullableBooleanProbe(ByVal envelope As Object, ByVal left As Variant, ByVal right As Variant) As Boolean
+  On Error Resume Next
+  NullableBooleanProbe = CBool(envelope("defer"))
+  If Err.Number <> 0 Then
+    NullableBooleanProbe = (left = right)
+  End If
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) == 0 {
+		t.Fatalf("nullable comparison fallback was accepted: %+v", findings)
+	}
+}
+
+func TestAnalyzerVBA214AllowsCheckedProjectAndSeparateArrayBoundsProbes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ProbeCall(ByVal value As Long) As Long
+  ProbeCall = value
+End Function
+
+Public Function CheckedProjectProbe(ByVal value As Long) As Long
+  Dim probeResult As Long
+  On Error Resume Next
+  Dim ignored As Long: ignored = ProbeCall(value)
+  On Error GoTo 0
+  If ignored = 0 Then
+    CheckedProjectProbe = 0
+  Else
+    CheckedProjectProbe = ignored
+  End If
+End Function
+
+Public Function CheckedProjectProbeWithVarPtr(ByVal value As Long) As Long
+  On Error Resume Next
+  Dim ignored As Long: ignored = ProbeCall(VarPtr(value))
+  On Error GoTo 0
+  If ignored = 0 Then
+    CheckedProjectProbeWithVarPtr = 0
+  Else
+    CheckedProjectProbeWithVarPtr = ignored
+  End If
+End Function
+
+Public Function SeparateBounds(ByRef values() As Variant) As Long
+  Dim lowerBound As Long
+  Dim itemCount As Long
+  On Error Resume Next
+  lowerBound = LBound(values)
+  itemCount = UBound(values) - lowerBound + 1
+  If Err.Number <> 0 Or itemCount < 0 Then
+    itemCount = 0
+    lowerBound = 0
+  End If
+  Err.Clear
+  On Error GoTo 0
+  SeparateBounds = itemCount
+End Function
+
+Public Function LowerBoundOnly(ByRef values() As Variant) As Long
+  Dim lowerBound As Long
+  On Error Resume Next
+  lowerBound = LBound(values)
+  If Err.Number <> 0 Then
+    lowerBound = 0
+  End If
+  Err.Clear
+  On Error GoTo 0
+  LowerBoundOnly = lowerBound
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("checked project and separate bounds probes should not report VBA214: %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+		t.Fatalf("checked project and separate bounds probes should not report VBA237: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214RejectsStringAndWrongPolarityProbeChecks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ProbeCall(ByVal value As Long) As Long
+  ProbeCall = value
+End Function
+
+Private Function InnerProbeCall(ByVal value As Long) As Long
+  InnerProbeCall = value
+End Function
+
+Private Function OuterProbeCall(ByVal value As Long) As Long
+  OuterProbeCall = value
+End Function
+
+Public Sub StringNamedResult(ByVal value As Long)
+  Dim ignored As Long
+  On Error Resume Next
+  ignored = ProbeCall(value)
+  On Error GoTo 0
+  If "ignored" = "x" Then
+    Debug.Print "not a result check"
+End If
+End Sub
+
+Public Sub NestedProjectProbe(ByVal value As Long)
+  Dim ignored As Long
+  On Error Resume Next
+  ignored = OuterProbeCall(InnerProbeCall(value))
+  On Error GoTo 0
+  If ignored = 0 Then
+    Debug.Print "nested"
+  End If
+End Sub
+
+Public Sub QualifiedMemberProbe(ByVal value As Long)
+  Dim status As Long
+  On Error Resume Next
+  status = ProbeCall(value)
+  On Error GoTo 0
+  If other.Status = 0 Then
+    Debug.Print "member"
+  End If
+End Sub
+
+Public Function WrongPolarity(ByRef values() As Variant) As Long
+  Dim lowerBound As Long
+  Dim itemCount As Long
+  On Error Resume Next
+  lowerBound = LBound(values)
+  itemCount = UBound(values) - lowerBound + 1
+  If Err.Number = 0 Then
+    itemCount = 0
+    lowerBound = 0
+  End If
+  Err.Clear
+  On Error GoTo 0
+  WrongPolarity = itemCount
+End Function
+
+Public Function ElsePolarity(ByRef values() As Variant) As Long
+  Dim lowerBound As Long
+  Dim itemCount As Long
+  On Error Resume Next
+  lowerBound = LBound(values)
+  itemCount = UBound(values) - lowerBound + 1
+  If Err.Number = 0 Then
+  Else
+    itemCount = 0
+    lowerBound = 0
+  End If
+  Err.Clear
+  On Error GoTo 0
+  ElsePolarity = itemCount
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 4 {
+		t.Fatalf("unsafe project/string, nested, qualified-member, and wrong-polarity probes = %+v, want four findings", got)
+	}
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if !procedures["StringNamedResult"] || !procedures["NestedProjectProbe"] || !procedures["QualifiedMemberProbe"] || !procedures["WrongPolarity"] || procedures["ElsePolarity"] {
+		t.Fatalf("probe polarity findings = %+v", procedures)
+	}
+}
+
+func TestAnalyzerVBA214ReportsConditionalCompilationRHSOperations(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub ConditionalProbe(ByVal ThisButton As Object)
+  On Error Resume Next
+#If Mac Then
+  ThisButton.ControlTipText = "Use Control+Command+" & LCase(ThisButton.Accelerator) & " as shortcut"
+#Else
+  ThisButton.ControlTipText = "Use Alt+" & LCase(ThisButton.Accelerator) & " as shortcut"
+#End If
+  On Error GoTo 0
+End Sub
+
+Public Sub ConditionalBroad(ByVal ThisButton As Object)
+  On Error Resume Next
+#If Mac Then
+  ThisButton.ControlTipText = "mac"
+  ThisButton.ControlTipText = "mac again"
+#Else
+  ThisButton.ControlTipText = "windows"
+  ThisButton.ControlTipText = "windows again"
+#End If
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	counts := map[string]int{}
+	for _, finding := range got {
+		counts[finding.Procedure]++
+	}
+	if len(got) != 2 || counts["ConditionalProbe"] != 1 || counts["ConditionalBroad"] != 1 {
+		t.Fatalf("conditional branches with member operations should report once each: %+v", got)
 	}
 }
 

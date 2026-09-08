@@ -118,9 +118,13 @@ const (
 	maxParserRecoveryTokenRunes        = 80
 	maxParserRecoveryContextRunes      = 160
 	// VB004 recovery limits bound the forward statement scan and the short
-	// reset scope that is accepted without an Err.Number probe.
-	resumeNextScanLimit  = 16
-	resumeNextShortScope = 5
+	// reset scope that is accepted without an Err.Number probe. The scope
+	// count excludes multiline block structure, so nested guard clauses do
+	// not make a small bounded probe look broad; it still permits at most two
+	// recovery statements plus the reset itself.
+	resumeNextScanLimit    = 16
+	resumeNextShortScope   = 5
+	resumeNextGuardedScope = 3
 )
 
 func (l Linter) Run() ([]Issue, error) {
@@ -1004,6 +1008,14 @@ func (c *astLintContext) visit(node *tree_sitter.Node, inProcedure bool, inType 
 	}
 	kind := node.Kind()
 	switch kind {
+	case "preprocessor_if", "type_preprocessor_if":
+		c.visitConditional(node, inProcedure, inType)
+		return
+	case "preprocessor_else", "preprocessor_elseif", "type_preprocessor_else", "type_preprocessor_elseif":
+		if body := node.ChildByFieldName("body"); body != nil {
+			c.visit(body, inProcedure, inType)
+		}
+		return
 	case "option_statement":
 		if strings.EqualFold(normalizedNodeText(node, c.source), "Option Explicit") {
 			c.hasOptionExplicit = true
@@ -1027,6 +1039,49 @@ func (c *astLintContext) visit(node *tree_sitter.Node, inProcedure bool, inType 
 			return
 		}
 		c.visit(node.NamedChild(i), inProcedure, inType)
+	}
+}
+
+func (c *astLintContext) visitConditional(node *tree_sitter.Node, inProcedure bool, inType bool) {
+	if known, value := conditionalConstant(node, c.source); known {
+		if value {
+			if body := node.ChildByFieldName("body"); body != nil {
+				c.visit(body, inProcedure, inType)
+			}
+			return
+		}
+		c.visitConditionalAlternatives(node, inProcedure, inType)
+		return
+	}
+	if body := node.ChildByFieldName("body"); body != nil {
+		c.visit(body, inProcedure, inType)
+	}
+	c.visitConditionalAlternatives(node, inProcedure, inType)
+}
+
+func (c *astLintContext) visitConditionalAlternatives(node *tree_sitter.Node, inProcedure bool, inType bool) {
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		kind := child.Kind()
+		if strings.Contains(kind, "elseif") {
+			if known, value := conditionalConstant(child, c.source); known {
+				if !value {
+					continue
+				}
+				if body := child.ChildByFieldName("body"); body != nil {
+					c.visit(body, inProcedure, inType)
+				}
+				return
+			}
+		} else if !strings.Contains(kind, "else") {
+			continue
+		}
+		if body := child.ChildByFieldName("body"); body != nil {
+			c.visit(body, inProcedure, inType)
+		}
 	}
 }
 
@@ -1639,25 +1694,29 @@ func (l Linter) onErrorIssuesFromProcedureIR(ctx context.Context, path string, i
 }
 
 func hasNarrowResumeNextRecovery(statements []procedureir.Statement, start int) bool {
-	seen := 0
+	scanned := 0
+	scopeStatements := 0
 	sawErrNumberCheck := false
 	sawLoop := false
-	for i := start + 1; i < len(statements) && seen < resumeNextScanLimit; i++ {
+	for i := start + 1; i < len(statements) && scanned < resumeNextScanLimit; i++ {
 		statement := statements[i]
 		if statement.Recovered || strings.TrimSpace(statement.Text) == "" {
 			continue
 		}
-		seen++
+		scanned++
 		switch statement.Kind {
 		case procedureir.StatementFor, procedureir.StatementForEach, procedureir.StatementDo, procedureir.StatementWhile:
 			sawLoop = true
+		}
+		if !isResumeNextStructuralStatement(statement) {
+			scopeStatements++
 		}
 		if statement.Kind == procedureir.StatementOnError && statement.Control != nil {
 			switch statement.Control.Transfer {
 			case procedureir.TransferOnErrorDisable, procedureir.TransferOnErrorGoto:
 				// Both forms replace Resume Next with an explicit error mode.
 				// Keep the existing short-scope and Err.Number probe allowances.
-				return sawErrNumberCheck || (!sawLoop && seen <= resumeNextShortScope)
+				return sawErrNumberCheck || (!sawLoop && (scanned <= resumeNextShortScope || scopeStatements <= resumeNextGuardedScope))
 			}
 		}
 		if strings.Contains(strings.ToLower(normalizedCodeLine(statement.Text)), "err.number") {
@@ -1665,6 +1724,20 @@ func hasNarrowResumeNextRecovery(statements []procedureir.Statement, start int) 
 		}
 	}
 	return false
+}
+
+func isResumeNextStructuralStatement(statement procedureir.Statement) bool {
+	switch statement.Kind {
+	case procedureir.StatementIf:
+		// A single-line If can contain executable statements in its own Text;
+		// only multiline block headers are structural here.
+		return statement.SyntaxKind != "single_line_if_statement"
+	case procedureir.StatementElseIf, procedureir.StatementElse,
+		procedureir.StatementSelect, procedureir.StatementCase, procedureir.StatementWith:
+		return true
+	default:
+		return false
+	}
 }
 
 func (l Linter) forEachIssuesFromProcedureIR(ctx context.Context, path string, ir procedureir.DocumentIR) ([]Issue, error) {

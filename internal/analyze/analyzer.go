@@ -264,11 +264,13 @@ var (
 	dictionaryCreateRe            = regexp.MustCompile(`(?i)^\s*createobject\s*\(\s*"scripting\.dictionary"\s*\)\s*$`)
 	dictionaryNewRe               = regexp.MustCompile(`(?i)^\s*new\s+scripting\.dictionary\s*$`)
 	errProbeReferenceRe           = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*(?:number|description|clear)\b`)
+	errNumberReferenceRe          = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*number\b`)
+	errClearStatementRe           = regexp.MustCompile(`(?i)^\s*err\s*\.\s*clear\s*$`)
 )
 
 var objectTypes = map[string]bool{
 	"application": true, "workbook": true, "worksheet": true, "range": true,
-	"chart": true, "pivot table": true, "pivottable": true, "listobject": true,
+	"chart": true, "chartobject": true, "series": true, "pivot table": true, "pivottable": true, "listobject": true,
 	"dictionary": true, "collection": true, "object": true, "window": true,
 }
 
@@ -379,6 +381,7 @@ type analysisContext struct {
 	arrayCapabilityIndex      *semanticArrayCapabilityIndex
 	procedures                map[string]procedureSignature
 	procedureResolver         procedureir.Resolver
+	projectResolver           procedureir.Resolver
 	objectAnalysis            *objectAnalysisContext
 	worksheetCodenames        map[string]string
 	projectEffects            effects.ProjectSummary
@@ -585,7 +588,11 @@ type parsedFile struct {
 	ArrayOptionBaseSet          bool
 	ConstantValues              map[string]constexpr.Value
 	RuntimeConstantBase         constexpr.Values
-	DataFlowModuleBindings      map[string]bool
+	// ResumeNextConstantValues is the immutable file-level environment used by
+	// VBA214 scalar probe inspection. Production batch and realtime setup build
+	// it once so procedure workers do not rescan a giant module independently.
+	ResumeNextConstantValues map[string]constexpr.Value
+	DataFlowModuleBindings   map[string]bool
 	// semanticQueryFacts is populated once the immutable revision capabilities
 	// (effects, resolution and array participant state) are ready.  Procedure
 	// query lanes share this pointer so they do not rebuild the same source,
@@ -981,6 +988,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	finishStage = analysisstats.Measure(ctx, "object_entry_states")
 	if objectAnalysis != nil {
 		objectAnalysis.buildEntryStates()
+		objectAnalysis.buildObjectMemberEntryContracts()
 		finishObjectCapability(nil)
 		finishStage(len(objectAnalysis.entries), nil)
 		if recorder := analysisstats.FromContext(ctx); recorder != nil {
@@ -996,6 +1004,9 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	finishProjectConstants := beginProjectCapabilityBuild(ctx, projectCapabilityProjectConstants)
 	analysis.visibleConstants = projectVisibleConstants(parsedFiles, analysis.typeDB)
 	analysis.visibleConstantValues = projectConstantValues(parsedFiles, analysis.typeDB)
+	for index := range parsedFiles {
+		prepareResumeNextScopeConstantValues(analysis, &parsedFiles[index])
+	}
 	finishProjectConstants(nil)
 	finishStage = analysisstats.Measure(ctx, "project_context")
 	finishArrayCapability := func(error) {}
@@ -1003,6 +1014,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		finishArrayCapability = beginProjectCapabilityBuild(ctx, projectCapabilityArrayInterprocedural)
 	}
 	analysisCtx := analysis.buildContextWithObjectAnalysisPlan(parsedFiles, objectAnalysis, capabilityPlan, procedureir.ProcedureOnlyResolver(resolutionResolver))
+	analysisCtx.projectResolver = resolutionResolver
 	analysisCtx.queryRevision = queryRevision
 	recordArrayInterproceduralTelemetry(ctx, analysisCtx)
 	prepareSemanticQueryFacts(analysis, parsedFiles, &analysisCtx)
@@ -1882,7 +1894,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 // the snapshot-aware form used by LSP and other project callers that already
 // own a value-bearing constant environment.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, 0)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, nil, 0)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext is
@@ -1890,7 +1902,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 // and reads project-dependent call/access/event facts through resolution
 // views, avoiding a full resolved DocumentIR clone per file.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, 0)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, 0)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext
@@ -1898,10 +1910,18 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(c
 // immutable document index instead of reparsing the complete buffer for every
 // expression they resolve.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, &sourceDocument, procedureWorkerLimit)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, &sourceDocument, procedureWorkerLimit)
 }
 
-func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, sourceDocument *intel.Document, procedureWorkerLimit int) ([]Finding, error) {
+// SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverContext
+// is the project-aware editor entry point. The resolution view carries
+// procedure facts, while projectResolver retains the complete symbol index
+// needed for source-level value and receiver validation.
+func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, &sourceDocument, procedureWorkerLimit)
+}
+
+func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, sourceDocument *intel.Document, procedureWorkerLimit int) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -2007,6 +2027,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			RootDir: rootDir, Config: cfg, typeDB: typeDB,
 			visibleConstantValues: projectConstants, excelRootBindings: excelRootBindings,
 		}
+		prepareResumeNextScopeConstantValues(analyzer, &file)
 		if procedureWorkerLimit > 0 {
 			analyzer.analysisWorkerLimit = procedureWorkerLimit
 		}
@@ -2039,7 +2060,20 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			}
 			queryRevision = queryContext.Store.Begin(revisionID)
 		}
-		analysisCtx := analyzer.buildContext(contextFiles)
+		// Keep the realtime projection on the same resolver boundary as batch
+		// analysis. In particular, checked Resume Next probes may use a
+		// project-visible Const or enum member as an argument; leaving this
+		// resolver nil would make the editor path reject those known values.
+		if projectResolver == nil {
+			projectResolver = buildResolutionResolver(contextFiles, true, typeDB)
+		}
+		analysisCtx := analyzer.buildContextWithObjectAnalysisPlan(
+			contextFiles,
+			nil,
+			buildProjectCapabilityPlan(cfg.Analyze, contextFiles),
+			procedureir.ProcedureOnlyResolver(projectResolver),
+		)
+		analysisCtx.projectResolver = projectResolver
 		analysisCtx.queryRevision = queryRevision
 		// buildContext materializes the participant-restricted plan after the
 		// initial procedure projection above was copied. Rebind the realtime
@@ -2362,7 +2396,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
 	if plan.runsProjection(procedureProjectionErrorSuppression) && a.Config.Analyze.DetectErrorSuppressionPropagation {
-		findings = append(findings, a.errorSuppressionFindings(file, proc, analysisCtx.projectEffects)...)
+		findings = append(findings, a.errorSuppressionFindings(file, proc, analysisCtx.projectEffects, analysisCtx.projectResolver)...)
 	}
 	var realtimeHTTPFindings []Finding
 	if plan.runsDataflowLane(procedureDataflowLaneGeneric) || plan.runsDataflowLane(procedureDataflowLaneHTTP) {
@@ -2436,10 +2470,6 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 		}
 	}
 	return procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
-}
-
-func (a Analyzer) buildContext(files []parsedFile) analysisContext {
-	return a.buildContextWithObjectAnalysisPlan(files, nil, buildProjectCapabilityPlan(a.Config.Analyze, files), nil)
 }
 
 func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectAnalysis *objectAnalysisContext, capabilityPlan projectCapabilityPlan, projectResolver procedureir.Resolver) analysisContext {
@@ -3231,7 +3261,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	}
 	if plan.runsProjection(procedureProjectionErrorResume) && a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
 		errorMeasurement := profile.begin(procedureDomainError)
-		errorFindings := a.leakedOnErrorResumeNextFindings(file, proc)
+		errorFindings := a.leakedOnErrorResumeNextFindings(file, proc, ctx.projectResolver)
 		profile.kernel()
 		profile.candidate(&candidateCounters, analysisstats.CounterErrorCandidateProcedures)
 		if proc.Graph != nil {
@@ -3242,7 +3272,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	}
 	if plan.runsProjection(procedureProjectionErrorSuppression) && a.Config.Analyze.DetectErrorSuppressionPropagation {
 		errorMeasurement := profile.begin(procedureDomainError)
-		errorFindings := a.errorSuppressionFindings(file, proc, projectEffects)
+		errorFindings := a.errorSuppressionFindings(file, proc, projectEffects, ctx.projectResolver)
 		profile.kernel()
 		profile.candidate(&candidateCounters, analysisstats.CounterErrorCandidateProcedures)
 		if proc.Graph != nil {
@@ -4926,9 +4956,27 @@ const (
 )
 
 type resumeNextScopeState struct {
-	block      vbacfg.BlockID
-	operations uint8
-	flags      resumeNextScopeFlag
+	block                    vbacfg.BlockID
+	operations               uint8
+	flags                    resumeNextScopeFlag
+	conditionalBranches      []resumeNextScopeConditionalBranch
+	probeTarget              string
+	probeBoundsArray         string
+	probeBoundsLowerTarget   string
+	probeBoundsResultTarget  string
+	probeBoundsFallbackUsed  uint8
+	errCheckParent           int
+	probeFallbackUsed        bool
+	probeInspectionUsed      bool
+	probeBooleanCoercionUsed bool
+}
+
+type resumeNextScopeConditionalBranch struct {
+	group               string
+	branch              int
+	baseOperations      uint8
+	branchOperations    uint8
+	maxBranchOperations uint8
 }
 
 type resumeNextScopeOutcome struct {
@@ -4940,11 +4988,15 @@ type resumeNextScopeOutcome struct {
 // leakedOnErrorResumeNextFindings follows each reachable Resume Next scope until
 // it is explicitly replaced or leaves the procedure. The small state domain is
 // deliberately saturated at two operations: the rule only needs to distinguish
-// a single compatibility probe from a wider protected region.
-func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourceProcedure) []Finding {
+// a single compatibility probe from a wider protected region. Conditional
+// compilation alternatives are tracked independently because ProcedureIR's CFG
+// is source-sequential while only one branch can exist in a compiled module.
+func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourceProcedure, projectResolver procedureir.Resolver) []Finding {
 	if proc.Graph == nil {
 		return nil
 	}
+	moduleDecls := file.moduleDecls()
+	constantValues := resumeNextScopePreparedConstantValues(a, file)
 	reachable := map[vbacfg.BlockID]bool{}
 	for _, id := range proc.Graph.Reachable(vbacfg.EdgeFilter{}) {
 		reachable[id] = true
@@ -4958,7 +5010,7 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 		if !ok || !reachable[start.ID] {
 			continue
 		}
-		for _, outcome := range resumeNextScopeOutcomes(proc, start.ID) {
+		for _, outcome := range resumeNextScopeOutcomes(proc, start.ID, moduleDecls, projectResolver, constantValues) {
 			if outcome.flags == 0 {
 				continue
 			}
@@ -4995,8 +5047,151 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 	return findings
 }
 
-func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resumeNextScopeOutcome {
+func resumeNextScopeConstantValues(a Analyzer, file parsedFile) map[string]constexpr.Value {
+	values := file.ConstantValues
+	if len(values) == 0 && len(file.Source) > 0 {
+		values = lint.ConstantValuesFromSource(string(file.Source), &file.IR, nil)
+	}
+	if len(a.visibleConstantValues) > 0 {
+		merged := make(map[string]constexpr.Value, len(values)+len(a.visibleConstantValues))
+		for name, value := range a.visibleConstantValues {
+			merged[name] = value
+		}
+		for name, value := range values {
+			merged[name] = value
+		}
+		values = merged
+	}
+	values = resumeNextScopeAddConditionalZeroConstants(file, values)
+	return values
+}
+
+func prepareResumeNextScopeConstantValues(a Analyzer, file *parsedFile) {
+	if file == nil || file.ResumeNextConstantValues != nil {
+		return
+	}
+	values := resumeNextScopeConstantValues(a, *file)
+	if values == nil {
+		values = map[string]constexpr.Value{}
+	}
+	file.ResumeNextConstantValues = values
+}
+
+func resumeNextScopePreparedConstantValues(a Analyzer, file parsedFile) map[string]constexpr.Value {
+	if file.ResumeNextConstantValues != nil {
+		return file.ResumeNextConstantValues
+	}
+	return resumeNextScopeConstantValues(a, file)
+}
+
+// Conditional-compilation branches can leave the resolver with multiple
+// candidates. Preserve a module constant only when every source definition is
+// known and agrees on the same integral value.
+func resumeNextScopeAddConditionalZeroConstants(file parsedFile, values map[string]constexpr.Value) map[string]constexpr.Value {
+	if len(file.Lines) == 0 {
+		return values
+	}
+	insideProcedure := make([]bool, len(file.Lines)+1)
+	for _, procedure := range file.IR.Procedures {
+		start := procedure.Symbol.DeclarationRange.StartLine
+		end := procedure.Symbol.DeclarationRange.EndLine
+		if start < 1 {
+			start = 1
+		}
+		if end > len(file.Lines) {
+			end = len(file.Lines)
+		}
+		for line := start; line <= end; line++ {
+			insideProcedure[line] = true
+		}
+	}
+	type constantState struct {
+		value      constexpr.Value
+		seen       bool
+		consistent bool
+	}
+	states := map[string]constantState{}
+	environment := make(map[string]constexpr.Value, len(values)+8)
+	for name, value := range values {
+		environment[name] = value
+	}
+	for lineNumber, rawLine := range file.Lines {
+		line := lineNumber + 1
+		if line < len(insideProcedure) && insideProcedure[line] {
+			continue
+		}
+		match := runtimeConstAssignmentRe.FindStringSubmatch(normalizedCodeLine(rawLine))
+		if len(match) == 0 {
+			continue
+		}
+		name := runtimeSimpleIdentifier(match[1])
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		state := states[key]
+		if !state.seen {
+			state.consistent = true
+		}
+		result := constexpr.Evaluate(strings.TrimSpace(match[2]), constexpr.NewValues(environment))
+		if result.Kind != constexpr.Known {
+			state.consistent = false
+			state.seen = true
+			states[key] = state
+			continue
+		}
+		if state.seen && !resumeNextScopeConstantValuesEqual(state.value, result.Typed) {
+			state.consistent = false
+		}
+		state.value = result.Typed
+		state.seen = true
+		states[key] = state
+		environment[key] = result.Typed
+	}
+	if len(states) == 0 {
+		return values
+	}
+	additions := make(map[string]constexpr.Value)
+	for name, state := range states {
+		if state.consistent && state.seen && state.value.Integer == 0 &&
+			(state.value.Kind == constexpr.ValueInteger || state.value.Kind == constexpr.ValueLong || state.value.Kind == constexpr.ValueLongLong) {
+			additions[name] = state.value
+		}
+	}
+	if len(additions) == 0 {
+		return values
+	}
+	merged := make(map[string]constexpr.Value, len(values)+len(additions))
+	for name, value := range values {
+		merged[name] = value
+	}
+	for name, value := range additions {
+		merged[name] = value
+	}
+	return merged
+}
+
+func resumeNextScopeConstantValuesEqual(left, right constexpr.Value) bool {
+	integral := func(value constexpr.Value) bool {
+		switch value.Kind {
+		case constexpr.ValueInteger, constexpr.ValueLong, constexpr.ValueLongLong:
+			return true
+		default:
+			return false
+		}
+	}
+	if integral(left) && integral(right) {
+		return left.Integer == right.Integer
+	}
+	return left == right
+}
+
+func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver, constantValues map[string]constexpr.Value) []resumeNextScopeOutcome {
 	graph := proc.Graph
+	statementsByID := make(map[int]procedureir.Statement)
+	for statement := range proc.Statements.All() {
+		statementsByID[statement.ID] = statement
+	}
 	queue := make([]resumeNextScopeState, 0)
 	var outcomes []resumeNextScopeOutcome
 	for _, edge := range graph.Edges {
@@ -5016,7 +5211,7 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resum
 	for len(queue) > 0 {
 		state := queue[0]
 		queue = queue[1:]
-		key := strings.Join([]string{strconvItoa(int(state.block)), strconvItoa(int(state.operations)), strconvItoa(int(state.flags))}, ":")
+		key := resumeNextScopeStateKey(state)
 		if seen[key] {
 			continue
 		}
@@ -5032,7 +5227,7 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resum
 			}
 			continue
 		}
-		state = applyResumeNextScopeStatement(proc, state, statement)
+		state = applyResumeNextScopeStatement(proc, state, statement, statementsByID, moduleDecls, projectResolver, constantValues)
 		for _, edge := range graph.Edges {
 			if edge.From != state.block {
 				continue
@@ -5049,10 +5244,55 @@ func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resum
 				})
 				continue
 			}
-			queue = append(queue, resumeNextScopeState{block: edge.To, operations: state.operations, flags: state.flags})
+			queue = append(queue, resumeNextScopeState{
+				block:                    edge.To,
+				operations:               state.operations,
+				flags:                    state.flags,
+				conditionalBranches:      append([]resumeNextScopeConditionalBranch(nil), state.conditionalBranches...),
+				probeTarget:              state.probeTarget,
+				probeBoundsArray:         state.probeBoundsArray,
+				probeBoundsLowerTarget:   state.probeBoundsLowerTarget,
+				probeBoundsResultTarget:  state.probeBoundsResultTarget,
+				probeBoundsFallbackUsed:  state.probeBoundsFallbackUsed,
+				errCheckParent:           state.errCheckParent,
+				probeFallbackUsed:        state.probeFallbackUsed,
+				probeInspectionUsed:      state.probeInspectionUsed,
+				probeBooleanCoercionUsed: state.probeBooleanCoercionUsed,
+			})
 		}
 	}
 	return outcomes
+}
+
+func resumeNextScopeStateKey(state resumeNextScopeState) string {
+	fallbackUsed := "0"
+	if state.probeFallbackUsed {
+		fallbackUsed = "1"
+	}
+	inspectionUsed := "0"
+	if state.probeInspectionUsed {
+		inspectionUsed = "1"
+	}
+	booleanCoercionUsed := "0"
+	if state.probeBooleanCoercionUsed {
+		booleanCoercionUsed = "1"
+	}
+	parts := []string{
+		strconvItoa(int(state.block)), strconvItoa(int(state.operations)), strconvItoa(int(state.flags)),
+		state.probeTarget, state.probeBoundsArray, state.probeBoundsLowerTarget,
+		state.probeBoundsResultTarget, strconvItoa(int(state.probeBoundsFallbackUsed)),
+		strconvItoa(state.errCheckParent), fallbackUsed, inspectionUsed, booleanCoercionUsed,
+	}
+	for _, branch := range state.conditionalBranches {
+		parts = append(parts,
+			branch.group,
+			strconvItoa(branch.branch),
+			strconvItoa(int(branch.baseOperations)),
+			strconvItoa(int(branch.branchOperations)),
+			strconvItoa(int(branch.maxBranchOperations)),
+		)
+	}
+	return strings.Join(parts, ":")
 }
 
 func isOnErrorResumeNext(statement procedureir.Statement) bool {
@@ -5068,34 +5308,2448 @@ func restoresErrorHandling(statement procedureir.Statement) bool {
 		statement.Control.Transfer == procedureir.TransferOnErrorGoto
 }
 
-func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement) resumeNextScopeState {
-	if isOnErrorResumeNext(statement) || resumeNextScopeErrProbeStatement(statement) ||
-		statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel {
+func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver, constantValues map[string]constexpr.Value) resumeNextScopeState {
+	state.conditionalBranches = append([]resumeNextScopeConditionalBranch(nil), state.conditionalBranches...)
+	state = resumeNextScopeSyncConditionalBranches(state, statement.ConditionalBranches)
+	if isOnErrorResumeNext(statement) {
 		return state
 	}
+	errProbe := resumeNextScopeErrProbeStatement(statement)
 	call, projectCall := resumeNextScopeCallRisk(proc.Calls, statement.ID)
-	if call {
-		state.flags |= resumeNextScopeCall
+	conditionCall := resumeNextScopeConditionHasCall(proc.Calls, statement)
+	if resumeNextScopeCurrentOperations(state) == 0 && resumeNextScopeSafeProbeInitialization(proc, statement) {
+		return state
 	}
-	if projectCall {
-		state.flags |= resumeNextScopeProjectCall
+	unsafeMemberProbeValue := resumeNextScopeMemberProbeHasUnsafeValue(proc, statement, moduleDecls, projectResolver)
+	unsafeObjectInspection := resumeNextScopeRHSMemberProbeHasUnsafeResultInspection(proc, statement, statementsByID, moduleDecls, constantValues)
+	unsafeMemberProbeValue = unsafeMemberProbeValue || unsafeObjectInspection
+	if resumeNextScopeCheckedMemberProbe(proc, state, statement, statementsByID, moduleDecls, projectResolver, constantValues) {
+		resumeNextScopeRecordOperation(&state)
+		return state
+	}
+	checkedProjectProbe := projectCall && resumeNextScopeCheckedProjectProbe(proc, state, statement, statementsByID, moduleDecls)
+	checkedBooleanCoercionProbe := call && !projectCall && resumeNextScopeCheckedBooleanCoercionProbe(proc, state, statement, statementsByID, moduleDecls)
+	if checkedBooleanCoercionProbe {
+		state.probeBooleanCoercionUsed = true
+	}
+	if resumeNextScopeArrayBoundsContinuation(&state, statement) {
+		return state
+	}
+	probeInspection := !state.probeInspectionUsed && !projectCall &&
+		resumeNextScopeProbeResultInspection(state, statement)
+	if !probeInspection && !checkedProjectProbe && !checkedBooleanCoercionProbe && (!errProbe || conditionCall) {
+		if call || conditionCall {
+			state.flags |= resumeNextScopeCall
+		}
+		if unsafeMemberProbeValue {
+			state.flags |= resumeNextScopeCall
+		}
+		if projectCall {
+			state.flags |= resumeNextScopeProjectCall
+		}
+	}
+	if errProbe {
+		if !conditionCall && resumeNextScopeErrCheckStatement(statement) {
+			state.errCheckParent = statement.ID
+		}
+		return state
+	}
+	if fallbackBit := resumeNextScopeBoundsProbeFallback(proc, state, statement, statementsByID, moduleDecls); fallbackBit != 0 {
+		state.probeBoundsFallbackUsed |= fallbackBit
+		state.flags &^= resumeNextScopeCall
+		return state
+	}
+	if resumeNextScopeProbeFallback(proc, state, statement, statementsByID, moduleDecls) {
+		state.probeFallbackUsed = true
+		if !projectCall {
+			state.flags &^= resumeNextScopeCall
+		}
+		return state
+	}
+	if probeInspection {
+		state.probeInspectionUsed = true
+		state.flags &^= resumeNextScopeCall
+		return state
+	}
+	if resumeNextScopeErrCheckBranchMarker(state, statement, statementsByID) {
+		return state
+	}
+	if statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel ||
+		statement.Kind == procedureir.StatementEnd {
+		return state
 	}
 	if resumeNextScopeControlStatement(statement) {
 		state.flags |= resumeNextScopeControlFlow
 		return state
 	}
-	if state.operations < 2 {
-		state.operations++
-	}
-	if state.operations >= 2 {
-		state.flags |= resumeNextScopeMultipleOperations
+	before := resumeNextScopeCurrentOperations(state)
+	resumeNextScopeRecordOperation(&state)
+	if before == 0 && state.probeTarget == "" {
+		state.probeTarget = resumeNextScopeAssignmentTarget(statement)
+		if array, lowerTarget, kind, ok := procedureir.SafeArrayBoundsProbeAssignment(
+			state.probeTarget, resumeNextScopeAssignmentValue(statement),
+		); ok && kind == procedureir.SafeArrayBoundsProbeLowerBound {
+			state.probeBoundsArray = array
+			state.probeBoundsLowerTarget = lowerTarget
+		}
 	}
 	return state
 }
 
+func resumeNextScopeSafeProbeInitialization(proc sourceProcedure, statement procedureir.Statement) bool {
+	if statement.Kind != procedureir.StatementSet || statement.Recovered || statement.Target == nil || statement.Value == nil || statement.Target.Recovered || statement.Value.Recovered {
+		return false
+	}
+	target, value, ok := resumeNextScopeAssignmentText(statement)
+	if !ok || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) || !strings.EqualFold(strings.TrimSpace(value), "Nothing") {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(strings.TrimSpace(declaration.Name), strings.TrimSpace(target)) && declaration.Scope == procedureir.ScopeLocal {
+			return true
+		}
+	}
+	return false
+}
+
+// resumeNextScopeCheckedMemberProbe accepts a single indexed/member operation
+// whose Err.Number result is asserted immediately before restoring the error
+// mode. This covers expected-error compatibility checks such as a Dictionary
+// default-member assignment without making an unresolved or nested RHS call
+// disappear from the scope analysis.
+func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver, constantValues map[string]constexpr.Value) bool {
+	if resumeNextScopeCurrentOperations(state) != 0 || statement.Recovered {
+		return false
+	}
+	lhsMemberProbe := false
+	rhsMemberProbe := false
+	rhsCheckedPropertyChain := false
+	arrayElementProbe := false
+	switch statement.Kind {
+	case procedureir.StatementAssignment, procedureir.StatementSet:
+		if statement.Target == nil || statement.Value == nil || statement.Value.Recovered {
+			return false
+		}
+		target, _, ok := resumeNextScopeAssignmentText(statement)
+		if !ok {
+			return false
+		}
+		lhsMemberProbe = resumeNextScopeMemberProbeTarget(target) &&
+			resumeNextScopeHasSingleStatementCall(proc, statement, moduleDecls, target, projectResolver) &&
+			resumeNextScopeMemberProbeAssignmentValueSafe(proc, statement, moduleDecls, projectResolver) &&
+			resumeNextScopeCheckedMemberAssignmentArgumentsSafe(proc, statement, moduleDecls, projectResolver)
+		rhsMemberProbe = !lhsMemberProbe &&
+			resumeNextScopeHasSingleRHSMemberCallProbe(proc, statement, moduleDecls, projectResolver) &&
+			resumeNextScopeMemberCallArgumentsSafe(proc, statement, moduleDecls, projectResolver)
+		rhsCheckedPropertyChain = !lhsMemberProbe && !rhsMemberProbe &&
+			resumeNextScopeCheckedPropertyChain(proc, statement, moduleDecls, projectResolver)
+		arrayElementProbe = !lhsMemberProbe && !rhsMemberProbe && resumeNextScopeHasSingleArrayElementProbe(proc, statement, moduleDecls)
+	case procedureir.StatementCall:
+		lhsMemberProbe = resumeNextScopeHasSingleMemberCallProbe(proc, statement, moduleDecls, projectResolver) &&
+			resumeNextScopeMemberCallArgumentsSafe(proc, statement, moduleDecls, projectResolver)
+	default:
+		return false
+	}
+	if !lhsMemberProbe && !rhsMemberProbe && !rhsCheckedPropertyChain && !arrayElementProbe {
+		return false
+	}
+	ordered := make([]procedureir.Statement, 0, len(statementsByID))
+	for _, candidate := range statementsByID {
+		ordered = append(ordered, candidate)
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Range.StartByte != ordered[j].Range.StartByte {
+			return ordered[i].Range.StartByte < ordered[j].Range.StartByte
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	index := -1
+	for i, candidate := range ordered {
+		if candidate.ID == statement.ID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return false
+	}
+	if arrayElementProbe && resumeNextScopeConditionalErrAssertionProbe(proc, statement, ordered, index, statementsByID, moduleDecls, projectResolver) {
+		return true
+	}
+	next := func(start int) (procedureir.Statement, int, bool) {
+		for i := start; i < len(ordered); i++ {
+			candidate := ordered[i]
+			if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+				continue
+			}
+			if !resumeNextScopeConditionalPathsCompatible(statement.ConditionalBranches, candidate.ConditionalBranches) {
+				continue
+			}
+			return candidate, i, true
+		}
+		return procedureir.Statement{}, -1, false
+	}
+	assertion, assertionIndex, ok := next(index + 1)
+	if rhsCheckedPropertyChain && ok && resumeNextScopeErrStatusCapture(proc, assertion, moduleDecls) &&
+		resumeNextScopeNormalFlowTo(proc.Graph, statement.ID, assertion.ID, statementsByID) {
+		previousID := assertion.ID
+		for nextIndex := assertionIndex + 1; ; {
+			candidate, candidateIndex, nextOK := next(nextIndex)
+			if !nextOK {
+				break
+			}
+			if errClearStatementRe.MatchString(maskStringLiterals(gui.StripComment(candidate.Text))) {
+				if !resumeNextScopeNormalFlowTo(proc.Graph, previousID, candidate.ID, statementsByID) {
+					return false
+				}
+				previousID = candidate.ID
+				nextIndex = candidateIndex + 1
+				continue
+			}
+			if restoresErrorHandling(candidate) && resumeNextScopeNormalFlowTo(proc.Graph, previousID, candidate.ID, statementsByID) {
+				return true
+			}
+			break
+		}
+	}
+	if ok && resumeNextScopeErrAssertion(proc, moduleDecls, assertion, projectResolver) &&
+		resumeNextScopeNormalFlowTo(proc.Graph, statement.ID, assertion.ID, statementsByID) {
+		previousID := assertion.ID
+		restoreIndex := assertionIndex + 1
+		for {
+			candidate, candidateIndex, nextOK := next(restoreIndex)
+			if !nextOK {
+				break
+			}
+			if resumeNextScopeErrDescriptionAssertion(proc, candidate) {
+				if !resumeNextScopeNormalFlowTo(proc.Graph, previousID, candidate.ID, statementsByID) {
+					return false
+				}
+				previousID = candidate.ID
+				restoreIndex = candidateIndex + 1
+				continue
+			}
+			if errClearStatementRe.MatchString(maskStringLiterals(gui.StripComment(candidate.Text))) {
+				if !resumeNextScopeNormalFlowTo(proc.Graph, previousID, candidate.ID, statementsByID) {
+					return false
+				}
+				previousID = candidate.ID
+				restoreIndex = candidateIndex + 1
+				continue
+			}
+			if restoresErrorHandling(candidate) && resumeNextScopeNormalFlowTo(proc.Graph, previousID, candidate.ID, statementsByID) {
+				if rhsMemberProbe {
+					target, _, targetOK := resumeNextScopeAssignmentText(statement)
+					inspection, _, inspectionOK := next(candidateIndex + 1)
+					if targetOK && inspectionOK && resumeNextScopeScalarResultInspectionShape(proc, inspection, target, constantValues) &&
+						!resumeNextScopeScalarResultTargetIsValid(proc, target) {
+						return false
+					}
+					if targetOK && inspectionOK && resumeNextScopeObjectResultInspection(inspection, target) &&
+						!resumeNextScopeMemberProbeHasHostReceiver(proc, statement) &&
+						!resumeNextScopeHasPriorSafeProbeInitialization(proc, statement, ordered, index, statementsByID) {
+						return false
+					}
+					if targetOK && inspectionOK && resumeNextScopeScalarResultInspection(proc, inspection, target, constantValues) &&
+						resumeNextScopeNormalFlowTo(proc.Graph, candidate.ID, inspection.ID, statementsByID) &&
+						!resumeNextScopeHasPriorSafeProbeInitialization(proc, statement, ordered, index, statementsByID) {
+						return false
+					}
+				}
+				return true
+			}
+			break
+		}
+	}
+	if ok && resumeNextScopeDirectErrNumberGuard(proc, moduleDecls, assertion, projectResolver) &&
+		!resumeNextScopeConditionHasCall(proc.Calls, assertion) &&
+		resumeNextScopeNormalFlowTo(proc.Graph, statement.ID, assertion.ID, statementsByID) &&
+		resumeNextScopeErrGuardRestores(proc, assertion, assertionIndex, ordered, statementsByID) {
+		return true
+	}
+	if !rhsMemberProbe {
+		return false
+	}
+	if !resumeNextScopeHasPriorSafeProbeInitialization(proc, statement, ordered, index, statementsByID) {
+		return false
+	}
+	restore, restoreIndex, ok := next(index + 1)
+	if !ok || !restoresErrorHandling(restore) || !resumeNextScopeNormalFlowTo(proc.Graph, statement.ID, restore.ID, statementsByID) {
+		return false
+	}
+	inspection, _, ok := next(restoreIndex + 1)
+	target, _, targetOK := resumeNextScopeAssignmentText(statement)
+	if !ok || !targetOK {
+		return false
+	}
+	if resumeNextScopeScalarResultInspectionShape(proc, inspection, target, constantValues) &&
+		!resumeNextScopeScalarResultTargetIsValid(proc, target) {
+		return false
+	}
+	if (!resumeNextScopeObjectResultInspection(inspection, target) &&
+		!resumeNextScopeScalarResultInspection(proc, inspection, target, constantValues)) ||
+		!resumeNextScopeNormalFlowTo(proc.Graph, restore.ID, inspection.ID, statementsByID) {
+		return false
+	}
+	return true
+}
+
+// Conditional compilation can provide different expected error numbers for
+// different VBA dialects. Treat those assertions as one checked probe only
+// when every branch of a single #If group is covered and all paths reach one
+// unconditional restore without another executable statement in between.
+func resumeNextScopeConditionalErrAssertionProbe(proc sourceProcedure, statement procedureir.Statement, ordered []procedureir.Statement, index int, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	if len(statement.ConditionalBranches) != 0 {
+		return false
+	}
+	assertions := make([]procedureir.Statement, 0, 2)
+	branches := make(map[int]bool)
+	group := ""
+	maxBranch := -1
+	for i := index + 1; i < len(ordered); i++ {
+		candidate := ordered[i]
+		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+			continue
+		}
+		if restoresErrorHandling(candidate) {
+			if len(candidate.ConditionalBranches) != 0 || len(assertions) < 2 || maxBranch < 1 {
+				return false
+			}
+			for branch := 0; branch <= maxBranch; branch++ {
+				if !branches[branch] {
+					return false
+				}
+			}
+			previousID := statement.ID
+			for _, assertion := range assertions {
+				if !resumeNextScopeNormalFlowTo(proc.Graph, previousID, assertion.ID, statementsByID) {
+					return false
+				}
+				previousID = assertion.ID
+			}
+			return resumeNextScopeNormalFlowTo(proc.Graph, previousID, candidate.ID, statementsByID)
+		}
+		if !resumeNextScopeErrAssertion(proc, moduleDecls, candidate, projectResolver) || len(candidate.ConditionalBranches) != 1 {
+			return false
+		}
+		branch := candidate.ConditionalBranches[0]
+		if branch.Group == "" || (group != "" && group != branch.Group) || branch.Branch < 0 || branches[branch.Branch] {
+			return false
+		}
+		group = branch.Group
+		branches[branch.Branch] = true
+		if branch.Branch > maxBranch {
+			maxBranch = branch.Branch
+		}
+		assertions = append(assertions, candidate)
+	}
+	return false
+}
+
+// A typed or Variant array element read/write is one compatibility operation
+// when its subscript contains no nested call or member access. Keep this
+// separate from member-call probes because the IR represents arr(index) as a
+// call-like expression even when arr is an array rather than a procedure.
+func resumeNextScopeHasSingleArrayElementProbe(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet || statement.Recovered {
+		return false
+	}
+	variables := resumeNextScopeArrayProbeVariables(proc, moduleDecls)
+	uses := arrayIndexedUses(maskStringLiterals(gui.StripComment(statement.Text)), variables)
+	if len(uses) != 1 || len(uses[0].args) == 0 {
+		return false
+	}
+	for _, argument := range uses[0].args {
+		if strings.ContainsAny(argument, "().!") {
+			return false
+		}
+	}
+	callCount := 0
+	for call := range proc.Calls.All() {
+		if call.StatementID != statement.ID || call.Callee.Receiver != nil || strings.EqualFold(strings.TrimSpace(call.Callee.BaseName), "Let") {
+			continue
+		}
+		if call.IsRaiseEvent || !strings.EqualFold(cleanIdentifier(strings.TrimSpace(call.Callee.BaseName)), cleanIdentifier(strings.TrimSpace(uses[0].name))) {
+			return false
+		}
+		callCount++
+	}
+	return callCount == 1
+}
+
+func resumeNextScopeArrayProbeVariables(proc sourceProcedure, moduleDecls map[string]sourceDeclaration) map[string]arrayVariable {
+	variables := make(map[string]arrayVariable, len(moduleDecls)+proc.Declarations.Len()+proc.Params.Len())
+	for name, declaration := range moduleDecls {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" {
+			continue
+		}
+		variables[key] = arrayVariable{isArray: declaration.Array, isVariant: declaration.Type == "" || strings.EqualFold(strings.TrimSpace(declaration.Type), "Variant")}
+	}
+	for declaration := range proc.Declarations.All() {
+		key := strings.ToLower(strings.TrimSpace(declaration.Name))
+		if key == "" {
+			continue
+		}
+		variables[key] = arrayVariable{
+			isArray:   declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+			isVariant: declaration.ValueShape == procedureir.ValueShapeVariant || declaration.Type == "" || strings.EqualFold(strings.TrimSpace(declaration.Type), "Variant"),
+		}
+	}
+	for parameter := range proc.Params.All() {
+		key := strings.ToLower(strings.TrimSpace(parameter.Name))
+		if key == "" {
+			continue
+		}
+		variables[key] = arrayVariable{
+			isArray:   parameterIsArray(parameter),
+			isVariant: parameter.Type == "" || strings.EqualFold(strings.TrimSpace(parameter.Type), "Variant"),
+		}
+	}
+	return variables
+}
+
+func resumeNextScopeMemberProbeTarget(target string) bool {
+	target = strings.TrimSpace(target)
+	return resumeNextScopeMemberProbeReceiver(target) != ""
+}
+
+func resumeNextScopeMemberProbeReceiver(target string) string {
+	target = strings.TrimSpace(target)
+	separator := strings.IndexAny(target, ".(!")
+	if separator <= 0 {
+		return ""
+	}
+	receiver := strings.TrimSpace(target[:separator])
+	if !errorSuccessIdentifierRE.MatchString(receiver) {
+		return ""
+	}
+	if target[separator] == '(' {
+		if matchingParen(target, separator) != len(target)-1 {
+			return ""
+		}
+	}
+	return receiver
+}
+
+func resumeNextScopeMemberProbeAssignmentValueSafe(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	if statement.Value == nil || statement.Value.Recovered {
+		return false
+	}
+	switch statement.Value.Kind {
+	case procedureir.ExpressionIdentifier, procedureir.ExpressionLiteral:
+	case procedureir.ExpressionCall:
+		return resumeNextScopeCheckedStringConversion(proc, *statement.Value)
+	default:
+		return false
+	}
+	value := strings.TrimSpace(statement.Value.Text)
+	return !errorSuccessIdentifierRE.MatchString(value) || resumeNextScopeKnownValueIdentifier(proc, moduleDecls, value, projectResolver)
+}
+
+func resumeNextScopeMemberProbeHasUnsafeValue(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	switch statement.Kind {
+	case procedureir.StatementAssignment, procedureir.StatementSet:
+		target, _, ok := resumeNextScopeAssignmentText(statement)
+		if !ok {
+			return false
+		}
+		if resumeNextScopeMemberProbeTarget(target) {
+			return !resumeNextScopeMemberProbeAssignmentValueSafe(proc, statement, moduleDecls, projectResolver) ||
+				!resumeNextScopeMemberCallArgumentsSafe(proc, statement, moduleDecls, projectResolver)
+		}
+		if statement.Value != nil && statement.Value.Kind == procedureir.ExpressionMember {
+			return !resumeNextScopeHasSimpleRHSMemberAccess(proc, statement, moduleDecls, projectResolver)
+		}
+		if statement.Value != nil && statement.Value.Kind == procedureir.ExpressionCall {
+			if !resumeNextScopeHasSingleRHSMemberCallProbe(proc, statement, moduleDecls, projectResolver) {
+				return false
+			}
+			return !resumeNextScopeMemberCallArgumentsSafe(proc, statement, moduleDecls, projectResolver)
+		}
+		return false
+	case procedureir.StatementCall:
+		return resumeNextScopeHasSingleMemberCallProbe(proc, statement, moduleDecls, projectResolver) && !resumeNextScopeMemberCallArgumentsSafe(proc, statement, moduleDecls, projectResolver)
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeRHSMemberProbeHasUnsafeResultInspection(proc sourceProcedure, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration, constantValues map[string]constexpr.Value) bool {
+	if statement.Target == nil || statement.Value == nil || statement.Value.Recovered || statement.Value.Kind != procedureir.ExpressionCall {
+		return false
+	}
+	target, _, ok := resumeNextScopeAssignmentText(statement)
+	if !ok || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	if resumeNextScopeMemberProbeHasHostReceiver(proc, statement) {
+		return false
+	}
+	objectTarget := resumeNextScopeBooleanCoercionTargetIsObject(proc, target, moduleDecls)
+	inspection := false
+	for _, candidate := range statementsByID {
+		if candidate.Range.StartByte <= statement.Range.StartByte ||
+			!resumeNextScopeConditionalPathsCompatible(statement.ConditionalBranches, candidate.ConditionalBranches) {
+			continue
+		}
+		if resumeNextScopeScalarResultInspectionShape(proc, candidate, target, constantValues) {
+			if !resumeNextScopeScalarResultTargetIsValid(proc, target) {
+				return true
+			}
+			continue
+		}
+		if objectTarget && resumeNextScopeObjectResultInspection(candidate, target) {
+			inspection = true
+			break
+		}
+	}
+	if !objectTarget || !inspection {
+		return false
+	}
+	ordered := make([]procedureir.Statement, 0, len(statementsByID))
+	for _, candidate := range statementsByID {
+		ordered = append(ordered, candidate)
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Range.StartByte != ordered[j].Range.StartByte {
+			return ordered[i].Range.StartByte < ordered[j].Range.StartByte
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	index := -1
+	for candidateIndex, candidate := range ordered {
+		if candidate.ID == statement.ID {
+			index = candidateIndex
+			break
+		}
+	}
+	return index < 0 || !resumeNextScopeHasPriorSafeProbeInitialization(proc, statement, ordered, index, statementsByID)
+}
+
+func resumeNextScopeMemberProbeHasHostReceiver(proc sourceProcedure, statement procedureir.Statement) bool {
+	for call := range proc.Calls.All() {
+		if call.StatementID == statement.ID && call.Callee.Receiver != nil &&
+			resumeNextScopeKnownHostObjectReceiver(*call.Callee.Receiver) {
+			return true
+		}
+	}
+	return false
+}
+
+func resumeNextScopeHasSingleStatementCall(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, target string, projectResolver procedureir.Resolver) bool {
+	if statement.Target == nil {
+		return false
+	}
+	expectedReceiver := resumeNextScopeMemberProbeReceiver(target)
+	count := 0
+	targetCount := 0
+	for candidate := range proc.Calls.All() {
+		if candidate.StatementID != statement.ID {
+			continue
+		}
+		if candidate.Callee.Receiver == nil && strings.EqualFold(candidate.Callee.BaseName, "Let") {
+			continue
+		}
+		if statement.Value != nil && resumeNextScopeCheckedStringConversionCall(proc, candidate, statement.Value.Range) {
+			continue
+		}
+		count++
+		if resumeNextScopeCallBelongsToTarget(candidate, statement.Target.Range) {
+			targetCount++
+			if !resumeNextScopeMemberCallReceiverIsValid(proc, candidate, moduleDecls, expectedReceiver, projectResolver) {
+				return false
+			}
+		}
+	}
+	return count == 1 && targetCount == 1
+}
+
+func resumeNextScopeHasSingleMemberCallProbe(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	count := 0
+	for candidate := range proc.Calls.All() {
+		if candidate.StatementID != statement.ID {
+			continue
+		}
+		if candidate.Callee.Receiver == nil && strings.EqualFold(candidate.Callee.BaseName, "Let") {
+			continue
+		}
+		count++
+		if count > 1 || candidate.Callee.Receiver == nil {
+			return false
+		}
+		if !resumeNextScopeMemberCallReceiverIsValid(proc, candidate, moduleDecls, "", projectResolver) {
+			return false
+		}
+	}
+	return count == 1
+}
+
+func resumeNextScopeHasSingleRHSMemberCallProbe(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	if statement.Target == nil || statement.Value == nil || statement.Value.Recovered {
+		return false
+	}
+	if statement.Value.Kind == procedureir.ExpressionMember {
+		return resumeNextScopeHasSimpleRHSMemberAccess(proc, statement, moduleDecls, projectResolver)
+	}
+	if statement.Value.Kind != procedureir.ExpressionCall {
+		return false
+	}
+	target, _, ok := resumeNextScopeAssignmentText(statement)
+	if !ok || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	count := 0
+	for candidate := range proc.Calls.All() {
+		if candidate.StatementID != statement.ID {
+			continue
+		}
+		if candidate.Callee.Receiver == nil && strings.EqualFold(candidate.Callee.BaseName, "Let") {
+			continue
+		}
+		if !resumeNextScopeCallBelongsToTarget(candidate, statement.Value.Range) {
+			return false
+		}
+		if resumeNextScopeSafeStringConversionCall(proc, candidate, statement.Value.Range, moduleDecls, projectResolver) {
+			continue
+		}
+		count++
+		if count > 1 {
+			return false
+		}
+		expectedReceiver := ""
+		if candidate.Callee.Receiver == nil {
+			expectedReceiver = resumeNextScopeRHSDefaultMemberReceiver(statement.Value.Text)
+			if expectedReceiver == "" || !resumeNextScopeBooleanCoercionTargetIsObject(proc, expectedReceiver, moduleDecls) {
+				return false
+			}
+		}
+		if !resumeNextScopeMemberCallReceiverIsValid(proc, candidate, moduleDecls, expectedReceiver, projectResolver) {
+			return false
+		}
+	}
+	return count == 1
+}
+
+func resumeNextScopeHasSimpleRHSMemberAccess(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	if statement.Value == nil || statement.Value.Recovered || statement.Value.Kind != procedureir.ExpressionMember || len(statement.Value.Children) != 2 {
+		return false
+	}
+	target, _, targetOK := resumeNextScopeAssignmentText(statement)
+	if !targetOK || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	receiver, receiverOK := proc.Expressions.At(statement.Value.Children[0] - 1)
+	member, memberOK := proc.Expressions.At(statement.Value.Children[1] - 1)
+	if !receiverOK || !memberOK || receiver.Recovered || member.Recovered ||
+		receiver.Kind != procedureir.ExpressionIdentifier || member.Kind != procedureir.ExpressionIdentifier {
+		return false
+	}
+	receiverName := strings.TrimSpace(receiver.Text)
+	return errorSuccessIdentifierRE.MatchString(receiverName) &&
+		errorSuccessIdentifierRE.MatchString(strings.TrimSpace(member.Text)) &&
+		resumeNextScopeBooleanCoercionTargetIsObject(proc, receiverName, moduleDecls) &&
+		!resumeNextScopeProcedureIdentifier(proc, receiverName, projectResolver)
+}
+
+func resumeNextScopeCheckedPropertyChain(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	target, value, ok := resumeNextScopeAssignmentText(statement)
+	if !ok || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) || strings.ContainsAny(value, "()!") {
+		return false
+	}
+	parts := strings.Split(strings.TrimSpace(value), ".")
+	if len(parts) < 3 {
+		return false
+	}
+	for _, part := range parts {
+		if !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(part)) {
+			return false
+		}
+	}
+	root := strings.TrimSpace(parts[0])
+	return resumeNextScopeBooleanCoercionTargetIsObject(proc, root, moduleDecls) &&
+		!resumeNextScopeProcedureIdentifier(proc, root, projectResolver)
+}
+
+func resumeNextScopeErrStatusCapture(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	target, value, ok := resumeNextScopeAssignmentText(statement)
+	if !ok || !strings.EqualFold(resumeNextScopeTargetType(proc, statement, moduleDecls), "Boolean") {
+		return false
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(value), ""))
+	if normalized != "err.number<>0" && normalized != "0<>err.number" &&
+		normalized != "err.number=0" && normalized != "0=err.number" {
+		return false
+	}
+	return errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) && !resumeNextScopeConditionHasCall(proc.Calls, statement)
+}
+
+func resumeNextScopeRHSDefaultMemberReceiver(value string) string {
+	value = strings.TrimSpace(value)
+	open := strings.IndexByte(value, '(')
+	if open <= 0 || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(value[:open])) || matchingParen(value, open) != len(value)-1 {
+		return ""
+	}
+	return strings.TrimSpace(value[:open])
+}
+
+func resumeNextScopeHasPriorSafeProbeInitialization(proc sourceProcedure, statement procedureir.Statement, ordered []procedureir.Statement, index int, statementsByID map[int]procedureir.Statement) bool {
+	target, _, ok := resumeNextScopeAssignmentText(statement)
+	if !ok || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	if resumeNextScopeHasImplicitObjectNothing(proc, target, statement, ordered, index) ||
+		resumeNextScopeHasImplicitScalarZero(proc, target, statement, ordered, index) {
+		return true
+	}
+	if proc.Graph == nil {
+		return false
+	}
+	probeBlock, probeOK := proc.Graph.BlockForStatement(statement.ID)
+	if !probeOK {
+		return false
+	}
+	dominators := proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).DominatorsOf(probeBlock.ID)
+	for candidateIndex := index - 1; candidateIndex >= 0; candidateIndex-- {
+		candidate := ordered[candidateIndex]
+		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+			continue
+		}
+		candidateTarget, _, candidateOK := resumeNextScopeAssignmentText(candidate)
+		if !candidateOK || !strings.EqualFold(strings.TrimSpace(candidateTarget), strings.TrimSpace(target)) ||
+			!resumeNextScopeNormalFlowTo(proc.Graph, candidate.ID, statement.ID, statementsByID) {
+			continue
+		}
+		if !resumeNextScopeSafeProbeInitialization(proc, candidate) {
+			return false
+		}
+		candidateBlock, candidateBlockOK := proc.Graph.BlockForStatement(candidate.ID)
+		if !candidateBlockOK {
+			continue
+		}
+		for _, dominator := range dominators {
+			if dominator == candidateBlock.ID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// A non-Static local object starts each procedure invocation as Nothing. That
+// implicit initialization is safe for a probe result when no earlier write can
+// have changed the variable. Static locals are intentionally excluded because
+// their value survives across invocations.
+func resumeNextScopeHasImplicitObjectNothing(proc sourceProcedure, target string, statement procedureir.Statement, ordered []procedureir.Statement, index int) bool {
+	if index < 0 || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	found := false
+	for declaration := range proc.Declarations.All() {
+		if !strings.EqualFold(strings.TrimSpace(declaration.Name), strings.TrimSpace(target)) ||
+			declaration.Scope != procedureir.ScopeLocal || declaration.IsArray || declaration.IsStatic || declaration.IsNew ||
+			(!declaration.IsObject && !isObjectType(declaration.Type)) {
+			continue
+		}
+		found = true
+		break
+	}
+	if !found {
+		return false
+	}
+	if resumeNextScopeHasPriorPotentialByRefCall(proc, target, statement) {
+		return false
+	}
+	for candidateIndex := 0; candidateIndex < index; candidateIndex++ {
+		candidate := ordered[candidateIndex]
+		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+			continue
+		}
+		candidateTarget, _, candidateOK := resumeNextScopeAssignmentText(candidate)
+		if candidateOK && strings.EqualFold(strings.TrimSpace(candidateTarget), strings.TrimSpace(target)) {
+			return false
+		}
+	}
+	for access := range proc.Accesses.All() {
+		if !strings.EqualFold(strings.TrimSpace(access.Name), strings.TrimSpace(target)) ||
+			(access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) {
+			continue
+		}
+		if access.Range.StartByte < statement.Range.StartByte ||
+			(access.StatementID > 0 && statement.ID > 0 && access.StatementID < statement.ID) {
+			return false
+		}
+	}
+	return true
+}
+
+func resumeNextScopeHasImplicitScalarZero(proc sourceProcedure, target string, statement procedureir.Statement, ordered []procedureir.Statement, index int) bool {
+	if index < 0 || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	found := false
+	for declaration := range proc.Declarations.All() {
+		if !strings.EqualFold(strings.TrimSpace(declaration.Name), strings.TrimSpace(target)) ||
+			declaration.Scope != procedureir.ScopeLocal || declaration.IsArray || declaration.IsStatic || declaration.IsNew ||
+			declaration.IsObject || isObjectType(declaration.Type) || !resumeNextScopeZeroDefaultScalarType(declaration.Type) {
+			continue
+		}
+		found = true
+		break
+	}
+	if !found {
+		return false
+	}
+	if resumeNextScopeHasPriorPotentialByRefCall(proc, target, statement) {
+		return false
+	}
+	for candidateIndex := 0; candidateIndex < index; candidateIndex++ {
+		candidate := ordered[candidateIndex]
+		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+			continue
+		}
+		candidateTarget, _, candidateOK := resumeNextScopeAssignmentText(candidate)
+		if candidateOK && strings.EqualFold(strings.TrimSpace(candidateTarget), strings.TrimSpace(target)) {
+			return false
+		}
+	}
+	for access := range proc.Accesses.All() {
+		if !strings.EqualFold(strings.TrimSpace(access.Name), strings.TrimSpace(target)) ||
+			(access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) {
+			continue
+		}
+		if access.Range.StartByte < statement.Range.StartByte ||
+			(access.StatementID > 0 && statement.ID > 0 && access.StatementID < statement.ID) {
+			return false
+		}
+	}
+	return true
+}
+
+// A direct argument to a non-builtin call may alias the probe result through
+// VBA's default ByRef parameter passing. The IR does not retain callee
+// parameter passing modes on CallSite, so unresolved and project calls are
+// conservatively treated as possible writes. This prevents an earlier helper
+// call from invalidating the implicit zero/Nothing proof.
+func resumeNextScopeHasPriorPotentialByRefCall(proc sourceProcedure, target string, statement procedureir.Statement) bool {
+	target = strings.ToLower(cleanIdentifier(strings.TrimSpace(target)))
+	if target == "" {
+		return false
+	}
+	for call := range proc.Calls.All() {
+		if !resumeNextScopeCallMayMutateTarget(proc, call, target) ||
+			!resumeNextScopeCallPrecedesStatement(call, statement) {
+			continue
+		}
+		for _, argument := range call.Arguments.Named {
+			if directArrayArgumentName(argument.ValueText) == target {
+				return true
+			}
+		}
+		for _, argument := range arrayCallArgumentTexts(proc, call) {
+			if directArrayArgumentName(argument) == target {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func resumeNextScopeCallMayMutateTarget(proc sourceProcedure, call procedureir.CallSite, target string) bool {
+	if call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+		return false
+	}
+	if call.IsRaiseEvent {
+		return true
+	}
+	if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 || proc.Document == nil {
+		return true
+	}
+	qualifiedName := strings.TrimSpace(call.Resolution.Candidates[0].QualifiedName)
+	for _, candidate := range proc.Document.Procedures {
+		if !strings.EqualFold(strings.TrimSpace(candidate.Symbol.QualifiedName), qualifiedName) {
+			continue
+		}
+		callee := sourceProcedure{Params: newReadOnlySpan(candidate.Symbol.Parameters)}
+		bindings, ok := arrayCallArgumentBindings(proc, callee, call)
+		if !ok {
+			return true
+		}
+		for _, binding := range bindings {
+			if directArrayArgumentName(binding.text) == strings.ToLower(cleanIdentifier(strings.TrimSpace(target))) &&
+				binding.parameterIndex >= 0 && binding.parameterIndex < callee.Params.Len() &&
+				parameterIsByRefScalar(callee.Params.valueAt(binding.parameterIndex)) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func resumeNextScopeCallPrecedesStatement(call procedureir.CallSite, statement procedureir.Statement) bool {
+	if call.StatementID > 0 && statement.ID > 0 && call.StatementID != statement.ID {
+		return call.StatementID < statement.ID
+	}
+	if call.Range.StartByte > 0 && statement.Range.StartByte > 0 {
+		return call.Range.StartByte < statement.Range.StartByte
+	}
+	if call.Range.StartLine != statement.Range.StartLine {
+		return call.Range.StartLine < statement.Range.StartLine
+	}
+	return call.Range.StartColumn < statement.Range.StartColumn
+}
+
+func resumeNextScopeZeroDefaultScalarType(typ string) bool {
+	switch strings.ToLower(cleanIdentifier(strings.TrimSpace(typ))) {
+	case "byte", "integer", "long", "longlong", "longptr", "single", "double", "currency", "decimal", "date", "boolean":
+		return true
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeMemberCallReceiverIsValid(proc sourceProcedure, call procedureir.CallSite, moduleDecls map[string]sourceDeclaration, expectedReceiver string, projectResolver procedureir.Resolver) bool {
+	receiver := strings.TrimSpace(expectedReceiver)
+	if call.Callee.Receiver != nil {
+		receiver = strings.TrimSpace(*call.Callee.Receiver)
+	} else if receiver == "" || !strings.EqualFold(strings.TrimSpace(call.Callee.BaseName), receiver) {
+		return false
+	}
+	if !errorSuccessIdentifierRE.MatchString(receiver) {
+		return false
+	}
+	if resumeNextScopeBooleanCoercionTargetIsObject(proc, receiver, moduleDecls) {
+		return true
+	}
+	if resumeNextScopeKnownHostObjectReceiver(receiver) {
+		return true
+	}
+	if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
+		// A qualified standard-module call (Helpers.DoWork) is a project
+		// procedure, not an object member probe. Require a declaration for the
+		// receiver before accepting a resolved call so the probe exemption cannot
+		// hide the ordinary project-call warning.
+		return resumeNextScopeReceiverDeclared(proc, moduleDecls, receiver) ||
+			!resumeNextScopeCallMatchesReceiverModule(call, receiver)
+	}
+	return resumeNextScopeProjectTypedMemberCall(proc, call, moduleDecls, receiver, projectResolver)
+}
+
+func resumeNextScopeKnownHostObjectReceiver(receiver string) bool {
+	switch strings.ToLower(strings.TrimSpace(receiver)) {
+	case "application", "thisworkbook", "activesheet", "activeworkbook", "selection", "worksheetfunction":
+		return true
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeReceiverDeclared(proc sourceProcedure, moduleDecls map[string]sourceDeclaration, receiver string) bool {
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(strings.TrimSpace(declaration.Name), receiver) {
+			return true
+		}
+	}
+	for name, declaration := range moduleDecls {
+		if strings.EqualFold(strings.TrimSpace(name), receiver) || strings.EqualFold(strings.TrimSpace(declaration.Name), receiver) {
+			return true
+		}
+	}
+	return false
+}
+
+func resumeNextScopeCallMatchesReceiverModule(call procedureir.CallSite, receiver string) bool {
+	if call.Callee.Receiver == nil || len(call.Resolution.Candidates) != 1 {
+		return false
+	}
+	qualifiedName := strings.TrimSpace(call.Resolution.Candidates[0].QualifiedName)
+	separator := strings.LastIndexAny(qualifiedName, ".!")
+	if separator <= 0 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(qualifiedName[:separator]), receiver)
+}
+
+func resumeNextScopeProjectTypedMemberCall(proc sourceProcedure, call procedureir.CallSite, moduleDecls map[string]sourceDeclaration, receiver string, projectResolver procedureir.Resolver) bool {
+	if projectResolver == nil || !resumeNextScopeReceiverDeclared(proc, moduleDecls, receiver) {
+		return false
+	}
+	typeName := ""
+	for candidate := range proc.Declarations.All() {
+		if strings.EqualFold(strings.TrimSpace(candidate.Name), receiver) {
+			typeName = strings.TrimSpace(candidate.Type)
+			break
+		}
+	}
+	if typeName == "" {
+		for name, candidate := range moduleDecls {
+			if strings.EqualFold(strings.TrimSpace(name), receiver) || strings.EqualFold(strings.TrimSpace(candidate.Name), receiver) {
+				typeName = strings.TrimSpace(candidate.Type)
+				break
+			}
+		}
+	}
+	if typeName == "" || !errorSuccessIdentifierRE.MatchString(lastName(typeName)) {
+		return false
+	}
+	member := strings.TrimSpace(call.Callee.Member)
+	if member == "" {
+		member = strings.TrimSpace(call.Callee.BaseName)
+	}
+	if !errorSuccessIdentifierRE.MatchString(member) {
+		return false
+	}
+	typedReceiver := lastName(typeName)
+	typedCall := call
+	typedCall.Callee.Receiver = &typedReceiver
+	typedCall.Callee.BaseName = member
+	typedCall.Callee.Member = member
+	typedCall.Callee.Text = typedReceiver + "." + member
+	resolution := projectResolver.ResolveCall(typedCall)
+	return resolution.Status == procedureir.ResolutionMatched && len(resolution.Candidates) == 1
+}
+
+func resumeNextScopeMemberCallArgumentsSafe(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	return resumeNextScopeMemberCallArgumentsSafeMode(proc, statement, moduleDecls, projectResolver, false)
+}
+
+func resumeNextScopeCheckedMemberAssignmentArgumentsSafe(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	return resumeNextScopeMemberCallArgumentsSafeMode(proc, statement, moduleDecls, projectResolver, true)
+}
+
+func resumeNextScopeMemberCallArgumentsSafeMode(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver, allowCheckedStringConversion bool) bool {
+	for call := range proc.Calls.All() {
+		if call.StatementID != statement.ID {
+			continue
+		}
+		if call.Callee.Receiver == nil && strings.EqualFold(call.Callee.BaseName, "Let") {
+			continue
+		}
+		if allowCheckedStringConversion && statement.Value != nil && resumeNextScopeCheckedStringConversionCall(proc, call, statement.Value.Range) {
+			continue
+		}
+		for _, expressionID := range call.Arguments.ExpressionIDs {
+			if statement.Value != nil {
+				if handled, safe := resumeNextScopeSyntheticIndexedAssignmentArgument(proc, statement, expressionID, moduleDecls, projectResolver); handled {
+					if !safe {
+						return false
+					}
+					continue
+				}
+			}
+			if allowCheckedStringConversion {
+				if expression, ok := proc.Expressions.At(expressionID - 1); ok && resumeNextScopeCheckedStringConversion(proc, expression) {
+					continue
+				}
+			}
+			if !resumeNextScopeSafeMemberCallArgumentExpression(proc, expressionID, moduleDecls, projectResolver) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func resumeNextScopeCheckedStringConversion(proc sourceProcedure, expression procedureir.Expression) bool {
+	if expression.Recovered || expression.Kind != procedureir.ExpressionCall {
+		return false
+	}
+	text := strings.TrimSpace(expression.Text)
+	open := strings.IndexByte(text, '(')
+	if open <= 0 || matchingParen(text, open) != len(text)-1 || !strings.EqualFold(strings.TrimSpace(text[:open]), "CStr") {
+		return false
+	}
+	argument := strings.TrimSpace(text[open+1 : len(text)-1])
+	if !errorSuccessIdentifierRE.MatchString(argument) {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(strings.TrimSpace(declaration.Name), argument) {
+			return !declaration.IsArray && !declaration.IsObject
+		}
+	}
+	return false
+}
+
+func resumeNextScopeCheckedStringConversionCall(proc sourceProcedure, call procedureir.CallSite, target vbaast.Range) bool {
+	if call.Callee.Receiver != nil || !strings.EqualFold(strings.TrimSpace(call.Callee.BaseName), "CStr") ||
+		!resumeNextScopeCallBelongsToTarget(call, target) {
+		return false
+	}
+	for expression := range proc.Expressions.All() {
+		if expression.StatementID == call.StatementID && expression.Range == call.Range {
+			return resumeNextScopeCheckedStringConversion(proc, expression)
+		}
+	}
+	return false
+}
+
+func resumeNextScopeSafeMemberCallArgumentExpression(proc sourceProcedure, expressionID int, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	expression, ok := proc.Expressions.At(expressionID - 1)
+	if !ok || expression.Recovered {
+		return false
+	}
+	if expression.Kind == procedureir.ExpressionParentheses {
+		return len(expression.Children) == 1 && resumeNextScopeSafeMemberCallArgumentExpression(proc, expression.Children[0], moduleDecls, projectResolver)
+	}
+	if expression.Kind == procedureir.ExpressionMember {
+		return resumeNextScopeCompileTimeValueMember(proc, expression, projectResolver)
+	}
+	if expression.Kind == procedureir.ExpressionCall {
+		return resumeNextScopeSafeStringConversion(proc, expression, moduleDecls, projectResolver)
+	}
+	if expression.Kind == procedureir.ExpressionIdentifier {
+		return resumeNextScopeKnownValueIdentifier(proc, moduleDecls, expression.Text, projectResolver)
+	}
+	return expression.Kind == procedureir.ExpressionLiteral
+}
+
+func resumeNextScopeSafeStringConversion(proc sourceProcedure, expression procedureir.Expression, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	text := strings.TrimSpace(expression.Text)
+	open := strings.IndexByte(text, '(')
+	if open <= 0 || matchingParen(text, open) != len(text)-1 || !strings.EqualFold(strings.TrimSpace(text[:open]), "CStr") {
+		return false
+	}
+	argument := strings.TrimSpace(text[open+1 : len(text)-1])
+	if _, err := strconv.ParseInt(argument, 10, 64); err == nil || resumeNextScopeMaskedStringLiteral(argument) {
+		return true
+	}
+	if !errorSuccessIdentifierRE.MatchString(argument) {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(strings.TrimSpace(declaration.Name), argument) {
+			return resumeNextScopeSafeScalarConversionType(proc, declaration.Type, declaration.IsArray, declaration.IsObject, projectResolver)
+		}
+	}
+	for name, declaration := range moduleDecls {
+		if strings.EqualFold(strings.TrimSpace(name), argument) || strings.EqualFold(strings.TrimSpace(declaration.Name), argument) {
+			return resumeNextScopeSafeScalarConversionType(proc, declaration.Type, declaration.Array, declaration.Object, projectResolver)
+		}
+	}
+	return false
+}
+
+func resumeNextScopeSafeStringConversionCall(proc sourceProcedure, call procedureir.CallSite, target vbaast.Range, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	if call.Callee.Receiver != nil || !strings.EqualFold(strings.TrimSpace(call.Callee.BaseName), "CStr") ||
+		!resumeNextScopeCallBelongsToTarget(call, target) {
+		return false
+	}
+	for expression := range proc.Expressions.All() {
+		if expression.StatementID == call.StatementID && expression.Kind == procedureir.ExpressionCall && expression.Range == call.Range {
+			return resumeNextScopeSafeStringConversion(proc, expression, moduleDecls, projectResolver)
+		}
+	}
+	return false
+}
+
+func resumeNextScopeSafeScalarConversionType(proc sourceProcedure, typ string, array, object bool, projectResolver procedureir.Resolver) bool {
+	if array || object || strings.EqualFold(strings.TrimSpace(typ), "Variant") {
+		return false
+	}
+	normalizedType := strings.ToLower(cleanIdentifier(strings.TrimSpace(typ)))
+	if normalizedType == "date" || strings.HasSuffix(normalizedType, ".date") {
+		return false
+	}
+	if procedureir.SafeBooleanComparisonOperandType(typ, false, false) {
+		return true
+	}
+	if projectResolver == nil || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(typ)) {
+		return false
+	}
+	caller := procedureir.ProcedureRef{Name: proc.Name, Kind: proc.ProcedureKind}
+	if proc.IR != nil {
+		caller.QualifiedName = proc.IR.Symbol.QualifiedName
+	}
+	resolution := projectResolver.ResolveSymbol(procedureir.SymbolReference{Name: strings.TrimSpace(typ), Module: proc.Module, Caller: caller})
+	if resolution.Status != procedureir.ResolutionMatched || len(resolution.Candidates) != 1 {
+		return false
+	}
+	kind := strings.ToLower(strings.TrimSpace(resolution.Candidates[0].Kind))
+	return kind == "enum" || kind == "enum_type"
+}
+
+func resumeNextScopeCompileTimeEnumMember(proc sourceProcedure, expression procedureir.Expression, projectResolver procedureir.Resolver) bool {
+	if len(expression.Children) < 2 {
+		return false
+	}
+	receiver, ok := proc.Expressions.At(expression.Children[0] - 1)
+	if !ok || receiver.Kind != procedureir.ExpressionIdentifier || receiver.Recovered {
+		return false
+	}
+	for access := range proc.Accesses.All() {
+		if access.Name != receiver.Text || access.Range != receiver.Range ||
+			access.Resolution.Status != procedureir.ResolutionMatched || len(access.Resolution.Candidates) != 1 {
+			continue
+		}
+		kind := strings.ToLower(strings.TrimSpace(access.Resolution.Candidates[0].Kind))
+		return kind == "enum" || kind == "enum_type"
+	}
+	if projectResolver == nil {
+		return false
+	}
+	caller := procedureir.ProcedureRef{Name: proc.Name, Kind: proc.ProcedureKind}
+	if proc.IR != nil {
+		caller.QualifiedName = proc.IR.Symbol.QualifiedName
+	}
+	resolution := projectResolver.ResolveSymbol(procedureir.SymbolReference{
+		Name: receiver.Text, Module: proc.Module, Caller: caller, Range: receiver.Range,
+	})
+	if resolution.Status != procedureir.ResolutionMatched || len(resolution.Candidates) != 1 {
+		return false
+	}
+	kind := strings.ToLower(strings.TrimSpace(resolution.Candidates[0].Kind))
+	return kind == "enum" || kind == "enum_type"
+}
+
+func resumeNextScopeCompileTimeValueMember(proc sourceProcedure, expression procedureir.Expression, projectResolver procedureir.Resolver) bool {
+	if resumeNextScopeCompileTimeEnumMember(proc, expression, projectResolver) {
+		return true
+	}
+	if projectResolver == nil || len(expression.Children) != 2 {
+		return false
+	}
+	receiver, receiverOK := proc.Expressions.At(expression.Children[0] - 1)
+	member, memberOK := proc.Expressions.At(expression.Children[1] - 1)
+	if !receiverOK || !memberOK || receiver.Recovered || member.Recovered ||
+		receiver.Kind != procedureir.ExpressionIdentifier || member.Kind != procedureir.ExpressionIdentifier {
+		return false
+	}
+	receiverName := strings.TrimSpace(receiver.Text)
+	memberName := strings.TrimSpace(member.Text)
+	if !errorSuccessIdentifierRE.MatchString(receiverName) || !errorSuccessIdentifierRE.MatchString(memberName) {
+		return false
+	}
+	caller := procedureir.ProcedureRef{Name: proc.Name, Kind: proc.ProcedureKind}
+	if proc.IR != nil {
+		caller.QualifiedName = proc.IR.Symbol.QualifiedName
+	}
+	resolution := projectResolver.ResolveSymbol(procedureir.SymbolReference{
+		Name: memberName, Module: proc.Module, Caller: caller, Range: member.Range,
+	})
+	if resolution.Status != procedureir.ResolutionMatched || len(resolution.Candidates) != 1 {
+		return false
+	}
+	qualifiedName := strings.TrimSpace(resolution.Candidates[0].QualifiedName)
+	separator := strings.LastIndexAny(qualifiedName, ".!")
+	if separator <= 0 || !strings.EqualFold(strings.TrimSpace(qualifiedName[:separator]), receiverName) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(resolution.Candidates[0].Kind)) {
+	case "const", "constant", "const_declaration", "enum_member", "enum_constant":
+		return true
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeSyntheticIndexedAssignmentArgument(proc sourceProcedure, statement procedureir.Statement, expressionID int, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) (handled, safe bool) {
+	expression, ok := proc.Expressions.At(expressionID - 1)
+	if !ok || expression.Recovered || expression.Kind != procedureir.ExpressionBinary || statement.Value == nil {
+		return false, false
+	}
+	valueChild := false
+	for _, childID := range expression.Children {
+		child, childOK := proc.Expressions.At(childID - 1)
+		if !childOK || child.Recovered {
+			return true, false
+		}
+		if child.Range == statement.Value.Range {
+			valueChild = true
+			continue
+		}
+		if !resumeNextScopeSafeMemberCallArgumentExpression(proc, childID, moduleDecls, projectResolver) {
+			return true, false
+		}
+	}
+	return true, valueChild
+}
+
+func resumeNextScopeCallBelongsToTarget(call procedureir.CallSite, target vbaast.Range) bool {
+	if call.Range.StartByte > call.Range.EndByte || target.StartByte > target.EndByte {
+		return false
+	}
+	return (target.StartByte <= call.Range.StartByte && call.Range.EndByte <= target.EndByte) ||
+		(call.Range.StartByte <= target.StartByte && target.EndByte <= call.Range.EndByte)
+}
+
+func resumeNextScopeObjectResultInspection(statement procedureir.Statement, target string) bool {
+	if statement.Kind != procedureir.StatementIf || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	condition := statement.Text
+	if statement.Condition != nil {
+		condition = statement.Condition.Text
+	} else {
+		condition = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(condition), "if"))
+		if thenIndex := strings.Index(strings.ToLower(condition), " then"); thenIndex >= 0 {
+			condition = condition[:thenIndex]
+		}
+	}
+	condition = strings.ToLower(strings.Join(strings.Fields(maskStringLiterals(gui.StripComment(condition))), " "))
+	target = strings.ToLower(strings.TrimSpace(target))
+	return condition == target+" is nothing" || condition == "not "+target+" is nothing"
+}
+
+func resumeNextScopeScalarResultInspection(proc sourceProcedure, statement procedureir.Statement, target string, constantValues map[string]constexpr.Value) bool {
+	if statement.Kind != procedureir.StatementIf || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	if !resumeNextScopeScalarResultTargetIsValid(proc, target) {
+		return false
+	}
+	return resumeNextScopeScalarResultInspectionShape(proc, statement, target, constantValues)
+}
+
+func resumeNextScopeScalarResultInspectionShape(proc sourceProcedure, statement procedureir.Statement, target string, constantValues map[string]constexpr.Value) bool {
+	if statement.Kind != procedureir.StatementIf || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) {
+		return false
+	}
+	condition := statement.Text
+	if statement.Condition != nil {
+		condition = statement.Condition.Text
+	} else {
+		condition = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(condition), "if"))
+		if thenIndex := strings.Index(condition, " then"); thenIndex >= 0 {
+			condition = condition[:thenIndex]
+		}
+	}
+	condition = strings.TrimSpace(strings.ToLower(maskStringLiterals(gui.StripComment(condition))))
+	left, operator, right, ok := resumeNextScopeComparison(condition)
+	if !ok || operator != "=" && operator != "<>" {
+		return false
+	}
+	target = strings.ToLower(strings.TrimSpace(target))
+	if strings.EqualFold(left, target) {
+		return resumeNextScopeScalarResultOperandSafe(proc, right, constantValues)
+	}
+	if strings.EqualFold(right, target) {
+		return resumeNextScopeScalarResultOperandSafe(proc, left, constantValues)
+	}
+	return false
+}
+
+func resumeNextScopeScalarResultTargetIsValid(proc sourceProcedure, target string) bool {
+	target = strings.TrimSpace(target)
+	if !errorSuccessIdentifierRE.MatchString(target) {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if !strings.EqualFold(strings.TrimSpace(declaration.Name), target) {
+			continue
+		}
+		return declaration.Scope == procedureir.ScopeLocal && !declaration.IsArray &&
+			declaration.ValueShape != procedureir.ValueShapeFixedArray &&
+			declaration.ValueShape != procedureir.ValueShapeDynamicArray &&
+			declaration.ValueShape != procedureir.ValueShapeVariant && !declaration.IsStatic &&
+			!declaration.IsNew && !declaration.IsObject && !isObjectType(declaration.Type) &&
+			resumeNextScopeZeroDefaultScalarType(declaration.Type)
+	}
+	return false
+}
+
+func resumeNextScopeScalarResultOperandSafe(proc sourceProcedure, value string, constantValues map[string]constexpr.Value) bool {
+	value = strings.TrimSpace(value)
+	if value == "0" {
+		return true
+	}
+	if !errorSuccessIdentifierRE.MatchString(value) {
+		return false
+	}
+	return resumeNextScopeKnownZeroConstantIdentifier(proc, value, constantValues)
+}
+
+func resumeNextScopeKnownZeroConstantIdentifier(proc sourceProcedure, name string, constantValues map[string]constexpr.Value) bool {
+	name = strings.ToLower(cleanIdentifier(strings.TrimSpace(name)))
+	if name == "" {
+		return false
+	}
+	value, ok := constantValues[name]
+	if !ok && !strings.Contains(name, ".") && proc.Module != "" {
+		value, ok = constantValues[strings.ToLower(cleanIdentifier(strings.TrimSpace(proc.Module)))+"."+name]
+	}
+	return ok && value.Integer == 0 && (value.Kind == constexpr.ValueInteger || value.Kind == constexpr.ValueLong || value.Kind == constexpr.ValueLongLong)
+}
+
+func resumeNextScopeDebugAssertComparison(statement procedureir.Statement) (left, right string, ok bool) {
+	if statement.Kind != procedureir.StatementCall {
+		return "", "", false
+	}
+	code := strings.TrimSpace(strings.ToLower(maskStringLiterals(gui.StripComment(statement.Text))))
+	const prefix = "debug.assert"
+	if !strings.HasPrefix(code, prefix) || len(code) == len(prefix) || (code[len(prefix)] != ' ' && code[len(prefix)] != '\t') {
+		return "", "", false
+	}
+	expression := strings.TrimSpace(code[len(prefix):])
+	operatorStart := strings.IndexAny(expression, "=<>")
+	if operatorStart < 0 {
+		return "", "", false
+	}
+	operatorEnd := operatorStart + 1
+	if operatorEnd < len(expression) && ((expression[operatorStart] == '<' || expression[operatorStart] == '>') && (expression[operatorEnd] == '>' || expression[operatorEnd] == '=')) {
+		operatorEnd++
+	}
+	if strings.ContainsAny(expression[operatorEnd:], "=<>") {
+		return "", "", false
+	}
+	return strings.TrimSpace(expression[:operatorStart]), strings.TrimSpace(expression[operatorEnd:]), true
+}
+
+func resumeNextScopeErrDescriptionAssertion(proc sourceProcedure, statement procedureir.Statement) bool {
+	left, right, ok := resumeNextScopeDebugAssertComparison(statement)
+	if !ok ||
+		(!resumeNextScopeErrDescriptionExpression(left) || !resumeNextScopeMaskedStringLiteral(right)) &&
+			(!resumeNextScopeErrDescriptionExpression(right) || !resumeNextScopeMaskedStringLiteral(left)) {
+		return false
+	}
+	for call := range proc.Calls.All() {
+		if call.StatementID != statement.ID {
+			continue
+		}
+		if strings.EqualFold(call.Callee.BaseName, "Assert") && (call.Callee.Receiver == nil || strings.EqualFold(strings.TrimSpace(*call.Callee.Receiver), "Debug")) {
+			continue
+		}
+		if call.Callee.Receiver == nil && strings.EqualFold(call.Callee.BaseName, "Left") &&
+			call.Arguments.Count == 2 && call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func resumeNextScopeErrDescriptionExpression(value string) bool {
+	value = strings.ToLower(strings.Join(strings.Fields(value), ""))
+	if value == "err.description" {
+		return true
+	}
+	if !strings.HasPrefix(value, "left(") || !strings.HasSuffix(value, ")") {
+		return false
+	}
+	arguments := strings.Split(value[len("left("):len(value)-1], ",")
+	if len(arguments) != 2 || arguments[0] != "err.description" {
+		return false
+	}
+	_, err := strconv.ParseInt(arguments[1], 10, 64)
+	return err == nil
+}
+
+func resumeNextScopeMaskedStringLiteral(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+		return false
+	}
+	for index := 1; index < len(value)-1; index++ {
+		if value[index] != '"' {
+			continue
+		}
+		if index+1 >= len(value)-1 || value[index+1] != '"' {
+			return false
+		}
+		index++
+	}
+	return true
+}
+
+func resumeNextScopeDirectErrNumberGuard(proc sourceProcedure, moduleDecls map[string]sourceDeclaration, statement procedureir.Statement, projectResolver procedureir.Resolver) bool {
+	if statement.Kind != procedureir.StatementIf {
+		return false
+	}
+	condition := statement.Text
+	if statement.Condition != nil {
+		condition = statement.Condition.Text
+	}
+	condition = strings.TrimSpace(strings.ToLower(maskStringLiterals(gui.StripComment(condition))))
+	if strings.HasPrefix(condition, "if ") {
+		condition = strings.TrimSpace(condition[len("if "):])
+	}
+	if strings.HasSuffix(condition, " then") {
+		condition = strings.TrimSpace(condition[:len(condition)-len(" then")])
+	}
+	return resumeNextScopeErrNumberComparison(condition, func(operand string) bool {
+		return resumeNextScopeSimpleErrOperand(proc, moduleDecls, operand, projectResolver)
+	})
+}
+
+func resumeNextScopeErrNumberComparison(expression string, operandSafe func(string) bool) bool {
+	left, _, right, ok := resumeNextScopeComparison(expression)
+	if !ok {
+		return false
+	}
+	if resumeNextScopeExactErrNumber(left) {
+		return operandSafe(right)
+	}
+	if resumeNextScopeExactErrNumber(right) {
+		return operandSafe(left)
+	}
+	return false
+}
+
+func resumeNextScopeComparison(expression string) (left, operator, right string, ok bool) {
+	expression = strings.TrimSpace(expression)
+	operatorStart := strings.IndexAny(expression, "=<>")
+	if operatorStart < 0 {
+		return "", "", "", false
+	}
+	operatorEnd := operatorStart + 1
+	if operatorEnd < len(expression) && ((expression[operatorStart] == '<' || expression[operatorStart] == '>') && (expression[operatorEnd] == '>' || expression[operatorEnd] == '=')) {
+		operatorEnd++
+	}
+	if strings.ContainsAny(expression[operatorEnd:], "=<>") {
+		return "", "", "", false
+	}
+	return strings.TrimSpace(expression[:operatorStart]), expression[operatorStart:operatorEnd], strings.TrimSpace(expression[operatorEnd:]), true
+}
+
+func resumeNextScopeErrGuardRestores(proc sourceProcedure, guard procedureir.Statement, guardIndex int, ordered []procedureir.Statement, statementsByID map[int]procedureir.Statement) bool {
+	thenBranch := make([]procedureir.Statement, 0)
+	elseBranch := make([]procedureir.Statement, 0)
+	elseID := 0
+	for _, candidate := range ordered {
+		if candidate.ParentID != guard.ID {
+			continue
+		}
+		if candidate.Kind == procedureir.StatementElse {
+			elseID = candidate.ID
+			continue
+		}
+		thenBranch = append(thenBranch, candidate)
+	}
+	if !resumeNextScopeErrGuardBranchRestores(proc.Graph, guard.ID, thenBranch, statementsByID) {
+		return false
+	}
+	if elseID != 0 {
+		for _, candidate := range ordered {
+			if candidate.ParentID == elseID {
+				elseBranch = append(elseBranch, candidate)
+			}
+		}
+		if !resumeNextScopeErrGuardBranchRestores(proc.Graph, guard.ID, elseBranch, statementsByID) {
+			return false
+		}
+	}
+	for index := guardIndex + 1; index < len(ordered); index++ {
+		candidate := ordered[index]
+		if resumeNextScopeStatementDescendsFrom(candidate, guard.ID, statementsByID) {
+			continue
+		}
+		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+			continue
+		}
+		if !resumeNextScopeConditionalPathsCompatible(guard.ConditionalBranches, candidate.ConditionalBranches) {
+			continue
+		}
+		return restoresErrorHandling(candidate) && resumeNextScopeNormalFlowTo(proc.Graph, guard.ID, candidate.ID, statementsByID)
+	}
+	return false
+}
+
+func resumeNextScopeErrGuardBranchRestores(graph *vbacfg.Graph, guardID int, branch []procedureir.Statement, statementsByID map[int]procedureir.Statement) bool {
+	for _, candidate := range branch {
+		if candidate.Recovered {
+			return false
+		}
+		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+			continue
+		}
+		if errClearStatementRe.MatchString(maskStringLiterals(gui.StripComment(candidate.Text))) {
+			continue
+		}
+		return restoresErrorHandling(candidate) && resumeNextScopeNormalFlowTo(graph, guardID, candidate.ID, statementsByID)
+	}
+	return true
+}
+
+func resumeNextScopeStatementDescendsFrom(statement procedureir.Statement, ancestorID int, statementsByID map[int]procedureir.Statement) bool {
+	visited := map[int]bool{}
+	for parentID := statement.ParentID; parentID != 0 && !visited[parentID]; parentID = statementsByID[parentID].ParentID {
+		if parentID == ancestorID {
+			return true
+		}
+		visited[parentID] = true
+		if _, ok := statementsByID[parentID]; !ok {
+			break
+		}
+	}
+	return false
+}
+
+func resumeNextScopeErrAssertion(proc sourceProcedure, moduleDecls map[string]sourceDeclaration, statement procedureir.Statement, projectResolver procedureir.Resolver) bool {
+	left, right, ok := resumeNextScopeDebugAssertComparison(statement)
+	if !ok {
+		return false
+	}
+	if (!resumeNextScopeExactErrNumber(left) || !resumeNextScopeSimpleErrOperand(proc, moduleDecls, right, projectResolver)) &&
+		(!resumeNextScopeExactErrNumber(right) || !resumeNextScopeSimpleErrOperand(proc, moduleDecls, left, projectResolver)) {
+		return false
+	}
+	for call := range proc.Calls.All() {
+		if call.StatementID != statement.ID {
+			continue
+		}
+		if strings.EqualFold(call.Callee.BaseName, "Assert") && (call.Callee.Receiver == nil || strings.EqualFold(strings.TrimSpace(*call.Callee.Receiver), "Debug")) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func resumeNextScopeExactErrNumber(value string) bool {
+	return strings.EqualFold(strings.Join(strings.Fields(value), ""), "err.number")
+}
+
+func resumeNextScopeSimpleErrOperand(proc sourceProcedure, moduleDecls map[string]sourceDeclaration, value string, projectResolver procedureir.Resolver) bool {
+	value = strings.TrimSpace(value)
+	if errorSuccessIdentifierRE.MatchString(value) {
+		if resumeNextScopeProcedureName(proc, value) {
+			return false
+		}
+		return resumeNextScopeSafeBooleanComparisonOperand(proc, value, moduleDecls) ||
+			resumeNextScopeProjectConstIdentifier(proc, value, projectResolver)
+	}
+	_, err := strconv.ParseInt(value, 10, 64)
+	return err == nil
+}
+
+func resumeNextScopeProjectConstIdentifier(proc sourceProcedure, name string, projectResolver procedureir.Resolver) bool {
+	if projectResolver == nil {
+		return false
+	}
+	caller := procedureir.ProcedureRef{Name: proc.Name, Kind: proc.ProcedureKind}
+	if proc.IR != nil {
+		caller.QualifiedName = proc.IR.Symbol.QualifiedName
+	}
+	resolution := projectResolver.ResolveSymbol(procedureir.SymbolReference{
+		Name: name, Module: proc.Module, Caller: caller,
+	})
+	if resolution.Status != procedureir.ResolutionMatched || len(resolution.Candidates) != 1 {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(resolution.Candidates[0].Kind)) {
+	case "const", "constant", "const_declaration", "enum_member", "enum_constant":
+		return true
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeProcedureName(proc sourceProcedure, name string) bool {
+	if proc.Document == nil {
+		return false
+	}
+	for _, candidate := range proc.Document.Procedures {
+		if !strings.EqualFold(candidate.Symbol.Name, name) {
+			continue
+		}
+		switch candidate.Symbol.Kind {
+		case procedureir.ProcedureSub, procedureir.ProcedureFunction, procedureir.ProcedureProperty, procedureir.ProcedurePropertyGet,
+			procedureir.ProcedurePropertyLet, procedureir.ProcedurePropertySet:
+			return !strings.EqualFold(candidate.Symbol.Name, proc.Name)
+		}
+	}
+	return false
+}
+
+func resumeNextScopeProcedureIdentifier(proc sourceProcedure, name string, projectResolver procedureir.Resolver) bool {
+	name = strings.TrimSpace(name)
+	if !errorSuccessIdentifierRE.MatchString(name) {
+		return false
+	}
+	if resumeNextScopeProcedureName(proc, name) {
+		return true
+	}
+	if projectResolver == nil {
+		return false
+	}
+	caller := procedureir.ProcedureRef{Name: proc.Name, Kind: proc.ProcedureKind}
+	if proc.IR != nil {
+		caller.QualifiedName = proc.IR.Symbol.QualifiedName
+	}
+	resolution := projectResolver.ResolveCall(procedureir.CallSite{
+		Module: proc.Module,
+		Caller: caller,
+		Callee: procedureir.Callee{Text: name, BaseName: name, Member: name},
+	})
+	if resolution.Status != procedureir.ResolutionMatched && resolution.Status != procedureir.ResolutionAmbiguous {
+		return false
+	}
+	for _, candidate := range resolution.Candidates {
+		if !resumeNextScopeProcedureCandidateKind(candidate.Kind) {
+			continue
+		}
+		if caller.QualifiedName == "" || !strings.EqualFold(candidate.QualifiedName, caller.QualifiedName) {
+			return true
+		}
+	}
+	return false
+}
+
+func resumeNextScopeKnownValueIdentifier(proc sourceProcedure, moduleDecls map[string]sourceDeclaration, name string, projectResolver procedureir.Resolver) bool {
+	name = strings.TrimSpace(name)
+	if !errorSuccessIdentifierRE.MatchString(name) || resumeNextScopeProcedureIdentifier(proc, name, projectResolver) {
+		return false
+	}
+	if resumeNextScopeIntrinsicValueIdentifier(name) {
+		return true
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(strings.TrimSpace(declaration.Name), name) && !resumeNextScopeProcedureIRDeclaration(declaration.Kind) {
+			return true
+		}
+	}
+	for declaredName := range moduleDecls {
+		if strings.EqualFold(strings.TrimSpace(declaredName), name) {
+			return true
+		}
+	}
+	if projectResolver != nil {
+		caller := procedureir.ProcedureRef{Name: proc.Name, Kind: proc.ProcedureKind}
+		if proc.IR != nil {
+			caller.QualifiedName = proc.IR.Symbol.QualifiedName
+		}
+		resolution := projectResolver.ResolveSymbol(procedureir.SymbolReference{
+			Name: name, Module: proc.Module, Caller: caller,
+		})
+		if resolution.Status == procedureir.ResolutionMatched && len(resolution.Candidates) == 1 &&
+			resumeNextScopeValueSymbolKind(resolution.Candidates[0].Kind) {
+			return true
+		}
+	}
+	return false
+}
+
+func resumeNextScopeIntrinsicValueIdentifier(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "true", "false", "empty", "null", "nothing":
+		return true
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeValueSymbolKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "variable", "local_variable", "module_variable", "field", "withevents_field", "parameter", "const", "constant", "enum_member", "enum_constant":
+		return true
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeProcedureIRDeclaration(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "sub", "function", "property", "property_get", "property_let", "property_set", "declare", "declare_sub", "declare_function":
+		return true
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeProcedureCandidateKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "sub", "function", "property", "property_get", "property_let", "property_set", "declare", "declare_sub", "declare_function":
+		return true
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeConditionalPathsCompatible(source, candidate []procedureir.ConditionalBranch) bool {
+	sourceBranches := make(map[string]int, len(source))
+	for _, branch := range source {
+		if previous, ok := sourceBranches[branch.Group]; ok && previous != branch.Branch {
+			return false
+		}
+		sourceBranches[branch.Group] = branch.Branch
+	}
+	for _, branch := range candidate {
+		previous, ok := sourceBranches[branch.Group]
+		if !ok || previous != branch.Branch {
+			return false
+		}
+	}
+	return true
+}
+
+func resumeNextScopeErrCheckStatement(statement procedureir.Statement) bool {
+	switch statement.Kind {
+	case procedureir.StatementIf, procedureir.StatementElseIf, procedureir.StatementSelect, procedureir.StatementCase,
+		procedureir.StatementDo, procedureir.StatementWhile:
+		code := maskStringLiterals(gui.StripComment(statement.Text))
+		if errNumberReferenceRe.MatchString(code) {
+			return true
+		}
+		condition := statement.Text
+		if statement.Condition != nil {
+			condition = statement.Condition.Text
+		} else if statement.Kind == procedureir.StatementDo || statement.Kind == procedureir.StatementWhile {
+			condition = strings.TrimSpace(excelLoopHeaderText(condition))
+			lower := strings.ToLower(condition)
+			for _, prefix := range []string{"do while", "do until", "while"} {
+				if strings.HasPrefix(lower, prefix) {
+					condition = strings.TrimSpace(condition[len(prefix):])
+					break
+				}
+			}
+		}
+		return strings.EqualFold(strings.TrimSpace(condition), "Err")
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeProbeFallback(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if state.probeFallbackUsed || state.probeBoundsResultTarget != "" || state.errCheckParent == 0 || state.probeTarget == "" || resumeNextScopeCurrentOperations(state) != 1 ||
+		!resumeNextScopeInErrorBranch(statement.ID, state.errCheckParent, statementsByID) &&
+			!resumeNextScopeBooleanStatusBranch(proc, state, statement, statementsByID, moduleDecls) {
+		return false
+	}
+	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
+		return false
+	}
+	if strings.EqualFold(resumeNextScopeAssignmentTarget(statement), state.probeTarget) && resumeNextScopeSafeProbeFallback(proc, statement, moduleDecls) {
+		return true
+	}
+	return resumeNextScopeBooleanStatusBranch(proc, state, statement, statementsByID, moduleDecls)
+}
+
+func resumeNextScopeSafeProbeFallback(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if resumeNextScopeSafeLiteralAssignment(proc, statement, moduleDecls) {
+		return true
+	}
+	if !strings.EqualFold(resumeNextScopeTargetType(proc, statement, moduleDecls), "Boolean") {
+		return false
+	}
+	return procedureir.SafeBooleanComparison(resumeNextScopeAssignmentValue(statement), func(operand string) bool {
+		return resumeNextScopeSafeBooleanComparisonOperand(proc, operand, moduleDecls)
+	})
+}
+
+const (
+	resumeNextScopeBoundsLowerFallback uint8 = 1 << iota
+	resumeNextScopeBoundsResultFallback
+)
+
+func resumeNextScopeArrayBoundsContinuation(state *resumeNextScopeState, statement procedureir.Statement) bool {
+	if statement.Recovered || state.probeBoundsArray == "" || state.probeBoundsLowerTarget == "" || state.probeBoundsResultTarget != "" ||
+		resumeNextScopeCurrentOperations(*state) != 1 ||
+		(statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) {
+		return false
+	}
+	array, lowerTarget, kind, ok := procedureir.SafeArrayBoundsProbeAssignment(
+		resumeNextScopeAssignmentTarget(statement), resumeNextScopeAssignmentValue(statement),
+	)
+	if !ok || kind != procedureir.SafeArrayBoundsProbeLength ||
+		!strings.EqualFold(array, state.probeBoundsArray) ||
+		!strings.EqualFold(lowerTarget, state.probeBoundsLowerTarget) {
+		return false
+	}
+	resultTarget := resumeNextScopeAssignmentTarget(statement)
+	if resultTarget == "" || strings.EqualFold(resultTarget, state.probeBoundsLowerTarget) {
+		return false
+	}
+	state.probeBoundsResultTarget = resultTarget
+	state.probeTarget = resultTarget
+	return true
+}
+
+func resumeNextScopeBoundsProbeFallback(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) uint8 {
+	if state.probeBoundsArray == "" || state.probeBoundsLowerTarget == "" || state.probeBoundsResultTarget == "" ||
+		state.errCheckParent == 0 || resumeNextScopeCurrentOperations(state) != 1 ||
+		!resumeNextScopeInErrorBranch(statement.ID, state.errCheckParent, statementsByID) ||
+		(statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) ||
+		!resumeNextScopeSafeLiteralAssignment(proc, statement, moduleDecls) {
+		return 0
+	}
+	target := resumeNextScopeAssignmentTarget(statement)
+	switch {
+	case strings.EqualFold(target, state.probeBoundsLowerTarget) && state.probeBoundsFallbackUsed&resumeNextScopeBoundsLowerFallback == 0:
+		return resumeNextScopeBoundsLowerFallback
+	case strings.EqualFold(target, state.probeBoundsResultTarget) && state.probeBoundsFallbackUsed&resumeNextScopeBoundsResultFallback == 0:
+		return resumeNextScopeBoundsResultFallback
+	default:
+		return 0
+	}
+}
+
+func resumeNextScopeCheckedProjectProbe(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if resumeNextScopeCurrentOperations(state) != 0 || statement.Recovered ||
+		(statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) ||
+		statement.Target == nil || statement.Value == nil || statement.Value.Recovered ||
+		statement.Value.Kind != procedureir.ExpressionCall {
+		return false
+	}
+	if !resumeNextScopeHasSingleResolvedCall(proc.Calls, statement.ID) {
+		return false
+	}
+	target := resumeNextScopeAssignmentTarget(statement)
+	if target == "" {
+		return false
+	}
+	targetType := resumeNextScopeTargetType(proc, statement, moduleDecls)
+	if targetType == "" || strings.HasSuffix(strings.TrimSpace(targetType), "()") || isObjectType(targetType) {
+		return false
+	}
+	ordered := make([]procedureir.Statement, 0, len(statementsByID))
+	for _, candidate := range statementsByID {
+		ordered = append(ordered, candidate)
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Range.StartByte != ordered[j].Range.StartByte {
+			return ordered[i].Range.StartByte < ordered[j].Range.StartByte
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	index := -1
+	for i, candidate := range ordered {
+		if candidate.ID == statement.ID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return false
+	}
+	next := func(start int) (procedureir.Statement, int, bool) {
+		for i := start; i < len(ordered); i++ {
+			candidate := ordered[i]
+			if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+				continue
+			}
+			return candidate, i, true
+		}
+		return procedureir.Statement{}, -1, false
+	}
+	restore, restoreIndex, ok := next(index + 1)
+	if !ok || !restoresErrorHandling(restore) {
+		return false
+	}
+	condition, _, ok := next(restoreIndex + 1)
+	if !ok || !resumeNextScopeCheckedProjectCondition(condition, target) ||
+		resumeNextScopeConditionHasCall(proc.Calls, condition) {
+		return false
+	}
+	return true
+}
+
+func resumeNextScopeCheckedBooleanCoercionProbe(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if state.probeBooleanCoercionUsed || resumeNextScopeCurrentOperations(state) != 0 || statement.Recovered ||
+		(statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) ||
+		statement.Target == nil || statement.Value == nil || statement.Value.Recovered ||
+		statement.Value.Kind != procedureir.ExpressionCall ||
+		!procedureir.SafeBooleanCoercionProbe(resumeNextScopeAssignmentValue(statement), func(name string) bool {
+			return resumeNextScopeBooleanCoercionTargetIsObject(proc, name, moduleDecls)
+		}) ||
+		!strings.EqualFold(resumeNextScopeTargetType(proc, statement, moduleDecls), "Boolean") {
+		return false
+	}
+	call, projectCall := resumeNextScopeCallRisk(proc.Calls, statement.ID)
+	if !call || projectCall {
+		return false
+	}
+	if !resumeNextScopeCheckedBooleanCoercionCallShape(proc.Calls, statement.ID, func(name string) bool {
+		return resumeNextScopeBooleanCoercionTargetIsObject(proc, name, moduleDecls)
+	}) {
+		return false
+	}
+	ordered := make([]procedureir.Statement, 0, len(statementsByID))
+	for _, candidate := range statementsByID {
+		ordered = append(ordered, candidate)
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Range.StartByte != ordered[j].Range.StartByte {
+			return ordered[i].Range.StartByte < ordered[j].Range.StartByte
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	index := -1
+	for i, candidate := range ordered {
+		if candidate.ID == statement.ID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return false
+	}
+	for i := index + 1; i < len(ordered); i++ {
+		candidate := ordered[i]
+		if candidate.Kind == procedureir.StatementDeclaration || candidate.Kind == procedureir.StatementLabel {
+			continue
+		}
+		return resumeNextScopeNormalFlowTo(proc.Graph, statement.ID, candidate.ID, statementsByID) &&
+			resumeNextScopeErrCheckStatement(candidate) && !resumeNextScopeConditionHasCall(proc.Calls, candidate)
+	}
+	return false
+}
+
+func resumeNextScopeCheckedBooleanCoercionCallShape(calls readOnlySpan[procedureir.CallSite], statementID int, targetIsObject func(string) bool) bool {
+	if targetIsObject == nil {
+		return false
+	}
+	outerCalls := 0
+	objectReads := 0
+	for candidate := range calls.All() {
+		if candidate.StatementID != statementID {
+			continue
+		}
+		switch {
+		case candidate.Callee.Receiver == nil && strings.EqualFold(candidate.Callee.BaseName, "CBool") && candidate.Arguments.Count == 1 && candidate.Resolution.Status == procedureir.ResolutionBuiltinLike:
+			outerCalls++
+		case candidate.Callee.Receiver == nil && candidate.Arguments.Count == 1 && candidate.Resolution.Status == procedureir.ResolutionUnresolved && targetIsObject(candidate.Callee.BaseName):
+			objectReads++
+		default:
+			return false
+		}
+	}
+	return outerCalls == 1 && objectReads == 1
+}
+
+func resumeNextScopeNormalFlowTo(graph *vbacfg.Graph, fromStatementID, targetStatementID int, statements map[int]procedureir.Statement) bool {
+	if graph == nil {
+		return false
+	}
+	from, ok := graph.BlockForStatement(fromStatementID)
+	if !ok {
+		return false
+	}
+	target, ok := graph.BlockForStatement(targetStatementID)
+	if !ok {
+		return false
+	}
+	queue := []vbacfg.BlockID{from.ID}
+	visited := map[vbacfg.BlockID]bool{from.ID: true}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range graph.OutgoingEdges(current) {
+			if edge.Class != vbacfg.EdgeNormal {
+				continue
+			}
+			if edge.To == target.ID {
+				return true
+			}
+			block, ok := graph.BlockByID(edge.To)
+			if !ok || block.Kind != vbacfg.BlockStatement || block.StatementID == targetStatementID {
+				continue
+			}
+			statement, ok := statements[block.StatementID]
+			if !ok || statement.Kind != procedureir.StatementDeclaration && statement.Kind != procedureir.StatementLabel {
+				continue
+			}
+			if !visited[block.ID] {
+				visited[block.ID] = true
+				queue = append(queue, block.ID)
+			}
+		}
+	}
+	return false
+}
+
+func resumeNextScopeHasSingleResolvedCall(calls readOnlySpan[procedureir.CallSite], statementID int) bool {
+	projectCalls := 0
+	for candidate := range calls.All() {
+		if candidate.StatementID != statementID {
+			continue
+		}
+		if candidate.Callee.Receiver == nil && strings.EqualFold(candidate.Callee.BaseName, "Let") {
+			continue
+		}
+		switch candidate.Resolution.Status {
+		case procedureir.ResolutionMatched:
+			if len(candidate.Resolution.Candidates) != 1 {
+				return false
+			}
+			projectCalls++
+		case procedureir.ResolutionUnresolved:
+			if resumeNextScopeSafeProbeArgument(candidate) {
+				continue
+			}
+			return false
+		default:
+			return false
+		}
+	}
+	return projectCalls == 1
+}
+
+func resumeNextScopeSafeProbeArgument(candidate procedureir.CallSite) bool {
+	// VarPtr is used to pass addresses to low-level COM probes. It is not a
+	// project call, and VBA's intrinsic does not create another compatibility
+	// operation for this rule's purpose. Keep this exception explicit so an
+	// unresolved nested project call cannot hide inside a checked probe.
+	return candidate.Callee.Receiver == nil && strings.EqualFold(candidate.Callee.BaseName, "VarPtr")
+}
+
+func resumeNextScopeCheckedProjectCondition(statement procedureir.Statement, target string) bool {
+	switch statement.Kind {
+	case procedureir.StatementIf, procedureir.StatementElseIf, procedureir.StatementSelect, procedureir.StatementCase,
+		procedureir.StatementDo, procedureir.StatementWhile:
+		condition := statement.Text
+		if statement.Condition != nil {
+			condition = statement.Condition.Text
+		}
+		return resumeNextScopeIdentifierInExpression(maskStringLiterals(gui.StripComment(condition)), target)
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeIdentifierInExpression(expression, identifier string) bool {
+	lowerExpression := strings.ToLower(expression)
+	lowerIdentifier := strings.ToLower(strings.TrimSpace(identifier))
+	if lowerIdentifier == "" {
+		return false
+	}
+	for start := 0; start < len(lowerExpression); {
+		relative := strings.Index(lowerExpression[start:], lowerIdentifier)
+		if relative < 0 {
+			return false
+		}
+		index := start + relative
+		beforeOK := index == 0 || !resumeNextScopeIdentifierByte(lowerExpression[index-1])
+		if beforeOK {
+			prefix := strings.TrimRight(lowerExpression[:index], " \t\r\n")
+			beforeOK = !strings.HasSuffix(prefix, ".") && !strings.HasSuffix(prefix, "!")
+		}
+		after := index + len(lowerIdentifier)
+		afterOK := after == len(lowerExpression) || !resumeNextScopeIdentifierByte(lowerExpression[after])
+		if beforeOK && afterOK {
+			return true
+		}
+		start = after
+	}
+	return false
+}
+
+func resumeNextScopeIdentifierByte(value byte) bool {
+	return value == '_' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
+}
+
+func resumeNextScopeBooleanStatusBranch(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement, statementsByID map[int]procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
+		return false
+	}
+	if !resumeNextScopeDirectCheckedBranch(statement.ID, state.errCheckParent, statementsByID) {
+		return false
+	}
+	if !strings.EqualFold(resumeNextScopeTargetType(proc, statement, moduleDecls), "Boolean") {
+		return false
+	}
+	return resumeNextScopeSafeLiteralAssignment(proc, statement, moduleDecls)
+}
+
+func resumeNextScopeDirectCheckedBranch(statementID, ancestorID int, statements map[int]procedureir.Statement) bool {
+	statement, ok := statements[statementID]
+	if !ok || ancestorID == 0 {
+		return false
+	}
+	if statement.ParentID == ancestorID {
+		return true
+	}
+	parent, ok := statements[statement.ParentID]
+	return ok && parent.Kind == procedureir.StatementElse && parent.ParentID == ancestorID
+}
+
+func resumeNextScopeErrCheckBranchMarker(state resumeNextScopeState, statement procedureir.Statement, statements map[int]procedureir.Statement) bool {
+	return state.errCheckParent != 0 && statement.Kind == procedureir.StatementElse && statement.ParentID == state.errCheckParent &&
+		statements[state.errCheckParent].Kind == procedureir.StatementIf
+}
+
+func resumeNextScopeProbeResultInspection(state resumeNextScopeState, statement procedureir.Statement) bool {
+	if resumeNextScopeCurrentOperations(state) != 1 || state.probeTarget == "" ||
+		(statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) {
+		return false
+	}
+	return procedureir.SafeProbeResultInspection(resumeNextScopeAssignmentValue(statement), state.probeTarget)
+}
+
+func resumeNextScopeAssignmentValue(statement procedureir.Statement) string {
+	if _, value, ok := resumeNextScopeAssignmentText(statement); ok {
+		return value
+	}
+	if statement.Value != nil {
+		return strings.TrimSpace(statement.Value.Text)
+	}
+	return ""
+}
+
+func resumeNextScopeInErrorBranch(statementID, ancestorID int, statements map[int]procedureir.Statement) bool {
+	ancestor, ok := statements[ancestorID]
+	if !ok {
+		return false
+	}
+	condition := ancestor.Text
+	if ancestor.Condition != nil {
+		condition = ancestor.Condition.Text
+	}
+	thenFailure, known := procedureir.ErrorNumberThenBranchIsFailure(condition)
+	if !known {
+		return false
+	}
+	inElseBranch := false
+	for currentID := statementID; currentID != ancestorID; {
+		current, ok := statements[currentID]
+		if !ok {
+			return false
+		}
+		if current.Kind == procedureir.StatementElseIf {
+			return false
+		}
+		if current.Kind == procedureir.StatementElse {
+			if current.ParentID != ancestorID {
+				return false
+			}
+			inElseBranch = true
+		}
+		currentID = current.ParentID
+	}
+	if inElseBranch {
+		return !thenFailure
+	}
+	return thenFailure
+}
+
+func resumeNextScopeAssignmentTarget(statement procedureir.Statement) string {
+	target, _, ok := resumeNextScopeAssignmentText(statement)
+	if !ok && statement.Target != nil {
+		target = strings.TrimSpace(statement.Target.Text)
+	}
+	if target == "" {
+		return ""
+	}
+	if !errorSuccessIdentifierRE.MatchString(target) {
+		return ""
+	}
+	return strings.ToLower(target)
+}
+
+func resumeNextScopeAssignmentText(statement procedureir.Statement) (target, value string, ok bool) {
+	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
+		return "", "", false
+	}
+	text := strings.TrimSpace(statement.Text)
+	lowerText := strings.ToLower(text)
+	if strings.HasPrefix(lowerText, "set ") || strings.HasPrefix(lowerText, "let ") {
+		text = strings.TrimSpace(text[4:])
+	}
+	index := strings.IndexByte(text, '=')
+	if index <= 0 || index+1 > len(text) {
+		return "", "", false
+	}
+	return strings.TrimSpace(text[:index]), strings.TrimSpace(text[index+1:]), true
+}
+
+func resumeNextScopeSafeLiteralAssignment(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	if statement.Value == nil || statement.Value.Recovered {
+		return false
+	}
+	return procedureir.SafeLiteralAssignment(statement.Value.Text, resumeNextScopeTargetType(proc, statement, moduleDecls))
+}
+
+func resumeNextScopeSafeBooleanComparisonOperand(proc sourceProcedure, operand string, moduleDecls map[string]sourceDeclaration) bool {
+	operand = strings.TrimSpace(operand)
+	if operand == "" {
+		return false
+	}
+	if strings.EqualFold(operand, proc.Name) {
+		return procedureir.SafeBooleanComparisonOperandType(
+			proc.ReturnType,
+			proc.ReturnValueShape == procedureir.ValueShapeFixedArray || proc.ReturnValueShape == procedureir.ValueShapeDynamicArray || proc.IR != nil && proc.IR.Symbol.IsArray,
+			isObjectType(proc.ReturnType),
+		)
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(declaration.Name, operand) {
+			return procedureir.SafeBooleanComparisonOperandType(
+				declaration.Type,
+				declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+				declaration.IsObject,
+			)
+		}
+	}
+	for name, declaration := range moduleDecls {
+		if strings.EqualFold(name, operand) || strings.EqualFold(declaration.Name, operand) {
+			return procedureir.SafeBooleanComparisonOperandType(declaration.Type, declaration.Array, declaration.Object)
+		}
+	}
+	return false
+}
+
+func resumeNextScopeBooleanCoercionTargetIsObject(proc sourceProcedure, target string, moduleDecls map[string]sourceDeclaration) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(declaration.Name, target) {
+			return declaration.IsObject || isObjectType(declaration.Type)
+		}
+	}
+	for name, declaration := range moduleDecls {
+		if strings.EqualFold(name, target) || strings.EqualFold(declaration.Name, target) {
+			return declaration.Object || isObjectType(declaration.Type)
+		}
+	}
+	return false
+}
+
+func resumeNextScopeTargetType(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) string {
+	target := resumeNextScopeAssignmentTarget(statement)
+	if target == "" {
+		return ""
+	}
+	if strings.EqualFold(target, proc.Name) {
+		return resumeNextScopeLiteralTargetType(
+			proc.ReturnType,
+			proc.ReturnValueShape == procedureir.ValueShapeFixedArray || proc.ReturnValueShape == procedureir.ValueShapeDynamicArray || proc.IR != nil && proc.IR.Symbol.IsArray,
+			isObjectType(proc.ReturnType),
+		)
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(declaration.Name, target) {
+			return resumeNextScopeLiteralTargetType(
+				declaration.Type,
+				declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+				declaration.IsObject,
+			)
+		}
+	}
+	for name, declaration := range moduleDecls {
+		if strings.EqualFold(name, target) || strings.EqualFold(declaration.Name, target) {
+			return resumeNextScopeLiteralTargetType(declaration.Type, declaration.Array, declaration.Object)
+		}
+	}
+	return ""
+}
+
+func resumeNextScopeLiteralTargetType(typeName string, array, object bool) string {
+	typeName = strings.TrimSpace(typeName)
+	if typeName == "" {
+		typeName = "Variant"
+	}
+	if array {
+		if !strings.HasSuffix(typeName, "()") {
+			typeName += "()"
+		}
+		return typeName
+	}
+	if object {
+		return "Object"
+	}
+	return typeName
+}
+
+func resumeNextScopeSyncConditionalBranches(state resumeNextScopeState, branches []procedureir.ConditionalBranch) resumeNextScopeState {
+	common := 0
+	for common < len(state.conditionalBranches) && common < len(branches) {
+		current := state.conditionalBranches[common]
+		target := branches[common]
+		if current.group != target.Group || current.branch != target.Branch {
+			break
+		}
+		common++
+	}
+
+	// If the active branch changes, finish nested alternatives belonging to the
+	// old branch before switching. Their maximum operation count belongs to the
+	// old branch and must not be carried into its mutually-exclusive sibling.
+	for len(state.conditionalBranches) > common {
+		if common < len(branches) && len(state.conditionalBranches) == common+1 &&
+			state.conditionalBranches[common].group == branches[common].Group {
+			break
+		}
+		resumeNextScopeCommitConditionalBranch(&state)
+	}
+
+	if common < len(branches) && common < len(state.conditionalBranches) &&
+		state.conditionalBranches[common].group == branches[common].Group {
+		branch := &state.conditionalBranches[common]
+		resumeNextScopeRememberConditionalOperation(branch)
+		branch.branch = branches[common].Branch
+		branch.branchOperations = 0
+	}
+
+	for len(state.conditionalBranches) < len(branches) {
+		branch := branches[len(state.conditionalBranches)]
+		state.conditionalBranches = append(state.conditionalBranches, resumeNextScopeConditionalBranch{
+			group:          branch.Group,
+			branch:         branch.Branch,
+			baseOperations: resumeNextScopeCurrentOperations(state),
+		})
+	}
+	return state
+}
+
+func resumeNextScopeCurrentOperations(state resumeNextScopeState) uint8 {
+	if len(state.conditionalBranches) == 0 {
+		return state.operations
+	}
+	branch := state.conditionalBranches[len(state.conditionalBranches)-1]
+	return resumeNextScopeSaturatedAdd(branch.baseOperations, branch.branchOperations)
+}
+
+func resumeNextScopeRecordOperation(state *resumeNextScopeState) {
+	if len(state.conditionalBranches) == 0 {
+		if state.operations < 2 {
+			state.operations++
+		}
+		if state.operations >= 2 {
+			state.flags |= resumeNextScopeMultipleOperations
+		}
+		return
+	}
+	branch := &state.conditionalBranches[len(state.conditionalBranches)-1]
+	if branch.branchOperations < 2 {
+		branch.branchOperations++
+	}
+	if resumeNextScopeCurrentOperations(*state) >= 2 {
+		state.flags |= resumeNextScopeMultipleOperations
+	}
+}
+
+func resumeNextScopeRememberConditionalOperation(branch *resumeNextScopeConditionalBranch) {
+	if branch.branchOperations > branch.maxBranchOperations {
+		branch.maxBranchOperations = branch.branchOperations
+	}
+}
+
+func resumeNextScopeCommitConditionalBranch(state *resumeNextScopeState) {
+	if len(state.conditionalBranches) == 0 {
+		return
+	}
+	index := len(state.conditionalBranches) - 1
+	branch := &state.conditionalBranches[index]
+	resumeNextScopeRememberConditionalOperation(branch)
+	completed := resumeNextScopeSaturatedAdd(branch.baseOperations, branch.maxBranchOperations)
+	state.conditionalBranches = state.conditionalBranches[:index]
+	if len(state.conditionalBranches) == 0 {
+		state.operations = completed
+		return
+	}
+	parent := &state.conditionalBranches[len(state.conditionalBranches)-1]
+	if completed <= parent.baseOperations {
+		parent.branchOperations = 0
+		return
+	}
+	parent.branchOperations = completed - parent.baseOperations
+	if parent.branchOperations > 2 {
+		parent.branchOperations = 2
+	}
+}
+
+func resumeNextScopeSaturatedAdd(left, right uint8) uint8 {
+	if left >= 2 || right >= 2 || left+right >= 2 {
+		return 2
+	}
+	return left + right
+}
+
 func resumeNextScopeErrProbeStatement(statement procedureir.Statement) bool {
 	code := maskStringLiterals(gui.StripComment(statement.Text))
-	return errProbeReferenceRe.MatchString(code)
+	return errProbeReferenceRe.MatchString(code) || resumeNextScopeErrCheckStatement(statement)
 }
 
 func resumeNextScopeControlStatement(statement procedureir.Statement) bool {
@@ -5115,6 +7769,11 @@ func resumeNextScopeCallRisk(calls readOnlySpan[procedureir.CallSite], statement
 		if candidate.StatementID != statementID {
 			continue
 		}
+		if candidate.Callee.Receiver == nil && strings.EqualFold(candidate.Callee.BaseName, "Let") {
+			// tree-sitter exposes the optional VBA Let keyword as a call-like
+			// node, but it cannot execute or fail independently.
+			continue
+		}
 		switch candidate.Resolution.Status {
 		case procedureir.ResolutionMatched:
 			if len(candidate.Resolution.Candidates) == 1 {
@@ -5126,6 +7785,23 @@ func resumeNextScopeCallRisk(calls readOnlySpan[procedureir.CallSite], statement
 		}
 	}
 	return call, projectCall
+}
+
+func resumeNextScopeConditionHasCall(calls readOnlySpan[procedureir.CallSite], statement procedureir.Statement) bool {
+	if statement.Condition == nil {
+		return false
+	}
+	for candidate := range calls.All() {
+		if statement.Condition.Range.EndByte > statement.Condition.Range.StartByte &&
+			candidate.Range.StartByte >= statement.Condition.Range.StartByte &&
+			candidate.Range.EndByte <= statement.Condition.Range.EndByte {
+			return true
+		}
+		if statement.Condition.Range.EndByte <= statement.Condition.Range.StartByte && candidate.StatementID == statement.ID {
+			return true
+		}
+	}
+	return false
 }
 
 func isResumeNextScopeExit(graph vbacfg.Graph, id vbacfg.BlockID) bool {
@@ -5384,8 +8060,10 @@ func isObjectType(typ string) bool {
 }
 
 func lastName(name string) string {
-	parts := strings.Split(name, ".")
-	return parts[len(parts)-1]
+	if separator := strings.LastIndexByte(name, '.'); separator >= 0 {
+		return name[separator+1:]
+	}
+	return name
 }
 
 func referencedTraceHelpers(code string) []string {

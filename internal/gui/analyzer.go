@@ -40,20 +40,28 @@ type detector struct {
 }
 
 var (
-	msgBoxFunctionRe   = regexp.MustCompile(`(?i)\b(?:(?:public|private|friend)\s+)?function\s+msgbox\b`)
-	inputBoxFunctionRe = regexp.MustCompile(`(?i)\b(?:(?:public|private|friend)\s+)?function\s+inputbox\b`)
+	msgBoxFunctionRe        = regexp.MustCompile(`(?i)\b(?:(?:public|private|friend)\s+)?function\s+msgbox\b`)
+	inputBoxFunctionRe      = regexp.MustCompile(`(?i)\b(?:(?:public|private|friend)\s+)?function\s+inputbox\b`)
+	showBooleanPropertyRe   = regexp.MustCompile(`(?i)\.\s*show\s*(?:=\s*(?:true|false)\b|\bthen\b)`)
+	showPropertyAssignRe    = regexp.MustCompile(`(?i)^\s*(?:let\s+)?[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*\s*\.\s*show\s*=`)
+	withStatementRe         = regexp.MustCompile(`(?i)^\s*with\b`)
+	fileDialogWithRe        = regexp.MustCompile(`(?i)^\s*with\s+application\s*\.\s*filedialog\b`)
+	endWithStatementRe      = regexp.MustCompile(`(?i)^\s*end\s+with\b`)
+	implicitShowStatementRe = regexp.MustCompile(`(?i)\.\s*show\b`)
 )
+
+var fileDialogDetector = detect(`(?i)\bapplication\s*\.\s*filedialog\b[^\r\n]*\.\s*show\b`, "file_picker", "Application.FileDialog", "File dialog requires human interaction and bypasses XlflowUI.", "Replace file-open and folder-picker flows with XlflowUI.FileDialogOpen(\"<dialog-id>\", ...) or XlflowUI.FolderPicker(\"<dialog-id>\", ...) so headless runs can pass --filedialog responses.")
 
 var detectors = []detector{
 	detect(`(?i)\bapplication\s*\.\s*getopenfilename\b`, "file_picker", "Application.GetOpenFilename", "File picker requires human interaction and bypasses XlflowUI.", "Replace it with XlflowUI.GetOpenFilename(\"<dialog-id>\", ...) or XlflowUI.FileDialogOpen(\"<dialog-id>\", ...) so headless runs can pass --filedialog responses."),
 	detect(`(?i)\bapplication\s*\.\s*getsaveasfilename\b`, "file_picker", "Application.GetSaveAsFilename", "File picker requires human interaction and bypasses XlflowUI.", "Replace it with XlflowUI.GetSaveAsFilename(\"<dialog-id>\", ...) so headless runs can pass --filedialog responses."),
-	detect(`(?i)\bapplication\s*\.\s*filedialog\b`, "file_picker", "Application.FileDialog", "File dialog requires human interaction and bypasses XlflowUI.", "Replace file-open and folder-picker flows with XlflowUI.FileDialogOpen(\"<dialog-id>\", ...) or XlflowUI.FolderPicker(\"<dialog-id>\", ...) so headless runs can pass --filedialog responses."),
+	fileDialogDetector,
 	detect(`(?i)\binputbox\s*(?:\(|")?`, "modal_dialog", "InputBox", "Raw InputBox requires human input and bypasses XlflowUI.", "Replace it with XlflowUI.InputBox(\"<dialog-id>\", ...) so headless, test, and agent runs can pass --inputbox responses."),
 	detect(`(?i)\bmsgbox\s*(?:\(|")?`, "modal_dialog", "MsgBox", "Raw MsgBox blocks unattended execution and bypasses XlflowUI.", "Replace it with XlflowUI.MsgBox(\"<dialog-id>\", ...) so headless, test, and agent runs can pass --msgbox responses."),
 	detect(`(?i)\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*show\b`, "user_form", "UserForm.Show", "UserForm display requires human interaction.", "Keep UserForm entrypoints interactive-only and extract core logic into parameterized procedures."),
 	detect(`(?i)\.\s*show\s+vbmodal\b`, "user_form", ".Show vbModal", "Modal form display requires human interaction.", "Keep modal UI entrypoints interactive-only and extract core logic into parameterized procedures."),
 	detect(`(?i)\bdoevents\b`, "message_pump", "DoEvents", "DoEvents can hide GUI waits or message-pump dependent behavior.", "Avoid message-pump dependent control flow in headless macros."),
-	detect(`(?i)^\s*shell\s*(?:\(|")?`, "external_process", "Shell", "Shell starts an external process from VBA.", "Prefer explicit CLI orchestration or document this macro as interactive/external-process dependent."),
+	detect(`(?i)^\s*shell\b\s*(?:\(|")?`, "external_process", "Shell", "Shell starts an external process from VBA.", "Prefer explicit CLI orchestration or document this macro as interactive/external-process dependent."),
 	detectWithStrings(`(?i)\bcreateobject\s*\(\s*"wscript\.shell"\s*\)\s*\.\s*popup\b`, "modal_dialog", `CreateObject("WScript.Shell").Popup`, "WScript popup blocks unattended execution.", "If this is just a confirmation dialog, prefer XlflowUI.MsgBox with a stable dialog id; otherwise keep it behind an interactive-only adapter."),
 }
 
@@ -86,6 +94,8 @@ func shouldIgnoreDetectorLine(detector detector, code string) bool {
 			return true
 		}
 		return inputBoxFunctionRe.MatchString(code)
+	case "UserForm.Show":
+		return showBooleanPropertyRe.MatchString(code) || showPropertyAssignRe.MatchString(code)
 	default:
 		return false
 	}
@@ -449,10 +459,17 @@ func (a Analyzer) AnalyzeFile(path string) (boundaries []Boundary, err error) {
 
 	scanner := bufio.NewScanner(f)
 	lineNo := 0
+	var fileDialogWithStack []bool
 	for scanner.Scan() {
 		lineNo++
 		code := StripComment(scanner.Text())
 		codeWithoutStrings := detectionText(code)
+		if withStatementRe.MatchString(codeWithoutStrings) && !endWithStatementRe.MatchString(codeWithoutStrings) {
+			fileDialogWithStack = append(fileDialogWithStack, fileDialogWithRe.MatchString(codeWithoutStrings))
+		}
+		if len(fileDialogWithStack) > 0 && fileDialogWithStack[len(fileDialogWithStack)-1] && implicitShowStatementRe.MatchString(codeWithoutStrings) && !strings.EqualFold(filepath.Base(path), "XlflowUI.bas") {
+			boundaries = append(boundaries, a.boundary(path, lineNo, fileDialogDetector))
+		}
 		for _, detector := range detectors {
 			if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") && (detector.symbol == "MsgBox" || detector.symbol == "InputBox" || detector.symbol == "UserForm.Show" || detector.kind == "file_picker") {
 				continue
@@ -467,6 +484,9 @@ func (a Analyzer) AnalyzeFile(path string) (boundaries []Boundary, err error) {
 			if detector.re.MatchString(input) {
 				boundaries = append(boundaries, a.boundary(path, lineNo, detector))
 			}
+		}
+		if endWithStatementRe.MatchString(codeWithoutStrings) && len(fileDialogWithStack) > 0 {
+			fileDialogWithStack = fileDialogWithStack[:len(fileDialogWithStack)-1]
 		}
 	}
 	if err := scanner.Err(); err != nil {

@@ -389,6 +389,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enable_events_before`
 - `enable_vba_object_model_access`
 - `enabled_count`
+- `enabled_labs_experiments`
 - `end_column`
 - `end_if_fragment`
 - `end_line`
@@ -397,6 +398,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enum_declaration`
 - `enum_group`
 - `enum_member`
+- `enum_type`
 - `environment_variable`
 - `error_candidate_procedures`
 - `error_cfg_walks`
@@ -614,6 +616,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invalid_withevents_shape`
 - `invoke_macro`
 - `is_wsl`
+- `iunknown_getwindow`
 - `keyword_casing`
 - `known_accept`
 - `known_reject`

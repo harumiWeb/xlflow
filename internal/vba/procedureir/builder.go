@@ -316,6 +316,8 @@ func (b *documentBuilder) declarations(node *tree_sitter.Node, scope SymbolScope
 			Kind: kind, IsArray: b.isArrayDeclarator(child), IsConst: kind == "const", Range: vbaast.NodeRange(child),
 			Recovered: recovered(child),
 		}
+		declarationText := strings.ToLower(strings.TrimSpace(nodeText(node, b.source)))
+		decl.IsStatic = strings.HasPrefix(declarationText, "static ")
 		// tree-sitter attaches a declaration-level `As ...` clause to the
 		// variable_declaration/const_declaration node rather than each
 		// declarator. Use it when the child has no more specific type so that
@@ -324,7 +326,8 @@ func (b *documentBuilder) declarations(node *tree_sitter.Node, scope SymbolScope
 		if decl.Type == "" {
 			decl.Type = typeText(node, b.source)
 		}
-		decl.IsObject = looksObjectType(decl.Type) || hasWord(text, "New")
+		decl.IsNew = hasWord(text, "New")
+		decl.IsObject = looksObjectType(decl.Type) || decl.IsNew
 		decl.ValueShape = valueShapeForDeclaration(decl, text)
 		if decl.IsArray {
 			if bounds := child.ChildByFieldName("bounds"); bounds != nil {

@@ -3,6 +3,7 @@ package effects
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,6 +11,13 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+)
+
+var (
+	errNumberReferenceRE = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*number\b`)
+	errValueReferenceRE  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*(?:number|description|source)\b`)
+	errClearReferenceRE  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*clear\b`)
+	errStatusConditionRE = regexp.MustCompile(`(?i)^\s*err\s*$`)
 )
 
 const (
@@ -48,7 +56,7 @@ func errorContractsFingerprint(loggerTargets map[string]loggerContract, rethrowT
 	return hex.EncodeToString(hash[:])
 }
 
-func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR, graph cfg.Graph, reachable map[int]bool, candidateKeys map[string]string, loggerTargets map[string]loggerContract, rethrowTargets, terminalTargets map[string]bool) {
+func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, graph cfg.Graph, reachable map[int]bool, candidateKeys map[string]string, loggerTargets map[string]loggerContract, rethrowTargets, terminalTargets map[string]bool) {
 	statements := append([]procedureir.Statement(nil), proc.Statements...)
 	sort.SliceStable(statements, func(i, j int) bool {
 		if statements[i].Range.StartByte != statements[j].Range.StartByte {
@@ -78,7 +86,7 @@ func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR
 		switch statement.Control.Transfer {
 		case procedureir.TransferOnErrorResumeNext:
 			addErrorEvidence(summary, statement.Range, statement.ID, 0, ErrorUsesResumeNext, errorTargetResumeNext, "")
-			if checkedResumeNextProbe(statements, i, reachable) || explicitResumeNextFallback(proc, graph, statements, i, reachable) {
+			if checkedResumeNextProbe(proc, moduleDeclarations, graph, statements, i, reachable) || explicitResumeNextFallback(proc, graph, statements, i, reachable) {
 				checkedResumeNext = true
 			} else {
 				addErrorEvidence(summary, statement.Range, statement.ID, 0, ErrorSuppresses, errorTargetResumeNext, "unchecked or broad scope")
@@ -178,7 +186,7 @@ func immediateLiteralResultFallback(proc procedureir.ProcedureIR, statements []p
 		if !resultAssignment(proc, statement) || statement.Value == nil {
 			return procedureir.Statement{}, false
 		}
-		if safeLiteralAssignment(statement) {
+		if safeLiteralAssignment(proc, statement) {
 			return statement, true
 		}
 		return procedureir.Statement{}, false
@@ -186,19 +194,45 @@ func immediateLiteralResultFallback(proc procedureir.ProcedureIR, statements []p
 	return procedureir.Statement{}, false
 }
 
-func isNumericLiteral(value string) bool {
-	if value == "" {
-		return false
-	}
-	_, err := strconv.ParseFloat(strings.TrimRight(strings.TrimSpace(value), "%&^!#@"), 64)
-	return err == nil
+func safeLiteralAssignment(proc procedureir.ProcedureIR, statement procedureir.Statement) bool {
+	return procedureir.SafeLiteralAssignment(assignmentProbeValue(statement), assignmentTargetType(proc, statement))
 }
 
-func safeLiteralAssignment(statement procedureir.Statement) bool {
-	value := strings.TrimSpace(assignmentProbeValue(statement))
-	lower := strings.ToLower(value)
-	return lower == "true" || lower == "false" || lower == "nothing" || lower == "empty" || lower == "null" ||
-		strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") || isNumericLiteral(value)
+func assignmentTargetType(proc procedureir.ProcedureIR, statement procedureir.Statement) string {
+	target := assignmentProbeTarget(statement)
+	if target == "" {
+		return ""
+	}
+	if strings.EqualFold(target, proc.Symbol.Name) {
+		return literalAssignmentTargetType(proc.Symbol.ReturnType, proc.Symbol.IsArray, false)
+	}
+	for _, declaration := range proc.Declarations {
+		if strings.EqualFold(declaration.Name, target) {
+			return literalAssignmentTargetType(
+				declaration.Type,
+				declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+				declaration.IsObject,
+			)
+		}
+	}
+	return ""
+}
+
+func literalAssignmentTargetType(typeName string, array, object bool) string {
+	typeName = strings.TrimSpace(typeName)
+	if typeName == "" {
+		typeName = "Variant"
+	}
+	if array {
+		if !strings.HasSuffix(typeName, "()") {
+			typeName += "()"
+		}
+		return typeName
+	}
+	if object {
+		return "Object"
+	}
+	return typeName
 }
 
 func dominatingResultFallback(proc procedureir.ProcedureIR, graph cfg.Graph, handlerSetupStatementID int) (procedureir.Statement, bool) {
@@ -485,7 +519,7 @@ func handlerSubgraphHasRaise(proc procedureir.ProcedureIR, graph cfg.CFGView, st
 }
 
 func containsErrorNumber(text string) bool {
-	return strings.Contains(strings.ToLower(stripVBStringLiterals(text)), "err.number")
+	return errNumberReferenceRE.MatchString(stripVBStringLiterals(text))
 }
 
 func expectedErrorRecoveryBranch(statement *procedureir.Statement, copiedNumber string) (cfg.EdgeKind, bool) {
@@ -690,13 +724,24 @@ func isIdentifierByte(value byte) bool {
 	return value == '_' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
 }
 
-func checkedResumeNextProbe(statements []procedureir.Statement, index int, reachable map[int]bool) bool {
+func checkedResumeNextProbe(proc procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, graph cfg.Graph, statements []procedureir.Statement, index int, reachable map[int]bool) bool {
 	faults, checked, restored := 0, false, false
 	probeTarget := ""
+	probeStatementID := 0
+	probeBoundsArray := ""
+	probeBoundsLowerTarget := ""
+	probeBoundsResultTarget := ""
+	probeBoundsFallbackUsed := uint8(0)
+	errCheckParent := 0
+	probeFallbackUsed := false
+	probeInspectionUsed := false
+	probeStatusBranches := map[int]bool{}
 	skipParent := 0
 	parents := make(map[int]int, len(statements))
+	statementsByID := make(map[int]procedureir.Statement, len(statements))
 	for _, statement := range statements {
 		parents[statement.ID] = statement.ParentID
+		statementsByID[statement.ID] = statement
 	}
 	for _, statement := range statements[index+1:] {
 		if !reachable[statement.ID] || statement.Recovered {
@@ -720,15 +765,31 @@ func checkedResumeNextProbe(statements []procedureir.Statement, index int, reach
 			break
 		}
 		lower := strings.ToLower(statement.Text)
+		code := stripVBStringLiterals(lower)
 		conditionText := statement.Text
 		if statement.Condition != nil {
 			conditionText = statement.Condition.Text
 		}
+		conditionCode := stripVBStringLiterals(strings.ToLower(conditionText))
+		errStatusCondition := errStatusConditionRE.MatchString(strings.TrimSpace(conditionCode))
 		probeObserved := errorProbeConditionKind(statement.Kind) &&
-			(strings.Contains(lower, "err.") || probeTarget != "" && identifierInExpression(conditionText, probeTarget))
-		assertsErr := strings.HasPrefix(strings.TrimSpace(lower), "debug.assert") && strings.Contains(lower, "err.")
+			(errValueReferenceRE.MatchString(code) || errStatusCondition || probeTarget != "" && identifierInExpression(conditionCode, probeTarget))
+		assertsErr := strings.HasPrefix(strings.TrimSpace(code), "debug.assert") && errValueReferenceRE.MatchString(code)
 		if probeObserved || assertsErr {
+			if probeStatementID == 0 || !normalFlowTo(graph, probeStatementID, statement.ID, statementsByID) {
+				continue
+			}
 			checked = true
+			hasCall := probeObserved && resumeNextProbeStatementHasCall(proc, statement)
+			if !restored && hasCall {
+				faults++
+				if faults == 1 {
+					probeStatementID = statement.ID
+				}
+			}
+			if !restored && probeObserved && !hasCall && (errNumberReferenceRE.MatchString(code) || errStatusCondition) {
+				errCheckParent = statement.ID
+			}
 			if restored {
 				break
 			}
@@ -740,17 +801,86 @@ func checkedResumeNextProbe(statements []procedureir.Statement, index int, reach
 			checked = true
 			continue
 		}
-		if strings.Contains(lower, "err.clear") || statement.Kind == procedureir.StatementLabel || statement.Kind == procedureir.StatementDeclaration {
+		if !restored && faults == 0 && !checked && errCheckParent == 0 && probeTarget == "" && safeResumeNextProbeInitialization(proc, statement) {
+			// Initializing an object result to Nothing gives a checked member
+			// probe a deterministic failure value; it does not itself probe the
+			// object while Resume Next is active.
 			continue
+		}
+		if !restored && (statement.Kind == procedureir.StatementAssignment || statement.Kind == procedureir.StatementSet) {
+			array, lowerTarget, kind, ok := procedureir.SafeArrayBoundsProbeAssignment(
+				assignmentProbeTarget(statement), assignmentProbeValue(statement),
+			)
+			switch {
+			case ok && kind == procedureir.SafeArrayBoundsProbeLowerBound && faults == 0 && !checked &&
+				errCheckParent == 0 && probeTarget == "":
+				// The lower-bound read is the first half of the same checked
+				// compatibility probe as the following UBound calculation.
+				faults = 1
+				probeStatementID = statement.ID
+				probeTarget = assignmentProbeTarget(statement)
+				probeBoundsArray = array
+				probeBoundsLowerTarget = lowerTarget
+				continue
+			case ok && kind == procedureir.SafeArrayBoundsProbeLength && faults == 1 && !checked &&
+				errCheckParent == 0 && probeBoundsArray != "" && probeBoundsResultTarget == "" &&
+				strings.EqualFold(array, probeBoundsArray) && strings.EqualFold(lowerTarget, probeBoundsLowerTarget):
+				// UBound(array) - lowerBound + 1 completes the same probe;
+				// do not count it as a second protected operation.
+				probeBoundsResultTarget = assignmentProbeTarget(statement)
+				if probeBoundsResultTarget == "" || strings.EqualFold(probeBoundsResultTarget, probeBoundsLowerTarget) {
+					break
+				}
+				probeTarget = probeBoundsResultTarget
+				probeStatementID = statement.ID
+				continue
+			}
+		}
+		if !probeInspectionUsed && faults == 1 && procedureir.SafeProbeResultInspection(assignmentProbeValue(statement), probeTarget) {
+			// A pure intrinsic predicate can inspect the value produced by the
+			// probe without becoming a second error-suppressed operation.
+			checked = true
+			probeInspectionUsed = true
+			continue
+		}
+		if errClearReferenceRE.MatchString(code) || statement.Kind == procedureir.StatementLabel || statement.Kind == procedureir.StatementDeclaration {
+			continue
+		}
+		if fallbackBit := checkedResumeNextBoundsProbeFallback(
+			proc, statement, errCheckParent, statementsByID, probeBoundsLowerTarget,
+			probeBoundsResultTarget, probeBoundsFallbackUsed, checked,
+		); fallbackBit != 0 {
+			probeBoundsFallbackUsed |= fallbackBit
+			continue
+		}
+		if !probeFallbackUsed && checked && errCheckParent != 0 && probeTarget != "" &&
+			strings.EqualFold(assignmentProbeTarget(statement), probeTarget) &&
+			statementInErrorBranch(statement.ID, errCheckParent, statementsByID) && safeProbeFallbackAssignment(proc, moduleDeclarations, statement) {
+			// A checked probe may assign a safe fallback to the same result
+			// once inside the error branch. It is recovery for the probe, not a
+			// second unchecked operation.
+			probeFallbackUsed = true
+			continue
+		}
+		if faults == 1 && checked && errCheckParent != 0 {
+			if branchID, ok := checkedResumeNextBooleanStatusBranch(proc, statement, errCheckParent, statementsByID); ok && !probeStatusBranches[branchID] {
+				// A Boolean status assignment in one side of the Err check is
+				// recovery for the probe. Track each mutually-exclusive branch
+				// separately so both True and False arms remain admissible.
+				probeStatusBranches[branchID] = true
+				continue
+			}
 		}
 		if restored {
 			if probeTarget != "" && identifierInExpression(assignmentProbeValue(statement), probeTarget) {
 				if derived := assignmentProbeTarget(statement); derived != "" {
 					probeTarget = derived
+					probeStatementID = statement.ID
 					continue
 				}
 			}
-			if safeLiteralAssignment(statement) {
+			if safeLiteralAssignment(proc, statement) {
+				probeStatementID = statement.ID
 				continue
 			}
 			break
@@ -759,10 +889,201 @@ func checkedResumeNextProbe(statements []procedureir.Statement, index int, reach
 			faults++
 			if faults == 1 {
 				probeTarget = assignmentProbeTarget(statement)
+				probeStatementID = statement.ID
 			}
 		}
 	}
 	return faults == 1 && checked && restored
+}
+
+func safeResumeNextProbeInitialization(proc procedureir.ProcedureIR, statement procedureir.Statement) bool {
+	if statement.Kind != procedureir.StatementSet {
+		return false
+	}
+	target := assignmentProbeTarget(statement)
+	if target == "" || !strings.EqualFold(strings.TrimSpace(assignmentProbeValue(statement)), "nothing") {
+		return false
+	}
+	for _, declaration := range proc.Declarations {
+		if declaration.Scope == procedureir.ScopeLocal && strings.EqualFold(declaration.Name, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func safeProbeFallbackAssignment(proc procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, statement procedureir.Statement) bool {
+	if safeLiteralAssignment(proc, statement) {
+		return true
+	}
+	if !strings.EqualFold(assignmentTargetType(proc, statement), "Boolean") {
+		return false
+	}
+	return procedureir.SafeBooleanComparison(assignmentProbeValue(statement), func(operand string) bool {
+		return safeBooleanComparisonOperand(proc, moduleDeclarations, operand)
+	})
+}
+
+func safeBooleanComparisonOperand(proc procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, operand string) bool {
+	for _, declaration := range proc.Declarations {
+		if strings.EqualFold(declaration.Name, strings.TrimSpace(operand)) {
+			return procedureir.SafeBooleanComparisonOperandType(
+				declaration.Type,
+				declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+				declaration.IsObject,
+			)
+		}
+	}
+	if strings.EqualFold(proc.Symbol.Name, strings.TrimSpace(operand)) {
+		return procedureir.SafeBooleanComparisonOperandType(proc.Symbol.ReturnType, proc.Symbol.IsArray, false)
+	}
+	for _, declaration := range moduleDeclarations {
+		if strings.EqualFold(declaration.Name, strings.TrimSpace(operand)) {
+			return procedureir.SafeBooleanComparisonOperandType(
+				declaration.Type,
+				declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray,
+				declaration.IsObject,
+			)
+		}
+	}
+	return false
+}
+
+func normalFlowTo(graph cfg.Graph, fromStatementID, targetStatementID int, statements map[int]procedureir.Statement) bool {
+	from, ok := graph.BlockForStatement(fromStatementID)
+	if !ok {
+		return false
+	}
+	target, ok := graph.BlockForStatement(targetStatementID)
+	if !ok {
+		return false
+	}
+	queue := []cfg.BlockID{from.ID}
+	visited := map[cfg.BlockID]bool{from.ID: true}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range graph.OutgoingEdges(current) {
+			if edge.Class != cfg.EdgeNormal {
+				continue
+			}
+			if edge.To == target.ID {
+				return true
+			}
+			block, ok := graph.BlockByID(edge.To)
+			if !ok || block.Kind != cfg.BlockStatement || block.StatementID == targetStatementID {
+				continue
+			}
+			statement, ok := statements[block.StatementID]
+			if !ok || !normalFlowIgnorable(statement) {
+				continue
+			}
+			if !visited[block.ID] {
+				visited[block.ID] = true
+				queue = append(queue, block.ID)
+			}
+		}
+	}
+	return false
+}
+
+func normalFlowIgnorable(statement procedureir.Statement) bool {
+	if statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel {
+		return true
+	}
+	return statement.Kind == procedureir.StatementOnError && statement.Control != nil &&
+		(statement.Control.Transfer == procedureir.TransferOnErrorDisable || statement.Control.Transfer == procedureir.TransferOnErrorGoto)
+}
+
+const (
+	checkedResumeNextBoundsLowerFallback uint8 = 1 << iota
+	checkedResumeNextBoundsResultFallback
+)
+
+func checkedResumeNextBoundsProbeFallback(proc procedureir.ProcedureIR, statement procedureir.Statement, errCheckParent int, statements map[int]procedureir.Statement, lowerTarget, resultTarget string, used uint8, checked bool) uint8 {
+	if !checked || errCheckParent == 0 || lowerTarget == "" || resultTarget == "" ||
+		(statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) ||
+		!statementInErrorBranch(statement.ID, errCheckParent, statements) || !safeLiteralAssignment(proc, statement) {
+		return 0
+	}
+	switch target := assignmentProbeTarget(statement); {
+	case strings.EqualFold(target, lowerTarget) && used&checkedResumeNextBoundsLowerFallback == 0:
+		return checkedResumeNextBoundsLowerFallback
+	case strings.EqualFold(target, resultTarget) && used&checkedResumeNextBoundsResultFallback == 0:
+		return checkedResumeNextBoundsResultFallback
+	default:
+		return 0
+	}
+}
+
+func checkedResumeNextBooleanStatusBranch(proc procedureir.ProcedureIR, statement procedureir.Statement, ancestorID int, statements map[int]procedureir.Statement) (int, bool) {
+	if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
+		return 0, false
+	}
+	if !strings.EqualFold(assignmentTargetType(proc, statement), "Boolean") || !safeLiteralAssignment(proc, statement) {
+		return 0, false
+	}
+	if statement.ParentID == ancestorID {
+		return ancestorID, true
+	}
+	parent, ok := statements[statement.ParentID]
+	if ok && parent.Kind == procedureir.StatementElse && parent.ParentID == ancestorID {
+		return parent.ID, true
+	}
+	return 0, false
+}
+
+func statementInErrorBranch(statementID, ancestorID int, statements map[int]procedureir.Statement) bool {
+	ancestor, ok := statements[ancestorID]
+	if !ok {
+		return false
+	}
+	condition := ancestor.Text
+	if ancestor.Condition != nil {
+		condition = ancestor.Condition.Text
+	}
+	thenFailure, known := procedureir.ErrorNumberThenBranchIsFailure(condition)
+	if !known {
+		return false
+	}
+	inElseBranch := false
+	for currentID := statementID; currentID != ancestorID; {
+		current, ok := statements[currentID]
+		if !ok {
+			return false
+		}
+		if current.Kind == procedureir.StatementElseIf {
+			return false
+		}
+		if current.Kind == procedureir.StatementElse {
+			if current.ParentID != ancestorID {
+				return false
+			}
+			inElseBranch = true
+		}
+		currentID = current.ParentID
+	}
+	if inElseBranch {
+		return !thenFailure
+	}
+	return thenFailure
+}
+
+func resumeNextProbeStatementHasCall(proc procedureir.ProcedureIR, statement procedureir.Statement) bool {
+	if statement.Condition == nil {
+		return false
+	}
+	for _, call := range proc.Calls {
+		if statement.Condition.Range.EndByte > statement.Condition.Range.StartByte &&
+			call.Range.StartByte >= statement.Condition.Range.StartByte &&
+			call.Range.EndByte <= statement.Condition.Range.EndByte {
+			return true
+		}
+		if statement.Condition.Range.EndByte <= statement.Condition.Range.StartByte && call.StatementID == statement.ID {
+			return true
+		}
+	}
+	return false
 }
 
 func statementDescendsFrom(statement procedureir.Statement, ancestor int, parents map[int]int) bool {
@@ -792,14 +1113,20 @@ func assignmentProbeTarget(statement procedureir.Statement) string {
 		return ""
 	}
 	text := strings.TrimSpace(statement.Text)
-	if strings.HasPrefix(strings.ToLower(text), "set ") {
+	lowerText := strings.ToLower(text)
+	if strings.HasPrefix(lowerText, "set ") || strings.HasPrefix(lowerText, "let ") {
 		text = strings.TrimSpace(text[4:])
 	}
 	index := strings.IndexByte(text, '=')
 	if index <= 0 {
-		return ""
+		if statement.Target == nil {
+			return ""
+		}
+		text = strings.TrimSpace(statement.Target.Text)
+	} else {
+		text = strings.TrimSpace(text[:index])
 	}
-	target := strings.ToLower(strings.TrimSpace(text[:index]))
+	target := strings.ToLower(text)
 	for i := 0; i < len(target); i++ {
 		if !isIdentifierByte(target[i]) {
 			return ""
@@ -918,7 +1245,7 @@ func recognizedLogSink(text string) bool {
 
 func containsErrorValue(lower, copied string) bool {
 	lower = stripVBStringLiterals(strings.ToLower(lower))
-	if strings.Contains(lower, "err.number") || strings.Contains(lower, "err.description") || strings.Contains(lower, "err.source") || identifierInExpression(lower, "erl") {
+	if errValueReferenceRE.MatchString(lower) || identifierInExpression(lower, "erl") {
 		return true
 	}
 	return copied != "" && identifierInExpression(lower, copied)
