@@ -370,15 +370,7 @@ func objectNonNothingPredicateContracts(plans map[string]*objectProcedurePlan) m
 	contracts := map[string]bool{}
 	qualifiedCounts := map[string]int{}
 	qualifiedNames := map[string]bool{}
-	nameCounts := map[string]int{}
-	contractNames := map[string]bool{}
 	for key, plan := range plans {
-		if plan != nil {
-			name := strings.ToLower(cleanIdentifier(plan.proc.Name))
-			if name != "" {
-				nameCounts[name]++
-			}
-		}
 		if objectProcedureNonNothingPredicate(plan) {
 			contracts[key] = true
 			qualified := strings.ToLower(objectProcedureQualifiedName(plan.proc))
@@ -386,17 +378,11 @@ func objectNonNothingPredicateContracts(plans map[string]*objectProcedurePlan) m
 				qualifiedCounts[qualified]++
 				qualifiedNames[qualified] = true
 			}
-			contractNames[strings.ToLower(cleanIdentifier(plan.proc.Name))] = true
 		}
 	}
 	for qualified := range qualifiedNames {
 		if qualifiedCounts[qualified] == 1 {
 			contracts[qualified] = true
-		}
-	}
-	for name := range contractNames {
-		if nameCounts[name] == 1 {
-			contracts["name:"+name] = true
 		}
 	}
 	return contracts
@@ -537,7 +523,7 @@ func objectPredicateResultUsesObjectMember(plan *objectProcedurePlan, statement 
 			return true
 		}
 	}
-	value := strings.ToLower(strings.TrimSpace(statement.Text))
+	value := strings.ToLower(strings.TrimSpace(maskStringLiterals(statement.Text)))
 	parameter := strings.ToLower(cleanIdentifier(parameterName))
 	return parameter != "" && strings.Contains(value, parameter+".")
 }
@@ -635,7 +621,13 @@ func objectPredicateNonNothingFlow(plan *objectProcedurePlan, variable objectVar
 				seen = true
 				return true
 			})
-			if seen && result[block.ID] != known {
+			if !seen {
+				// A block reachable only through exceptional edges is not part of
+				// the predicate's normal return proof.  Leave it unproven instead
+				// of retaining the optimistic initial value.
+				known = false
+			}
+			if result[block.ID] != known {
 				result[block.ID] = known
 				changed = true
 			}
@@ -2922,9 +2914,8 @@ func objectFlowApplyGuard(proc sourceProcedure, state map[string]bool, flowConte
 		}
 		return state
 	}
-	if name, predicateTrue, ok := objectNonNothingPredicateGuard(text); ok {
-		if !objectFlowPredicateHasContract(flowContext, edge.StatementID, name) &&
-			!flowContext.predicateContracts["name:"+strings.ToLower(cleanIdentifier(name))] {
+	if predicate, name, predicateTrue, ok := objectNonNothingPredicateGuard(text); ok {
+		if !objectFlowPredicateHasContract(flowContext, edge.StatementID, predicate, name) {
 			return state
 		}
 		key := objectGuardVariableKey(name, state, declarations, flowContext.objectTypeNames)
@@ -2942,7 +2933,7 @@ func objectFlowApplyGuard(proc sourceProcedure, state map[string]bool, flowConte
 		}
 		updated := cloneObjectState(state)
 		updated[key] = true
-		if strings.Contains(text, "isexceltable(") {
+		if strings.EqualFold(predicate, "IsExcelTable") {
 			updated[objectTypeNameFactKey(key, "ListObject")] = true
 		}
 		return updated
@@ -3106,7 +3097,7 @@ func objectFlowApplySelectCaseTypeGuard(state map[string]bool, flowContext objec
 	return updated
 }
 
-func objectFlowPredicateHasContract(flowContext objectFlowContext, statementID int, argumentName string) bool {
+func objectFlowPredicateHasContract(flowContext objectFlowContext, statementID int, predicateName, argumentName string) bool {
 	if flowContext.facts == nil || len(flowContext.predicateContracts) == 0 {
 		return false
 	}
@@ -3119,13 +3110,18 @@ func objectFlowPredicateHasContract(flowContext objectFlowContext, statementID i
 		if calleeName == "" {
 			calleeName = strings.ToLower(objectBareCallName(call.Callee.Text))
 		}
-		contract := flowContext.predicateContracts["name:"+calleeName]
+		if !strings.EqualFold(calleeName, cleanIdentifier(predicateName)) {
+			return
+		}
 		if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
 			candidate := call.Resolution.Candidates[0]
 			key := objectSummaryKey(candidate.File, candidate.QualifiedName, candidate.Kind, candidate.Line)
-			contract = contract || flowContext.predicateContracts[key] || flowContext.predicateContracts[strings.ToLower(candidate.QualifiedName)]
-		}
-		if !contract {
+			if !flowContext.predicateContracts[key] && !flowContext.predicateContracts[strings.ToLower(candidate.QualifiedName)] {
+				return
+			}
+		} else {
+			// An unresolved or ambiguous bare name does not prove that the
+			// project-local predicate contract is visible at this call site.
 			return
 		}
 		for _, actual := range objectCallActuals(call, flowContext.facts) {
@@ -3334,7 +3330,7 @@ func objectProgIDFactKey(variableKey, progID string) string {
 	return "progid:" + variableKey + ":" + strings.ToLower(strings.TrimSpace(progID))
 }
 
-func objectNonNothingPredicateGuard(text string) (string, bool, bool) {
+func objectNonNothingPredicateGuard(text string) (string, string, bool, bool) {
 	text = objectTrimOuterParens(strings.TrimSpace(text))
 	if then := strings.Index(text, " then"); then >= 0 {
 		text = strings.TrimSpace(text[:then])
@@ -3346,17 +3342,17 @@ func objectNonNothingPredicateGuard(text string) (string, bool, bool) {
 	}
 	open := strings.IndexByte(text, '(')
 	if open <= 0 || !strings.HasSuffix(text, ")") {
-		return "", false, false
+		return "", "", false, false
 	}
 	name := cleanIdentifier(strings.TrimSpace(text[:open]))
 	if name == "" || strings.ContainsAny(name, ".()") {
-		return "", false, false
+		return "", "", false, false
 	}
 	argument := strings.TrimSpace(text[open+1 : len(text)-1])
 	if argument == "" || strings.ContainsAny(argument, ".()") {
-		return "", false, false
+		return "", "", false, false
 	}
-	return cleanIdentifier(argument), !negated, true
+	return name, cleanIdentifier(argument), !negated, true
 }
 
 func objectFlowInlineGuardAssignment(statement procedureir.Statement, name string) bool {

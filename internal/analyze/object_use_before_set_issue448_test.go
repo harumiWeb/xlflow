@@ -1100,6 +1100,120 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448DoesNotUsePrivatePredicateFromOtherModule(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helper.bas", `Option Explicit
+Private Function IsReady(ByVal candidate As Object) As Boolean
+  If candidate Is Nothing Then Exit Function
+  IsReady = True
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal candidate As Object)
+  If IsReady(candidate) Then
+    Debug.Print candidate.Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "Run" {
+		t.Fatalf("a private predicate from another module must not refine its caller: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsErrorHandlerOnlyPredicateResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function IsReady(ByVal candidate As Object) As Boolean
+  On Error GoTo Failed
+  Debug.Print candidate.Name
+  Exit Function
+Failed:
+  IsReady = True
+End Function
+
+Public Sub Run(ByVal candidate As Object)
+  If IsReady(candidate) Then
+    Debug.Print candidate.Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 2 {
+		t.Fatalf("an error-handler-only True result must not establish a caller proof: %+v", got)
+	}
+	if got[0].Procedure != "IsReady" || got[1].Procedure != "Run" {
+		t.Fatalf("unexpected error-handler-only predicate findings: %+v", got)
+	}
+}
+
+func TestVBA202Issue448IgnoresStringLiteralPredicateMemberText(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function IsReady(ByVal candidate As Object) As Boolean
+  On Error GoTo Failed
+  IsReady = ("candidate.Name" = "candidate.Name")
+Failed:
+End Function
+
+Public Sub Run(ByVal candidate As Object)
+  If IsReady(candidate) Then
+    Debug.Print candidate.Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "Run" {
+		t.Fatalf("string literal text must not establish a predicate member proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RequiresExactIsExcelTablePredicateName(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function FooIsExcelTable(ByVal candidate As Object) As Boolean
+  If candidate Is Nothing Then Exit Function
+  FooIsExcelTable = (candidate.Name <> "")
+End Function
+
+Public Sub Run(ByVal candidate As Object)
+  Dim value As Object
+  If FooIsExcelTable(candidate) Then
+    Set value = candidate.Range
+    Debug.Print value.Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "Run" {
+		t.Fatalf("a similarly named predicate must not establish ListObject type facts: %+v", got)
+	}
+}
+
 func TestVBA202Issue448PropagatesPrivateByValObjectEntryGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -1623,13 +1623,16 @@ reads. Safe use requires a dominating proof across all reachable paths; an
 explicit reset or a possibly empty loop therefore invalidates later use until
 another definite initialization.
 
-Unique project-local Boolean predicates also refine the matching true branch
-when their single object parameter is protected by an explicit `Is Nothing`
-exit or when every true result is assigned only after a successful member
-access under a terminating `On Error GoTo` handler. The predicate's own
-member access remains subject to the normal `VBA202` check; this contract only
-proves that a caller reaching the true branch supplied a non-`Nothing` object.
-The true branch of a negated predicate remains nullable.
+Resolved, visible project-local Boolean predicates also refine the matching
+true branch when their single object parameter is protected by an explicit `Is
+Nothing` exit or when every true result is assigned only after a successful
+member access under a terminating `On Error GoTo` handler. A result assigned
+only on an exception-handler path does not establish the contract, and an
+unresolved or ambiguous same-name call remains conservative. The predicate's
+own member access remains subject to the normal `VBA202` check; this contract
+only proves that a caller reaching the true branch supplied a non-`Nothing`
+object. The true branch of a negated predicate remains nullable. The
+`IsExcelTable` type fact is limited to that exact predicate name.
 
 Private project-local object procedures may additionally establish parameter
 entry state when every reachable direct call site supplies a definitely
