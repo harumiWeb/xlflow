@@ -352,6 +352,31 @@ End Sub
 	}
 }
 
+func TestVBA225FallsBackToRepeatingOuterLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  Dim j As Long
+  For i = 1 To 100
+    For j = 1 To 100
+      Cells(i, j).Value2 = i + j
+      Exit For
+    Next j
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA225")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("one-shot inner access should roll up to the repeating outer loop: %+v", got)
+	}
+}
+
 func TestVBA225IgnoresStringAndCommentText(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

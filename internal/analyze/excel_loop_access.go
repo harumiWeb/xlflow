@@ -417,18 +417,16 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 		}
 		selected := -1
 		for i := len(candidates) - 1; i >= 0; i-- {
-			if !candidates[i].Small {
-				selected = i
-				break
+			if candidates[i].Small || !excelLoopAccessCanRepeat(proc, candidates[i], statementID, adjacency, blockByStatement) {
+				continue
 			}
+			selected = i
+			break
 		}
 		if selected < 0 {
 			continue
 		}
 		region := candidates[selected]
-		if !excelLoopAccessCanRepeat(proc, region, statementID, adjacency, blockByStatement) {
-			continue
-		}
 		grouped[region.StatementID] = append(grouped[region.StatementID], accesses...)
 	}
 
