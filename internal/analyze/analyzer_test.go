@@ -9845,6 +9845,41 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PreservesResumeNextAfterErrorHandlerReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Function MakeArray() As Variant
+  MakeArray = Array(1)
+End Function
+
+Public Sub Run()
+  Dim values As Variant
+  On Error GoTo Handler
+  Call MaybeFail
+  values = MakeArray()
+  Debug.Print UBound(values)
+  Exit Sub
+Handler:
+  On Error Resume Next
+  Resume Next
+End Sub
+
+Private Sub MaybeFail()
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Run" || got[0].Line != 11 {
+		t.Fatalf("Resume Next from an error handler must reach the following array-return assignment: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227SuccessfulBoundsClearResumeNextFailure(t *testing.T) {
 	t.Parallel()
 	state := arrayFlowState{

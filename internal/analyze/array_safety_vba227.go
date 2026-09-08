@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -2039,6 +2040,7 @@ func arrayVBA227ResumeNextPrefixes(file parsedFile, proc sourceProcedure) []bool
 	prefixes := make([]bool, len(file.Lines)+1)
 	if proc.Graph != nil && len(proc.Graph.Blocks) > 0 {
 		graph := proc.Graph.View(vbacfg.EdgeFilter{})
+		resumeNextContinuations := arrayVBA227ResumeNextContinuations(graph)
 		inStates := map[vbacfg.BlockID]bool{graph.Entry(): false}
 		queued := map[vbacfg.BlockID]bool{graph.Entry(): true}
 		for len(queued) > 0 {
@@ -2090,6 +2092,14 @@ func arrayVBA227ResumeNextPrefixes(file parsedFile, proc sourceProcedure) []bool
 				}
 				return true
 			})
+			if out {
+				for _, target := range resumeNextContinuations[id] {
+					if !inStates[target] {
+						inStates[target] = true
+						queued[target] = true
+					}
+				}
+			}
 		}
 		return prefixes
 	}
@@ -2102,6 +2112,91 @@ func arrayVBA227ResumeNextPrefixes(file parsedFile, proc sourceProcedure) []bool
 		mayHaveResumeNext = arrayVBA227ResumeNextAfterStatement(mayHaveResumeNext, normalizedCodeLine(file.Lines[line-1]))
 	}
 	return prefixes
+}
+
+// arrayVBA227ResumeNextContinuations recovers the concrete continuation that
+// VBA uses for Resume Next. The CFG models the instruction as an uncertain
+// edge to UnknownExit because its target depends on the statement that
+// raised the error. Error edges retain that missing association: when a
+// Resume Next statement is reachable through a handler, its targets are the
+// normal successors of the fault sites that enter that handler.
+func arrayVBA227ResumeNextContinuations(graph vbacfg.CFGView) map[vbacfg.BlockID][]vbacfg.BlockID {
+	normalOutgoing := map[vbacfg.BlockID][]vbacfg.BlockID{}
+	errorSources := map[vbacfg.BlockID]map[vbacfg.BlockID]bool{}
+	graph.ForEachEdge(func(edge vbacfg.Edge) bool {
+		if edge.Class == vbacfg.EdgeNormal {
+			normalOutgoing[edge.From] = append(normalOutgoing[edge.From], edge.To)
+		}
+		if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeError {
+			handler, ok := graph.BlockByID(edge.To)
+			if !ok || handler.Statement == nil || handler.Statement.Kind != procedureir.StatementLabel {
+				return true
+			}
+			if errorSources[edge.To] == nil {
+				errorSources[edge.To] = map[vbacfg.BlockID]bool{}
+			}
+			errorSources[edge.To][edge.From] = true
+		}
+		return true
+	})
+	if len(errorSources) == 0 {
+		return nil
+	}
+
+	resumeNextBlocks := map[vbacfg.BlockID]bool{}
+	graph.ForEachBlock(func(block vbacfg.Block) bool {
+		if block.Statement != nil && block.Statement.Control != nil &&
+			block.Statement.Control.Transfer == procedureir.TransferResumeNext {
+			resumeNextBlocks[block.ID] = true
+		}
+		return true
+	})
+	if len(resumeNextBlocks) == 0 {
+		return nil
+	}
+
+	continuationSets := map[vbacfg.BlockID]map[vbacfg.BlockID]bool{}
+	for handler, sources := range errorSources {
+		reachable := map[vbacfg.BlockID]bool{handler: true}
+		queue := []vbacfg.BlockID{handler}
+		for len(queue) > 0 {
+			current := queue[0]
+			queue = queue[1:]
+			for _, target := range normalOutgoing[current] {
+				if reachable[target] {
+					continue
+				}
+				reachable[target] = true
+				queue = append(queue, target)
+			}
+		}
+		for resumeBlock := range resumeNextBlocks {
+			if !reachable[resumeBlock] {
+				continue
+			}
+			if continuationSets[resumeBlock] == nil {
+				continuationSets[resumeBlock] = map[vbacfg.BlockID]bool{}
+			}
+			for source := range sources {
+				for _, target := range normalOutgoing[source] {
+					continuationSets[resumeBlock][target] = true
+				}
+			}
+		}
+	}
+	if len(continuationSets) == 0 {
+		return nil
+	}
+
+	continuations := make(map[vbacfg.BlockID][]vbacfg.BlockID, len(continuationSets))
+	for resumeBlock, targets := range continuationSets {
+		continuations[resumeBlock] = make([]vbacfg.BlockID, 0, len(targets))
+		for target := range targets {
+			continuations[resumeBlock] = append(continuations[resumeBlock], target)
+		}
+		slices.Sort(continuations[resumeBlock])
+	}
+	return continuations
 }
 
 func arrayVBA227ResumeNextAfterStatement(active bool, text string) bool {
