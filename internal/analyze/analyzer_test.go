@@ -9938,6 +9938,131 @@ func TestAnalyzerVBA227ResumeNextCompoundSourceUsesPostCompoundContinuation(t *t
 	}
 }
 
+func TestAnalyzerVBA227ResumeNextNestedCompoundUsesSameCFGJoin(t *testing.T) {
+	t.Parallel()
+	outer := &procedureir.Statement{ID: 1, Kind: procedureir.StatementIf, Text: "If outer Then", Range: vbaast.Range{StartLine: 2}}
+	inner := &procedureir.Statement{ID: 2, ParentID: outer.ID, Kind: procedureir.StatementIf, Text: "If inner Then", Range: vbaast.Range{StartLine: 3}}
+	innerThen := &procedureir.Statement{ID: 3, ParentID: inner.ID, Kind: procedureir.StatementCall, Text: "ThenWork", Range: vbaast.Range{StartLine: 4}}
+	innerElse := &procedureir.Statement{ID: 4, ParentID: inner.ID, Kind: procedureir.StatementCall, Text: "ElseWork", Range: vbaast.Range{StartLine: 5}}
+	outerElse := &procedureir.Statement{ID: 5, ParentID: outer.ID, Kind: procedureir.StatementElse, Text: "Else", Range: vbaast.Range{StartLine: 6}}
+	join := &procedureir.Statement{ID: 6, Kind: procedureir.StatementCall, Text: "AfterOuter", Range: vbaast.Range{StartLine: 7}}
+	handler := &procedureir.Statement{ID: 7, Kind: procedureir.StatementLabel, Text: "Handler:", Range: vbaast.Range{StartLine: 9}}
+	resume := &procedureir.Statement{
+		ID: 8, Kind: procedureir.StatementResume, Text: "Resume Next",
+		Control: &procedureir.ControlFlowMetadata{Transfer: procedureir.TransferResumeNext},
+		Range:   vbaast.Range{StartLine: 10},
+	}
+	graph := vbacfg.Graph{
+		Blocks: []vbacfg.Block{
+			{ID: 1, Kind: vbacfg.BlockEntry},
+			{ID: 2, Kind: vbacfg.BlockStatement, StatementID: outer.ID, Statement: outer},
+			{ID: 3, Kind: vbacfg.BlockStatement, StatementID: inner.ID, Statement: inner},
+			{ID: 4, Kind: vbacfg.BlockStatement, StatementID: innerThen.ID, Statement: innerThen},
+			{ID: 5, Kind: vbacfg.BlockStatement, StatementID: innerElse.ID, Statement: innerElse},
+			{ID: 6, Kind: vbacfg.BlockStatement, StatementID: outerElse.ID, Statement: outerElse},
+			{ID: 7, Kind: vbacfg.BlockStatement, StatementID: join.ID, Statement: join},
+			{ID: 8, Kind: vbacfg.BlockStatement, StatementID: handler.ID, Statement: handler},
+			{ID: 9, Kind: vbacfg.BlockStatement, StatementID: resume.ID, Statement: resume},
+			{ID: 10, Kind: vbacfg.BlockNormalExit},
+			{ID: 11, Kind: vbacfg.BlockUnknownExit},
+		},
+		Edges: []vbacfg.Edge{
+			{From: 1, To: 2, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 3, Kind: vbacfg.EdgeBranchTrue, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 6, Kind: vbacfg.EdgeBranchFalse, Class: vbacfg.EdgeNormal},
+			{From: 3, To: 4, Kind: vbacfg.EdgeBranchTrue, Class: vbacfg.EdgeNormal},
+			{From: 3, To: 5, Kind: vbacfg.EdgeBranchFalse, Class: vbacfg.EdgeNormal},
+			{From: 3, To: 8, Kind: vbacfg.EdgeError, Class: vbacfg.EdgeExceptional},
+			{From: 4, To: 7, Class: vbacfg.EdgeNormal},
+			{From: 5, To: 7, Class: vbacfg.EdgeNormal},
+			{From: 6, To: 7, Class: vbacfg.EdgeNormal},
+			{From: 7, To: 10, Class: vbacfg.EdgeNormal},
+			{From: 8, To: 9, Class: vbacfg.EdgeNormal},
+			{From: 9, To: 11, Kind: vbacfg.EdgeResume, Class: vbacfg.EdgeExceptional, Uncertain: true},
+		},
+		Entry: 1, NormalExit: 10, UnknownExit: 11,
+	}
+	continuations := arrayVBA227ResumeNextContinuations(graph.View(vbacfg.EdgeFilter{}))[9]
+	if len(continuations) != 1 || continuations[0] != 7 {
+		t.Fatalf("nested compound Resume Next continuations = %v, want outer join block 7", continuations)
+	}
+}
+
+func TestAnalyzerVBA227ResumeNextWithUsesPostWithContinuation(t *testing.T) {
+	t.Parallel()
+	withStatement := &procedureir.Statement{ID: 1, Kind: procedureir.StatementWith, Text: "With target", Range: vbaast.Range{StartLine: 2}}
+	body := &procedureir.Statement{ID: 2, ParentID: withStatement.ID, Kind: procedureir.StatementCall, Text: "Work", Range: vbaast.Range{StartLine: 3}}
+	continuation := &procedureir.Statement{ID: 3, Kind: procedureir.StatementCall, Text: "AfterWith", Range: vbaast.Range{StartLine: 5}}
+	handler := &procedureir.Statement{ID: 4, Kind: procedureir.StatementLabel, Text: "Handler:", Range: vbaast.Range{StartLine: 7}}
+	resume := &procedureir.Statement{
+		ID: 5, Kind: procedureir.StatementResume, Text: "Resume Next",
+		Control: &procedureir.ControlFlowMetadata{Transfer: procedureir.TransferResumeNext},
+		Range:   vbaast.Range{StartLine: 8},
+	}
+	graph := vbacfg.Graph{
+		Blocks: []vbacfg.Block{
+			{ID: 1, Kind: vbacfg.BlockEntry},
+			{ID: 2, Kind: vbacfg.BlockStatement, StatementID: withStatement.ID, Statement: withStatement},
+			{ID: 3, Kind: vbacfg.BlockStatement, StatementID: body.ID, Statement: body},
+			{ID: 4, Kind: vbacfg.BlockStatement, StatementID: continuation.ID, Statement: continuation},
+			{ID: 5, Kind: vbacfg.BlockStatement, StatementID: handler.ID, Statement: handler},
+			{ID: 6, Kind: vbacfg.BlockStatement, StatementID: resume.ID, Statement: resume},
+			{ID: 7, Kind: vbacfg.BlockNormalExit},
+			{ID: 8, Kind: vbacfg.BlockUnknownExit},
+		},
+		Edges: []vbacfg.Edge{
+			{From: 1, To: 2, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 3, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 5, Kind: vbacfg.EdgeError, Class: vbacfg.EdgeExceptional},
+			{From: 3, To: 4, Class: vbacfg.EdgeNormal},
+			{From: 4, To: 7, Class: vbacfg.EdgeNormal},
+			{From: 5, To: 6, Class: vbacfg.EdgeNormal},
+			{From: 6, To: 8, Kind: vbacfg.EdgeResume, Class: vbacfg.EdgeExceptional, Uncertain: true},
+		},
+		Entry: 1, NormalExit: 7, UnknownExit: 8,
+	}
+	continuations := arrayVBA227ResumeNextContinuations(graph.View(vbacfg.EdgeFilter{}))[6]
+	if len(continuations) != 1 || continuations[0] != 4 {
+		t.Fatalf("With Resume Next continuations = %v, want post-With block 4", continuations)
+	}
+}
+
+func TestAnalyzerVBA227ResumeNextTerminalCompoundUsesNormalExit(t *testing.T) {
+	t.Parallel()
+	compound := &procedureir.Statement{ID: 1, Kind: procedureir.StatementIf, Text: "If condition Then", Range: vbaast.Range{StartLine: 2}}
+	body := &procedureir.Statement{ID: 2, ParentID: compound.ID, Kind: procedureir.StatementCall, Text: "Work", Range: vbaast.Range{StartLine: 3}}
+	handler := &procedureir.Statement{ID: 3, Kind: procedureir.StatementLabel, Text: "Handler:", Range: vbaast.Range{StartLine: 5}}
+	resume := &procedureir.Statement{
+		ID: 4, Kind: procedureir.StatementResume, Text: "Resume Next",
+		Control: &procedureir.ControlFlowMetadata{Transfer: procedureir.TransferResumeNext},
+		Range:   vbaast.Range{StartLine: 6},
+	}
+	graph := vbacfg.Graph{
+		Blocks: []vbacfg.Block{
+			{ID: 1, Kind: vbacfg.BlockEntry},
+			{ID: 2, Kind: vbacfg.BlockStatement, StatementID: compound.ID, Statement: compound},
+			{ID: 3, Kind: vbacfg.BlockStatement, StatementID: body.ID, Statement: body},
+			{ID: 4, Kind: vbacfg.BlockStatement, StatementID: handler.ID, Statement: handler},
+			{ID: 5, Kind: vbacfg.BlockStatement, StatementID: resume.ID, Statement: resume},
+			{ID: 6, Kind: vbacfg.BlockNormalExit},
+			{ID: 7, Kind: vbacfg.BlockUnknownExit},
+		},
+		Edges: []vbacfg.Edge{
+			{From: 1, To: 2, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 3, Kind: vbacfg.EdgeBranchTrue, Class: vbacfg.EdgeNormal},
+			{From: 2, To: 4, Kind: vbacfg.EdgeError, Class: vbacfg.EdgeExceptional},
+			{From: 3, To: 6, Kind: vbacfg.EdgeProcedureExit, Class: vbacfg.EdgeNormal},
+			{From: 4, To: 5, Class: vbacfg.EdgeNormal},
+			{From: 5, To: 7, Kind: vbacfg.EdgeResume, Class: vbacfg.EdgeExceptional, Uncertain: true},
+		},
+		Entry: 1, NormalExit: 6, UnknownExit: 7,
+	}
+	continuations := arrayVBA227ResumeNextContinuations(graph.View(vbacfg.EdgeFilter{}))[5]
+	if len(continuations) != 1 || continuations[0] != 6 {
+		t.Fatalf("terminal compound Resume Next continuations = %v, want NormalExit block 6", continuations)
+	}
+}
+
 func TestAnalyzerVBA227SuccessfulBoundsClearResumeNextFailure(t *testing.T) {
 	t.Parallel()
 	state := arrayFlowState{
