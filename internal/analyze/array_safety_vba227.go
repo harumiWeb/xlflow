@@ -2220,22 +2220,16 @@ func arrayVBA227ResumeNextContinuations(graph vbacfg.CFGView) map[vbacfg.BlockID
 			handlerLabels[block.Statement.ID] = true
 		}
 	}
-	compoundFallbacks := make(map[vbacfg.BlockID]vbacfg.BlockID, len(compoundBlocks))
-	for compoundID := range compoundBlocks {
-		compound := blocksByID[compoundID]
-		if compound.Statement == nil {
-			continue
-		}
-		if target := arrayVBA227SyntaxContinuation(compound.Statement.ID, graph.NormalExit(), statementBlocks, statementKinds, parents, children, handlerLabels); target != 0 {
-			compoundFallbacks[compoundID] = target
-		}
-	}
-
 	compoundTargets := make(map[vbacfg.BlockID][]vbacfg.BlockID, len(compoundBlocks))
 	for compoundID := range compoundBlocks {
 		targets := compoundTargetSets[compoundID]
 		if len(targets) == 0 {
-			if fallback := compoundFallbacks[compoundID]; fallback != 0 {
+			compound := blocksByID[compoundID]
+			var fallback vbacfg.BlockID
+			if compound.Statement != nil {
+				fallback = arrayVBA227SyntaxContinuation(compound.Statement.ID, graph.NormalExit(), statementBlocks, statementKinds, parents, children, handlerLabels)
+			}
+			if fallback != 0 {
 				compoundTargets[compoundID] = []vbacfg.BlockID{fallback}
 			} else if exit := graph.NormalExit(); exit != 0 {
 				compoundTargets[compoundID] = []vbacfg.BlockID{exit}
