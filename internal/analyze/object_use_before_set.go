@@ -375,7 +375,7 @@ func objectNonNothingPredicateContracts(plans map[string]*objectProcedurePlan) m
 	for key, plan := range plans {
 		if plan != nil {
 			name := strings.ToLower(cleanIdentifier(plan.proc.Name))
-			if name == "isexceltable" {
+			if name != "" {
 				nameCounts[name]++
 			}
 		}
@@ -403,7 +403,7 @@ func objectNonNothingPredicateContracts(plans map[string]*objectProcedurePlan) m
 }
 
 func objectProcedureNonNothingPredicate(plan *objectProcedurePlan) bool {
-	if plan == nil || !strings.EqualFold(cleanIdentifier(plan.proc.Name), "isexceltable") || !strings.EqualFold(cleanIdentifier(plan.proc.ReturnType), "boolean") {
+	if plan == nil || !strings.EqualFold(cleanIdentifier(plan.proc.ReturnType), "boolean") {
 		return false
 	}
 	objectParameter := ""
@@ -418,7 +418,7 @@ func objectProcedureNonNothingPredicate(plan *objectProcedurePlan) bool {
 	if objectParameters != 1 || objectParameter == "" || objectPredicateParameterWrites(plan, objectParameter) {
 		return false
 	}
-	return objectPredicateHasNothingExit(plan, objectParameter)
+	return objectPredicateHasNothingExit(plan, objectParameter) || objectPredicateHasErrorGuardedResult(plan, objectParameter)
 }
 
 func objectPredicateParameterWrites(plan *objectProcedurePlan, parameterName string) bool {
@@ -478,6 +478,96 @@ func objectPredicateHasNothingExit(plan *objectProcedurePlan, parameterName stri
 		}
 	}
 	return sawPotentialTrue
+}
+
+func objectPredicateHasErrorGuardedResult(plan *objectProcedurePlan, parameterName string) bool {
+	if plan == nil || plan.flowContext.facts == nil {
+		return false
+	}
+	labels := map[string]int{}
+	for statement := range plan.proc.Statements.All() {
+		if statement.Kind == procedureir.StatementLabel {
+			labels[strings.ToLower(cleanIdentifier(statement.Label))] = statement.ID
+		}
+	}
+	activeHandler := ""
+	sawTrueResult := false
+	for statement := range plan.proc.Statements.All() {
+		switch statement.Kind {
+		case procedureir.StatementOnError:
+			label := strings.ToLower(cleanIdentifier(statement.Label))
+			if label == "" || label == "0" {
+				activeHandler = ""
+			} else {
+				activeHandler = label
+			}
+		case procedureir.StatementAssignment, procedureir.StatementSet:
+			if statement.Value == nil || !objectPredicateWritesResult(statement, plan.proc.Name) {
+				continue
+			}
+			value := strings.ToLower(strings.TrimSpace(statement.Text))
+			if separator := strings.IndexByte(value, '='); separator >= 0 {
+				value = strings.TrimSpace(value[separator+1:])
+			}
+			if value == "false" || value == "0" || value == "vbfalse" {
+				continue
+			}
+			if activeHandler == "" {
+				return false
+			}
+			handlerID, ok := labels[activeHandler]
+			if !ok || handlerID <= statement.ID || !objectPredicateResultUsesObjectMember(plan, statement, parameterName) ||
+				objectPredicateHandlerReachesResult(plan, handlerID, statement.ID) {
+				return false
+			}
+			sawTrueResult = true
+		}
+	}
+	return sawTrueResult
+}
+
+func objectPredicateResultUsesObjectMember(plan *objectProcedurePlan, statement procedureir.Statement, parameterName string) bool {
+	for access := range plan.proc.Accesses.All() {
+		if access.StatementID != statement.ID || access.Scope != procedureir.ScopeParameter ||
+			!strings.EqualFold(cleanIdentifier(access.Name), cleanIdentifier(parameterName)) ||
+			access.Mode != procedureir.AccessRead && access.Mode != procedureir.AccessReadWrite {
+			continue
+		}
+		if objectMemberReceiver(plan.flowContext.facts, access) {
+			return true
+		}
+	}
+	value := strings.ToLower(strings.TrimSpace(statement.Text))
+	parameter := strings.ToLower(cleanIdentifier(parameterName))
+	return parameter != "" && strings.Contains(value, parameter+".")
+}
+
+func objectPredicateHandlerReachesResult(plan *objectProcedurePlan, handlerStatementID, resultStatementID int) bool {
+	if plan == nil || plan.flowGraph.BlockCount() == 0 {
+		return true
+	}
+	handlerBlock, handlerOK := plan.flowGraph.BlockForStatement(handlerStatementID)
+	resultBlock, resultOK := plan.flowGraph.BlockForStatement(resultStatementID)
+	if !handlerOK || !resultOK {
+		return true
+	}
+	seen := map[vbacfg.BlockID]bool{handlerBlock.ID: true}
+	queue := []vbacfg.BlockID{handlerBlock.ID}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if current == resultBlock.ID {
+			return true
+		}
+		plan.flowGraph.ForEachOutgoing(current, func(edge vbacfg.Edge) bool {
+			if !seen[edge.To] {
+				seen[edge.To] = true
+				queue = append(queue, edge.To)
+			}
+			return true
+		})
+	}
+	return false
 }
 
 func objectPredicateWritesResult(statement procedureir.Statement, procedureName string) bool {
@@ -2842,9 +2932,9 @@ func objectFlowApplyGuard(proc sourceProcedure, state map[string]bool, flowConte
 			return state
 		}
 		// The contract proves that the predicate result itself is true only on
-		// the matching edge.  In particular, `If Not IsExcelTable(x) Then`
-		// must not refine the true edge: a Nothing argument makes the helper
-		// return its default False value, so that branch can still dereference x.
+		// the matching edge.  In particular, a negated predicate must not refine
+		// its true edge: a Nothing argument makes a guarded helper return its
+		// default False value, so that branch can still dereference the argument.
 		predicateResultTrue := (predicateTrue && edge.Kind == vbacfg.EdgeBranchTrue) ||
 			(!predicateTrue && edge.Kind == vbacfg.EdgeBranchFalse)
 		if !predicateResultTrue {
@@ -3254,11 +3344,15 @@ func objectNonNothingPredicateGuard(text string) (string, bool, bool) {
 		negated = true
 		text = objectTrimOuterParens(strings.TrimSpace(strings.TrimPrefix(text, "not ")))
 	}
-	const prefix = "isexceltable("
-	if !strings.HasPrefix(text, prefix) || !strings.HasSuffix(text, ")") {
+	open := strings.IndexByte(text, '(')
+	if open <= 0 || !strings.HasSuffix(text, ")") {
 		return "", false, false
 	}
-	argument := strings.TrimSpace(text[len(prefix) : len(text)-1])
+	name := cleanIdentifier(strings.TrimSpace(text[:open]))
+	if name == "" || strings.ContainsAny(name, ".()") {
+		return "", false, false
+	}
+	argument := strings.TrimSpace(text[open+1 : len(text)-1])
 	if argument == "" || strings.ContainsAny(argument, ".()") {
 		return "", false, false
 	}

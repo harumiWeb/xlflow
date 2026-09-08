@@ -1048,6 +1048,58 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RecognizesGenericNonNothingPredicate(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function IsShape(ByVal candidate As Object) As Boolean
+  If candidate Is Nothing Then Exit Function
+  IsShape = (TypeName(candidate) = "Shape")
+End Function
+
+Public Sub Run(ByVal candidate As Object)
+  If IsShape(candidate) Then
+    Debug.Print candidate.Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a uniquely resolved generic predicate with a Nothing guard should establish non-Nothing state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesErrorGuardedNonNothingPredicate(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function DetectShape(ByVal candidate As Object) As Boolean
+  On Error GoTo Failed
+  DetectShape = candidate.ShapeRange.Count > 0
+Failed:
+End Function
+
+Public Sub Run(ByVal candidate As Object)
+  If DetectShape(candidate) Then
+    Debug.Print candidate.ShapeRange(1).Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 4 {
+		t.Fatalf("the helper dereference remains reportable but its successful result should guard the caller: %+v", got)
+	}
+}
+
 func TestVBA202Issue448PropagatesPrivateByValObjectEntryGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
