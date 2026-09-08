@@ -243,10 +243,16 @@ func buildExcelLoopAccessIndex(files []parsedFile, db *vbadb.DB, rootDir string,
 	for changed {
 		changed = false
 		for _, file := range files {
-			for _, procedure := range file.IR.Procedures {
+			procedures := file.procedureView()
+			for i, procedure := range file.IR.Procedures {
 				key := excelProcedureKey(file.IR, procedure.Symbol)
 				current := index.Summaries[key]
+				sourceProc, _ := procedures.At(i)
+				normalReachable, canFilterByReachability := excelNormalReachableStatements(sourceProc)
 				for _, call := range procedure.Calls {
+					if canFilterByReachability && !normalReachable[call.StatementID] {
+						continue
+					}
 					if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
 						continue
 					}
@@ -304,6 +310,7 @@ func mergeExcelSummary(dst *excelAccessSummary, src excelAccessSummary) bool {
 
 func directExcelAccessSummary(file parsedFile, proc sourceProcedure, db *vbadb.DB, rootBindings excelRootBindingIndex, rootDir string, cfg config.Config) excelAccessSummary {
 	summary := excelAccessSummary{Categories: map[string]bool{}, Members: map[string]bool{}}
+	normalReachable, canFilterByReachability := excelNormalReachableStatements(proc)
 	loopVars := rangeVariablesForProcedure(proc, file, db, rootBindings, rootDir, cfg)
 	facts := proc.Facts
 	if facts == nil {
@@ -312,6 +319,9 @@ func directExcelAccessSummary(file parsedFile, proc sourceProcedure, db *vbadb.D
 		facts = proc.analysisFacts()
 	}
 	for statement := range proc.Statements.All() {
+		if canFilterByReachability && !normalReachable[statement.ID] {
+			continue
+		}
 		for _, access := range classifyExcelStatement(file, proc, statement, db, loopVars, rootDir, cfg, facts) {
 			summary.Categories[access.Category] = true
 			if access.Member != "" {
@@ -320,6 +330,26 @@ func directExcelAccessSummary(file parsedFile, proc sourceProcedure, db *vbadb.D
 		}
 	}
 	return summary
+}
+
+func excelNormalReachableStatements(proc sourceProcedure) (map[int]bool, bool) {
+	if proc.Graph == nil {
+		return nil, false
+	}
+	reachableBlocks := make(map[vbacfg.BlockID]bool)
+	for _, block := range proc.Graph.Reachable(vbacfg.EdgeFilter{NormalOnly: true}) {
+		reachableBlocks[block] = true
+	}
+	statementReachability := make(map[int]bool)
+	hasStatementBlock := false
+	for _, block := range proc.Graph.Blocks {
+		if block.Kind != vbacfg.BlockStatement || block.StatementID <= 0 {
+			continue
+		}
+		hasStatementBlock = true
+		statementReachability[block.StatementID] = reachableBlocks[block.ID]
+	}
+	return statementReachability, hasStatementBlock
 }
 
 func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure) []Finding {
@@ -611,7 +641,11 @@ func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootBindings
 			}
 			key := excelProcedureKey(file.IR, procedure.IR.Symbol)
 			current := summaries[key]
+			normalReachable, canFilterByReachability := excelNormalReachableStatements(procedure)
 			for call := range procedure.Calls.All() {
+				if canFilterByReachability && !normalReachable[call.StatementID] {
+					continue
+				}
 				callee, ok := excelHelperSummaryKey(file, call)
 				if !ok {
 					continue

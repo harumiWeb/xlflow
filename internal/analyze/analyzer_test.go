@@ -750,6 +750,39 @@ End Function
 	}
 }
 
+func TestVBA225IgnoresExcelAccessOnlyInHelperErrorHandler(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Public Sub ReadNode(ByVal node As Object)
+  On Error GoTo ErrHandler
+  Debug.Print node
+  Exit Sub
+ErrHandler:
+  LogCell
+End Sub
+
+Private Sub LogCell()
+  Cells(1, 1).Value2 = "error"
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal nodes As Object)
+  Dim node As Object
+  For Each node In nodes
+    ReadNode node
+  Next node
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 0 {
+		t.Fatalf("Excel access reachable only through a helper error handler should not produce VBA225: %+v", got)
+	}
+}
+
 func TestExcelProcedureHasLocalLoopCallIncludesResolvedQualifiedCalls(t *testing.T) {
 	receiver := "Me"
 	file := parsedFile{

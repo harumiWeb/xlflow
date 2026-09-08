@@ -223,7 +223,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA225","severity":"warning","line":276,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA225","severity":"warning","line":465,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA225","severity":"warning","line":50,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA225","severity":"warning","line":353,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":355,"column":14}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":431,"column":18}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA225","severity":"warning","line":771,"column":0}
@@ -253,7 +252,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA202","severity":"warning","line":347,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA202","severity":"warning","line":418,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA225","severity":"warning","line":890,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA225","severity":"warning","line":15,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":89,"column":14}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":133,"column":14}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":224,"column":14}
