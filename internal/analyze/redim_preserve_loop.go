@@ -1,11 +1,15 @@
 package analyze
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+var redimWhileEqualityRe = regexp.MustCompile(`(?i)^\s*while\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*=\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?|[-+]?[0-9]+)\s*$`)
+var redimSelectCaseRe = regexp.MustCompile(`(?i)^\s*select\s+case\s+(.+?)\s*$`)
 
 // redimPreserveLoopFinding reports a ReDim Preserve which executes on a
 // repeated loop path. ReDim parsing deliberately stays shared with the array
@@ -30,6 +34,8 @@ func (a Analyzer) redimPreserveLoopFindingsPreparedWithApplicability(file parsed
 	var findings []Finding
 	applicable := false
 	seen := map[string]bool{}
+	statements := redimProcedureStatements(proc)
+	constants := excelIntegerConstants(proc)
 	for statement := range proc.Statements.All() {
 		if statement.Recovered || !arrayRedimPreserveStatement(statement.Text) {
 			continue
@@ -42,7 +48,7 @@ func (a Analyzer) redimPreserveLoopFindingsPreparedWithApplicability(file parsed
 		// region's Body map is also what excludes unreachable statements.
 		bodyLoops := containing[:0]
 		for _, loop := range containing {
-			if loop.Body[statement.ID] {
+			if loop.Body[statement.ID] && !redimPreserveLoopBodyImpossible(proc, statements, constants, loop.StatementID) {
 				bodyLoops = append(bodyLoops, loop)
 			}
 		}
@@ -125,6 +131,130 @@ func (a Analyzer) redimPreserveLoopFindingsPreparedWithApplicability(file parsed
 	}
 	sortFindings(findings)
 	return findings, applicable
+}
+
+// redimPreserveLoopBodyImpossible recognizes a narrow, source-proven
+// unreachable loop shape: a simple While equality under a Select Case clause
+// compares the unchanged selector with a different enum member (or known
+// integer). The CFG remains structurally conservative around Select Case, but
+// VBA's case entry establishes the selector value before the loop condition is
+// evaluated. Do not generalize this to arbitrary expressions or modified
+// selectors; unknown paths must remain eligible for the advisory.
+func redimPreserveLoopBodyImpossible(proc sourceProcedure, statements map[int]procedureir.Statement, constants map[string]int, loopID int) bool {
+	loop, ok := statements[loopID]
+	if !ok {
+		return false
+	}
+	header := strings.TrimSpace(excelLoopHeaderText(loop.Text))
+	match := redimWhileEqualityRe.FindStringSubmatch(header)
+	if len(match) != 3 {
+		return false
+	}
+	selectorName := strings.TrimSpace(match[1])
+	loopValue := strings.TrimSpace(match[2])
+	caseClause, caseValue, selectHeader, ok := redimEnclosingCase(proc, statements, loop)
+	if !ok {
+		return false
+	}
+	selectMatch := redimSelectCaseRe.FindStringSubmatch(strings.TrimSpace(excelLoopHeaderText(selectHeader.Text)))
+	if len(selectMatch) != 2 || !strings.EqualFold(strings.TrimSpace(selectMatch[1]), selectorName) {
+		return false
+	}
+	if redimCaseSelectorWrittenBeforeLoop(proc, statements, caseClause.ID, loop.ID, selectorName) {
+		return false
+	}
+	return redimDistinctCaseValues(caseValue.Text, loopValue, constants)
+}
+
+func redimProcedureStatements(proc sourceProcedure) map[int]procedureir.Statement {
+	statements := make(map[int]procedureir.Statement, proc.Statements.Len())
+	for statement := range proc.Statements.All() {
+		statements[statement.ID] = statement
+	}
+	return statements
+}
+
+func redimEnclosingCase(proc sourceProcedure, statements map[int]procedureir.Statement, loop procedureir.Statement) (caseClause, caseValue, selectHeader procedureir.Statement, ok bool) {
+	for parentID := loop.ParentID; parentID != 0; {
+		parent, exists := statements[parentID]
+		if !exists {
+			return procedureir.Statement{}, procedureir.Statement{}, procedureir.Statement{}, false
+		}
+		if parent.SyntaxKind == "case_clause" {
+			selectStatement, exists := statements[parent.ParentID]
+			if !exists || selectStatement.Kind != procedureir.StatementSelect {
+				return procedureir.Statement{}, procedureir.Statement{}, procedureir.Statement{}, false
+			}
+			var expression procedureir.Statement
+			count := 0
+			for child := range proc.Statements.All() {
+				if child.ParentID == parent.ID && child.SyntaxKind == "case_expression" {
+					expression = child
+					count++
+				}
+			}
+			if count != 1 {
+				return procedureir.Statement{}, procedureir.Statement{}, procedureir.Statement{}, false
+			}
+			return parent, expression, selectStatement, true
+		}
+		parentID = parent.ParentID
+	}
+	return procedureir.Statement{}, procedureir.Statement{}, procedureir.Statement{}, false
+}
+
+func redimCaseSelectorWrittenBeforeLoop(proc sourceProcedure, statements map[int]procedureir.Statement, caseClauseID, loopID int, selectorName string) bool {
+	loop := statements[loopID]
+	for access := range proc.Accesses.All() {
+		if !strings.EqualFold(access.Name, selectorName) || (access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) {
+			continue
+		}
+		if access.StatementID == loopID {
+			continue
+		}
+		statement, ok := statements[access.StatementID]
+		if !ok || statement.Range.StartLine >= loop.Range.StartLine || !redimStatementDescendsFrom(statements, access.StatementID, caseClauseID) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func redimStatementDescendsFrom(statements map[int]procedureir.Statement, statementID, ancestorID int) bool {
+	for statementID != 0 {
+		if statementID == ancestorID {
+			return true
+		}
+		statement, ok := statements[statementID]
+		if !ok {
+			return false
+		}
+		statementID = statement.ParentID
+	}
+	return false
+}
+
+func redimDistinctCaseValues(caseValue, loopValue string, constants map[string]int) bool {
+	caseValue = strings.TrimSpace(caseValue)
+	loopValue = strings.TrimSpace(loopValue)
+	if caseValue == "" || loopValue == "" || strings.ContainsAny(caseValue, ",") || strings.Contains(strings.ToLower(caseValue), " to ") || strings.Contains(strings.ToLower(caseValue), " is ") {
+		return false
+	}
+	if strings.EqualFold(caseValue, loopValue) {
+		return false
+	}
+	if caseNumber, err := constantIntegerExpression(caseValue, constants); err == nil {
+		if loopNumber, err := constantIntegerExpression(loopValue, constants); err == nil {
+			return caseNumber != loopNumber
+		}
+	}
+	caseDot := strings.LastIndex(caseValue, ".")
+	loopDot := strings.LastIndex(loopValue, ".")
+	if caseDot <= 0 || loopDot <= 0 {
+		return false
+	}
+	return strings.EqualFold(caseValue[:caseDot], loopValue[:loopDot]) && !strings.EqualFold(caseValue[caseDot+1:], loopValue[loopDot+1:])
 }
 
 // redimLoopVariables extends the shared loop-variable extraction for Do loops.

@@ -840,7 +840,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA227","severity":"warning","line":200,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA222","severity":"warning","line":211,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA241","severity":"information","line":232,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA241","severity":"information","line":249,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA227","severity":"warning","line":438,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA227","severity":"warning","line":438,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocketNew.cls","surface":"analyze","code":"VBA222","severity":"warning","line":150,"column":0}

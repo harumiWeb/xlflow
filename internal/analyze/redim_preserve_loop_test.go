@@ -167,6 +167,36 @@ End Sub
 	}
 }
 
+func TestVBA241ExcludesLoopContradictedByEnclosingEnumCase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Enum EBufferType
+    BinaryFragment = 1
+    Utf8Fragment = 3
+End Enum
+
+Public Sub Receive()
+    Dim state As EBufferType
+    Dim values() As Long
+    Select Case state
+    Case EBufferType.Utf8Fragment
+        While state = EBufferType.BinaryFragment
+            ReDim Preserve values(1 To 10)
+        Wend
+    End Select
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA241"); len(got) != 0 {
+		t.Fatalf("enum-case-contradicted loop produced VBA241: %+v", got)
+	}
+}
+
 func TestVBA241DetectsVariantArrayTarget(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
