@@ -260,7 +260,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 164 || report.BoundFixtures != 147 || report.PartialFixtures != 0 || report.UnboundFixtures != 16 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 165 || report.BoundFixtures != 148 || report.PartialFixtures != 0 || report.UnboundFixtures != 16 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -331,6 +331,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"issue594-select-case-valid",
 		"issue594-typeof-trailing-token",
 		"issue594-typeof-valid",
+		"issue774-outlook-early-bound",
 		"known-as-type",
 		"known-enum-as-type",
 		"known-named-argument",

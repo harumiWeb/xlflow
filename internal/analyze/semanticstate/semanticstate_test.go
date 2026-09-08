@@ -278,6 +278,39 @@ func TestSolverDeterministicAndExceptionalEdgesUseInput(t *testing.T) {
 	}
 }
 
+func TestSolverRunReportsStatsWithoutResultSnapshot(t *testing.T) {
+	env := NewEnvironment([]string{"value"})
+	index, err := NewIndex(testGraph())
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, _ := env.Symbol("value")
+	solver, err := NewSolver[int](index, env, maxLattice{}, []Lane[int]{{
+		Initialize: func(_ context.Context, _ LaneOrdinal, state *State[int]) error {
+			state.Set(value, 1)
+			return nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, err := solver.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Transfers == 0 || stats.Joins == 0 {
+		t.Fatalf("Run stats = %#v, want transfers and joins", stats)
+	}
+
+	result, err := solver.Solve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Stats() != stats {
+		t.Fatalf("Run stats = %#v, Solve stats = %#v", stats, result.Stats())
+	}
+}
+
 func TestSolverUncertainEdgesUseInputWhileNormalEdgesUseOutput(t *testing.T) {
 	index, err := NewIndex(cfg.Graph{
 		Blocks: []cfg.Block{

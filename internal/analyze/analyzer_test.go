@@ -4227,6 +4227,34 @@ Public Sub CheckedSimpleMemberGetter(ByVal ws As Object)
   On Error GoTo 0
 End Sub
 
+Public Sub CheckedVariantPropertySetter(ByVal regex As Object, ByVal pattern As Variant)
+  Dim probeFailed As Boolean
+  On Error Resume Next
+  regex.Pattern = CStr(pattern)
+  probeFailed = Err.Number <> 0
+  Err.Clear
+  On Error GoTo 0
+End Sub
+
+Public Sub CheckedNestedMemberGetter(ByVal actualRange As Object)
+  Dim sheetName As String
+  Dim probeFailed As Boolean
+  On Error Resume Next
+  sheetName = actualRange.Worksheet.Name
+  probeFailed = Err.Number <> 0
+  Err.Clear
+  On Error GoTo 0
+End Sub
+
+Public Sub UncheckedNestedMemberFallback(ByVal app As Object)
+  Dim fileName As String
+  fileName = vbNullString
+  On Error Resume Next
+  fileName = app.VBE.ActiveVBProject.fileName
+  On Error GoTo 0
+  If fileName = vbNullString Then Exit Sub
+End Sub
+
 Public Sub DefaultMemberRHSProbe(ByVal d As Dictionary)
   Dim value As Variant
   On Error Resume Next
@@ -4265,8 +4293,12 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA214")
-	if len(got) != 1 || got[0].Procedure != "NestedCallProbe" {
-		t.Fatalf("checked member probes should only leave the nested-call warning: %+v", got)
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if len(got) != 2 || !procedures["NestedCallProbe"] || !procedures["UncheckedNestedMemberFallback"] {
+		t.Fatalf("checked member probes should leave only nested-call and unchecked-chain warnings: %+v", got)
 	}
 	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
 		t.Fatalf("checked object probe should not report VBA237: %+v", got)
@@ -4680,6 +4712,19 @@ End Sub
 	}
 	if len(got) != 2 || !procedures["NestedArrayElementProbe"] || !procedures["MissingConditionalAssertion"] || procedures["CheckedArrayElementProbe"] {
 		t.Fatalf("only nested or incomplete-conditional array probes should report VBA214: %+v", got)
+	}
+}
+
+func TestPrepareResumeNextScopeConstantValuesCachesFileEnvironment(t *testing.T) {
+	file := parsedFile{Lines: []string{"Private Const NullPtr As Long = 0"}}
+	prepareResumeNextScopeConstantValues(Analyzer{}, &file)
+
+	file.Lines = []string{"Private Const NullPtr As Long = 1"}
+	prepareResumeNextScopeConstantValues(Analyzer{}, &file)
+	values := resumeNextScopePreparedConstantValues(Analyzer{}, file)
+	value, ok := values["nullptr"]
+	if !ok || value.Integer != 0 {
+		t.Fatalf("prepared Resume Next constants = %#v, want cached NullPtr=0", values)
 	}
 }
 
@@ -17022,6 +17067,28 @@ End Sub
 	}
 	if findings := findingsByCode(result.Findings, "VBA229"); len(findings) != 0 {
 		t.Fatalf("qualified project type should resolve: %+v", findings)
+	}
+}
+
+func TestAnalyzerVBA229AcceptsOutlookCOMTypes(t *testing.T) {
+	useCompleteTestTypeDB(t)
+	dir := t.TempDir()
+	writeModule(t, dir, "ReproOutlook.bas", `Attribute VB_Name = "ReproOutlook"
+Option Explicit
+Public Sub ReproVBA229()
+    Dim outlookObj As Outlook.Application
+    Dim mailItemObj As Outlook.MailItem
+    Set outlookObj = CreateObject("Outlook.Application")
+    Set mailItemObj = outlookObj.CreateItem(0)
+    mailItemObj.Subject = "xlflow VBA229 reproduction"
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := findingsByCode(result.Findings, "VBA229"); len(findings) != 0 {
+		t.Fatalf("valid Outlook early-bound types should resolve: %+v", findings)
 	}
 }
 

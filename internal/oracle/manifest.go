@@ -49,6 +49,7 @@ const (
 
 var caseIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 var vbNamePattern = regexp.MustCompile(`(?im)^\s*Attribute\s+VB_Name\s*=\s*"([^"]+)"`)
+var libIDPattern = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
 
 type Manifest struct {
 	SchemaVersion int             `json:"schema_version"`
@@ -131,11 +132,22 @@ type Case struct {
 	SchemaVersion int                 `json:"schema_version"`
 	ID            string              `json:"id"`
 	Description   string              `json:"description,omitempty"`
+	References    []Reference         `json:"references,omitempty"`
 	Modules       []Module            `json:"modules"`
 	Probe         Probe               `json:"probe"`
 	VBE           VBEExpectation      `json:"vbe"`
 	Analysis      AnalysisExpectation `json:"analysis,omitempty"`
 	Provenance    Provenance          `json:"provenance"`
+}
+
+// Reference identifies a registered VBA project TypeLib to add before the
+// fixture modules are compiled. Name is descriptive; the LIBID and version
+// are the values passed to VBProject.References.AddFromGuid.
+type Reference struct {
+	Name  string `json:"name,omitempty"`
+	LibID string `json:"libid"`
+	Major int    `json:"major"`
+	Minor int    `json:"minor"`
 }
 
 type Module struct {
@@ -329,6 +341,9 @@ func ValidateCase(c Case, manifestID, caseDir string) error {
 	if len(c.Modules) == 0 {
 		return fmt.Errorf("oracle case %q has no modules", c.ID)
 	}
+	if err := validateReferences(c.References, c.ID); err != nil {
+		return err
+	}
 	seenNames := map[string]struct{}{}
 	for _, module := range c.Modules {
 		kind := strings.ToLower(strings.TrimSpace(module.Kind))
@@ -413,6 +428,30 @@ func ValidateCase(c Case, manifestID, caseDir string) error {
 		}
 	default:
 		return fmt.Errorf("oracle case %q has invalid vbe.expected %q", c.ID, c.VBE.Expected)
+	}
+	return nil
+}
+
+func validateReferences(references []Reference, caseID string) error {
+	seen := map[string]struct{}{}
+	for _, reference := range references {
+		libID := strings.TrimSpace(reference.LibID)
+		if strings.HasPrefix(libID, "{") != strings.HasSuffix(libID, "}") {
+			return fmt.Errorf("oracle case %q reference %q has an invalid libid", caseID, reference.Name)
+		}
+		libID = strings.TrimPrefix(libID, "{")
+		libID = strings.TrimSuffix(libID, "}")
+		if !libIDPattern.MatchString(libID) {
+			return fmt.Errorf("oracle case %q reference %q has an invalid libid", caseID, reference.Name)
+		}
+		if reference.Major < 0 || reference.Minor < 0 {
+			return fmt.Errorf("oracle case %q reference %q has a negative version", caseID, reference.Name)
+		}
+		key := strings.ToLower(libID) + fmt.Sprintf("/%d/%d", reference.Major, reference.Minor)
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("oracle case %q repeats reference %q version %d.%d", caseID, reference.Name, reference.Major, reference.Minor)
+		}
+		seen[key] = struct{}{}
 	}
 	return nil
 }

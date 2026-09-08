@@ -137,6 +137,57 @@ func TestModuleAnalysisFactsIndexesOrderedConstantsAndLocalProcedures(t *testing
 	}
 }
 
+func TestArrayModuleProcedureAtLineUsesModuleRangeIndex(t *testing.T) {
+	lines := []string{
+		"Public Sub First()",
+		"End Sub",
+		"Private Function Second() As Long",
+		"    Second = 1",
+		"End Function",
+	}
+	procedures := []sourceProcedure{
+		{Name: "Second", StartLine: 3, EndLine: 5, StartByte: 20},
+		{Name: "First", StartLine: 1, EndLine: 2, StartByte: 10},
+	}
+	facts := buildModuleAnalysisFacts(lines, procedureir.DocumentIR{}, procedures)
+	if len(facts.procedureRanges) != len(procedures) {
+		t.Fatalf("procedure range index length = %d, want %d", len(facts.procedureRanges), len(procedures))
+	}
+	file := parsedFile{Lines: lines, ModuleFacts: facts}
+	for _, test := range []struct {
+		line int
+		name string
+	}{
+		{line: 1, name: "First"},
+		{line: 2, name: "First"},
+		{line: 3, name: "Second"},
+		{line: 5, name: "Second"},
+	} {
+		procedure, ok := arrayModuleProcedureAtLine(file, test.line)
+		if !ok || procedure.Name != test.name {
+			t.Fatalf("procedure at line %d = %#v, %v; want %s", test.line, procedure, ok, test.name)
+		}
+	}
+	if _, ok := arrayModuleProcedureAtLine(file, 6); ok {
+		t.Fatalf("procedure at line outside module unexpectedly resolved")
+	}
+}
+
+func TestArrayModuleProcedureAtLineFallsBackForPartialRangeIndex(t *testing.T) {
+	want := sourceProcedure{Name: "Later", StartLine: 5, EndLine: 8}
+	file := parsedFile{
+		Procedures: []sourceProcedure{want},
+		ModuleFacts: &moduleAnalysisFacts{
+			procedureRanges:     []sourceProcedure{{Name: "Earlier", StartLine: 1, EndLine: 2}},
+			procedureLineOwners: []int{-1, 0, 0},
+		},
+	}
+	got, ok := arrayModuleProcedureAtLine(file, 6)
+	if !ok || got.Name != want.Name {
+		t.Fatalf("partial range fallback = %#v, %v; want %#v", got, ok, want)
+	}
+}
+
 func TestModuleAnalysisFactsConstantLookupRespectsProcedureScope(t *testing.T) {
 	lines := []string{
 		"Private Const ModuleValue As Long = 1",

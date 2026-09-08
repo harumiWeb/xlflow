@@ -18,9 +18,15 @@ func inferArrayModuleInvalidationSummaries(files []parsedFile, ctx analysisConte
 	}
 	for _, file := range files {
 		moduleDecls := file.moduleDecls()
+		if !hasModuleDynamicArrayDeclaration(moduleDecls) {
+			continue
+		}
 		procedures := file.procedureView()
 		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
 			proc := procedures.valueAt(procedureIndex)
+			if !arrayProcedureIsModuleEffectParticipant(ctx, proc) {
+				continue
+			}
 			key := arrayProcedureKey(proc)
 			if key == "" {
 				continue
@@ -218,7 +224,19 @@ func arrayPrivateModuleArrayInvalidations(file parsedFile, target sourceProcedur
 			return summary
 		}
 	}
+	if !arrayProcedureIsModuleEffectParticipant(ctx, target) {
+		return nil
+	}
 	return arrayPrivateModuleArrayInvalidationsWithVisiting(file, target, moduleDecls, ctx, map[string]bool{})
+}
+
+func hasModuleDynamicArrayDeclaration(moduleDecls map[string]sourceDeclaration) bool {
+	for _, declaration := range moduleDecls {
+		if declaration.Array && !declaration.Fixed && !declaration.Parameter {
+			return true
+		}
+	}
+	return false
 }
 
 // arrayPrivateModuleArrayInvalidationsWithVisiting identifies module arrays
@@ -249,6 +267,7 @@ func arrayPrivateModuleArrayInvalidationsWithVisiting(file parsedFile, target so
 			return summary
 		}
 	}
+	ctx.arrayStats.addModuleInvalidationSummary(target.Graph != nil)
 	visiting[key] = true
 	defer delete(visiting, key)
 
@@ -355,12 +374,12 @@ func arrayModuleSummaryTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		}
 		result := meetArrayState(thenState, elseState)
 		applyCalls := func(value arrayFlowState, conditionValue, conditionKnown bool) arrayFlowState {
-			for _, call := range arrayCallsAtLine(proc.Calls, line) {
+			forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 				if conditionKnown && !arrayInlineConditionalCallIsReachable(file, call, conditionValue, hasElse) {
-					continue
+					return
 				}
 				value = applyArrayModuleSummaryCallEffects(value, file, proc, call, ctx, variables, moduleDecls, moduleArrays, visiting)
-			}
+			}, ctx.arrayStats)
 			return value
 		}
 		if value, known := arraySourceOrderConstantBoolean(condition, constants); known {
@@ -379,10 +398,9 @@ func arrayModuleSummaryTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		return result
 	}
 	state = arrayModuleSummaryTransferParts(file, proc, ctx, variables, state, text, line, constants, moduleDecls, moduleArrays, visiting)
-	callsAtLine := arrayCallsAtLine(proc.Calls, line)
-	for _, call := range callsAtLine {
+	forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 		state = applyArrayModuleSummaryCallEffects(state, file, proc, call, ctx, variables, moduleDecls, moduleArrays, visiting)
-	}
+	}, ctx.arrayStats)
 	return state
 }
 
@@ -464,6 +482,9 @@ func applyArrayModuleSummaryCallEffects(state arrayFlowState, file parsedFile, p
 				updated[name] = value
 			}
 		}
+	}
+	if !arrayProcedureIsModuleEffectParticipant(ctx, target) {
+		return updated
 	}
 	for name := range arrayPrivateModuleArrayInvalidationsWithVisiting(file, target, moduleDecls, ctx, visiting) {
 		if moduleArrays[name] {
@@ -1110,6 +1131,9 @@ func inferArrayModuleReadyGuardStates(files []parsedFile, ctx analysisContext) a
 			continue
 		}
 		moduleDecls := file.moduleDecls()
+		if !hasModuleDynamicArrayDeclaration(moduleDecls) {
+			continue
+		}
 		for guardName, guardDeclaration := range moduleDecls {
 			guardName = strings.ToLower(cleanIdentifier(guardName))
 			if guardName == "" || guardDeclaration.Array || guardDeclaration.Parameter || !strings.EqualFold(strings.TrimSpace(guardDeclaration.Type), "Boolean") || !arrayModuleReadyGuardSourceOwned(file, guardDeclaration) {
@@ -1123,7 +1147,7 @@ func inferArrayModuleReadyGuardStates(files []parsedFile, ctx analysisContext) a
 				if !valid {
 					return
 				}
-				owner, owned := arrayModuleProcedureAtLine(file, operation.Line+1)
+				owner, owned := arrayModuleProcedureAtLine(file, operation.Line+1, ctx.arrayStats)
 				if !owned {
 					valid = false
 					return
@@ -1150,7 +1174,8 @@ func inferArrayModuleReadyGuardStates(files []parsedFile, ctx analysisContext) a
 			if !valid || len(trueWrites) != 1 {
 				continue
 			}
-			writer, ok := arrayModuleProcedureAtLine(file, trueWrites[0].Line+1)
+			ctx.arrayStats.addModuleReadyGuardCandidate()
+			writer, ok := arrayModuleProcedureAtLine(file, trueWrites[0].Line+1, ctx.arrayStats)
 			if !ok {
 				continue
 			}
@@ -1181,9 +1206,18 @@ func arrayModuleReadyGuardSourceOwned(file parsedFile, declaration sourceDeclara
 	return !strings.HasPrefix(lower, "public ") && !strings.HasPrefix(lower, "global ")
 }
 
-func arrayModuleProcedureAtLine(file parsedFile, line int) (sourceProcedure, bool) {
+func arrayModuleProcedureAtLine(file parsedFile, line int, stats ...*arrayInterproceduralStats) (sourceProcedure, bool) {
 	if line < 1 {
 		return sourceProcedure{}, false
+	}
+	if facts := file.moduleAnalysisFacts(); facts != nil && len(facts.procedureRanges) > 0 && line < len(facts.procedureLineOwners) {
+		owner := facts.procedureLineOwners[line]
+		if owner >= 0 && owner < len(facts.procedureRanges) {
+			if len(stats) > 0 {
+				stats[0].addProcedureRangeIndexHit()
+			}
+			return facts.procedureRanges[owner], true
+		}
 	}
 	procedures := file.procedureView()
 	for index := 0; index < procedures.Len(); index++ {
@@ -1212,6 +1246,7 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 	if len(candidates) == 0 {
 		return nil
 	}
+	ctx.arrayStats.addModuleReadyGuardCFGWalk()
 
 	graph := arrayVBA227Graph(proc, ctx)
 	initial := arrayInitialState(variables)
@@ -1228,10 +1263,10 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 			}
 		}
 		out, _ := (Analyzer{}).arrayVBA227Transfer(file, proc, ctx, variables, in, text, line, nil, nil, nil)
-		for _, call := range arrayCallsAtLine(proc.Calls, line) {
+		forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 			out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 			out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
-		}
+		}, ctx.arrayStats)
 		return out
 	}
 	edgeState := func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
@@ -1263,7 +1298,7 @@ func arrayModuleReadyGuardLifecycleSafe(file parsedFile, guardName string, array
 			if !safe {
 				return
 			}
-			owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+			owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1, ctx.arrayStats)
 			if !ok {
 				safe = false
 				return
@@ -1355,10 +1390,8 @@ func arrayModuleReadyGuardFalseWriteDominates(file parsedFile, proc sourceProced
 		if !falseBlockOK {
 			continue
 		}
-		for _, dominator := range normalGraph.DominatorsOf(eraseBlock.ID) {
-			if dominator == falseBlock.ID {
-				return true
-			}
+		if normalGraph.Dominates(falseBlock.ID, eraseBlock.ID) {
+			return true
 		}
 	}
 	return false
@@ -1499,13 +1532,7 @@ func arrayModuleSetupReDimIsReliable(file parsedFile, proc sourceProcedure, guar
 	if !normalGraph.IsReachable(redimBlock.ID) || !normalGraph.IsReachable(readyBlock.ID) {
 		return false
 	}
-	dominatesReady := false
-	for _, dominator := range normalGraph.DominatorsOf(readyBlock.ID) {
-		if dominator == redimBlock.ID {
-			dominatesReady = true
-			break
-		}
-	}
+	dominatesReady := normalGraph.Dominates(redimBlock.ID, readyBlock.ID)
 	if !dominatesReady || !arrayFalseBranchRequiresBlock(*proc.Graph, guardBlock.ID, redimBlock.ID) {
 		return false
 	}
@@ -1899,14 +1926,14 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 			}
 		}
 		visit := func(text string, line int, in arrayFlowState) arrayFlowState {
-			for _, call := range arrayCallsAtLine(procedure.proc.Calls, line) {
+			forEachArrayCallAtLine(procedure.proc, line, func(call procedureir.CallSite) {
 				recordCall(call, in)
-			}
+			}, ctx.arrayStats)
 			out, _ := a.arrayTransfer(procedure.file, procedure.proc, ctx, variables, in, text, line, nil, nil)
-			for _, call := range arrayCallsAtLine(procedure.proc.Calls, line) {
+			forEachArrayCallAtLine(procedure.proc, line, func(call procedureir.CallSite) {
 				out = applyArrayModuleCallEffects(out, procedure.file, procedure.proc, call, ctx, variables, procedure.moduleDecls)
 				out = applyArrayUnknownModuleCallEffects(out, procedure.file, procedure.proc, call, ctx, variables, procedure.moduleDecls)
-			}
+			}, ctx.arrayStats)
 			return out
 		}
 		if procedure.proc.Graph == nil {

@@ -17,6 +17,29 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if _, ok := db.ResolveType("Excel.Application"); !ok {
 		t.Fatal("Excel.Application was not loaded")
 	}
+	for _, name := range []string{"Outlook.Application", "Outlook.MailItem"} {
+		if typ, ok := db.ResolveType(name); !ok || typ.Library != "Outlook" {
+			t.Fatalf("ResolveType(%s) = %+v, %v; want embedded Outlook type", name, typ, ok)
+		}
+	}
+	if typ, ok := db.ResolveProgID("Outlook.Application"); !ok || typ.Name != "Outlook.Application" {
+		t.Fatalf("ResolveProgID(Outlook.Application) = %+v, %v", typ, ok)
+	}
+	if typ, ok := db.ResolveType("Application"); !ok || typ.Name != "Excel.Application" {
+		t.Fatalf("ResolveType(Application) = %+v, %v; want Excel.Application alias", typ, ok)
+	}
+	if _, ok := db.ResolveType("_Application"); ok {
+		t.Fatal("ResolveType(_Application) must not use an unqualified Outlook alias")
+	}
+	if member, ok := db.ResolveMember("Outlook.Application", "CreateItem"); !ok || member.ReturnType != "Object" {
+		t.Fatalf("Outlook.Application.CreateItem = %+v, %v; want Object return type", member, ok)
+	}
+	if member, ok := db.ResolveMember("Outlook.MailItem", "Subject"); !ok || member.ReturnType != "String" {
+		t.Fatalf("Outlook.MailItem.Subject = %+v, %v; want String return type", member, ok)
+	}
+	if member, ok := db.ResolveMember("Outlook.NameSpace", "GetItemFromID"); !ok || len(member.Parameters) != 2 || member.Parameters[0].Name != "EntryIDItem" || member.Parameters[1].Name != "EntryIDStore" || !member.Parameters[1].Optional {
+		t.Fatalf("Outlook.NameSpace.GetItemFromID = %+v, %v; want optional EntryIDStore", member, ok)
+	}
 	if _, ok := db.ResolveType("Workbook"); !ok {
 		t.Fatal("Workbook alias did not resolve")
 	}
@@ -301,6 +324,19 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 		got, ok := db.ResolveMember("Excel.Application", name)
 		if !ok || got.ReturnType != "Variant" {
 			t.Fatalf("Application.%s = %+v, %v", name, got, ok)
+		}
+	}
+	for _, name := range []string{"Min", "Max"} {
+		got, ok := db.ResolveMember("Excel.Application", name)
+		if !ok || got.ReturnType != "Double" || len(got.Parameters) != 30 || got.Parameters[0].Optional || !got.Parameters[29].Optional {
+			t.Fatalf("Application.%s = %+v, %v", name, got, ok)
+		}
+		for i, parameter := range got.Parameters {
+			wantName := fmt.Sprintf("Arg%d", i+1)
+			wantOptional := i > 0
+			if parameter.Name != wantName || parameter.Type != "Variant" || parameter.Optional != wantOptional {
+				t.Fatalf("Application.%s parameter %d = %+v; want %s Variant optional=%t", name, i+1, parameter, wantName, wantOptional)
+			}
 		}
 	}
 	if got, ok := db.ResolveMember("Excel.Application", "Match"); !ok || len(got.Parameters) != 3 || !got.Parameters[2].Optional {

@@ -149,9 +149,14 @@ const (
 	CounterSemanticQueryMisses
 	CounterSemanticQueryInvalidatedProcedures
 	CounterSemanticQueryRecomputedKernels
+	// Array participant-boundary counters are appended to preserve the numeric
+	// identity of counters consumed by existing profile bitsets.
+	CounterArrayLocalParticipants
+	CounterArrayInterproceduralParticipants
+	CounterArrayModuleEffectParticipants
 )
 
-const counterCount = int(CounterSemanticQueryRecomputedKernels) + 1
+const counterCount = int(CounterArrayModuleEffectParticipants) + 1
 
 // WorkCounterCount is the fixed number of counter slots used by
 // DomainAggregate. It is exposed for compile-time guards in lightweight
@@ -162,6 +167,9 @@ const (
 	RuntimeCandidateProceduresCounter          = "runtime_candidate_procedures"
 	ArrayCandidateProceduresCounter            = "array_candidate_procedures"
 	ArrayParticipantProceduresCounter          = "array_participant_procedures"
+	ArrayLocalParticipantsCounter              = "array_local_participants"
+	ArrayInterproceduralParticipantsCounter    = "array_interprocedural_participants"
+	ArrayModuleEffectParticipantsCounter       = "array_module_effect_participants"
 	ObjectCandidateProceduresCounter           = "object_candidate_procedures"
 	DictionaryCandidateProceduresCounter       = "dictionary_candidate_procedures"
 	ErrorCandidateProceduresCounter            = "error_candidate_procedures"
@@ -276,6 +284,9 @@ var counterNames = [...]string{
 	SemanticQueryMissesCounter,
 	SemanticQueryInvalidatedProceduresCounter,
 	SemanticQueryRecomputedKernelsCounter,
+	ArrayLocalParticipantsCounter,
+	ArrayInterproceduralParticipantsCounter,
+	ArrayModuleEffectParticipantsCounter,
 }
 
 // These paired array declarations fail compilation if a counter is added

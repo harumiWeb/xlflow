@@ -356,7 +356,7 @@ func walkArrayCFGCompactLanes(ctx context.Context, graph *vbacfg.CFGView, lines 
 	if err != nil {
 		return err
 	}
-	_, err = solver.SolveContext(ctx)
+	_, err = solver.RunContext(ctx)
 	return err
 }
 

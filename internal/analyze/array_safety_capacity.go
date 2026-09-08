@@ -529,12 +529,7 @@ func arrayModuleCapacityRequiredPositive(file parsedFile, proc sourceProcedure, 
 	if !zeroOK || !assignmentOK {
 		return false
 	}
-	for _, dominator := range graph.DominatorsOf(assignmentBlock.ID) {
-		if dominator == zeroBlock.ID {
-			return true
-		}
-	}
-	return false
+	return graph.Dominates(zeroBlock.ID, assignmentBlock.ID)
 }
 
 func arrayZeroLengthConditionInput(condition string) (string, bool) {

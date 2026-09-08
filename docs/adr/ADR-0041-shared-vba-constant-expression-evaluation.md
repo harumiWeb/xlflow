@@ -47,6 +47,16 @@ Existing `Optional`-default, fixed-array, and `ReDim` bound consumers call the
 shared API through adapters. Their diagnostic ownership and codes do not
 change; unknown values continue to fail open.
 
+### Amendment: normalized integer environment adapter
+
+Analyzer-owned integer constant tables may be passed through
+`constexpr.IntegerValues` and `EvaluateIntegerEnvironment` after their keys
+have been normalized by the existing table builders. This avoids rebuilding a
+typed `Values` map for every bound or loop expression while preserving the
+same typed integral projection and Unknown/Invalid policy. The original
+`EvaluateInteger` API remains the compatibility path for arbitrary maps and
+continues to apply case-folding, whitespace, and duplicate-spelling rules.
+
 ## Consequences
 
 - Const, Enum, optional-default, declaration-bound, and ReDim checks share one

@@ -81,20 +81,22 @@ func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayP
 	}
 	if len(all) == 0 {
 		return &arrayParticipantGraph{
-			all:              all,
-			fileByKey:        fileByKey,
-			byModule:         byModule,
-			keyByIdentity:    keyByIdentity,
-			candidateIndex:   buildArrayCandidateIndex(all),
-			adjacency:        map[string]map[string]bool{},
-			reverse:          map[string]map[string]bool{},
-			resolvedReverse:  map[string]map[string]bool{},
-			callAdjacency:    map[string]map[string]bool{},
-			knownSeeds:       map[string]bool{},
-			intrinsicSeeds:   map[string]bool{},
-			uncertainFacts:   map[bool]map[string]bool{false: {}, true: {}},
-			uncertainCalls:   map[string]bool{},
-			moduleArrayUsers: map[string][]string{},
+			all:                      all,
+			fileByKey:                fileByKey,
+			byModule:                 byModule,
+			keyByIdentity:            keyByIdentity,
+			candidateIndex:           buildArrayCandidateIndex(all),
+			adjacency:                map[string]map[string]bool{},
+			reverse:                  map[string]map[string]bool{},
+			resolvedReverse:          map[string]map[string]bool{},
+			callAdjacency:            map[string]map[string]bool{},
+			knownSeeds:               map[string]bool{},
+			intrinsicSeeds:           map[string]bool{},
+			uncertainFacts:           map[bool]map[string]bool{false: {}, true: {}},
+			uncertainCalls:           map[string]bool{},
+			moduleArrayUsers:         map[string][]string{},
+			moduleEffectSeeds:        map[string]bool{},
+			moduleEffectParticipants: map[string]bool{},
 		}
 	}
 	candidateIndex := buildArrayCandidateIndex(all)
@@ -105,6 +107,7 @@ func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayP
 	uncertainFacts := map[bool]map[string]bool{false: {}, true: {}}
 	uncertainCalls := make(map[string]bool)
 	moduleArrayUsers := make(map[string][]string)
+	moduleEffectSeeds := make(map[string]bool, len(all))
 	callAdjacency := make(map[string]map[string]bool, len(all))
 	type resolvedEdge struct {
 		caller string
@@ -116,6 +119,9 @@ func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayP
 		moduleDecls := moduleDeclarationsForProcedure(files, proc)
 		arraySeed := procedureArraySeed(proc)
 		moduleArrayUse := procedureUsesModuleArray(file, proc, moduleDecls)
+		if procedureHasPossibleModuleArrayEffect(file, proc, moduleDecls) {
+			moduleEffectSeeds[key] = true
+		}
 		shapeSeed := procedureHasArrayParameter(proc) || procedureReturnsArray(proc) || moduleArrayUse
 		arraySeed = arraySeed || procedureHasArrayForEach(proc) || procedureHasObjectComparison(proc)
 		if arraySeed || shapeSeed {
@@ -158,6 +164,10 @@ func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayP
 				candidate := resolution.Candidates[0]
 				target := arrayCandidateKey(candidate, all, candidateIndex)
 				addCallEdge(target)
+				if moduleArrayByRefCallMayMutate(file, proc, moduleDecls, call, target, all, ctx) {
+					moduleEffectSeeds[key] = true
+					moduleEffectSeeds[target] = true
+				}
 				// Defer resolved-edge filtering until every procedure's
 				// intrinsic seed has been classified. The source map is not
 				// ordered, so checking the target while this loop runs would
@@ -166,10 +176,17 @@ func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayP
 				continue
 			}
 			if resolution.Status == procedureir.ResolutionAmbiguous || resolution.Status == procedureir.ResolutionUnresolved || resolution.Status == procedureir.ResolutionDynamic || resolution.Status == procedureir.ResolutionIncomplete {
+				if procedureHasModuleArrayArgument(file, proc, moduleDecls, call) {
+					moduleEffectSeeds[key] = true
+				}
 				for _, candidate := range resolution.Candidates {
 					target := arrayCandidateKey(candidate, all, candidateIndex)
 					addCallEdge(target)
 					addEdge(target)
+					if moduleArrayByRefCallMayMutate(file, proc, moduleDecls, call, target, all, ctx) {
+						moduleEffectSeeds[key] = true
+						moduleEffectSeeds[target] = true
+					}
 				}
 				if len(resolution.Candidates) == 0 {
 					// A candidate-bearing ambiguous/dynamic/unresolved call is
@@ -206,22 +223,25 @@ func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayP
 			reverse[callee][caller] = true
 		}
 	}
-	return &arrayParticipantGraph{
-		all:              all,
-		fileByKey:        fileByKey,
-		byModule:         byModule,
-		keyByIdentity:    keyByIdentity,
-		candidateIndex:   candidateIndex,
-		adjacency:        adjacency,
-		reverse:          reverse,
-		resolvedReverse:  resolvedReverse,
-		callAdjacency:    callAdjacency,
-		knownSeeds:       knownSeeds,
-		intrinsicSeeds:   intrinsicSeeds,
-		uncertainFacts:   uncertainFacts,
-		uncertainCalls:   uncertainCalls,
-		moduleArrayUsers: moduleArrayUsers,
+	graph := &arrayParticipantGraph{
+		all:               all,
+		fileByKey:         fileByKey,
+		byModule:          byModule,
+		keyByIdentity:     keyByIdentity,
+		candidateIndex:    candidateIndex,
+		adjacency:         adjacency,
+		reverse:           reverse,
+		resolvedReverse:   resolvedReverse,
+		callAdjacency:     callAdjacency,
+		knownSeeds:        knownSeeds,
+		intrinsicSeeds:    intrinsicSeeds,
+		uncertainFacts:    uncertainFacts,
+		uncertainCalls:    uncertainCalls,
+		moduleArrayUsers:  moduleArrayUsers,
+		moduleEffectSeeds: moduleEffectSeeds,
 	}
+	graph.moduleEffectParticipants = graph.moduleEffectParticipantSet()
+	return graph
 }
 
 func (graph *arrayParticipantGraph) participantSet(ignoreFeatureUnknown bool) map[string]bool {
@@ -294,10 +314,10 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 	return buildArrayParticipantGraph(files, ctx).participantSet(ctx.arrayIgnoreFeatureUnknown)
 }
 
-func buildArrayParticipantSets(files []parsedFile, ctx analysisContext) (map[string]bool, map[string]bool, map[string]string) {
+func buildArrayParticipantSets(files []parsedFile, ctx analysisContext) (map[string]bool, map[string]bool, map[string]bool, map[string]string) {
 	graph := buildArrayParticipantGraph(files, ctx)
 	participants := graph.participantSet(ctx.arrayIgnoreFeatureUnknown)
-	return participants, buildArrayInterproceduralParticipantSetFromGraph(graph, participants), graph.keyByIdentity
+	return participants, buildArrayInterproceduralParticipantSetFromGraph(graph, participants), graph.moduleEffectParticipants, graph.keyByIdentity
 }
 
 // buildArrayInterproceduralParticipantSet keeps the local fail-open plan
@@ -365,6 +385,60 @@ func buildArrayInterproceduralParticipantSetFromGraph(graph *arrayParticipantGra
 		legacyResult[key] = true
 	}
 	return legacyResult
+}
+
+// moduleEffectParticipantSet is deliberately caller-closed and module-local.
+// A procedure that only reads a module array remains outside this boundary;
+// an effect seed reaches its same-module callers through project-local
+// resolved or candidate-bounded edges. In
+// particular, walking the ordinary adjacency here would pull scalar callees
+// into the expensive module-array fixed points.
+func (graph *arrayParticipantGraph) moduleEffectParticipantSet() map[string]bool {
+	if len(graph.moduleEffectSeeds) == 0 {
+		return map[string]bool{}
+	}
+	participants := make(map[string]bool, len(graph.moduleEffectSeeds))
+	queue := make([]string, 0, len(graph.moduleEffectSeeds))
+	for key := range graph.moduleEffectSeeds {
+		participants[key] = true
+		queue = append(queue, key)
+	}
+	sort.Strings(queue)
+	for head := 0; head < len(queue); head++ {
+		target := queue[head]
+		targetProc, ok := graph.all[target]
+		if !ok {
+			continue
+		}
+		module := strings.ToLower(strings.TrimSpace(targetProc.Module))
+		callerSet := make(map[string]bool, len(graph.reverse[target])+len(graph.resolvedReverse[target]))
+		for caller := range graph.reverse[target] {
+			callerSet[caller] = true
+		}
+		for caller := range graph.resolvedReverse[target] {
+			callerSet[caller] = true
+		}
+		callers := make([]string, 0, len(callerSet))
+		for caller := range callerSet {
+			callerProc, exists := graph.all[caller]
+			if !exists || strings.ToLower(strings.TrimSpace(callerProc.Module)) != module || participants[caller] {
+				continue
+			}
+			callers = append(callers, caller)
+		}
+		sort.Strings(callers)
+		for _, caller := range callers {
+			participants[caller] = true
+			queue = append(queue, caller)
+		}
+	}
+	return participants
+}
+
+// buildArrayModuleEffectParticipantSet is a compatibility helper for focused
+// callers that only need the dedicated module-array boundary.
+func buildArrayModuleEffectParticipantSet(files []parsedFile, ctx analysisContext) map[string]bool {
+	return buildArrayParticipantGraph(files, ctx).moduleEffectParticipantSet()
 }
 
 const arrayResolvedCallerModuleLimit = 512
@@ -608,6 +682,211 @@ func procedureHasDirectModuleArrayOperation(file parsedFile, proc sourceProcedur
 	return false
 }
 
+// procedureHasPossibleModuleArrayEffect is narrower than
+// procedureUsesModuleArray: indexed reads are useful array evidence, but they
+// do not require module-array invalidation/lifecycle work.  Direct writes and
+// shape-changing statements are effects; a recovered procedure that touches a
+// module array is retained conservatively because the missing syntax may hide
+// one of those writes.
+func procedureHasPossibleModuleArrayEffect(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
+	if len(moduleDecls) == 0 || !hasModuleArrayDeclaration(moduleDecls) {
+		return false
+	}
+	if procedureHasDirectModuleArrayMutation(file, proc, moduleDecls) {
+		return true
+	}
+	return procedureHasModuleArrayRecoveryEvidence(proc) && procedureUsesModuleArray(file, proc, moduleDecls)
+}
+
+func hasModuleArrayDeclaration(moduleDecls map[string]sourceDeclaration) bool {
+	for _, declaration := range moduleDecls {
+		if declaration.Array && !declaration.Parameter {
+			return true
+		}
+	}
+	return false
+}
+
+func procedureHasDirectModuleArrayMutation(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
+	visibleModuleArrays := make(map[string]sourceDeclaration)
+	for name, declaration := range moduleDecls {
+		name = strings.ToLower(cleanIdentifier(name))
+		if declaration.Array && !declaration.Parameter && !procedureShadowsModuleName(file, proc, name) {
+			visibleModuleArrays[name] = declaration
+		}
+	}
+	if len(visibleModuleArrays) == 0 {
+		return false
+	}
+	if file.ModuleFacts != nil {
+		facts := file.ModuleFacts
+		for name := range visibleModuleArrays {
+			mutated := false
+			facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+				if operation.Line >= proc.StartLine && operation.Line <= proc.EndLine {
+					mutated = true
+				}
+			})
+			if mutated {
+				return true
+			}
+		}
+	}
+	for statement := range proc.Statements.All() {
+		for _, part := range splitRangeValueSourceStatements(statement.Text) {
+			if moduleArrayMutationStatement(part, visibleModuleArrays) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func moduleArrayMutationStatement(text string, moduleDecls map[string]sourceDeclaration) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	if _, body, ok := arrayIfThenParts(text); ok && strings.TrimSpace(body) != "" {
+		thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+		for _, part := range splitRangeValueSourceStatements(thenBody) {
+			if moduleArrayMutationStatement(part, moduleDecls) {
+				return true
+			}
+		}
+		if hasElse {
+			for _, part := range splitRangeValueSourceStatements(elseBody) {
+				if moduleArrayMutationStatement(part, moduleDecls) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if lhs, _, indexed, ok := arrayAssignment(text); ok && !indexed {
+		name := strings.ToLower(cleanIdentifier(lhs))
+		if declaration, declared := moduleDecls[name]; declared && declaration.Array && !declaration.Parameter {
+			return true
+		}
+	}
+	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 && strings.TrimSpace(match[1]) == "" {
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if !direct {
+				continue
+			}
+			if declaration, declared := moduleDecls[strings.ToLower(cleanIdentifier(redim.name))]; declared && declaration.Array && !declaration.Parameter {
+				return true
+			}
+		}
+	}
+	if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
+		for _, target := range splitArgs(match[1]) {
+			name := strings.ToLower(cleanIdentifier(strings.TrimSpace(target)))
+			if declaration, declared := moduleDecls[name]; declared && declaration.Array && !declaration.Parameter {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func procedureHasModuleArrayRecoveryEvidence(proc sourceProcedure) bool {
+	if proc.Document != nil && (proc.Document.Parse.HasError || proc.Document.Parse.HasMissing) {
+		return true
+	}
+	if proc.IR != nil && proc.IR.Symbol.Recovered {
+		return true
+	}
+	if proc.Graph != nil && len(proc.Graph.UnknownFlowSources) > 0 {
+		return true
+	}
+	for statement := range proc.Statements.All() {
+		if statement.Recovered || statement.Kind == procedureir.StatementUnknown || statement.Kind == procedureir.StatementRecovered || len(statement.ConditionalBranches) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func procedureHasModuleArrayArgument(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, call procedureir.CallSite) bool {
+	for _, argument := range call.Arguments.Named {
+		if isDirectModuleArrayArgument(file, proc, moduleDecls, argument.ValueText) {
+			return true
+		}
+	}
+	for _, argument := range arrayCallArgumentTexts(proc, call) {
+		if isDirectModuleArrayArgument(file, proc, moduleDecls, argument) {
+			return true
+		}
+	}
+	return false
+}
+
+func isDirectModuleArrayArgument(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, argument string) bool {
+	name := directArrayArgumentName(argument)
+	if name == "" {
+		return false
+	}
+	declaration, declared := moduleDeclarationForName(moduleDecls, name)
+	if !declared || !declaration.Array || declaration.Parameter {
+		return false
+	}
+	return !procedureShadowsModuleName(file, proc, name)
+}
+
+// procedureShadowsModuleName uses canonical procedure IR before consulting
+// source-derived declaration facts. The guarded source fallback preserves
+// compatibility with legacy projections without asking an empty hand-built
+// fixture to parse line zero.
+func procedureShadowsModuleName(file parsedFile, proc sourceProcedure, name string) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" {
+		return false
+	}
+	for parameter := range proc.Params.All() {
+		if strings.EqualFold(cleanIdentifier(parameter.Name), name) {
+			return true
+		}
+	}
+	for declaration := range proc.Declarations.All() {
+		if declaration.Scope != procedureir.ScopeModule && strings.EqualFold(cleanIdentifier(declaration.Name), name) {
+			return true
+		}
+	}
+	if file.ModuleFacts == nil && (proc.StartLine < 1 || proc.EndLine < proc.StartLine || proc.StartLine > len(file.Lines)) {
+		return false
+	}
+	scope := newDeclarationScope(file, proc)
+	return scope.shadowsModule(name)
+}
+
+func moduleArrayByRefCallMayMutate(file parsedFile, caller sourceProcedure, moduleDecls map[string]sourceDeclaration, call procedureir.CallSite, targetKey string, all map[string]sourceProcedure, ctx analysisContext) bool {
+	if targetKey == "" {
+		return false
+	}
+	target, ok := all[targetKey]
+	if !ok || !strings.EqualFold(strings.TrimSpace(caller.Module), strings.TrimSpace(target.Module)) {
+		return false
+	}
+	bindings, mapped := arrayCallArgumentBindings(caller, target, call)
+	if !mapped {
+		return false
+	}
+	for _, binding := range bindings {
+		if binding.parameterIndex < 0 || binding.parameterIndex >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(binding.parameterIndex)) {
+			continue
+		}
+		if !isDirectModuleArrayArgument(file, caller, moduleDecls, binding.text) {
+			continue
+		}
+		if arrayByRefParameterMayMutate(target, binding.parameterIndex, ctx, map[string]bool{}) {
+			return true
+		}
+	}
+	return false
+}
+
 func moduleArrayIndexedIdentifier(text, name string) bool {
 	text = strings.ToLower(text)
 	name = strings.ToLower(strings.TrimSpace(name))
@@ -739,6 +1018,14 @@ func arrayProcedureIsParticipant(ctx analysisContext, proc sourceProcedure) bool
 	if participants == nil {
 		participants = ctx.arrayParticipants
 	}
+	if participants == nil {
+		return true
+	}
+	return participants[arrayParticipantLookupKey(proc, ctx.arrayParticipantKeys)]
+}
+
+func arrayProcedureIsModuleEffectParticipant(ctx analysisContext, proc sourceProcedure) bool {
+	participants := ctx.arrayModuleEffectParticipants
 	if participants == nil {
 		return true
 	}

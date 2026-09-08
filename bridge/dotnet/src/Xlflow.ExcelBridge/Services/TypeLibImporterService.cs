@@ -33,6 +33,7 @@ public sealed class TypeLibImporterService
         ["scripting"] = new("Scripting", "{420B2830-E718-11CF-893D-00A0C9054228}", "scripting.generated.json"),
         ["adodb"] = new("ADODB", "{00000205-0000-0010-8000-00AA006D2EA4}", "adodb.generated.json"),
         ["vbide"] = new("VBIDE", "{0002E157-0000-0000-C000-000000000046}", "vbide.generated.json"),
+        ["outlook"] = new("Outlook", "{00062FFF-0000-0000-C000-000000000046}", "outlook.generated.json"),
     };
 
     public BridgeResponse Execute(BridgeRequest request, TypeDbImportArguments args, CancellationToken cancellationToken)
@@ -152,7 +153,7 @@ public sealed class TypeLibImporterService
         }
     }
 
-    private static ResolvedLibraries ResolveLibraries(string libraries)
+    internal static ResolvedLibraries ResolveLibraries(string libraries)
     {
         var names = libraries.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (names.Length == 0)
@@ -610,9 +611,9 @@ public sealed class TypeLibImporterService
     [DllImport("oleaut32.dll", PreserveSig = false)]
     private static extern void LoadRegTypeLib(ref Guid rguid, ushort wVerMajor, ushort wVerMinor, int lcid, out ITypeLib typeLib);
 
-    private sealed record LibraryTarget(string Name, string LibID, string Output);
+    internal sealed record LibraryTarget(string Name, string LibID, string Output);
 
-    private sealed record ResolvedLibraries(List<LibraryTarget> Targets, bool BestEffort);
+    internal sealed record ResolvedLibraries(List<LibraryTarget> Targets, bool BestEffort);
 
     private sealed record TypeLibRegistration(string LibID, int Major, int Minor, int LCID);
 

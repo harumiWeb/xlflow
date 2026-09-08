@@ -44,6 +44,25 @@ func TestEvaluateIntegerClassifiesKnownUnknownAndInvalid(t *testing.T) {
 	}
 }
 
+func TestEvaluateIntegerEnvironmentReusesNormalizedIntegerValues(t *testing.T) {
+	environment := IntegerValues{"limit": 3, "offset": -1}
+	for _, test := range []struct {
+		expr  string
+		value int
+	}{
+		{expr: "(Limit + 2) * 2", value: 10},
+		{expr: "-Offset", value: 1},
+	} {
+		result := EvaluateIntegerEnvironment(test.expr, environment)
+		if result.Kind != Known || result.Value != test.value {
+			t.Fatalf("EvaluateIntegerEnvironment(%q) = %#v, want %d", test.expr, result, test.value)
+		}
+	}
+	if result := EvaluateIntegerEnvironment("missing", environment); result.Kind != Unknown {
+		t.Fatalf("unresolved result = %#v, want Unknown", result)
+	}
+}
+
 func TestEvaluateTypedValuesAndOperators(t *testing.T) {
 	values := NewValues(map[string]Value{
 		"limit": {Kind: ValueLong, Integer: 3},

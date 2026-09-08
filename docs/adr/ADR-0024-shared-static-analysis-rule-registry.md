@@ -56,13 +56,15 @@ The registry is authoritative for these projections:
 - VS Code suppression Quick Fix eligibility; and
 - the generated static-analysis diagnostic catalog.
 
-`xlflow rules --json` publishes schema version 1 and the sorted registry items
-inside the normal success envelope. Version 1 evolves additively: consumers
-must ignore unknown fields and rule IDs, and breaking field changes require a
-new `schema_version`. The VS Code extension caches successful metadata by
-resolved CLI path and fails closed when retrieval fails, the schema is
-unsupported, or a diagnostic ID is unknown. It must not offer an inline
-suppression Quick Fix without affirmative registry metadata.
+`xlflow rules --json` publishes schema version 2 and the sorted registry items
+inside the normal success envelope. Version 2 adds the `information` severity
+while retaining the fields and suppression semantics used by the extension;
+consumers must ignore unknown fields and rule IDs, and breaking field changes
+require a new `schema_version`. The VS Code extension accepts schema versions 1
+and 2 because it consumes the stable `inline_suppressible` field, caches
+successful metadata by resolved CLI path, and fails closed when retrieval
+fails, the schema is unsupported, or a diagnostic ID is unknown. It must not
+offer an inline suppression Quick Fix without affirmative registry metadata.
 
 The JSON file is embedded so the installed binary remains self-contained, while
 the documentation generator reads the same repository file directly and does

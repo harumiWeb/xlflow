@@ -361,6 +361,10 @@ type analysisContext struct {
 	arrayPrivateTargets                  map[string]sourceProcedure
 	arrayParticipants                    map[string]bool
 	arrayParticipantKeys                 map[string]string
+	// arrayModuleEffectParticipants is the narrower caller-closed boundary
+	// used by module-array invalidation/lifecycle summaries. It intentionally
+	// excludes procedures that only read an indexed module array.
+	arrayModuleEffectParticipants map[string]bool
 	// arrayInterproceduralParticipants excludes complete procedures whose only
 	// evidence is an unknown array capability. Those procedures remain in the
 	// local participant plan for fail-open diagnostics, but cannot by themselves
@@ -385,16 +389,91 @@ type analysisContext struct {
 }
 
 type arrayInterproceduralStats struct {
-	mu                  sync.Mutex
-	cfgWalks            uint64
-	revisits            uint64
-	compactWalks        uint64
-	legacyWalks         uint64
-	fallbackWalks       uint64
-	fallbackEmptyState  uint64
-	fallbackIndex       uint64
-	fallbackUnsupported uint64
-	strategy            arrayCFGStrategy
+	mu                          sync.Mutex
+	cfgWalks                    uint64
+	revisits                    uint64
+	moduleInvalidationSummaries uint64
+	moduleInvalidationCFGWalks  uint64
+	moduleReadyGuardCandidates  uint64
+	moduleReadyGuardCFGWalks    uint64
+	callLineIndexBuilds         uint64
+	callLineIndexHits           uint64
+	procedureRangeIndexBuilds   uint64
+	procedureRangeIndexHits     uint64
+	compactWalks                uint64
+	legacyWalks                 uint64
+	fallbackWalks               uint64
+	fallbackEmptyState          uint64
+	fallbackIndex               uint64
+	fallbackUnsupported         uint64
+	strategy                    arrayCFGStrategy
+}
+
+func (s *arrayInterproceduralStats) addModuleInvalidationSummary(hasCFG bool) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.moduleInvalidationSummaries++
+	if hasCFG {
+		s.moduleInvalidationCFGWalks++
+	}
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addModuleReadyGuardCandidate() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.moduleReadyGuardCandidates++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addModuleReadyGuardCFGWalk() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.moduleReadyGuardCFGWalks++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addArrayIndexBuilds(callLines, procedureRanges uint64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.callLineIndexBuilds += callLines
+	s.procedureRangeIndexBuilds += procedureRanges
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addCallLineIndexHit() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.callLineIndexHits++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addProcedureRangeIndexHit() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.procedureRangeIndexHits++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) moduleSnapshot() (invalidationSummaries, invalidationCFGWalks, readyGuardCandidates, readyGuardCFGWalks, callLineIndexBuilds, callLineIndexHits, procedureRangeIndexBuilds, procedureRangeIndexHits uint64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.moduleInvalidationSummaries, s.moduleInvalidationCFGWalks, s.moduleReadyGuardCandidates, s.moduleReadyGuardCFGWalks, s.callLineIndexBuilds, s.callLineIndexHits, s.procedureRangeIndexBuilds, s.procedureRangeIndexHits
 }
 
 // Array CFG walks can be materialized concurrently while a procedure plan is
@@ -509,7 +588,11 @@ type parsedFile struct {
 	ArrayOptionBaseSet          bool
 	ConstantValues              map[string]constexpr.Value
 	RuntimeConstantBase         constexpr.Values
-	DataFlowModuleBindings      map[string]bool
+	// ResumeNextConstantValues is the immutable file-level environment used by
+	// VBA214 scalar probe inspection. Production batch and realtime setup build
+	// it once so procedure workers do not rescan a giant module independently.
+	ResumeNextConstantValues map[string]constexpr.Value
+	DataFlowModuleBindings   map[string]bool
 	// semanticQueryFacts is populated once the immutable revision capabilities
 	// (effects, resolution and array participant state) are ready.  Procedure
 	// query lanes share this pointer so they do not rebuild the same source,
@@ -921,6 +1004,9 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	finishProjectConstants := beginProjectCapabilityBuild(ctx, projectCapabilityProjectConstants)
 	analysis.visibleConstants = projectVisibleConstants(parsedFiles, analysis.typeDB)
 	analysis.visibleConstantValues = projectConstantValues(parsedFiles, analysis.typeDB)
+	for index := range parsedFiles {
+		prepareResumeNextScopeConstantValues(analysis, &parsedFiles[index])
+	}
 	finishProjectConstants(nil)
 	finishStage = analysisstats.Measure(ctx, "project_context")
 	finishArrayCapability := func(error) {}
@@ -1941,6 +2027,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			RootDir: rootDir, Config: cfg, typeDB: typeDB,
 			visibleConstantValues: projectConstants, excelRootBindings: excelRootBindings,
 		}
+		prepareResumeNextScopeConstantValues(analyzer, &file)
 		if procedureWorkerLimit > 0 {
 			analyzer.analysisWorkerLimit = procedureWorkerLimit
 		}
@@ -2488,7 +2575,8 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arraySafeArrayLengthGuards = inferArraySafeArrayLengthGuards(files)
 		ctx.arraySafeBoundGuards = inferArraySafeBoundGuards(files)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
-		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
+		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayModuleEffectParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
+		recordArrayIndexBuilds(files, ctx.arrayStats)
 		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants, ctx.arrayParticipantKeys)
 		ctx.arraySkipModuleInvalidationEffects = true
 		returnSummaries := inferArrayReturnSummarySet(files, ctx.arrayAllocationGuards, ctx)
@@ -2565,6 +2653,9 @@ func recordArrayInterproceduralTelemetry(ctx context.Context, analysisCtx analys
 		return
 	}
 	recorder.AddSum(analysisstats.ArrayParticipantProceduresCounter, uint64(len(analysisCtx.arrayParticipants)))
+	recorder.AddSum(analysisstats.ArrayLocalParticipantsCounter, uint64(len(analysisCtx.arrayParticipants)))
+	recorder.AddSum(analysisstats.ArrayInterproceduralParticipantsCounter, uint64(len(analysisCtx.arrayInterproceduralParticipants)))
+	recorder.AddSum(analysisstats.ArrayModuleEffectParticipantsCounter, uint64(len(analysisCtx.arrayModuleEffectParticipants)))
 	if analysisCtx.arrayStats != nil {
 		cfgWalks, revisits, compactWalks, legacyWalks, fallbackWalks, fallbackEmptyState, fallbackIndex, fallbackUnsupported := analysisCtx.arrayStats.snapshot()
 		recorder.AddSum(analysisstats.ArrayInterproceduralCFGWalksCounter, cfgWalks)
@@ -2575,7 +2666,34 @@ func recordArrayInterproceduralTelemetry(ctx context.Context, analysisCtx analys
 		recorder.AddSum("array_cfg_fallback_empty_state", fallbackEmptyState)
 		recorder.AddSum("array_cfg_fallback_index", fallbackIndex)
 		recorder.AddSum("array_cfg_fallback_unsupported", fallbackUnsupported)
+		invalidationSummaries, invalidationCFGWalks, readyGuardCandidates, readyGuardCFGWalks, callLineIndexBuilds, callLineIndexHits, procedureRangeIndexBuilds, procedureRangeIndexHits := analysisCtx.arrayStats.moduleSnapshot()
+		recorder.AddSum("array_module_invalidation_summaries", invalidationSummaries)
+		recorder.AddSum("array_module_invalidation_cfg_walks", invalidationCFGWalks)
+		recorder.AddSum("array_module_ready_guard_candidates", readyGuardCandidates)
+		recorder.AddSum("array_module_ready_guard_cfg_walks", readyGuardCFGWalks)
+		recorder.AddSum("array_calls_by_line_index_builds", callLineIndexBuilds)
+		recorder.AddSum("array_calls_by_line_index_hits", callLineIndexHits)
+		recorder.AddSum("procedure_range_index_builds", procedureRangeIndexBuilds)
+		recorder.AddSum("procedure_range_index_hits", procedureRangeIndexHits)
 	}
+}
+
+func recordArrayIndexBuilds(files []parsedFile, stats *arrayInterproceduralStats) {
+	if stats == nil {
+		return
+	}
+	var callLines, procedureRanges uint64
+	for _, file := range files {
+		if facts := file.moduleAnalysisFacts(); facts != nil && len(facts.procedureRanges) > 0 {
+			procedureRanges++
+		}
+		for procedure := range file.procedureView().All() {
+			if procedure.Facts != nil && procedure.Facts.callsByLineBuilt && procedure.Calls.Len() > 0 {
+				callLines++
+			}
+		}
+	}
+	stats.addArrayIndexBuilds(callLines, procedureRanges)
 }
 
 func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analysisContext, file parsedFile, projectEffects effects.ProjectSummary, filePermitHeld bool) ([]Finding, error) {
@@ -4878,7 +4996,7 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 		return nil
 	}
 	moduleDecls := file.moduleDecls()
-	constantValues := resumeNextScopeConstantValues(a, file)
+	constantValues := resumeNextScopePreparedConstantValues(a, file)
 	reachable := map[vbacfg.BlockID]bool{}
 	for _, id := range proc.Graph.Reachable(vbacfg.EdgeFilter{}) {
 		reachable[id] = true
@@ -4946,6 +5064,24 @@ func resumeNextScopeConstantValues(a Analyzer, file parsedFile) map[string]const
 	}
 	values = resumeNextScopeAddConditionalZeroConstants(file, values)
 	return values
+}
+
+func prepareResumeNextScopeConstantValues(a Analyzer, file *parsedFile) {
+	if file == nil || file.ResumeNextConstantValues != nil {
+		return
+	}
+	values := resumeNextScopeConstantValues(a, *file)
+	if values == nil {
+		values = map[string]constexpr.Value{}
+	}
+	file.ResumeNextConstantValues = values
+}
+
+func resumeNextScopePreparedConstantValues(a Analyzer, file parsedFile) map[string]constexpr.Value {
+	if file.ResumeNextConstantValues != nil {
+		return file.ResumeNextConstantValues
+	}
+	return resumeNextScopeConstantValues(a, file)
 }
 
 // Conditional-compilation branches can leave the resolver with multiple
@@ -5287,6 +5423,7 @@ func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextSco
 	}
 	lhsMemberProbe := false
 	rhsMemberProbe := false
+	rhsCheckedPropertyChain := false
 	arrayElementProbe := false
 	switch statement.Kind {
 	case procedureir.StatementAssignment, procedureir.StatementSet:
@@ -5300,10 +5437,12 @@ func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextSco
 		lhsMemberProbe = resumeNextScopeMemberProbeTarget(target) &&
 			resumeNextScopeHasSingleStatementCall(proc, statement, moduleDecls, target, projectResolver) &&
 			resumeNextScopeMemberProbeAssignmentValueSafe(proc, statement, moduleDecls, projectResolver) &&
-			resumeNextScopeMemberCallArgumentsSafe(proc, statement, moduleDecls, projectResolver)
+			resumeNextScopeCheckedMemberAssignmentArgumentsSafe(proc, statement, moduleDecls, projectResolver)
 		rhsMemberProbe = !lhsMemberProbe &&
 			resumeNextScopeHasSingleRHSMemberCallProbe(proc, statement, moduleDecls, projectResolver) &&
 			resumeNextScopeMemberCallArgumentsSafe(proc, statement, moduleDecls, projectResolver)
+		rhsCheckedPropertyChain = !lhsMemberProbe && !rhsMemberProbe &&
+			resumeNextScopeCheckedPropertyChain(proc, statement, moduleDecls, projectResolver)
 		arrayElementProbe = !lhsMemberProbe && !rhsMemberProbe && resumeNextScopeHasSingleArrayElementProbe(proc, statement, moduleDecls)
 	case procedureir.StatementCall:
 		lhsMemberProbe = resumeNextScopeHasSingleMemberCallProbe(proc, statement, moduleDecls, projectResolver) &&
@@ -5311,7 +5450,7 @@ func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextSco
 	default:
 		return false
 	}
-	if !lhsMemberProbe && !rhsMemberProbe && !arrayElementProbe {
+	if !lhsMemberProbe && !rhsMemberProbe && !rhsCheckedPropertyChain && !arrayElementProbe {
 		return false
 	}
 	ordered := make([]procedureir.Statement, 0, len(statementsByID))
@@ -5351,6 +5490,28 @@ func resumeNextScopeCheckedMemberProbe(proc sourceProcedure, state resumeNextSco
 		return procedureir.Statement{}, -1, false
 	}
 	assertion, assertionIndex, ok := next(index + 1)
+	if rhsCheckedPropertyChain && ok && resumeNextScopeErrStatusCapture(proc, assertion, moduleDecls) &&
+		resumeNextScopeNormalFlowTo(proc.Graph, statement.ID, assertion.ID, statementsByID) {
+		previousID := assertion.ID
+		for nextIndex := assertionIndex + 1; ; {
+			candidate, candidateIndex, nextOK := next(nextIndex)
+			if !nextOK {
+				break
+			}
+			if errClearStatementRe.MatchString(maskStringLiterals(gui.StripComment(candidate.Text))) {
+				if !resumeNextScopeNormalFlowTo(proc.Graph, previousID, candidate.ID, statementsByID) {
+					return false
+				}
+				previousID = candidate.ID
+				nextIndex = candidateIndex + 1
+				continue
+			}
+			if restoresErrorHandling(candidate) && resumeNextScopeNormalFlowTo(proc.Graph, previousID, candidate.ID, statementsByID) {
+				return true
+			}
+			break
+		}
+	}
 	if ok && resumeNextScopeErrAssertion(proc, moduleDecls, assertion, projectResolver) &&
 		resumeNextScopeNormalFlowTo(proc.Graph, statement.ID, assertion.ID, statementsByID) {
 		previousID := assertion.ID
@@ -5577,6 +5738,8 @@ func resumeNextScopeMemberProbeAssignmentValueSafe(proc sourceProcedure, stateme
 	}
 	switch statement.Value.Kind {
 	case procedureir.ExpressionIdentifier, procedureir.ExpressionLiteral:
+	case procedureir.ExpressionCall:
+		return resumeNextScopeCheckedStringConversion(proc, *statement.Value)
 	default:
 		return false
 	}
@@ -5688,6 +5851,9 @@ func resumeNextScopeHasSingleStatementCall(proc sourceProcedure, statement proce
 		if candidate.Callee.Receiver == nil && strings.EqualFold(candidate.Callee.BaseName, "Let") {
 			continue
 		}
+		if statement.Value != nil && resumeNextScopeCheckedStringConversionCall(proc, candidate, statement.Value.Range) {
+			continue
+		}
 		count++
 		if resumeNextScopeCallBelongsToTarget(candidate, statement.Target.Range) {
 			targetCount++
@@ -5784,6 +5950,38 @@ func resumeNextScopeHasSimpleRHSMemberAccess(proc sourceProcedure, statement pro
 		errorSuccessIdentifierRE.MatchString(strings.TrimSpace(member.Text)) &&
 		resumeNextScopeBooleanCoercionTargetIsObject(proc, receiverName, moduleDecls) &&
 		!resumeNextScopeProcedureIdentifier(proc, receiverName, projectResolver)
+}
+
+func resumeNextScopeCheckedPropertyChain(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	target, value, ok := resumeNextScopeAssignmentText(statement)
+	if !ok || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) || strings.ContainsAny(value, "()!") {
+		return false
+	}
+	parts := strings.Split(strings.TrimSpace(value), ".")
+	if len(parts) < 3 {
+		return false
+	}
+	for _, part := range parts {
+		if !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(part)) {
+			return false
+		}
+	}
+	root := strings.TrimSpace(parts[0])
+	return resumeNextScopeBooleanCoercionTargetIsObject(proc, root, moduleDecls) &&
+		!resumeNextScopeProcedureIdentifier(proc, root, projectResolver)
+}
+
+func resumeNextScopeErrStatusCapture(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration) bool {
+	target, value, ok := resumeNextScopeAssignmentText(statement)
+	if !ok || !strings.EqualFold(resumeNextScopeTargetType(proc, statement, moduleDecls), "Boolean") {
+		return false
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(value), ""))
+	if normalized != "err.number<>0" && normalized != "0<>err.number" &&
+		normalized != "err.number=0" && normalized != "0=err.number" {
+		return false
+	}
+	return errorSuccessIdentifierRE.MatchString(strings.TrimSpace(target)) && !resumeNextScopeConditionHasCall(proc.Calls, statement)
 }
 
 func resumeNextScopeRHSDefaultMemberReceiver(value string) string {
@@ -6113,11 +6311,22 @@ func resumeNextScopeProjectTypedMemberCall(proc sourceProcedure, call procedurei
 }
 
 func resumeNextScopeMemberCallArgumentsSafe(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	return resumeNextScopeMemberCallArgumentsSafeMode(proc, statement, moduleDecls, projectResolver, false)
+}
+
+func resumeNextScopeCheckedMemberAssignmentArgumentsSafe(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
+	return resumeNextScopeMemberCallArgumentsSafeMode(proc, statement, moduleDecls, projectResolver, true)
+}
+
+func resumeNextScopeMemberCallArgumentsSafeMode(proc sourceProcedure, statement procedureir.Statement, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver, allowCheckedStringConversion bool) bool {
 	for call := range proc.Calls.All() {
 		if call.StatementID != statement.ID {
 			continue
 		}
 		if call.Callee.Receiver == nil && strings.EqualFold(call.Callee.BaseName, "Let") {
+			continue
+		}
+		if allowCheckedStringConversion && statement.Value != nil && resumeNextScopeCheckedStringConversionCall(proc, call, statement.Value.Range) {
 			continue
 		}
 		for _, expressionID := range call.Arguments.ExpressionIDs {
@@ -6129,12 +6338,51 @@ func resumeNextScopeMemberCallArgumentsSafe(proc sourceProcedure, statement proc
 					continue
 				}
 			}
+			if allowCheckedStringConversion {
+				if expression, ok := proc.Expressions.At(expressionID - 1); ok && resumeNextScopeCheckedStringConversion(proc, expression) {
+					continue
+				}
+			}
 			if !resumeNextScopeSafeMemberCallArgumentExpression(proc, expressionID, moduleDecls, projectResolver) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+func resumeNextScopeCheckedStringConversion(proc sourceProcedure, expression procedureir.Expression) bool {
+	if expression.Recovered || expression.Kind != procedureir.ExpressionCall {
+		return false
+	}
+	text := strings.TrimSpace(expression.Text)
+	open := strings.IndexByte(text, '(')
+	if open <= 0 || matchingParen(text, open) != len(text)-1 || !strings.EqualFold(strings.TrimSpace(text[:open]), "CStr") {
+		return false
+	}
+	argument := strings.TrimSpace(text[open+1 : len(text)-1])
+	if !errorSuccessIdentifierRE.MatchString(argument) {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(strings.TrimSpace(declaration.Name), argument) {
+			return !declaration.IsArray && !declaration.IsObject
+		}
+	}
+	return false
+}
+
+func resumeNextScopeCheckedStringConversionCall(proc sourceProcedure, call procedureir.CallSite, target vbaast.Range) bool {
+	if call.Callee.Receiver != nil || !strings.EqualFold(strings.TrimSpace(call.Callee.BaseName), "CStr") ||
+		!resumeNextScopeCallBelongsToTarget(call, target) {
+		return false
+	}
+	for expression := range proc.Expressions.All() {
+		if expression.StatementID == call.StatementID && expression.Range == call.Range {
+			return resumeNextScopeCheckedStringConversion(proc, expression)
+		}
+	}
+	return false
 }
 
 func resumeNextScopeSafeMemberCallArgumentExpression(proc sourceProcedure, expressionID int, moduleDecls map[string]sourceDeclaration, projectResolver procedureir.Resolver) bool {
@@ -7812,8 +8060,10 @@ func isObjectType(typ string) bool {
 }
 
 func lastName(name string) string {
-	parts := strings.Split(name, ".")
-	return parts[len(parts)-1]
+	if separator := strings.LastIndexByte(name, '.'); separator >= 0 {
+		return name[separator+1:]
+	}
+	return name
 }
 
 func referencedTraceHelpers(code string) []string {

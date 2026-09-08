@@ -1,6 +1,6 @@
 # Completion and type inference
 
-The language server provides VBA keywords, built-in VBA/Excel/Office/MSForms metadata, project symbols, UserForm controls, and ProgID completion inside `CreateObject`/`GetObject` strings. Late-bound variables can acquire a curated type from known ProgIDs, enabling member completion and hover.
+The language server provides VBA keywords, built-in VBA/Excel/Office/MSForms/Outlook metadata, project symbols, UserForm controls, and ProgID completion inside `CreateObject`/`GetObject` strings. Late-bound variables can acquire a curated type from known ProgIDs, enabling member completion and hover.
 
 For example, type `CreateObject("Scripting.Dictionary")` and assign it to a variable. xlflow can recognize that well-known ProgID and suggest dictionary members even though VBA would otherwise treat the variable as late-bound. Suggestions are guidance, not a guarantee that a specific Office installation exposes every member; still run the macro to verify behavior.
 

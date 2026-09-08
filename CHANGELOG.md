@@ -4,6 +4,41 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Prevented project-object false-positive fixes from regressing giant-project
+  analysis by caching file-level constant environments, indexing object-summary
+  lookups, and limiting module-object flow state to participating procedures;
+  diagnostic output remains unchanged.
+
+- Fixed false-positive `VBA214` findings for a single checked compatibility
+  probe that assigns a `CStr(Variant)` value to a property or reads a nested
+  object property before immediately inspecting and clearing `Err`.
+
+- Fixed `analyze` performance regressions on giant VBA modules by restricting
+  module-array invalidation CFG work to relevant effect participants and
+  reusing indexed call/procedure lookups; conservative array diagnostics remain
+  unchanged.
+
+- Reduced shared analyzer allocation churn by avoiding unused semantic-state
+  result snapshots, reusing normalized integer-constant environments, and
+  compacting CFG dominator intersections; diagnostic and JSON/LSP output remain
+  unchanged.
+
+- Changed `lint`, `analyze`, and the diagnostic portion of `check` to return
+  exit code `0` when all source diagnostics are warnings or information;
+  error-level, unknown, or empty-severity diagnostics continue to return
+  validation exit code `1`.
+
+## v0.31.2
+
+- Fixed false-positive `VBA229` findings for early-bound Outlook COM types such
+  as `Outlook.Application` and `Outlook.MailItem`. The embedded COM database
+  now includes a practical Outlook surface, and
+  `xlflow type db refresh --library outlook` (or `--library all`) can import
+  the installed Outlook TypeLib for broader coverage.
+
+- Fixed false-positive VBA diagnostics for `Application.Min`/`Application.Max`
+  and decimal literals in multiline `WorksheetFunction` calls.
+
 - Updated the `tree-sitter-vba` parser dependency to v0.13.0. Print-family
   output lists now support trailing `;` / `,` controls and explicit `Write #`
   statements; call extraction and linting ignore `char_position` nodes while

@@ -1,13 +1,14 @@
 package coordination
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -157,7 +158,7 @@ func (m *Manager) ListRecoveries() ([]RecoveryEntry, error) {
 		}
 		result = append(result, RecoveryEntry{LockID: lockID, State: state})
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].LockID < result[j].LockID })
+	slices.SortFunc(result, func(a, b RecoveryEntry) int { return cmp.Compare(a.LockID, b.LockID) })
 	return result, nil
 }
 

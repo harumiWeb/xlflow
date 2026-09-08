@@ -262,7 +262,7 @@ func deterministicArrayRuntimeIssues(text string, line int, state arrayFlowState
 			if index >= len(value.dimensions) {
 				break
 			}
-			result := constexpr.EvaluateInteger(argument, constants)
+			result := constexpr.EvaluateIntegerEnvironment(argument, constexpr.IntegerValues(constants))
 			if result.Kind != constexpr.Known {
 				continue
 			}

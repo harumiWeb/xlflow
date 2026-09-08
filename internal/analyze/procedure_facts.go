@@ -86,6 +86,8 @@ type procedureAnalysisFacts struct {
 	statementIndex   map[int]int
 	expressionIndex  map[int]int
 	callsByStatement
+	callsByLine
+	callsByLineBuilt bool
 	accessesByStatement
 	memberExpressionsByStatement map[int][]int
 	// memberExpressionFallback is true only for hand-built/recovered IR where
@@ -143,6 +145,7 @@ func (facts *procedureAnalysisFacts) initialize(
 	calls []procedureir.CallSite,
 	accesses []procedureir.VariableAccess,
 ) *procedureAnalysisFacts {
+	facts.callsByLineBuilt = true
 
 	if len(declarations) > 0 {
 		facts.declarationIndex = make(map[int]int, len(declarations))
@@ -189,6 +192,7 @@ func (facts *procedureAnalysisFacts) initialize(
 			facts.features.observeCall(call)
 		}
 		facts.callsByStatement = newCallFactsByStatement(calls)
+		facts.callsByLine = newCallFactsByLine(calls)
 	}
 	if len(accesses) > 0 {
 		facts.accessesByStatement = newAccessFactsByStatement(accesses)
@@ -339,6 +343,26 @@ func (facts *procedureAnalysisFacts) CallsForStatement(statementID int) []proced
 		return nil
 	}
 	return facts.callsByStatement.values(facts.callsView(), statementID)
+}
+
+// CallsAtLine returns non-RaiseEvent calls whose source range starts on line,
+// preserving their IR order. The returned slice is an owned result for callers
+// that need to retain or range over the calls after this lookup.
+func (facts *procedureAnalysisFacts) CallsAtLine(line int) []procedureir.CallSite {
+	if facts == nil || !facts.callsByLineBuilt {
+		return nil
+	}
+	return facts.callsByLine.values(facts.callsView(), line)
+}
+
+// forEachCallAtLine visits non-RaiseEvent calls whose source range starts on
+// line without allocating a result slice. The callback receives calls in IR
+// order and must treat each value, and its nested IR slices, as immutable.
+func (facts *procedureAnalysisFacts) forEachCallAtLine(line int, visit func(procedureir.CallSite)) {
+	if facts == nil || !facts.callsByLineBuilt || visit == nil {
+		return
+	}
+	facts.forEach(facts.callsView(), line, visit)
 }
 
 // forEachCallForStatement visits calls without exposing the facts-owned slice
@@ -543,12 +567,80 @@ type callsByStatement struct {
 	groups indexGroups
 }
 
+// callsByLine indexes only ordinary calls. RaiseEvent is deliberately omitted
+// because array analyses model procedure calls and must not treat events as
+// local procedure effects.
+type callsByLine struct {
+	groups      indexGroups
+	callIndexes []int
+}
+
 func newCallFactsByStatement(calls []procedureir.CallSite) callsByStatement {
 	ids := make([]int, len(calls))
 	for index, call := range calls {
 		ids[index] = call.StatementID
 	}
 	return callsByStatement{groups: newIndexGroups(ids)}
+}
+
+func newCallFactsByLine(calls []procedureir.CallSite) callsByLine {
+	lineIDs := make([]int, 0, len(calls))
+	callIndexes := make([]int, 0, len(calls))
+	for index, call := range calls {
+		if call.IsRaiseEvent {
+			continue
+		}
+		lineIDs = append(lineIDs, call.Range.StartLine)
+		callIndexes = append(callIndexes, index)
+	}
+	return callsByLine{
+		groups:      newIndexGroups(lineIDs),
+		callIndexes: callIndexes,
+	}
+}
+
+func (facts callsByLine) values(calls readOnlySpan[procedureir.CallSite], line int) []procedureir.CallSite {
+	span, contiguous := facts.groups.contiguousSpan(line)
+	if contiguous {
+		out := make([]procedureir.CallSite, 0, span.end-span.start)
+		for index := span.start; index < span.end; index++ {
+			if index < 0 || index >= len(facts.callIndexes) {
+				continue
+			}
+			if call, ok := calls.At(facts.callIndexes[index]); ok {
+				out = append(out, call)
+			}
+		}
+		return out
+	}
+	indexes, ok := facts.groups.sparse[line]
+	if !ok {
+		return nil
+	}
+	out := make([]procedureir.CallSite, 0, len(indexes))
+	for _, index := range indexes {
+		if index < 0 || index >= len(facts.callIndexes) {
+			continue
+		}
+		if call, ok := calls.At(facts.callIndexes[index]); ok {
+			out = append(out, call)
+		}
+	}
+	return out
+}
+
+func (facts callsByLine) forEach(calls readOnlySpan[procedureir.CallSite], line int, visit func(procedureir.CallSite)) {
+	if visit == nil {
+		return
+	}
+	facts.groups.forEach(line, func(index int) {
+		if index < 0 || index >= len(facts.callIndexes) {
+			return
+		}
+		if call, ok := calls.At(facts.callIndexes[index]); ok {
+			visit(call)
+		}
+	})
 }
 
 func (facts callsByStatement) values(calls readOnlySpan[procedureir.CallSite], statementID int) []procedureir.CallSite {
@@ -675,6 +767,28 @@ func (groups indexGroups) contiguousSpan(id int) (indexSpan, bool) {
 	}
 	span, ok := groups.spans[id]
 	return span, ok
+}
+
+// forEach visits indexes for one group without materializing the contiguous
+// span as a slice. Sparse groups already own their compact index slices; the
+// common contiguous case is represented by one span in the immutable index.
+func (groups indexGroups) forEach(id int, visit func(int)) {
+	if visit == nil {
+		return
+	}
+	if indexes, ok := groups.sparse[id]; ok {
+		for _, index := range indexes {
+			visit(index)
+		}
+		return
+	}
+	span, ok := groups.spans[id]
+	if !ok {
+		return
+	}
+	for index := span.start; index < span.end; index++ {
+		visit(index)
+	}
 }
 
 // analysisFacts returns the attached facts and provides a compatibility path

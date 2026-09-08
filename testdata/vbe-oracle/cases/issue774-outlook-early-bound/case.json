@@ -1,7 +1,15 @@
 {
   "schema_version": 1,
-  "id": "unknown-as-type",
-  "description": "Declare a variable using an unknown As type name.",
+  "id": "issue774-outlook-early-bound",
+  "description": "Compile issue #774 Outlook early-bound types with the installed Outlook TypeLib referenced.",
+  "references": [
+    {
+      "name": "Outlook",
+      "libid": "{00062FFF-0000-0000-C000-000000000046}",
+      "major": 9,
+      "minor": 6
+    }
+  ],
   "modules": [
     {
       "name": "Main",
@@ -14,26 +22,19 @@
     "mode": "compile"
   },
   "vbe": {
-    "expected": "rejected",
+    "expected": "accepted",
     "evidence_phase": "compile",
-    "diagnostic_meaning": "compile-error"
+    "diagnostic_meaning": "specification"
   },
   "analysis": {
     "binding_status": "bound",
     "evidence_role": "compile-equivalent",
     "rule_codes": ["VBA229"],
-    "negative_controls": ["known-as-type", "known-enum-as-type", "issue774-outlook-early-bound"],
-    "expected_diagnostics": [
+    "forbidden_diagnostics": [
       {
         "code": "VBA229",
         "severity": "error",
-        "surfaces": ["analyze", "lsp"],
-        "range": {
-          "start_line": 5,
-          "start_column": 18,
-          "end_line": 5,
-          "end_column": 40
-        }
+        "surfaces": ["analyze", "lsp"]
       }
     ]
   },
@@ -45,7 +46,7 @@
         "excel_build": "17932",
         "bitness": "x64",
         "locale": "ja-JP",
-        "verified_at": "2026-08-06T04:33:57Z"
+        "verified_at": "2026-09-03T09:12:36Z"
       }
     ]
   }

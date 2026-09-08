@@ -408,6 +408,115 @@
       "source": "xlflow"
     },
     {
+      "name": "Outlook.Application",
+      "library": "Outlook",
+      "kind": "class",
+      "summary": "Microsoft Outlook application object.",
+      "properties": [
+        { "name": "Name", "return_type": "String", "read_only": true },
+        { "name": "Version", "return_type": "String", "read_only": true }
+      ],
+      "methods": [
+        {
+          "name": "CreateItem",
+          "return_type": "Object",
+          "parameters": [{ "name": "ItemType", "type": "Long" }]
+        },
+        {
+          "name": "GetNamespace",
+          "return_type": "Outlook.NameSpace",
+          "parameters": [{ "name": "Type", "type": "String" }]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Outlook.MailItem",
+      "library": "Outlook",
+      "kind": "class",
+      "properties": [
+        { "name": "Subject", "return_type": "String" },
+        { "name": "To", "return_type": "String" },
+        { "name": "CC", "return_type": "String" },
+        { "name": "BCC", "return_type": "String" },
+        { "name": "Body", "return_type": "String" },
+        { "name": "HTMLBody", "return_type": "String" }
+      ],
+      "methods": [{ "name": "Save" }, { "name": "Send" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Outlook.AppointmentItem",
+      "library": "Outlook",
+      "kind": "class",
+      "properties": [
+        { "name": "Subject", "return_type": "String" },
+        { "name": "Start", "return_type": "Date" },
+        { "name": "End", "return_type": "Date" },
+        { "name": "Location", "return_type": "String" }
+      ],
+      "methods": [{ "name": "Save" }, { "name": "Send" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Outlook.NameSpace",
+      "library": "Outlook",
+      "kind": "class",
+      "properties": [
+        { "name": "CurrentUser", "return_type": "Object", "read_only": true },
+        { "name": "Folders", "return_type": "Object", "read_only": true }
+      ],
+      "methods": [
+        {
+          "name": "GetDefaultFolder",
+          "return_type": "Outlook.MAPIFolder",
+          "parameters": [{ "name": "FolderType", "type": "Long" }]
+        },
+        {
+          "name": "GetItemFromID",
+          "return_type": "Object",
+          "parameters": [
+            { "name": "EntryIDItem", "type": "String" },
+            { "name": "EntryIDStore", "type": "String", "optional": true }
+          ]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Outlook.MAPIFolder",
+      "library": "Outlook",
+      "kind": "class",
+      "properties": [
+        { "name": "Name", "return_type": "String", "read_only": true },
+        { "name": "Items", "return_type": "Outlook.Items", "read_only": true },
+        { "name": "Folders", "return_type": "Object", "read_only": true }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Outlook.Items",
+      "library": "Outlook",
+      "kind": "collection",
+      "element_type": "Object",
+      "properties": [{ "name": "Count", "return_type": "Long", "read_only": true }],
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "Object",
+          "parameters": [{ "name": "Index", "type": "Variant" }],
+          "default": true
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
       "name": "stdole.IUnknown",
       "library": "stdole",
       "kind": "interface",
@@ -457,6 +566,7 @@
     "VBScript.RegExp": "VBScript.RegExp",
     "ADODB.Connection": "ADODB.Connection",
     "ADODB.Recordset": "ADODB.Recordset",
-    "ADODB.Command": "ADODB.Command"
+    "ADODB.Command": "ADODB.Command",
+    "Outlook.Application": "Outlook.Application"
   }
 }

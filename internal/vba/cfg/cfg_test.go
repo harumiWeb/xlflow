@@ -439,11 +439,27 @@ func TestCFGViewCachesCanonicalQueriesAndCustomMasks(t *testing.T) {
 		},
 		Entry: 1,
 	}
+	chainView := chainGraph.View(EdgeFilter{})
+	if !chainView.Dominates(1, 4) || chainView.Dominates(2, 3) {
+		t.Fatalf("Dominates membership is incorrect: entry->exit=%v, branch->branch=%v", chainView.Dominates(1, 4), chainView.Dominates(2, 3))
+	}
 	chained := chainGraph.View(EdgeFilter{}).
 		WithoutNormalContinuationsFrom(map[BlockID]bool{2: true}).
 		WithoutNormalContinuationsFrom(map[BlockID]bool{3: true})
 	if chained.IsReachable(4) {
 		t.Fatal("chained custom mask restored the first excluded continuation")
+	}
+}
+
+func TestCFGViewDominatorListsUseExactCapacity(t *testing.T) {
+	t.Parallel()
+	graph := benchmarkQueryGraph(100)
+	view := graph.View(EdgeFilter{})
+
+	for id, values := range view.dominatorSet() {
+		if got, want := cap(values), len(values); got != want {
+			t.Fatalf("dominator list for block %d has capacity %d, want exact capacity %d", id, got, want)
+		}
 	}
 }
 

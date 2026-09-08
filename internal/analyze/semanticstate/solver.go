@@ -136,44 +136,70 @@ func (s *Solver[T]) Solve() (Result[T], error) {
 	return s.SolveContext(context.Background())
 }
 
+// Run executes a context-independent fixed point without materializing a
+// Result snapshot. The solver retains its reusable scratch states until the
+// next invocation, so callers that only need the analysis side effects and
+// statistics should prefer Run over Solve.
+func (s *Solver[T]) Run() (Stats, error) {
+	return s.RunContext(context.Background())
+}
+
+// RunContext runs all lanes to a finite fixed point without retaining an
+// immutable copy of every converged state. It checks cancellation before
+// queue operations, transfers, and edge propagation. On error, Stats is zero
+// and no partial result is published.
+func (s *Solver[T]) RunContext(ctx context.Context) (Stats, error) {
+	_, stats, err := s.solveContext(ctx, false)
+	if err != nil {
+		return Stats{}, err
+	}
+	return stats, nil
+}
+
 // SolveContext runs all lanes to a finite fixed point. It checks cancellation
 // before queue operations, transfers, and edge propagation. Cancellation never
 // returns a partial Result.
 func (s *Solver[T]) SolveContext(ctx context.Context) (Result[T], error) {
+	result, _, err := s.solveContext(ctx, true)
+	return result, err
+}
+
+func (s *Solver[T]) solveContext(ctx context.Context, materialize bool) (Result[T], Stats, error) {
 	if s == nil {
-		return Result[T]{}, fmt.Errorf("semanticstate: nil solver")
+		return Result[T]{}, Stats{}, fmt.Errorf("semanticstate: nil solver")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return Result[T]{}, err
+		return Result[T]{}, Stats{}, err
 	}
 	s.allocateStates()
 	entry := s.index.Entry()
 	for laneIndex, lane := range s.lanes {
 		if err := ctx.Err(); err != nil {
-			return Result[T]{}, err
+			return Result[T]{}, Stats{}, err
 		}
 		if lane.Initialize != nil {
 			if err := lane.Initialize(ctx, LaneOrdinal(laneIndex), &s.states[s.stateIndex(entry, LaneOrdinal(laneIndex))]); err != nil {
-				return Result[T]{}, err
+				return Result[T]{}, Stats{}, err
 			}
 		}
 		s.enqueue(WorkItem{Block: entry, Lane: LaneOrdinal(laneIndex)})
 	}
 	stats := Stats{}
 	var order []WorkItem
-	if s.RecordOrder {
+	recordOrder := materialize && s.RecordOrder
+	if recordOrder {
 		order = make([]WorkItem, 0, s.index.BlockCount()*len(s.lanes))
 	}
 	for len(s.queue) != 0 {
 		if err := ctx.Err(); err != nil {
-			return Result[T]{}, err
+			return Result[T]{}, Stats{}, err
 		}
 		item := heap.Pop(&s.queue).(WorkItem)
 		s.queued[s.stateIndex(item.Block, item.Lane)] = false
-		if s.RecordOrder {
+		if recordOrder {
 			order = append(order, item)
 		}
 		stats.Transfers++
@@ -183,13 +209,13 @@ func (s *Solver[T]) SolveContext(ctx context.Context) (Result[T], error) {
 		output.Reset()
 		if lane.Transfer != nil {
 			if err := lane.Transfer(ctx, item.Lane, item.Block, input.View(), output); err != nil {
-				return Result[T]{}, err
+				return Result[T]{}, Stats{}, err
 			}
 		} else {
 			output.CloneFrom(input.View(), s.lattice.Clone)
 		}
 		if err := ctx.Err(); err != nil {
-			return Result[T]{}, err
+			return Result[T]{}, Stats{}, err
 		}
 		inputView := input.View()
 		for _, edge := range s.index.outgoing[item.Block] {
@@ -204,7 +230,7 @@ func (s *Solver[T]) SolveContext(ctx context.Context) (Result[T], error) {
 		for edgeIndex, edge := range s.index.outgoing[item.Block] {
 			if edgeIndex&0xff == 0 {
 				if err := ctx.Err(); err != nil {
-					return Result[T]{}, err
+					return Result[T]{}, Stats{}, err
 				}
 			}
 			candidate := &s.edgeScratch[item.Lane]
@@ -216,14 +242,14 @@ func (s *Solver[T]) SolveContext(ctx context.Context) (Result[T], error) {
 			if lane.EdgeDecision != nil {
 				disposition, err := lane.EdgeDecision(ctx, item.Lane, edge, inputView, output.View(), candidate)
 				if err != nil {
-					return Result[T]{}, err
+					return Result[T]{}, Stats{}, err
 				}
 				if disposition == EdgeSuppress {
 					continue
 				}
 			} else if lane.Edge != nil {
 				if err := lane.Edge(ctx, item.Lane, edge, inputView, output.View(), candidate); err != nil {
-					return Result[T]{}, err
+					return Result[T]{}, Stats{}, err
 				}
 			}
 			stats.Joins++
@@ -237,12 +263,14 @@ func (s *Solver[T]) SolveContext(ctx context.Context) (Result[T], error) {
 		}
 	}
 	result := Result[T]{layout: s.layout, lanes: len(s.lanes), blocks: s.index.BlockCount(), order: order, stats: stats}
-	result.states = make([]State[T], len(s.states))
-	for i := range s.states {
-		result.states[i] = newState[T](s.layout)
-		result.states[i].CloneFrom(s.states[i].View(), s.lattice.Clone)
+	if materialize {
+		result.states = make([]State[T], len(s.states))
+		for i := range s.states {
+			result.states[i] = newState[T](s.layout)
+			result.states[i].CloneFrom(s.states[i].View(), s.lattice.Clone)
+		}
 	}
-	return result, nil
+	return result, stats, nil
 }
 
 func (s *Solver[T]) stateIndex(block BlockOrdinal, lane LaneOrdinal) int {

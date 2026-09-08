@@ -2699,7 +2699,7 @@ func TestObjectDirectCallSummaryUsesCallFileForDuplicateModules(t *testing.T) {
 		Resolution: procedureir.CallResolution{Status: procedureir.ResolutionAmbiguous},
 		Callee:     procedureir.Callee{BaseName: "createRemoteWorkbook"},
 	}
-	summary, ok := objectDirectCallSummary(sourceProcedure{Module: "stdTimer"}, call, map[string]objectProcedureSummary{
+	summaries := map[string]objectProcedureSummary{
 		"primary": {
 			File:           "src/stdTimer.cls",
 			Module:         "stdTimer",
@@ -2712,9 +2712,71 @@ func TestObjectDirectCallSummaryUsesCallFileForDuplicateModules(t *testing.T) {
 			QualifiedName:  "stdTimer.createRemoteWorkbook",
 			ReturnAssigned: false,
 		},
-	})
-	if !ok || !summary.ReturnAssigned {
-		t.Fatalf("same-file function summary = %+v, ok=%v; want assigned primary summary", summary, ok)
+	}
+	indexes := map[string]map[string][]string{
+		"scan":    nil,
+		"indexed": {objectReceiverSummaryIndexKey("stdTimer", "createRemoteWorkbook"): {"primary", "wip"}},
+	}
+	for name, index := range indexes {
+		t.Run(name, func(t *testing.T) {
+			summary, ok := objectDirectCallSummaryIndexed(sourceProcedure{Module: "stdTimer"}, call, summaries, index)
+			if !ok || !summary.ReturnAssigned {
+				t.Fatalf("same-file function summary = %+v, ok=%v; want assigned primary summary", summary, ok)
+			}
+		})
+	}
+}
+
+func TestRestrictObjectModuleVariablesKeepsTransitiveFields(t *testing.T) {
+	used := objectVariable{Scope: procedureir.ScopeModule, Name: "used"}
+	unused := objectVariable{Scope: procedureir.ScopeModule, Name: "unused"}
+	moduleDecls := map[string]sourceDeclaration{
+		"used":   {Name: "used", Object: true},
+		"unused": {Name: "unused", Object: true},
+	}
+	newPlan := func(name string, accesses []procedureir.VariableAccess, statements []procedureir.Statement) *objectProcedurePlan {
+		return &objectProcedurePlan{
+			key: name,
+			proc: sourceProcedure{
+				Module:     "M",
+				Name:       name,
+				Accesses:   newReadOnlySpan(accesses),
+				Statements: newReadOnlySpan(statements),
+			},
+			moduleDecls: moduleDecls,
+			vars: map[string]objectVariable{
+				used.key():   used,
+				unused.key(): unused,
+			},
+		}
+	}
+	callee := newPlan("callee", []procedureir.VariableAccess{{Name: "used", Scope: procedureir.ScopeModule, Mode: procedureir.AccessWrite}}, nil)
+	caller := newPlan("caller", nil, nil)
+	indexedReceiver := newPlan("indexed", nil, []procedureir.Statement{{Text: "value = used(index)"}})
+	unrelated := newPlan("unrelated", nil, nil)
+	analysis := &objectAnalysisContext{
+		plans: map[string]*objectProcedurePlan{
+			"callee":    callee,
+			"caller":    caller,
+			"indexed":   indexedReceiver,
+			"unrelated": unrelated,
+		},
+		entries:           map[string]map[string]bool{},
+		summaryDependents: map[string][]string{"callee": {"caller"}},
+	}
+
+	analysis.restrictObjectModuleVariables()
+
+	for _, plan := range []*objectProcedurePlan{callee, caller, indexedReceiver} {
+		if _, ok := plan.vars[used.key()]; !ok {
+			t.Errorf("%s lost the directly or transitively required field", plan.key)
+		}
+		if _, ok := plan.vars[unused.key()]; ok {
+			t.Errorf("%s retained an unrelated module field", plan.key)
+		}
+	}
+	if len(unrelated.vars) != 0 || len(analysis.entries["unrelated"]) != 0 {
+		t.Fatalf("unrelated procedure retained module state: vars=%v entry=%v", unrelated.vars, analysis.entries["unrelated"])
 	}
 }
 

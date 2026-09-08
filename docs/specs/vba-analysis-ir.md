@@ -464,6 +464,31 @@ module allocation, module-entry state, and ByRef-entry state all receive this
 same set. A procedure outside the set must not be scanned by an array
 interprocedural fixed point when its absence is proven.
 
+Module-array invalidation and lifecycle proofs use a narrower effect
+participant set. Direct whole-array assignment, `ReDim`, and `Erase` of a
+visible module array seed this set. Passing a visible module array to a
+relevant `ByRef` array parameter also seeds the caller and the resolved target
+when the target may mutate the argument. Candidate-bearing uncertain calls
+retain known project-local candidates; recovered or incomplete syntax that
+touches a module array remains a conservative seed. A module-array indexed
+read alone is not an effect seed.
+
+The effect closure follows resolved or candidate-bounded reverse callers only
+within the same module. It does not follow ordinary callee edges, so scalar helpers called by
+an effect procedure and read-only module-array procedures do not enter the
+specialized module-array fixed points unless they are same-module callers of a
+seed. A module with no dynamic module-array declaration skips the invalidation
+summary stage. A lookup miss for a nonparticipant has no effect and returns no
+invalidation summary; it does not rescan the module. A participant miss may
+compute the summary on demand for compatibility callers.
+
+This is a conservative ownership boundary, not a new array lattice. Unknown
+module-array mutation may keep an extra same-module caller in the effect set,
+but it cannot silently turn the specialized proof into a complete giant-module
+scan. The separate boundary keeps expensive invalidation work proportional to
+module-array effect participants while the general array closure continues to
+cover read/write diagnostics and array-shaped propagation.
+
 For resolved reverse callers, the planner permits one additional hop only when
 the target has complete facts and its module contains at most 512 procedures.
 This preserves short wrapper/helper chains while preventing a generic call hub
@@ -491,11 +516,22 @@ closure construction does not currently accept or check a context.
 fixed-point worklists remain deterministic.
 
 Participant telemetry is developer-only and additive:
-`array_participant_procedures` counts unique closure participants,
-`array_interprocedural_cfg_walks` counts started CFG walks in array summary or
-entry fixed points, and `array_worklist_revisits` counts post-initial
-participant evaluations. Existing local `array_cfg_walks` and candidate
-counters keep their prior meanings.
+`array_participant_procedures` and `array_local_participants` count the local
+fail-open participant closure, `array_interprocedural_participants` counts the
+bounded fixed-point closure, and `array_module_effect_participants` counts the
+dedicated module-array effect closure. `array_interprocedural_cfg_walks`
+counts started CFG walks in array summary or entry fixed points, and
+`array_worklist_revisits` counts post-initial participant evaluations.
+Module-array stages additionally report
+`array_module_invalidation_summaries`,
+`array_module_invalidation_cfg_walks`,
+`array_module_ready_guard_candidates`, and
+`array_module_ready_guard_cfg_walks`. The indexed fact lookups report
+`array_calls_by_line_index_builds`, `array_calls_by_line_index_hits`,
+`procedure_range_index_builds`, and `procedure_range_index_hits`. Existing
+local `array_cfg_walks` and candidate counters keep their prior meanings.
+All of these counters are stderr-only telemetry and never become normal CLI
+JSON, LSP, diagnostic, or public IR fields.
 
 ### Project semantic capabilities
 

@@ -170,6 +170,7 @@ func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 	analysis.buildObjectIndexes()
 	analysis.buildObjectCallReachability()
 	analysis.buildObjectDependencies()
+	analysis.restrictObjectModuleVariables()
 	analysis.prepareTerminalCallGraphs()
 	return analysis
 }
@@ -694,6 +695,9 @@ func objectInitialEntryState(plan *objectProcedurePlan) map[string]bool {
 	for name, declaration := range plan.moduleDecls {
 		if declaration.Object {
 			variableKey := (objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()
+			if _, tracked := plan.vars[variableKey]; !tracked {
+				continue
+			}
 			state[variableKey] = false
 			for _, typeName := range []string{"ListObject", "ListColumn"} {
 				state[objectTypeNameFactKey(variableKey, typeName)] = false
@@ -754,7 +758,7 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 					addSummaryDependency(summaryKey, callerKey)
 					continue
 				}
-				targets, ok := objectMemberFunctionTargets(caller.proc, expression.Text, caller.declarations, analysis.summaries, false)
+				targets, ok := objectMemberFunctionTargetsIndexed(caller.proc, expression.Text, caller.declarations, analysis.summaries, false, caller.receiverSummaryKeys)
 				if !ok {
 					continue
 				}
@@ -879,6 +883,91 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 	}
 }
 
+// restrictObjectModuleVariables keeps each procedure's flow lattice scoped to
+// module fields that can affect its own summary. Direct module-object accesses
+// seed the set; same-module summary dependencies carry callee fields back to
+// callers so transitive initialization and invalidation remain visible.
+// Recovered or otherwise incomplete procedures retain every module object.
+func (analysis *objectAnalysisContext) restrictObjectModuleVariables() {
+	needed := make(map[string]map[string]bool, len(analysis.plans))
+	for key, plan := range analysis.plans {
+		fields := map[string]bool{}
+		if plan == nil {
+			needed[key] = fields
+			continue
+		}
+		if plan.unknownFlow {
+			for variableKey, variable := range plan.vars {
+				if variable.Scope == procedureir.ScopeModule {
+					fields[variableKey] = true
+				}
+			}
+		} else {
+			for access := range plan.proc.Accesses.All() {
+				if access.Scope != procedureir.ScopeModule {
+					continue
+				}
+				declaration, ok := plan.moduleDecls[strings.ToLower(cleanIdentifier(access.Name))]
+				if !ok || !declaration.Object {
+					continue
+				}
+				fields[(objectVariable{Scope: procedureir.ScopeModule, Name: declaration.Name}).key()] = true
+			}
+			// Indexed/default-member receivers are not guaranteed to have a
+			// VariableAccess entry. Preserve a conservative textual fallback so
+			// pruning cannot hide a dereference such as moduleCollection(index).
+			for variableKey, variable := range plan.vars {
+				if variable.Scope != procedureir.ScopeModule || fields[variableKey] {
+					continue
+				}
+				for statement := range plan.proc.Statements.All() {
+					if containsVBAIdentifier(statement.Text, variable.Name) {
+						fields[variableKey] = true
+						break
+					}
+				}
+			}
+		}
+		needed[key] = fields
+	}
+
+	changed := true
+	for changed {
+		changed = false
+		for calleeKey, dependents := range analysis.summaryDependents {
+			callee := analysis.plans[calleeKey]
+			if callee == nil {
+				continue
+			}
+			for _, dependentKey := range dependents {
+				dependent := analysis.plans[dependentKey]
+				if dependent == nil || !strings.EqualFold(dependent.proc.Module, callee.proc.Module) {
+					continue
+				}
+				for fieldKey := range needed[calleeKey] {
+					if !needed[dependentKey][fieldKey] {
+						needed[dependentKey][fieldKey] = true
+						changed = true
+					}
+				}
+			}
+		}
+	}
+
+	for key, plan := range analysis.plans {
+		if plan == nil {
+			continue
+		}
+		for variableKey, variable := range plan.vars {
+			if variable.Scope == procedureir.ScopeModule && !needed[key][variableKey] {
+				delete(plan.vars, variableKey)
+			}
+		}
+		plan.flowContext.vars = plan.vars
+		analysis.entries[key] = objectInitialEntryState(plan)
+	}
+}
+
 // prepareTerminalCallGraphs removes normal-flow continuations after
 // project-local helpers that cannot return normally.  A helper such as
 // RaiseContractError is otherwise treated as an ordinary call, so the
@@ -990,14 +1079,14 @@ func (analysis *objectAnalysisContext) objectReceiverCalleeKeys(caller *objectPr
 		return nil
 	}
 	text := strings.TrimSpace(*call.Callee.Receiver) + "." + strings.TrimSpace(call.Callee.Member)
-	targets, ok := objectMemberFunctionTargets(caller.proc, text, caller.declarations, analysis.summaries, false)
+	targets, ok := objectMemberFunctionTargetsIndexed(caller.proc, text, caller.declarations, analysis.summaries, false, caller.receiverSummaryKeys)
 	if !ok {
 		return nil
 	}
 	keys := make([]string, 0, len(targets))
 	for targetIndex, target := range targets {
 		if targetIndex == len(targets)-1 {
-			if summary, found := objectMemberFunctionSummary(target, analysis.summaries); found && objectSummaryHasCustomReturn(summary) {
+			if summary, found := objectMemberFunctionSummaryIndexed(target, analysis.summaries, caller.receiverSummaryKeys); found && objectSummaryHasCustomReturn(summary) {
 				continue
 			}
 		}
@@ -1184,6 +1273,9 @@ func (analysis *objectAnalysisContext) buildSummaries() map[string]objectProcedu
 					continue
 				}
 				variable := objectVariable{Scope: procedureir.ScopeModule, Name: declaration.Name}
+				if _, tracked := plan.vars[variable.key()]; !tracked {
+					continue
+				}
 				updated.ModuleAssigned[strings.ToLower(name)] = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
 				updated.ModuleWritten[strings.ToLower(name)] = objectProcedureWritesModuleFieldIndexed(plan.proc, declaration.Name, plan.flowContext.facts)
 			}
@@ -1347,7 +1439,7 @@ func objectActualFactoryProgID(caller *objectProcedurePlan, call procedureir.Cal
 			return "vba.collection"
 		}
 	}
-	return strings.ToLower(objectReceiverFactoryProgID(caller.proc, name, call.StatementID, summaries))
+	return strings.ToLower(objectReceiverFactoryProgIDIndexed(caller.proc, name, call.StatementID, summaries, caller.receiverSummaryKeys))
 }
 
 func (analysis *objectAnalysisContext) buildEntryStates() map[string]map[string]bool {
@@ -1441,11 +1533,14 @@ func (analysis *objectAnalysisContext) buildEntryStates() map[string]map[string]
 					if !declaration.Object {
 						continue
 					}
+					fieldKey := (objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()
+					if _, tracked := callee.vars[fieldKey]; !tracked {
+						continue
+					}
 					binding, scope, ok := objectDeclarationBinding(name, caller.declarations)
 					if !ok || scope != procedureir.ScopeModule || !binding.Object {
 						continue
 					}
-					fieldKey := (objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()
 					contributions[fieldKey] = blockState[fieldKey]
 					for _, typeName := range []string{"ListObject", "ListColumn"} {
 						contributions[objectTypeNameFactKey(fieldKey, typeName)] = blockState[objectTypeNameFactKey(fieldKey, typeName)]
@@ -1479,13 +1574,13 @@ func (analysis *objectAnalysisContext) buildEntryStates() map[string]map[string]
 func (analysis *objectAnalysisContext) buildObjectMemberEntryContracts() {
 	for _, plan := range analysis.plans {
 		if plan != nil {
-			plan.flowContext.memberContracts = map[string]bool{}
+			plan.flowContext.memberContracts = nil
 		}
 	}
 	callerFlows := map[string]objectFlowResult{}
 	for calleeKey, incoming := range analysis.entryIncoming {
 		callee := analysis.plans[calleeKey]
-		if callee == nil || len(incoming) == 0 {
+		if callee == nil || len(incoming) == 0 || !objectProcedureHasCollectionParameter(callee.proc) {
 			continue
 		}
 		var common map[string]bool
@@ -1515,6 +1610,15 @@ func (analysis *objectAnalysisContext) buildObjectMemberEntryContracts() {
 			callee.flowContext.memberContracts = common
 		}
 	}
+}
+
+func objectProcedureHasCollectionParameter(proc sourceProcedure) bool {
+	for _, parameter := range proc.Params.AllIndexed() {
+		if dcKindFromType(parameter.Type) == dcCollection {
+			return true
+		}
+	}
+	return false
 }
 
 func (analysis *objectAnalysisContext) objectMemberEntryContractsForCall(entryCall *objectEntryCall, flow objectFlowResult) map[string]bool {
@@ -2582,7 +2686,7 @@ func objectFlowExceptionalTerminalState(graph vbacfg.CFGView, proc sourceProcedu
 	state := cloneObjectState(input)
 	flowContext.facts.forEachCallForStatement(block.Statement.ID, func(call procedureir.CallSite) {
 		if flowContext.terminalCalls[call.ID] {
-			applyObjectCallEffects(proc, call, state, vars, declarations, flowContext.facts, summaries)
+			applyObjectCallEffectsIndexed(proc, call, state, vars, declarations, flowContext, summaries)
 		}
 	})
 	return state
@@ -3194,7 +3298,7 @@ func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Bloc
 	callSeen := false
 	flowContext.facts.forEachCallForStatement(statement.ID, func(call procedureir.CallSite) {
 		callSeen = true
-		applyObjectCallEffects(proc, call, state, vars, declarations, flowContext.facts, summaries)
+		applyObjectCallEffectsIndexed(proc, call, state, vars, declarations, flowContext, summaries)
 	})
 	// The IR represents implicit call statements such as `Helper obj` as an
 	// assignment-shaped statement. Their argument effects were applied above;
@@ -3461,11 +3565,11 @@ func objectMemberFunctionAssigned(proc sourceProcedure, text string, state map[s
 	if !rootAssigned && !objectMemberChainContractAssigned(proc, parts, statementID, declarations, flowContext.memberContracts, 2) {
 		return false
 	}
-	targets, ok := objectMemberFunctionTargetsWithContracts(proc, text, declarations, summaries, true, statementID, flowContext.memberContracts)
+	targets, ok := objectMemberFunctionTargetsWithContractsIndexed(proc, text, declarations, summaries, true, statementID, flowContext.memberContracts, flowContext.receiverSummaryKeys)
 	if !ok {
 		return false
 	}
-	match, found := objectMemberFunctionSummary(targets[len(targets)-1], summaries)
+	match, found := objectMemberFunctionSummaryIndexed(targets[len(targets)-1], summaries, flowContext.receiverSummaryKeys)
 	return found && !objectSummaryHasCustomReturn(match) && match.ReturnAssigned
 }
 
@@ -3505,10 +3609,14 @@ type objectMemberFunctionTargetInfo struct {
 }
 
 func objectMemberFunctionTargets(proc sourceProcedure, text string, declarations declarationScope, summaries map[string]objectProcedureSummary, requireAssigned bool) ([]objectMemberFunctionTargetInfo, bool) {
-	return objectMemberFunctionTargetsWithContracts(proc, text, declarations, summaries, requireAssigned, 0, nil)
+	return objectMemberFunctionTargetsIndexed(proc, text, declarations, summaries, requireAssigned, nil)
 }
 
-func objectMemberFunctionTargetsWithContracts(proc sourceProcedure, text string, declarations declarationScope, summaries map[string]objectProcedureSummary, requireAssigned bool, statementID int, memberContracts map[string]bool) ([]objectMemberFunctionTargetInfo, bool) {
+func objectMemberFunctionTargetsIndexed(proc sourceProcedure, text string, declarations declarationScope, summaries map[string]objectProcedureSummary, requireAssigned bool, receiverSummaryKeys map[string][]string) ([]objectMemberFunctionTargetInfo, bool) {
+	return objectMemberFunctionTargetsWithContractsIndexed(proc, text, declarations, summaries, requireAssigned, 0, nil, receiverSummaryKeys)
+}
+
+func objectMemberFunctionTargetsWithContractsIndexed(proc sourceProcedure, text string, declarations declarationScope, summaries map[string]objectProcedureSummary, requireAssigned bool, statementID int, memberContracts map[string]bool, receiverSummaryKeys map[string][]string) ([]objectMemberFunctionTargetInfo, bool) {
 	parts := objectMemberChainParts(text)
 	if len(parts) < 2 {
 		return nil, false
@@ -3537,9 +3645,9 @@ func objectMemberFunctionTargetsWithContracts(proc sourceProcedure, text string,
 		if index == len(parts)-2 {
 			break
 		}
-		intermediate, ok := objectMemberFunctionSummary(target, summaries)
+		intermediate, ok := objectMemberFunctionSummaryIndexed(target, summaries, receiverSummaryKeys)
 		if !ok || strings.TrimSpace(intermediate.ReturnType) == "" {
-			if fallback, fallbackOK := objectLegacyBuiltinMemberFunctionTarget(proc, rootTypeName, parts, summaries); fallbackOK {
+			if fallback, fallbackOK := objectLegacyBuiltinMemberFunctionTargetIndexed(proc, rootTypeName, parts, summaries, receiverSummaryKeys); fallbackOK {
 				return []objectMemberFunctionTargetInfo{fallback}, true
 			}
 			return nil, false
@@ -3554,13 +3662,13 @@ func objectMemberFunctionTargetsWithContracts(proc sourceProcedure, text string,
 	}
 	if len(parts) > 2 && !isObjectType(rootTypeName) &&
 		(strings.EqualFold(objectTypeIdentity(rootTypeName), objectTypeIdentity(proc.Module)) || objectClassOrFormProcedure(proc)) {
-		match, found := objectMemberFunctionSummary(targets[len(targets)-1], summaries)
+		match, found := objectMemberFunctionSummaryIndexed(targets[len(targets)-1], summaries, receiverSummaryKeys)
 		if !found || objectSummaryHasCustomReturn(match) {
 			return nil, false
 		}
 	}
 	if len(parts) == 2 && !isObjectType(typeName) && strings.EqualFold(objectTypeIdentity(typeName), objectTypeIdentity(proc.Module)) {
-		if summary, found := objectMemberFunctionSummary(targets[0], summaries); found && objectSummaryHasCustomReturn(summary) {
+		if summary, found := objectMemberFunctionSummaryIndexed(targets[0], summaries, receiverSummaryKeys); found && objectSummaryHasCustomReturn(summary) {
 			return nil, false
 		}
 	}
@@ -3578,12 +3686,12 @@ func objectMemberChainContractAssigned(proc sourceProcedure, parts []string, sta
 	return memberContracts[objectCollectionMemberContractKey(parameterName, itemIndex, parts[1:memberCount])]
 }
 
-func objectLegacyBuiltinMemberFunctionTarget(proc sourceProcedure, rootTypeName string, parts []string, summaries map[string]objectProcedureSummary) (objectMemberFunctionTargetInfo, bool) {
+func objectLegacyBuiltinMemberFunctionTargetIndexed(proc sourceProcedure, rootTypeName string, parts []string, summaries map[string]objectProcedureSummary, receiverSummaryKeys map[string][]string) (objectMemberFunctionTargetInfo, bool) {
 	if len(parts) < 3 || isObjectType(rootTypeName) || !strings.EqualFold(objectTypeIdentity(rootTypeName), objectTypeIdentity(proc.Module)) {
 		return objectMemberFunctionTargetInfo{}, false
 	}
 	target := objectMemberFunctionTargetInfo{typeName: rootTypeName, member: parts[len(parts)-1]}
-	match, found := objectMemberFunctionSummary(target, summaries)
+	match, found := objectMemberFunctionSummaryIndexed(target, summaries, receiverSummaryKeys)
 	if !found || objectSummaryHasCustomReturn(match) || !match.ReturnAssigned {
 		return objectMemberFunctionTargetInfo{}, false
 	}
@@ -3606,6 +3714,27 @@ func objectClassOrFormProcedure(proc sourceProcedure) bool {
 }
 
 func objectMemberFunctionSummary(target objectMemberFunctionTargetInfo, summaries map[string]objectProcedureSummary) (objectProcedureSummary, bool) {
+	return objectMemberFunctionSummaryIndexed(target, summaries, nil)
+}
+
+func objectMemberFunctionSummaryIndexed(target objectMemberFunctionTargetInfo, summaries map[string]objectProcedureSummary, receiverSummaryKeys map[string][]string) (objectProcedureSummary, bool) {
+	if receiverSummaryKeys != nil {
+		keys := receiverSummaryKeys[objectReceiverSummaryIndexKey(target.typeName, target.member)]
+		var match objectProcedureSummary
+		found := false
+		for _, key := range keys {
+			summary, ok := summaries[key]
+			if !ok || !objectSummaryReturnsObject(summary) {
+				continue
+			}
+			if found {
+				return objectProcedureSummary{}, false
+			}
+			match = summary
+			found = true
+		}
+		return match, found
+	}
 	var match objectProcedureSummary
 	found := false
 	for _, summary := range summaries {
@@ -3782,11 +3911,11 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 	if objectDictionaryItemAssigned(proc, statementID, call, state, declarations) {
 		return true
 	}
-	if objectLateBoundFactoryMemberAssigned(proc, call, summaries) {
+	if objectLateBoundFactoryMemberAssigned(proc, call, summaries, flowContext.receiverSummaryKeys) {
 		return true
 	}
 	if call.Callee.Receiver == nil {
-		if summary, ok := objectDirectCallSummary(proc, call, summaries); ok {
+		if summary, ok := objectDirectCallSummaryIndexed(proc, call, summaries, flowContext.receiverSummaryKeys); ok {
 			return objectCallSummaryReturnsAssigned(proc, call, state, flowContext, declarations, summaries, summary)
 		}
 	}
@@ -4164,6 +4293,9 @@ func objectModuleProgIDs(plan *objectProcedurePlan, summaries map[string]objectP
 		if !declaration.Object {
 			continue
 		}
+		if _, tracked := plan.vars[(objectVariable{Scope: procedureir.ScopeModule, Name: declaration.Name}).key()]; !tracked {
+			continue
+		}
 		candidate := ""
 		for statement := range plan.proc.Statements.All() {
 			if statement.Kind != procedureir.StatementSet || statement.Target == nil || statement.Value == nil || !strings.EqualFold(cleanIdentifier(statement.Target.Text), cleanIdentifier(declaration.Name)) {
@@ -4252,7 +4384,7 @@ func objectCallReturnProgIDs(plan *objectProcedurePlan, valueText string, statem
 		if call.StatementID != statementID || call.Callee.Receiver != nil || !strings.EqualFold(cleanIdentifier(call.Callee.BaseName), name) {
 			continue
 		}
-		summary, ok := objectDirectCallSummary(plan.proc, call, summaries)
+		summary, ok := objectDirectCallSummaryIndexed(plan.proc, call, summaries, plan.receiverSummaryKeys)
 		if !ok || summary.ReturnProgID == "" {
 			return nil
 		}
@@ -4513,12 +4645,12 @@ func objectDictionaryItemGuarded(proc sourceProcedure, statementID int, receiver
 	return false
 }
 
-func objectLateBoundFactoryMemberAssigned(proc sourceProcedure, call procedureir.CallSite, summaries map[string]objectProcedureSummary) bool {
+func objectLateBoundFactoryMemberAssigned(proc sourceProcedure, call procedureir.CallSite, summaries map[string]objectProcedureSummary, receiverSummaryKeys map[string][]string) bool {
 	receiver := objectCallWithReceiverName(proc, call)
 	if receiver == "" || strings.Contains(receiver, ".") {
 		return false
 	}
-	progid := objectReceiverFactoryProgID(proc, receiver, call.StatementID, summaries)
+	progid := objectReceiverFactoryProgIDIndexed(proc, receiver, call.StatementID, summaries, receiverSummaryKeys)
 	if !strings.EqualFold(progid, "scripting.filesystemobject") {
 		return false
 	}
@@ -4608,7 +4740,7 @@ func objectBlockCanReach(graph vbacfg.CFGView, from, target vbacfg.BlockID) bool
 	return false
 }
 
-func objectReceiverFactoryProgID(proc sourceProcedure, receiver string, statementID int, summaries map[string]objectProcedureSummary) string {
+func objectReceiverFactoryProgIDIndexed(proc sourceProcedure, receiver string, statementID int, summaries map[string]objectProcedureSummary, receiverSummaryKeys map[string][]string) string {
 	if direct := objectCreateObjectReceiverProgID(proc, receiver, statementID); direct != "" {
 		return direct
 	}
@@ -4658,7 +4790,7 @@ func objectReceiverFactoryProgID(proc sourceProcedure, receiver string, statemen
 			if call.StatementID != statement.ID || call.Callee.Receiver != nil {
 				continue
 			}
-			summary, summaryOK := objectDirectCallSummary(proc, call, summaries)
+			summary, summaryOK := objectDirectCallSummaryIndexed(proc, call, summaries, receiverSummaryKeys)
 			if summaryOK && summary.ReturnProgID != "" {
 				if current != "" && !strings.EqualFold(current, summary.ReturnProgID) {
 					return ""
@@ -4677,12 +4809,12 @@ func objectReceiverFactoryProgID(proc sourceProcedure, receiver string, statemen
 	return progid
 }
 
-func objectDirectCallSummary(proc sourceProcedure, call procedureir.CallSite, summaries map[string]objectProcedureSummary) (objectProcedureSummary, bool) {
+func objectDirectCallSummaryIndexed(proc sourceProcedure, call procedureir.CallSite, summaries map[string]objectProcedureSummary, receiverSummaryKeys map[string][]string) (objectProcedureSummary, bool) {
 	if (call.Resolution.Status != procedureir.ResolutionMatched && !objectResolutionAllowsDirectSummary(call.Resolution.Status)) ||
 		call.Callee.Receiver != nil || strings.TrimSpace(call.Callee.BaseName) == "" {
 		return objectProcedureSummary{}, false
 	}
-	matches := objectSummaryCandidatesForDirectCall(proc.Module, call.Callee.BaseName, call.File, summaries)
+	matches := objectSummaryCandidatesForDirectCallIndexed(proc.Module, call.Callee.BaseName, call.File, summaries, receiverSummaryKeys)
 	if len(matches) == 0 {
 		return objectProcedureSummary{}, false
 	}
@@ -4699,17 +4831,25 @@ func objectDirectCallSummary(proc sourceProcedure, call procedureir.CallSite, su
 	return objectProcedureSummary{ReturnAssigned: true, ReturnParameter: -1, ReturnCollectionItemParameter: -1}, true
 }
 
-func objectSummaryCandidatesForDirectCall(module, name, callFile string, summaries map[string]objectProcedureSummary) []objectProcedureSummary {
+func objectSummaryCandidatesForDirectCallIndexed(module, name, callFile string, summaries map[string]objectProcedureSummary, receiverSummaryKeys map[string][]string) []objectProcedureSummary {
 	name = strings.TrimSpace(name)
 	if strings.TrimSpace(module) == "" || name == "" {
 		return nil
 	}
 	allMatches := make([]objectProcedureSummary, 0, 1)
-	for _, summary := range summaries {
-		if !strings.EqualFold(strings.TrimSpace(summary.Module), strings.TrimSpace(module)) || !strings.EqualFold(lastName(summary.QualifiedName), name) {
-			continue
+	if receiverSummaryKeys != nil {
+		for _, key := range receiverSummaryKeys[objectReceiverSummaryIndexKey(module, name)] {
+			if summary, ok := summaries[key]; ok {
+				allMatches = append(allMatches, summary)
+			}
 		}
-		allMatches = append(allMatches, summary)
+	} else {
+		for _, summary := range summaries {
+			if !strings.EqualFold(strings.TrimSpace(summary.Module), strings.TrimSpace(module)) || !strings.EqualFold(lastName(summary.QualifiedName), name) {
+				continue
+			}
+			allMatches = append(allMatches, summary)
+		}
 	}
 	if len(allMatches) == 0 {
 		return nil
@@ -4767,7 +4907,7 @@ func objectReceiverReturnSummaryIndexed(proc sourceProcedure, call procedureir.C
 		return objectProcedureSummary{}, false
 	}
 	text := strings.TrimSpace(*call.Callee.Receiver) + "." + strings.TrimSpace(call.Callee.Member)
-	targets, ok := objectMemberFunctionTargets(proc, text, declarations, summaries, true)
+	targets, ok := objectMemberFunctionTargetsIndexed(proc, text, declarations, summaries, true, receiverSummaryKeys)
 	if !ok {
 		return objectProcedureSummary{}, false
 	}
@@ -5044,15 +5184,19 @@ func excelObjectFactoryMember(member string) bool {
 }
 
 func applyObjectCallEffects(proc sourceProcedure, call procedureir.CallSite, state map[string]bool, vars map[string]objectVariable, declarations declarationScope, facts *procedureAnalysisFacts, summaries map[string]objectProcedureSummary) {
-	if objectExternalCallPreservesObjectArguments(proc, call, summaries) {
+	applyObjectCallEffectsIndexed(proc, call, state, vars, declarations, objectFlowContext{facts: facts}, summaries)
+}
+
+func applyObjectCallEffectsIndexed(proc sourceProcedure, call procedureir.CallSite, state map[string]bool, vars map[string]objectVariable, declarations declarationScope, flowContext objectFlowContext, summaries map[string]objectProcedureSummary) {
+	if objectExternalCallPreservesObjectArguments(proc, call, summaries, flowContext.receiverSummaryKeys) {
 		// ADODB.Stream.CopyTo consumes its destination stream but does not
 		// replace the caller's object variable.  Handle the late-bound With
 		// form before the unresolved-expression guard below, because the IR may
 		// retain the implicit receiver as an expression call.
 		return
 	}
-	actuals := objectCallActuals(call, facts)
-	if objectAddCallPreservesContainerArguments(proc, call, actuals, declarations, summaries) || objectExternalCallPreservesObjectArguments(proc, call, summaries) {
+	actuals := objectCallActuals(call, flowContext.facts)
+	if objectAddCallPreservesContainerArguments(proc, call, actuals, declarations, summaries, flowContext.receiverSummaryKeys) || objectExternalCallPreservesObjectArguments(proc, call, summaries, flowContext.receiverSummaryKeys) {
 		// Collection/Dictionary Add accepts its item by value; the built-in
 		// operation cannot replace a container argument with Nothing.  A late-
 		// bound Object is included here because this is the normal VBA shape for
@@ -5075,7 +5219,7 @@ func applyObjectCallEffects(proc sourceProcedure, call procedureir.CallSite, sta
 		if strings.TrimSpace(name) == "" {
 			name = call.Callee.Member
 		}
-		matches := objectSummaryCandidatesForDirectCall(call.Module, name, call.File, summaries)
+		matches := objectSummaryCandidatesForDirectCallIndexed(call.Module, name, call.File, summaries, flowContext.receiverSummaryKeys)
 		if len(matches) != 1 {
 			matches = nil
 		}
@@ -5224,7 +5368,7 @@ func objectUnresolvedExpressionCallReadOnly(call procedureir.CallSite) bool {
 	}
 }
 
-func objectAddCallPreservesContainerArguments(proc sourceProcedure, call procedureir.CallSite, actuals []objectCallActual, declarations declarationScope, summaries map[string]objectProcedureSummary) bool {
+func objectAddCallPreservesContainerArguments(proc sourceProcedure, call procedureir.CallSite, actuals []objectCallActual, declarations declarationScope, summaries map[string]objectProcedureSummary, receiverSummaryKeys map[string][]string) bool {
 	if call.Callee.Receiver == nil || !strings.EqualFold(cleanIdentifier(call.Callee.Member), "add") {
 		return false
 	}
@@ -5239,7 +5383,7 @@ func objectAddCallPreservesContainerArguments(proc sourceProcedure, call procedu
 	receiverKind := dcKindFromType(receiverDeclaration.Type)
 	receiverIsContainer := receiverKind == dcCollection || receiverKind == dcDictionary
 	if !receiverIsContainer && strings.EqualFold(cleanIdentifier(receiverDeclaration.Type), "object") {
-		receiverProgID := objectReceiverFactoryProgID(proc, receiver, call.StatementID, summaries)
+		receiverProgID := objectReceiverFactoryProgIDIndexed(proc, receiver, call.StatementID, summaries, receiverSummaryKeys)
 		receiverIsContainer = strings.EqualFold(receiverProgID, "scripting.dictionary")
 		if !receiverIsContainer && receiverDeclaration.Parameter {
 			if summary, ok := objectSummaryForProcedure(proc, summaries); ok {
@@ -5270,7 +5414,7 @@ func objectAddCallPreservesContainerArguments(proc sourceProcedure, call procedu
 	return objectArgument
 }
 
-func objectExternalCallPreservesObjectArguments(proc sourceProcedure, call procedureir.CallSite, summaries map[string]objectProcedureSummary) bool {
+func objectExternalCallPreservesObjectArguments(proc sourceProcedure, call procedureir.CallSite, summaries map[string]objectProcedureSummary, receiverSummaryKeys map[string][]string) bool {
 	// This Windows API declaration takes the object as ByVal.  The call can
 	// inspect the COM interface, but it cannot clear the caller's object
 	// reference, so preserve the definite-assignment state across it.
@@ -5284,7 +5428,7 @@ func objectExternalCallPreservesObjectArguments(proc sourceProcedure, call proce
 	if receiver == "" || strings.Contains(receiver, ".") {
 		return false
 	}
-	progid := objectReceiverFactoryProgID(proc, receiver, call.StatementID, summaries)
+	progid := objectReceiverFactoryProgIDIndexed(proc, receiver, call.StatementID, summaries, receiverSummaryKeys)
 	return strings.EqualFold(progid, "adodb.stream")
 }
 

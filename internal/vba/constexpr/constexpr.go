@@ -57,6 +57,21 @@ type Environment interface {
 // Values adapts a map to Environment. Keys are matched case-insensitively.
 type Values map[string]Value
 
+// IntegerValues adapts the already-normalized integer constant tables used by
+// range and loop analysis without allocating a temporary Values map for every
+// expression. Callers must keep keys case-insensitive and trim-free, as
+// produced by the analyzer's constant table builders.
+type IntegerValues map[string]int
+
+// Resolve implements Environment for an integer constant table.
+func (v IntegerValues) Resolve(name string) (Value, bool) {
+	value, ok := v[strings.ToLower(strings.TrimSpace(name))]
+	if !ok {
+		return Value{}, false
+	}
+	return Value{Kind: ValueLongLong, Integer: int64(value)}, true
+}
+
 // NewValues normalizes a value map once for deterministic, constant-time
 // case-insensitive lookups. When declarations differ only by case or
 // surrounding whitespace, the lexicographically smallest spelling wins.
@@ -132,7 +147,18 @@ func EvaluateInteger(expression string, constants map[string]int) Result {
 		// literals while the final int projection still enforces its own width.
 		values[name] = Value{Kind: ValueLongLong, Integer: int64(value)}
 	}
-	result := Evaluate(expression, NewValues(values))
+	return evaluateIntegerResult(Evaluate(expression, NewValues(values)))
+}
+
+// EvaluateIntegerEnvironment evaluates an integer expression against an
+// immutable environment and applies the historical integral projection. It
+// is useful when a caller already owns a normalized constant environment and
+// must evaluate many expressions without rebuilding a Values map.
+func EvaluateIntegerEnvironment(expression string, env Environment) Result {
+	return evaluateIntegerResult(Evaluate(expression, env))
+}
+
+func evaluateIntegerResult(result Result) Result {
 	if result.Kind != Known {
 		return result
 	}

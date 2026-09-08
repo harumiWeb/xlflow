@@ -174,6 +174,67 @@ func TestProcedureAnalysisFactsPreservesInterleavedStatementGroups(t *testing.T)
 	}
 }
 
+func TestProcedureAnalysisFactsCallsAtLineExcludesRaiseEventAndPreservesIROrder(t *testing.T) {
+	calls := []procedureir.CallSite{
+		{ID: 1, Range: vbaast.Range{StartLine: 4}},
+		{ID: 2, IsRaiseEvent: true, Range: vbaast.Range{StartLine: 4}},
+		{ID: 3, Range: vbaast.Range{StartLine: 5}},
+		{ID: 4, Range: vbaast.Range{StartLine: 4}},
+		{ID: 5, Range: vbaast.Range{StartLine: 4}},
+	}
+	facts := newProcedureAnalysisFacts(nil, nil, calls, nil)
+
+	got := facts.CallsAtLine(4)
+	if len(got) != 3 || got[0].ID != 1 || got[1].ID != 4 || got[2].ID != 5 {
+		t.Fatalf("calls at line 4 = %#v, want ordinary calls [1 4 5]", got)
+	}
+	if got := facts.CallsAtLine(6); got != nil {
+		t.Fatalf("calls at missing line = %#v, want nil", got)
+	}
+
+	count := 0
+	facts.forEachCallAtLine(4, func(call procedureir.CallSite) {
+		count++
+	})
+	if count != 3 {
+		t.Fatalf("callback visited %d calls, want 3", count)
+	}
+	allocs := testing.AllocsPerRun(1000, func() {
+		facts.forEachCallAtLine(4, consumeCallSite)
+	})
+	if allocs != 0 {
+		t.Fatalf("indexed call callback allocations = %v, want zero", allocs)
+	}
+}
+
+func TestArrayCallsAtLineFallsBackForPartialFacts(t *testing.T) {
+	calls := []procedureir.CallSite{
+		{ID: 1, Range: vbaast.Range{StartLine: 4}, Callee: procedureir.Callee{BaseName: "First"}},
+		{ID: 2, Range: vbaast.Range{StartLine: 4}, Callee: procedureir.Callee{BaseName: "Second"}},
+	}
+	proc := sourceProcedure{Facts: &procedureAnalysisFacts{}, Calls: newReadOnlySpan(calls)}
+	got := arrayCallsAtLine(proc, 4)
+	if len(got) != 2 || got[0].ID != 1 || got[1].ID != 2 {
+		t.Fatalf("partial facts fallback = %#v, want raw calls in IR order", got)
+	}
+}
+
+func TestRecordArrayIndexBuildsRequiresBuiltCallLineIndex(t *testing.T) {
+	calls := []procedureir.CallSite{{ID: 1, Range: vbaast.Range{StartLine: 4}}}
+	builtFacts := newProcedureAnalysisFacts(nil, nil, calls, nil)
+	file := parsedFile{ModuleFacts: &moduleAnalysisFacts{}, Procedures: []sourceProcedure{
+		{Facts: &procedureAnalysisFacts{}, Calls: newReadOnlySpan(calls)},
+		{Facts: builtFacts, Calls: newReadOnlySpan(calls)},
+		{Calls: newReadOnlySpan(calls)},
+	}}
+	stats := &arrayInterproceduralStats{}
+	recordArrayIndexBuilds([]parsedFile{file}, stats)
+	_, _, _, _, callLineBuilds, _, _, _ := stats.moduleSnapshot()
+	if callLineBuilds != 1 {
+		t.Fatalf("call-line index builds = %d, want only the built index", callLineBuilds)
+	}
+}
+
 func TestProcedureAnalysisFactsMemberExpressionsPreserveRecoveryAndFallback(t *testing.T) {
 	statements := []procedureir.Statement{{ID: 10, ExpressionIDs: []int{1}}}
 	expressions := []procedureir.Expression{

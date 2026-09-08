@@ -22,7 +22,7 @@ automation needs the complete metadata contract.
   "status": "ok",
   "command": "rules",
   "rules": {
-    "schema_version": 1,
+    "schema_version": 2,
     "items": [
       {
         "id": "VB001",
