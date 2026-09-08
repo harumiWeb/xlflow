@@ -9766,7 +9766,9 @@ End Function
 
 Public Sub Run()
   On Error Resume Next
-  Dim values As Variant: values = MakeArray()
+  Dim values As Variant
+  values = Empty
+  values = MakeArray()
   Debug.Print UBound(values)
   On Error GoTo 0
   Dim safe As Variant: safe = MakeArray()
@@ -9779,8 +9781,109 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA227")
-	if len(got) != 1 || got[0].Procedure != "Run" || got[0].Line != 9 {
+	if len(got) != 1 || got[0].Procedure != "Run" || got[0].Line != 11 {
 		t.Fatalf("a failed array-return assignment under Resume Next must keep the later bounds query unsafe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PreservesResumeNextAcrossBranchForArrayReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MakeArray() As Variant
+  MakeArray = Array(1)
+End Function
+
+Public Sub Run(ByVal useResume As Boolean)
+  Dim values As Variant
+  values = Empty
+  If useResume Then
+    On Error Resume Next
+  Else
+    On Error GoTo 0
+  End If
+  values = MakeArray()
+  On Error GoTo 0
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Run" || got[0].Line != 16 {
+		t.Fatalf("a Resume Next path through a branch must remain visible after the join: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsExistingArrayAfterResumeNextArrayReturnFailure(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MakeArray() As Variant
+  MakeArray = Array(1)
+End Function
+
+Public Sub Run()
+  Dim values As Variant
+  values = Array(1)
+  On Error Resume Next
+  values = MakeArray()
+  On Error GoTo 0
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a failed Resume Next assignment must not discard an already allocated array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227SuccessfulBoundsClearResumeNextFailure(t *testing.T) {
+	t.Parallel()
+	state := arrayFlowState{
+		"values": {
+			kind:             arrayUnknown,
+			knownArray:       true,
+			mayBeUnallocated: true,
+		},
+	}
+	variables := map[string]arrayVariable{
+		"values": {name: "values", isVariant: true},
+	}
+	updated := arraySuccessfulBoundsState(state, "Debug.Print UBound(values)", variables, 0)
+	value := updated["values"]
+	if value.kind != arrayAllocated || !value.knownArray || value.mayBeUnallocated {
+		t.Fatalf("successful bounds state = %#v, want allocated known value without transient failure", value)
+	}
+}
+
+func TestAnalyzerVBA227RestoresResumeNextFailureAfterLoopBoundsProof(t *testing.T) {
+	t.Parallel()
+	state := arrayFlowState{
+		"values": {
+			kind:             arrayUnknown,
+			knownArray:       true,
+			mayBeUnallocated: true,
+		},
+	}
+	variables := map[string]arrayVariable{
+		"values": {name: "values", isVariant: true},
+	}
+	updated := arraySuccessfulBoundsState(state, "For i = 0 To UBound(values)", variables, 20)
+	value := updated["values"]
+	if value.mayBeUnallocated || value.boundsProof.priorMayBeUnallocated != true {
+		t.Fatalf("loop bounds proof = %#v, want cleared active failure and saved prior failure", value)
+	}
+	restored := arrayVBA227ClearLoopBodyBounds(updated, 20)
+	if !restored["values"].mayBeUnallocated || restored["values"].boundsProof.loopEndLine != 0 {
+		t.Fatalf("loop exit state = %#v, want restored transient failure without proof", restored["values"])
 	}
 }
 

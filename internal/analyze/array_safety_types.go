@@ -123,6 +123,7 @@ type arrayBoundsProof struct {
 	priorKind                        arrayAllocation
 	priorKnownArray                  bool
 	priorMayBeEmpty                  bool
+	priorMayBeUnallocated            bool
 	priorAllocationCount             string
 	priorConditionalAllocationSource string
 }

@@ -17,14 +17,22 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		state = arrayVBA227RepeatedSelectCaseBoundsState(file, proc, line, state, variables)
 	}
 	transfer := func(input arrayFlowState, source string) (arrayFlowState, []Finding) {
+		resumeNext := arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line)
+		failureInput := input
+		if resumeNext {
+			// arrayTransfer mutates its state map in place. Keep the pre-assignment
+			// value so a failed RHS under Resume Next can retain the existing LHS
+			// value instead of observing the normal assignment result as input.
+			failureInput = cloneArrayState(input)
+		}
 		output, findings := a.arrayTransfer(file, proc, ctx, variables, input, source, line, constants, capacityGuards)
 		output = arrayVBA227AttachConditionalReDimState(output, proc, source, line, variables)
 		output = arrayVBA227AttachReturnProvenance(output, source, ctx, variables, constants)
 		output = arrayVBA227AttachAllocationFlagState(file, proc, source, line, input, output, variables)
-		if arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
-			output = arrayVBA227PreserveResumeNextArrayFailure(input, output, source, ctx, variables)
+		if resumeNext {
+			output = arrayVBA227PreserveResumeNextArrayFailure(failureInput, output, source, ctx, variables)
 		}
-		if resumeNextBefore == nil || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+		if resumeNextBefore == nil || resumeNext {
 			return output, findings
 		}
 		return output, arrayVBA227FilterNestedBoundIndexFindings(findings, source, variables)
@@ -178,14 +186,19 @@ func arrayVBA227PreserveResumeNextArrayFailure(input, output arrayFlowState, tex
 	if _, assignedOutput := output[name]; !assignedOutput {
 		return output
 	}
-	updated := cloneArrayState(output)
-	updated[name] = arrayValue{
-		kind:             arrayUnknown,
-		knownArray:       true,
-		mayBeEmpty:       true,
-		mayBeUnallocated: true,
-		origin:           arrayOriginUnknown,
+	inputValue, assignedInput := input[name]
+	if !assignedInput {
+		inputValue = arrayValue{
+			kind:       arrayUnknown,
+			knownArray: variable.isArray,
+			origin:     arrayOriginUnknown,
+		}
 	}
+	if inputValue.kind != arrayAllocated || !inputValue.knownArray || inputValue.mayBeUnallocated {
+		inputValue.mayBeUnallocated = true
+	}
+	updated := cloneArrayState(output)
+	updated[name] = meetArrayValue(output[name], inputValue)
 	return updated
 }
 
@@ -1895,6 +1908,7 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 		value = arrayVBA227RecordBoundsProof(value, loopEndLine)
 		value.kind = arrayAllocated
 		value.knownArray = true
+		value.mayBeUnallocated = false
 		updated[name] = value
 	}
 	for name, value := range state {
@@ -1914,6 +1928,7 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 		value.kind = arrayAllocated
 		value.knownArray = true
 		value.mayBeEmpty = false
+		value.mayBeUnallocated = false
 		value.allocationCountSource = ""
 		updated[name] = value
 	}
@@ -1924,7 +1939,7 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 }
 
 func arrayVBA227RecordBoundsProof(value arrayValue, loopEndLine int) arrayValue {
-	if loopEndLine == 0 || value.boundsProof.loopEndLine != 0 || value.kind == arrayAllocated && value.knownArray {
+	if loopEndLine == 0 || value.boundsProof.loopEndLine != 0 || value.kind == arrayAllocated && value.knownArray && !value.mayBeUnallocated {
 		return value
 	}
 	value.boundsProof = arrayBoundsProof{
@@ -1932,6 +1947,7 @@ func arrayVBA227RecordBoundsProof(value arrayValue, loopEndLine int) arrayValue 
 		priorKind:                        value.kind,
 		priorKnownArray:                  value.knownArray,
 		priorMayBeEmpty:                  value.mayBeEmpty,
+		priorMayBeUnallocated:            value.mayBeUnallocated,
 		priorAllocationCount:             value.allocationCountSource,
 		priorConditionalAllocationSource: value.conditionalAllocationSource,
 	}
@@ -1953,6 +1969,7 @@ func arrayVBA227ClearLoopBodyBounds(state arrayFlowState, line int) arrayFlowSta
 		value.kind = value.boundsProof.priorKind
 		value.knownArray = value.boundsProof.priorKnownArray
 		value.mayBeEmpty = value.boundsProof.priorMayBeEmpty
+		value.mayBeUnallocated = value.boundsProof.priorMayBeUnallocated
 		value.allocationCountSource = value.boundsProof.priorAllocationCount
 		value.conditionalAllocationSource = value.boundsProof.priorConditionalAllocationSource
 		value.boundsProof = arrayBoundsProof{}
@@ -2014,30 +2031,95 @@ func arraySuccessfulConditionState(state arrayFlowState, statement *procedureir.
 }
 
 // arrayVBA227ResumeNextPrefixes computes the conservative "may have seen
-// Resume Next" fact once per procedure. Explicit resets are applied in source
-// order so a later array-return assignment is not treated as fallible merely
-// because an earlier compatibility probe used Resume Next. A compound branch
-// that contains both Resume Next and GoTo 0 remains active conservatively.
+// Resume Next" fact once per procedure. CFG joins retain the fact when any
+// predecessor has enabled Resume Next, while explicit resets clear it only on
+// paths that actually execute them. The source-order fallback is retained for
+// focused or recovered procedures without a usable CFG.
 func arrayVBA227ResumeNextPrefixes(file parsedFile, proc sourceProcedure) []bool {
 	prefixes := make([]bool, len(file.Lines)+1)
+	if proc.Graph != nil && len(proc.Graph.Blocks) > 0 {
+		graph := proc.Graph.View(vbacfg.EdgeFilter{})
+		inStates := map[vbacfg.BlockID]bool{graph.Entry(): false}
+		queued := map[vbacfg.BlockID]bool{graph.Entry(): true}
+		for len(queued) > 0 {
+			var id vbacfg.BlockID
+			first := true
+			for candidate := range queued {
+				if first || candidate < id {
+					id = candidate
+					first = false
+				}
+			}
+			delete(queued, id)
+			active := inStates[id]
+			block, ok := graph.BlockByID(id)
+			if !ok {
+				continue
+			}
+			out := active
+			if block.Statement != nil {
+				start := block.Statement.Range.StartLine
+				if start == 0 {
+					start = block.Range.StartLine
+				}
+				end := block.Statement.Range.EndLine
+				if end < start {
+					end = start
+				}
+				if start >= 1 && start <= len(file.Lines) {
+					end = min(end, len(file.Lines))
+					for line := start; line <= end; line++ {
+						prefixes[line] = prefixes[line] || out
+						out = arrayVBA227ResumeNextAfterStatement(out, normalizedCodeLine(file.Lines[line-1]))
+					}
+				} else {
+					out = arrayVBA227ResumeNextAfterStatement(out, block.Statement.Text)
+				}
+			}
+			graph.ForEachOutgoing(id, func(edge vbacfg.Edge) bool {
+				next := out
+				incoming, exists := inStates[edge.To]
+				if !exists {
+					inStates[edge.To] = next
+					queued[edge.To] = true
+					return true
+				}
+				if next && !incoming {
+					inStates[edge.To] = true
+					queued[edge.To] = true
+				}
+				return true
+			})
+		}
+		return prefixes
+	}
+
 	mayHaveResumeNext := false
 	start := max(1, proc.StartLine)
 	end := min(len(file.Lines), proc.EndLine)
 	for line := start; line <= end; line++ {
 		prefixes[line] = mayHaveResumeNext
-		for _, statement := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
-			trimmed := strings.TrimSpace(statement)
-			if arrayOnErrorGotoZeroRe.MatchString(trimmed) {
-				mayHaveResumeNext = false
-				continue
-			}
-			if arrayOnErrorResumeNextStatementRe.MatchString(trimmed) {
-				mayHaveResumeNext = true
-				break
-			}
-		}
+		mayHaveResumeNext = arrayVBA227ResumeNextAfterStatement(mayHaveResumeNext, normalizedCodeLine(file.Lines[line-1]))
 	}
 	return prefixes
+}
+
+func arrayVBA227ResumeNextAfterStatement(active bool, text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if strings.Contains(lower, " else ") && strings.Contains(lower, "on error resume next") && strings.Contains(lower, "on error goto") {
+		return true
+	}
+	next := active
+	for _, statement := range splitRangeValueSourceStatements(text) {
+		trimmed := strings.TrimSpace(statement)
+		switch {
+		case arrayOnErrorGotoZeroRe.MatchString(trimmed), arrayOnErrorGotoRe.MatchString(trimmed):
+			next = false
+		case arrayOnErrorResumeNextRe.MatchString(trimmed), arrayOnErrorResumeNextStatementRe.MatchString(trimmed):
+			next = true
+		}
+	}
+	return next
 }
 
 func arrayVBA227ResumeNextBeforeLine(prefixes []bool, line int) bool {
