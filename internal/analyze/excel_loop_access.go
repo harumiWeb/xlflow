@@ -1268,7 +1268,13 @@ func isExcelRangeType(typ string) bool {
 
 func isExcelWorksheetOrRangeType(typ string) bool {
 	lower := strings.ToLower(strings.TrimSpace(typ))
-	return isExcelRangeType(lower) || strings.Contains(lower, "worksheet") || strings.Contains(lower, "worksheets") || strings.Contains(lower, "excel.application")
+	if isExcelRangeType(lower) {
+		return true
+	}
+	if lower == "worksheet" || lower == "worksheets" || lower == "excel.application" {
+		return true
+	}
+	return strings.HasSuffix(lower, ".worksheet") || strings.HasSuffix(lower, ".worksheets")
 }
 
 func isPerCellExcelExpression(file parsedFile, proc sourceProcedure, db *vbadb.DB, expression string, rangeVars excelRangeVariables, line int, rootDir string, cfg config.Config) bool {

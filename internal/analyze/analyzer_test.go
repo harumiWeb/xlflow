@@ -557,6 +557,38 @@ End Sub
 	}
 }
 
+func TestVBA225DoesNotTreatWorksheetNamedProjectTypesAsExcel(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "WorksheetTable.cls", `Attribute VB_Name = "WorksheetTable"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = False
+Attribute VB_Exposed = False
+Option Explicit
+Public Property Get Columns() As Collection
+  Set Columns = New Collection
+End Property
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim table As WorksheetTable
+  Dim column As Variant
+  Set table = New WorksheetTable
+  For Each column In table.Columns
+    Debug.Print column
+  Next column
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 0 {
+		t.Fatalf("project WorksheetTable.Columns should not produce VBA225: %+v", got)
+	}
+}
+
 func TestVBA225SupportsForEachOffsetWorksheetFunctionsAndBorders(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
