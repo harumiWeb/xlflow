@@ -29,6 +29,7 @@ var (
 	directExcelLookupRe = regexp.MustCompile(`(?i)(^|[^a-z0-9_.])(?:range|worksheets|sheets)\s*\(`)
 	forEachRangeRe      = regexp.MustCompile(`(?i)^\s*for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+?)\s*$`)
 	forBoundsRe         = regexp.MustCompile(`(?i)^\s*for\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*(.+?)\s+to\s+(.+?)(?:\s+step\s+(.+?))?\s*$`)
+	forArrayBoundsRe    = regexp.MustCompile(`(?i)^\s*for\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*lbound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s+to\s+ubound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*$`)
 	literalRangeRe      = regexp.MustCompile(`(?i)\b(?:range|cells)\s*\(\s*"([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?"\s*\)`)
 )
 
@@ -329,6 +330,8 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 	if len(regions) == 0 {
 		return nil
 	}
+	adjacency := excelCFGAdjacency(proc.Graph)
+	blockByStatement := excelCFGBlocksByStatement(proc.Graph)
 	summaries := map[string]excelAccessSummary{}
 	var localProcedures excelProcedureIndex
 	needHelperSummaries := false
@@ -423,6 +426,9 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 			continue
 		}
 		region := candidates[selected]
+		if !excelLoopAccessCanRepeat(proc, region, statementID, adjacency, blockByStatement) {
+			continue
+		}
 		grouped[region.StatementID] = append(grouped[region.StatementID], accesses...)
 	}
 
@@ -488,6 +494,69 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 		findings = append(findings, finding)
 	}
 	return findings
+}
+
+func excelLoopAccessCanRepeat(proc sourceProcedure, region excelLoopRegion, statementID int, adjacency map[vbacfg.BlockID][]vbacfg.Edge, blockByStatement map[int]vbacfg.BlockID) bool {
+	if proc.Graph == nil {
+		return true
+	}
+	start, ok := blockByStatement[statementID]
+	if !ok {
+		return true
+	}
+	header, ok := blockByStatement[region.StatementID]
+	if !ok {
+		return true
+	}
+	backTargets := map[vbacfg.BlockID]bool{header: true}
+	for statement := range proc.Statements.All() {
+		if statement.ParentID != region.StatementID || statement.SyntaxKind != "do_condition" {
+			continue
+		}
+		if target, ok := blockByStatement[statement.ID]; ok {
+			backTargets[target] = true
+		}
+		break
+	}
+	bodyBlocks := map[vbacfg.BlockID]bool{}
+	for id := range region.Body {
+		if block, ok := blockByStatement[id]; ok {
+			bodyBlocks[block] = true
+		}
+	}
+	if !bodyBlocks[start] && start != header {
+		return true
+	}
+
+	seen := map[vbacfg.BlockID]bool{start: true}
+	queue := []vbacfg.BlockID{start}
+	for len(queue) > 0 {
+		from := queue[0]
+		queue = queue[1:]
+		for _, edge := range adjacency[from] {
+			if edge.Class != vbacfg.EdgeNormal {
+				continue
+			}
+			if edge.Uncertain {
+				return true
+			}
+			if edge.Kind == vbacfg.EdgeLoopBack && backTargets[edge.To] {
+				return true
+			}
+			if edge.From == header && edge.Kind == vbacfg.EdgeLoopExit {
+				continue
+			}
+			if edge.To == proc.Graph.NormalExit || edge.To == proc.Graph.ExceptionalExit || edge.To == proc.Graph.TerminationExit || edge.To == proc.Graph.UnknownExit || !bodyBlocks[edge.To] {
+				continue
+			}
+			if seen[edge.To] {
+				continue
+			}
+			seen[edge.To] = true
+			queue = append(queue, edge.To)
+		}
+	}
+	return false
 }
 
 func excelProcedureHasLocalLoopCall(file parsedFile, proc sourceProcedure, regions []excelLoopRegion) bool {
@@ -684,7 +753,7 @@ func excelLoopRegions(proc sourceProcedure) []excelLoopRegion {
 			Line:        statement.Range.StartLine,
 			EndLine:     endLine,
 			Body:        body,
-			Small:       excelLoopIsSmall(statement.Text, constants),
+			Small:       excelLoopIsSmall(proc, statement.Text, constants),
 		})
 	}
 	for i := range regions {
@@ -919,7 +988,7 @@ func isExcelLoopKind(kind procedureir.StatementKind) bool {
 	}
 }
 
-func excelLoopIsSmall(text string, constants map[string]int) bool {
+func excelLoopIsSmall(proc sourceProcedure, text string, constants map[string]int) bool {
 	text = excelLoopHeaderText(text)
 	match := forBoundsRe.FindStringSubmatch(strings.TrimSpace(text))
 	if len(match) > 0 {
@@ -942,11 +1011,35 @@ func excelLoopIsSmall(text string, constants map[string]int) bool {
 			return count <= 3
 		}
 	}
+	if match := forArrayBoundsRe.FindStringSubmatch(strings.TrimSpace(text)); len(match) == 3 && strings.EqualFold(match[1], match[2]) {
+		if count, ok := excelFixedArrayBoundCount(proc, match[1], constants); ok {
+			return count <= 3
+		}
+	}
 	if match := forEachRangeRe.FindStringSubmatch(strings.TrimSpace(text)); len(match) > 0 {
 		count := literalRangeCellCount(match[2])
 		return count > 0 && count <= 3
 	}
 	return false
+}
+
+func excelFixedArrayBoundCount(proc sourceProcedure, name string, constants map[string]int) (int, bool) {
+	for declaration := range proc.Declarations.All() {
+		if !strings.EqualFold(strings.TrimSpace(declaration.Name), strings.TrimSpace(name)) || !declaration.IsArray || declaration.Recovered || len(declaration.ArrayBounds) != 1 {
+			continue
+		}
+		bound := declaration.ArrayBounds[0]
+		if bound.Recovered || strings.TrimSpace(bound.Lower) == "" || strings.TrimSpace(bound.Upper) == "" {
+			continue
+		}
+		lower, lowerErr := constantIntegerExpression(bound.Lower, constants)
+		upper, upperErr := constantIntegerExpression(bound.Upper, constants)
+		if lowerErr != nil || upperErr != nil || upper < lower {
+			continue
+		}
+		return upper - lower + 1, true
+	}
+	return 0, false
 }
 
 func constantIntegerExpression(text string, constants map[string]int) (int, error) {

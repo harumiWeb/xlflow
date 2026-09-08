@@ -307,6 +307,27 @@ End Sub
 	}
 }
 
+func TestVBA225ExemptsSmallFixedArrayBoundLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim searchTerms(1 To 3) As String
+  Dim index As Long
+  For index = LBound(searchTerms) To UBound(searchTerms)
+    Debug.Print Range("A1").Cells(index, 1).Value2
+  Next index
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 0 {
+		t.Fatalf("a fixed array loop with three elements should be exempt from VBA225: %+v", got)
+	}
+}
+
 func TestVBA225UsesNearestNonSmallLoop(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -671,6 +692,36 @@ End Sub
 	}
 	if got := findingsByCode(realtime, "VBA225"); len(got) != 1 || !strings.Contains(got[0].Message, "ReadLocal") {
 		t.Fatalf("realtime helper VBA225 findings = %+v, want one local helper finding", got)
+	}
+}
+
+func TestVBA225SkipsHelperThatCannotReachLoopBack(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Public Sub ReadCell(ByVal rng As Range, ByVal i As Long)
+  Debug.Print rng.Cells(i, 1).Value2
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function SelectRow(ByVal rng As Range, ByVal wanted As Long) As String
+  Dim i As Long
+  For i = 1 To 100
+    If i = wanted Then
+      ReadCell rng, i
+      SelectRow = "ok"
+      Exit Function
+    End If
+  Next i
+  SelectRow = "empty"
+End Function
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 0 {
+		t.Fatalf("one-shot helper before procedure exit should not produce VBA225: %+v", got)
 	}
 }
 
