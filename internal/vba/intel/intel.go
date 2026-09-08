@@ -3071,6 +3071,7 @@ type parsedCall struct {
 	Line            string
 	Start           int
 	End             int
+	Parenthesized   bool
 	DiagnosticRange *Range
 }
 
@@ -3095,10 +3096,10 @@ func callsOnLine(line string) []parsedCall {
 }
 
 func parenthesizedArgumentPrefix(inner, outer parsedCall) bool {
-	if !strings.EqualFold(inner.Target, outer.Target) || inner.Start != outer.Start || inner.End >= outer.End {
+	if !strings.EqualFold(inner.Target, outer.Target) || inner.Start != outer.Start || inner.End > outer.End {
 		return false
 	}
-	if len(inner.Arguments) != 1 || len(outer.Arguments) <= 1 {
+	if len(inner.Arguments) != 1 || len(outer.Arguments) == 0 {
 		return false
 	}
 	return strings.HasPrefix(strings.TrimSpace(outer.Arguments[0].Text), "(")
@@ -3172,11 +3173,12 @@ func parenCallsOnLine(line string) []parsedCall {
 				start = max(0, i-len(target))
 			}
 			out = append(out, parsedCall{
-				Target:    target,
-				Arguments: parseArguments(line[i+1 : close]),
-				Line:      line,
-				Start:     start,
-				End:       close + 1,
+				Target:        target,
+				Arguments:     parseArguments(line[i+1 : close]),
+				Line:          line,
+				Start:         start,
+				End:           close + 1,
+				Parenthesized: true,
 			})
 		}
 	}
@@ -3345,7 +3347,7 @@ func matchingParen(line string, open int) int {
 
 func diagnosticsForCallArguments(lineNo int, call parsedCall, sig Signature) []Diagnostic {
 	messages := make([]string, 0, 2)
-	minArgs, maxArgs := signatureArity(sig.Parameters)
+	minArgs, maxArgs := signatureArityForCall(call, sig)
 	got := len(call.Arguments)
 	if got < minArgs {
 		messages = append(messages, fmt.Sprintf("Argument count mismatch: %s expects at least %d argument(s), got %d.", sigLabelName(sig.Label), minArgs, got))
@@ -3381,6 +3383,16 @@ func diagnosticsForCallArguments(lineNo int, call parsedCall, sig Signature) []D
 		return nil
 	}
 	return []Diagnostic{compileEquivalentCallDiagnostic(lineNo, call, strings.Join(messages, " "))}
+}
+
+func signatureArityForCall(call parsedCall, sig Signature) (min int, max int) {
+	if strings.EqualFold(sig.receiverType, "VBA.Global") && strings.EqualFold(sig.memberName, "Seek") {
+		if call.Parenthesized {
+			return 1, 1
+		}
+		return 2, 2
+	}
+	return signatureArity(sig.Parameters)
 }
 
 func signatureArity(params []Parameter) (min int, max int) {

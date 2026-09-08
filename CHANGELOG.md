@@ -4,6 +4,16 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed static-analysis edge cases around numeric `.Show` property assignments,
+  multiline `With Application.FileDialog(...): .Show` flows, and known-true
+  conditional-compilation branches so disabled code no longer leaks findings
+  while actual file-picker boundaries remain visible.
+
+- Fixed duplicate `VB045` arity diagnostics for one parenthesized argument,
+  enforced the VBE-confirmed statement/function arities of `Seek`, and stopped
+  treating `True` as a safe `Byte` recovery assignment because VBA represents
+  it as `-1`.
+
 - Prevented project-object false-positive fixes from regressing giant-project
   analysis by caching file-level constant environments, indexing object-summary
   lookups, and limiting module-object flow state to participating procedures;

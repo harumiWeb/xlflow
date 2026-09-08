@@ -278,6 +278,8 @@ Sub Main()
     End If
     YAxis.Show = True
     Options.DataLabels.Show = True
+    YAxis.Show = -1
+    Options.DataLabels.Show = 0
     If fd.Show = -1 Then
     End If
     UserForm1.Show
@@ -291,8 +293,38 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(boundaries) != 2 || boundaries[0].Symbol != "UserForm.Show" || boundaries[0].Line != 9 || boundaries[1].Symbol != "UserForm.Show" || boundaries[1].Line != 11 {
+	if len(boundaries) != 2 || boundaries[0].Symbol != "UserForm.Show" || boundaries[0].Line != 11 || boundaries[1].Symbol != "UserForm.Show" || boundaries[1].Line != 13 {
 		t.Fatalf("expected only the file-dialog and UserForm display calls, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerDetectsFileDialogShowInsideWithBlock(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Option Explicit
+Sub Main()
+    Const actionButton As Long = -1
+    With Application.FileDialog(msoFileDialogFolderPicker)
+        .Title = "Choose a folder"
+        If .Show = actionButton Then
+            Debug.Print .SelectedItems.Item(1)
+        End If
+    End With
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 1 || boundaries[0].Symbol != "Application.FileDialog" || boundaries[0].Kind != "file_picker" || boundaries[0].Line != 6 {
+		t.Fatalf("expected the implicit FileDialog.Show call, got %+v", boundaries)
 	}
 }
 

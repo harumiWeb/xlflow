@@ -18,6 +18,18 @@
     },
     { "id": "missing-required-argument", "path": "cases/missing-required-argument/case.json" },
     { "id": "optional-argument-omitted", "path": "cases/optional-argument-omitted/case.json" },
+    {
+      "id": "seek-function-extra-position",
+      "path": "cases/seek-function-extra-position/case.json"
+    },
+    {
+      "id": "seek-statement-function-valid",
+      "path": "cases/seek-statement-function-valid/case.json"
+    },
+    {
+      "id": "seek-statement-missing-position",
+      "path": "cases/seek-statement-missing-position/case.json"
+    },
     { "id": "duplicate-named-argument", "path": "cases/duplicate-named-argument/case.json" },
     { "id": "known-named-argument", "path": "cases/known-named-argument/case.json" },
     { "id": "unknown-named-argument", "path": "cases/unknown-named-argument/case.json" },

@@ -1524,6 +1524,13 @@ Private Enum API
   Dim ignoredOne, ignoredTwo
 #End If
 End Enum
+#If False Then
+Dim ignoredFalse
+#ElseIf True Then
+Dim liveElseIf
+#Else
+Dim ignoredElse
+#End If
 Sub Main()
   Dim liveValue
 End Sub
@@ -1533,7 +1540,7 @@ End Sub
 		t.Fatal(err)
 	}
 	vb005 := issuesByCode(issues, "VB005")
-	if len(vb005) != 1 || vb005[0].Line != 9 || vb005[0].Column != 7 {
+	if len(vb005) != 2 || vb005[0].Line != 11 || vb005[0].Column != 5 || vb005[1].Line != 16 || vb005[1].Column != 7 {
 		t.Fatalf("disabled conditional declarations should be ignored while live declarations remain visible: %+v", vb005)
 	}
 }

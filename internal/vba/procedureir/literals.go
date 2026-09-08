@@ -176,7 +176,10 @@ func SafeLiteralAssignment(value, targetType string) bool {
 
 	lower := strings.ToLower(value)
 	switch lower {
-	case "true", "false":
+	case "true":
+		// VBA represents True as -1, which cannot be assigned to Byte.
+		return targetType == "variant" || targetType == "string" || targetType == "boolean" || isNumericLiteralTarget(targetType) && targetType != "byte"
+	case "false":
 		return targetType == "variant" || targetType == "string" || isNumericLiteralTarget(targetType) || targetType == "boolean"
 	case "nothing":
 		return targetType == "variant" || isObjectLiteralTarget(targetType)

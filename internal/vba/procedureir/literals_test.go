@@ -204,6 +204,8 @@ func TestSafeLiteralAssignmentRequiresCompatibleCompleteLiterals(t *testing.T) {
 		{name: "nothing to array", value: "Nothing", targetType: "Object()", want: false},
 		{name: "rounded byte", value: "255.1", targetType: "Byte", want: true},
 		{name: "rounded byte overflow", value: "255.5", targetType: "Byte", want: false},
+		{name: "true overflows byte", value: "True", targetType: "Byte", want: false},
+		{name: "false fits byte", value: "False", targetType: "Byte", want: true},
 		{name: "rounded long", value: "2147483647.1", targetType: "Long", want: true},
 		{name: "exact longlong overflow", value: "9223372036854775808", targetType: "LongLong", want: false},
 		{name: "longptr max 32 bit", value: "2147483647", targetType: "LongPtr", want: true},

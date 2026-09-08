@@ -260,7 +260,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 165 || report.BoundFixtures != 148 || report.PartialFixtures != 0 || report.UnboundFixtures != 16 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 168 || report.BoundFixtures != 151 || report.PartialFixtures != 0 || report.UnboundFixtures != 16 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -347,6 +347,9 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"property-signature-invalid",
 		"property-signature-valid",
 		"scalar-assignment",
+		"seek-function-extra-position",
+		"seek-statement-function-valid",
+		"seek-statement-missing-position",
 		"set-object-target",
 		"set-scalar-target",
 		"unknown-as-type",

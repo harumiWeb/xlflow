@@ -1067,8 +1067,14 @@ func (c *astLintContext) visitConditionalAlternatives(node *tree_sitter.Node, in
 		}
 		kind := child.Kind()
 		if strings.Contains(kind, "elseif") {
-			if known, value := conditionalConstant(child, c.source); known && !value {
-				continue
+			if known, value := conditionalConstant(child, c.source); known {
+				if !value {
+					continue
+				}
+				if body := child.ChildByFieldName("body"); body != nil {
+					c.visit(body, inProcedure, inType)
+				}
+				return
 			}
 		} else if !strings.Contains(kind, "else") {
 			continue

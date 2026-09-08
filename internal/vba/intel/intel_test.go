@@ -2300,6 +2300,35 @@ End Sub
 	}
 }
 
+func TestArgumentDiagnosticsDoNotDoubleCountSingleParenthesizedArgument(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "Foo") {
+			return nil, nil
+		}
+		return []Symbol{{
+			Name: "Foo", Kind: "sub", Module: "Main", ModuleKind: "standard", Visibility: "Public",
+			Parameters: []Parameter{{Name: "First"}, {Name: "Second"}},
+		}}, nil
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim value As Long
+    Foo (value)
+End Sub
+`,
+	}
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045")
+	if len(diagnostics) != 1 || !hasDiagnosticMessage(diagnostics, "expects at least 2 argument") {
+		t.Fatalf("single parenthesized argument should produce one arity diagnostic: diagnostics=%+v calls=%+v", diagnostics, callsOnLine("    Foo (value)"))
+	}
+	if calls := callsOnLine("    Foo (value)"); len(calls) != 1 || len(calls[0].Arguments) != 1 {
+		t.Fatalf("parsed call = %+v, want one one-argument call", calls)
+	}
+}
+
 func TestCallParserIgnoresBracketedMemberTextAndAssignments(t *testing.T) {
 	bracketed := callsOnLine(`    sb.[string which can even include " ' # ! / \ without    ]`)
 	if len(bracketed) != 0 {
@@ -2327,6 +2356,24 @@ End Sub
 	}
 	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(diagnostics) != 0 {
 		t.Fatalf("Seek statement/function forms produced argument diagnostics: %+v", diagnostics)
+	}
+}
+
+func TestArgumentDiagnosticsRejectInvalidSeekStatementAndFunctionArities(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim position As Long
+    Seek #1
+    position = Seek(1, 2)
+End Sub
+`,
+	}
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045")
+	if len(diagnostics) != 2 {
+		t.Fatalf("invalid Seek statement/function forms should each produce one argument diagnostic: %+v", diagnostics)
 	}
 }
 
