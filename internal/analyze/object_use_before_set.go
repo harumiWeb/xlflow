@@ -5451,7 +5451,7 @@ func objectUnresolvedExpressionCallReadOnly(call procedureir.CallSite) bool {
 		return false
 	}
 	switch name {
-	case "typename", "strcomp", "isobject", "array":
+	case "typename", "strcomp", "isobject", "array", "intersect":
 		return true
 	default:
 		return false

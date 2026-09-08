@@ -3508,6 +3508,54 @@ func sourceProceduresFromProcedureSlice(document *procedureir.DocumentIR, proced
 	return procedures
 }
 
+type declarationSourcePart struct {
+	text   string
+	static bool
+}
+
+type declarationSourcePartIterator struct {
+	single      declarationSourcePart
+	singleValid bool
+	multiple    []declarationSourcePart
+	index       int
+}
+
+func declarationSourceParts(stmt string) declarationSourcePartIterator {
+	if !declRe.MatchString(stmt) {
+		return declarationSourcePartIterator{}
+	}
+	if !strings.Contains(stmt, ":") {
+		trimmed := strings.TrimSpace(stmt)
+		return declarationSourcePartIterator{
+			single:      declarationSourcePart{text: trimmed, static: strings.HasPrefix(strings.ToLower(trimmed), "static ")},
+			singleValid: true,
+		}
+	}
+	var parts []declarationSourcePart
+	for _, part := range splitRangeValueSourceStatements(stmt) {
+		trimmed := strings.TrimSpace(part)
+		lower := strings.ToLower(trimmed)
+		if !declRe.MatchString(trimmed) {
+			continue
+		}
+		parts = append(parts, declarationSourcePart{text: trimmed, static: strings.HasPrefix(lower, "static ")})
+	}
+	return declarationSourcePartIterator{multiple: parts}
+}
+
+func (iterator *declarationSourcePartIterator) next() (declarationSourcePart, bool) {
+	if iterator.singleValid {
+		iterator.singleValid = false
+		return iterator.single, true
+	}
+	if iterator.index >= len(iterator.multiple) {
+		return declarationSourcePart{}, false
+	}
+	part := iterator.multiple[iterator.index]
+	iterator.index++
+	return part, true
+}
+
 func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sourceDeclaration {
 	decls := map[string]sourceDeclaration{}
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
@@ -3517,19 +3565,23 @@ func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sour
 		if lineNo == proc.StartLine && isProcedureHeaderLine(lower) {
 			continue
 		}
-		if !strings.HasPrefix(lower, "dim ") && !strings.HasPrefix(lower, "static ") && !strings.HasPrefix(lower, "private ") && !strings.HasPrefix(lower, "public ") {
-			continue
-		}
-		m := declRe.FindStringSubmatch(stmt)
-		if len(m) == 0 {
-			continue
-		}
-		for _, part := range splitArgs(m[1]) {
-			name, typ, array, newExpr := declarationNameAndType(part)
-			if name == "" {
+		parts := declarationSourceParts(stmt)
+		for {
+			sourcePart, ok := parts.next()
+			if !ok {
+				break
+			}
+			match := declRe.FindStringSubmatch(sourcePart.text)
+			if len(match) == 0 {
 				continue
 			}
-			decls[strings.ToLower(name)] = sourceDeclaration{Name: name, Type: typ, Line: lineNo, Object: isObjectType(typ), Array: array, NewExpression: newExpr, Static: strings.HasPrefix(lower, "static ")}
+			for _, part := range splitArgs(match[1]) {
+				name, typ, array, newExpr := declarationNameAndType(part)
+				if name == "" {
+					continue
+				}
+				decls[strings.ToLower(name)] = sourceDeclaration{Name: name, Type: typ, Line: lineNo, Object: isObjectType(typ), Array: array, NewExpression: newExpr, Static: sourcePart.static}
+			}
 		}
 	}
 	return decls

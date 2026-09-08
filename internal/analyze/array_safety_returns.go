@@ -1849,7 +1849,7 @@ func arraySummaryStatementAlwaysFails(text string, base int, constants map[strin
 }
 
 func arrayValueEqual(left, right arrayValue) bool {
-	return arrayValueCompatible(left, right) && left.mayBeEmpty == right.mayBeEmpty
+	return arrayValueCompatible(left, right) && left.mayBeEmpty == right.mayBeEmpty && left.mayBeUnallocated == right.mayBeUnallocated
 }
 
 // arrayReturnValueCompatible keeps a return summary when every normal return
@@ -1869,5 +1869,5 @@ func arrayReturnValueCompatible(proc sourceProcedure, left, right arrayValue) bo
 }
 
 func arrayValueCompatible(left, right arrayValue) bool {
-	return left.kind == right.kind && left.knownArray == right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.allocationCountSource == right.allocationCountSource && left.returnNonEmptyArrayParameter == right.returnNonEmptyArrayParameter && left.returnPositiveScalarParameter == right.returnPositiveScalarParameter && left.nonEmptySource == right.nonEmptySource && left.returnDescriptorSourceParameter == right.returnDescriptorSourceParameter && left.returnDescriptorStartParameter == right.returnDescriptorStartParameter && left.returnDescriptorLengthParameter == right.returnDescriptorLengthParameter && left.returnDescriptorLowerParameter == right.returnDescriptorLowerParameter && arrayDimensionsEqual(left.dimensions, right.dimensions) && arrayDimensionsEqual(left.preserveShape, right.preserveShape)
+	return left.kind == right.kind && left.knownArray == right.knownArray && left.mayBeUnallocated == right.mayBeUnallocated && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.allocationCountSource == right.allocationCountSource && left.returnNonEmptyArrayParameter == right.returnNonEmptyArrayParameter && left.returnPositiveScalarParameter == right.returnPositiveScalarParameter && left.nonEmptySource == right.nonEmptySource && left.returnDescriptorSourceParameter == right.returnDescriptorSourceParameter && left.returnDescriptorStartParameter == right.returnDescriptorStartParameter && left.returnDescriptorLengthParameter == right.returnDescriptorLengthParameter && left.returnDescriptorLowerParameter == right.returnDescriptorLowerParameter && arrayDimensionsEqual(left.dimensions, right.dimensions) && arrayDimensionsEqual(left.preserveShape, right.preserveShape)
 }

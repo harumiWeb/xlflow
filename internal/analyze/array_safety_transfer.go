@@ -160,10 +160,10 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		// A Variant has no statically proven array nature.  Keep this path
 		// fail-open; only a proven array (or a proven scalar handled above) is
 		// actionable here.
-		if variable.isVariant && !value.knownArray {
+		if variable.isVariant && !variable.isArray && !value.knownArray && !value.mayBeUnallocated {
 			continue
 		}
-		if value.kind != arrayAllocated || !value.knownArray {
+		if value.mayBeUnallocated || value.kind != arrayAllocated || !value.knownArray {
 			if arrayResumeNextCapacityProofApplies(capacityGuards, name, line) {
 				// A recognized Resume Next capacity probe deliberately catches
 				// this bounds failure before its fallback allocation branch.
@@ -209,13 +209,13 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			continue
 		}
 		value := state[strings.ToLower(use.name)]
-		if variable, ok := variables[strings.ToLower(use.name)]; ok && variable.isVariant && !value.knownArray {
+		if variable, ok := variables[strings.ToLower(use.name)]; ok && variable.isVariant && !variable.isArray && !value.knownArray && !value.mayBeUnallocated {
 			continue
 		}
 		if value.origin == arrayOriginRangeValue {
 			continue
 		}
-		if value.kind != arrayAllocated || !value.knownArray {
+		if value.mayBeUnallocated || value.kind != arrayAllocated || !value.knownArray {
 			addWithKey(arrayIndexOperationKey(use.name, "unallocated"), "VBA227", use.name+" is indexed before its array allocation is guaranteed.", "An array access can fail after Erase, before ReDim, or on a branch where allocation is not established.", "Allocate the array on every path before indexing it, or guard the access with a proven allocation check.")
 			continue
 		}
@@ -265,7 +265,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 				state[name] = value
 			}
 		}
-		if variable, exists := variables[name]; exists && variable.isArray && variable.isObject && indexed && !strings.HasPrefix(lower, "set ") {
+		if variable, exists := variables[name]; exists && variable.isArray && variable.isObject && indexed && arrayAssignmentIsDirectElement(text) && !strings.HasPrefix(lower, "set ") {
 			code := "VBA101"
 			typ := variable.typ
 			callee := arrayCallName(rhs)

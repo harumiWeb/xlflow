@@ -21,6 +21,9 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		output = arrayVBA227AttachConditionalReDimState(output, proc, source, line, variables)
 		output = arrayVBA227AttachReturnProvenance(output, source, ctx, variables, constants)
 		output = arrayVBA227AttachAllocationFlagState(file, proc, source, line, input, output, variables)
+		if arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+			output = arrayVBA227PreserveResumeNextArrayFailure(input, output, source, ctx, variables)
+		}
 		if resumeNextBefore == nil || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 			return output, findings
 		}
@@ -143,6 +146,76 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		}
 	}
 	return state, findings
+}
+
+// arrayVBA227PreserveResumeNextArrayFailure keeps a possible failed call
+// visible after `On Error Resume Next`. A documented or inferred array return
+// normally establishes an allocated value, but a failed assignment leaves a
+// Variant/array target uninitialized and VBA continues to the next statement.
+// Only downgrade a target whose RHS was already proven to be an array; an
+// arbitrary Variant call remains fail-open to avoid turning unknown values into
+// diagnostics.
+func arrayVBA227PreserveResumeNextArrayFailure(input, output arrayFlowState, text string, ctx analysisContext, variables map[string]arrayVariable) arrayFlowState {
+	lhs, rhs, indexed, assigned := arrayAssignment(text)
+	if !assigned || indexed {
+		return output
+	}
+	name := strings.ToLower(cleanIdentifier(lhs))
+	variable, known := variables[name]
+	if !known || !variable.isArray && !variable.isVariant {
+		return output
+	}
+	if !arrayVBA227MayFailArrayExpression(rhs) {
+		return output
+	}
+	value, provenArray := arrayExpressionState(rhs, input, ctx)
+	if !provenArray || !value.knownArray {
+		value, provenArray = arrayVBA227QualifiedArrayReturnValue(rhs, ctx, variables)
+	}
+	if !provenArray || !value.knownArray {
+		return output
+	}
+	if _, assignedOutput := output[name]; !assignedOutput {
+		return output
+	}
+	updated := cloneArrayState(output)
+	updated[name] = arrayValue{
+		kind:             arrayUnknown,
+		knownArray:       true,
+		mayBeEmpty:       true,
+		mayBeUnallocated: true,
+		origin:           arrayOriginUnknown,
+	}
+	return updated
+}
+
+func arrayVBA227MayFailArrayExpression(rhs string) bool {
+	switch arrayCallName(rhs) {
+	case "array", "filter", "split":
+		// These VBA array factories establish an array result directly. The
+		// existing transfer treats them as deterministic allocation facts,
+		// including when the procedure has Resume Next enabled.
+		return false
+	default:
+		return true
+	}
+}
+
+func arrayVBA227QualifiedArrayReturnValue(rhs string, ctx analysisContext, variables map[string]arrayVariable) (arrayValue, bool) {
+	receiver, member, ok := arrayMemberCallParts(rhs)
+	if !ok {
+		return arrayValue{}, false
+	}
+	variable, known := variables[strings.ToLower(cleanIdentifier(receiver))]
+	if !known || variable.typ == "" {
+		return arrayValue{}, false
+	}
+	typeName := strings.TrimSpace(variable.typ)
+	if colon := strings.IndexByte(typeName, ':'); colon >= 0 {
+		typeName = strings.TrimSpace(typeName[:colon])
+	}
+	value, known := ctx.arrayReturnsQualified[strings.ToLower(typeName+"."+member)]
+	return value, known
 }
 
 // arraySafeArrayPointerGuardTarget recognizes the narrow low-level VBA idiom
@@ -1812,11 +1885,8 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 			}
 		}
 		variable, known := variables[name]
-		if !known || !variable.isArray {
-			continue
-		}
-		value, known := state[name]
-		if !known {
+		value, knownValue := state[name]
+		if !known || !knownValue || !variable.isArray && (!variable.isVariant || !value.knownArray) {
 			continue
 		}
 		if updated == nil {
@@ -1944,9 +2014,10 @@ func arraySuccessfulConditionState(state arrayFlowState, statement *procedureir.
 }
 
 // arrayVBA227ResumeNextPrefixes computes the conservative "may have seen
-// Resume Next" fact once per procedure. A reset is intentionally not modeled
-// here because the array worklist does not carry VBA's procedure-level error
-// mode and a reset may be reachable only on one branch.
+// Resume Next" fact once per procedure. Explicit resets are applied in source
+// order so a later array-return assignment is not treated as fallible merely
+// because an earlier compatibility probe used Resume Next. A compound branch
+// that contains both Resume Next and GoTo 0 remains active conservatively.
 func arrayVBA227ResumeNextPrefixes(file parsedFile, proc sourceProcedure) []bool {
 	prefixes := make([]bool, len(file.Lines)+1)
 	mayHaveResumeNext := false
@@ -1955,7 +2026,12 @@ func arrayVBA227ResumeNextPrefixes(file parsedFile, proc sourceProcedure) []bool
 	for line := start; line <= end; line++ {
 		prefixes[line] = mayHaveResumeNext
 		for _, statement := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
-			if arrayOnErrorResumeNextStatementRe.MatchString(strings.TrimSpace(statement)) {
+			trimmed := strings.TrimSpace(statement)
+			if arrayOnErrorGotoZeroRe.MatchString(trimmed) {
+				mayHaveResumeNext = false
+				continue
+			}
+			if arrayOnErrorResumeNextStatementRe.MatchString(trimmed) {
 				mayHaveResumeNext = true
 				break
 			}

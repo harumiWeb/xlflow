@@ -273,8 +273,20 @@ func arrayDictionaryMemberExpressionState(file parsedFile, proc sourceProcedure,
 	if receiver == "" {
 		receiver = arrayWithReceiverAtLine(file, proc, line)
 	}
-	if receiver == "" || !knownNonEmpty && !arrayDictionaryReceiverProven(file, proc, line, receiver, variables) {
+	if receiver == "" {
 		return arrayValue{}, false
+	}
+	if !knownNonEmpty && !arrayDictionaryReceiverProven(file, proc, line, receiver, variables) {
+		// A late-bound Keys/Items result is still an array-shaped value, but
+		// its receiver may be Nothing or empty. Keep the unknown array visible
+		// to the bound checker so UBound/LBound remain conservative until a
+		// dictionary proof or a positive-count guard establishes safety.
+		return arrayValue{
+			kind:       arrayUnknown,
+			knownArray: true,
+			mayBeEmpty: true,
+			origin:     arrayOriginUnknown,
+		}, true
 	}
 	source := canonicalArrayBoundExpression(receiver)
 	kind := arrayUnknown

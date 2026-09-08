@@ -613,22 +613,25 @@ func moduleDeclarationsFromSource(lines []string, procedureLineOwners []int) map
 			continue
 		}
 		stmt := normalizedCodeLine(rawLine)
-		lower := strings.ToLower(stmt)
-		if !strings.HasPrefix(lower, "dim ") && !strings.HasPrefix(lower, "static ") && !strings.HasPrefix(lower, "private ") && !strings.HasPrefix(lower, "public ") {
-			continue
-		}
-		match := declRe.FindStringSubmatch(stmt)
-		if len(match) == 0 {
-			continue
-		}
-		for _, part := range splitArgs(match[1]) {
-			name, typ, array, newExpression := declarationNameAndType(part)
-			if name == "" {
+		parts := declarationSourceParts(stmt)
+		for {
+			sourcePart, ok := parts.next()
+			if !ok {
+				break
+			}
+			match := declRe.FindStringSubmatch(sourcePart.text)
+			if len(match) == 0 {
 				continue
 			}
-			decls[strings.ToLower(name)] = sourceDeclaration{
-				Name: name, Type: typ, Line: line, Object: isObjectType(typ),
-				Array: array, NewExpression: newExpression,
+			for _, part := range splitArgs(match[1]) {
+				name, typ, array, newExpression := declarationNameAndType(part)
+				if name == "" {
+					continue
+				}
+				decls[strings.ToLower(name)] = sourceDeclaration{
+					Name: name, Type: typ, Line: line, Object: isObjectType(typ),
+					Array: array, NewExpression: newExpression,
+				}
 			}
 		}
 	}

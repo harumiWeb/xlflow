@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -172,6 +173,50 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("colon-separated object factories and their callers must establish returned objects: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RegistersMultipleColonSeparatedDeclarations(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim marker As Long: Dim service As Object: Debug.Print service.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 3 || !strings.Contains(got[0].Message, "service") {
+		t.Fatalf("every colon-separated declaration must participate in object flow: %+v", got)
+	}
+}
+
+func TestVBA202Issue448KeepsInlineForEachObjectAssignedAcrossIntersect(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim area As Range: Set area = Application.Range("A1")
+  Dim cell As Range: For Each cell In area.Cells
+    If Not Application.Intersect(cell, area) Is Nothing Then
+      Debug.Print cell.Row
+    End If
+  Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if strings.Contains(finding.Message, "cell may") {
+			t.Fatalf("For Each must establish the object before a read-only Intersect call: %+v", findings)
+		}
 	}
 }
 

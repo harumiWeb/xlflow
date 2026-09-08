@@ -7309,6 +7309,29 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA101IgnoresNestedObjectArrayDefaultMemberAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim agents() As Object
+  ReDim agents(1 To 1)
+  Set agents(1) = CreateObject("Scripting.Dictionary")
+  agents(1)("id") = 1
+  agents(1) = CreateObject("Scripting.Dictionary")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA101")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("only the direct object-array element assignment should require Set: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227WholeArrayAssignmentDoesNotLookLikeElementAccess(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -9626,13 +9649,23 @@ Public Sub BoundLoop(ByVal data As Variant)
       End With
 End Select
 End Sub
+
+Public Sub TypeNameBoundLoop(ByVal data As Variant)
+  Dim keys As Variant
+  If TypeName(data) = "Dictionary" Then
+    keys = data.Keys
+    Dim lower As Long: lower = LBound(keys)
+    Dim upper As Long: upper = UBound(keys)
+    Debug.Print keys(lower)
+  End If
+End Sub
 `)
 
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var countLoop, nonDictionary, boundLoop []Finding
+	var countLoop, nonDictionary, boundLoop, typeNameBoundLoop []Finding
 	for _, finding := range findingsByCode(findings, "VBA227") {
 		switch finding.Procedure {
 		case "CountLoop":
@@ -9641,6 +9674,8 @@ End Sub
 			nonDictionary = append(nonDictionary, finding)
 		case "BoundLoop":
 			boundLoop = append(boundLoop, finding)
+		case "TypeNameBoundLoop":
+			typeNameBoundLoop = append(typeNameBoundLoop, finding)
 		}
 	}
 	if len(countLoop) != 0 {
@@ -9651,6 +9686,9 @@ End Sub
 	}
 	if len(boundLoop) != 1 || boundLoop[0].Line != 37 {
 		t.Fatalf("a direct UBound should remain the only Dictionary snapshot warning: bound=%+v all=%+v", boundLoop, findingsByCode(findings, "VBA227"))
+	}
+	if len(typeNameBoundLoop) != 2 || typeNameBoundLoop[0].Line != 50 || typeNameBoundLoop[1].Line != 52 || !strings.Contains(strings.ToLower(typeNameBoundLoop[1].Message), "may be empty") {
+		t.Fatalf("TypeName-proven Variant Keys must keep the first bound and possible-empty element access: %+v", typeNameBoundLoop)
 	}
 }
 
@@ -9715,6 +9753,34 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("a documented Variant array property should establish allocation for its caller: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PreservesResumeNextArrayReturnFailure(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MakeArray() As Variant
+  MakeArray = Array(1)
+End Function
+
+Public Sub Run()
+  On Error Resume Next
+  Dim values As Variant: values = MakeArray()
+  Debug.Print UBound(values)
+  On Error GoTo 0
+  Dim safe As Variant: safe = MakeArray()
+  Debug.Print UBound(safe)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Run" || got[0].Line != 9 {
+		t.Fatalf("a failed array-return assignment under Resume Next must keep the later bounds query unsafe: %+v", got)
 	}
 }
 

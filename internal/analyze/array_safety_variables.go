@@ -251,25 +251,32 @@ func declarationDimensions(lines []string, line int, name string, base int) ([]a
 		return nil, false
 	}
 	stmt := normalizedCodeLine(lines[line-1])
-	m := declRe.FindStringSubmatch(stmt)
-	if len(m) == 0 {
-		return nil, false
-	}
-	for _, part := range splitArgs(m[1]) {
-		candidate, _, array, _ := declarationNameAndType(part)
-		if !array || !strings.EqualFold(candidate, name) {
+	parts := declarationSourceParts(stmt)
+	for {
+		sourcePart, ok := parts.next()
+		if !ok {
+			break
+		}
+		match := declRe.FindStringSubmatch(sourcePart.text)
+		if len(match) == 0 {
 			continue
 		}
-		start := strings.Index(part, "(")
-		end := strings.LastIndex(part, ")")
-		if start < 0 || end < start {
-			return nil, false
+		for _, part := range splitArgs(match[1]) {
+			candidate, _, array, _ := declarationNameAndType(part)
+			if !array || !strings.EqualFold(candidate, name) {
+				continue
+			}
+			start := strings.Index(part, "(")
+			end := strings.LastIndex(part, ")")
+			if start < 0 || end < start {
+				return nil, false
+			}
+			raw := strings.TrimSpace(part[start+1 : end])
+			if raw == "" {
+				return nil, false
+			}
+			return parseArrayDimensions(raw, base), true
 		}
-		raw := strings.TrimSpace(part[start+1 : end])
-		if raw == "" {
-			return nil, false
-		}
-		return parseArrayDimensions(raw, base), true
 	}
 	return nil, false
 }
@@ -733,6 +740,33 @@ func arrayAssignment(text string) (lhs, rhs string, indexed, ok bool) {
 		return cleanIdentifier(lhs), rhs, false, true
 	}
 	return "", "", false, false
+}
+
+func arrayAssignmentIsDirectElement(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	lower := strings.ToLower(trimmed)
+	for _, prefix := range []string{"set ", "let "} {
+		if strings.HasPrefix(lower, prefix) {
+			trimmed = strings.TrimSpace(trimmed[len(prefix):])
+			break
+		}
+	}
+	for i := 0; i < len(trimmed); i++ {
+		if trimmed[i] != '=' || i > 0 && (trimmed[i-1] == '<' || trimmed[i-1] == '>' || trimmed[i-1] == '=') {
+			continue
+		}
+		lhs := strings.TrimSpace(trimmed[:i])
+		if lhs == "" || strings.HasPrefix(strings.ToLower(lhs), "if ") {
+			return false
+		}
+		open := strings.IndexByte(lhs, '(')
+		if open < 0 {
+			return false
+		}
+		close := matchingParen(lhs, open)
+		return close == len(lhs)-1 && strings.TrimSpace(lhs[open+1:close]) != ""
+	}
+	return false
 }
 
 func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext) (arrayValue, bool) {
