@@ -79,6 +79,11 @@ type excelAccessSummary struct {
 	Members    map[string]bool
 }
 
+type excelNormalReachability struct {
+	Statements map[int]bool
+	Available  bool
+}
+
 type excelProcedureIndex struct {
 	LocalNames      map[string]int
 	LocalCandidates map[string]bool
@@ -237,20 +242,19 @@ func buildExcelLoopAccessIndex(files []parsedFile, db *vbadb.DB, rootDir string,
 		}
 	}
 
+	normalReachability := buildExcelNormalReachabilityIndex(files)
 	// Propagate only uniquely resolved project-local summaries. The summary is
 	// a finite set of categories, so repeated fixed-point passes are bounded.
 	changed := true
 	for changed {
 		changed = false
 		for _, file := range files {
-			procedures := file.procedureView()
-			for i, procedure := range file.IR.Procedures {
+			for _, procedure := range file.IR.Procedures {
 				key := excelProcedureKey(file.IR, procedure.Symbol)
 				current := index.Summaries[key]
-				sourceProc, _ := procedures.At(i)
-				normalReachable, canFilterByReachability := excelNormalReachableStatements(sourceProc)
+				reachability := normalReachability[key]
 				for _, call := range procedure.Calls {
-					if canFilterByReachability && !normalReachable[call.StatementID] {
+					if reachability.Available && !reachability.Statements[call.StatementID] {
 						continue
 					}
 					if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
@@ -350,6 +354,22 @@ func excelNormalReachableStatements(proc sourceProcedure) (map[int]bool, bool) {
 		statementReachability[block.StatementID] = reachableBlocks[block.ID]
 	}
 	return statementReachability, hasStatementBlock
+}
+
+func buildExcelNormalReachabilityIndex(files []parsedFile) map[string]excelNormalReachability {
+	index := make(map[string]excelNormalReachability)
+	for _, file := range files {
+		procedures := file.procedureView()
+		for i, procedure := range file.IR.Procedures {
+			proc, _ := procedures.At(i)
+			statements, available := excelNormalReachableStatements(proc)
+			index[excelProcedureKey(file.IR, procedure.Symbol)] = excelNormalReachability{
+				Statements: statements,
+				Available:  available,
+			}
+		}
+	}
+	return index
 }
 
 func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure) []Finding {
@@ -631,6 +651,7 @@ func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootBindings
 		key := excelProcedureKey(file.IR, procedure.IR.Symbol)
 		summaries[key] = directExcelAccessSummary(file, procedure, db, rootBindings, rootDir, cfg)
 	}
+	normalReachability := buildExcelNormalReachabilityIndex([]parsedFile{file})
 	changed := true
 	for changed {
 		changed = false
@@ -641,9 +662,9 @@ func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootBindings
 			}
 			key := excelProcedureKey(file.IR, procedure.IR.Symbol)
 			current := summaries[key]
-			normalReachable, canFilterByReachability := excelNormalReachableStatements(procedure)
+			reachability := normalReachability[key]
 			for call := range procedure.Calls.All() {
-				if canFilterByReachability && !normalReachable[call.StatementID] {
+				if reachability.Available && !reachability.Statements[call.StatementID] {
 					continue
 				}
 				callee, ok := excelHelperSummaryKey(file, call)
