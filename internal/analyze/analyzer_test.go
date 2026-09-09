@@ -10613,6 +10613,44 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA227AllowsDictionaryReAddAfterRemoval(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Public Sub Perform()
+  data_.Add "actions", Array("x")
+  If data_.Exists("actions") Then
+    data_.RemoveAll
+    data_.Add "actions", Array("y")
+    Dim result As Long
+    result = syncChannels(data_)
+  End If
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a non-empty Dictionary array re-added after removal must remain safe: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227RecognizesCreateLookupDictSnapshots(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

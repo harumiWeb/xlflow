@@ -371,7 +371,7 @@ func arrayDictionaryItemAllocationContract(index *objectContainerIndex, owner so
 				return false
 			}
 			existsGuarded := objectContainerExistsGuarded(index, caller, actual, key, call.StatementID)
-			allowRemovals := !arrayDictionaryItemHasRemovalBeforeObservation(index, caller, actual, key, call.StatementID, !existsGuarded)
+			allowRemovals := !arrayDictionaryItemHasRemovalBeforeObservation(index, caller, actual, key, call.StatementID, !existsGuarded, ctx)
 			if !arrayDictionaryItemAllWritesSafe(index, actual, key, ctx, allowRemovals) ||
 				!arrayDictionaryItemCallerHasPresence(index, caller, actual, key, call.StatementID, ctx, allowRemovals) {
 				return false
@@ -541,9 +541,13 @@ func arrayDictionaryItemProcedureHasRemoval(index *objectContainerIndex, proc so
 	return false
 }
 
-func arrayDictionaryItemProcedureHasRemovalBeforeObservation(index *objectContainerIndex, proc sourceProcedure, receiver, key string, observationID int) bool {
+func arrayDictionaryItemProcedureHasRemovalBeforeObservation(index *objectContainerIndex, proc sourceProcedure, receiver, key string, observationID int, ctx analysisContext) bool {
 	flowContext, _, contextOK := objectContainerGraphContext(index, proc)
 	if !contextOK {
+		return true
+	}
+	safeWrites, _, safe := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx, true)
+	if !safe {
 		return true
 	}
 	for call := range proc.Calls.All() {
@@ -560,14 +564,63 @@ func arrayDictionaryItemProcedureHasRemovalBeforeObservation(index *objectContai
 				continue
 			}
 		}
-		if objectContainerStatementBeforeObservation(flowContext.graph, call.StatementID, observationID) {
+		if !objectContainerStatementBeforeObservation(flowContext.graph, call.StatementID, observationID) {
+			continue
+		}
+		overwritten := false
+		for safeWriteID := range safeWrites {
+			if objectContainerStatementCanReach(flowContext.graph, call.StatementID, safeWriteID) &&
+				objectContainerStatementDominates(flowContext.graph, safeWriteID, observationID) {
+				overwritten = true
+				break
+			}
+		}
+		if !overwritten {
 			return true
 		}
 	}
 	return false
 }
 
-func arrayDictionaryItemHasRemovalBeforeObservation(index *objectContainerIndex, caller sourceProcedure, receiver, key string, observationID int, includeExternal bool) bool {
+func arrayDictionaryItemProcedureRemovalInvalidatesNormalExit(index *objectContainerIndex, proc sourceProcedure, receiver, key string, ctx analysisContext) bool {
+	flowContext, _, contextOK := objectContainerGraphContext(index, proc)
+	if !contextOK {
+		return true
+	}
+	safeWrites, _, safe := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx, true)
+	if !safe {
+		return true
+	}
+	for call := range proc.Calls.All() {
+		if !strings.EqualFold(objectCallWithReceiverName(proc, call), receiver) {
+			continue
+		}
+		member := strings.ToLower(cleanIdentifier(call.Callee.Member))
+		if member != "remove" && member != "removeall" {
+			continue
+		}
+		if member == "remove" {
+			callKey, keyOK := objectContainerDictionaryKey(proc, call)
+			if keyOK && !objectContainerKeysMayAlias(callKey, key) {
+				continue
+			}
+		}
+		overwritten := false
+		for safeWriteID := range safeWrites {
+			if objectContainerStatementCanReach(flowContext.graph, call.StatementID, safeWriteID) &&
+				objectContainerNormalExitCoveredByWrites(proc, map[int]bool{safeWriteID: true}) {
+				overwritten = true
+				break
+			}
+		}
+		if !overwritten {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayDictionaryItemHasRemovalBeforeObservation(index *objectContainerIndex, caller sourceProcedure, receiver, key string, observationID int, includeExternal bool, ctx analysisContext) bool {
 	if index == nil || observationID <= 0 {
 		return true
 	}
@@ -576,7 +629,7 @@ func arrayDictionaryItemHasRemovalBeforeObservation(index *objectContainerIndex,
 			continue
 		}
 		if proc.StartLine == caller.StartLine {
-			if arrayDictionaryItemProcedureHasRemovalBeforeObservation(index, proc, receiver, key, observationID) {
+			if arrayDictionaryItemProcedureHasRemovalBeforeObservation(index, proc, receiver, key, observationID, ctx) {
 				return true
 			}
 			continue
@@ -584,7 +637,8 @@ func arrayDictionaryItemHasRemovalBeforeObservation(index *objectContainerIndex,
 		if includeExternal && strings.EqualFold(strings.TrimSpace(proc.Visibility), "public") {
 			return true
 		}
-		if objectContainerProcedureMayReachObservation(index, caller, proc, observationID) {
+		if objectContainerProcedureMayReachObservation(index, caller, proc, observationID) &&
+			arrayDictionaryItemProcedureRemovalInvalidatesNormalExit(index, proc, receiver, key, ctx) {
 			return true
 		}
 	}
