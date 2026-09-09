@@ -17092,6 +17092,12 @@ Public Sub RunBareProperty()
 	values = MakeValues
 	Debug.Print values(1)
 End Sub
+
+Public Sub RunShadowed(ByVal MakeValues As Long)
+	Dim values() As Long
+	values = MakeValues
+	Debug.Print values(1)
+End Sub
 `,
 		},
 	}
@@ -17138,8 +17144,15 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
-		t.Fatalf("project-aware realtime analysis should preserve qualified array-return summaries: %+v", got)
+	shadowedFinding := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure != "RunShadowed" {
+			t.Fatalf("project-aware realtime analysis should preserve qualified array-return summaries: %+v", finding)
+		}
+		shadowedFinding = true
+	}
+	if !shadowedFinding {
+		t.Fatal("a local parameter shadowing a project array-return function must retain the VBA227 finding")
 	}
 }
 

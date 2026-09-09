@@ -2051,6 +2051,9 @@ func realtimeProjectContextDocuments(current parsedFile, documents []intel.Proje
 				}
 			}
 			for _, access := range procedure.Accesses {
+				if !realtimeProjectAccessCanBeProcedure(access) {
+					continue
+				}
 				for _, candidate := range access.Resolution.Candidates {
 					if separator := strings.LastIndexAny(candidate.QualifiedName, ".!"); separator > 0 {
 						enqueueModule(candidate.QualifiedName[:separator])
@@ -2068,7 +2071,7 @@ func realtimeProjectContextDocuments(current parsedFile, documents []intel.Proje
 					Callee: procedureir.Callee{
 						Text: access.Name, BaseName: access.Name, Member: access.Name,
 					},
-					Range: access.Range,
+					Range: access.Range, NonCallableNames: realtimeProjectNonCallableNames(document, procedure),
 				})
 				for _, candidate := range resolution.Candidates {
 					if separator := strings.LastIndexAny(candidate.QualifiedName, ".!"); separator > 0 {
@@ -2099,6 +2102,39 @@ func realtimeProjectContextDocuments(current parsedFile, documents []intel.Proje
 			continue
 		}
 		result = append(result, document)
+	}
+	return result
+}
+
+func realtimeProjectAccessCanBeProcedure(access procedureir.VariableAccess) bool {
+	switch access.Scope {
+	case procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule:
+		return false
+	default:
+		return true
+	}
+}
+
+func realtimeProjectNonCallableNames(document procedureir.DocumentIR, procedure procedureir.ProcedureIR) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(document.Declarations)+len(procedure.Declarations))
+	appendDeclaration := func(declaration procedureir.Declaration) {
+		name := strings.TrimSpace(declaration.Name)
+		if name == "" || seen[strings.ToLower(name)] {
+			return
+		}
+		switch strings.ToLower(strings.TrimSpace(declaration.Kind)) {
+		case "sub", "function", "property", "property_get", "property_let", "property_set", "declare", "declare_sub", "declare_function":
+			return
+		}
+		seen[strings.ToLower(name)] = true
+		result = append(result, name)
+	}
+	for _, declaration := range document.Declarations {
+		appendDeclaration(declaration)
+	}
+	for _, declaration := range procedure.Declarations {
+		appendDeclaration(declaration)
 	}
 	return result
 }

@@ -68,7 +68,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		}
 		output, findings := a.arrayTransfer(file, proc, ctx, variables, input, source, line, constants, capacityGuards)
 		output = arrayVBA227AttachConditionalReDimState(output, proc, source, line, variables)
-		output = arrayVBA227AttachReturnProvenance(output, source, ctx, variables, constants)
+		output = arrayVBA227AttachReturnProvenance(output, source, proc, ctx, variables, constants)
 		output = arrayVBA227AttachAllocationFlagState(file, proc, source, line, input, output, variables)
 		if resumeNext {
 			output = arrayVBA227PreserveResumeNextArrayFailure(failureInput, output, source, line, proc, ctx, variables)
@@ -223,7 +223,7 @@ func arrayVBA227PreserveResumeNextArrayFailure(input, output arrayFlowState, tex
 	if !arrayVBA227MayFailArrayExpression(rhs) {
 		return output
 	}
-	value, provenArray := arrayExpressionState(rhs, input, ctx)
+	value, provenArray := arrayExpressionStateForProcedure(rhs, input, ctx, proc)
 	if !provenArray || !value.knownArray {
 		value, provenArray = arrayQualifiedReturnExpressionState(proc, line, rhs, variables, ctx)
 	}

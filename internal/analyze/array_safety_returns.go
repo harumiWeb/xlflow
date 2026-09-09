@@ -13,13 +13,13 @@ import (
 // an array-return summary at the call site. The summary records a formal
 // parameter; this step maps it to the actual argument and keeps the fact
 // path-sensitive until the caller proves the corresponding condition.
-func arrayVBA227AttachReturnProvenance(state arrayFlowState, text string, ctx analysisContext, variables map[string]arrayVariable, constants map[string]int) arrayFlowState {
+func arrayVBA227AttachReturnProvenance(state arrayFlowState, text string, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, constants map[string]int) arrayFlowState {
 	lhs, rhs, indexed, ok := arrayAssignment(text)
 	if !ok || indexed {
 		return state
 	}
 	callee := arrayCallName(rhs)
-	if callee == "" || ctx.functionAmbiguous[callee] {
+	if callee == "" || ctx.functionAmbiguous[callee] || arrayProcedureNameShadowed(proc, arrayBareCallName(rhs)) {
 		return state
 	}
 	summary, ok := ctx.arrayReturns[callee]

@@ -284,7 +284,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 					state[name] = value
 				}
-			} else if value, known := arrayExpressionState(rhs, state, ctx); known {
+			} else if value, known := arrayExpressionStateForProcedure(rhs, state, ctx, proc); known {
 				if qualifiedValue, qualifiedKnown := arrayQualifiedReturnExpressionState(proc, line, rhs, variables, ctx); qualifiedKnown {
 					value = qualifiedValue
 				}

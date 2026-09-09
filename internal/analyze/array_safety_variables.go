@@ -809,3 +809,52 @@ func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext)
 	}
 	return arrayValue{}, false
 }
+
+// arrayExpressionStateForProcedure keeps a bare array-return summary from
+// overriding a lexical variable or parameter with the same name. The summary
+// is intentionally keyed by the unqualified name, so it needs this procedure
+// context before it can be used as a call-site fact.
+func arrayExpressionStateForProcedure(rhs string, state arrayFlowState, ctx analysisContext, proc sourceProcedure) (arrayValue, bool) {
+	if arrayProcedureNameShadowed(proc, arrayBareCallName(rhs)) {
+		ctx.arrayReturns = nil
+	}
+	return arrayExpressionState(rhs, state, ctx)
+}
+
+func arrayBareCallName(text string) string {
+	if strings.ContainsAny(strings.TrimSpace(text), ".!") {
+		return ""
+	}
+	return arrayCallName(text)
+}
+
+func arrayProcedureNameShadowed(proc sourceProcedure, name string) bool {
+	name = strings.TrimSpace(cleanIdentifier(name))
+	if name == "" {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		switch declaration.Scope {
+		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
+			if strings.EqualFold(cleanIdentifier(declaration.Name), name) {
+				return true
+			}
+		}
+	}
+	for parameter := range proc.Params.All() {
+		if strings.EqualFold(cleanIdentifier(parameter.Name), name) {
+			return true
+		}
+	}
+	if proc.Document != nil {
+		for _, declaration := range proc.Document.Declarations {
+			switch declaration.Scope {
+			case procedureir.ScopeModule, procedureir.ScopeProject:
+				if strings.EqualFold(cleanIdentifier(declaration.Name), name) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
