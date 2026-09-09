@@ -992,10 +992,10 @@ func arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings []Finding,
 // body means the condition's indexed access completed normally. Keep the
 // proof tied to the immediately preceding If header and reject Else bodies;
 // an unrelated earlier access must not establish allocation for a later one.
-// A handler that can Resume Next may re-enter the body after the condition
-// failed, so it also disables this normal-path proof.
+// A reachable error handler that can resume into the body also disables this
+// normal-path proof because the condition may have failed before the re-entry.
 func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, variables map[string]arrayVariable, resumeNextBefore []bool) []Finding {
-	if line <= 1 || line > len(file.Lines) || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) || arrayVBA227ProcedureHasErrorHandlerResumeNext(proc) {
+	if line <= 1 || line > len(file.Lines) || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 		return findings
 	}
 	condition, body, ok := arrayIfThenParts(normalizedCodeLine(file.Lines[line-2]))
@@ -1007,7 +1007,9 @@ func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding,
 	if statement.ID == 0 {
 		return findings
 	}
+	access := statement
 	guardFound := false
+	var guard procedureir.Statement
 	visited := map[int]bool{}
 	for statement.ParentID != 0 && !visited[statement.ParentID] {
 		visited[statement.ParentID] = true
@@ -1020,6 +1022,7 @@ func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding,
 		}
 		if (parent.Kind == procedureir.StatementIf || parent.Kind == procedureir.StatementElseIf) && parent.Range.StartLine == line-1 {
 			guardFound = true
+			guard = parent
 			break
 		}
 		statement = parent
@@ -1040,6 +1043,9 @@ func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding,
 		}
 	}
 	if len(proven) == 0 {
+		return findings
+	}
+	if arrayVBA227ResumeCanReachIndexedConditionBody(proc, guard, access) {
 		return findings
 	}
 
@@ -2485,13 +2491,75 @@ func arrayVBA227ResumeNextBeforeLine(prefixes []bool, line int) bool {
 	return line >= 0 && line < len(prefixes) && prefixes[line]
 }
 
-func arrayVBA227ProcedureHasErrorHandlerResumeNext(proc sourceProcedure) bool {
-	for statement := range proc.Statements.All() {
-		if statement.Kind == procedureir.StatementResume && strings.HasPrefix(strings.ToLower(strings.TrimSpace(statement.Text)), "resume next") {
-			return true
+func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, guard, access procedureir.Statement) bool {
+	if proc.Graph == nil || guard.ID == 0 || access.ID == 0 {
+		return false
+	}
+	graph := proc.Graph.View(vbacfg.EdgeFilter{})
+	guardBlock, ok := graph.BlockForStatement(guard.ID)
+	if !ok {
+		return false
+	}
+	bodyBlock, ok := graph.BlockForStatement(access.ID)
+	if !ok {
+		return false
+	}
+	handlers := map[vbacfg.BlockID]bool{}
+	graph.ForEachOutgoing(guardBlock.ID, func(edge vbacfg.Edge) bool {
+		if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeError {
+			handlers[edge.To] = true
+		}
+		return true
+	})
+	for handler := range handlers {
+		reachable := arrayVBA227NormalReachableBlocks(graph, handler)
+		for blockID := range reachable {
+			block, exists := graph.BlockByID(blockID)
+			if !exists || block.Statement == nil || block.Statement.Control == nil {
+				continue
+			}
+			switch block.Statement.Control.Transfer {
+			case procedureir.TransferResumeNext:
+				return true
+			case procedureir.TransferResumeLabel:
+				labelReachesBody := false
+				graph.ForEachOutgoing(block.ID, func(edge vbacfg.Edge) bool {
+					if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeResume && arrayVBA227NormalPathReaches(graph, edge.To, bodyBlock.ID) {
+						labelReachesBody = true
+					}
+					return true
+				})
+				if labelReachesBody {
+					return true
+				}
+			}
 		}
 	}
 	return false
+}
+
+func arrayVBA227NormalReachableBlocks(graph vbacfg.CFGView, start vbacfg.BlockID) map[vbacfg.BlockID]bool {
+	reachable := map[vbacfg.BlockID]bool{start: true}
+	queue := []vbacfg.BlockID{start}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		graph.ForEachOutgoing(current, func(edge vbacfg.Edge) bool {
+			if edge.Class == vbacfg.EdgeNormal && !reachable[edge.To] {
+				reachable[edge.To] = true
+				queue = append(queue, edge.To)
+			}
+			return true
+		})
+	}
+	return reachable
+}
+
+func arrayVBA227NormalPathReaches(graph vbacfg.CFGView, start, target vbacfg.BlockID) bool {
+	if start == target {
+		return true
+	}
+	return arrayVBA227NormalReachableBlocks(graph, start)[target]
 }
 
 func arrayIfThenParts(text string) (condition, body string, ok bool) {

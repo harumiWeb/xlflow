@@ -8305,6 +8305,61 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227DoesNotCarryIndexedConditionThroughLabelResume(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant)
+  Dim values() As Long
+  values = source
+  On Error GoTo Handler
+  If values(0) <> 1 Then
+Body: Debug.Print values(0)
+  End If
+  Exit Sub
+Handler:
+  Resume Body
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 6 || got[1].Line != 7 {
+		t.Fatalf("a label-resume path must keep the body access possible: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227IgnoresUnreachableResumeHandlerForIndexedConditionProof(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant)
+  Dim values() As Long
+  On Error GoTo Handler
+  On Error GoTo 0
+  values = source
+  If values(0) <> 1 Then
+    Debug.Print values(0)
+  End If
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("an unreachable handler must not disable the normal-path proof: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulBoundsAfterLengthAssignment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
