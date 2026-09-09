@@ -1262,7 +1262,7 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 				}
 			}
 		}
-		out, _ := (Analyzer{}).arrayVBA227Transfer(file, proc, ctx, variables, in, text, line, nil, nil, nil)
+		out, _ := (Analyzer{}).arrayVBA227Transfer(file, proc, ctx, variables, in, text, line, nil, nil, nil, &graph)
 		forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 			out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 			out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)

@@ -8388,6 +8388,38 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227UsesPrunedGraphForUnknownResumeFlow(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant, ByVal selector As Long)
+  Dim values() As Long
+  values = source
+  On Error GoTo Handler
+  GoTo Guard
+Retry:
+  Err.Raise 5
+Unknown: On selector GoTo Retry, Body
+Guard:
+  If values(0) <> 1 Then
+Body: Debug.Print values(0)
+  End If
+  Exit Sub
+Handler:
+  Resume Retry
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 11 {
+		t.Fatalf("an unreachable unknown flow after Err.Raise must not disable the indexed condition proof: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227IgnoresUnreachableResumeHandlerForIndexedConditionProof(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

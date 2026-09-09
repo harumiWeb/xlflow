@@ -11,7 +11,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
-func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, resumeNextBefore []bool) (arrayFlowState, []Finding) {
+func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView) (arrayFlowState, []Finding) {
 	state = arrayVBA227ClearLoopBodyBounds(state, line)
 	state = arrayVBA227ClearConditionalAllocationGuards(state, proc, text, line, variables)
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "case ") || arrayBoundCallRe.MatchString(text) {
@@ -128,7 +128,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	}
 	state, findings := transfer(state, text)
 	findings = arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings, file, proc, line, variables, resumeNextBefore)
-	findings = arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings, file, proc, line, variables, resumeNextBefore)
+	findings = arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings, file, proc, line, variables, resumeNextBefore, vba227Graph)
 	findings = arrayVBA227FilterConditionalBodyIndexFindings(findings, file, proc, line, state, variables, ctx, resumeNextBefore)
 	findings = arrayVBA227FilterForBodyIndexFindings(findings, file, proc, line, state, variables, ctx, resumeNextBefore)
 	if (arrayVBA227HasSuccessfulBoundsExpression(text) || arrayVBA227HasDictionaryBoundsExpression(text, state)) &&
@@ -994,7 +994,7 @@ func arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings []Finding,
 // an unrelated earlier access must not establish allocation for a later one.
 // A reachable error handler that can resume into the body also disables this
 // normal-path proof because the condition may have failed before the re-entry.
-func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, variables map[string]arrayVariable, resumeNextBefore []bool) []Finding {
+func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, variables map[string]arrayVariable, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView) []Finding {
 	if line <= 1 || line > len(file.Lines) || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 		return findings
 	}
@@ -1045,7 +1045,7 @@ func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding,
 	if len(proven) == 0 {
 		return findings
 	}
-	if arrayVBA227ResumeCanReachIndexedConditionBody(proc, guard, access) {
+	if arrayVBA227ResumeCanReachIndexedConditionBody(proc, vba227Graph, guard, access) {
 		return findings
 	}
 
@@ -2491,11 +2491,11 @@ func arrayVBA227ResumeNextBeforeLine(prefixes []bool, line int) bool {
 	return line >= 0 && line < len(prefixes) && prefixes[line]
 }
 
-func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, guard, access procedureir.Statement) bool {
+func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227Graph *vbacfg.CFGView, guard, access procedureir.Statement) bool {
 	if guard.ID == 0 || access.ID == 0 {
 		return false
 	}
-	if proc.Graph == nil {
+	if vba227Graph == nil && proc.Graph == nil {
 		for statement := range proc.Statements.All() {
 			if statement.Kind != procedureir.StatementResume || statement.Control == nil {
 				continue
@@ -2507,7 +2507,12 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, guard, 
 		}
 		return false
 	}
-	graph := proc.Graph.View(vbacfg.EdgeFilter{})
+	var graph vbacfg.CFGView
+	if vba227Graph != nil {
+		graph = *vba227Graph
+	} else {
+		graph = proc.Graph.View(vbacfg.EdgeFilter{})
+	}
 	guardBlock, ok := graph.BlockForStatement(guard.ID)
 	if !ok {
 		return false

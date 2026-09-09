@@ -66,6 +66,11 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		initial = arrayEntryStateForProcedure(file, proc, ctx, moduleDecls, variables)
 	}
 	runtimeBase := arrayOptionBase(file)
+	var vba227Graph *vbacfg.CFGView
+	if a.Config.Analyze.DetectArrayLifecycleSafety && proc.Graph != nil {
+		graph := arrayVBA227Graph(proc, ctx)
+		vba227Graph = &graph
+	}
 	if proc.Graph == nil {
 		findings := append([]Finding(nil), comparisonFindings...)
 		if !baseLaneRequested && runtimeSink == nil {
@@ -105,7 +110,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				}
 				if a.Config.Analyze.DetectArrayLifecycleSafety {
 					var lifecycleIssues []Finding
-					vba227State, lifecycleIssues = a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, vba227State, text, line, constants, capacityGuards, vba227ResumeNextBefore)
+					vba227State, lifecycleIssues = a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, vba227State, text, line, constants, capacityGuards, vba227ResumeNextBefore, vba227Graph)
 					for _, finding := range lifecycleIssues {
 						if finding.Code != "VBA227" {
 							continue
@@ -177,15 +182,14 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		})
 	}
 	if a.Config.Analyze.DetectArrayLifecycleSafety {
-		vba227Graph := arrayVBA227Graph(proc, ctx)
 		vba227Initial := arrayEntryStateForProcedure(file, proc, ctx, moduleDecls, vba227Variables)
 		lanes = append(lanes, arrayCFGWorklistLane{
-			Graph: &vba227Graph, Initial: vba227Initial, Stats: ctx.arrayStats, SourceLines: true,
+			Graph: vba227Graph, Initial: vba227Initial, Stats: ctx.arrayStats, SourceLines: true,
 			ReliableExceptional: func(statement *procedureir.Statement, in, out arrayFlowState) bool {
 				return arrayAllocationTransferIsReliable(statement, in, out)
 			},
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
-				out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, capacityGuards, vba227ResumeNextBefore)
+				out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, capacityGuards, vba227ResumeNextBefore, vba227Graph)
 				forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
 					out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
@@ -203,7 +207,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				return out
 			},
 			EdgeState: func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-				out = applyArrayConditionalAllocationBranch(out, &vba227Graph, block, edge)
+				out = applyArrayConditionalAllocationBranch(out, vba227Graph, block, edge)
 				out = applyArrayVBA227ConditionalReDimBranch(out, proc, block.Statement, edge, vba227Variables)
 				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore, proc)
 				out = applyArrayModuleCapacityGuardBranch(out, block.Statement, edge, file, proc, ctx, vba227Variables, moduleDecls)
