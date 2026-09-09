@@ -8489,7 +8489,7 @@ func TestArrayVBA227DoesNotFilterForBodyAfterErrorHandlerResume(t *testing.T) {
 		parsedFile{Lines: []string{"On Error GoTo Handler", loop.Text, access.Text}},
 		proc,
 		3,
-		arrayFlowState{"values": {kind: arrayAllocated, knownArray: true, mayBeEmpty: true}},
+		arrayFlowState{"values": {kind: arrayUnknown, knownArray: true, mayBeEmpty: true}},
 		map[string]arrayVariable{"values": {name: "values", isVariant: true}},
 		analysisContext{},
 		make([]bool, 4),
@@ -8674,6 +8674,32 @@ End Sub
 	got := findingsByCode(findings, "VBA227")
 	if len(got) != 3 || got[0].Line != 5 || got[1].Line != 5 || got[2].Line != 6 {
 		t.Fatalf("an error-handler Resume Next path must keep the loop body access possible: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsSuccessfulEmptyBoundsLoopBodyProofWithErrorHandler(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  values = vbNullString
+  On Error GoTo Handler
+  Dim i As Long
+  For i = LBound(values) To UBound(values)
+    Debug.Print values(i)
+  Next
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a successfully bounded empty array cannot reach the default-positive-step loop body: %+v", got)
 	}
 }
 

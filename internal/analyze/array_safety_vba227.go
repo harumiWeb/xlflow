@@ -727,9 +727,10 @@ func arrayVBA227StatementLineDominates(proc sourceProcedure, line int, target pr
 // the first body visit; this narrow filter preserves the bound finding itself
 // and any known lower/upper-bound violation.
 func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, ctx analysisContext, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges) []Finding {
-	if line <= 0 || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+	if line <= 0 {
 		return findings
 	}
+	resumeNext := arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line)
 	proven := map[string]bool{}
 	provenNonEmpty := map[string]bool{}
 	for statement := range proc.Statements.All() {
@@ -738,14 +739,18 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 		}
 		switch statement.Kind {
 		case procedureir.StatementFor:
-			if name, ok := arrayVBA227DerivedZeroBasedLoopArray(file, proc, statement, variables, ctx); ok {
-				proven[name] = true
-				provenNonEmpty[name] = true
+			if !resumeNext {
+				if name, ok := arrayVBA227DerivedZeroBasedLoopArray(file, proc, statement, variables, ctx); ok {
+					proven[name] = true
+					provenNonEmpty[name] = true
+				}
 			}
 		case procedureir.StatementDo, procedureir.StatementWhile:
-			if name, ok := arrayVBA227DerivedDoWhileArray(file, proc, statement, line, variables, ctx); ok {
-				proven[name] = true
-				provenNonEmpty[name] = true
+			if !resumeNext {
+				if name, ok := arrayVBA227DerivedDoWhileArray(file, proc, statement, line, variables, ctx); ok {
+					proven[name] = true
+					provenNonEmpty[name] = true
+				}
 			}
 		}
 		header := strings.TrimSpace(statement.Text)
@@ -754,7 +759,7 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 		}
 		header = strings.TrimSpace(normalizedCodeLine(header))
 		argument := ""
-		if _, _, countSource, _, ok := arrayForCountHeader(header); ok {
+		if _, _, countSource, _, ok := arrayForCountHeader(header); ok && !resumeNext {
 			for name, value := range state {
 				if value.allocationCountSource == "" || !arrayCountExpressionMatches(countSource, value.allocationCountSource) {
 					continue
@@ -766,7 +771,7 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 				}
 			}
 		}
-		if match := arrayForScalarBoundRe.FindStringSubmatch(header); len(match) == 2 {
+		if match := arrayForScalarBoundRe.FindStringSubmatch(header); len(match) == 2 && !resumeNext {
 			bound, known := state[strings.ToLower(cleanIdentifier(match[1]))]
 			if known {
 				argument = bound.safeBoundProbe
@@ -774,11 +779,11 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 		}
 		name := strings.ToLower(cleanIdentifier(argument))
 		variable, known := variables[name]
-		if name != "" && known && (variable.isArray || variable.isVariant) {
+		if !resumeNext && name != "" && known && (variable.isArray || variable.isVariant) {
 			proven[name] = true
 			provenNonEmpty[name] = true
 		}
-		if match := arrayForUBoundRe.FindStringSubmatch(header); len(match) == 3 {
+		if match := arrayForUBoundRe.FindStringSubmatch(header); len(match) == 3 && !resumeNext {
 			name := strings.ToLower(cleanIdentifier(match[2]))
 			variable, variableKnown := variables[name]
 			_, valueKnown := state[name]
@@ -796,10 +801,10 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 		if match := arrayForBoundsRe.FindStringSubmatch(header); len(match) == 3 && strings.EqualFold(match[1], match[2]) {
 			name := strings.ToLower(cleanIdentifier(match[1]))
 			variable, variableKnown := variables[name]
-			_, valueKnown := state[name]
+			value, valueKnown := state[name]
 			if variableKnown && (variable.isArray || variable.isVariant) && valueKnown {
 				access := procedureStatementAtLine(proc, line)
-				if access.ID != 0 && arrayVBA227ResumeCanReachForBody(proc, vba227Graph, resumeNextEdges, statement, access) {
+				if arrayVBA227BoundsCanFail(value) && access.ID != 0 && arrayVBA227ResumeCanReachForBody(proc, vba227Graph, resumeNextEdges, statement, access) {
 					continue
 				}
 				// Reaching the body means both bounds queries completed and the
@@ -2509,6 +2514,10 @@ func arrayVBA227ResumeNextAfterStatement(active bool, text string) bool {
 
 func arrayVBA227ResumeCanReachForBody(proc sourceProcedure, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges, loop, access procedureir.Statement) bool {
 	return arrayVBA227ResumeCanReachIndexedConditionBody(proc, vba227Graph, resumeNextEdges, loop, access)
+}
+
+func arrayVBA227BoundsCanFail(value arrayValue) bool {
+	return value.kind != arrayAllocated || !value.knownArray || value.mayBeUnallocated
 }
 
 func arrayVBA227ResumeNextBeforeLine(prefixes []bool, line int) bool {
