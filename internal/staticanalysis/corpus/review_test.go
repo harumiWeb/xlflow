@@ -105,8 +105,8 @@ func TestCommittedDiagnosticReviews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reviews) != 3744 {
-		t.Fatalf("committed reviews = %d, want 3744", len(reviews))
+	if len(reviews) != 3745 {
+		t.Fatalf("committed reviews = %d, want 3745", len(reviews))
 	}
 	if err := ValidateReviewSources(repoRoot, corpusRoot, reviews); err != nil {
 		t.Fatal(err)
