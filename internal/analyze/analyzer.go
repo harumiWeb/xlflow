@@ -1932,11 +1932,12 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentR
 	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, projectDocuments, &sourceDocument, procedureWorkerLimit)
 }
 
-func realtimeProjectContextFiles(current parsedFile, documents []intel.ProjectAnalysisDocument, project effects.ProjectSummary, cfg config.AnalyzeConfig) []parsedFile {
-	files := make([]parsedFile, 0, len(documents)+1)
+func realtimeProjectContextFiles(current parsedFile, documents []intel.ProjectAnalysisDocument, project effects.ProjectSummary, cfg config.AnalyzeConfig, projectResolver procedureir.Resolver) []parsedFile {
+	projectDocuments := realtimeProjectContextDocuments(current, documents, projectResolver)
+	files := make([]parsedFile, 0, len(projectDocuments)+1)
 	files = append(files, current)
 	seen := map[string]bool{realtimeProjectPathKey(current.Path): true}
-	for _, document := range documents {
+	for _, document := range projectDocuments {
 		path := strings.TrimSpace(document.IR.Path)
 		key := realtimeProjectPathKey(path)
 		if key == "" || seen[key] {
@@ -1966,6 +1967,116 @@ func realtimeProjectContextFiles(current parsedFile, documents []intel.ProjectAn
 		files = append(files, file)
 	}
 	return files
+}
+
+// realtimeProjectContextDocuments narrows the immutable workspace snapshot to
+// the type/call closure that can contribute an interprocedural array summary
+// for the edited document. The project resolver supplies exact call targets;
+// declaration and return types cover member chains whose external-looking
+// qualifier is not resolved by the generic resolver.
+func realtimeProjectContextDocuments(current parsedFile, documents []intel.ProjectAnalysisDocument, projectResolver procedureir.Resolver) []intel.ProjectAnalysisDocument {
+	if len(documents) == 0 {
+		return nil
+	}
+	byModule := make(map[string][]int, len(documents)*2)
+	for index, document := range documents {
+		for _, key := range realtimeProjectDocumentModuleKeys(document) {
+			byModule[key] = append(byModule[key], index)
+		}
+	}
+
+	selected := make(map[int]bool, len(documents))
+	queued := make(map[string]bool, len(documents)*2)
+	queue := make([]string, 0, len(documents))
+	enqueueModule := func(name string) {
+		for _, key := range realtimeProjectTypeKeys(name) {
+			if key == "" || queued[key] {
+				continue
+			}
+			queued[key] = true
+			queue = append(queue, key)
+		}
+	}
+	collectDocumentReferences := func(document procedureir.DocumentIR) {
+		collectType := func(typeName string) {
+			enqueueModule(typeName)
+		}
+		for _, declaration := range document.Declarations {
+			collectType(declaration.Type)
+			for _, parameter := range declaration.Parameters {
+				collectType(parameter.Type)
+			}
+		}
+		for _, procedure := range document.Procedures {
+			collectType(procedure.Symbol.ReturnType)
+			for _, parameter := range procedure.Symbol.Parameters {
+				collectType(parameter.Type)
+			}
+			for _, declaration := range procedure.Declarations {
+				collectType(declaration.Type)
+				for _, parameter := range declaration.Parameters {
+					collectType(parameter.Type)
+				}
+			}
+			for _, call := range procedure.Calls {
+				resolution := call.Resolution
+				if projectResolver != nil {
+					resolution = projectResolver.ResolveCall(call)
+				}
+				for _, candidate := range resolution.Candidates {
+					if separator := strings.LastIndexAny(candidate.QualifiedName, ".!"); separator > 0 {
+						enqueueModule(candidate.QualifiedName[:separator])
+					}
+				}
+				if call.Callee.Receiver != nil {
+					enqueueModule(*call.Callee.Receiver)
+				}
+			}
+		}
+		for _, reference := range document.TypeReferences {
+			collectType(reference.Target)
+		}
+	}
+	collectDocumentReferences(current.IR)
+	for head := 0; head < len(queue); head++ {
+		for _, index := range byModule[queue[head]] {
+			if selected[index] {
+				continue
+			}
+			selected[index] = true
+			collectDocumentReferences(documents[index].IR)
+		}
+	}
+
+	result := make([]intel.ProjectAnalysisDocument, 0, len(selected))
+	currentPath := realtimeProjectPathKey(current.Path)
+	for index, document := range documents {
+		if !selected[index] || realtimeProjectPathKey(document.IR.Path) == currentPath {
+			continue
+		}
+		result = append(result, document)
+	}
+	return result
+}
+
+func realtimeProjectDocumentModuleKeys(document intel.ProjectAnalysisDocument) []string {
+	module := strings.TrimSpace(document.IR.ModuleName)
+	if module == "" {
+		module = strings.TrimSuffix(filepath.Base(document.IR.Path), filepath.Ext(document.IR.Path))
+	}
+	return realtimeProjectTypeKeys(module)
+}
+
+func realtimeProjectTypeKeys(typeName string) []string {
+	typeName = strings.ToLower(cleanIdentifier(strings.TrimSpace(typeName)))
+	if typeName == "" {
+		return nil
+	}
+	keys := []string{typeName}
+	if short := strings.ToLower(cleanIdentifier(lastName(typeName))); short != "" && short != typeName {
+		keys = append(keys, short)
+	}
+	return keys
 }
 
 func realtimeProjectPathKey(path string) string {
@@ -2107,7 +2218,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
-		contextFiles := realtimeProjectContextFiles(file, projectDocuments, projectEffects, cfg.Analyze)
+		contextFiles := realtimeProjectContextFiles(file, projectDocuments, projectEffects, cfg.Analyze, projectResolver)
 		if queryContext.Store != nil && queryRevision == nil {
 			revisionID := queryContext.Revision
 			if revisionID == "" {
