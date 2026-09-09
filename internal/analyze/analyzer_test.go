@@ -14817,6 +14817,31 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227SynchronizesUniqueUnqualifiedEnumAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Enum Earlier
+  Limit = 1
+End Enum
+Public Enum Later
+  Upper = Limit + 1
+  Limit = 10
+End Enum
+Public Sub Run()
+  Dim values() As Long
+  ReDim values(Later.Upper To Upper)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("equivalent qualified and unique unqualified Enum bounds must agree: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227EvaluatesConstReDimBounds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

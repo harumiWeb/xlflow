@@ -352,6 +352,9 @@ func addQualifiedEnumIntegerConstants(file parsedFile, constants map[string]int)
 	for enumIndex, enum := range enums {
 		for memberName, value := range resolved[enumIndex] {
 			constants[strings.ToLower(enum.name+"."+memberName)] = value
+			if memberGroups[memberName] == 1 {
+				constants[memberName] = value
+			}
 		}
 	}
 }
