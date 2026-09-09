@@ -2492,7 +2492,19 @@ func arrayVBA227ResumeNextBeforeLine(prefixes []bool, line int) bool {
 }
 
 func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, guard, access procedureir.Statement) bool {
-	if proc.Graph == nil || guard.ID == 0 || access.ID == 0 {
+	if guard.ID == 0 || access.ID == 0 {
+		return false
+	}
+	if proc.Graph == nil {
+		for statement := range proc.Statements.All() {
+			if statement.Kind != procedureir.StatementResume || statement.Control == nil {
+				continue
+			}
+			switch statement.Control.Transfer {
+			case procedureir.TransferResumeNext, procedureir.TransferResumeLabel:
+				return true
+			}
+		}
 		return false
 	}
 	graph := proc.Graph.View(vbacfg.EdgeFilter{})
@@ -2524,7 +2536,7 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, guard, 
 			case procedureir.TransferResumeLabel:
 				labelReachesBody := false
 				graph.ForEachOutgoing(block.ID, func(edge vbacfg.Edge) bool {
-					if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeResume && arrayVBA227NormalPathReaches(graph, edge.To, bodyBlock.ID) {
+					if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeResume && arrayVBA227NormalPathReachesWithout(graph, edge.To, bodyBlock.ID, guardBlock.ID) {
 						labelReachesBody = true
 					}
 					return true
@@ -2539,13 +2551,31 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, guard, 
 }
 
 func arrayVBA227NormalReachableBlocks(graph vbacfg.CFGView, start vbacfg.BlockID) map[vbacfg.BlockID]bool {
+	return arrayVBA227NormalReachableBlocksWithout(graph, start, 0)
+}
+
+func arrayVBA227NormalPathReachesWithout(graph vbacfg.CFGView, start, target, blocked vbacfg.BlockID) bool {
+	if start == blocked {
+		return false
+	}
+	if start == target {
+		return true
+	}
+	reachable := arrayVBA227NormalReachableBlocksWithout(graph, start, blocked)
+	return reachable[target]
+}
+
+func arrayVBA227NormalReachableBlocksWithout(graph vbacfg.CFGView, start, blocked vbacfg.BlockID) map[vbacfg.BlockID]bool {
+	if start == blocked {
+		return nil
+	}
 	reachable := map[vbacfg.BlockID]bool{start: true}
 	queue := []vbacfg.BlockID{start}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
 		graph.ForEachOutgoing(current, func(edge vbacfg.Edge) bool {
-			if edge.Class == vbacfg.EdgeNormal && !reachable[edge.To] {
+			if edge.Class == vbacfg.EdgeNormal && edge.To != blocked && !reachable[edge.To] {
 				reachable[edge.To] = true
 				queue = append(queue, edge.To)
 			}
@@ -2553,13 +2583,6 @@ func arrayVBA227NormalReachableBlocks(graph vbacfg.CFGView, start vbacfg.BlockID
 		})
 	}
 	return reachable
-}
-
-func arrayVBA227NormalPathReaches(graph vbacfg.CFGView, start, target vbacfg.BlockID) bool {
-	if start == target {
-		return true
-	}
-	return arrayVBA227NormalReachableBlocks(graph, start)[target]
 }
 
 func arrayIfThenParts(text string) (condition, body string, ok bool) {

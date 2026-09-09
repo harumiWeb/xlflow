@@ -8332,6 +8332,34 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227KeepsIndexedConditionProofWhenLabelResumeRetriesGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant)
+  Dim values() As Long
+  values = source
+  On Error GoTo Handler
+Retry:
+  If values(0) <> 1 Then
+    Debug.Print values(0)
+  End If
+  Exit Sub
+Handler:
+  Resume Retry
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("a label-resume path that retries the guard must preserve its proof: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227IgnoresUnreachableResumeHandlerForIndexedConditionProof(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
