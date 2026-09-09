@@ -222,7 +222,7 @@ func arrayQualifiedReturnExpressionState(proc sourceProcedure, line int, rhs str
 		}
 		matched = true
 		key := strings.ToLower(strings.TrimSpace(resolution.Candidates[0].QualifiedName))
-		candidate, known := ctx.arrayReturnsQualified[key]
+		candidate, known := arrayQualifiedReturnValueForQualifiedName(key, ctx)
 		if !known || candidate.kind != arrayAllocated || !candidate.knownArray {
 			return arrayValue{}, false
 		}
@@ -247,8 +247,7 @@ func arrayQualifiedReturnValueFromType(rhs string, variables map[string]arrayVar
 	if !ok {
 		return arrayValue{}, false
 	}
-	key := strings.ToLower(cleanIdentifier(lastName(typeName)) + "." + cleanIdentifier(member))
-	value, known := ctx.arrayReturnsQualified[key]
+	value, known := arrayQualifiedReturnValueForType(typeName, member, ctx)
 	if !known || value.kind != arrayAllocated || !value.knownArray {
 		return arrayValue{}, false
 	}
@@ -271,12 +270,56 @@ func arrayQualifiedReturnObjectType(expression string, variables map[string]arra
 	if !ok || len(ctx.functionReturnsQualified) == 0 {
 		return "", false
 	}
-	key := strings.ToLower(cleanIdentifier(lastName(receiverType)) + "." + cleanIdentifier(member))
-	returnType, known := ctx.functionReturnsQualified[key]
+	returnType, known := arrayQualifiedReturnTypeForType(receiverType, member, ctx)
 	if !known || strings.TrimSpace(returnType) == "" {
 		return "", false
 	}
 	return strings.TrimSpace(returnType), true
+}
+
+func arrayQualifiedReturnLookupKeys(typeName string, projectObjectTypes map[string]bool) []string {
+	typeName = strings.ToLower(cleanIdentifier(strings.TrimSpace(typeName)))
+	if typeName == "" {
+		return nil
+	}
+	keys := []string{typeName}
+	short := strings.ToLower(cleanIdentifier(lastName(typeName)))
+	if short != "" && short != typeName && projectObjectTypes[typeName] {
+		keys = append(keys, short)
+	}
+	return keys
+}
+
+func arrayQualifiedReturnValueForType(typeName, member string, ctx analysisContext) (arrayValue, bool) {
+	for _, typeKey := range arrayQualifiedReturnLookupKeys(typeName, ctx.projectObjectTypes) {
+		key := typeKey + "." + strings.ToLower(cleanIdentifier(member))
+		if value, known := ctx.arrayReturnsQualified[key]; known {
+			return value, true
+		}
+	}
+	return arrayValue{}, false
+}
+
+func arrayQualifiedReturnTypeForType(typeName, member string, ctx analysisContext) (string, bool) {
+	for _, typeKey := range arrayQualifiedReturnLookupKeys(typeName, ctx.projectObjectTypes) {
+		key := typeKey + "." + strings.ToLower(cleanIdentifier(member))
+		if returnType, known := ctx.functionReturnsQualified[key]; known {
+			return returnType, true
+		}
+	}
+	return "", false
+}
+
+func arrayQualifiedReturnValueForQualifiedName(name string, ctx analysisContext) (arrayValue, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if value, known := ctx.arrayReturnsQualified[name]; known {
+		return value, true
+	}
+	dot := strings.LastIndexByte(name, '.')
+	if dot <= 0 || dot >= len(name)-1 {
+		return arrayValue{}, false
+	}
+	return arrayQualifiedReturnValueForType(name[:dot], name[dot+1:], ctx)
 }
 
 func arrayQualifiedReturnMemberCallParts(text string) (receiver, member string, ok bool) {

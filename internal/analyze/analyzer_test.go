@@ -16888,7 +16888,7 @@ End Sub
 func TestAnalyzerVBA227PropagatesChainedQualifiedArrayReturn(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeClass(t, dir, "WebDriver.cls", `Attribute VB_Name = "WebDriver"
+	writeClass(t, dir, "driver_impl.cls", `Attribute VB_Name = "WebDriver"
 Option Explicit
 
 Public Function FindElement(ByVal selector As String) As WebElement
@@ -16902,7 +16902,7 @@ Public Function TableToArray() As Variant()
 	TableToArray = values
 End Function
 `)
-	writeClass(t, dir, "WebElement.cls", `Attribute VB_Name = "WebElement"
+	writeClass(t, dir, "element_impl.cls", `Attribute VB_Name = "WebElement"
 Option Explicit
 
 Private driver_ As WebDriver
@@ -16924,16 +16924,201 @@ Public Sub Run()
 	table = driver.FindElement(By.ID, "table").TableToArray()
 	Debug.Print table(1)
 End Sub
+
+Public Sub RunWithResume()
+	Dim driver As SeleniumVBA.WebDriver
+	Dim table() As Variant
+	Set driver = New WebDriver
+	On Error Resume Next
+	table = driver.FindElement(By.ID, "table").TableToArray()
+	On Error GoTo 0
+	Debug.Print table(1)
+End Sub
+
+Public Sub RunExternal()
+	Dim driver As OtherLib.WebDriver
+	Dim table() As Variant
+	table = driver.TableToArray()
+	Debug.Print table(1)
+End Sub
 `)
 
 	cfg := config.Default()
-	cfg.Project.Name = "SeleniumVBA"
+	cfg.Project.Name = "third_party/selenium-vba"
 	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
+	resumeFinding := false
+	externalFinding := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		switch finding.Procedure {
+		case "RunWithResume":
+			resumeFinding = true
+		case "RunExternal":
+			externalFinding = true
+		default:
+			t.Fatalf("a chained qualified array-return call should preserve its allocated result: %+v", finding)
+		}
+	}
+	if !resumeFinding {
+		t.Fatal("a chained qualified array-return call under Resume Next must retain its possible failed assignment")
+	}
+	if !externalFinding {
+		t.Fatal("a project array-return summary must not be applied to an unrelated external type with the same short name")
+	}
+}
+
+func TestAnalyzerVBA227UsesDeclaredVariantArrayPropertyReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Dictionary.cls", `Attribute VB_Name = "Dictionary"
+Option Explicit
+
+Private count_ As Long
+
+Public Property Get KeysItems2D() As Variant()
+	Dim result() As Variant
+	If count_ = 0 Then
+		ReDim result(0 To 0, 0 To 1)
+		KeysItems2D = result
+		Exit Property
+	End If
+	ReDim result(0 To count_ - 1, 0 To 1)
+	KeysItems2D = result
+End Property
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run()
+	Dim d As Dictionary
+	Dim values() As Variant
+	Set d = New Dictionary
+	values = d.KeysItems2D
+	Debug.Print LBound(values, 1)
+	Debug.Print UBound(values, 1)
+	Debug.Print values(0, 0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
-		t.Fatalf("a chained qualified array-return call should preserve its allocated result: %+v", got)
+		t.Fatalf("a declared Variant array Property Get should preserve its allocated result across empty and non-empty branches: %+v", got)
+	}
+}
+
+func TestSourceRealtimeVBA227PropagatesProjectQualifiedArrayReturn(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	type sourceDocument struct {
+		path   string
+		module string
+		kind   string
+		source string
+	}
+	sources := []sourceDocument{
+		{
+			path:   filepath.Join(root, "src", "classes", "driver_impl.cls"),
+			module: "WebDriver",
+			kind:   "class",
+			source: `Attribute VB_Name = "WebDriver"
+Option Explicit
+
+Public Function FindElement(ByVal selector As String) As WebElement
+	Set FindElement = New WebElement
+End Function
+
+Public Function TableToArray() As Variant()
+	Dim values() As Variant
+	ReDim values(1 To 1)
+	values(1) = "value"
+	TableToArray = values
+End Function
+`,
+		},
+		{
+			path:   filepath.Join(root, "src", "classes", "element_impl.cls"),
+			module: "WebElement",
+			kind:   "class",
+			source: `Attribute VB_Name = "WebElement"
+Option Explicit
+
+Private driver_ As WebDriver
+
+Private Sub Class_Initialize()
+	Set driver_ = New WebDriver
+End Sub
+
+Public Function TableToArray() As Variant()
+	TableToArray = driver_.TableToArray()
+End Function
+`,
+		},
+		{
+			path:   filepath.Join(root, "src", "modules", "Main.bas"),
+			module: "Main",
+			kind:   "standard",
+			source: `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run()
+	Dim driver As SeleniumVBA.WebDriver
+	Dim table() As Variant
+	Set driver = New WebDriver
+	table = driver.FindElement(By.ID, "table").TableToArray()
+	Debug.Print table(1)
+End Sub
+`,
+		},
+	}
+	documents := make([]intel.ProjectAnalysisDocument, 0, len(sources))
+	parsedDocuments := make([]*vbaast.ParsedDocument, 0, len(sources))
+	for _, source := range sources {
+		parsed, err := vbaast.ParseDocument(source.path, []byte(source.source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsedDocuments = append(parsedDocuments, parsed)
+		ir, err := procedureir.BuildParsedContext(context.Background(), procedureir.BuildOptions{
+			RootDir: root, Path: source.path, ModuleName: source.module, ModuleKind: source.kind,
+		}, parsed)
+		if err != nil {
+			for _, parsedDocument := range parsedDocuments {
+				parsedDocument.Close()
+			}
+			t.Fatal(err)
+		}
+		controlFlow, err := vbacfg.BuildDocumentContext(context.Background(), ir)
+		if err != nil {
+			for _, parsedDocument := range parsedDocuments {
+				parsedDocument.Close()
+			}
+			t.Fatal(err)
+		}
+		documents = append(documents, intel.ProjectAnalysisDocument{IR: ir, CFG: controlFlow, Source: source.source})
+	}
+	defer func() {
+		for _, parsed := range parsedDocuments {
+			parsed.Close()
+		}
+	}()
+
+	cfg := config.Default()
+	cfg.Project.Name = "third_party/selenium-vba"
+	main := documents[2]
+	findings, err := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(
+		context.Background(), root, cfg, parsedDocuments[2], main.IR, main.CFG, nil,
+		effects.ProjectSummary{}, nil, nil, nil, documents,
+		intel.Document{Path: main.IR.Path, Source: main.Source}, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("project-aware realtime analysis should preserve qualified array-return summaries: %+v", got)
 	}
 }
 

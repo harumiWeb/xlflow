@@ -1645,6 +1645,7 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 			arrayReturnsQualified:    arrayReturnsQualified,
 			arrayAllowVariantRedim:   (arrayProcedureDocumentsArray(procedure.file, proc) || arrayProcedureDeclaresArrayReturn(proc)) && arrayProcedureHasReturnAllocation(procedure.file, proc),
 			functionReturnsQualified: participantCtx.functionReturnsQualified,
+			projectObjectTypes:       participantCtx.projectObjectTypes,
 			procedureResolver:        participantCtx.procedureResolver,
 		}
 		returnCandidates := map[int]candidate{}
@@ -1710,7 +1711,10 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 	dependents := make(map[string][]int)
 	qualifiedDependents := make(map[string][]int)
 	for index, procedure := range procedures {
-		dependencyContext := analysisContext{functionReturnsQualified: participantCtx.functionReturnsQualified}
+		dependencyContext := analysisContext{
+			functionReturnsQualified: participantCtx.functionReturnsQualified,
+			projectObjectTypes:       participantCtx.projectObjectTypes,
+		}
 		for call := range procedure.proc.Calls.All() {
 			resolution := call.Resolution
 			if participantCtx.procedureResolver != nil {
@@ -1733,8 +1737,10 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 				receiverType, ok := arrayQualifiedReturnObjectType(*call.Callee.Receiver, procedure.variables, dependencyContext)
 				member := cleanIdentifier(call.Callee.Member)
 				if ok && member != "" {
-					qualifiedName := strings.ToLower(cleanIdentifier(lastName(receiverType)) + "." + member)
-					qualifiedDependents[qualifiedName] = append(qualifiedDependents[qualifiedName], index)
+					for _, typeKey := range arrayQualifiedReturnLookupKeys(receiverType, participantCtx.projectObjectTypes) {
+						qualifiedName := typeKey + "." + strings.ToLower(member)
+						qualifiedDependents[qualifiedName] = append(qualifiedDependents[qualifiedName], index)
+					}
 				}
 			}
 		}

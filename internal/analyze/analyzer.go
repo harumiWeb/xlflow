@@ -339,6 +339,7 @@ var traceHelperDependencies = map[string]helperDependencyRule{
 type analysisContext struct {
 	functionReturns                      map[string]string
 	functionReturnsQualified             map[string]string
+	projectObjectTypes                   map[string]bool
 	functionShapes                       map[string]procedureir.ValueShapeKind
 	functionNamesSeen                    map[string]bool
 	functionAmbiguous                    map[string]bool
@@ -1896,7 +1897,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 // the snapshot-aware form used by LSP and other project callers that already
 // own a value-bearing constant environment.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, nil, 0)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, nil, nil, 0)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext is
@@ -1904,7 +1905,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 // and reads project-dependent call/access/event facts through resolution
 // views, avoiding a full resolved DocumentIR clone per file.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, 0)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, nil, 0)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext
@@ -1912,7 +1913,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(c
 // immutable document index instead of reparsing the complete buffer for every
 // expression they resolve.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, &sourceDocument, procedureWorkerLimit)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, &sourceDocument, procedureWorkerLimit)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverContext
@@ -1920,10 +1921,62 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentC
 // procedure facts, while projectResolver retains the complete symbol index
 // needed for source-level value and receiver validation.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, &sourceDocument, procedureWorkerLimit)
+	return SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, nil, sourceDocument, procedureWorkerLimit)
 }
 
-func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, sourceDocument *intel.Document, procedureWorkerLimit int) ([]Finding, error) {
+// SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext
+// is the project-aware editor entry point. In addition to the resolver, it
+// carries the coherent workspace documents needed for interprocedural array
+// return summaries. The legacy resolver entry point remains document-local.
+func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, projectDocuments, &sourceDocument, procedureWorkerLimit)
+}
+
+func realtimeProjectContextFiles(current parsedFile, documents []intel.ProjectAnalysisDocument, project effects.ProjectSummary, cfg config.AnalyzeConfig) []parsedFile {
+	files := make([]parsedFile, 0, len(documents)+1)
+	files = append(files, current)
+	seen := map[string]bool{realtimeProjectPathKey(current.Path): true}
+	for _, document := range documents {
+		path := strings.TrimSpace(document.IR.Path)
+		key := realtimeProjectPathKey(path)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		file := parsedFile{
+			Path:       path,
+			Lines:      normalizedSourceLines(document.Source),
+			Module:     strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			ModuleKind: string(document.IR.ModuleKind),
+			Source:     []byte(document.Source),
+			IR:         document.IR,
+			CFG:        document.CFG,
+		}
+		resolution := document.Resolution
+		file.Resolution = &resolution
+		file.Procedures, file.ResolvedProcedures = sourceProceduresFromIRRefWithResolution(&file.IR, file.Resolution, file.CFG)
+		file.ensureModuleAnalysisFacts()
+		materializeProcedureAnalysisPlans(&file, project, cfg)
+		if arrayAnalysisEnabled(cfg) {
+			file.ArrayOptionBase = optionBase(file.Lines)
+			file.ArrayOptionBaseSet = true
+			file.ArrayIntegerModuleConstants = arrayIntegerModuleConstants(file)
+			file.ArrayVariableCatalog = buildArrayVariableCatalog(file, file.moduleDecls())
+		}
+		files = append(files, file)
+	}
+	return files
+}
+
+func realtimeProjectPathKey(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	return strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+}
+
+func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument *intel.Document, procedureWorkerLimit int) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -2054,7 +2107,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
-		contextFiles := []parsedFile{file}
+		contextFiles := realtimeProjectContextFiles(file, projectDocuments, projectEffects, cfg.Analyze)
 		if queryContext.Store != nil && queryRevision == nil {
 			revisionID := queryContext.Revision
 			if revisionID == "" {
@@ -2476,18 +2529,34 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 
 func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectAnalysis *objectAnalysisContext, capabilityPlan projectCapabilityPlan, projectResolver procedureir.Resolver) analysisContext {
 	projectObjectTypes := make(map[string]bool)
+	projectNamePrefixes := projectObjectTypePrefixes(a.Config.Project.Name)
 	for _, file := range files {
 		if !strings.EqualFold(file.ModuleKind, "class") && !strings.EqualFold(file.ModuleKind, "form") {
 			continue
 		}
-		module := strings.ToLower(cleanIdentifier(lastName(strings.TrimSpace(file.Module))))
-		if module != "" {
-			projectObjectTypes[module] = true
+		module := strings.TrimSpace(file.IR.ModuleName)
+		if module == "" {
+			module = strings.TrimSpace(file.Module)
+		}
+		module = strings.ToLower(cleanIdentifier(module))
+		if module == "" {
+			continue
+		}
+		projectObjectTypes[module] = true
+		shortModule := strings.ToLower(cleanIdentifier(lastName(module)))
+		if shortModule != "" {
+			projectObjectTypes[shortModule] = true
+			if !strings.Contains(module, ".") {
+				for _, projectName := range projectNamePrefixes {
+					projectObjectTypes[projectName+"."+shortModule] = true
+				}
+			}
 		}
 	}
 	ctx := analysisContext{
 		functionReturns:                  map[string]string{},
 		functionReturnsQualified:         map[string]string{},
+		projectObjectTypes:               projectObjectTypes,
 		functionShapes:                   map[string]procedureir.ValueShapeKind{},
 		functionNamesSeen:                map[string]bool{},
 		functionAmbiguous:                map[string]bool{},
@@ -2620,6 +2689,47 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions = inferArrayByRefEntryStates(a, files, ctx)
 	}
 	return ctx
+}
+
+// projectObjectTypePrefixes returns the configured project identity forms that
+// can appear before a project class name in VBA. Corpus projects sometimes
+// use a repository-like configured name (for example
+// "third_party/selenium-vba") while their VBA project name is the compact
+// basename ("SeleniumVBA"). Keep the exact configured name and add only
+// deterministic path/basename forms; this still prevents an unrelated
+// qualifier such as OtherLib from borrowing a same-named project class.
+func projectObjectTypePrefixes(projectName string) []string {
+	projectName = strings.TrimSpace(projectName)
+	if projectName == "" {
+		return nil
+	}
+	candidates := []string{projectName}
+	if separator := strings.LastIndexAny(projectName, `/\\`); separator >= 0 {
+		if base := strings.TrimSpace(projectName[separator+1:]); base != "" {
+			candidates = append(candidates, base)
+		}
+	}
+	seen := make(map[string]bool, len(candidates)*2)
+	prefixes := make([]string, 0, len(candidates)*2)
+	for _, candidate := range candidates {
+		candidate = strings.ToLower(cleanIdentifier(candidate))
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		prefixes = append(prefixes, candidate)
+		compact := strings.Map(func(r rune) rune {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+				return unicode.ToLower(r)
+			}
+			return -1
+		}, candidate)
+		if compact != "" && !seen[compact] {
+			seen[compact] = true
+			prefixes = append(prefixes, compact)
+		}
+	}
+	return prefixes
 }
 
 func recordBatchWorkload(ctx context.Context, files []parsedFile) {

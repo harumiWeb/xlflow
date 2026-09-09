@@ -71,7 +71,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		output = arrayVBA227AttachReturnProvenance(output, source, ctx, variables, constants)
 		output = arrayVBA227AttachAllocationFlagState(file, proc, source, line, input, output, variables)
 		if resumeNext {
-			output = arrayVBA227PreserveResumeNextArrayFailure(failureInput, output, source, ctx, variables)
+			output = arrayVBA227PreserveResumeNextArrayFailure(failureInput, output, source, line, proc, ctx, variables)
 		}
 		if resumeNextBefore == nil || resumeNext {
 			return output, findings
@@ -210,7 +210,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 // Only downgrade a target whose RHS was already proven to be an array; an
 // arbitrary Variant call remains fail-open to avoid turning unknown values into
 // diagnostics.
-func arrayVBA227PreserveResumeNextArrayFailure(input, output arrayFlowState, text string, ctx analysisContext, variables map[string]arrayVariable) arrayFlowState {
+func arrayVBA227PreserveResumeNextArrayFailure(input, output arrayFlowState, text string, line int, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable) arrayFlowState {
 	lhs, rhs, indexed, assigned := arrayAssignment(text)
 	if !assigned || indexed {
 		return output
@@ -224,6 +224,9 @@ func arrayVBA227PreserveResumeNextArrayFailure(input, output arrayFlowState, tex
 		return output
 	}
 	value, provenArray := arrayExpressionState(rhs, input, ctx)
+	if !provenArray || !value.knownArray {
+		value, provenArray = arrayQualifiedReturnExpressionState(proc, line, rhs, variables, ctx)
+	}
 	if !provenArray || !value.knownArray {
 		value, provenArray = arrayVBA227QualifiedArrayReturnValue(rhs, ctx, variables)
 	}
@@ -274,8 +277,7 @@ func arrayVBA227QualifiedArrayReturnValue(rhs string, ctx analysisContext, varia
 	if colon := strings.IndexByte(typeName, ':'); colon >= 0 {
 		typeName = strings.TrimSpace(typeName[:colon])
 	}
-	value, known := ctx.arrayReturnsQualified[strings.ToLower(typeName+"."+member)]
-	return value, known
+	return arrayQualifiedReturnValueForType(typeName, member, ctx)
 }
 
 // arraySafeArrayPointerGuardTarget recognizes the narrow low-level VBA idiom
