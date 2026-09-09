@@ -1534,7 +1534,7 @@ func arrayProcedureHasNonEmptyReturnAllocation(file parsedFile, proc sourceProce
 	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
 	walkArrayCFGWithStopStats(&graph, file.Lines, arrayInitialState(variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 		if lhs, rhs, indexed, assigned := arrayAssignment(text); assigned && !indexed && strings.EqualFold(lhs, proc.Name) {
-			value, known := arrayExpressionState(rhs, in, ctx)
+			value, known := arrayExpressionStateForProcedure(rhs, in, ctx, proc)
 			returnCandidates[line] = returnCandidate{
 				value: value,
 				ok:    known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue,
@@ -1657,7 +1657,7 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 		baseView := proc.Graph.View(vbacfg.EdgeFilter{})
 		walkArrayCFGWithStopStats(&baseView, procedure.file.Lines, arrayInitialState(procedure.variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 			if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
-				value, known := arrayExpressionState(rhs, in, ctx)
+				value, known := arrayExpressionStateForProcedure(rhs, in, ctx, proc)
 				if qualifiedValue, qualifiedKnown := arrayQualifiedReturnExpressionState(proc, line, rhs, procedure.variables, ctx); qualifiedKnown {
 					value, known = qualifiedValue, true
 				}

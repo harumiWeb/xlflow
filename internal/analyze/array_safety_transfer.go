@@ -193,7 +193,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 	}
 
 	if match := arrayForEachRe.FindStringSubmatch(text); len(match) > 0 {
-		if iterableSourceKnownInvalid(match[1], variables, state, ctx) {
+		if iterableSourceKnownInvalid(match[1], variables, state, ctx, proc) {
 			add("VBA227", strings.TrimSpace(match[1])+" is not a collection or array and cannot be used as a For Each source.", "For Each requires an iterable Collection or array value; this source is a known scalar.", "Iterate an array or Collection, or change the source expression to an iterable value.")
 		}
 	}

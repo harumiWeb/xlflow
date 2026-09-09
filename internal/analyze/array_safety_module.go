@@ -960,7 +960,7 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 		if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed {
 			name := strings.ToLower(cleanIdentifier(lhs))
 			if moduleArrays[name] {
-				if value, known := arrayExpressionState(rhs, arrayFlowState{}, ctx); known && value.kind == arrayAllocated && value.knownArray {
+				if value, known := arrayExpressionStateForProcedure(rhs, arrayFlowState{}, ctx, proc); known && value.kind == arrayAllocated && value.knownArray {
 					if !arrayProcedureLineHasInlineConditional(file, statement.Range.StartLine) {
 						addDirectAllocation(statement.ID, name)
 					}
@@ -1321,7 +1321,7 @@ func arrayModuleReadyGuardLifecycleSafe(file parsedFile, guardName string, array
 					safe = false
 					return
 				}
-				value, known := arrayExpressionState(rhs, arrayFlowState{}, ctx)
+				value, known := arrayExpressionStateForProcedure(rhs, arrayFlowState{}, ctx, owner)
 				if !known || value.kind != arrayAllocated || !value.knownArray {
 					safe = false
 				}

@@ -454,7 +454,7 @@ func impossibleArrayBounds(dimensions []arrayDimension) bool {
 	return false
 }
 
-func iterableSourceKnownInvalid(source string, variables map[string]arrayVariable, state arrayFlowState, ctx analysisContext) bool {
+func iterableSourceKnownInvalid(source string, variables map[string]arrayVariable, state arrayFlowState, ctx analysisContext, proc sourceProcedure) bool {
 	source = strings.TrimSpace(source)
 	if source == "" {
 		return false
@@ -487,7 +487,7 @@ func iterableSourceKnownInvalid(source string, variables map[string]arrayVariabl
 			return true
 		}
 	}
-	if value, known := arrayExpressionState(source, state, ctx); known {
+	if value, known := arrayExpressionStateForProcedure(source, state, ctx, proc); known {
 		if value.knownArray {
 			return false
 		}

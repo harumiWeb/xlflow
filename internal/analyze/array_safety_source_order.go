@@ -1001,7 +1001,7 @@ func arrayByRefCallHasProvenArrayArguments(file parsedFile, target, caller sourc
 		if _, _, qualifiedMember := arrayQualifiedMemberParts(argument); qualifiedMember {
 			return false, false
 		}
-		value, known := arrayExpressionState(argument, state, ctx)
+		value, known := arrayExpressionStateForProcedure(argument, state, ctx, caller)
 		if !known || value.kind != arrayAllocated || !value.knownArray {
 			return false, false
 		}

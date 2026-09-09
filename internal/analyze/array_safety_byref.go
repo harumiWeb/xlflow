@@ -1802,7 +1802,7 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 			// unallocated.  Unknown or conditionally allocated returns remain
 			// conservative because arrayExpressionState returns no allocated
 			// proof for them.
-			if returned, returnedKnown := arrayExpressionState(arguments[index], state, ctx); returnedKnown && returned.kind == arrayAllocated && returned.knownArray {
+			if returned, returnedKnown := arrayExpressionStateForProcedure(arguments[index], state, ctx, caller); returnedKnown && returned.kind == arrayAllocated && returned.knownArray {
 				value = returned
 				known = true
 				allocated = true

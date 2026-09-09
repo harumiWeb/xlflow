@@ -17098,6 +17098,17 @@ Public Sub RunShadowed(ByVal MakeValues As Long)
 	values = MakeValues
 	Debug.Print values(1)
 End Sub
+
+Public Function ShadowedReturn() As Long()
+	Dim MakeValues() As Long
+	ShadowedReturn = MakeValues
+End Function
+
+Public Sub RunShadowedReturn()
+	Dim values() As Long
+	values = ShadowedReturn
+	Debug.Print values(1)
+End Sub
 `,
 		},
 	}
@@ -17144,15 +17155,20 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	shadowedFinding := false
+	expectedProcedures := map[string]bool{
+		"RunShadowed":       false,
+		"RunShadowedReturn": false,
+	}
 	for _, finding := range findingsByCode(findings, "VBA227") {
-		if finding.Procedure != "RunShadowed" {
+		if _, expected := expectedProcedures[finding.Procedure]; !expected {
 			t.Fatalf("project-aware realtime analysis should preserve qualified array-return summaries: %+v", finding)
 		}
-		shadowedFinding = true
+		expectedProcedures[finding.Procedure] = true
 	}
-	if !shadowedFinding {
-		t.Fatal("a local parameter shadowing a project array-return function must retain the VBA227 finding")
+	for procedure, found := range expectedProcedures {
+		if !found {
+			t.Fatalf("a local declaration shadowing a project array-return function must retain the VBA227 finding in %s", procedure)
+		}
 	}
 }
 

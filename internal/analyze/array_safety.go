@@ -277,7 +277,7 @@ func (a Analyzer) arrayForEachFindings(file parsedFile, proc sourceProcedure, va
 			source = statement.Value.Text
 		}
 		source = strings.TrimSpace(strings.SplitN(source, "'", 2)[0])
-		if !iterableSourceKnownInvalid(source, variables, arrayInitialState(variables), ctx) {
+		if !iterableSourceKnownInvalid(source, variables, arrayInitialState(variables), ctx, proc) {
 			continue
 		}
 		findings = append(findings, a.simpleFinding(file, proc, statement.Range.StartLine, "VBA227", "warning", strings.TrimSpace(source)+" is not a collection or array and cannot be used as a For Each source.", "For Each requires an iterable Collection or array value; this source is a known scalar.", "Iterate an array or Collection, or change the source expression to an iterable value."))
