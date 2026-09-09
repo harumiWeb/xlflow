@@ -10651,6 +10651,45 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA227RejectsDictionaryReAddOnlyOnLoopBackEdge(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Public Sub Perform()
+  Dim done As Boolean
+  Do
+    data_.Add "actions", Array("x")
+    data_.RemoveAll
+    done = True
+  Loop Until done
+  Dim result As Long
+  result = syncChannels(data_)
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Procedure != "syncChannels" {
+		t.Fatalf("a removal that can reach observation before loop-back re-addition must remain diagnostic: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227RecognizesCreateLookupDictSnapshots(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

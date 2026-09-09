@@ -1901,6 +1901,90 @@ func objectContainerNormalExitCoveredByWrites(proc sourceProcedure, statementIDs
 	return true
 }
 
+// objectContainerPathCoveredByWrites reports whether every path from just
+// after startStatementID to targetBlock crosses one of statementIDs. A write
+// before the removal is deliberately not enough; loop back-edges must also
+// pass through a write before reaching the target.
+func objectContainerPathCoveredByWrites(proc sourceProcedure, startStatementID int, targetBlock cfg.BlockID, targetStatementID int, statementIDs map[int]bool) bool {
+	if proc.Graph == nil || startStatementID <= 0 || targetBlock <= 0 || len(statementIDs) == 0 {
+		return false
+	}
+	view := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	start, startOK := view.BlockForStatement(startStatementID)
+	if !startOK || !view.IsReachable(start.ID) || !view.IsReachable(targetBlock) {
+		return false
+	}
+	if start.ID == targetBlock {
+		if targetStatementID <= startStatementID {
+			return false
+		}
+		return objectContainerBlockHasWriteBetween(view, start.ID, startStatementID, targetStatementID, statementIDs)
+	}
+	if !objectContainerBlockCanReach(view, start.ID, targetBlock) {
+		return false
+	}
+
+	type state struct {
+		block   cfg.BlockID
+		covered bool
+	}
+	queue := []state{}
+	startCovered := objectContainerBlockHasWriteBetween(view, start.ID, startStatementID, 0, statementIDs)
+	view.ForEachOutgoing(start.ID, func(edge cfg.Edge) bool {
+		nextCovered := startCovered
+		if edge.Class == cfg.EdgeExceptional && startCovered {
+			// An error raised before the write completes must not count as a
+			// completed overwrite on the handler/resume path.
+			nextCovered = false
+		}
+		queue = append(queue, state{block: edge.To, covered: nextCovered})
+		return true
+	})
+	seen := map[state]bool{}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if seen[current] {
+			continue
+		}
+		seen[current] = true
+		if current.block == targetBlock {
+			covered := current.covered
+			if targetStatementID > 0 {
+				covered = covered || objectContainerBlockHasWriteBetween(view, current.block, 0, targetStatementID, statementIDs)
+			}
+			if !covered {
+				return false
+			}
+			continue
+		}
+		blockCovered := objectContainerBlockHasWriteBetween(view, current.block, 0, 0, statementIDs)
+		view.ForEachOutgoing(current.block, func(edge cfg.Edge) bool {
+			nextCovered := current.covered || blockCovered
+			if edge.Class == cfg.EdgeExceptional && !current.covered && blockCovered {
+				nextCovered = false
+			}
+			queue = append(queue, state{block: edge.To, covered: nextCovered})
+			return true
+		})
+	}
+	return true
+}
+
+func objectContainerBlockHasWriteBetween(view cfg.CFGView, blockID cfg.BlockID, lowerExclusive, upperExclusive int, statementIDs map[int]bool) bool {
+	for statementID := range statementIDs {
+		statementBlock, ok := view.BlockForStatement(statementID)
+		if !ok || statementBlock.ID != blockID || statementID <= lowerExclusive {
+			continue
+		}
+		if upperExclusive > 0 && statementID >= upperExclusive {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func objectContainerObservationCoveredByWrites(proc sourceProcedure, observationStatementID int, statementIDs map[int]bool) bool {
 	if proc.Graph == nil || observationStatementID <= 0 || len(statementIDs) == 0 {
 		return false

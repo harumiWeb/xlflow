@@ -546,6 +546,10 @@ func arrayDictionaryItemProcedureHasRemovalBeforeObservation(index *objectContai
 	if !contextOK {
 		return true
 	}
+	observationBlock, observationOK := flowContext.graph.BlockForStatement(observationID)
+	if !observationOK {
+		return true
+	}
 	safeWrites, _, safe := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx, true)
 	if !safe {
 		return true
@@ -567,14 +571,7 @@ func arrayDictionaryItemProcedureHasRemovalBeforeObservation(index *objectContai
 		if !objectContainerStatementBeforeObservation(flowContext.graph, call.StatementID, observationID) {
 			continue
 		}
-		overwritten := false
-		for safeWriteID := range safeWrites {
-			if objectContainerStatementCanReach(flowContext.graph, call.StatementID, safeWriteID) &&
-				objectContainerStatementDominates(flowContext.graph, safeWriteID, observationID) {
-				overwritten = true
-				break
-			}
-		}
+		overwritten := objectContainerPathCoveredByWrites(proc, call.StatementID, observationBlock.ID, observationID, safeWrites)
 		if !overwritten {
 			return true
 		}
@@ -605,14 +602,11 @@ func arrayDictionaryItemProcedureRemovalInvalidatesNormalExit(index *objectConta
 				continue
 			}
 		}
-		overwritten := false
-		for safeWriteID := range safeWrites {
-			if objectContainerStatementCanReach(flowContext.graph, call.StatementID, safeWriteID) &&
-				objectContainerNormalExitCoveredByWrites(proc, map[int]bool{safeWriteID: true}) {
-				overwritten = true
-				break
-			}
+		removalBlock, removalOK := flowContext.graph.BlockForStatement(call.StatementID)
+		if !removalOK || !objectContainerBlockCanReach(flowContext.graph, removalBlock.ID, flowContext.graph.NormalExit()) {
+			continue
 		}
+		overwritten := objectContainerPathCoveredByWrites(proc, call.StatementID, flowContext.graph.NormalExit(), 0, safeWrites)
 		if !overwritten {
 			return true
 		}
