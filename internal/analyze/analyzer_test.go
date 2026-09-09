@@ -8204,6 +8204,53 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesSuccessfulIndexedConditionIntoBody(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant)
+  Dim values() As Long
+  values = source
+  If values(0) <> 1 Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("the first indexed condition should remain the only possible failure: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsElseBodyAfterIndexedCondition(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant)
+  Dim values() As Long
+  values = source
+  If values(0) <> 1 Then
+    Debug.Print values(0)
+  Else
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 5 || got[1].Line != 8 {
+		t.Fatalf("the condition and Else-body accesses should remain possible failures: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulBoundsAfterLengthAssignment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -20,7 +20,6 @@
 {"project":"self/world-news","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":282,"column":0}
 {"project":"self/world-news","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":282,"column":0}
 {"project":"self/world-news","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA227","severity":"warning","line":329,"column":0}
-{"project":"self/world-news","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA227","severity":"warning","line":330,"column":0}
 {"project":"self/world-news","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":527,"column":0}
 {"project":"self/world-news","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":543,"column":0}
 {"project":"self/world-news","file":"src/workbook/ThisWorkbook.bas","surface":"analyze","code":"VBA220","severity":"warning","line":5,"column":0}

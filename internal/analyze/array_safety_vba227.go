@@ -128,6 +128,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	}
 	state, findings := transfer(state, text)
 	findings = arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings, file, proc, line, variables, resumeNextBefore)
+	findings = arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings, file, proc, line, variables, resumeNextBefore)
 	findings = arrayVBA227FilterConditionalBodyIndexFindings(findings, file, proc, line, state, variables, ctx, resumeNextBefore)
 	findings = arrayVBA227FilterForBodyIndexFindings(findings, file, proc, line, state, variables, ctx, resumeNextBefore)
 	if (arrayVBA227HasSuccessfulBoundsExpression(text) || arrayVBA227HasDictionaryBoundsExpression(text, state)) &&
@@ -967,6 +968,76 @@ func arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings []Finding,
 	if len(proven) == 0 {
 		return findings
 	}
+	filtered := findings[:0]
+	for _, finding := range findings {
+		remove := false
+		if finding.Code == "VBA227" {
+			for name := range proven {
+				if finding.arrayOperationKey == arrayIndexOperationKey(name, "unallocated") {
+					remove = true
+					break
+				}
+			}
+		}
+		if !remove {
+			filtered = append(filtered, finding)
+		}
+	}
+	return filtered
+}
+
+// arrayVBA227FilterSuccessfulIndexedConditionBodyFindings removes the
+// redundant unallocated-array observation in the true body after a
+// multi-line If condition has already indexed the same array. Reaching that
+// body means the condition's indexed access completed normally. Keep the
+// proof tied to the immediately preceding If header and reject Else bodies;
+// an unrelated earlier access must not establish allocation for a later one.
+func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, variables map[string]arrayVariable, resumeNextBefore []bool) []Finding {
+	if line <= 1 || line > len(file.Lines) || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+		return findings
+	}
+	condition, body, ok := arrayIfThenParts(normalizedCodeLine(file.Lines[line-2]))
+	if !ok || body != "" {
+		return findings
+	}
+
+	statement := procedureStatementAtLine(proc, line)
+	if statement.ID == 0 {
+		return findings
+	}
+	guardFound := false
+	visited := map[int]bool{}
+	for statement.ParentID != 0 && !visited[statement.ParentID] {
+		visited[statement.ParentID] = true
+		parent := procedureStatementByID(proc, statement.ParentID)
+		if parent.ID == 0 {
+			return findings
+		}
+		if parent.Kind == procedureir.StatementElse {
+			return findings
+		}
+		if (parent.Kind == procedureir.StatementIf || parent.Kind == procedureir.StatementElseIf) && parent.Range.StartLine == line-1 {
+			guardFound = true
+			break
+		}
+		statement = parent
+	}
+	if !guardFound {
+		return findings
+	}
+
+	proven := map[string]bool{}
+	for _, use := range arrayIndexedUsesForSource(condition, variables) {
+		name := strings.ToLower(cleanIdentifier(use.name))
+		variable, known := variables[name]
+		if known && (variable.isArray || variable.isVariant) && name != "" {
+			proven[name] = true
+		}
+	}
+	if len(proven) == 0 {
+		return findings
+	}
+
 	filtered := findings[:0]
 	for _, finding := range findings {
 		remove := false
