@@ -14791,6 +14791,32 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PreservesQualifiedEnumValuesWithForwardDuplicateMembers(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Enum Later
+  Upper = Limit + 1
+  Limit = 10
+End Enum
+Public Enum Earlier
+  Limit = 1
+End Enum
+Public Sub Run()
+  Dim values() As Long
+  ReDim values(Later.Upper To 5)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 11 {
+		t.Fatalf("qualified Enum forward values must keep their own duplicate member namespace: %#v", got)
+	}
+}
+
 func TestAnalyzerVBA227EvaluatesConstReDimBounds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -207,10 +207,18 @@ func redimDeleteShadowedConstant(constants map[string]int, name string) {
 }
 
 func addQualifiedEnumIntegerConstants(file parsedFile, constants map[string]int) {
-	enumName := ""
-	enumValues := map[string]int{}
-	nextValue := 0
-	nextKnown := false
+	type enumMember struct {
+		name       string
+		expression string
+		implicit   bool
+	}
+	type enumDefinition struct {
+		name    string
+		members []enumMember
+	}
+
+	var enums []enumDefinition
+	currentEnum := -1
 	conditionalDepth := 0
 	for _, line := range file.Lines {
 		code := strings.TrimSpace(normalizedCodeLine(line))
@@ -231,20 +239,16 @@ func addQualifiedEnumIntegerConstants(file parsedFile, constants map[string]int)
 		if strings.HasPrefix(lower, "enum ") || strings.HasPrefix(lower, "public enum ") || strings.HasPrefix(lower, "private enum ") || strings.HasPrefix(lower, "friend enum ") {
 			fields := strings.Fields(code)
 			if len(fields) >= 2 {
-				enumName = cleanIdentifier(fields[len(fields)-1])
-				enumValues = map[string]int{}
-				nextValue = 0
-				nextKnown = true
+				enums = append(enums, enumDefinition{name: cleanIdentifier(fields[len(fields)-1])})
+				currentEnum = len(enums) - 1
 			}
 			continue
 		}
 		if strings.HasPrefix(lower, "end enum") {
-			enumName = ""
-			enumValues = nil
-			nextKnown = false
+			currentEnum = -1
 			continue
 		}
-		if enumName == "" || code == "" {
+		if currentEnum < 0 || code == "" {
 			continue
 		}
 		parts := strings.SplitN(code, "=", 2)
@@ -256,31 +260,99 @@ func addQualifiedEnumIntegerConstants(file parsedFile, constants map[string]int)
 		if memberName == "" {
 			continue
 		}
-		value := 0
-		if len(parts) == 2 {
-			expressionConstants := make(map[string]int, len(constants)+len(enumValues))
-			for key, value := range constants {
-				expressionConstants[key] = value
-			}
-			for key, value := range enumValues {
-				expressionConstants[key] = value
-			}
-			parsed, err := constantIntegerExpression(strings.TrimSpace(parts[1]), expressionConstants)
-			if err != nil {
-				nextKnown = false
-				continue
-			}
-			value = parsed
-		} else {
-			if !nextKnown {
-				continue
-			}
-			value = nextValue
+		member := enumMember{name: memberName, implicit: len(parts) != 2}
+		if !member.implicit {
+			member.expression = strings.TrimSpace(parts[1])
 		}
-		enumValues[strings.ToLower(memberName)] = value
-		constants[strings.ToLower(enumName+"."+memberName)] = value
-		nextValue = value + 1
-		nextKnown = true
+		enums[currentEnum].members = append(enums[currentEnum].members, member)
+	}
+	if len(enums) == 0 {
+		return
+	}
+
+	memberGroups := make(map[string]int)
+	totalMembers := 0
+	for _, enum := range enums {
+		totalMembers += len(enum.members)
+		for _, member := range enum.members {
+			memberGroups[strings.ToLower(member.name)]++
+		}
+	}
+
+	// Do not let an unqualified member from another Enum satisfy a forward
+	// reference. Unique external members are added back to each evaluation
+	// environment after their own qualified value is known.
+	base := make(map[string]int, len(constants))
+	for key, value := range constants {
+		if !strings.Contains(key, ".") && memberGroups[strings.ToLower(key)] > 0 {
+			continue
+		}
+		base[key] = value
+	}
+	resolved := make([]map[string]int, len(enums))
+	for index := range resolved {
+		resolved[index] = make(map[string]int, len(enums[index].members))
+	}
+
+	// Revisit the definitions so a member can refer to another member declared
+	// later in the same Enum without falling back to an unrelated unqualified
+	// member from a different Enum.
+	for pass := 0; pass <= totalMembers; pass++ {
+		changed := false
+		for enumIndex, enum := range enums {
+			environment := make(map[string]int, len(base)+totalMembers)
+			for key, value := range base {
+				environment[key] = value
+			}
+			for otherIndex, other := range enums {
+				for memberName, value := range resolved[otherIndex] {
+					qualified := strings.ToLower(other.name + "." + memberName)
+					environment[qualified] = value
+					if memberGroups[memberName] == 1 {
+						environment[memberName] = value
+					}
+				}
+			}
+			for memberName, value := range resolved[enumIndex] {
+				environment[memberName] = value
+			}
+
+			nextValue := 0
+			nextKnown := true
+			for _, member := range enum.members {
+				value := 0
+				if member.implicit {
+					if !nextKnown {
+						continue
+					}
+					value = nextValue
+				} else {
+					parsed, err := constantIntegerExpression(member.expression, environment)
+					if err != nil {
+						nextKnown = false
+						continue
+					}
+					value = parsed
+				}
+				key := strings.ToLower(member.name)
+				if prior, exists := resolved[enumIndex][key]; !exists || prior != value {
+					resolved[enumIndex][key] = value
+					changed = true
+				}
+				environment[key] = value
+				environment[strings.ToLower(enum.name+"."+key)] = value
+				nextValue = value + 1
+				nextKnown = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	for enumIndex, enum := range enums {
+		for memberName, value := range resolved[enumIndex] {
+			constants[strings.ToLower(enum.name+"."+memberName)] = value
+		}
 	}
 }
 
