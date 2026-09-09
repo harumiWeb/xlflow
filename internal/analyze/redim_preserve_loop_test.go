@@ -172,6 +172,8 @@ func TestVBA241ExcludesLoopContradictedByEnclosingEnumCase(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 
+Private Const Limit As Long = 1
+
 Private Enum EBufferType
     BinaryFragment = 1
     Utf8Fragment = 3
@@ -225,13 +227,25 @@ Public Sub ReceiveQualified()
         Wend
     End Select
 End Sub
+
+Public Sub ReceiveShadowed()
+    Dim state As EBufferType
+    Dim Limit As Long
+    Dim values() As Long
+    Select Case state
+    Case EBufferType.Utf8Fragment
+        While state = Limit
+            ReDim Preserve values(1 To 10)
+        Wend
+    End Select
+End Sub
 `)
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA241"); len(got) != 3 {
-		t.Fatalf("enum-case reachability findings = %+v, want alias, post-write, and qualified-selector loops", got)
+	if got := findingsByCode(findings, "VBA241"); len(got) != 4 {
+		t.Fatalf("enum-case reachability findings = %+v, want alias, post-write, qualified-selector, and shadowed-constant loops", got)
 	}
 }
 

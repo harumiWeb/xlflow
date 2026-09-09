@@ -186,12 +186,27 @@ func redimIntegerConstants(file parsedFile, proc sourceProcedure) map[string]int
 	base := arrayIntegerModuleConstants(file)
 	constants := make(map[string]int, len(base)+4)
 	maps.Copy(constants, base)
+	for declaration := range proc.Declarations.All() {
+		redimDeleteShadowedConstant(constants, declaration.Name)
+	}
+	for parameter := range proc.Params.All() {
+		redimDeleteShadowedConstant(constants, parameter.Name)
+	}
 	maps.Copy(constants, excelIntegerConstants(proc))
-	redimQualifiedEnumConstants(file, constants)
 	return constants
 }
 
-func redimQualifiedEnumConstants(file parsedFile, constants map[string]int) {
+func redimDeleteShadowedConstant(constants map[string]int, name string) {
+	key := strings.ToLower(cleanIdentifier(name))
+	if key == "" {
+		return
+	}
+	maps.DeleteFunc(constants, func(candidate string, _ int) bool {
+		return candidate == key || strings.HasPrefix(candidate, key+".")
+	})
+}
+
+func addQualifiedEnumIntegerConstants(file parsedFile, constants map[string]int) {
 	enumName := ""
 	nextValue := 0
 	nextKnown := false

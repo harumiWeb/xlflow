@@ -428,6 +428,7 @@ func arrayIntegerModuleConstants(file parsedFile) map[string]int {
 		n := *next + 1
 		next = &n
 	}
+	addQualifiedEnumIntegerConstants(file, constants)
 	return constants
 }
 
