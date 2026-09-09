@@ -11,7 +11,9 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
-func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView) (arrayFlowState, []Finding) {
+type arrayVBA227ResumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool
+
+func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges) (arrayFlowState, []Finding) {
 	state = arrayVBA227ClearLoopBodyBounds(state, line)
 	state = arrayVBA227ClearConditionalAllocationGuards(state, proc, text, line, variables)
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "case ") || arrayBoundCallRe.MatchString(text) {
@@ -128,7 +130,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	}
 	state, findings := transfer(state, text)
 	findings = arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings, file, proc, line, variables, resumeNextBefore)
-	findings = arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings, file, proc, line, variables, resumeNextBefore, vba227Graph)
+	findings = arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings, file, proc, line, variables, resumeNextBefore, vba227Graph, resumeNextEdges)
 	findings = arrayVBA227FilterConditionalBodyIndexFindings(findings, file, proc, line, state, variables, ctx, resumeNextBefore)
 	findings = arrayVBA227FilterForBodyIndexFindings(findings, file, proc, line, state, variables, ctx, resumeNextBefore)
 	if (arrayVBA227HasSuccessfulBoundsExpression(text) || arrayVBA227HasDictionaryBoundsExpression(text, state)) &&
@@ -994,7 +996,7 @@ func arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings []Finding,
 // an unrelated earlier access must not establish allocation for a later one.
 // A reachable error handler that can resume into the body also disables this
 // normal-path proof because the condition may have failed before the re-entry.
-func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, variables map[string]arrayVariable, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView) []Finding {
+func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, variables map[string]arrayVariable, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges) []Finding {
 	if line <= 1 || line > len(file.Lines) || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 		return findings
 	}
@@ -1045,7 +1047,7 @@ func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding,
 	if len(proven) == 0 {
 		return findings
 	}
-	if arrayVBA227ResumeCanReachIndexedConditionBody(proc, vba227Graph, guard, access) {
+	if arrayVBA227ResumeCanReachIndexedConditionBody(proc, vba227Graph, resumeNextEdges, guard, access) {
 		return findings
 	}
 
@@ -2491,7 +2493,7 @@ func arrayVBA227ResumeNextBeforeLine(prefixes []bool, line int) bool {
 	return line >= 0 && line < len(prefixes) && prefixes[line]
 }
 
-func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227Graph *vbacfg.CFGView, guard, access procedureir.Statement) bool {
+func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges, guard, access procedureir.Statement) bool {
 	if guard.ID == 0 || access.ID == 0 {
 		return false
 	}
@@ -2521,7 +2523,9 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227G
 	if !ok {
 		return false
 	}
-	resumeNextEdges := arrayVBA227ResumeNextContinuationEdges(proc)
+	if resumeNextEdges == nil && proc.Graph != nil {
+		resumeNextEdges = arrayVBA227ResumeNextContinuationEdges(proc)
+	}
 	handlers := map[vbacfg.BlockID]bool{}
 	graph.ForEachOutgoing(guardBlock.ID, func(edge vbacfg.Edge) bool {
 		if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeError {
@@ -2571,7 +2575,7 @@ func arrayVBA227NormalPathReachesWithout(graph vbacfg.CFGView, start, target, bl
 	return reachable[target]
 }
 
-func arrayVBA227ResumeNextPathReachesWithout(graph vbacfg.CFGView, start, target, blocked vbacfg.BlockID, resumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool) bool {
+func arrayVBA227ResumeNextPathReachesWithout(graph vbacfg.CFGView, start, target, blocked vbacfg.BlockID, resumeNextEdges arrayVBA227ResumeNextEdges) bool {
 	if start == blocked {
 		return false
 	}
@@ -2582,7 +2586,7 @@ func arrayVBA227ResumeNextPathReachesWithout(graph vbacfg.CFGView, start, target
 	return reachable[target]
 }
 
-func arrayVBA227UnknownFlowCanReachBody(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, unknownFlowSources []vbacfg.BlockID, resumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool) bool {
+func arrayVBA227UnknownFlowCanReachBody(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, unknownFlowSources []vbacfg.BlockID, resumeNextEdges arrayVBA227ResumeNextEdges) bool {
 	unknown := make(map[vbacfg.BlockID]struct{}, len(unknownFlowSources))
 	for _, unknownFlowSource := range unknownFlowSources {
 		unknown[unknownFlowSource] = struct{}{}
@@ -2599,11 +2603,11 @@ func arrayVBA227NormalReachableBlocksWithout(graph vbacfg.CFGView, start, blocke
 	return arrayVBA227ReachableBlocksWithout(graph, start, blocked, nil)
 }
 
-func arrayVBA227ResumeNextReachableBlocksWithout(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, resumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool) map[vbacfg.BlockID]bool {
+func arrayVBA227ResumeNextReachableBlocksWithout(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, resumeNextEdges arrayVBA227ResumeNextEdges) map[vbacfg.BlockID]bool {
 	return arrayVBA227ReachableBlocksWithout(graph, start, blocked, resumeNextEdges)
 }
 
-func arrayVBA227ReachableBlocksWithout(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, resumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool) map[vbacfg.BlockID]bool {
+func arrayVBA227ReachableBlocksWithout(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, resumeNextEdges arrayVBA227ResumeNextEdges) map[vbacfg.BlockID]bool {
 	if start == blocked {
 		return nil
 	}
@@ -2627,12 +2631,12 @@ func arrayVBA227ReachableBlocksWithout(graph vbacfg.CFGView, start, blocked vbac
 // mirror a normal successor in the unfiltered CFG. The builder emits those
 // pairs for On Error Resume Next, so the exceptional edge remains the valid
 // continuation after arrayVBA227Graph removes an Err.Raise normal edge.
-func arrayVBA227ResumeNextContinuationEdges(proc sourceProcedure) map[vbacfg.BlockID]map[vbacfg.BlockID]bool {
+func arrayVBA227ResumeNextContinuationEdges(proc sourceProcedure) arrayVBA227ResumeNextEdges {
 	if proc.Graph == nil {
 		return nil
 	}
 	normal := map[vbacfg.BlockID]map[vbacfg.BlockID]bool{}
-	continuations := map[vbacfg.BlockID]map[vbacfg.BlockID]bool{}
+	continuations := arrayVBA227ResumeNextEdges{}
 	graph := proc.Graph.View(vbacfg.EdgeFilter{})
 	graph.ForEachEdge(func(edge vbacfg.Edge) bool {
 		if edge.Class == vbacfg.EdgeNormal {

@@ -1249,6 +1249,7 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 	ctx.arrayStats.addModuleReadyGuardCFGWalk()
 
 	graph := arrayVBA227Graph(proc, ctx)
+	resumeNextEdges := arrayVBA227ResumeNextContinuationEdges(proc)
 	initial := arrayInitialState(variables)
 	seenReady := false
 	failed := map[string]bool{}
@@ -1262,7 +1263,7 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 				}
 			}
 		}
-		out, _ := (Analyzer{}).arrayVBA227Transfer(file, proc, ctx, variables, in, text, line, nil, nil, nil, &graph)
+		out, _ := (Analyzer{}).arrayVBA227Transfer(file, proc, ctx, variables, in, text, line, nil, nil, nil, &graph, resumeNextEdges)
 		forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 			out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 			out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)

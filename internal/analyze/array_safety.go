@@ -67,9 +67,11 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 	}
 	runtimeBase := arrayOptionBase(file)
 	var vba227Graph *vbacfg.CFGView
+	var vba227ResumeNextEdges arrayVBA227ResumeNextEdges
 	if a.Config.Analyze.DetectArrayLifecycleSafety && proc.Graph != nil {
 		graph := arrayVBA227Graph(proc, ctx)
 		vba227Graph = &graph
+		vba227ResumeNextEdges = arrayVBA227ResumeNextContinuationEdges(proc)
 	}
 	if proc.Graph == nil {
 		findings := append([]Finding(nil), comparisonFindings...)
@@ -110,7 +112,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				}
 				if a.Config.Analyze.DetectArrayLifecycleSafety {
 					var lifecycleIssues []Finding
-					vba227State, lifecycleIssues = a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, vba227State, text, line, constants, capacityGuards, vba227ResumeNextBefore, vba227Graph)
+					vba227State, lifecycleIssues = a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, vba227State, text, line, constants, capacityGuards, vba227ResumeNextBefore, vba227Graph, vba227ResumeNextEdges)
 					for _, finding := range lifecycleIssues {
 						if finding.Code != "VBA227" {
 							continue
@@ -189,7 +191,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				return arrayAllocationTransferIsReliable(statement, in, out)
 			},
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
-				out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, capacityGuards, vba227ResumeNextBefore, vba227Graph)
+				out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, capacityGuards, vba227ResumeNextBefore, vba227Graph, vba227ResumeNextEdges)
 				forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
 					out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
