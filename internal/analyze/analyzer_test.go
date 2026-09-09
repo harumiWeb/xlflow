@@ -8427,6 +8427,80 @@ func TestArrayVBA227ResumeNextPathUsesExceptionalContinuation(t *testing.T) {
 	}
 }
 
+func TestArrayVBA227DoesNotFilterForBodyAfterErrorHandlerResume(t *testing.T) {
+	t.Parallel()
+	loop := procedureir.Statement{
+		ID:    1,
+		Kind:  procedureir.StatementFor,
+		Text:  "For i = LBound(values) To UBound(values)",
+		Range: vbaast.Range{StartLine: 2, EndLine: 5},
+	}
+	access := procedureir.Statement{
+		ID:       2,
+		ParentID: loop.ID,
+		Kind:     procedureir.StatementCall,
+		Text:     "Debug.Print values(i)",
+		Range:    vbaast.Range{StartLine: 3, EndLine: 3},
+	}
+	onError := procedureir.Statement{
+		ID:    3,
+		Kind:  procedureir.StatementCall,
+		Text:  "On Error GoTo Handler",
+		Range: vbaast.Range{StartLine: 1, EndLine: 1},
+	}
+	handler := procedureir.Statement{
+		ID:    4,
+		Kind:  procedureir.StatementLabel,
+		Text:  "Handler:",
+		Range: vbaast.Range{StartLine: 6, EndLine: 6},
+	}
+	resume := procedureir.Statement{
+		ID:    5,
+		Kind:  procedureir.StatementResume,
+		Text:  "Resume Next",
+		Range: vbaast.Range{StartLine: 7, EndLine: 7},
+		Control: &procedureir.ControlFlowMetadata{
+			Transfer: procedureir.TransferResumeNext,
+		},
+	}
+	proc := sourceProcedure{
+		Statements: newReadOnlySpan([]procedureir.Statement{onError, loop, access, handler, resume}),
+		Graph: &vbacfg.Graph{
+			Blocks: []vbacfg.Block{
+				{ID: 1, Kind: vbacfg.BlockStatement, StatementID: loop.ID, Statement: &loop},
+				{ID: 2, Kind: vbacfg.BlockStatement, StatementID: access.ID, Statement: &access},
+				{ID: 3, Kind: vbacfg.BlockStatement, StatementID: handler.ID, Statement: &handler},
+				{ID: 4, Kind: vbacfg.BlockStatement, StatementID: resume.ID, Statement: &resume},
+			},
+			Edges: []vbacfg.Edge{
+				{From: 1, To: 2, Class: vbacfg.EdgeNormal, Kind: vbacfg.EdgeLoopBody},
+				{From: 1, To: 3, Class: vbacfg.EdgeExceptional, Kind: vbacfg.EdgeError},
+				{From: 3, To: 4, Class: vbacfg.EdgeNormal, Kind: vbacfg.EdgeFallthrough},
+			},
+		},
+	}
+	graph := proc.Graph.View(vbacfg.EdgeFilter{})
+	finding := Finding{
+		Code:              "VBA227",
+		arrayOperationKey: arrayIndexOperationKey("values", "empty"),
+	}
+	got := arrayVBA227FilterForBodyIndexFindings(
+		[]Finding{finding},
+		parsedFile{Lines: []string{"On Error GoTo Handler", loop.Text, access.Text}},
+		proc,
+		3,
+		arrayFlowState{"values": {kind: arrayAllocated, knownArray: true, mayBeEmpty: true}},
+		map[string]arrayVariable{"values": {name: "values", isVariant: true}},
+		analysisContext{},
+		make([]bool, 4),
+		&graph,
+		nil,
+	)
+	if len(got) != 1 {
+		t.Fatalf("a Resume Next path from a loop-bound error must keep the loop body finding: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227DoesNotCarryIndexedConditionThroughUnknownResumeFlow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -8574,6 +8648,32 @@ End Sub
 	got := findingsByCode(findings, "VBA227")
 	if len(got) != 2 || got[0].Line != 7 || got[1].Line != 7 {
 		t.Fatalf("the bounds queries should remain the only findings when a Variant array loop body is reached after successful LBound/UBound: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotSuppressBoundsLoopBodyAfterErrorHandlerResume(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  On Error GoTo Handler
+  Dim i As Long
+  For i = LBound(values) To UBound(values)
+    Debug.Print values(i)
+  Next
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 3 || got[0].Line != 5 || got[1].Line != 5 || got[2].Line != 6 {
+		t.Fatalf("an error-handler Resume Next path must keep the loop body access possible: %+v", got)
 	}
 }
 

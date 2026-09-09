@@ -132,7 +132,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	findings = arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings, file, proc, line, variables, resumeNextBefore)
 	findings = arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings, file, proc, line, variables, resumeNextBefore, vba227Graph, resumeNextEdges)
 	findings = arrayVBA227FilterConditionalBodyIndexFindings(findings, file, proc, line, state, variables, ctx, resumeNextBefore)
-	findings = arrayVBA227FilterForBodyIndexFindings(findings, file, proc, line, state, variables, ctx, resumeNextBefore)
+	findings = arrayVBA227FilterForBodyIndexFindings(findings, file, proc, line, state, variables, ctx, resumeNextBefore, vba227Graph, resumeNextEdges)
 	if (arrayVBA227HasSuccessfulBoundsExpression(text) || arrayVBA227HasDictionaryBoundsExpression(text, state)) &&
 		!arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) &&
 		!strings.Contains(strings.ToLower(text), "on error resume next") {
@@ -726,7 +726,7 @@ func arrayVBA227StatementLineDominates(proc sourceProcedure, line int, target pr
 // its nested body in one scan, so the edge refinement is applied too late for
 // the first body visit; this narrow filter preserves the bound finding itself
 // and any known lower/upper-bound violation.
-func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, ctx analysisContext, resumeNextBefore []bool) []Finding {
+func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, ctx analysisContext, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges) []Finding {
 	if line <= 0 || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 		return findings
 	}
@@ -798,6 +798,10 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 			variable, variableKnown := variables[name]
 			_, valueKnown := state[name]
 			if variableKnown && (variable.isArray || variable.isVariant) && valueKnown {
+				access := procedureStatementAtLine(proc, line)
+				if access.ID != 0 && arrayVBA227ResumeCanReachForBody(proc, vba227Graph, resumeNextEdges, statement, access) {
+					continue
+				}
 				// Reaching the body means both bounds queries completed and the
 				// default positive step found at least one value between LBound
 				// and UBound. This also proves a late-bound Variant snapshot is
@@ -2501,6 +2505,10 @@ func arrayVBA227ResumeNextAfterStatement(active bool, text string) bool {
 		}
 	}
 	return next
+}
+
+func arrayVBA227ResumeCanReachForBody(proc sourceProcedure, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges, loop, access procedureir.Statement) bool {
+	return arrayVBA227ResumeCanReachIndexedConditionBody(proc, vba227Graph, resumeNextEdges, loop, access)
 }
 
 func arrayVBA227ResumeNextBeforeLine(prefixes []bool, line int) bool {
