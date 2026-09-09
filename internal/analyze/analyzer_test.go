@@ -10355,6 +10355,180 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA227KeepsUnsafeDictionaryArrayItemContracts(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"case-sensitive-key": `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Private Sub Populate()
+  data_.Add "ACTIONS", Array("x")
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+
+Public Sub Perform()
+  Populate
+  Dim result As Long
+  result = syncChannels(data_)
+End Sub
+`,
+		"remove": `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Private Sub Populate()
+  data_.Add "actions", Array("x")
+  data_.Remove "actions"
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+
+Public Sub Perform()
+  Populate
+  Dim result As Long
+  result = syncChannels(data_)
+End Sub
+`,
+		"remove-all": `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Private Sub Populate()
+  data_.Add "actions", Array("x")
+  data_.RemoveAll
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+
+Public Sub Perform()
+  Populate
+  Dim result As Long
+  result = syncChannels(data_)
+End Sub
+`,
+		"dynamic-key": `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Private Sub Populate()
+  Dim key As String
+  key = "actions"
+  data_.Item(key) = Array("x")
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+
+Public Sub Perform()
+  Populate
+  Dim result As Long
+  result = syncChannels(data_)
+End Sub
+`,
+		"write-after-observation": `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+
+Public Sub Perform()
+  Dim result As Long
+  result = syncChannels(data_)
+  data_.Add "actions", Array("x")
+End Sub
+`,
+		"local-shadow": `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Private Sub Populate()
+  Dim data_ As Dictionary
+  Set data_ = New Dictionary
+  data_.Add "actions", Array("x")
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+
+Public Sub Perform()
+  Populate
+  Dim result As Long
+  result = syncChannels(data_)
+End Sub
+`,
+	}
+	for name, source := range cases {
+		name, source := name, source
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeClass(t, dir, "ActionChain.cls", source)
+			findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := findingsByCode(findings, "VBA227")
+			if len(got) != 1 || got[0].Procedure != "syncChannels" {
+				t.Fatalf("unsafe Dictionary array item contract must remain diagnostic: %+v", got)
+			}
+		})
+	}
+}
+
 func TestAnalyzerVBA227RecognizesCreateLookupDictSnapshots(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

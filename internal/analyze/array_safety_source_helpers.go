@@ -370,7 +370,8 @@ func arrayDictionaryItemAllocationContract(index *objectContainerIndex, owner so
 				!objectContainerDictionaryReceiverKnown(index, caller, actual, actualScope, call.StatementID) {
 				return false
 			}
-			if !arrayDictionaryItemAllWritesSafe(index, actual, key, ctx) ||
+			existsGuarded := objectContainerExistsGuarded(index, caller, actual, key, call.StatementID)
+			if !arrayDictionaryItemAllWritesSafe(index, actual, key, ctx, existsGuarded) ||
 				!arrayDictionaryItemCallerHasPresence(index, caller, actual, key, call.StatementID, ctx) {
 				return false
 			}
@@ -380,10 +381,10 @@ func arrayDictionaryItemAllocationContract(index *objectContainerIndex, owner so
 	return foundCaller
 }
 
-func arrayDictionaryItemAllWritesSafe(index *objectContainerIndex, receiver, key string, ctx analysisContext) bool {
+func arrayDictionaryItemAllWritesSafe(index *objectContainerIndex, receiver, key string, ctx analysisContext, allowRemovals bool) bool {
 	foundArrayWrite := false
 	for _, proc := range index.procedures {
-		safeWrites, hasMutation, ok := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx)
+		safeWrites, hasMutation, ok := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx, allowRemovals)
 		if !hasMutation {
 			continue
 		}
@@ -401,9 +402,18 @@ func arrayDictionaryItemAllWritesSafe(index *objectContainerIndex, receiver, key
 	return foundArrayWrite
 }
 
-func arrayDictionaryItemSafeWrites(index *objectContainerIndex, proc sourceProcedure, receiver, key string, ctx analysisContext) (map[int]bool, bool, bool) {
+func arrayDictionaryItemSafeWrites(index *objectContainerIndex, proc sourceProcedure, receiver, key string, ctx analysisContext, allowRemovals bool) (map[int]bool, bool, bool) {
 	safeWrites := map[int]bool{}
 	hasMutation := false
+	declarations := objectFlowDeclarations(index.file, proc, index.moduleDecls)
+	declaration, scope, bound := objectDeclarationBinding(receiver, declarations)
+	moduleDeclaration, moduleBound := index.moduleDecls[strings.ToLower(cleanIdentifier(receiver))]
+	if !bound || !moduleBound || scope != procedureir.ScopeModule || declaration.Line != moduleDeclaration.Line {
+		if objectContainerProcedureMayMutateReceiver(index, proc, receiver, key) {
+			return safeWrites, true, false
+		}
+		return safeWrites, false, true
+	}
 	for statement := range proc.Statements.All() {
 		if statement.Kind != procedureir.StatementSet && statement.Kind != procedureir.StatementAssignment {
 			continue
@@ -434,7 +444,7 @@ func arrayDictionaryItemSafeWrites(index *objectContainerIndex, proc sourceProce
 			if !keyOK {
 				return safeWrites, true, false
 			}
-			if !objectContainerKeysMayAlias(callKey, key) {
+			if !objectContainerKeysEqual(callKey, key) {
 				continue
 			}
 			hasMutation = true
@@ -456,7 +466,7 @@ func arrayDictionaryItemSafeWrites(index *objectContainerIndex, proc sourceProce
 				continue
 			}
 			hasMutation = true
-			if !matched || objectErrorResumeNextAt(proc, call.StatementID) {
+			if !matched || !arrayDictionaryItemExactAssignment(statement, receiver, key) || objectErrorResumeNextAt(proc, call.StatementID) {
 				return safeWrites, hasMutation, false
 			}
 			_, rhs, assigned := arrayAssignmentSides(statement.Text)
@@ -471,9 +481,15 @@ func arrayDictionaryItemSafeWrites(index *objectContainerIndex, proc sourceProce
 			}
 			if objectContainerKeysMayAlias(callKey, key) {
 				hasMutation = true
+				if !allowRemovals {
+					return safeWrites, hasMutation, false
+				}
 			}
 		case "removeall":
 			hasMutation = true
+			if !allowRemovals {
+				return safeWrites, hasMutation, false
+			}
 		default:
 			return safeWrites, true, false
 		}
@@ -486,8 +502,14 @@ func arrayDictionaryItemCallerHasPresence(index *objectContainerIndex, caller so
 		return true
 	}
 	for _, proc := range index.procedures {
-		safeWrites, hasMutation, ok := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx)
+		safeWrites, hasMutation, ok := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx, false)
 		if !hasMutation || !ok || len(safeWrites) == 0 || !objectContainerNormalExitCoveredByWrites(proc, safeWrites) {
+			continue
+		}
+		if proc.StartLine == caller.StartLine {
+			if objectContainerObservationCoveredByWrites(caller, observationID, safeWrites) {
+				return true
+			}
 			continue
 		}
 		if objectContainerProcedureCalledBeforeObservation(index, caller, proc, observationID) {
@@ -520,7 +542,7 @@ func arrayDictionaryItemNonEmptyArrayExpression(index *objectContainerIndex, pro
 			continue
 		}
 		arrayReceiver, arrayKey, sourceOK := objectContainerArraySource(proc, cleanIdentifier(arguments[appendInfo.arrayParameter]), statementID, flowContext)
-		return sourceOK && strings.EqualFold(arrayReceiver, receiver) && objectContainerKeysMayAlias(arrayKey, key)
+		return sourceOK && strings.EqualFold(arrayReceiver, receiver) && objectContainerKeysEqual(arrayKey, key)
 	}
 	if value, known := ctx.arrayReturns[name]; known {
 		return value.kind == arrayAllocated && value.knownArray && !value.mayBeEmpty
@@ -536,7 +558,27 @@ func arrayDictionaryItemNonEmptyArrayExpression(index *objectContainerIndex, pro
 	return false
 }
 
+func arrayDictionaryItemExactAssignment(statement procedureir.Statement, receiver, key string) bool {
+	left, _, assigned := arrayAssignmentSides(statement.Text)
+	if !assigned {
+		return false
+	}
+	if leftReceiver, leftKey, literal := objectContainerDictionaryItemExpression(left); literal {
+		return strings.EqualFold(leftReceiver, receiver) && objectContainerKeysEqual(leftKey, key)
+	}
+	if leftReceiver, leftKey, literal := objectContainerDefaultItemExpression(left); literal {
+		return strings.EqualFold(leftReceiver, receiver) && objectContainerKeysEqual(leftKey, key)
+	}
+	return false
+}
+
 func arrayObjectContainerIndex(ctx analysisContext, file parsedFile, proc sourceProcedure) (*objectContainerIndex, sourceProcedure) {
+	if ctx.objectAnalysis != nil {
+		key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
+		if plan := ctx.objectAnalysis.plans[key]; plan != nil && plan.containerIndex != nil {
+			return plan.containerIndex, plan.proc
+		}
+	}
 	if ctx.procedureResolver != nil {
 		resolvedIR := procedureir.Resolve(file.IR, ctx.procedureResolver)
 		resolvedProcedures := sourceProceduresFromIRRef(&resolvedIR, file.CFG)
@@ -550,13 +592,6 @@ func arrayObjectContainerIndex(ctx analysisContext, file parsedFile, proc source
 			}
 		}
 		return index, proc
-	}
-	if ctx.objectAnalysis != nil {
-		for _, plan := range ctx.objectAnalysis.plans {
-			if plan != nil && plan.containerIndex != nil && plan.file.Path == file.Path {
-				return plan.containerIndex, proc
-			}
-		}
 	}
 	return buildObjectContainerIndex(file), proc
 }
