@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/gui"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 func arrayLogicalCodeLine(lines []string, line int) string {
@@ -253,7 +254,12 @@ func arrayDictionaryMemberParts(text string) (receiver, member string, ok bool) 
 	return receiver, member, true
 }
 
-func arrayDictionaryMemberExpressionState(file parsedFile, proc sourceProcedure, line int, rhs string, variables map[string]arrayVariable) (arrayValue, bool) {
+func arrayDictionaryMemberExpressionState(file parsedFile, proc sourceProcedure, line int, rhs string, variables map[string]arrayVariable, ctx analysisContext) (arrayValue, bool) {
+	if receiver, key, ok := objectContainerDictionaryItemExpression(rhs); ok {
+		if value, safe := arrayDictionaryItemContainerState(file, proc, line, receiver, key, ctx); safe {
+			return value, true
+		}
+	}
 	receiver, _, ok := arrayDictionaryMemberParts(rhs)
 	knownNonEmpty := false
 	if source := arrayLogicalSourceLine(file.Lines, line); source != "" {
@@ -300,6 +306,268 @@ func arrayDictionaryMemberExpressionState(file parsedFile, proc sourceProcedure,
 		origin:                arrayOriginLocal,
 		allocationCountSource: arrayDictionaryCountSourcePrefix + source,
 	}, true
+}
+
+func arrayDictionaryItemContainerState(file parsedFile, proc sourceProcedure, line int, receiver, key string, ctx analysisContext) (arrayValue, bool) {
+	if !strings.EqualFold(strings.TrimSpace(proc.Visibility), "private") {
+		return arrayValue{}, false
+	}
+	index, owner := arrayObjectContainerIndex(ctx, file, proc)
+	if index == nil {
+		return arrayValue{}, false
+	}
+	statementID := arrayStatementIDAtLine(owner, line)
+	if statementID <= 0 {
+		return arrayValue{}, false
+	}
+	if !arrayDictionaryItemAllocationContract(index, owner, receiver, key, statementID, ctx) {
+		return arrayValue{}, false
+	}
+	return arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal}, true
+}
+
+func arrayDictionaryItemAllocationContract(index *objectContainerIndex, owner sourceProcedure, receiver, key string, observationID int, ctx analysisContext) bool {
+	if index == nil || receiver == "" || key == "" || observationID <= 0 {
+		return false
+	}
+	declarations := objectFlowDeclarations(index.file, owner, index.moduleDecls)
+	parameter, scope, ok := objectDeclarationBinding(receiver, declarations)
+	if !ok || scope != procedureir.ScopeParameter || !parameter.Object || !strings.EqualFold(strings.TrimSpace(owner.Visibility), "private") {
+		return false
+	}
+	parameterIndex := -1
+	for index, candidate := range owner.Params.AllIndexed() {
+		if strings.EqualFold(cleanIdentifier(candidate.Name), receiver) {
+			parameterIndex = index
+			break
+		}
+	}
+	if parameterIndex < 0 {
+		return false
+	}
+	foundCaller := false
+	for _, caller := range index.procedures {
+		for call := range caller.Calls.All() {
+			if call.Callee.Receiver != nil || !strings.EqualFold(cleanIdentifier(call.Callee.BaseName), owner.Name) ||
+				!objectContainerCallResolutionUsable(call) || !objectContainerResolvedCandidateMatches(owner, call.Resolution.Candidates[0]) {
+				continue
+			}
+			parameterNames := make([]string, 0, owner.Params.Len())
+			for _, parameter := range owner.Params.AllIndexed() {
+				parameterNames = append(parameterNames, parameter.Name)
+			}
+			arguments, argumentsOK := objectContainerCallArgumentsForParameters(caller, call, parameterNames)
+			if !argumentsOK || parameterIndex >= len(arguments) {
+				return false
+			}
+			actual := cleanIdentifier(arguments[parameterIndex])
+			if actual == "" || strings.ContainsAny(actual, ".()") {
+				return false
+			}
+			callerDeclarations := objectFlowDeclarations(index.file, caller, index.moduleDecls)
+			actualDeclaration, actualScope, actualOK := objectDeclarationBinding(actual, callerDeclarations)
+			if !actualOK || !actualDeclaration.Object || actualScope != procedureir.ScopeModule || !objectContainerModuleReceiverIsPrivate(index, actual) ||
+				!objectContainerDictionaryReceiverKnown(index, caller, actual, actualScope, call.StatementID) {
+				return false
+			}
+			if !arrayDictionaryItemAllWritesSafe(index, actual, key, ctx) ||
+				!arrayDictionaryItemCallerHasPresence(index, caller, actual, key, call.StatementID, ctx) {
+				return false
+			}
+			foundCaller = true
+		}
+	}
+	return foundCaller
+}
+
+func arrayDictionaryItemAllWritesSafe(index *objectContainerIndex, receiver, key string, ctx analysisContext) bool {
+	foundArrayWrite := false
+	for _, proc := range index.procedures {
+		safeWrites, hasMutation, ok := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx)
+		if !hasMutation {
+			continue
+		}
+		if !ok {
+			return false
+		}
+		if len(safeWrites) == 0 {
+			continue
+		}
+		if !objectContainerNormalExitCoveredByWrites(proc, safeWrites) {
+			return false
+		}
+		foundArrayWrite = true
+	}
+	return foundArrayWrite
+}
+
+func arrayDictionaryItemSafeWrites(index *objectContainerIndex, proc sourceProcedure, receiver, key string, ctx analysisContext) (map[int]bool, bool, bool) {
+	safeWrites := map[int]bool{}
+	hasMutation := false
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementSet && statement.Kind != procedureir.StatementAssignment {
+			continue
+		}
+		target, targetOK := objectContainerSimpleTarget(statement)
+		if !targetOK || !strings.EqualFold(target, receiver) {
+			continue
+		}
+		if strings.EqualFold(proc.Name, "Class_Initialize") && objectConstructorExpression(statement.Value) {
+			continue
+		}
+		return safeWrites, true, false
+	}
+	flowContext, _, contextOK := objectContainerGraphContext(index, proc)
+	if !contextOK {
+		return safeWrites, false, false
+	}
+	for call := range proc.Calls.All() {
+		if !strings.EqualFold(objectCallWithReceiverName(proc, call), receiver) {
+			continue
+		}
+		member := strings.ToLower(cleanIdentifier(call.Callee.Member))
+		switch member {
+		case "exists", "count", "keys":
+			continue
+		case "add":
+			callKey, keyOK := objectContainerDictionaryKey(proc, call)
+			if !keyOK {
+				return safeWrites, true, false
+			}
+			if !objectContainerKeysMayAlias(callKey, key) {
+				continue
+			}
+			hasMutation = true
+			if objectErrorResumeNextAt(proc, call.StatementID) {
+				return safeWrites, hasMutation, false
+			}
+			arguments := objectContainerCallArguments(proc, call)
+			if len(arguments) < 2 || !arrayDictionaryItemNonEmptyArrayExpression(index, proc, call.StatementID, arguments[1], receiver, key, flowContext, ctx) {
+				return safeWrites, hasMutation, false
+			}
+			safeWrites[call.StatementID] = true
+		case "item":
+			statement, statementOK := objectContainerStatement(proc, call.StatementID)
+			if !statementOK {
+				return safeWrites, true, false
+			}
+			matched, assignment := objectContainerDictionaryItemTarget(statement, receiver, key)
+			if !assignment {
+				continue
+			}
+			hasMutation = true
+			if !matched || objectErrorResumeNextAt(proc, call.StatementID) {
+				return safeWrites, hasMutation, false
+			}
+			_, rhs, assigned := arrayAssignmentSides(statement.Text)
+			if !assigned || !arrayDictionaryItemNonEmptyArrayExpression(index, proc, call.StatementID, rhs, receiver, key, flowContext, ctx) {
+				return safeWrites, hasMutation, false
+			}
+			safeWrites[call.StatementID] = true
+		case "remove":
+			callKey, keyOK := objectContainerDictionaryKey(proc, call)
+			if !keyOK {
+				return safeWrites, true, false
+			}
+			if objectContainerKeysMayAlias(callKey, key) {
+				hasMutation = true
+			}
+		case "removeall":
+			hasMutation = true
+		default:
+			return safeWrites, true, false
+		}
+	}
+	return safeWrites, hasMutation, true
+}
+
+func arrayDictionaryItemCallerHasPresence(index *objectContainerIndex, caller sourceProcedure, receiver, key string, observationID int, ctx analysisContext) bool {
+	if objectContainerExistsGuarded(index, caller, receiver, key, observationID) {
+		return true
+	}
+	for _, proc := range index.procedures {
+		safeWrites, hasMutation, ok := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx)
+		if !hasMutation || !ok || len(safeWrites) == 0 || !objectContainerNormalExitCoveredByWrites(proc, safeWrites) {
+			continue
+		}
+		if objectContainerProcedureCalledBeforeObservation(index, caller, proc, observationID) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayDictionaryItemNonEmptyArrayExpression(index *objectContainerIndex, proc sourceProcedure, statementID int, expression, receiver, key string, flowContext objectFlowContext, ctx analysisContext) bool {
+	name := arrayCallName(expression)
+	if name == "array" {
+		open := firstParenOutsideString(strings.TrimSpace(expression))
+		if open < 0 {
+			return false
+		}
+		close := matchingParen(strings.TrimSpace(expression), open)
+		return close == len(strings.TrimSpace(expression))-1 && len(splitArgs(strings.TrimSpace(expression)[open+1:close])) > 0
+	}
+	for call := range proc.Calls.All() {
+		if call.StatementID != statementID || call.Callee.Receiver != nil || !strings.EqualFold(cleanIdentifier(call.Callee.BaseName), name) {
+			continue
+		}
+		appendInfo, appendOK := objectContainerAppendInfoForResolvedCall(index, proc, call)
+		if !appendOK || appendInfo.arrayParameter < 0 {
+			continue
+		}
+		arguments, argumentsOK := objectContainerCallArgumentsForProcedure(index, proc, call, call.Callee.BaseName)
+		if !argumentsOK || appendInfo.arrayParameter >= len(arguments) {
+			continue
+		}
+		arrayReceiver, arrayKey, sourceOK := objectContainerArraySource(proc, cleanIdentifier(arguments[appendInfo.arrayParameter]), statementID, flowContext)
+		return sourceOK && strings.EqualFold(arrayReceiver, receiver) && objectContainerKeysMayAlias(arrayKey, key)
+	}
+	if value, known := ctx.arrayReturns[name]; known {
+		return value.kind == arrayAllocated && value.knownArray && !value.mayBeEmpty
+	}
+	for _, candidate := range index.procedures {
+		if !strings.EqualFold(cleanIdentifier(candidate.Name), name) || candidate.ProcedureKind != procedureir.ProcedureFunction && candidate.ProcedureKind != procedureir.ProcedurePropertyGet {
+			continue
+		}
+		if candidate.ReturnValueShape == procedureir.ValueShapeDynamicArray || strings.Contains(strings.ReplaceAll(candidate.ReturnType, " ", ""), "()") {
+			return arrayProcedureHasNonEmptyReturnAllocation(index.file, candidate)
+		}
+	}
+	return false
+}
+
+func arrayObjectContainerIndex(ctx analysisContext, file parsedFile, proc sourceProcedure) (*objectContainerIndex, sourceProcedure) {
+	if ctx.procedureResolver != nil {
+		resolvedIR := procedureir.Resolve(file.IR, ctx.procedureResolver)
+		resolvedProcedures := sourceProceduresFromIRRef(&resolvedIR, file.CFG)
+		resolvedFile := file
+		resolvedFile.IR = resolvedIR
+		resolvedFile.Procedures = resolvedProcedures
+		index := buildObjectContainerIndex(resolvedFile)
+		for _, candidate := range resolvedProcedures {
+			if candidate.StartLine == proc.StartLine && strings.EqualFold(candidate.Name, proc.Name) {
+				return index, candidate
+			}
+		}
+		return index, proc
+	}
+	if ctx.objectAnalysis != nil {
+		for _, plan := range ctx.objectAnalysis.plans {
+			if plan != nil && plan.containerIndex != nil && plan.file.Path == file.Path {
+				return plan.containerIndex, proc
+			}
+		}
+	}
+	return buildObjectContainerIndex(file), proc
+}
+
+func arrayStatementIDAtLine(proc sourceProcedure, line int) int {
+	for statement := range proc.Statements.All() {
+		if statement.ID > 0 && statement.Range.StartLine == line {
+			return statement.ID
+		}
+	}
+	return 0
 }
 
 // arrayDictionaryMemberKnownNonEmpty recognizes the outer dictionary returned

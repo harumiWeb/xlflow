@@ -10276,6 +10276,85 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227TracksDictionaryArrayItemThroughPrivateHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Public Sub AddChannel()
+  Dim storedChannel As Dictionary
+  Dim inputChans() As Variant
+  Set storedChannel = New Dictionary
+  If data_.Exists("actions") Then
+    inputChans = data_.Item("actions")
+    data_.Item("actions") = appendInputChannel(inputChans, storedChannel)
+  Else
+    data_.Add "actions", Array(storedChannel)
+  End If
+End Sub
+
+Private Function appendInputChannel(inputChans() As Variant, inputChan As Object) As Variant()
+  ReDim Preserve inputChans(0 To UBound(inputChans) + 1)
+  Set inputChans(UBound(inputChans)) = inputChan
+  appendInputChannel = inputChans
+End Function
+
+Private Function syncChannels(data As Dictionary) As Dictionary
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  If UBound(inputChans) = 0 Then
+    Set syncChannels = data
+    Exit Function
+  End If
+  Set syncChannels = data
+End Function
+
+Public Sub Perform()
+  AddChannel
+  Dim result As Object
+  Set result = syncChannels(data_)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a private helper receiving a proven Dictionary array item must not warn on UBound: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsPublicDictionaryArrayItemUnsafe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Reader.cls", `Attribute VB_Name = "Reader"
+Option Explicit
+
+Public Function Read(data As Dictionary) As Long
+  Dim values() As Variant
+  values = data.Item("actions")
+  Read = UBound(values)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Read" || got[0].Line != 7 {
+		t.Fatalf("a public Dictionary helper with an unknown item value must remain unsafe: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227RecognizesCreateLookupDictSnapshots(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -280,7 +280,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			}
 		}
 		if !indexed {
-			if value, known := arrayDictionaryMemberExpressionState(file, proc, line, rhs, variables); known {
+			if value, known := arrayDictionaryMemberExpressionState(file, proc, line, rhs, variables, ctx); known {
 				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 					state[name] = value
 				}
