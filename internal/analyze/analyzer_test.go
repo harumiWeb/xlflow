@@ -16885,6 +16885,58 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesChainedQualifiedArrayReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "WebDriver.cls", `Attribute VB_Name = "WebDriver"
+Option Explicit
+
+Public Function FindElement(ByVal selector As String) As WebElement
+	Set FindElement = New WebElement
+End Function
+
+Public Function TableToArray() As Variant()
+	Dim values() As Variant
+	ReDim values(1 To 1)
+	values(1) = "value"
+	TableToArray = values
+End Function
+`)
+	writeClass(t, dir, "WebElement.cls", `Attribute VB_Name = "WebElement"
+Option Explicit
+
+Private driver_ As WebDriver
+
+Private Sub Class_Initialize()
+	Set driver_ = New WebDriver
+End Sub
+
+Public Function TableToArray() As Variant()
+	TableToArray = driver_.TableToArray()
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run()
+	Dim driver As SeleniumVBA.WebDriver
+	Dim table() As Variant
+	Set driver = New WebDriver
+	table = driver.FindElement(By.ID, "table").TableToArray()
+	Debug.Print table(1)
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Project.Name = "SeleniumVBA"
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a chained qualified array-return call should preserve its allocated result: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227ExcludesDefinitelyFailingArrayReturnPaths(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

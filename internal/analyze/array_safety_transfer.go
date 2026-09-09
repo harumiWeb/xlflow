@@ -285,9 +285,16 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 					state[name] = value
 				}
 			} else if value, known := arrayExpressionState(rhs, state, ctx); known {
+				if qualifiedValue, qualifiedKnown := arrayQualifiedReturnExpressionState(proc, line, rhs, variables, ctx); qualifiedKnown {
+					value = qualifiedValue
+				}
 				if value.mayBeEmpty && arrayExpressionKnownNonEmpty(file, proc, line, rhs, variables) {
 					value.mayBeEmpty = false
 				}
+				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
+					state[name] = value
+				}
+			} else if value, known := arrayQualifiedReturnExpressionState(proc, line, rhs, variables, ctx); known {
 				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 					state[name] = value
 				}

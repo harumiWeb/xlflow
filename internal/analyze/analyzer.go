@@ -338,6 +338,7 @@ var traceHelperDependencies = map[string]helperDependencyRule{
 
 type analysisContext struct {
 	functionReturns                      map[string]string
+	functionReturnsQualified             map[string]string
 	functionShapes                       map[string]procedureir.ValueShapeKind
 	functionNamesSeen                    map[string]bool
 	functionAmbiguous                    map[string]bool
@@ -2474,8 +2475,19 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 }
 
 func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectAnalysis *objectAnalysisContext, capabilityPlan projectCapabilityPlan, projectResolver procedureir.Resolver) analysisContext {
+	projectObjectTypes := make(map[string]bool)
+	for _, file := range files {
+		if !strings.EqualFold(file.ModuleKind, "class") && !strings.EqualFold(file.ModuleKind, "form") {
+			continue
+		}
+		module := strings.ToLower(cleanIdentifier(lastName(strings.TrimSpace(file.Module))))
+		if module != "" {
+			projectObjectTypes[module] = true
+		}
+	}
 	ctx := analysisContext{
 		functionReturns:                  map[string]string{},
+		functionReturnsQualified:         map[string]string{},
 		functionShapes:                   map[string]procedureir.ValueShapeKind{},
 		functionNamesSeen:                map[string]bool{},
 		functionAmbiguous:                map[string]bool{},
@@ -2544,6 +2556,10 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 						ctx.functionReturns[functionName] = proc.ReturnType
 					}
 				}
+			}
+			returnTypeName := strings.ToLower(cleanIdentifier(lastName(strings.TrimSpace(proc.ReturnType))))
+			if (proc.ProcedureKind == procedureir.ProcedureFunction || proc.ProcedureKind == procedureir.ProcedurePropertyGet) && (isObjectType(proc.ReturnType) || projectObjectTypes[returnTypeName]) {
+				ctx.functionReturnsQualified[arrayProcedureKey(proc)] = proc.ReturnType
 			}
 			// Only built-in scalar return types are strong enough to reject a
 			// For Each source. A user-defined class/UDT may expose an enumerator

@@ -1115,6 +1115,13 @@ func arrayProcedureDocumentsArray(file parsedFile, proc sourceProcedure) bool {
 	return false
 }
 
+func arrayProcedureDeclaresArrayReturn(proc sourceProcedure) bool {
+	return proc.ReturnValueShape == procedureir.ValueShapeFixedArray ||
+		proc.ReturnValueShape == procedureir.ValueShapeDynamicArray ||
+		strings.Contains(strings.ReplaceAll(proc.ReturnType, " ", ""), "()") ||
+		proc.IR != nil && proc.IR.Symbol.IsArray
+}
+
 func arrayProcedureHasReturnAllocation(file parsedFile, proc sourceProcedure) bool {
 	hasAllocation := false
 	hasReturn := false
@@ -1602,6 +1609,7 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
 	})
 	ambiguousReturnNames := arrayReturnSummaryDuplicateNames(allReturnProcedures)
+	qualifiedSummaries := map[string]arrayValue{}
 
 	evaluate := func(procedure returnProcedure, summaries map[string]arrayValue) (candidate, bool) {
 		proc := procedure.proc
@@ -1622,9 +1630,22 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 				}
 			}
 		}
+		arrayReturnsQualified := qualifiedSummaries
+		qualifiedKey := arrayProcedureKey(proc)
+		if _, self := qualifiedSummaries[qualifiedKey]; self {
+			arrayReturnsQualified = make(map[string]arrayValue, len(qualifiedSummaries)-1)
+			for name, value := range qualifiedSummaries {
+				if name != qualifiedKey {
+					arrayReturnsQualified[name] = value
+				}
+			}
+		}
 		ctx := analysisContext{
-			arrayReturns:           arrayReturns,
-			arrayAllowVariantRedim: arrayProcedureDocumentsArray(procedure.file, proc) && arrayProcedureHasReturnAllocation(procedure.file, proc),
+			arrayReturns:             arrayReturns,
+			arrayReturnsQualified:    arrayReturnsQualified,
+			arrayAllowVariantRedim:   (arrayProcedureDocumentsArray(procedure.file, proc) || arrayProcedureDeclaresArrayReturn(proc)) && arrayProcedureHasReturnAllocation(procedure.file, proc),
+			functionReturnsQualified: participantCtx.functionReturnsQualified,
+			procedureResolver:        participantCtx.procedureResolver,
 		}
 		returnCandidates := map[int]candidate{}
 		base := arrayOptionBase(procedure.file)
@@ -1636,6 +1657,9 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 		walkArrayCFGWithStopStats(&baseView, procedure.file.Lines, arrayInitialState(procedure.variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 			if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
 				value, known := arrayExpressionState(rhs, in, ctx)
+				if qualifiedValue, qualifiedKnown := arrayQualifiedReturnExpressionState(proc, line, rhs, procedure.variables, ctx); qualifiedKnown {
+					value, known = qualifiedValue, true
+				}
 				returnCandidates[line] = candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue}
 			}
 			out, _ := (Analyzer{}).arrayTransfer(procedure.file, proc, ctx, procedure.variables, in, text, line, procedure.constants, nil)
@@ -1684,14 +1708,20 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 	}
 
 	dependents := make(map[string][]int)
+	qualifiedDependents := make(map[string][]int)
 	for index, procedure := range procedures {
+		dependencyContext := analysisContext{functionReturnsQualified: participantCtx.functionReturnsQualified}
 		for call := range procedure.proc.Calls.All() {
 			resolution := call.Resolution
 			if participantCtx.procedureResolver != nil {
 				resolution = participantCtx.procedureResolver.ResolveCall(call)
 			}
 			for _, candidate := range resolution.Candidates {
-				name := strings.ToLower(strings.TrimSpace(candidate.QualifiedName))
+				qualifiedName := strings.ToLower(strings.TrimSpace(candidate.QualifiedName))
+				if qualifiedName != "" {
+					qualifiedDependents[qualifiedName] = append(qualifiedDependents[qualifiedName], index)
+				}
+				name := qualifiedName
 				if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
 					name = name[dot+1:]
 				}
@@ -1699,16 +1729,26 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 					dependents[name] = append(dependents[name], index)
 				}
 			}
+			if call.Callee.Receiver != nil {
+				receiverType, ok := arrayQualifiedReturnObjectType(*call.Callee.Receiver, procedure.variables, dependencyContext)
+				member := cleanIdentifier(call.Callee.Member)
+				if ok && member != "" {
+					qualifiedName := strings.ToLower(cleanIdentifier(lastName(receiverType)) + "." + member)
+					qualifiedDependents[qualifiedName] = append(qualifiedDependents[qualifiedName], index)
+				}
+			}
 		}
 	}
 	for name := range dependents {
 		sort.Ints(dependents[name])
 	}
+	for name := range qualifiedDependents {
+		sort.Ints(qualifiedDependents[name])
+	}
 	contributions := make(map[string]candidate, len(procedures))
 	present := make(map[string]bool, len(procedures))
 	groups := make(map[string]map[string]candidate)
 	summaries := map[string]arrayValue{}
-	qualifiedSummaries := map[string]arrayValue{}
 	documentedSummaries := inferDocumentedArrayReturnSummaries(files)
 	documentedBareSummaries := inferDocumentedNonEmptyArrayReturnSummaries(files)
 	documentedLowerBoundSummaries := inferDocumentedArrayReturnLowerBoundSummaries(files)
@@ -1728,23 +1768,42 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 		name := strings.ToLower(strings.TrimSpace(procedure.proc.Name))
 		key := arrayProcedureKey(procedure.proc)
 		value, hasContribution := evaluate(procedure, summaries)
+		previousQualified, hadPreviousQualified := qualifiedSummaries[key]
 		if hasContribution && value.ok {
 			qualifiedSummaries[key] = value.value
 		} else {
 			delete(qualifiedSummaries, key)
 		}
+		qualifiedChanged := hadPreviousQualified != (hasContribution && value.ok) ||
+			(hasContribution && value.ok && !arrayValueEqual(previousQualified, value.value))
 		if ambiguousReturnNames[name] {
 			// Summary lookups use bare names for compatibility with the existing
 			// expression resolver. A duplicate bare name is therefore permanently
 			// ambiguous for this revision. Keep it at the unknown bottom of the
 			// lattice instead of allowing iteration order to delete and recreate a
 			// summary while duplicate candidates are evaluated.
+			if qualifiedChanged {
+				for _, dependent := range qualifiedDependents[key] {
+					if !queued[dependent] {
+						queued[dependent] = true
+						queue = append(queue, dependent)
+					}
+				}
+			}
 			continue
 		}
 		if head >= len(procedures) && participantCtx.arrayStats != nil {
 			participantCtx.arrayStats.addRevisit()
 		}
 		if present[key] == hasContribution && (!hasContribution || arrayValueEqual(contributions[key].value, value.value) && contributions[key].ok == value.ok) {
+			if qualifiedChanged {
+				for _, dependent := range qualifiedDependents[key] {
+					if !queued[dependent] {
+						queued[dependent] = true
+						queue = append(queue, dependent)
+					}
+				}
+			}
 			continue
 		}
 		if hasContribution {
@@ -1786,6 +1845,14 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 			if !queued[dependent] {
 				queued[dependent] = true
 				queue = append(queue, dependent)
+			}
+		}
+		if qualifiedChanged {
+			for _, dependent := range qualifiedDependents[key] {
+				if !queued[dependent] {
+					queued[dependent] = true
+					queue = append(queue, dependent)
+				}
 			}
 		}
 	}

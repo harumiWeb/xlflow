@@ -201,6 +201,135 @@ func inlineArrayQualifiedReturnAssignmentText(file parsedFile, proc sourceProced
 	return lhs + " = Array()", true
 }
 
+func arrayQualifiedReturnExpressionState(proc sourceProcedure, line int, rhs string, variables map[string]arrayVariable, ctx analysisContext) (arrayValue, bool) {
+	member := arrayCallName(rhs)
+	if member == "" || len(ctx.arrayReturnsQualified) == 0 {
+		return arrayValue{}, false
+	}
+	var value arrayValue
+	found := false
+	matched := false
+	for call := range proc.Calls.All() {
+		if call.Range.StartLine != line || call.Callee.Receiver == nil || !strings.EqualFold(cleanIdentifier(call.Callee.Member), member) {
+			continue
+		}
+		resolution := call.Resolution
+		if ctx.procedureResolver != nil {
+			resolution = ctx.procedureResolver.ResolveCall(call)
+		}
+		if resolution.Status != procedureir.ResolutionMatched || len(resolution.Candidates) != 1 {
+			continue
+		}
+		matched = true
+		key := strings.ToLower(strings.TrimSpace(resolution.Candidates[0].QualifiedName))
+		candidate, known := ctx.arrayReturnsQualified[key]
+		if !known || candidate.kind != arrayAllocated || !candidate.knownArray {
+			return arrayValue{}, false
+		}
+		if found {
+			return arrayValue{}, false
+		}
+		value = candidate
+		found = true
+	}
+	if found || matched {
+		return value, found
+	}
+	return arrayQualifiedReturnValueFromType(rhs, variables, ctx)
+}
+
+func arrayQualifiedReturnValueFromType(rhs string, variables map[string]arrayVariable, ctx analysisContext) (arrayValue, bool) {
+	receiver, member, ok := arrayQualifiedReturnMemberCallParts(rhs)
+	if !ok {
+		return arrayValue{}, false
+	}
+	typeName, ok := arrayQualifiedReturnObjectType(receiver, variables, ctx)
+	if !ok {
+		return arrayValue{}, false
+	}
+	key := strings.ToLower(cleanIdentifier(lastName(typeName)) + "." + cleanIdentifier(member))
+	value, known := ctx.arrayReturnsQualified[key]
+	if !known || value.kind != arrayAllocated || !value.knownArray {
+		return arrayValue{}, false
+	}
+	return value, true
+}
+
+func arrayQualifiedReturnObjectType(expression string, variables map[string]arrayVariable, ctx analysisContext) (string, bool) {
+	expression = strings.TrimSpace(expression)
+	if expression == "" {
+		return "", false
+	}
+	if variable, known := variables[strings.ToLower(cleanIdentifier(expression))]; known && strings.TrimSpace(variable.typ) != "" {
+		return strings.TrimSpace(variable.typ), true
+	}
+	receiver, member, ok := arrayQualifiedReturnMemberCallParts(expression)
+	if !ok {
+		return "", false
+	}
+	receiverType, ok := arrayQualifiedReturnObjectType(receiver, variables, ctx)
+	if !ok || len(ctx.functionReturnsQualified) == 0 {
+		return "", false
+	}
+	key := strings.ToLower(cleanIdentifier(lastName(receiverType)) + "." + cleanIdentifier(member))
+	returnType, known := ctx.functionReturnsQualified[key]
+	if !known || strings.TrimSpace(returnType) == "" {
+		return "", false
+	}
+	return strings.TrimSpace(returnType), true
+}
+
+func arrayQualifiedReturnMemberCallParts(text string) (receiver, member string, ok bool) {
+	trimmed := strings.TrimSpace(text)
+	dot := arrayQualifiedReturnLastDot(trimmed)
+	if dot <= 0 || dot >= len(trimmed)-1 {
+		return "", "", false
+	}
+	receiver = strings.TrimSpace(trimmed[:dot])
+	memberText := strings.TrimSpace(trimmed[dot+1:])
+	if open := firstParenOutsideString(memberText); open >= 0 {
+		close := matchingParen(memberText, open)
+		if close < 0 || strings.TrimSpace(memberText[close+1:]) != "" {
+			return "", "", false
+		}
+		memberText = strings.TrimSpace(memberText[:open])
+	}
+	member = cleanIdentifier(memberText)
+	if receiver == "" || !arrayEraseNameRe.MatchString(member) {
+		return "", "", false
+	}
+	return receiver, member, true
+}
+
+func arrayQualifiedReturnLastDot(text string) int {
+	depth := 0
+	last := -1
+	inString := false
+	for index := 0; index < len(text); index++ {
+		switch text[index] {
+		case '"':
+			if inString && index+1 < len(text) && text[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case '.':
+			if !inString && depth == 0 {
+				last = index
+			}
+		}
+	}
+	return last
+}
+
 func arrayMemberCallParts(text string) (receiver, member string, ok bool) {
 	trimmed := strings.TrimSpace(text)
 	if open := firstParenOutsideString(trimmed); open >= 0 {
