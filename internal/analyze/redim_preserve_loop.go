@@ -208,6 +208,7 @@ func redimDeleteShadowedConstant(constants map[string]int, name string) {
 
 func addQualifiedEnumIntegerConstants(file parsedFile, constants map[string]int) {
 	enumName := ""
+	enumValues := map[string]int{}
 	nextValue := 0
 	nextKnown := false
 	conditionalDepth := 0
@@ -231,6 +232,7 @@ func addQualifiedEnumIntegerConstants(file parsedFile, constants map[string]int)
 			fields := strings.Fields(code)
 			if len(fields) >= 2 {
 				enumName = cleanIdentifier(fields[len(fields)-1])
+				enumValues = map[string]int{}
 				nextValue = 0
 				nextKnown = true
 			}
@@ -238,6 +240,7 @@ func addQualifiedEnumIntegerConstants(file parsedFile, constants map[string]int)
 		}
 		if strings.HasPrefix(lower, "end enum") {
 			enumName = ""
+			enumValues = nil
 			nextKnown = false
 			continue
 		}
@@ -255,7 +258,14 @@ func addQualifiedEnumIntegerConstants(file parsedFile, constants map[string]int)
 		}
 		value := 0
 		if len(parts) == 2 {
-			parsed, err := constantIntegerExpression(strings.TrimSpace(parts[1]), constants)
+			expressionConstants := make(map[string]int, len(constants)+len(enumValues))
+			for key, value := range constants {
+				expressionConstants[key] = value
+			}
+			for key, value := range enumValues {
+				expressionConstants[key] = value
+			}
+			parsed, err := constantIntegerExpression(strings.TrimSpace(parts[1]), expressionConstants)
 			if err != nil {
 				nextKnown = false
 				continue
@@ -267,6 +277,7 @@ func addQualifiedEnumIntegerConstants(file parsedFile, constants map[string]int)
 			}
 			value = nextValue
 		}
+		enumValues[strings.ToLower(memberName)] = value
 		constants[strings.ToLower(enumName+"."+memberName)] = value
 		nextValue = value + 1
 		nextKnown = true
