@@ -371,7 +371,7 @@ func arrayDictionaryItemAllocationContract(index *objectContainerIndex, owner so
 				return false
 			}
 			existsGuarded := objectContainerExistsGuarded(index, caller, actual, key, call.StatementID)
-			allowRemovals := existsGuarded || !arrayDictionaryItemHasRemovalBeforeObservation(index, caller, actual, key, call.StatementID)
+			allowRemovals := !arrayDictionaryItemHasRemovalBeforeObservation(index, caller, actual, key, call.StatementID, !existsGuarded)
 			if !arrayDictionaryItemAllWritesSafe(index, actual, key, ctx, allowRemovals) ||
 				!arrayDictionaryItemCallerHasPresence(index, caller, actual, key, call.StatementID, ctx, allowRemovals) {
 				return false
@@ -520,51 +520,71 @@ func arrayDictionaryItemCallerHasPresence(index *objectContainerIndex, caller so
 	return false
 }
 
-func arrayDictionaryItemHasRemovalBeforeObservation(index *objectContainerIndex, caller sourceProcedure, receiver, key string, observationID int) bool {
+func arrayDictionaryItemProcedureHasRemoval(index *objectContainerIndex, proc sourceProcedure, receiver, key string) bool {
+	if index == nil {
+		return false
+	}
+	for call := range proc.Calls.All() {
+		if !strings.EqualFold(objectCallWithReceiverName(proc, call), receiver) {
+			continue
+		}
+		switch strings.ToLower(cleanIdentifier(call.Callee.Member)) {
+		case "removeall":
+			return true
+		case "remove":
+			callKey, keyOK := objectContainerDictionaryKey(proc, call)
+			if !keyOK || objectContainerKeysMayAlias(callKey, key) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func arrayDictionaryItemProcedureHasRemovalBeforeObservation(index *objectContainerIndex, proc sourceProcedure, receiver, key string, observationID int) bool {
+	flowContext, _, contextOK := objectContainerGraphContext(index, proc)
+	if !contextOK {
+		return true
+	}
+	for call := range proc.Calls.All() {
+		if !strings.EqualFold(objectCallWithReceiverName(proc, call), receiver) {
+			continue
+		}
+		member := strings.ToLower(cleanIdentifier(call.Callee.Member))
+		if member != "remove" && member != "removeall" {
+			continue
+		}
+		if member == "remove" {
+			callKey, keyOK := objectContainerDictionaryKey(proc, call)
+			if keyOK && !objectContainerKeysMayAlias(callKey, key) {
+				continue
+			}
+		}
+		if objectContainerStatementBeforeObservation(flowContext.graph, call.StatementID, observationID) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayDictionaryItemHasRemovalBeforeObservation(index *objectContainerIndex, caller sourceProcedure, receiver, key string, observationID int, includeExternal bool) bool {
 	if index == nil || observationID <= 0 {
 		return true
 	}
 	for _, proc := range index.procedures {
-		removes := false
-		flowContext, _, contextOK := objectContainerGraphContext(index, proc)
-		if !contextOK {
-			continue
-		}
-		for call := range proc.Calls.All() {
-			if !strings.EqualFold(objectCallWithReceiverName(proc, call), receiver) {
-				continue
-			}
-			member := strings.ToLower(cleanIdentifier(call.Callee.Member))
-			switch member {
-			case "removeall":
-				removes = true
-			case "remove":
-				callKey, keyOK := objectContainerDictionaryKey(proc, call)
-				if !keyOK || objectContainerKeysMayAlias(callKey, key) {
-					removes = true
-				}
-			}
-			if removes {
-				break
-			}
-		}
-		if !removes {
+		if !arrayDictionaryItemProcedureHasRemoval(index, proc, receiver, key) {
 			continue
 		}
 		if proc.StartLine == caller.StartLine {
-			for call := range proc.Calls.All() {
-				member := strings.ToLower(cleanIdentifier(call.Callee.Member))
-				if !strings.EqualFold(objectCallWithReceiverName(proc, call), receiver) || member != "remove" && member != "removeall" {
-					continue
-				}
-				if objectContainerStatementBeforeObservation(flowContext.graph, call.StatementID, observationID) {
-					return true
-				}
+			if arrayDictionaryItemProcedureHasRemovalBeforeObservation(index, proc, receiver, key, observationID) {
+				return true
 			}
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(proc.Visibility), "public") ||
-			objectContainerProcedureCalledBeforeObservation(index, caller, proc, observationID) {
+		if includeExternal && strings.EqualFold(strings.TrimSpace(proc.Visibility), "public") {
+			return true
+		}
+		if objectContainerProcedureMayReachObservation(index, caller, proc, observationID) {
 			return true
 		}
 	}

@@ -10435,6 +10435,55 @@ Public Sub Perform()
   result = syncChannels(data_)
 End Sub
 `,
+		"exists-then-remove": `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+
+Public Sub Perform()
+  data_.Add "actions", Array("x")
+  If data_.Exists("actions") Then data_.RemoveAll
+  Dim result As Long
+  result = syncChannels(data_)
+End Sub
+`,
+		"conditional-clear": `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Private Sub ClearData()
+  data_.RemoveAll
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+
+Public Sub Perform()
+  Dim shouldClear As Boolean
+  data_.Add "actions", Array("x")
+  If shouldClear Then ClearData
+  Dim result As Long
+  result = syncChannels(data_)
+End Sub
+`,
 		"dynamic-key": `Attribute VB_Name = "ActionChain"
 Option Explicit
 
