@@ -992,8 +992,10 @@ func arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings []Finding,
 // body means the condition's indexed access completed normally. Keep the
 // proof tied to the immediately preceding If header and reject Else bodies;
 // an unrelated earlier access must not establish allocation for a later one.
+// A handler that can Resume Next may re-enter the body after the condition
+// failed, so it also disables this normal-path proof.
 func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, variables map[string]arrayVariable, resumeNextBefore []bool) []Finding {
-	if line <= 1 || line > len(file.Lines) || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+	if line <= 1 || line > len(file.Lines) || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) || arrayVBA227ProcedureHasErrorHandlerResumeNext(proc) {
 		return findings
 	}
 	condition, body, ok := arrayIfThenParts(normalizedCodeLine(file.Lines[line-2]))
@@ -1028,6 +1030,9 @@ func arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings []Finding,
 
 	proven := map[string]bool{}
 	for _, use := range arrayIndexedUsesForSource(condition, variables) {
+		if len(use.args) == 0 {
+			continue
+		}
 		name := strings.ToLower(cleanIdentifier(use.name))
 		variable, known := variables[name]
 		if known && (variable.isArray || variable.isVariant) && name != "" {
@@ -2478,6 +2483,15 @@ func arrayVBA227ResumeNextAfterStatement(active bool, text string) bool {
 
 func arrayVBA227ResumeNextBeforeLine(prefixes []bool, line int) bool {
 	return line >= 0 && line < len(prefixes) && prefixes[line]
+}
+
+func arrayVBA227ProcedureHasErrorHandlerResumeNext(proc sourceProcedure) bool {
+	for statement := range proc.Statements.All() {
+		if statement.Kind == procedureir.StatementResume && strings.HasPrefix(strings.ToLower(strings.TrimSpace(statement.Text)), "resume next") {
+			return true
+		}
+	}
+	return false
 }
 
 func arrayIfThenParts(text string) (condition, body string, ok bool) {

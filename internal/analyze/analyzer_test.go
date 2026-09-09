@@ -8251,6 +8251,60 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227DoesNotTreatWholeArrayConditionAsIndexedProof(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant)
+  Dim values() As Long
+  values = source
+  If HasValues(values()) Then
+    Debug.Print values(0)
+  End If
+End Sub
+
+Private Function HasValues(ByRef values() As Long) As Boolean
+  HasValues = True
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 6 {
+		t.Fatalf("a whole-array argument must not prove an indexed access: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryIndexedConditionThroughErrorHandlerResume(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant)
+  Dim values() As Long
+  values = source
+  On Error GoTo Handler
+  If values(0) <> 1 Then
+    Debug.Print values(0)
+  End If
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 6 || got[1].Line != 7 {
+		t.Fatalf("an error-handler resume path must keep the body access possible: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulBoundsAfterLengthAssignment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
