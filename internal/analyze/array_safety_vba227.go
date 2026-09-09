@@ -2536,7 +2536,7 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, guard, 
 			case procedureir.TransferResumeLabel:
 				labelReachesBody := false
 				graph.ForEachOutgoing(block.ID, func(edge vbacfg.Edge) bool {
-					if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeResume && arrayVBA227NormalPathReachesWithout(graph, edge.To, bodyBlock.ID, guardBlock.ID) {
+					if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeResume && (arrayVBA227NormalPathReachesWithout(graph, edge.To, bodyBlock.ID, guardBlock.ID) || arrayVBA227UnknownFlowCanReachBody(graph, edge.To, guardBlock.ID, proc.Graph.UnknownFlowSources)) {
 						labelReachesBody = true
 					}
 					return true
@@ -2563,6 +2563,19 @@ func arrayVBA227NormalPathReachesWithout(graph vbacfg.CFGView, start, target, bl
 	}
 	reachable := arrayVBA227NormalReachableBlocksWithout(graph, start, blocked)
 	return reachable[target]
+}
+
+func arrayVBA227UnknownFlowCanReachBody(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, unknownFlowSources []vbacfg.BlockID) bool {
+	unknown := make(map[vbacfg.BlockID]struct{}, len(unknownFlowSources))
+	for _, unknownFlowSource := range unknownFlowSources {
+		unknown[unknownFlowSource] = struct{}{}
+	}
+	for blockID := range arrayVBA227NormalReachableBlocksWithout(graph, start, blocked) {
+		if _, ok := unknown[blockID]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func arrayVBA227NormalReachableBlocksWithout(graph vbacfg.CFGView, start, blocked vbacfg.BlockID) map[vbacfg.BlockID]bool {

@@ -8360,6 +8360,34 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227DoesNotCarryIndexedConditionThroughUnknownResumeFlow(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant, ByVal selector As Long)
+  Dim values() As Long
+  values = source
+  On Error GoTo Handler
+Retry: On selector GoTo Retry, Body
+  If values(0) <> 1 Then
+Body: Debug.Print values(0)
+  End If
+  Exit Sub
+Handler:
+  Resume Retry
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 7 || got[1].Line != 8 {
+		t.Fatalf("unknown resume flow must keep the body access possible: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227IgnoresUnreachableResumeHandlerForIndexedConditionProof(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
