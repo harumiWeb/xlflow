@@ -1969,6 +1969,24 @@ func realtimeProjectContextFiles(current parsedFile, documents []intel.ProjectAn
 	return files
 }
 
+func realtimeProjectResolverFiles(current parsedFile, documents []intel.ProjectAnalysisDocument) []parsedFile {
+	files := []parsedFile{current}
+	seen := map[string]bool{realtimeProjectPathKey(current.Path): true}
+	for _, document := range documents {
+		path := strings.TrimSpace(document.IR.Path)
+		key := realtimeProjectPathKey(path)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		files = append(files, parsedFile{
+			Path: path, Module: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			ModuleKind: string(document.IR.ModuleKind), IR: document.IR,
+		})
+	}
+	return files
+}
+
 // realtimeProjectContextDocuments narrows the immutable workspace snapshot to
 // the type/call closure that can contribute an interprocedural array summary
 // for the edited document. The project resolver supplies exact call targets;
@@ -1997,7 +2015,7 @@ func realtimeProjectContextDocuments(current parsedFile, documents []intel.Proje
 			queue = append(queue, key)
 		}
 	}
-	collectDocumentReferences := func(document procedureir.DocumentIR) {
+	collectDocumentReferences := func(document procedureir.DocumentIR, procedures []procedureir.ProcedureIR) {
 		collectType := func(typeName string) {
 			enqueueModule(typeName)
 		}
@@ -2007,7 +2025,7 @@ func realtimeProjectContextDocuments(current parsedFile, documents []intel.Proje
 				collectType(parameter.Type)
 			}
 		}
-		for _, procedure := range document.Procedures {
+		for _, procedure := range procedures {
 			collectType(procedure.Symbol.ReturnType)
 			for _, parameter := range procedure.Symbol.Parameters {
 				collectType(parameter.Type)
@@ -2032,19 +2050,45 @@ func realtimeProjectContextDocuments(current parsedFile, documents []intel.Proje
 					enqueueModule(*call.Callee.Receiver)
 				}
 			}
+			for _, access := range procedure.Accesses {
+				for _, candidate := range access.Resolution.Candidates {
+					if separator := strings.LastIndexAny(candidate.QualifiedName, ".!"); separator > 0 {
+						enqueueModule(candidate.QualifiedName[:separator])
+					}
+				}
+				if projectResolver == nil || strings.TrimSpace(access.Name) == "" {
+					continue
+				}
+				resolution := projectResolver.ResolveCall(procedureir.CallSite{
+					Module: document.ModuleName,
+					Caller: procedureir.ProcedureRef{
+						Name: procedure.Symbol.Name, Kind: procedure.Symbol.Kind,
+						QualifiedName: procedure.Symbol.QualifiedName,
+					},
+					Callee: procedureir.Callee{
+						Text: access.Name, BaseName: access.Name, Member: access.Name,
+					},
+					Range: access.Range,
+				})
+				for _, candidate := range resolution.Candidates {
+					if separator := strings.LastIndexAny(candidate.QualifiedName, ".!"); separator > 0 {
+						enqueueModule(candidate.QualifiedName[:separator])
+					}
+				}
+			}
 		}
 		for _, reference := range document.TypeReferences {
 			collectType(reference.Target)
 		}
 	}
-	collectDocumentReferences(current.IR)
+	collectDocumentReferences(current.IR, realtimeProjectProcedures(current.IR, current.Resolution))
 	for head := 0; head < len(queue); head++ {
 		for _, index := range byModule[queue[head]] {
 			if selected[index] {
 				continue
 			}
 			selected[index] = true
-			collectDocumentReferences(documents[index].IR)
+			collectDocumentReferences(documents[index].IR, realtimeProjectProcedures(documents[index].IR, &documents[index].Resolution))
 		}
 	}
 
@@ -2057,6 +2101,21 @@ func realtimeProjectContextDocuments(current parsedFile, documents []intel.Proje
 		result = append(result, document)
 	}
 	return result
+}
+
+func realtimeProjectProcedures(document procedureir.DocumentIR, resolution *procedureir.ResolvedDocumentView) []procedureir.ProcedureIR {
+	if resolution == nil || !resolution.HasOverlay() {
+		return document.Procedures
+	}
+	procedures := make([]procedureir.ProcedureIR, len(document.Procedures))
+	for index, procedure := range document.Procedures {
+		if resolved, ok := resolution.ResolvedProcedure(index); ok {
+			procedures[index] = resolved
+		} else {
+			procedures[index] = procedure
+		}
+	}
+	return procedures
 }
 
 func realtimeProjectDocumentModuleKeys(document intel.ProjectAnalysisDocument) []string {
@@ -2218,6 +2277,9 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
+		if projectResolver == nil {
+			projectResolver = buildResolutionResolver(realtimeProjectResolverFiles(file, projectDocuments), true, typeDB)
+		}
 		contextFiles := realtimeProjectContextFiles(file, projectDocuments, projectEffects, cfg.Analyze, projectResolver)
 		if queryContext.Store != nil && queryRevision == nil {
 			revisionID := queryContext.Revision
@@ -2230,9 +2292,6 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		// analysis. In particular, checked Resume Next probes may use a
 		// project-visible Const or enum member as an argument; leaving this
 		// resolver nil would make the editor path reject those known values.
-		if projectResolver == nil {
-			projectResolver = buildResolutionResolver(contextFiles, true, typeDB)
-		}
 		analysisCtx := analyzer.buildContextWithObjectAnalysisPlan(
 			contextFiles,
 			nil,

@@ -17058,6 +17058,21 @@ End Function
 `,
 		},
 		{
+			path:   filepath.Join(root, "src", "modules", "Helper.bas"),
+			module: "Helper",
+			kind:   "standard",
+			source: `Attribute VB_Name = "Helper"
+Option Explicit
+
+Public Function MakeValues() As Long()
+	Dim values() As Long
+	ReDim values(1 To 1)
+	values(1) = 1
+	MakeValues = values
+End Function
+`,
+		},
+		{
 			path:   filepath.Join(root, "src", "modules", "Main.bas"),
 			module: "Main",
 			kind:   "standard",
@@ -17070,6 +17085,12 @@ Public Sub Run()
 	Set driver = New WebDriver
 	table = driver.FindElement(By.ID, "table").TableToArray()
 	Debug.Print table(1)
+End Sub
+
+Public Sub RunBareProperty()
+	Dim values() As Long
+	values = MakeValues
+	Debug.Print values(1)
 End Sub
 `,
 		},
@@ -17108,9 +17129,9 @@ End Sub
 
 	cfg := config.Default()
 	cfg.Project.Name = "third_party/selenium-vba"
-	main := documents[2]
+	main := documents[3]
 	findings, err := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(
-		context.Background(), root, cfg, parsedDocuments[2], main.IR, main.CFG, nil,
+		context.Background(), root, cfg, parsedDocuments[3], main.IR, main.CFG, nil,
 		effects.ProjectSummary{}, nil, nil, nil, documents,
 		intel.Document{Path: main.IR.Path, Source: main.Source}, 1,
 	)
