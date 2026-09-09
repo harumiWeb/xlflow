@@ -8552,6 +8552,31 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesSuccessfulBoundsIntoVariantLoopBody(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal value As Object)
+  Dim keys As Variant
+  Dim i As Long
+  If value.Count = 0 Then Exit Sub
+  keys = value.keys
+  For i = LBound(keys) To UBound(keys)
+    Debug.Print keys(i)
+  Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 7 || got[1].Line != 7 {
+		t.Fatalf("the bounds queries should remain the only findings when a Variant array loop body is reached after successful LBound/UBound: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulBoundsAcrossRepeatedSelectCase(t *testing.T) {
 	t.Parallel()
 	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {

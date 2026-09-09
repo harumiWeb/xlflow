@@ -162,6 +162,7 @@ var (
 	arrayBoundCallRe       = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
 	arrayForBoundRe        = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
 	arrayForUBoundRe       = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+ubound\s*\(\s*([A-Za-z_]\w*)`)
+	arrayForBoundsRe       = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*lbound\s*\(\s*([A-Za-z_]\w*)\s*\)\s+to\s+ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
 	// A loop with this shape is safe for a zero-based Byte array when its
 	// length was obtained from a successful UBound(array) + 1 expression.
 	arrayForZeroBasedLengthRe         = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*0\s+to\s+([A-Za-z_]\w*)\s*-\s*1\s*$`)

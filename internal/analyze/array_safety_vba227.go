@@ -793,6 +793,20 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 				provenNonEmpty[name] = true
 			}
 		}
+		if match := arrayForBoundsRe.FindStringSubmatch(header); len(match) == 3 && strings.EqualFold(match[1], match[2]) {
+			name := strings.ToLower(cleanIdentifier(match[1]))
+			variable, variableKnown := variables[name]
+			_, valueKnown := state[name]
+			if variableKnown && (variable.isArray || variable.isVariant) && valueKnown {
+				// Reaching the body means both bounds queries completed and the
+				// default positive step found at least one value between LBound
+				// and UBound. This also proves a late-bound Variant snapshot is
+				// non-empty on the body path, while the bound observations remain
+				// findings on the header itself.
+				proven[name] = true
+				provenNonEmpty[name] = true
+			}
+		}
 	}
 	if len(proven) == 0 && len(provenNonEmpty) == 0 {
 		return findings
