@@ -2523,9 +2523,6 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227G
 	if !ok {
 		return false
 	}
-	if resumeNextEdges == nil && proc.Graph != nil {
-		resumeNextEdges = arrayVBA227ResumeNextContinuationEdges(proc)
-	}
 	handlers := map[vbacfg.BlockID]bool{}
 	graph.ForEachOutgoing(guardBlock.ID, func(edge vbacfg.Edge) bool {
 		if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeError {
