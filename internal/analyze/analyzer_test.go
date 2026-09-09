@@ -10529,6 +10529,41 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227AllowsDictionaryRemovalAfterObservation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ActionChain.cls", `Attribute VB_Name = "ActionChain"
+Option Explicit
+
+Private data_ As Dictionary
+
+Private Sub Class_Initialize()
+  Set data_ = New Dictionary
+End Sub
+
+Public Sub Perform()
+  data_.Add "actions", Array("x")
+  Dim result As Long
+  result = syncChannels(data_)
+  data_.RemoveAll
+End Sub
+
+Private Function syncChannels(data As Dictionary) As Long
+  Dim inputChans() As Variant
+  inputChans = data.Item("actions")
+  syncChannels = UBound(inputChans)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a removal after the observed Dictionary array item must not invalidate the earlier proof: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227RecognizesCreateLookupDictSnapshots(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

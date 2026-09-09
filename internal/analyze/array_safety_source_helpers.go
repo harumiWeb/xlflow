@@ -371,8 +371,9 @@ func arrayDictionaryItemAllocationContract(index *objectContainerIndex, owner so
 				return false
 			}
 			existsGuarded := objectContainerExistsGuarded(index, caller, actual, key, call.StatementID)
-			if !arrayDictionaryItemAllWritesSafe(index, actual, key, ctx, existsGuarded) ||
-				!arrayDictionaryItemCallerHasPresence(index, caller, actual, key, call.StatementID, ctx) {
+			allowRemovals := existsGuarded || !arrayDictionaryItemHasRemovalBeforeObservation(index, caller, actual, key, call.StatementID)
+			if !arrayDictionaryItemAllWritesSafe(index, actual, key, ctx, allowRemovals) ||
+				!arrayDictionaryItemCallerHasPresence(index, caller, actual, key, call.StatementID, ctx, allowRemovals) {
 				return false
 			}
 			foundCaller = true
@@ -497,12 +498,12 @@ func arrayDictionaryItemSafeWrites(index *objectContainerIndex, proc sourceProce
 	return safeWrites, hasMutation, true
 }
 
-func arrayDictionaryItemCallerHasPresence(index *objectContainerIndex, caller sourceProcedure, receiver, key string, observationID int, ctx analysisContext) bool {
+func arrayDictionaryItemCallerHasPresence(index *objectContainerIndex, caller sourceProcedure, receiver, key string, observationID int, ctx analysisContext, allowRemovals bool) bool {
 	if objectContainerExistsGuarded(index, caller, receiver, key, observationID) {
 		return true
 	}
 	for _, proc := range index.procedures {
-		safeWrites, hasMutation, ok := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx, false)
+		safeWrites, hasMutation, ok := arrayDictionaryItemSafeWrites(index, proc, receiver, key, ctx, allowRemovals)
 		if !hasMutation || !ok || len(safeWrites) == 0 || !objectContainerNormalExitCoveredByWrites(proc, safeWrites) {
 			continue
 		}
@@ -513,6 +514,57 @@ func arrayDictionaryItemCallerHasPresence(index *objectContainerIndex, caller so
 			continue
 		}
 		if objectContainerProcedureCalledBeforeObservation(index, caller, proc, observationID) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayDictionaryItemHasRemovalBeforeObservation(index *objectContainerIndex, caller sourceProcedure, receiver, key string, observationID int) bool {
+	if index == nil || observationID <= 0 {
+		return true
+	}
+	for _, proc := range index.procedures {
+		removes := false
+		flowContext, _, contextOK := objectContainerGraphContext(index, proc)
+		if !contextOK {
+			continue
+		}
+		for call := range proc.Calls.All() {
+			if !strings.EqualFold(objectCallWithReceiverName(proc, call), receiver) {
+				continue
+			}
+			member := strings.ToLower(cleanIdentifier(call.Callee.Member))
+			switch member {
+			case "removeall":
+				removes = true
+			case "remove":
+				callKey, keyOK := objectContainerDictionaryKey(proc, call)
+				if !keyOK || objectContainerKeysMayAlias(callKey, key) {
+					removes = true
+				}
+			}
+			if removes {
+				break
+			}
+		}
+		if !removes {
+			continue
+		}
+		if proc.StartLine == caller.StartLine {
+			for call := range proc.Calls.All() {
+				member := strings.ToLower(cleanIdentifier(call.Callee.Member))
+				if !strings.EqualFold(objectCallWithReceiverName(proc, call), receiver) || member != "remove" && member != "removeall" {
+					continue
+				}
+				if objectContainerStatementBeforeObservation(flowContext.graph, call.StatementID, observationID) {
+					return true
+				}
+			}
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(proc.Visibility), "public") ||
+			objectContainerProcedureCalledBeforeObservation(index, caller, proc, observationID) {
 			return true
 		}
 	}
