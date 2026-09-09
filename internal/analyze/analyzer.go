@@ -3497,11 +3497,11 @@ func sourceProceduresFromProcedureSlice(document *procedureir.DocumentIR, proced
 			Calls:            newReadOnlySpan(procedure.Calls),
 			Accesses:         newReadOnlySpan(procedure.Accesses),
 		}
-		source.arrayVBA227ResumeFacts = buildArrayVBA227ResumeFacts(source)
 		source.Facts = newProcedureAnalysisFactsForProcedure(procedure)
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
 			source.Graph = &controlFlow[0].Graphs[procedureIndex]
 		}
+		source.arrayVBA227ResumeFacts = buildArrayVBA227ResumeFacts(source)
 		graphUnknown := source.Graph != nil && len(source.Graph.UnknownFlowSources) > 0
 		source.Features = finalizeProcedureFeatures(source.Facts.features, *document, *procedure, source.Graph != nil, graphUnknown)
 		source.Facts.features = source.Features

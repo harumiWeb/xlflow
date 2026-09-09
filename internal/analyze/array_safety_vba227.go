@@ -14,12 +14,16 @@ import (
 type arrayVBA227ResumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool
 
 type arrayVBA227ResumeFacts struct {
-	hasResumeTransfer bool
-	boundsByName      map[string][]procedureir.Statement
+	hasResumeTransfer       bool
+	boundsByName            map[string][]procedureir.Statement
+	resumeNextContinuations map[vbacfg.BlockID][]vbacfg.BlockID
 }
 
 func buildArrayVBA227ResumeFacts(proc sourceProcedure) *arrayVBA227ResumeFacts {
-	facts := &arrayVBA227ResumeFacts{boundsByName: map[string][]procedureir.Statement{}}
+	facts := &arrayVBA227ResumeFacts{
+		boundsByName:            map[string][]procedureir.Statement{},
+		resumeNextContinuations: map[vbacfg.BlockID][]vbacfg.BlockID{},
+	}
 	for statement := range proc.Statements.All() {
 		if statement.Kind == procedureir.StatementResume && statement.Control != nil {
 			switch statement.Control.Transfer {
@@ -33,6 +37,9 @@ func buildArrayVBA227ResumeFacts(proc sourceProcedure) *arrayVBA227ResumeFacts {
 				facts.boundsByName[name] = append(facts.boundsByName[name], statement)
 			}
 		}
+	}
+	if proc.Graph != nil && facts.hasResumeTransfer {
+		facts.resumeNextContinuations = arrayVBA227ResumeNextContinuations(proc.Graph.View(vbacfg.EdgeFilter{}))
 	}
 	return facts
 }
@@ -2688,7 +2695,8 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227G
 			}
 			switch block.Statement.Control.Transfer {
 			case procedureir.TransferResumeNext:
-				if arrayVBA227ResumeNextFaultPathReachesBody(graph, guardBlock.ID, bodyBlock.ID) {
+				if arrayVBA227ResumeNextContinuationReachesBody(proc, graph, block.ID, bodyBlock.ID, guardBlock.ID) ||
+					arrayVBA227ResumeNextFaultPathReachesBody(graph, resumeNextEdges, guardBlock.ID, bodyBlock.ID) {
 					return true
 				}
 			case procedureir.TransferResumeLabel:
@@ -2708,13 +2716,22 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227G
 	return false
 }
 
-func arrayVBA227ResumeNextFaultPathReachesBody(graph vbacfg.CFGView, faultBlock, bodyBlock vbacfg.BlockID) bool {
+func arrayVBA227ResumeNextContinuationReachesBody(proc sourceProcedure, graph vbacfg.CFGView, resumeBlock, bodyBlock, blocked vbacfg.BlockID) bool {
+	for _, target := range arrayVBA227ResumeFactsFor(proc).resumeNextContinuations[resumeBlock] {
+		if arrayVBA227NormalPathReachesWithout(graph, target, bodyBlock, blocked) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227ResumeNextFaultPathReachesBody(graph vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges, faultBlock, bodyBlock vbacfg.BlockID) bool {
 	if faultBlock == bodyBlock {
 		return true
 	}
 	reaches := false
 	graph.ForEachOutgoing(faultBlock, func(edge vbacfg.Edge) bool {
-		if edge.Class == vbacfg.EdgeNormal && arrayVBA227NormalPathReachesWithout(graph, edge.To, bodyBlock, faultBlock) {
+		if (edge.Class == vbacfg.EdgeNormal || resumeNextEdges[faultBlock][edge.To]) && arrayVBA227NormalPathReachesWithout(graph, edge.To, bodyBlock, faultBlock) {
 			reaches = true
 		}
 		return !reaches

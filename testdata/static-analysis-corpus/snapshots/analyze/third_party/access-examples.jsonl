@@ -246,6 +246,7 @@
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":899,"column":0}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA249","severity":"error","line":929,"column":0}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA249","severity":"error","line":931,"column":0}
+{"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA227","severity":"warning","line":956,"column":0}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":1000,"column":0}
 {"project":"third_party/access-examples","file":"Form_900_Check_Runtime_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":22,"column":0}
 {"project":"third_party/access-examples","file":"Form_900_Check_Runtime_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":92,"column":0}

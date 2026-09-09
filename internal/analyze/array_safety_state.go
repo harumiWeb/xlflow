@@ -777,10 +777,56 @@ func arrayVBA227Graph(proc sourceProcedure, ctx analysisContext) vbacfg.CFGView 
 			removed[block.ID] = true
 		}
 	}
-	if len(removed) == 0 {
+	if len(removed) != 0 {
+		graph = graph.WithoutNormalContinuationsFrom(removed)
+	}
+	return arrayVBA227AddResumeNextContinuationEdges(proc, graph)
+}
+
+func arrayVBA227AddResumeNextContinuationEdges(proc sourceProcedure, graph vbacfg.CFGView) vbacfg.CFGView {
+	if proc.Graph == nil {
 		return graph
 	}
-	return graph.WithoutNormalContinuationsFrom(removed)
+	continuations := arrayVBA227ResumeFactsFor(proc).resumeNextContinuations
+	if len(continuations) == 0 {
+		return graph
+	}
+	materialized := graph.Materialize()
+	existingResume := map[[2]vbacfg.BlockID]bool{}
+	var nextID vbacfg.EdgeID
+	for _, edge := range materialized.Edges {
+		if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeResume {
+			existingResume[[2]vbacfg.BlockID{edge.From, edge.To}] = true
+		}
+		if edge.ID >= nextID {
+			nextID = edge.ID + 1
+		}
+	}
+	for resumeBlock, targets := range continuations {
+		block, ok := graph.BlockByID(resumeBlock)
+		if !ok {
+			continue
+		}
+		for _, target := range targets {
+			key := [2]vbacfg.BlockID{resumeBlock, target}
+			if existingResume[key] {
+				continue
+			}
+			materialized.Edges = append(materialized.Edges, vbacfg.Edge{
+				ID:          nextID,
+				From:        resumeBlock,
+				To:          target,
+				Kind:        vbacfg.EdgeResume,
+				Class:       vbacfg.EdgeExceptional,
+				Uncertain:   true,
+				StatementID: block.StatementID,
+				Range:       block.Range,
+			})
+			nextID++
+			existingResume[key] = true
+		}
+	}
+	return materialized.View(vbacfg.EdgeFilter{})
 }
 
 func arrayProcedureAlwaysRaises(proc sourceProcedure) bool {

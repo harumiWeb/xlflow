@@ -8391,6 +8391,35 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227KeepsLoopBodyAfterResumeNextRaiseExpression(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  On Error GoTo Handler
+  Error UBound(values)
+  Dim i As Long
+  For i = LBound(values) To UBound(values)
+    Debug.Print values(i)
+  Next
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 7 && strings.HasPrefix(finding.arrayOperationKey, "index:values:") {
+			return
+		}
+	}
+	t.Fatalf("Resume Next after a bounds expression in a raise statement must keep the loop body access possible: %+v", findingsByCode(findings, "VBA227"))
+}
+
 func TestArrayVBA227ResumeNextPathUsesExceptionalContinuation(t *testing.T) {
 	t.Parallel()
 	proc := sourceProcedure{Graph: &vbacfg.Graph{
