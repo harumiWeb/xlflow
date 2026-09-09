@@ -13,6 +13,37 @@ import (
 
 type arrayVBA227ResumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool
 
+type arrayVBA227ResumeFacts struct {
+	hasResumeTransfer bool
+	boundsByName      map[string][]procedureir.Statement
+}
+
+func buildArrayVBA227ResumeFacts(proc sourceProcedure) *arrayVBA227ResumeFacts {
+	facts := &arrayVBA227ResumeFacts{boundsByName: map[string][]procedureir.Statement{}}
+	for statement := range proc.Statements.All() {
+		if statement.Kind == procedureir.StatementResume && statement.Control != nil {
+			switch statement.Control.Transfer {
+			case procedureir.TransferResumeNext, procedureir.TransferResumeLabel:
+				facts.hasResumeTransfer = true
+			}
+		}
+		for _, match := range arrayBoundCallRe.FindAllStringSubmatch(statement.Text, -1) {
+			name := strings.ToLower(cleanIdentifier(match[2]))
+			if name != "" {
+				facts.boundsByName[name] = append(facts.boundsByName[name], statement)
+			}
+		}
+	}
+	return facts
+}
+
+func arrayVBA227ResumeFactsFor(proc sourceProcedure) *arrayVBA227ResumeFacts {
+	if proc.arrayVBA227ResumeFacts != nil {
+		return proc.arrayVBA227ResumeFacts
+	}
+	return buildArrayVBA227ResumeFacts(proc)
+}
+
 func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges) (arrayFlowState, []Finding) {
 	state = arrayVBA227ClearLoopBodyBounds(state, line)
 	state = arrayVBA227ClearConditionalAllocationGuards(state, proc, text, line, variables)
@@ -813,7 +844,7 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 					if arrayVBA227BoundsCanFail(value) && arrayVBA227ResumeCanReachForBody(proc, vba227Graph, resumeNextEdges, statement, access) {
 						continue
 					}
-					if arrayVBA227ResumeCanReachPriorBoundsBody(proc, vba227Graph, resumeNextEdges, statement.Range.StartLine, name, access, variables) {
+					if value.resumeBoundsFailurePossible && arrayVBA227ResumeCanReachPriorBoundsBody(proc, vba227Graph, resumeNextEdges, statement.Range.StartLine, name, access, variables) {
 						continue
 					}
 				}
@@ -2057,7 +2088,7 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 }
 
 func arrayVBA227RetainBoundsFailureOnResume(state, before arrayFlowState, text string, variables map[string]arrayVariable, proc sourceProcedure) arrayFlowState {
-	if !arrayVBA227ProcedureHasResumeTransfer(proc) {
+	if !arrayVBA227ResumeFactsFor(proc).hasResumeTransfer {
 		return state
 	}
 	var updated arrayFlowState
@@ -2591,44 +2622,12 @@ func arrayVBA227ResumeCanReachPriorBoundsBody(proc sourceProcedure, vba227Graph 
 	if !known || variable.fixed {
 		return false
 	}
-	for statement := range proc.Statements.All() {
-		if statement.Range.StartLine >= beforeLine || !arrayVBA227StatementHasBoundCall(statement.Text, name) {
+	facts := arrayVBA227ResumeFactsFor(proc)
+	for _, statement := range facts.boundsByName[strings.ToLower(cleanIdentifier(name))] {
+		if statement.Range.StartLine >= beforeLine {
 			continue
 		}
 		if arrayVBA227ResumeCanReachIndexedConditionBody(proc, vba227Graph, resumeNextEdges, statement, access) {
-			return true
-		}
-		if arrayVBA227ProcedureHasResumeNextTransfer(proc) {
-			return true
-		}
-	}
-	return false
-}
-
-func arrayVBA227ProcedureHasResumeTransfer(proc sourceProcedure) bool {
-	for statement := range proc.Statements.All() {
-		if statement.Kind == procedureir.StatementResume && statement.Control != nil {
-			switch statement.Control.Transfer {
-			case procedureir.TransferResumeNext, procedureir.TransferResumeLabel:
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func arrayVBA227ProcedureHasResumeNextTransfer(proc sourceProcedure) bool {
-	for statement := range proc.Statements.All() {
-		if statement.Kind == procedureir.StatementResume && statement.Control != nil && statement.Control.Transfer == procedureir.TransferResumeNext {
-			return true
-		}
-	}
-	return false
-}
-
-func arrayVBA227StatementHasBoundCall(text, name string) bool {
-	for _, match := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
-		if strings.EqualFold(cleanIdentifier(match[2]), name) {
 			return true
 		}
 	}
@@ -2689,7 +2688,9 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227G
 			}
 			switch block.Statement.Control.Transfer {
 			case procedureir.TransferResumeNext:
-				return true
+				if arrayVBA227ResumeNextFaultPathReachesBody(graph, guardBlock.ID, bodyBlock.ID) {
+					return true
+				}
 			case procedureir.TransferResumeLabel:
 				labelReachesBody := false
 				graph.ForEachOutgoing(block.ID, func(edge vbacfg.Edge) bool {
@@ -2705,6 +2706,20 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227G
 		}
 	}
 	return false
+}
+
+func arrayVBA227ResumeNextFaultPathReachesBody(graph vbacfg.CFGView, faultBlock, bodyBlock vbacfg.BlockID) bool {
+	if faultBlock == bodyBlock {
+		return true
+	}
+	reaches := false
+	graph.ForEachOutgoing(faultBlock, func(edge vbacfg.Edge) bool {
+		if edge.Class == vbacfg.EdgeNormal && arrayVBA227NormalPathReachesWithout(graph, edge.To, bodyBlock, faultBlock) {
+			reaches = true
+		}
+		return !reaches
+	})
+	return reaches
 }
 
 func arrayVBA227NormalReachableBlocks(graph vbacfg.CFGView, start vbacfg.BlockID) map[vbacfg.BlockID]bool {

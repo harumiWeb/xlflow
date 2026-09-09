@@ -646,11 +646,12 @@ type sourceProcedure struct {
 	// provides range/len compatibility for the analyzer while exposing no
 	// mutable slice through a package boundary.  New consumers should prefer
 	// the view/facts accessors.
-	Declarations readOnlySpan[procedureir.Declaration]
-	Statements   readOnlySpan[procedureir.Statement]
-	Expressions  readOnlySpan[procedureir.Expression]
-	Calls        readOnlySpan[procedureir.CallSite]
-	Accesses     readOnlySpan[procedureir.VariableAccess]
+	Declarations           readOnlySpan[procedureir.Declaration]
+	Statements             readOnlySpan[procedureir.Statement]
+	Expressions            readOnlySpan[procedureir.Expression]
+	Calls                  readOnlySpan[procedureir.CallSite]
+	Accesses               readOnlySpan[procedureir.VariableAccess]
+	arrayVBA227ResumeFacts *arrayVBA227ResumeFacts
 	// Features is the immutable, analyzer-owned applicability summary built
 	// with the procedure facts. It contains no parser-owned values.
 	Features procedureFeatureSet
@@ -3496,6 +3497,7 @@ func sourceProceduresFromProcedureSlice(document *procedureir.DocumentIR, proced
 			Calls:            newReadOnlySpan(procedure.Calls),
 			Accesses:         newReadOnlySpan(procedure.Accesses),
 		}
+		source.arrayVBA227ResumeFacts = buildArrayVBA227ResumeFacts(source)
 		source.Facts = newProcedureAnalysisFactsForProcedure(procedure)
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
 			source.Graph = &controlFlow[0].Graphs[procedureIndex]
