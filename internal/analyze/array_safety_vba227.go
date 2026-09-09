@@ -124,11 +124,15 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		// narrow: ElseIf merging and inline bodies retain their existing CFG
 		// handling, and Resume Next may continue after a failed query.
 		if body == "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(condition)), "if ") && arrayVBA227HasBoundsCondition(condition) && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+			beforeBounds := cloneArrayState(state)
 			state, findings := transfer(state, condition)
-			return arraySuccessfulBoundsState(state, condition, variables, arrayVBA227LoopBodyEndLine(proc, line)), findings
+			state = arraySuccessfulBoundsState(state, condition, variables, arrayVBA227LoopBodyEndLine(proc, line))
+			return arrayVBA227RetainBoundsFailureOnResume(state, beforeBounds, condition, variables, proc), findings
 		}
 	}
 	state, findings := transfer(state, text)
+	findings = a.arrayVBA227AddResumeBoundIndexFindings(findings, file, proc, line, text, state, variables, vba227Graph, resumeNextEdges)
+	beforeBounds := cloneArrayState(state)
 	findings = arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings, file, proc, line, variables, resumeNextBefore)
 	findings = arrayVBA227FilterSuccessfulIndexedConditionBodyFindings(findings, file, proc, line, variables, resumeNextBefore, vba227Graph, resumeNextEdges)
 	findings = arrayVBA227FilterConditionalBodyIndexFindings(findings, file, proc, line, state, variables, ctx, resumeNextBefore)
@@ -137,6 +141,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		!arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) &&
 		!strings.Contains(strings.ToLower(text), "on error resume next") {
 		state = arraySuccessfulBoundsState(state, text, variables, arrayVBA227LoopBodyEndLine(proc, line))
+		state = arrayVBA227RetainBoundsFailureOnResume(state, beforeBounds, text, variables, proc)
 	}
 	// Source-line CFG blocks can contain an If condition and its body. Apply
 	// the normal-path fact after the condition while the block is still being
@@ -804,8 +809,13 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 			value, valueKnown := state[name]
 			if variableKnown && (variable.isArray || variable.isVariant) && valueKnown {
 				access := procedureStatementAtLine(proc, line)
-				if arrayVBA227BoundsCanFail(value) && access.ID != 0 && arrayVBA227ResumeCanReachForBody(proc, vba227Graph, resumeNextEdges, statement, access) {
-					continue
+				if access.ID != 0 {
+					if arrayVBA227BoundsCanFail(value) && arrayVBA227ResumeCanReachForBody(proc, vba227Graph, resumeNextEdges, statement, access) {
+						continue
+					}
+					if arrayVBA227ResumeCanReachPriorBoundsBody(proc, vba227Graph, resumeNextEdges, statement.Range.StartLine, name, access, variables) {
+						continue
+					}
 				}
 				// Reaching the body means both bounds queries completed and the
 				// default positive step found at least one value between LBound
@@ -2046,6 +2056,66 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 	return updated
 }
 
+func arrayVBA227RetainBoundsFailureOnResume(state, before arrayFlowState, text string, variables map[string]arrayVariable, proc sourceProcedure) arrayFlowState {
+	if !arrayVBA227ProcedureHasResumeTransfer(proc) {
+		return state
+	}
+	var updated arrayFlowState
+	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+		name := strings.ToLower(strings.TrimSpace(bound[2]))
+		variable, variableKnown := variables[name]
+		prior, priorKnown := before[name]
+		if name == "" || !variableKnown || !variable.isArray && !variable.isVariant || !priorKnown || !arrayVBA227BoundsCanFail(prior) {
+			continue
+		}
+		value, valueKnown := state[name]
+		if !valueKnown || value.mayBeUnallocated {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value.resumeBoundsFailurePossible = true
+		updated[name] = value
+	}
+	if updated == nil {
+		return state
+	}
+	return updated
+}
+
+func (a Analyzer) arrayVBA227AddResumeBoundIndexFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, text string, state arrayFlowState, variables map[string]arrayVariable, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges) []Finding {
+	if line <= 0 || !a.Config.Analyze.DetectArrayLifecycleSafety {
+		return findings
+	}
+	access := procedureStatementAtLine(proc, line)
+	if access.ID == 0 {
+		return findings
+	}
+	seen := make(map[string]bool)
+	for _, finding := range findings {
+		if finding.Code == "VBA227" {
+			seen[finding.arrayOperationKey] = true
+		}
+	}
+	for _, use := range arrayIndexedUsesForSource(text, variables) {
+		if len(use.args) == 0 {
+			continue
+		}
+		name := strings.ToLower(cleanIdentifier(use.name))
+		value, known := state[name]
+		if !known || !value.resumeBoundsFailurePossible || seen[arrayIndexOperationKey(name, "unallocated")] || !arrayVBA227ResumeCanReachPriorBoundsBody(proc, vba227Graph, resumeNextEdges, access.Range.StartLine, name, access, variables) {
+			continue
+		}
+		finding := a.simpleFinding(file, proc, line, "VBA227", "warning", name+" is indexed before its array allocation is guaranteed.", "An array access can fail after an earlier bounds probe raises an error and an error handler resumes into this statement.", "Allocate the array on every path before indexing it, or guard the access with a proven allocation check.")
+		finding.arrayLifecycleFinding = true
+		finding.arrayOperationKey = arrayIndexOperationKey(name, "unallocated")
+		findings = append(findings, finding)
+		seen[finding.arrayOperationKey] = true
+	}
+	return findings
+}
+
 func arrayVBA227RecordBoundsProof(value arrayValue, loopEndLine int) arrayValue {
 	if loopEndLine == 0 || value.boundsProof.loopEndLine != 0 || value.kind == arrayAllocated && value.knownArray && !value.mayBeUnallocated {
 		return value
@@ -2514,6 +2584,55 @@ func arrayVBA227ResumeNextAfterStatement(active bool, text string) bool {
 
 func arrayVBA227ResumeCanReachForBody(proc sourceProcedure, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges, loop, access procedureir.Statement) bool {
 	return arrayVBA227ResumeCanReachIndexedConditionBody(proc, vba227Graph, resumeNextEdges, loop, access)
+}
+
+func arrayVBA227ResumeCanReachPriorBoundsBody(proc sourceProcedure, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges, beforeLine int, name string, access procedureir.Statement, variables map[string]arrayVariable) bool {
+	variable, known := variables[name]
+	if !known || variable.fixed {
+		return false
+	}
+	for statement := range proc.Statements.All() {
+		if statement.Range.StartLine >= beforeLine || !arrayVBA227StatementHasBoundCall(statement.Text, name) {
+			continue
+		}
+		if arrayVBA227ResumeCanReachIndexedConditionBody(proc, vba227Graph, resumeNextEdges, statement, access) {
+			return true
+		}
+		if arrayVBA227ProcedureHasResumeNextTransfer(proc) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227ProcedureHasResumeTransfer(proc sourceProcedure) bool {
+	for statement := range proc.Statements.All() {
+		if statement.Kind == procedureir.StatementResume && statement.Control != nil {
+			switch statement.Control.Transfer {
+			case procedureir.TransferResumeNext, procedureir.TransferResumeLabel:
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func arrayVBA227ProcedureHasResumeNextTransfer(proc sourceProcedure) bool {
+	for statement := range proc.Statements.All() {
+		if statement.Kind == procedureir.StatementResume && statement.Control != nil && statement.Control.Transfer == procedureir.TransferResumeNext {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227StatementHasBoundCall(text, name string) bool {
+	for _, match := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+		if strings.EqualFold(cleanIdentifier(match[2]), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func arrayVBA227BoundsCanFail(value arrayValue) bool {

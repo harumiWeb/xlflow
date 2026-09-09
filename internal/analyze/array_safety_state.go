@@ -971,6 +971,7 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 		knownArray:                      left.knownArray,
 		mayBeEmpty:                      left.mayBeEmpty,
 		mayBeUnallocated:                left.mayBeUnallocated,
+		resumeBoundsFailurePossible:     left.resumeBoundsFailurePossible,
 		origin:                          left.origin,
 		dimensions:                      append([]arrayDimension(nil), left.dimensions...),
 		preserveShape:                   append([]arrayDimension(nil), left.preserveShape...),
@@ -1030,6 +1031,7 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 	}
 	out.mayBeEmpty = left.mayBeEmpty || right.mayBeEmpty
 	out.mayBeUnallocated = left.mayBeUnallocated || right.mayBeUnallocated
+	out.resumeBoundsFailurePossible = left.resumeBoundsFailurePossible || right.resumeBoundsFailurePossible
 	if left.origin != right.origin {
 		out.origin = arrayOriginUnknown
 	}
@@ -1093,7 +1095,7 @@ func arrayStateEqual(left, right arrayFlowState) bool {
 	}
 	for key, l := range left {
 		r, ok := right[key]
-		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.mayBeUnallocated != r.mayBeUnallocated || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.allocationFlagSource != r.allocationFlagSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.returnDescriptorSourceParameter != r.returnDescriptorSourceParameter || l.returnDescriptorStartParameter != r.returnDescriptorStartParameter || l.returnDescriptorLengthParameter != r.returnDescriptorLengthParameter || l.returnDescriptorLowerParameter != r.returnDescriptorLowerParameter || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
+		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.mayBeUnallocated != r.mayBeUnallocated || l.resumeBoundsFailurePossible != r.resumeBoundsFailurePossible || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.allocationFlagSource != r.allocationFlagSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.returnDescriptorSourceParameter != r.returnDescriptorSourceParameter || l.returnDescriptorStartParameter != r.returnDescriptorStartParameter || l.returnDescriptorLengthParameter != r.returnDescriptorLengthParameter || l.returnDescriptorLowerParameter != r.returnDescriptorLowerParameter || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
 			return false
 		}
 	}

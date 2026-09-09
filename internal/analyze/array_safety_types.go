@@ -75,11 +75,14 @@ type arrayValue struct {
 	// join may retain the possible failure while the normal path remains an
 	// otherwise unknown Variant.
 	mayBeUnallocated bool
-	dimensions       []arrayDimension
-	preserveShape    []arrayDimension
-	origin           arrayOrigin
-	allocationProbe  string
-	safeBoundProbe   string
+	// resumeBoundsFailurePossible records that a successful bounds probe may
+	// have failed before an error handler resumed into a later statement.
+	resumeBoundsFailurePossible bool
+	dimensions                  []arrayDimension
+	preserveShape               []arrayDimension
+	origin                      arrayOrigin
+	allocationProbe             string
+	safeBoundProbe              string
 	// allocationCountSource records a narrow conditional allocation contract:
 	// the array is allocated when the named scalar is positive, or when the
 	// named collection's Count is positive. The fact is refined only on a

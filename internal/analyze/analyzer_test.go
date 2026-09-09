@@ -8703,6 +8703,36 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227KeepsLoopBodyAfterPriorBoundsResume(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  Dim length As Long
+  On Error GoTo Handler
+  length = UBound(values)
+  Dim i As Long
+  For i = LBound(values) To UBound(values)
+    Debug.Print values(i)
+  Next
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 8 && strings.HasPrefix(finding.arrayOperationKey, "index:values:") {
+			return
+		}
+	}
+	t.Fatalf("a prior bounds probe can fail before the handler resumes into the loop body: %+v", findingsByCode(findings, "VBA227"))
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulBoundsAcrossRepeatedSelectCase(t *testing.T) {
 	t.Parallel()
 	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {
