@@ -8360,6 +8360,73 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227KeepsBodyAfterResumeNextRaise(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant)
+  Dim values() As Long
+  values = source
+  On Error GoTo Handler
+  If values(0) <> 1 Then
+Retry:
+    On Error Resume Next
+    Err.Raise 5
+    On Error GoTo 0
+    Debug.Print values(0)
+  End If
+  Exit Sub
+Handler:
+  Resume Retry
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 6 || got[1].Line != 11 {
+		t.Fatalf("a Resume Next continuation after Err.Raise must keep the re-entered body access possible: %+v", got)
+	}
+}
+
+func TestArrayVBA227ResumeNextPathUsesExceptionalContinuation(t *testing.T) {
+	t.Parallel()
+	proc := sourceProcedure{Graph: &vbacfg.Graph{
+		Blocks: []vbacfg.Block{
+			{ID: 1, StatementID: 1, Statement: &procedureir.Statement{ID: 1, Kind: procedureir.StatementIf}},
+			{ID: 2, StatementID: 2, Statement: &procedureir.Statement{ID: 2, Kind: procedureir.StatementLabel}},
+			{ID: 3, StatementID: 3, Statement: &procedureir.Statement{ID: 3, Kind: procedureir.StatementCall, Text: "Err.Raise 5"}},
+			{ID: 4, StatementID: 4, Statement: &procedureir.Statement{ID: 4, Kind: procedureir.StatementCall}},
+			{ID: 5, StatementID: 5, Statement: &procedureir.Statement{ID: 5, Kind: procedureir.StatementCall}},
+		},
+		Edges: []vbacfg.Edge{
+			{ID: 1, From: 2, To: 3, Class: vbacfg.EdgeNormal, Kind: vbacfg.EdgeFallthrough},
+			{ID: 2, From: 3, To: 4, Class: vbacfg.EdgeExceptional, Kind: vbacfg.EdgeError},
+			{ID: 3, From: 3, To: 4, Class: vbacfg.EdgeNormal, Kind: vbacfg.EdgeFallthrough},
+			{ID: 4, From: 4, To: 5, Class: vbacfg.EdgeNormal, Kind: vbacfg.EdgeFallthrough},
+		},
+	}}
+	graph := arrayVBA227Graph(proc, analysisContext{})
+	if graph.BlockCount() == 0 {
+		t.Fatal("pruned graph is empty")
+	}
+	graph.ForEachOutgoing(3, func(edge vbacfg.Edge) bool {
+		if edge.Class == vbacfg.EdgeNormal && edge.To == 4 {
+			t.Fatalf("pruned graph retained Err.Raise normal continuation: %+v", edge)
+		}
+		return true
+	})
+	continuations := arrayVBA227ResumeNextContinuationEdges(proc)
+	if !continuations[3][4] {
+		t.Fatalf("Resume Next continuation edge was not recovered: %#v", continuations)
+	}
+	if !arrayVBA227ResumeNextPathReachesWithout(graph, 2, 5, 1, continuations) {
+		t.Fatal("Resume Next continuation should reach body from label")
+	}
+}
+
 func TestAnalyzerVBA227DoesNotCarryIndexedConditionThroughUnknownResumeFlow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

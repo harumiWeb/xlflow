@@ -2521,6 +2521,7 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227G
 	if !ok {
 		return false
 	}
+	resumeNextEdges := arrayVBA227ResumeNextContinuationEdges(proc)
 	handlers := map[vbacfg.BlockID]bool{}
 	graph.ForEachOutgoing(guardBlock.ID, func(edge vbacfg.Edge) bool {
 		if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeError {
@@ -2541,7 +2542,7 @@ func arrayVBA227ResumeCanReachIndexedConditionBody(proc sourceProcedure, vba227G
 			case procedureir.TransferResumeLabel:
 				labelReachesBody := false
 				graph.ForEachOutgoing(block.ID, func(edge vbacfg.Edge) bool {
-					if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeResume && (arrayVBA227NormalPathReachesWithout(graph, edge.To, bodyBlock.ID, guardBlock.ID) || arrayVBA227UnknownFlowCanReachBody(graph, edge.To, guardBlock.ID, proc.Graph.UnknownFlowSources)) {
+					if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeResume && (arrayVBA227NormalPathReachesWithout(graph, edge.To, bodyBlock.ID, guardBlock.ID) || arrayVBA227ResumeNextPathReachesWithout(graph, edge.To, bodyBlock.ID, guardBlock.ID, resumeNextEdges) || arrayVBA227UnknownFlowCanReachBody(graph, edge.To, guardBlock.ID, proc.Graph.UnknownFlowSources, resumeNextEdges)) {
 						labelReachesBody = true
 					}
 					return true
@@ -2570,12 +2571,23 @@ func arrayVBA227NormalPathReachesWithout(graph vbacfg.CFGView, start, target, bl
 	return reachable[target]
 }
 
-func arrayVBA227UnknownFlowCanReachBody(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, unknownFlowSources []vbacfg.BlockID) bool {
+func arrayVBA227ResumeNextPathReachesWithout(graph vbacfg.CFGView, start, target, blocked vbacfg.BlockID, resumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool) bool {
+	if start == blocked {
+		return false
+	}
+	if start == target {
+		return true
+	}
+	reachable := arrayVBA227ResumeNextReachableBlocksWithout(graph, start, blocked, resumeNextEdges)
+	return reachable[target]
+}
+
+func arrayVBA227UnknownFlowCanReachBody(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, unknownFlowSources []vbacfg.BlockID, resumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool) bool {
 	unknown := make(map[vbacfg.BlockID]struct{}, len(unknownFlowSources))
 	for _, unknownFlowSource := range unknownFlowSources {
 		unknown[unknownFlowSource] = struct{}{}
 	}
-	for blockID := range arrayVBA227NormalReachableBlocksWithout(graph, start, blocked) {
+	for blockID := range arrayVBA227ResumeNextReachableBlocksWithout(graph, start, blocked, resumeNextEdges) {
 		if _, ok := unknown[blockID]; ok {
 			return true
 		}
@@ -2584,6 +2596,14 @@ func arrayVBA227UnknownFlowCanReachBody(graph vbacfg.CFGView, start, blocked vba
 }
 
 func arrayVBA227NormalReachableBlocksWithout(graph vbacfg.CFGView, start, blocked vbacfg.BlockID) map[vbacfg.BlockID]bool {
+	return arrayVBA227ReachableBlocksWithout(graph, start, blocked, nil)
+}
+
+func arrayVBA227ResumeNextReachableBlocksWithout(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, resumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool) map[vbacfg.BlockID]bool {
+	return arrayVBA227ReachableBlocksWithout(graph, start, blocked, resumeNextEdges)
+}
+
+func arrayVBA227ReachableBlocksWithout(graph vbacfg.CFGView, start, blocked vbacfg.BlockID, resumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool) map[vbacfg.BlockID]bool {
 	if start == blocked {
 		return nil
 	}
@@ -2593,7 +2613,7 @@ func arrayVBA227NormalReachableBlocksWithout(graph vbacfg.CFGView, start, blocke
 		current := queue[0]
 		queue = queue[1:]
 		graph.ForEachOutgoing(current, func(edge vbacfg.Edge) bool {
-			if edge.Class == vbacfg.EdgeNormal && edge.To != blocked && !reachable[edge.To] {
+			if (edge.Class == vbacfg.EdgeNormal || resumeNextEdges[current][edge.To]) && edge.To != blocked && !reachable[edge.To] {
 				reachable[edge.To] = true
 				queue = append(queue, edge.To)
 			}
@@ -2601,6 +2621,38 @@ func arrayVBA227NormalReachableBlocksWithout(graph vbacfg.CFGView, start, blocke
 		})
 	}
 	return reachable
+}
+
+// arrayVBA227ResumeNextContinuationEdges identifies exceptional edges that
+// mirror a normal successor in the unfiltered CFG. The builder emits those
+// pairs for On Error Resume Next, so the exceptional edge remains the valid
+// continuation after arrayVBA227Graph removes an Err.Raise normal edge.
+func arrayVBA227ResumeNextContinuationEdges(proc sourceProcedure) map[vbacfg.BlockID]map[vbacfg.BlockID]bool {
+	if proc.Graph == nil {
+		return nil
+	}
+	normal := map[vbacfg.BlockID]map[vbacfg.BlockID]bool{}
+	continuations := map[vbacfg.BlockID]map[vbacfg.BlockID]bool{}
+	graph := proc.Graph.View(vbacfg.EdgeFilter{})
+	graph.ForEachEdge(func(edge vbacfg.Edge) bool {
+		if edge.Class == vbacfg.EdgeNormal {
+			if normal[edge.From] == nil {
+				normal[edge.From] = map[vbacfg.BlockID]bool{}
+			}
+			normal[edge.From][edge.To] = true
+		}
+		return true
+	})
+	graph.ForEachEdge(func(edge vbacfg.Edge) bool {
+		if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeError && normal[edge.From][edge.To] {
+			if continuations[edge.From] == nil {
+				continuations[edge.From] = map[vbacfg.BlockID]bool{}
+			}
+			continuations[edge.From][edge.To] = true
+		}
+		return true
+	})
+	return continuations
 }
 
 func arrayIfThenParts(text string) (condition, body string, ok bool) {
