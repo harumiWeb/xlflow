@@ -3534,6 +3534,16 @@ func objectFlowApplySelectCaseTypeGuard(state map[string]bool, flowContext objec
 	if key == "" {
 		return state
 	}
+	if caseBlock.Statement.Control != nil && caseBlock.Statement.Control.CaseElse {
+		if !objectSelectCaseHasNothingCase(flowContext.facts, selectStatement.ID) {
+			return state
+		}
+		// TypeName(Nothing) is "Nothing".  Case Else excludes Nothing only
+		// when an explicit Nothing case has already consumed that value.
+		updated := cloneObjectState(state)
+		updated[key] = true
+		return updated
+	}
 	expected := objectSelectCaseStringValues(caseBlock.Statement.Text)
 	if len(expected) == 0 {
 		return state
@@ -3559,6 +3569,23 @@ func objectFlowApplySelectCaseTypeGuard(state map[string]bool, flowContext objec
 		}
 	}
 	return updated
+}
+
+func objectSelectCaseHasNothingCase(facts *procedureAnalysisFacts, selectID int) bool {
+	if facts == nil {
+		return false
+	}
+	for statement := range facts.Statements().All() {
+		if statement.Kind != procedureir.StatementCase || statement.ParentID != selectID || statement.Control != nil && statement.Control.CaseElse {
+			continue
+		}
+		for _, typeName := range objectSelectCaseStringValues(statement.Text) {
+			if strings.EqualFold(strings.TrimSpace(typeName), "nothing") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func objectFlowPredicateHasContract(flowContext objectFlowContext, statementID int, predicateName, argumentName string) bool {
@@ -3756,6 +3783,7 @@ func objectSelectCaseStringValues(text string) []string {
 	if strings.EqualFold(text, "else") {
 		return nil
 	}
+	text = objectCaseLabelText(text)
 	parts := strings.Split(text, ",")
 	values := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -3769,6 +3797,24 @@ func objectSelectCaseStringValues(text string) []string {
 		}
 	}
 	return values
+}
+
+func objectCaseLabelText(text string) string {
+	inString := false
+	for index := 0; index < len(text); index++ {
+		if text[index] != '"' {
+			if !inString && text[index] == ':' {
+				return strings.TrimSpace(text[:index])
+			}
+			continue
+		}
+		if inString && index+1 < len(text) && text[index+1] == '"' {
+			index++
+			continue
+		}
+		inString = !inString
+	}
+	return strings.TrimSpace(text)
 }
 
 func objectDynamicExcelTypeName(typeName string) bool {

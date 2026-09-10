@@ -2907,6 +2907,36 @@ End Function
 	}
 }
 
+func TestVBA202Issue448RecognizesTypeNameSelectCaseObjectGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function GetObjID(ByRef obj As Object) As String
+  Select Case TypeName(obj)
+    Case "Range": GetObjID = obj.Address
+    Case "Axis": GetObjID = obj.Type & "-" & obj.AxisGroup
+    Case Else: GetObjID = obj.Name
+  End Select
+End Function
+
+Public Function GetObjIDWithNothing(ByRef obj As Object) As String
+  Select Case TypeName(obj)
+    Case "Nothing": GetObjIDWithNothing = ""
+    Case Else: GetObjIDWithNothing = obj.Name
+  End Select
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "GetObjID" {
+		t.Fatalf("TypeName Case Else should remain nullable without an explicit Nothing case: %+v", got)
+	}
+}
+
 func TestVBA202Issue448RejectsCompositeNonzeroResult(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

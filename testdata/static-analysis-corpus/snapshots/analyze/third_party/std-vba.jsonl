@@ -547,7 +547,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":139,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":141,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":141,"column":14}
-{"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":204,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":215,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":227,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdHTTPServer.cls","surface":"analyze","code":"VBA227","severity":"warning","line":280,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"analyze","code":"VBA222","severity":"warning","line":8,"column":0}
@@ -774,7 +774,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":139,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":141,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":141,"column":14}
-{"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":204,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":215,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":227,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTable.cls","surface":"analyze","code":"VBA202","severity":"warning","line":57,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTable.cls","surface":"analyze","code":"VBA202","severity":"warning","line":95,"column":0}
