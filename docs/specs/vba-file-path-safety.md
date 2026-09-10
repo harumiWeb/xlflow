@@ -24,6 +24,11 @@ lifecycle kind is `temporary_cleanup_missing`.
 The analyzer is lexical and symbolic: it does not resolve runtime symlinks,
 junctions, or the actual current directory.
 
+`FileSystemObject.OpenTextFile` is treated as non-destructive when `IOMode` is
+`ForReading` or omitted and `Create` is omitted or explicitly `False`. A
+`Create=True` argument remains state-changing even when the read mode is the
+default, because the call can create a missing file.
+
 The additive `file_operation` context contains the operation, path role, risk
 class, risk kind, origin state, trusted anchor when known, and an explicit
 overwrite fact when the API provides one. Suggestions require a trusted anchor,

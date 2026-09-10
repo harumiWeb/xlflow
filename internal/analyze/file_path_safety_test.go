@@ -221,6 +221,48 @@ End Sub
 	}
 }
 
+func TestVBA245IgnoresDefaultOpenTextFileRead(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(raw As String)
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    fso.OpenTextFile raw, , , TristateUseDefault
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA245"); len(got) != 0 {
+		t.Fatalf("default OpenTextFile read should not be a destructive path finding: %+v", got)
+	}
+}
+
+func TestVBA245FlagsOpenTextFileReadWithCreate(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(raw As String)
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    fso.OpenTextFile raw, , True
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA245"); len(got) != 1 {
+		t.Fatalf("OpenTextFile with Create=True should remain a destructive path finding: %+v", got)
+	}
+}
+
 func TestVBA245MixedNamedArgumentsAndContextSerialization(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"

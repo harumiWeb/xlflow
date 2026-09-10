@@ -417,7 +417,7 @@ func fileOperationUsesWithLookup(stmt string, localProcedure func(string) bool, 
 		// the overwrite risk.
 		if named := fileNamedArguments(args); len(named) > 0 {
 			normalized, namedOverwrite, mode := normalizeFSOArguments(method, args, named)
-			if method == "opentextfile" && mode == "reading" {
+			if method == "opentextfile" && mode == "reading" && fileTextCreateDisabled(args, named) {
 				return out
 			}
 			if len(normalized) >= count {
@@ -440,8 +440,12 @@ func fileOperationUsesWithLookup(stmt string, localProcedure func(string) bool, 
 				return out
 			}
 		}
-		if method == "opentextfile" && len(args) > 1 {
-			if fileTextMode(args[1]) == "reading" {
+		if method == "opentextfile" {
+			modeExpr := ""
+			if len(args) > 1 {
+				modeExpr = args[1]
+			}
+			if fileTextMode(modeExpr) == "reading" && fileTextCreateDisabled(args, nil) {
 				return out
 			}
 		}
@@ -518,13 +522,34 @@ func fileNamedArgument(arg string) (string, string, bool) {
 	return key, strings.TrimSpace(parts[1]), true
 }
 
-func normalizeFSOArguments(method string, args []string, named map[string]string) ([]string, *bool, string) {
+func filePositionalArguments(args []string) []string {
 	positional := make([]string, 0, len(args))
 	for _, arg := range args {
 		if _, _, ok := fileNamedArgument(arg); !ok {
 			positional = append(positional, strings.TrimSpace(arg))
 		}
 	}
+	return positional
+}
+
+func fileTextCreateDisabled(args []string, named map[string]string) bool {
+	expr, ok := named["create"]
+	if !ok {
+		positional := filePositionalArguments(args)
+		if len(positional) <= 2 {
+			return true
+		}
+		expr = positional[2]
+	}
+	if strings.TrimSpace(expr) == "" {
+		return true
+	}
+	value, ok := parseFileBool(expr)
+	return ok && !value
+}
+
+func normalizeFSOArguments(method string, args []string, named map[string]string) ([]string, *bool, string) {
+	positional := filePositionalArguments(args)
 	path := func(position int, keys ...string) string {
 		for _, key := range keys {
 			if value, ok := named[key]; ok {
@@ -611,6 +636,10 @@ func normalizeFSOArguments(method string, args []string, named map[string]string
 func fileTextMode(expr string) string {
 	lower := strings.ToLower(strings.TrimSpace(expr))
 	switch lower {
+	case "":
+		// FileSystemObject.OpenTextFile defaults IOMode to ForReading when
+		// the optional argument is omitted.
+		return "reading"
 	case "1", "forreading", "iomode:=forreading":
 		return "reading"
 	case "2", "forwriting", "iomode:=forwriting":
