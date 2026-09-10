@@ -442,6 +442,9 @@ func arrayDictionaryMemberExpressionState(file parsedFile, proc sourceProcedure,
 	if !knownNonEmpty {
 		knownNonEmpty = arrayDictionaryMemberKnownNonEmpty(file, line, rhs)
 	}
+	if !knownNonEmpty {
+		knownNonEmpty = arrayDictionaryObjectReceiverKnownNonEmpty(file, proc, line, receiver, ctx)
+	}
 	if !ok {
 		if !knownNonEmpty {
 			return arrayValue{}, false
@@ -454,7 +457,8 @@ func arrayDictionaryMemberExpressionState(file parsedFile, proc sourceProcedure,
 	if receiver == "" {
 		return arrayValue{}, false
 	}
-	if !knownNonEmpty && !arrayDictionaryReceiverProven(file, proc, line, receiver, variables) {
+	if !knownNonEmpty && !arrayDictionaryReceiverProven(file, proc, line, receiver, variables) &&
+		!arrayDictionaryObjectReceiverProven(file, proc, line, receiver, ctx) {
 		// A late-bound Keys/Items result is still an array-shaped value, but
 		// its receiver may be Nothing or empty. Keep the unknown array visible
 		// to the bound checker so UBound/LBound remain conservative until a
@@ -1097,6 +1101,197 @@ func arrayDictionaryReceiverProven(file parsedFile, proc sourceProcedure, line i
 	}
 	return false
 }
+
+func arrayDictionaryObjectReceiverProven(file parsedFile, proc sourceProcedure, line int, receiver string, ctx analysisContext) bool {
+	index, owner := arrayObjectContainerIndex(ctx, file, proc)
+	if index == nil {
+		return false
+	}
+	statementID := arrayStatementIDAtLine(owner, line)
+	if statementID <= 0 {
+		return false
+	}
+	declarations := objectFlowDeclarations(index.file, owner, index.moduleDecls)
+	_, scope, ok := objectDeclarationBinding(receiver, declarations)
+	if !ok {
+		return false
+	}
+	if objectContainerDictionaryReceiverKnown(index, owner, receiver, scope, statementID) {
+		return true
+	}
+	return arrayDictionaryFactoryReceiverProven(index, owner, receiver, scope, statementID, declarations)
+}
+
+func arrayDictionaryFactoryReceiverProven(index *objectContainerIndex, owner sourceProcedure, receiver string, scope procedureir.SymbolScope, statementID int, declarations declarationScope) bool {
+	if index == nil || statementID <= 0 {
+		return false
+	}
+	flowContext, _, ok := objectContainerGraphContext(index, owner)
+	if !ok {
+		return false
+	}
+	latest, found := objectContainerLastDominatingAssignment(owner, objectVariable{Scope: scope, Name: receiver}, statementID, declarations, flowContext)
+	if !found || latest.Value == nil || objectErrorResumeNextAt(owner, latest.ID) {
+		return false
+	}
+	factoryName := arrayCallName(latest.Value.Text)
+	if factoryName == "" {
+		return false
+	}
+	var factory sourceProcedure
+	foundFactory := false
+	for _, candidate := range index.procedures {
+		if !strings.EqualFold(cleanIdentifier(candidate.Name), factoryName) {
+			continue
+		}
+		if foundFactory {
+			return false
+		}
+		factory = candidate
+		foundFactory = true
+	}
+	return foundFactory && arrayDictionaryFactoryReturnsDictionary(index, factory)
+}
+
+func arrayDictionaryFactoryReturnsDictionary(index *objectContainerIndex, procedure sourceProcedure) bool {
+	if index == nil || !isObjectType(procedure.ReturnType) {
+		return false
+	}
+	_, _, ok := objectContainerGraphContext(index, procedure)
+	if !ok {
+		return false
+	}
+	returnIDs := map[int]bool{}
+	for statement := range procedure.Statements.All() {
+		if statement.Kind != procedureir.StatementSet && statement.Kind != procedureir.StatementAssignment {
+			continue
+		}
+		target, targetOK := objectContainerSimpleTarget(statement)
+		if !targetOK || !strings.EqualFold(target, procedure.Name) {
+			continue
+		}
+		if statement.Value == nil || !objectContainerDictionaryConstructorExpression(statement.Value) || objectErrorResumeNextAt(procedure, statement.ID) {
+			return false
+		}
+		returnIDs[statement.ID] = true
+	}
+	return len(returnIDs) > 0 && objectContainerNormalExitCoveredByWrites(procedure, returnIDs)
+}
+
+// arrayDictionaryObjectReceiverKnownNonEmpty proves that a dictionary snapshot
+// contains an element after a fresh, dominating literal-key Add.  The object
+// flow index supplies the constructor proof; this narrow local rule then
+// rejects any later reassignment, Remove, RemoveAll, or unknown call that could
+// invalidate the count before the snapshot is materialized.
+func arrayDictionaryObjectReceiverKnownNonEmpty(file parsedFile, proc sourceProcedure, line int, receiver string, ctx analysisContext) bool {
+	receiver = strings.TrimSpace(receiver)
+	if receiver == "" || strings.ContainsAny(receiver, ".()") {
+		return false
+	}
+	index, owner := arrayObjectContainerIndex(ctx, file, proc)
+	if index == nil {
+		return false
+	}
+	statementID := arrayStatementIDAtLine(owner, line)
+	if statementID <= 0 {
+		return false
+	}
+	if owner.Graph == nil {
+		return false
+	}
+	graph := owner.Graph.WithoutNormalErrRaiseContinuationView()
+	receiver = cleanIdentifier(receiver)
+	flowContext, _, ok := objectContainerGraphContext(index, owner)
+	if !ok {
+		return false
+	}
+	declarations := objectFlowDeclarations(index.file, owner, index.moduleDecls)
+	_, scope, ok := objectDeclarationBinding(receiver, declarations)
+	if !ok {
+		return false
+	}
+	latestAssignment, found := objectContainerLastDominatingAssignment(owner, objectVariable{Scope: scope, Name: receiver}, statementID, declarations, flowContext)
+	if !found || latestAssignment.ID <= 0 {
+		return false
+	}
+	addIDs := make([]int, 0, 1)
+	for call := range owner.Calls.All() {
+		if !strings.EqualFold(objectCallWithReceiverName(owner, call), receiver) ||
+			!strings.EqualFold(cleanIdentifier(call.Callee.Member), "add") ||
+			call.StatementID <= latestAssignment.ID ||
+			!objectContainerStatementDominates(graph, call.StatementID, statementID) ||
+			!objectContainerStatementBeforeObservation(graph, call.StatementID, statementID) ||
+			objectErrorResumeNextAt(owner, call.StatementID) || objectContainerErrorHandlerActiveAt(owner, call.StatementID) {
+			continue
+		}
+		arguments := objectContainerCallArguments(owner, call)
+		if len(arguments) == 0 {
+			continue
+		}
+		if _, literal := objectContainerLiteral(arguments[0]); !literal {
+			continue
+		}
+		addIDs = append(addIDs, call.StatementID)
+	}
+	if len(addIDs) == 0 {
+		return false
+	}
+	if !arrayDictionaryObjectReceiverProven(file, owner, line, receiver, ctx) {
+		return false
+	}
+
+	for statement := range owner.Statements.All() {
+		if statement.ID == statementID || !objectContainerStatementBeforeObservation(graph, statement.ID, statementID) {
+			continue
+		}
+		afterAdd := false
+		for _, addID := range addIDs {
+			if statement.ID > addID {
+				afterAdd = true
+				break
+			}
+		}
+		if !afterAdd || statement.ID >= statementID {
+			continue
+		}
+		if target, targetOK := objectContainerSimpleTarget(statement); targetOK && strings.EqualFold(target, receiver) {
+			return false
+		}
+	}
+	for call := range owner.Calls.All() {
+		if call.StatementID == statementID || !objectContainerStatementBeforeObservation(graph, call.StatementID, statementID) {
+			continue
+		}
+		afterAdd := false
+		for _, addID := range addIDs {
+			if call.StatementID > addID {
+				afterAdd = true
+				break
+			}
+		}
+		if !afterAdd || call.StatementID >= statementID {
+			continue
+		}
+		if !strings.EqualFold(objectCallWithReceiverName(owner, call), receiver) {
+			for _, argument := range objectContainerCallArguments(owner, call) {
+				if strings.EqualFold(cleanIdentifier(argument), receiver) {
+					return false
+				}
+			}
+			continue
+		}
+		switch strings.ToLower(cleanIdentifier(call.Callee.Member)) {
+		case "remove", "removeall":
+			return false
+		case "add", "exists", "count", "keys", "items", "item", "comparemode":
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func arraySelectCaseValueAtLine(file parsedFile, proc sourceProcedure, line int, expression string) string {
 	type frame struct {
 		expression string

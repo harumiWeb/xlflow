@@ -10276,6 +10276,138 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227TracksDictionarySnapshotAfterAdds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim Dict As Object
+  Dim Items As Variant
+  Set Dict = CreateObject("Scripting.Dictionary")
+  Dict.Add "A", 123
+  Dict.Add "B", 3.14
+  Dict.Add "C", "ABC"
+  Dict.Add "D", True
+  Items = Dict.Items
+  Debug.Print UBound(Items)
+  Debug.Print Items(0)
+  Debug.Print Items(3)
+End Sub
+
+Public Function CreateDictionary(Optional ByVal UseNative As Boolean = False) As Object
+  If UseNative Then
+    Set CreateDictionary = CreateObject("Scripting.Dictionary")
+  Else
+    Set CreateDictionary = New Dictionary
+  End If
+End Function
+
+Public Sub FactoryRun()
+  Dim Dict As Object
+  Dim Items As Variant
+  Set Dict = CreateDictionary(False)
+  Dict.Add "A", 123
+  Items = Dict.Items
+  Debug.Print UBound(Items)
+  Debug.Print Items(0)
+End Sub
+
+Public Function Specs() As Object
+  Dim UseNative As Boolean
+  Dim Dict As Object
+  Dim Items As Variant
+  With Specs.It("items")
+    Set Dict = CreateDictionary(UseNative)
+    Dict.Add "A", 123
+    Dict.Add "B", 3.14
+    Dict.Add "C", "ABC"
+    Dict.Add "D", True
+    Items = Dict.Items
+    .Expect(UBound(Items)).ToEqual 3
+    .Expect(Items(0)).ToEqual 123
+  End With
+End Function
+`)
+	writeClass(t, dir, "Dictionary.cls", `Attribute VB_Name = "Dictionary"
+Option Explicit
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a Dictionary snapshot after four successful adds must be allocated and non-empty: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsUncertainDictionarySnapshotsUnsafe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub EmptySnapshot()
+  Dim Dict As Object
+  Dim Items As Variant
+  Set Dict = CreateObject("Scripting.Dictionary")
+  Items = Dict.Items
+  Debug.Print UBound(Items)
+End Sub
+
+Public Sub ConditionalAdd(ByVal ok As Boolean)
+  Dim Dict As Object
+  Dim Items As Variant
+  Set Dict = CreateObject("Scripting.Dictionary")
+  If ok Then Dict.Add "A", 123
+  Items = Dict.Items
+  Debug.Print UBound(Items)
+End Sub
+
+Public Sub RemovedSnapshot()
+  Dim Dict As Object
+  Dim Items As Variant
+  Set Dict = CreateObject("Scripting.Dictionary")
+  Dict.Add "A", 123
+  Dict.RemoveAll
+  Items = Dict.Items
+  Debug.Print Items(0)
+End Sub
+
+Public Sub ReassignedSnapshot()
+  Dim Dict As Object
+  Dim Items As Variant
+  Set Dict = CreateObject("Scripting.Dictionary")
+  Dict.Add "A", 123
+  Set Dict = CreateObject("Scripting.Dictionary")
+  Items = Dict.Items
+  Debug.Print UBound(Items)
+End Sub
+
+Public Sub UnknownMutation()
+  Dim Dict As Object
+  Dim Items As Variant
+  Set Dict = CreateObject("Scripting.Dictionary")
+  Dict.Add "A", 123
+  Dict.ClearAll
+  Items = Dict.Items
+  Debug.Print Items(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		seen[finding.Procedure] = true
+	}
+	for _, procedure := range []string{"EmptySnapshot", "ConditionalAdd", "RemovedSnapshot", "ReassignedSnapshot", "UnknownMutation"} {
+		if !seen[procedure] {
+			t.Fatalf("an uncertain or invalidated Dictionary snapshot must remain unsafe in %s: %+v", procedure, findingsByCode(findings, "VBA227"))
+		}
+	}
+}
+
 func TestAnalyzerVBA227TracksDictionaryArrayItemThroughPrivateHelper(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
