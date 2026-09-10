@@ -561,9 +561,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":89,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":90,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":90,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":95,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":100,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":105,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA206","severity":"warning","line":164,"column":29}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA237","severity":"warning","line":187,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdMath.cls","surface":"analyze","code":"VBA206","severity":"warning","line":49,"column":23}

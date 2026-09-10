@@ -5,6 +5,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 )
 
 // filePathValue is deliberately small and procedure-local. It mirrors the
@@ -106,37 +109,46 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 	cleanupLines := map[string][]int{}
 	binaryHandles := map[string]fileOperationPath{}
 	guardedDestinations := fileGuardedDestinations(file.Lines, proc.StartLine, proc.EndLine)
+	reachableStatements := filePathSafetyReachableStatements(proc)
 	var findings []Finding
 	seen := map[string]bool{}
 	for lineNo := proc.StartLine; lineNo <= proc.EndLine && lineNo <= len(file.Lines); lineNo++ {
-		raw := stripVBAFileComment(file.Lines[lineNo-1])
+		sourceLine := file.Lines[lineNo-1]
+		raw := stripVBAFileComment(sourceLine)
 		stmt := strings.TrimSpace(raw)
 		if stmt == "" {
 			continue
 		}
 		lower := strings.ToLower(stmt)
+		lineReachable := filePathSafetyLineReachable(proc, reachableStatements, lineNo, sourceLine)
 		// Track simple aliases and path construction before inspecting the sink
 		// on the same line. This is enough for the common `p = root & name`
 		// pattern while retaining unknown provenance for unsupported expressions.
-		if name, expr, ok := fileAssignment(stmt); ok {
-			value := classifyFilePathExpr(expr, values, params)
-			values[strings.ToLower(name)] = value
+		if lineReachable {
+			if name, expr, ok := fileAssignment(stmt); ok {
+				value := classifyFilePathExpr(expr, values, params)
+				values[strings.ToLower(name)] = value
+			}
 		}
-		if strings.Contains(lower, "createobject(\"scripting.filesystemobject\")") {
+		if lineReachable && strings.Contains(lower, "createobject(\"scripting.filesystemobject\")") {
 			if name, _, ok := fileAssignment(stmt); ok {
 				fsos[strings.ToLower(name)] = true
 			}
 		}
 		// File numbers are reusable. Any Open assignment invalidates the old
-		// binary mapping; a binary Open then installs the current path.
-		if match := fileOpenHandleRe.FindStringSubmatch(stmt); len(match) == 2 {
-			delete(binaryHandles, match[1])
-		}
-		if match := fileBinaryOpenRe.FindStringSubmatch(stmt); len(match) == 3 {
-			binaryHandles[match[2]] = fileOperationPath{role: "target", expr: strings.TrimSpace(match[1])}
-		}
-		if match := fileCloseRe.FindStringSubmatch(stmt); len(match) == 2 {
-			clearClosedBinaryHandles(match[1], binaryHandles)
+		// binary mapping; a binary Open then installs the current path. State
+		// changes from unreachable source statements must not affect a later
+		// reachable Put.
+		if lineReachable {
+			if match := fileOpenHandleRe.FindStringSubmatch(stmt); len(match) == 2 {
+				delete(binaryHandles, match[1])
+			}
+			if match := fileBinaryOpenRe.FindStringSubmatch(stmt); len(match) == 3 {
+				binaryHandles[match[2]] = fileOperationPath{role: "target", expr: strings.TrimSpace(match[1])}
+			}
+			if match := fileCloseRe.FindStringSubmatch(stmt); len(match) == 2 {
+				clearClosedBinaryHandles(match[1], binaryHandles)
+			}
 		}
 		uses := fileOperationUsesWithLookup(stmt, localProcedure, fsos, values, workbooks)
 		if match := fileBinaryWriteRe.FindStringSubmatch(stmt); len(match) == 2 {
@@ -145,6 +157,9 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 			}
 		}
 		for _, use := range uses {
+			if !filePathSafetyUseReachable(proc, reachableStatements, lineNo, sourceLine, use.column) {
+				continue
+			}
 			if len(use.paths) >= 2 && (use.operation == "Name" || strings.Contains(strings.ToLower(use.operation), "copy") || strings.Contains(strings.ToLower(use.operation), "move")) {
 				left := classifyFilePathExpr(use.paths[0].expr, values, params)
 				right := classifyFilePathExpr(use.paths[1].expr, values, params)
@@ -224,6 +239,103 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 		findings = append(findings, a.fileOperationFinding(file, proc, lineNo, use, path, value, "lifecycle", "temporary_cleanup_missing"))
 	}
 	return findings
+}
+
+func filePathSafetyReachableStatements(proc sourceProcedure) map[int]bool {
+	if proc.Graph == nil || proc.Statements.Len() == 0 {
+		return nil
+	}
+	// Reuse the established Resume Next continuation recovery used by the
+	// array analysis. It is based only on CFG/error-handler edges and restores
+	// the path from a handler's `Resume Next` to the statement after the fault.
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	graph = arrayVBA227AddResumeNextContinuationEdges(proc, graph)
+	reachableBlocks := map[vbacfg.BlockID]bool{}
+	for _, blockID := range graph.Reachable() {
+		reachableBlocks[blockID] = true
+	}
+	reachable := make(map[int]bool, proc.Statements.Len())
+	for statement := range proc.Statements.All() {
+		block, ok := graph.BlockForStatement(statement.ID)
+		reachable[statement.ID] = !ok || reachableBlocks[block.ID]
+	}
+	return reachable
+}
+
+func filePathSafetyUseReachable(proc sourceProcedure, reachableStatements map[int]bool, line int, raw string, column int) bool {
+	if len(reachableStatements) == 0 {
+		return true
+	}
+	leading := len(raw) - len(strings.TrimLeftFunc(raw, unicode.IsSpace))
+	return filePathSafetyPositionReachable(proc, reachableStatements, line, leading+max(0, column))
+}
+
+func filePathSafetyLineReachable(proc sourceProcedure, reachableStatements map[int]bool, line int, raw string) bool {
+	if len(reachableStatements) == 0 {
+		return true
+	}
+	leading := len(raw) - len(strings.TrimLeftFunc(raw, unicode.IsSpace))
+	return filePathSafetyPositionReachable(proc, reachableStatements, line, leading)
+}
+
+func filePathSafetyPositionReachable(proc sourceProcedure, reachableStatements map[int]bool, line, zeroBasedColumn int) bool {
+	statementID, ok := filePathSafetyStatementAt(proc, line, zeroBasedColumn)
+	if !ok {
+		// A parser-recovery or synthetic statement without a source range must
+		// not make a valid sink disappear.
+		return true
+	}
+	reachable, known := reachableStatements[statementID]
+	return !known || reachable
+}
+
+func filePathSafetyStatementAt(proc sourceProcedure, line, zeroBasedColumn int) (int, bool) {
+	if line <= 0 {
+		return 0, false
+	}
+	column := zeroBasedColumn + 1
+	bestID := 0
+	bestSpan := int(^uint(0) >> 1)
+	for statement := range proc.Statements.All() {
+		rng := statement.Range
+		startLine := rng.StartLine
+		endLine := rng.EndLine
+		if startLine <= 0 {
+			continue
+		}
+		if endLine < startLine {
+			endLine = startLine
+		}
+		if line < startLine || line > endLine {
+			continue
+		}
+		if line == startLine && rng.StartColumn > 0 && column < rng.StartColumn {
+			continue
+		}
+		if line == endLine && rng.EndColumn > 0 && column >= rng.EndColumn {
+			continue
+		}
+		span := filePathSafetyRangeSpan(rng.StartByte, rng.EndByte, startLine, rng.StartColumn, endLine, rng.EndColumn)
+		if span < bestSpan {
+			bestID = statement.ID
+			bestSpan = span
+		}
+	}
+	return bestID, bestID != 0
+}
+
+func filePathSafetyRangeSpan(startByte, endByte, startLine, startColumn, endLine, endColumn int) int {
+	if endByte > startByte && startByte >= 0 {
+		return endByte - startByte
+	}
+	if endLine < startLine {
+		endLine = startLine
+	}
+	span := (endLine-startLine)*1_000_000 + endColumn - startColumn
+	if span <= 0 {
+		return 1
+	}
+	return span
 }
 
 func fileFindingKey(line int, use fileOperationUse, path fileOperationPath, risk string) string {

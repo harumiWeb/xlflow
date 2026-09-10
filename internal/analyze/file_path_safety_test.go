@@ -242,6 +242,155 @@ End Sub
 	}
 }
 
+func TestVBA245IgnoresUnreachableFileOperationAfterErrRaise(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(raw As String)
+    GoTo failure
+    Exit Sub
+failure:
+    Err.Raise 100, "Run", "failed"
+    Kill raw
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA245"); len(got) != 0 {
+		t.Fatalf("unreachable file operation after Err.Raise should not be reported: %+v", got)
+	}
+}
+
+func TestVBA245KeepsFileOperationAfterErrorHandlerResumeNext(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(raw As String)
+    On Error GoTo Handler
+    Err.Raise 100, "Run", "failed"
+    Kill raw
+    Exit Sub
+Handler:
+    Resume Next
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA245")
+	if len(got) != 1 || got[0].Line != 6 {
+		t.Fatalf("Resume Next should keep the post-fault file operation reachable: %+v", got)
+	}
+}
+
+func TestVBA245IgnoresUnreachableFileOperationInsideCompoundStatement(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(raw As String)
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    On Error GoTo Handler
+    If True Then
+        Err.Raise 100, "Run", "failed"
+        fso.DeleteFile raw
+    End If
+    Exit Sub
+Handler:
+    Exit Sub
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA245"); len(got) != 0 {
+		t.Fatalf("a compound parent must not make the post-Err.Raise operation reachable: %+v", got)
+	}
+}
+
+func TestVBA245IgnoresUnreachableColonSeparatedFileOperation(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(raw As String)
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    On Error GoTo Handler
+    If True Then
+        Err.Raise 100, "Run", "failed": fso.DeleteFile raw
+    End If
+    Exit Sub
+Handler:
+    Exit Sub
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA245"); len(got) != 0 {
+		t.Fatalf("a colon-separated operation after Err.Raise must remain unreachable: %+v", got)
+	}
+}
+
+func TestVBA245IgnoresUnreachableBinaryOpenForPut(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(raw As String)
+    GoTo PutWithoutOpen
+    Open raw For Binary As #1
+PutWithoutOpen:
+    Put #1, , raw
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA245"); len(got) != 0 {
+		t.Fatalf("an unreachable binary Open must not establish a Put handle: %+v", got)
+	}
+}
+
+func TestVBA245KeepsBinaryHandleAfterUnreachableClose(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(raw As String)
+    Open raw For Binary As #1
+    GoTo PutAfterClose
+    Close #1
+PutAfterClose:
+    Put #1, , raw
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA245")
+	if len(got) != 1 || got[0].Line != 8 {
+		t.Fatalf("an unreachable Close must not remove the live binary handle: %+v", got)
+	}
+}
+
 func TestVBA245FlagsOpenTextFileReadWithCreate(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
