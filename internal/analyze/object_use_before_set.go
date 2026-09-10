@@ -206,6 +206,7 @@ func (analysis *objectAnalysisContext) buildObjectIndexes() {
 		moduleKeys[key] = uniqueStrings(keys)
 	}
 	predicateContracts := objectNonNothingPredicateContracts(analysis.plans)
+	nonzeroReturnModuleFields := objectNonzeroReturnModuleFieldContracts(analysis.plans)
 	analysis.moduleProcedureKeys = moduleKeys
 	for _, key := range analysis.order {
 		plan := analysis.plans[key]
@@ -216,6 +217,7 @@ func (analysis *objectAnalysisContext) buildObjectIndexes() {
 		plan.classInitializerKeys = append([]string(nil), initializerKeys[strings.ToLower(cleanIdentifier(plan.proc.Module))]...)
 		plan.classIndexBuilt = true
 		plan.flowContext.predicateContracts = predicateContracts
+		plan.flowContext.nonzeroReturnModuleFields = nonzeroReturnModuleFields
 	}
 }
 
@@ -386,6 +388,106 @@ func objectNonNothingPredicateContracts(plans map[string]*objectProcedurePlan) m
 		}
 	}
 	return contracts
+}
+
+// objectNonzeroReturnModuleFieldContracts records scalar helpers whose
+// nonzero result proves a module object was non-Nothing.  VBA pointer-style
+// helpers commonly return zero after an early Nothing guard and return an
+// interface pointer only after the guarded member access succeeds.  Keeping
+// this contract separate from object-return summaries avoids treating an
+// arbitrary numeric function as an initialized object.
+type objectNonzeroReturnModuleFieldContract struct {
+	Module string
+	Fields map[string]bool
+}
+
+func objectNonzeroReturnModuleFieldContracts(plans map[string]*objectProcedurePlan) map[string]objectNonzeroReturnModuleFieldContract {
+	contracts := map[string]objectNonzeroReturnModuleFieldContract{}
+	qualifiedCounts := map[string]int{}
+	qualifiedNames := map[string]bool{}
+	for key, plan := range plans {
+		fields := objectNonzeroReturnModuleFields(plan)
+		if len(fields) == 0 {
+			continue
+		}
+		contracts[key] = objectNonzeroReturnModuleFieldContract{
+			Module: plan.proc.Module,
+			Fields: fields,
+		}
+		qualified := strings.ToLower(objectProcedureQualifiedName(plan.proc))
+		if qualified != "" {
+			qualifiedCounts[qualified]++
+			qualifiedNames[qualified] = true
+		}
+	}
+	for qualified := range qualifiedNames {
+		if qualifiedCounts[qualified] != 1 {
+			continue
+		}
+		for key, plan := range plans {
+			if strings.EqualFold(objectProcedureQualifiedName(plan.proc), qualified) {
+				if contract := contracts[key]; len(contract.Fields) > 0 {
+					contracts[qualified] = contract
+				}
+				break
+			}
+		}
+	}
+	return contracts
+}
+
+func objectNonzeroReturnModuleFields(plan *objectProcedurePlan) map[string]bool {
+	if plan == nil || plan.flowGraph.BlockCount() == 0 || isObjectType(plan.proc.ReturnType) || strings.EqualFold(cleanIdentifier(plan.proc.ReturnType), "boolean") {
+		return nil
+	}
+	var fields map[string]bool
+	sawResult := false
+	for statement := range plan.proc.Statements.All() {
+		if (statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) || statement.Target == nil || statement.Value == nil || !objectPredicateWritesResult(statement, plan.proc.Name) {
+			continue
+		}
+		if objectZeroLiteral(statement.Value.Text) {
+			continue
+		}
+		sawResult = true
+		guarded := map[string]bool{}
+		for name, declaration := range plan.moduleDecls {
+			if !declaration.Object || !objectGuardProvesNonNothingAt(plan.proc, name, statement.ID, plan.flowContext) {
+				continue
+			}
+			guarded[strings.ToLower(cleanIdentifier(name))] = true
+		}
+		if len(guarded) == 0 {
+			return nil
+		}
+		if objectNonzeroModuleFieldMutationAfter(plan.proc, statement.ID, guarded, plan.declarations, plan.flowContext, true) {
+			return nil
+		}
+		if fields == nil {
+			fields = guarded
+			continue
+		}
+		for name := range fields {
+			if !guarded[name] {
+				delete(fields, name)
+			}
+		}
+	}
+	if !sawResult || len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
+func objectZeroLiteral(text string) bool {
+	compact := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(text)), ""))
+	compact = strings.TrimSuffix(compact, "&")
+	switch compact {
+	case "0", "false", "vbfalse":
+		return true
+	default:
+		return false
+	}
 }
 
 func objectProcedureNonNothingPredicate(plan *objectProcedurePlan) bool {
@@ -1808,8 +1910,14 @@ func objectGuardProvesNonNothingAt(proc sourceProcedure, objectName string, useI
 			continue
 		}
 		names, ok := objectNothingOrGuard(statement.Condition.Text)
+		nonNothingOnTrue := false
 		if !ok {
-			continue
+			name, negated, singleOK := objectSingleNothingGuard(statement.Condition.Text)
+			if !singleOK {
+				continue
+			}
+			names = []string{name}
+			nonNothingOnTrue = negated
 		}
 		matched := false
 		for _, name := range names {
@@ -1832,7 +1940,9 @@ func objectGuardProvesNonNothingAt(proc sourceProcedure, objectName string, useI
 				return true
 			}
 			reachesUse := objectFlowCanReach(successors, edge.To, useBlock.ID)
-			if edge.Kind == vbacfg.EdgeBranchFalse {
+			nonNothing := (edge.Kind == vbacfg.EdgeBranchTrue && nonNothingOnTrue) ||
+				(edge.Kind == vbacfg.EdgeBranchFalse && !nonNothingOnTrue)
+			if nonNothing {
 				safeReachable = safeReachable || reachesUse
 			} else {
 				unsafeReachable = unsafeReachable || reachesUse
@@ -1860,6 +1970,82 @@ func objectStatementDominates(proc sourceProcedure, assignmentID, useID int) boo
 		return assignmentID < useID
 	}
 	return objectBlockSetContains(graph.Dominators()[useBlock.ID], assignmentBlock.ID)
+}
+
+func objectStatementCanReach(proc sourceProcedure, statementID, targetID int) bool {
+	if proc.Graph == nil {
+		return false
+	}
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	statementBlock, statementOK := graph.BlockForStatement(statementID)
+	targetBlock, targetOK := graph.BlockForStatement(targetID)
+	if !statementOK || !targetOK {
+		// Single-line If bodies can retain a statement in the ProcedureIR
+		// without giving it a standalone CFG block.  Source order is the only
+		// available reachability signal there; fail conservatively for an
+		// earlier assignment rather than allowing it to bypass the contract.
+		return statementID < targetID
+	}
+	if statementBlock.ID == targetBlock.ID {
+		if statementID < targetID {
+			return true
+		}
+		seen := map[vbacfg.BlockID]bool{statementBlock.ID: true}
+		queue := []vbacfg.BlockID{statementBlock.ID}
+		for len(queue) > 0 {
+			current := queue[0]
+			queue = queue[1:]
+			foundCycle := false
+			graph.ForEachOutgoing(current, func(edge vbacfg.Edge) bool {
+				if edge.To == statementBlock.ID {
+					foundCycle = true
+					return false
+				}
+				if !seen[edge.To] {
+					seen[edge.To] = true
+					queue = append(queue, edge.To)
+				}
+				return true
+			})
+			if foundCycle {
+				return true
+			}
+		}
+		return false
+	}
+	return objectBlockCanReach(graph, statementBlock.ID, targetBlock.ID)
+}
+
+func objectStatementCanReachNormalExit(proc sourceProcedure, statementID int) bool {
+	if proc.Graph == nil {
+		return false
+	}
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	statementBlock, ok := graph.BlockForStatement(statementID)
+	if !ok {
+		return false
+	}
+	return objectBlockCanReach(graph, statementBlock.ID, graph.NormalExit())
+}
+
+func objectNonzeroModuleFieldMutationAfter(proc sourceProcedure, fromID int, fields map[string]bool, declarations declarationScope, flowContext objectFlowContext, normalExit bool) bool {
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
+			continue
+		}
+		target, ok := objectFlowTarget(proc, statement, declarations, flowContext)
+		if !ok || target.Scope != procedureir.ScopeModule || !fields[strings.ToLower(cleanIdentifier(target.Name))] {
+			continue
+		}
+		if !objectStatementCanReach(proc, fromID, statement.ID) {
+			continue
+		}
+		if normalExit && !objectStatementCanReachNormalExit(proc, statement.ID) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func objectCollectionItemExpression(text string) (string, string, bool) {
@@ -2605,6 +2791,7 @@ type objectFlowContext struct {
 	receiverSummaryKeys         map[string][]string
 	valueState                  map[string]bool
 	predicateContracts          map[string]bool
+	nonzeroReturnModuleFields   map[string]objectNonzeroReturnModuleFieldContract
 	terminalCalls               map[int]bool
 	shapeStates                 map[int]objectCollectionShapeState
 	shapeStateReady             map[int]bool
@@ -2836,6 +3023,9 @@ func objectFlowApplyGuard(proc sourceProcedure, state map[string]bool, flowConte
 	if edge.Kind == vbacfg.EdgeCase {
 		return objectFlowApplySelectCaseTypeGuard(state, flowContext, edge, declarations)
 	}
+	if updated, applied := objectFlowApplyNonzeroReturnGuard(proc, state, flowContext, edge, declarations); applied {
+		return updated
+	}
 	if edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
 		if edge.Class == vbacfg.EdgeExceptional {
 			if statement, ok := flowContext.facts.Statement(edge.StatementID); ok && statement.Condition != nil {
@@ -2984,6 +3174,150 @@ func objectFlowApplyGuard(proc sourceProcedure, state map[string]bool, flowConte
 	return state
 }
 
+func objectFlowApplyNonzeroReturnGuard(proc sourceProcedure, state map[string]bool, flowContext objectFlowContext, edge vbacfg.Edge, declarations declarationScope) (map[string]bool, bool) {
+	if (edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse) || flowContext.facts == nil {
+		return state, false
+	}
+	statement, ok := flowContext.facts.Statement(edge.StatementID)
+	if !ok || statement.Condition == nil {
+		return state, false
+	}
+	resultName, nonzeroOnTrue, ok := objectNonzeroNumericGuard(statement.Condition.Text)
+	if !ok {
+		return state, false
+	}
+	fields := objectNonzeroReturnModuleFieldsAt(proc, resultName, statement.ID, flowContext, declarations)
+	if len(fields) == 0 {
+		return state, false
+	}
+	nonzeroBranch := vbacfg.EdgeBranchTrue
+	if !nonzeroOnTrue {
+		nonzeroBranch = vbacfg.EdgeBranchFalse
+	}
+	if edge.Kind != nonzeroBranch {
+		return state, true
+	}
+	updated := cloneObjectState(state)
+	for name := range fields {
+		_, scope, declared := objectDeclarationBinding(name, declarations)
+		if !declared || scope != procedureir.ScopeModule {
+			continue
+		}
+		updated[(objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()] = true
+	}
+	return updated, true
+}
+
+func objectNonzeroNumericGuard(text string) (string, bool, bool) {
+	text = strings.TrimSpace(text)
+	if then := strings.Index(strings.ToLower(text), " then"); then >= 0 {
+		text = strings.TrimSpace(text[:then])
+	}
+	negated := false
+	if len(text) >= 4 && strings.EqualFold(text[:4], "not ") {
+		negated = true
+		text = strings.TrimSpace(text[4:])
+	}
+	text = objectTrimOuterParens(text)
+	operator := ""
+	position := strings.Index(text, "<>")
+	if position >= 0 {
+		operator = "<>"
+	} else if position = strings.IndexByte(text, '='); position >= 0 {
+		operator = "="
+	}
+	if operator == "" {
+		return "", false, false
+	}
+	left := strings.TrimSpace(text[:position])
+	right := strings.TrimSpace(text[position+len(operator):])
+	if strings.HasSuffix(right, "&") {
+		right = strings.TrimSpace(strings.TrimSuffix(right, "&"))
+	}
+	name := cleanIdentifier(left)
+	if right != "0" || name == "" || strings.ContainsAny(name, ".()<>=") {
+		return "", false, false
+	}
+	nonzeroOnTrue := operator == "<>"
+	if negated {
+		nonzeroOnTrue = !nonzeroOnTrue
+	}
+	return name, nonzeroOnTrue, true
+}
+
+func objectNonzeroReturnModuleFieldsAt(proc sourceProcedure, resultName string, guardStatementID int, flowContext objectFlowContext, declarations declarationScope) map[string]bool {
+	if flowContext.nonzeroReturnModuleFields == nil || flowContext.facts == nil || proc.Graph == nil {
+		return nil
+	}
+	var fields map[string]bool
+	found := false
+	for statement := range proc.Statements.All() {
+		if objectInlineResultAssignment(statement.Text, resultName) {
+			if objectStatementCanReach(proc, statement.ID, guardStatementID) {
+				return nil
+			}
+			continue
+		}
+		if (statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) || statement.Target == nil || !strings.EqualFold(cleanIdentifier(statement.Target.Text), cleanIdentifier(resultName)) || !objectStatementCanReach(proc, statement.ID, guardStatementID) {
+			continue
+		}
+		if statement.Value == nil || statement.Value.Kind != procedureir.ExpressionCall {
+			return nil
+		}
+		var callFields map[string]bool
+		callFound := false
+		flowContext.facts.forEachCallForStatement(statement.ID, func(call procedureir.CallSite) {
+			if callFound || call.ExpressionID != statement.Value.ID || call.Callee.Receiver != nil || call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
+				return
+			}
+			candidate := call.Resolution.Candidates[0]
+			key := objectSummaryKey(candidate.File, candidate.QualifiedName, candidate.Kind, candidate.Line)
+			contract, contractOK := flowContext.nonzeroReturnModuleFields[key]
+			if contractOK && strings.EqualFold(cleanIdentifier(contract.Module), cleanIdentifier(proc.Module)) && len(contract.Fields) > 0 {
+				callFields = contract.Fields
+				callFound = true
+			}
+		})
+		if !callFound {
+			return nil
+		}
+		if objectNonzeroModuleFieldMutationAfter(proc, statement.ID, callFields, declarations, flowContext, false) {
+			return nil
+		}
+		if found {
+			for name := range fields {
+				if !callFields[name] {
+					delete(fields, name)
+				}
+			}
+		} else {
+			fields = cloneBoolMap(callFields)
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return fields
+}
+
+func objectInlineResultAssignment(text, resultName string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if !strings.HasPrefix(lower, "if ") {
+		return false
+	}
+	then := strings.Index(lower, " then")
+	if then < 0 {
+		return false
+	}
+	body := strings.TrimSpace(text[then+len(" then"):])
+	if body == "" {
+		return false
+	}
+	target, _, ok := objectCollectionShapeBareAssignment(body)
+	return ok && strings.EqualFold(cleanIdentifier(target), cleanIdentifier(resultName))
+}
+
 func objectNothingOrGuard(text string) ([]string, bool) {
 	text = objectTrimOuterParens(strings.TrimSpace(text))
 	if then := strings.Index(text, " then"); then >= 0 {
@@ -3010,6 +3344,27 @@ func objectNothingOrGuard(text string) ([]string, bool) {
 		names = append(names, name)
 	}
 	return names, true
+}
+
+func objectSingleNothingGuard(text string) (string, bool, bool) {
+	text = objectTrimOuterParens(strings.ToLower(strings.TrimSpace(text)))
+	if then := strings.Index(text, " then"); then >= 0 {
+		text = strings.TrimSpace(text[:then])
+	}
+	negated := false
+	if strings.HasPrefix(text, "not ") {
+		negated = true
+		text = objectTrimOuterParens(strings.TrimSpace(strings.TrimPrefix(text, "not ")))
+	}
+	const marker = " is nothing"
+	if !strings.HasSuffix(text, marker) {
+		return "", false, false
+	}
+	name := cleanIdentifier(strings.TrimSpace(strings.TrimSuffix(text, marker)))
+	if name == "" || strings.ContainsAny(name, ".()") {
+		return "", false, false
+	}
+	return name, negated, true
 }
 
 func objectSplitTopLevel(text, operator string) []string {

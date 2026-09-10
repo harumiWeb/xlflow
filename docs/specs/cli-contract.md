@@ -1623,6 +1623,16 @@ reads. Safe use requires a dominating proof across all reachable paths; an
 explicit reset or a possibly empty loop therefore invalidates later use until
 another definite initialization.
 
+Known late-bound Dictionary cache values are carried through a proven item
+assignment, including object-producing `VBScript.RegExp.Execute` results.
+For a persistent local Dictionary, `If Not cache(key) Then` may discard only
+the absent branch when the procedure proves that no keyed write or alias can
+mutate the Dictionary; dynamically different-looking keys are not assumed to
+remain distinct across invocations. Scalar project-local helpers may refine a
+module Object on a nonzero result only when every nonzero result assignment is dominated by
+that field's non-`Nothing` guard; arbitrary numeric return values do not create
+an object proof.
+
 Resolved, visible project-local Boolean predicates also refine the matching
 true branch when their single object parameter is protected by an explicit `Is
 Nothing` exit or when every true result is assigned only after a successful

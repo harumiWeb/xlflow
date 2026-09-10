@@ -14,17 +14,21 @@ import (
 // and a resolved helper that writes an object argument into a Dictionary.
 type objectCollectionShapeState struct {
 	values       map[string]bool
+	objects      map[string]bool
 	dictionaries map[string]bool
 	collections  map[string]bool
 	guarded      map[string]bool
+	regexp       map[string]bool
 }
 
 func newObjectCollectionShapeState() objectCollectionShapeState {
 	return objectCollectionShapeState{
 		values:       map[string]bool{},
+		objects:      map[string]bool{},
 		dictionaries: map[string]bool{},
 		collections:  map[string]bool{},
 		guarded:      map[string]bool{},
+		regexp:       map[string]bool{},
 	}
 }
 
@@ -32,6 +36,9 @@ func (state objectCollectionShapeState) clone() objectCollectionShapeState {
 	clone := newObjectCollectionShapeState()
 	for path := range state.values {
 		clone.values[path] = true
+	}
+	for path := range state.objects {
+		clone.objects[path] = true
 	}
 	for path := range state.dictionaries {
 		clone.dictionaries[path] = true
@@ -42,15 +49,23 @@ func (state objectCollectionShapeState) clone() objectCollectionShapeState {
 	for path := range state.guarded {
 		clone.guarded[path] = true
 	}
+	for path := range state.regexp {
+		clone.regexp[path] = true
+	}
 	return clone
 }
 
 func objectCollectionShapeStateEqual(left, right objectCollectionShapeState) bool {
-	if len(left.values) != len(right.values) || len(left.dictionaries) != len(right.dictionaries) || len(left.collections) != len(right.collections) || len(left.guarded) != len(right.guarded) {
+	if len(left.values) != len(right.values) || len(left.objects) != len(right.objects) || len(left.dictionaries) != len(right.dictionaries) || len(left.collections) != len(right.collections) || len(left.guarded) != len(right.guarded) || len(left.regexp) != len(right.regexp) {
 		return false
 	}
 	for path := range left.values {
 		if !right.values[path] {
+			return false
+		}
+	}
+	for path := range left.objects {
+		if !right.objects[path] {
 			return false
 		}
 	}
@@ -69,6 +84,11 @@ func objectCollectionShapeStateEqual(left, right objectCollectionShapeState) boo
 			return false
 		}
 	}
+	for path := range left.regexp {
+		if !right.regexp[path] {
+			return false
+		}
+	}
 	return true
 }
 
@@ -77,6 +97,11 @@ func objectCollectionShapeIntersect(left, right objectCollectionShapeState) obje
 	for path := range left.values {
 		if right.values[path] {
 			merged.values[path] = true
+		}
+	}
+	for path := range left.objects {
+		if right.objects[path] {
+			merged.objects[path] = true
 		}
 	}
 	for path := range left.dictionaries {
@@ -92,6 +117,11 @@ func objectCollectionShapeIntersect(left, right objectCollectionShapeState) obje
 	for path := range left.guarded {
 		if right.guarded[path] {
 			merged.guarded[path] = true
+		}
+	}
+	for path := range left.regexp {
+		if right.regexp[path] {
+			merged.regexp[path] = true
 		}
 	}
 	return merged
@@ -178,17 +208,25 @@ func objectCollectionShapePathHasPrefix(path, prefix string) bool {
 }
 
 func objectCollectionShapeCopy(state *objectCollectionShapeState, source, destination string) {
-	if state == nil || source == "" || destination == "" || !state.values[source] {
+	if state == nil || source == "" || destination == "" || !state.objects[source] {
 		return
 	}
 	values := make(map[string]bool)
+	objects := make(map[string]bool)
 	dictionaries := make(map[string]bool)
 	collections := make(map[string]bool)
 	guarded := make(map[string]bool)
+	regexp := make(map[string]bool)
 	for path := range state.values {
 		if objectCollectionShapePathHasPrefix(path, source) {
 			suffix := strings.TrimPrefix(path, source)
 			values[destination+suffix] = true
+		}
+	}
+	for path := range state.objects {
+		if objectCollectionShapePathHasPrefix(path, source) {
+			suffix := strings.TrimPrefix(path, source)
+			objects[destination+suffix] = true
 		}
 	}
 	for path := range state.dictionaries {
@@ -210,9 +248,18 @@ func objectCollectionShapeCopy(state *objectCollectionShapeState, source, destin
 			guarded[destination+suffix] = true
 		}
 	}
+	for path := range state.regexp {
+		if objectCollectionShapePathHasPrefix(path, source) {
+			suffix := strings.TrimPrefix(path, source)
+			regexp[destination+suffix] = true
+		}
+	}
 	objectCollectionShapeDelete(state, destination)
 	for path := range values {
 		state.values[path] = true
+	}
+	for path := range objects {
+		state.objects[path] = true
 	}
 	for path := range dictionaries {
 		state.dictionaries[path] = true
@@ -223,13 +270,22 @@ func objectCollectionShapeCopy(state *objectCollectionShapeState, source, destin
 	for path := range guarded {
 		state.guarded[path] = true
 	}
+	for path := range regexp {
+		state.regexp[path] = true
+	}
 	state.values[destination] = true
+	state.objects[destination] = true
 }
 
 func objectCollectionShapeDelete(state *objectCollectionShapeState, prefix string) {
 	for path := range state.values {
 		if objectCollectionShapePathHasPrefix(path, prefix) {
 			delete(state.values, path)
+		}
+	}
+	for path := range state.objects {
+		if objectCollectionShapePathHasPrefix(path, prefix) {
+			delete(state.objects, path)
 		}
 	}
 	for path := range state.dictionaries {
@@ -245,6 +301,11 @@ func objectCollectionShapeDelete(state *objectCollectionShapeState, prefix strin
 	for path := range state.guarded {
 		if objectCollectionShapePathHasPrefix(path, prefix) {
 			delete(state.guarded, path)
+		}
+	}
+	for path := range state.regexp {
+		if objectCollectionShapePathHasPrefix(path, prefix) {
+			delete(state.regexp, path)
 		}
 	}
 }
@@ -266,18 +327,32 @@ func objectCollectionShapeSetValue(state *objectCollectionShapeState, path, valu
 	}
 	if strings.HasPrefix(value, "new collection") {
 		state.values[path] = true
+		state.objects[path] = true
 		state.collections[path] = true
 		state.guarded[path] = true
 		return
 	}
 	if strings.HasPrefix(value, "new dictionary") || strings.HasPrefix(value, "new scripting.dictionary") {
 		state.values[path] = true
+		state.objects[path] = true
 		state.dictionaries[path] = true
 		return
 	}
 	if strings.HasPrefix(value, "createobject(\"scripting.dictionary\"") {
 		state.values[path] = true
+		state.objects[path] = true
 		state.dictionaries[path] = true
+		return
+	}
+	if strings.HasPrefix(value, "createobject(\"vbscript.regexp\"") {
+		state.values[path] = true
+		state.objects[path] = true
+		state.regexp[path] = true
+		return
+	}
+	if receiver, ok := objectCollectionShapeRegExpExecuteReceiver(value); ok && state.regexp[receiver] {
+		state.values[path] = true
+		state.objects[path] = true
 		return
 	}
 	if source, ok := objectCollectionShapePathText(value); ok {
@@ -285,7 +360,27 @@ func objectCollectionShapeSetValue(state *objectCollectionShapeState, path, valu
 	}
 }
 
+func objectCollectionShapeRegExpExecuteReceiver(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	lower := strings.ToLower(text)
+	position := strings.Index(lower, ".execute")
+	if position <= 0 {
+		return "", false
+	}
+	rest := strings.TrimSpace(text[position+len(".execute"):])
+	if !strings.HasPrefix(rest, "(") {
+		return "", false
+	}
+	if _, end, ok := dcBalancedContentSpan(rest); !ok || strings.TrimSpace(rest[end:]) != "" {
+		return "", false
+	}
+	return objectCollectionShapePathText(text[:position])
+}
+
 func objectCollectionShapeStatementSource(index *objectContainerIndex, statement procedureir.Statement) string {
+	if statement.Kind == procedureir.StatementSet && strings.HasPrefix(strings.ToLower(strings.TrimSpace(statement.Text)), "set ") {
+		return strings.TrimSpace(statement.Text)
+	}
 	if index != nil && statement.Range.StartLine > 0 && statement.Range.StartLine <= len(index.file.Lines) {
 		return strings.TrimSpace(index.file.Lines[statement.Range.StartLine-1])
 	}
@@ -410,7 +505,7 @@ func objectCollectionShapeKnownObjectExpression(state *objectCollectionShapeStat
 		return true
 	}
 	path, ok := objectCollectionShapePathText(value)
-	return ok && state.values[path]
+	return ok && state.objects[path]
 }
 
 func objectCollectionShapeKnownObjectGuard(statement procedureir.Statement, knownObjectParameters map[string]bool) bool {
@@ -785,7 +880,111 @@ func objectCollectionShapeExistsCondition(text string) (string, string, bool, bo
 	return receiver, inside, negated, true
 }
 
-func objectCollectionShapeApplyGuard(statement procedureir.Statement, edge vbacfg.Edge, state *objectCollectionShapeState, index *objectContainerIndex, contracts map[string]bool) {
+func objectCollectionShapeDefaultItemCondition(text string) (string, string, bool, bool) {
+	text = strings.TrimSpace(text)
+	if len(text) >= len("If ") && strings.EqualFold(text[:len("If ")], "If ") {
+		text = strings.TrimSpace(text[len("If "):])
+	}
+	if then := strings.Index(strings.ToLower(text), " then"); then >= 0 {
+		text = strings.TrimSpace(text[:then])
+	}
+	negated := false
+	if len(text) >= len("Not ") && strings.EqualFold(text[:len("Not ")], "Not ") {
+		negated = true
+		text = strings.TrimSpace(text[len("Not "):])
+	}
+	path, ok := objectCollectionShapePathText(text)
+	if !ok {
+		return "", "", false, false
+	}
+	parts := strings.Split(path, "|")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false, false
+	}
+	return parts[0], parts[1], negated, true
+}
+
+func objectCollectionShapeGuardBranchImpossible(proc sourceProcedure, statement procedureir.Statement, edge vbacfg.Edge, index *objectContainerIndex) bool {
+	if edge.Kind != vbacfg.EdgeBranchFalse {
+		return false
+	}
+	text := objectCollectionShapeStatementSource(index, statement)
+	receiver, key, negated, ok := objectCollectionShapeDefaultItemCondition(text)
+	if !ok || !negated {
+		return false
+	}
+	return objectCollectionShapeStaticDictionaryKeyAbsent(proc, receiver, key, statement.ID, index)
+}
+
+// objectCollectionShapeStaticDictionaryKeyAbsent proves only a narrow lazy-cache
+// case: a local Static Dictionary is constructed in the procedure and no keyed
+// write or alias can mutate it. This lets the false branch of
+// `If Not cache(key) Then` be removed without assuming that dynamic keys which
+// look different in one invocation stay different across invocations.
+func objectCollectionShapeStaticDictionaryKeyAbsent(proc sourceProcedure, receiver, key string, guardID int, index *objectContainerIndex) bool {
+	if receiver == "" || key == "" || strings.Contains(receiver, "|") || index == nil {
+		return false
+	}
+	declarations := objectFlowDeclarations(index.file, proc, index.moduleDecls)
+	declaration, scope, ok := objectDeclarationBinding(receiver, declarations)
+	if !ok || scope != procedureir.ScopeLocal || !declaration.Static || !declaration.Object {
+		return false
+	}
+	receiverPath := objectCollectionShapePath(receiver)
+	for statement := range proc.Statements.All() {
+		text := objectCollectionShapeStatementSource(index, statement)
+		target, value, assignmentOK := objectCollectionShapeSetAssignment(text)
+		if !assignmentOK {
+			target, value, assignmentOK = objectCollectionShapeBareAssignment(text)
+		}
+		if !assignmentOK {
+			continue
+		}
+		targetPath, targetOK := objectCollectionShapePathText(target)
+		if !targetOK {
+			continue
+		}
+		if sourcePath, sourceOK := objectCollectionShapePathText(objectTrimOuterParens(value)); sourceOK && sourcePath == receiverPath {
+			return false
+		}
+		if strings.HasPrefix(targetPath, receiverPath+"|") {
+			return false
+		}
+		if targetPath == receiverPath {
+			value = strings.ToLower(strings.TrimSpace(value))
+			if value == "" || value == "nothing" {
+				continue
+			}
+			if objectCollectionShapeKnownValueKind(proc, receiverPath, index) != "dictionary" {
+				return false
+			}
+		}
+	}
+	for call := range proc.Calls.All() {
+		if call.StatementID == guardID {
+			continue
+		}
+		if call.Callee.Receiver != nil {
+			receiverText := strings.TrimSpace(*call.Callee.Receiver)
+			if objectCollectionShapePath(receiverText) == receiverPath {
+				member := strings.ToLower(cleanIdentifier(call.Callee.Member))
+				switch member {
+				case "", "exists", "item", "count", "keys":
+				default:
+					return false
+				}
+			}
+		}
+		for _, actual := range objectCallActuals(call, proc.analysisFacts()) {
+			if strings.EqualFold(cleanIdentifier(actual.text), cleanIdentifier(receiver)) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func objectCollectionShapeApplyGuard(proc sourceProcedure, statement procedureir.Statement, edge vbacfg.Edge, state *objectCollectionShapeState, index *objectContainerIndex, contracts map[string]bool) {
 	if state == nil || (edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse) {
 		return
 	}
@@ -795,6 +994,34 @@ func objectCollectionShapeApplyGuard(statement procedureir.Statement, edge vbacf
 	}
 	receiver, key, negated, ok := objectCollectionShapeExistsCondition(strings.TrimSpace(text))
 	if !ok {
+		condition := strings.TrimSpace(text)
+		if len(condition) >= len("If ") && strings.EqualFold(condition[:len("If ")], "If ") {
+			condition = strings.TrimSpace(condition[len("If "):])
+		}
+		name, negated, singleOK := objectSingleNothingGuard(condition)
+		if !singleOK {
+			return
+		}
+		path := objectCollectionShapePath(name)
+		nonNothing := (edge.Kind == vbacfg.EdgeBranchTrue && negated) ||
+			(edge.Kind == vbacfg.EdgeBranchFalse && !negated)
+		if !nonNothing {
+			objectCollectionShapeDelete(state, path)
+			return
+		}
+		state.values[path] = true
+		switch objectCollectionShapeKnownValueKind(proc, path, index) {
+		case "collection":
+			state.objects[path] = true
+			state.collections[path] = true
+			state.guarded[path] = true
+		case "dictionary":
+			state.objects[path] = true
+			state.dictionaries[path] = true
+		case "regexp":
+			state.objects[path] = true
+			state.regexp[path] = true
+		}
 		return
 	}
 	receiverPath, receiverOK := objectCollectionShapePathText(receiver)
@@ -812,11 +1039,50 @@ func objectCollectionShapeApplyGuard(statement procedureir.Statement, edge vbacf
 	if present {
 		state.values[path] = true
 		if contracts[path] {
+			state.objects[path] = true
 			state.collections[path] = true
 		}
 	} else {
 		objectCollectionShapeDelete(state, path)
 	}
+}
+
+func objectCollectionShapeKnownValueKind(proc sourceProcedure, path string, index *objectContainerIndex) string {
+	if path == "" || strings.Contains(path, "|") {
+		return ""
+	}
+	kind := ""
+	for statement := range proc.Statements.All() {
+		text := objectCollectionShapeStatementSource(index, statement)
+		target, value, ok := objectCollectionShapeSetAssignment(text)
+		if !ok {
+			continue
+		}
+		targetPath, targetOK := objectCollectionShapePathText(target)
+		if !targetOK || targetPath != path {
+			continue
+		}
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" || value == "nothing" {
+			continue
+		}
+		current := ""
+		switch {
+		case strings.HasPrefix(value, "new collection"):
+			current = "collection"
+		case strings.HasPrefix(value, "new dictionary"), strings.HasPrefix(value, "new scripting.dictionary"), strings.HasPrefix(value, "createobject(\"scripting.dictionary\""):
+			current = "dictionary"
+		case strings.HasPrefix(value, "createobject(\"vbscript.regexp\""):
+			current = "regexp"
+		default:
+			return ""
+		}
+		if kind != "" && kind != current {
+			return ""
+		}
+		kind = current
+	}
+	return kind
 }
 
 func objectCollectionShapeInitialState(declarations declarationScope) objectCollectionShapeState {
@@ -828,6 +1094,7 @@ func objectCollectionShapeInitialState(declarations declarationScope) objectColl
 			}
 			path := objectCollectionShapePath(name)
 			state.values[path] = true
+			state.objects[path] = true
 			if dcKindFromType(declaration.Type) == dcCollection {
 				state.collections[path] = true
 				state.guarded[path] = true
@@ -871,12 +1138,15 @@ func objectCollectionShapeBeforeStatement(proc sourceProcedure, statementID int,
 			objectCollectionShapeApplyStatement(context.containerIndex, proc, *block.Statement, &after)
 		}
 		context.graph.ForEachOutgoing(blockID, func(edge vbacfg.Edge) bool {
+			if blockOK && block.Statement != nil && objectCollectionShapeGuardBranchImpossible(proc, *block.Statement, edge, context.containerIndex) {
+				return true
+			}
 			candidate := after.clone()
 			if edge.Class == vbacfg.EdgeExceptional {
 				candidate = before.clone()
 			}
 			if blockOK && block.Statement != nil {
-				objectCollectionShapeApplyGuard(*block.Statement, edge, &candidate, context.containerIndex, contracts)
+				objectCollectionShapeApplyGuard(proc, *block.Statement, edge, &candidate, context.containerIndex, contracts)
 			}
 			if !seen[edge.To] {
 				input[edge.To] = candidate
@@ -932,5 +1202,5 @@ func objectCollectionShapeExpressionAssigned(proc sourceProcedure, expression pr
 	if !ready {
 		return false
 	}
-	return state.values[path] && (state.collections[path] || state.guarded[path] && dcKindFromType(declaration.Type) == dcCollection)
+	return state.objects[path] || state.collections[path] || state.guarded[path] && dcKindFromType(declaration.Type) == dcCollection
 }

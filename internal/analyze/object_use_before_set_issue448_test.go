@@ -2634,6 +2634,434 @@ End Function
 	}
 }
 
+func TestVBA202Issue448PropagatesRegExpExecuteThroughDictionaryCache(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal inputText As String) As Long
+  Dim expression As Object
+  Dim cache As Object
+  Dim matches As Object
+  Set expression = CreateObject("VBScript.RegExp")
+  Set cache = CreateObject("Scripting.Dictionary")
+  Set cache("expression") = expression.Execute(inputText)
+  Set matches = cache("expression")
+  MatchCount = matches.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a cached RegExp.Execute MatchCollection should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesRegExpExecuteThroughConditionallyInitializedDictionaryCache(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal inputText As String) As Long
+  Static expression As Object
+  Static cache As Object
+  If expression Is Nothing Then Set expression = CreateObject("VBScript.RegExp")
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  Set cache("matches") = expression.Execute(inputText)
+  Dim matches As Object
+  Set matches = cache("matches")
+  MatchCount = matches.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a cached RegExp.Execute result after conditional initialization should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsPotentiallyCollidingStaticCacheProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal inputText As String) As Long
+  Static expression As Object
+  Static cache As Object
+  If expression Is Nothing Then Set expression = CreateObject("VBScript.RegExp")
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  If Not cache(inputText) Then
+    Set cache(")" & inputText) = expression.Execute(inputText)
+  End If
+  Dim matches As Object
+  Set matches = cache(")" & inputText)
+  MatchCount = matches.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("dynamic static cache keys that only look distinct must remain conservative: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsUnrelatedStaticCacheKeyProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal key As String, ByVal otherKey As String) As Long
+  Static cache As Object
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  If Not cache(otherKey) Then
+    Set cache(otherKey) = CreateObject("Scripting.Dictionary")
+  End If
+  Dim value As Object
+  Set value = cache(key)
+  MatchCount = value.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("an unrelated static cache key must remain conservative: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsUnprovenDictionaryItemObjectValue(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal key As String) As Long
+  Static cache As Object
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  Dim value As Object
+  If cache.Exists(key) Then
+    Set value = cache(key)
+  Else
+    Set value = New Collection
+  End If
+  MatchCount = value.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("Dictionary.Exists should not prove that an arbitrary item is an object: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesNonzeroModulePointerGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  Dim p As Long
+  If m_Interface Is Nothing Then Exit Function
+  For p = 1 To m_Interface.Count
+    If Not m_Interface.Item(p) = 0 Then
+      GetInterfacePointer = m_Interface.Item(p)
+      Exit For
+    End If
+  Next
+End Function
+
+Public Sub GetInterface()
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a nonzero result from a Nothing-guarded module pointer helper should prove the receiver: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsCompositeNonzeroResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+End Function
+
+Public Sub GetInterface()
+  Dim ptr As Long
+  ptr = GetInterfacePointer() + 1
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a composite nonzero result must not prove the module receiver: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsNonzeroResultOverwrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+End Function
+
+Public Sub GetInterface(ByVal force As Boolean)
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  If force Then ptr = 1
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a later conditional result overwrite must invalidate the nonzero proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsMultilineNonzeroResultOverwrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+End Function
+
+Public Sub GetInterface(ByVal force As Boolean)
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  If force Then
+    ptr = 1
+  End If
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a multiline result overwrite must invalidate the nonzero proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsCallerFieldResetAfterNonzeroHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+End Function
+
+Public Sub GetInterface()
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  Set m_Interface = Nothing
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a caller-side module field reset must invalidate the nonzero proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsHelperFieldResetAfterNonzeroResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+  Set m_Interface = Nothing
+End Function
+
+Public Sub GetInterface()
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a helper-side module field reset must invalidate its nonzero contract: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotCrossModuleNonzeroFieldProof(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helper.bas", `Option Explicit
+Private m_Interface As Collection
+
+Public Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private m_Interface As Collection
+
+Public Sub GetInterface()
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Count
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a helper in another module must not prove a same-named caller field: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesConditionalDictionaryAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function CountItems() As Long
+  Static cache As Object
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  Dim cacheAlias As Object
+  Set cacheAlias = cache
+  CountItems = cacheAlias.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a conditionally initialized Dictionary should remain an object through its alias: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsDictionaryAliasMutationForAbsentProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal key As String, ByVal unknownValue As Variant) As Long
+  Static cache As Object
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  Dim cacheAlias As Object
+  Set cacheAlias = cache
+  cacheAlias.Add key, unknownValue
+  If Not cache(key) Then
+    Set cache(key) = New Collection
+  End If
+  Dim value As Object
+  Set value = cache(key)
+  MatchCount = value.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("an alias mutation must keep the static cache probe conservative: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsBareDictionaryItemWriteForAbsentProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal key As String, ByVal unknownValue As Variant) As Long
+  Static cache As Object
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  cache(key) = unknownValue
+  If Not cache(key) Then
+    Set cache(key) = New Collection
+  End If
+  Dim value As Object
+  Set value = cache(key)
+  MatchCount = value.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a bare Dictionary item write must keep the static cache probe conservative: %+v", got)
+	}
+}
+
 func TestVBA202Issue448PropagatesForEachObjectIntoHelper(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
