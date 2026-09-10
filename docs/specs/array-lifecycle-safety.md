@@ -223,6 +223,66 @@ element, so indexed access remains subject to the possible-empty check. The
 four statements must remain in this structural order; a pointer-slot check
 without descriptor validation or a different memory-copy shape is conservative.
 
+The recognized `SafeArrayLen` helper may also validate a `ByRef` Byte array
+directly. A local `Do While index < length` loop proves the array is non-empty
+only when `index` is initialized to zero, neither the index nor the length is
+reassigned before the access, and an indexed expression derives its position
+from `LBound(array)`. The loop body must also leave the array, index, and
+length unchanged on the path back to the loop condition. An index increment
+must be a positive literal or a scalar whose assignments are themselves
+proven positive; an unknown variable step remains conservative. A scalar step
+may also be proven positive when a dominating plain `ReDim` uses it as
+`0 To step - 1` and no local error-handling or intervening mutation can resume
+after a failed resize. A plain `array(index)` access still requires a proven
+zero-based source; the helper does not establish that bound. The scalar helper
+must not change the probed array after its descriptor bounds are read, and its
+low-level pointer calls must be declared external APIs rather than same-named
+project procedures. Project-visible declarations may be resolved across
+standard modules, while a `Private Declare` is visible only in its declaring
+module. Same-line colon-separated scalar updates before the increment also
+invalidate the normal-path step proof. This rule is limited to the successful
+positive loop path and does not infer a relationship between an arbitrary
+scalar length argument and a callee's `ByRef` array.
+
+The step expression is part of the loop-backedge contract. Scalar aliases,
+member fields, and `ByRef` calls that can change any dependency of that
+expression after the access invalidate the positive-step proof, even when the
+first iteration used a positive value.
+
+A scalar length assignment used by a positive `SafeArrayLen` branch must
+dominate the guarded access. A conditional assignment that can be skipped does
+not refresh a module or `ByRef` length value, and a later direct assignment or
+`ByRef` scalar call invalidates the proof even when the array itself is
+unchanged. The same pre-access mutation rule applies to a zero loop index:
+initializing it to zero is insufficient when a `ByRef` call can change it before
+the `Do While` header.
+
+The low-level length-helper contract is limited to a normal-path descriptor
+guard. Conditional `Erase` or whole-array replacement inside the helper,
+`On Error` handling, and `GoTo` paths that bypass the descriptor guard are
+conservative; the descriptor guard must dominate every subsequent `LBound`,
+`UBound`, and positive return assignment.
+
+A member-qualified loop step is accepted only when every matching member
+assignment is positive and unconditional. An assignment in the current
+procedure must dominate the loop access. A cross-procedure assignment must
+belong to the same array-participant closure, and a reachable call to that
+initializer (or its private helper chain) must dominate the access; the
+initializer itself must dominate its normal return. Conditional,
+non-dominating, uncalled, or unrelated-procedure initializers remain unknown;
+a scalar alias is subject to the same dominance requirement. A member write on
+the physical increment line is treated conservatively because the recovered
+statement range may not distinguish a later colon-separated update.
+
+For a typed Byte array, the positive descriptor guard
+`(Not Not values) <> 0` proves that the SAFEARRAY descriptor is present, so
+`LBound` and `UBound` queries on that branch are safe. It deliberately does not
+prove that the descriptor contains an element. The `(Not Not values) = 0`
+branch remains conservative because it is commonly used to identify an
+unallocated array and does not establish a safe access path. The descriptor
+fact is also invalidated by any array mutation before the access or after it
+on an enclosing loop's backedge.
+
 A procedure-local `Static` dynamic array may be carried as allocated at entry
 when the same procedure has exactly one `If Not state.isSet Then` setup block,
 `state` is a Static UDT-like readiness value, a resolved ByRef helper sets the

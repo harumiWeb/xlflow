@@ -361,6 +361,7 @@ type analysisContext struct {
 	arrayModuleEntryStates               arrayModuleEntryStates
 	arrayModuleReadyGuards               arrayModuleReadyGuardStates
 	arrayPrivateTargets                  map[string]sourceProcedure
+	arrayVBA227ExternalAPIs              arrayVBA227ExternalAPISet
 	arrayParticipants                    map[string]bool
 	arrayParticipantKeys                 map[string]string
 	// arrayModuleEffectParticipants is the narrower caller-closed boundary
@@ -2781,6 +2782,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayModuleEntryStates:           arrayModuleEntryStates{},
 		arrayModuleReadyGuards:           arrayModuleReadyGuardStates{},
 		arrayPrivateTargets:              map[string]sourceProcedure{},
+		arrayVBA227ExternalAPIs:          buildArrayVBA227ExternalAPISet(files),
 		arrayStats:                       &arrayInterproceduralStats{strategy: a.arrayStrategy},
 		arrayByRefEntryStates:            map[string]map[int]bool{},
 		arrayByRefEntryConditions:        map[string]map[int]string{},

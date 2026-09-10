@@ -121,6 +121,16 @@ type arrayValue struct {
 
 type arrayFlowState map[string]arrayValue
 
+// arrayVBA227ExternalAPISet is the project-wide declaration boundary for
+// low-level SAFEARRAY helpers. A declaration in one standard module is still
+// visible to a helper in another module, while a project procedure with the
+// same name must prevent the low-level proof from being inferred.
+type arrayVBA227ExternalAPISet struct {
+	declared        map[string]bool
+	privateByModule map[string]map[string]bool
+	procedures      map[string]bool
+}
+
 type arrayBoundsProof struct {
 	loopEndLine                      int
 	priorKind                        arrayAllocation
@@ -187,6 +197,7 @@ var (
 	arrayIsArrayGuardRe               = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*(.+)\s*\)\s*$`)
 	arrayByteArrayGuardRe             = regexp.MustCompile(`(?i)^\s*(?:vartypeof|vartype)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*=\s*\(?\s*vbarray\s+or\s+vbbyte\s*\)?\s*$`)
 	arrayStrPtrGuardRe                = regexp.MustCompile(`(?i)^\s*strptr\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(=|<>)\s*0\s*$`)
+	arrayNotNotByteArrayGuardRe       = regexp.MustCompile(`(?i)^\s*\(?\s*not\s+not\s+([A-Za-z_]\w*)\s*\)?\s*<>\s*0\s*$`)
 	arraySafeArrayZeroExitGuardRe     = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s*=\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
 	arraySafeArrayPointerCopyRe       = regexp.MustCompile(`(?i)^\s*(?:call\s+)?(?:[A-Za-z_]\w*\.)?copymemoryfromptr\s+([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*,\s*lenb\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
 	arrayByteArrayReadRe              = regexp.MustCompile(`(?i)^\s*(?:[A-Za-z_]\w*\.)*read\s*\(\s*-1\s*\)\s*$`)

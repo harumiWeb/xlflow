@@ -570,6 +570,7 @@ func firstParenOutsideString(text string) int {
 // On Error GoTo recovery label. That contract is enough to prove the positive
 // branch of a direct call, while arbitrary helper functions remain unknown.
 func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
+	externalAPIs := buildArrayVBA227ExternalAPISet(files)
 	candidates := map[string][]string{}
 	procedureNames := map[string]int{}
 	recognizedNames := map[string]int{}
@@ -583,7 +584,7 @@ func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 			}
 			parameter, ok := arrayAllocationGuardParameter(proc)
 			if !ok {
-				parameter, ok = arraySafeArrayPointerLengthGuardParameter(file, proc)
+				parameter, ok = arraySafeArrayPointerLengthGuardParameter(file, proc, externalAPIs)
 			}
 			if !ok {
 				parameter, ok = arrayDimensionCountGuardParameter(proc)
@@ -610,6 +611,7 @@ func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 }
 
 func inferArraySafeArrayLengthGuards(files []parsedFile) map[string]bool {
+	externalAPIs := buildArrayVBA227ExternalAPISet(files)
 	procedureNames := map[string]int{}
 	recognizedNames := map[string]int{}
 	for _, file := range files {
@@ -621,7 +623,7 @@ func inferArraySafeArrayLengthGuards(files []parsedFile) map[string]bool {
 				continue
 			}
 			procedureNames[name]++
-			if _, ok := arraySafeArrayPointerLengthGuardParameter(file, proc); ok {
+			if _, ok := arraySafeArrayPointerLengthGuardParameter(file, proc, externalAPIs); ok {
 				recognizedNames[name]++
 			}
 		}
@@ -786,7 +788,7 @@ func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {
 // returned expression to be derived from preceding LBound and UBound
 // assignments so an arbitrary pointer check cannot become an allocation
 // contract.
-func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProcedure) (string, bool) {
+func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProcedure, externalAPIs arrayVBA227ExternalAPISet) (string, bool) {
 	if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
 		return "", false
 	}
@@ -805,12 +807,15 @@ func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProce
 	}
 	guardLine := 0
 	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
-		if target, ok := arraySafeArrayPointerGuardTarget(file, proc, line, file.Lines[line-1], variables); ok && target == parameterName {
+		if target, ok := arraySafeArrayPointerGuardTarget(file, proc, line, file.Lines[line-1], variables, externalAPIs); ok && target == parameterName {
 			guardLine = line
 			break
 		}
 	}
 	if guardLine == 0 {
+		return "", false
+	}
+	if arrayProcedureHasErrorHandling(proc) || procedureStatementAtLine(proc, guardLine).ID == 0 {
 		return "", false
 	}
 	lowerName := ""
@@ -822,6 +827,9 @@ func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProce
 		if text == "" || strings.HasPrefix(text, "'") || strings.HasPrefix(text, "#") {
 			continue
 		}
+		if arrayVBA227SafeArrayLengthHelperMayMutateArray(proc, line, text, parameterName) {
+			return "", false
+		}
 		lhs, rhs, indexed, assigned := arrayAssignment(text)
 		if !assigned || indexed {
 			continue
@@ -829,16 +837,28 @@ func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProce
 		compact := strings.Join(strings.Fields(strings.ToLower(rhs)), "")
 		switch {
 		case compact == "lbound("+parameterName+")":
+			statement := procedureStatementAtLine(proc, line)
+			if statement.ID == 0 || !arrayVBA227StatementLineDominates(proc, guardLine, statement) {
+				return "", false
+			}
 			if lowerName != "" {
 				return "", false
 			}
 			lowerName = strings.ToLower(cleanIdentifier(lhs))
 		case compact == "ubound("+parameterName+")":
+			statement := procedureStatementAtLine(proc, line)
+			if statement.ID == 0 || !arrayVBA227StatementLineDominates(proc, guardLine, statement) {
+				return "", false
+			}
 			if upperName != "" {
 				return "", false
 			}
 			upperName = strings.ToLower(cleanIdentifier(lhs))
 		case strings.EqualFold(cleanIdentifier(lhs), proc.Name):
+			statement := procedureStatementAtLine(proc, line)
+			if statement.ID == 0 || !arrayVBA227StatementLineDominates(proc, guardLine, statement) {
+				return "", false
+			}
 			returnCount++
 			expected := upperName + "-" + lowerName + "+1"
 			if lowerName == "" || upperName == "" || compact != expected {

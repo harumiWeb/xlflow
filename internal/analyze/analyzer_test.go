@@ -9840,6 +9840,179 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA227RequiresDeclaredSafeArrayPointerAPIs(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function VarPtrArray(ByRef values() As Byte) As Long
+  VarPtrArray = 1
+End Function
+
+Private Sub CopyMemoryFromPtr(ByRef dest As Long, ByVal src As Long, ByVal size As Long)
+  dest = 1
+End Sub
+
+Private Function FakeSafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  FakeSafeArrayLen = UBound(values) - LBound(values) + 1
+End Function
+
+Private Sub Guarded(ByRef values() As Byte)
+  Dim length As Long
+  length = FakeSafeArrayLen(values)
+  If length > 0 Then values(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenGuarded := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Guarded" {
+			seenGuarded = true
+		}
+	}
+	if !seenGuarded {
+		t.Fatalf("ordinary procedures with SAFEARRAY-like names must not establish allocation: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227ResolvesSafeArrayPointerAPIsAcrossModules(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Native.bas", `Option Explicit
+Public Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Public Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  SafeArrayLen = hi - lo + 1
+End Function
+
+Private Sub Guarded(ByRef values() As Byte)
+  Dim length As Long
+  length = SafeArrayLen(values)
+  If length > 0 Then values(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Guarded" {
+			t.Fatalf("project-wide Declare resolution should preserve the SafeArrayLen proof: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA227RespectsPrivateSafeArrayPointerAPIScope(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Native.bas", `Option Explicit
+Private Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Private Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  SafeArrayLen = hi - lo + 1
+End Function
+
+Private Sub Guarded(ByRef values() As Byte)
+  Dim length As Long
+  length = SafeArrayLen(values)
+  If length > 0 Then values(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Guarded" {
+			return
+		}
+	}
+	t.Fatalf("a Private Declare in another module must not establish the pointer contract: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227RejectsProjectWideSafeArrayPointerNameCollision(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Native.bas", `Option Explicit
+Public Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Public Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+`)
+	writeModule(t, dir, "Collision.bas", `Option Explicit
+Private Function VarPtrArray(ByRef values() As Byte) As Long
+  VarPtrArray = 1
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  If hi >= lo Then
+    SafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private Sub Guarded(ByRef values() As Byte)
+  Dim length As Long
+  length = SafeArrayLen(values)
+  If length > 0 Then values(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Guarded" {
+			return
+		}
+	}
+	t.Fatalf("a same-named project procedure must disable the pointer Declare contract: %+v", findingsByCode(findings, "VBA227"))
+}
+
 func TestAnalyzerVBA227UsesSafeArrayPointerLengthGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -9896,6 +10069,293 @@ End Sub
 	got := findingsByCode(findings, "VBA227")
 	if len(got) != 1 || got[0].Procedure != "Unproven" {
 		t.Fatalf("an unrelated positive helper must not establish array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsUnsafeSafeArrayLengthProofs(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Private Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  If hi >= lo Then
+    SafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private Function ConditionalMutatingSafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  If clearArray Then Erase values
+  If hi >= lo Then
+    ConditionalMutatingSafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private Function ErrorSafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  On Error Resume Next
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  If hi >= lo Then
+    ErrorSafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private Function GotoBypassSafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  GoTo Bounds
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+Bounds:
+  lo = LBound(values)
+  hi = UBound(values)
+  If hi >= lo Then
+    GotoBypassSafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private clearArray As Boolean
+Private staleLength As Long
+
+Private Sub ConditionalLength(ByRef values() As Byte, ByVal refresh As Boolean)
+  If refresh Then
+    staleLength = SafeArrayLen(values)
+  End If
+  If staleLength > 0 Then values(0) = 1
+End Sub
+
+Private Sub MutatedLength(ByRef values() As Byte)
+  Dim length As Long
+  length = SafeArrayLen(values)
+  SetPositiveLength length
+  If length > 0 Then values(0) = 1
+End Sub
+
+Private Sub SetPositiveLength(ByRef value As Long)
+  value = 1
+End Sub
+
+Private Sub ConditionalHelperCaller(ByRef values() As Byte)
+  Dim length As Long
+  length = ConditionalMutatingSafeArrayLen(values)
+  If length > 0 Then values(0) = 1
+End Sub
+
+Private Sub ErrorHelperCaller(ByRef values() As Byte)
+  Dim length As Long
+  length = ErrorSafeArrayLen(values)
+  If length > 0 Then values(0) = 1
+End Sub
+
+Private Sub GotoHelperCaller(ByRef values() As Byte)
+  Dim length As Long
+  length = GotoBypassSafeArrayLen(values)
+  If length > 0 Then values(0) = 1
+End Sub
+
+Private Sub PreheaderIndexMutation(ByRef values() As Byte)
+  Dim length As Long
+  Dim offset As Long
+  length = SafeArrayLen(values)
+  offset = 0
+  SetNegative offset
+  Do While offset < length
+    Debug.Print values(LBound(values) + offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub SetNegative(ByRef value As Long)
+  value = -1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"ConditionalLength":       true,
+		"MutatedLength":           true,
+		"ConditionalHelperCaller": true,
+		"ErrorHelperCaller":       true,
+		"GotoHelperCaller":        true,
+		"PreheaderIndexMutation":  true,
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if _, ok := want[finding.Procedure]; ok {
+			want[finding.Procedure] = false
+		}
+	}
+	for procedure, missing := range want {
+		if missing {
+			t.Errorf("unsafe SafeArrayLen proof should remain diagnosed in %s: %+v", procedure, findingsByCode(findings, "VBA227"))
+		}
+	}
+}
+
+func TestAnalyzerVBA227UsesSuccessfulReDimForPositiveLoopStep(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Private Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  If hi >= lo Then
+    SafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private Function StringToUtf8(ByVal text As String) As Byte()
+  Dim result() As Byte
+  If Len(text) > 0 Then
+    ReDim result(0 To Len(text) - 1)
+  End If
+  StringToUtf8 = result
+End Function
+
+Private Type LoopState
+  step As Long
+End Type
+
+Private loopState As LoopState
+
+Private Sub Probe(ByVal text As String)
+  Dim values() As Byte
+  Dim scratch() As Byte
+  Dim length As Long
+  Dim offset As Long
+  Dim stepSize As Long
+	values = StringToUtf8(text)
+  length = SafeArrayLen(values)
+  stepSize = loopState.step
+  offset = 0
+	Do While offset < length
+		ReDim scratch(0 To stepSize - 1)
+		Debug.Print values(offset)
+		offset = offset + stepSize
+  Loop
+End Sub
+
+Private Sub ResumeNextProbe(ByVal text As String)
+  On Error Resume Next
+  Dim values() As Byte
+  Dim scratch() As Byte
+  Dim length As Long
+  Dim offset As Long
+  Dim stepSize As Long
+	values = StringToUtf8(text)
+  length = SafeArrayLen(values)
+  stepSize = loopState.step
+  offset = 0
+	Do While offset < length
+		ReDim scratch(0 To stepSize - 1)
+		Debug.Print values(offset)
+		offset = offset + stepSize
+  Loop
+End Sub
+
+Private Sub SameLineStepMutation(ByVal text As String)
+  Dim values() As Byte
+  Dim scratch() As Byte
+  Dim length As Long
+  Dim offset As Long
+  Dim stepSize As Long
+  values = StringToUtf8(text)
+  length = SafeArrayLen(values)
+  stepSize = loopState.step
+  offset = 0
+  Do While offset < length
+    ReDim scratch(0 To stepSize - 1)
+    Debug.Print values(offset)
+    stepSize = -1: offset = offset + stepSize
+  Loop
+End Sub
+
+Private Sub SameLineMemberMutation(ByVal text As String)
+  Dim values() As Byte
+  Dim length As Long
+  Dim offset As Long
+  loopState.step = 1
+  values = StringToUtf8(text)
+  length = SafeArrayLen(values)
+  offset = 0
+  Do While offset < length
+    Debug.Print values(offset)
+    offset = offset + loopState.step: loopState.step = -1
+  Loop
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Probe" {
+			t.Fatalf("a successful ReDim should prove the positive loop step: %+v", finding)
+		}
+	}
+	seenResumeNext := false
+	seenSameLineMutation := false
+	seenSameLineMemberMutation := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "ResumeNextProbe" {
+			seenResumeNext = true
+		}
+		if finding.Procedure == "SameLineStepMutation" {
+			seenSameLineMutation = true
+		}
+		if finding.Procedure == "SameLineMemberMutation" {
+			seenSameLineMemberMutation = true
+		}
+	}
+	if !seenResumeNext || !seenSameLineMutation || !seenSameLineMemberMutation {
+		t.Fatalf("error recovery and same-line step mutations must remain conservative: %+v", findingsByCode(findings, "VBA227"))
 	}
 }
 
@@ -10060,6 +10520,733 @@ End Sub
 	}
 	if !seenDoWhileUnsafe {
 		t.Fatalf("a Do While loop with a negative index must remain diagnosed: all=%+v vba227=%+v", findings, findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227CarriesSafeArrayLengthIntoNestedTLSChunkLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Private Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  #If VBA7 Then
+    Dim pSA As LongPtr
+    Dim ptr As LongPtr
+  #Else
+    Dim pSA As Long
+    Dim ptr As Long
+  #End If
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  If hi >= lo Then
+    SafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private Function MutatingSafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  Erase values
+  If hi >= lo Then MutatingSafeArrayLen = hi - lo + 1
+End Function
+
+Private Type Connection
+  cbHeader As Long
+End Type
+
+Private m_Connections() As Connection
+
+Private Sub TLSSend(ByVal handle As Long, ByRef data() As Byte)
+  Dim sendBuf() As Byte
+  Dim dataLen As Long
+  Dim totalLen As Long
+  Dim offset As Long
+  Dim chunkSize As Long
+  Dim maxChunk As Long
+  Dim i As Long
+  With m_Connections(handle)
+    dataLen = SafeArrayLen(data)
+    If dataLen = 0 Then Exit Sub
+    maxChunk = 4
+    offset = 0
+    Do While offset < dataLen
+      chunkSize = maxChunk
+      If offset + chunkSize > dataLen Then
+        chunkSize = dataLen - offset
+      End If
+      totalLen = .cbHeader + chunkSize
+      ReDim sendBuf(0 To totalLen - 1)
+      For i = 0 To chunkSize - 1
+        sendBuf(.cbHeader + i) = data(LBound(data) + offset + i)
+      Next i
+      offset = offset + chunkSize
+    Loop
+End With
+End Sub
+
+Private Sub AfterProbeMutation(ByVal text As String)
+  Dim values() As Byte
+  Dim dataLen As Long
+  values = StrConv(text, vbFromUnicode)
+  dataLen = SafeArrayLen(values)
+  EraseArray values
+  If dataLen > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub MutatingSafeArrayLenAccess(ByVal text As String)
+  Dim values() As Byte
+  Dim dataLen As Long
+  values = StrConv(text, vbFromUnicode)
+  dataLen = MutatingSafeArrayLen(values)
+  If dataLen > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub ConditionalStep(ByVal enabled As Boolean, ByVal text As String)
+  Dim values() As Byte
+  Dim dataLen As Long
+  Dim offset As Long
+  Dim stepSize As Long
+  values = StrConv(text, vbFromUnicode)
+  dataLen = SafeArrayLen(values)
+  offset = 0
+  If enabled Then stepSize = 1
+  Do While offset < dataLen
+    Debug.Print values(LBound(values) + offset)
+    offset = offset + stepSize
+  Loop
+End Sub
+
+Private Type LoopState
+  step As Long
+End Type
+
+Private conditionalLoopState As LoopState
+
+Private Sub SingleLineMutatedIndex(ByRef data() As Byte, ByVal reset As Boolean)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  If reset Then offset = offset + 2
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub ConditionalMemberStep(ByRef data() As Byte, ByVal enabled As Boolean)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  If enabled Then conditionalLoopState.step = 1
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    offset = offset + conditionalLoopState.step
+  Loop
+End Sub
+
+Private aliasLoopState As LoopState
+Private baseLoopState As LoopState
+Private otherBaseLoopState As LoopState
+Private conditionalReturnState As LoopState
+
+Private Sub ConditionalAliasMemberStep(ByVal enabled As Boolean, ByVal text As String)
+  Dim values() As Byte
+  Dim dataLen As Long
+  Dim offset As Long
+  Dim stepSize As Long
+  values = StrConv(text, vbFromUnicode)
+  dataLen = SafeArrayLen(values)
+  If enabled Then stepSize = 1
+  aliasLoopState.step = stepSize
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print values(LBound(values) + offset)
+    offset = offset + aliasLoopState.step
+  Loop
+End Sub
+
+Private Sub ForeignMemberStep(ByVal text As String)
+  Dim values() As Byte
+  Dim dataLen As Long
+  Dim offset As Long
+  otherBaseLoopState.step = 1
+  values = StrConv(text, vbFromUnicode)
+  dataLen = SafeArrayLen(values)
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print values(LBound(values) + offset)
+    offset = offset + baseLoopState.step
+  Loop
+End Sub
+
+Private Sub SkippingMemberInitializer(ByVal skip As Boolean, ByRef scratch() As Byte)
+  If skip Then Exit Sub
+  conditionalReturnState.step = 1
+End Sub
+
+Private Sub SkippingMemberStep(ByVal text As String)
+  Dim values() As Byte
+  Dim dataLen As Long
+  Dim offset As Long
+  values = StrConv(text, vbFromUnicode)
+  dataLen = SafeArrayLen(values)
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print values(LBound(values) + offset)
+    offset = offset + conditionalReturnState.step
+  Loop
+End Sub
+
+Private Type UncalledState
+  step As Long
+End Type
+
+Private uncalledState As UncalledState
+
+Private Sub UncalledMemberInitializer()
+  uncalledState.step = 1
+End Sub
+
+Private Sub UncalledMemberStep(ByVal text As String)
+  Dim values() As Byte
+  Dim dataLen As Long
+  Dim offset As Long
+  values = StrConv(text, vbFromUnicode)
+  dataLen = SafeArrayLen(values)
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print values(LBound(values) + offset)
+    offset = offset + uncalledState.step
+  Loop
+End Sub
+
+Private Type OrderedState
+  step As Long
+End Type
+
+Private orderedState As OrderedState
+
+Private Sub OrderedMemberInitializer()
+  orderedState.step = 1
+End Sub
+
+Private Sub OrderedMemberStep(ByVal text As String)
+  Dim values() As Byte
+  Dim dataLen As Long
+  Dim offset As Long
+  Dim stepSize As Long
+  values = StrConv(text, vbFromUnicode)
+  dataLen = SafeArrayLen(values)
+  OrderedMemberInitializer
+  stepSize = orderedState.step
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print values(LBound(values) + offset)
+    offset = offset + stepSize
+  Loop
+End Sub
+
+Private Type LateState
+  step As Long
+End Type
+
+Private lateState As LateState
+
+Private Sub LateMemberInitializer()
+  lateState.step = 1
+End Sub
+
+Private Sub LateMemberStep(ByVal text As String)
+  Dim values() As Byte
+  Dim dataLen As Long
+  Dim offset As Long
+  Dim stepSize As Long
+  values = StrConv(text, vbFromUnicode)
+  dataLen = SafeArrayLen(values)
+  stepSize = lateState.step
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print values(LBound(values) + offset)
+    offset = offset + stepSize
+  Loop
+  LateMemberInitializer
+End Sub
+
+Private Sub ConditionalRedimParameter(ByVal enabled As Boolean, ByVal dataLen As Long)
+  Dim values() As Byte
+  If enabled Then
+    ReDim values(0 To 4)
+    dataLen = 5
+  End If
+  If dataLen > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub ConditionalRedimByRef(ByVal enabled As Boolean, ByVal dataLen As Long)
+  Dim values() As Byte
+  If enabled Then
+    ReDim values(0 To 4)
+    dataLen = 5
+  End If
+  SetPositiveLength dataLen
+  If dataLen > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub SetPositiveLength(ByRef value As Long)
+  value = 1
+End Sub
+
+Private Sub PlainIndex(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub VariableStep(ByRef data() As Byte, ByVal step As Long)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    offset = offset + step
+  Loop
+End Sub
+
+Private Sub MutatedIndex(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    offset = offset + 1
+    Debug.Print data(LBound(data) + offset)
+  Loop
+End Sub
+
+Private Sub UnrelatedBound(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(offset), LBound(data)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub ConditionalProbe(ByRef data() As Byte, ByVal enabled As Boolean)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = 1
+  If enabled Then
+    dataLen = SafeArrayLen(data)
+  End If
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub ConditionalIndex(ByRef data() As Byte, ByVal reset As Boolean)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  If reset Then
+    offset = 0
+  End If
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub SameLineErase(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data): Erase data
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub MixedAccess(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset), data(offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub SameLineLengthReset(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data): dataLen = 1
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub AccessLineErase(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    Erase data: Debug.Print data(LBound(data) + offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub PostAccessMutation(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    Erase data
+    offset = offset - 1
+    dataLen = dataLen + 1
+  Loop
+End Sub
+
+Private Sub EraseArray(ByRef data() As Byte)
+  Erase data
+End Sub
+
+Private Sub MutatedByRef(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    EraseArray data
+    Debug.Print data(LBound(data) + offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub SetOffset(ByRef value As Long)
+  value = value + 1
+End Sub
+
+Private Sub SetLength(ByRef value As Long)
+  value = value + 1
+End Sub
+
+Private Sub SameLineScalarCall(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data): SetLength dataLen
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub MutatedScalar(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    SetOffset offset
+    Debug.Print data(LBound(data) + offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub PostAccessStepMutation(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  Dim stepSize As Long
+  dataLen = SafeArrayLen(data)
+  stepSize = 1
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    stepSize = -1
+    offset = offset + stepSize
+  Loop
+End Sub
+
+Private backedgeLoopState As LoopState
+
+Private Sub PostAccessMemberStepMutation(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  backedgeLoopState.step = 1
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    backedgeLoopState.step = -1
+    offset = offset + backedgeLoopState.step
+  Loop
+End Sub
+
+Private Sub SetNegativeMemberStep(ByRef state As LoopState)
+  state.step = -1
+End Sub
+
+Private Sub PostAccessMemberCallMutation(ByRef data() As Byte)
+  Dim dataLen As Long
+  Dim offset As Long
+  backedgeLoopState.step = 1
+  dataLen = SafeArrayLen(data)
+  offset = 0
+  Do While offset < dataLen
+    Debug.Print data(LBound(data) + offset)
+    SetNegativeMemberStep backedgeLoopState
+    offset = offset + backedgeLoopState.step
+  Loop
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenPlainIndex := false
+	seenVariableStep := false
+	seenMutatedIndex := false
+	seenUnrelatedBound := false
+	seenConditionalProbe := false
+	seenConditionalIndex := false
+	seenSameLineErase := false
+	seenSameLineLengthReset := false
+	seenAccessLineErase := false
+	seenPostAccessMutation := false
+	seenSameLineScalarCall := false
+	seenMixedAccess := false
+	seenMutatedByRef := false
+	seenMutatedScalar := false
+	seenAfterProbeMutation := false
+	seenPostAccessStepMutation := false
+	seenPostAccessMemberStepMutation := false
+	seenPostAccessMemberCallMutation := false
+	seenMutatingSafeArrayLenAccess := false
+	seenConditionalStep := false
+	seenSingleLineMutatedIndex := false
+	seenConditionalMemberStep := false
+	seenConditionalAliasMemberStep := false
+	seenForeignMemberStep := false
+	seenSkippingMemberStep := false
+	seenUncalledMemberStep := false
+	seenOrderedMemberStep := false
+	seenLateMemberStep := false
+	seenConditionalRedimParameter := false
+	seenConditionalRedimByRef := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "TLSSend" {
+			if strings.Contains(finding.arrayOperationKey, ":data:") {
+				t.Fatalf("a positive SafeArrayLen chunk loop should prove the ByRef input allocation: %+v", finding)
+			}
+			continue
+		}
+		if finding.Procedure == "PlainIndex" {
+			seenPlainIndex = true
+		}
+		if finding.Procedure == "VariableStep" {
+			seenVariableStep = true
+		}
+		if finding.Procedure == "MutatedIndex" {
+			seenMutatedIndex = true
+		}
+		if finding.Procedure == "UnrelatedBound" {
+			seenUnrelatedBound = true
+		}
+		if finding.Procedure == "ConditionalProbe" {
+			seenConditionalProbe = true
+		}
+		if finding.Procedure == "ConditionalIndex" {
+			seenConditionalIndex = true
+		}
+		if finding.Procedure == "SameLineErase" {
+			seenSameLineErase = true
+		}
+		if finding.Procedure == "SameLineLengthReset" {
+			seenSameLineLengthReset = true
+		}
+		if finding.Procedure == "AccessLineErase" {
+			seenAccessLineErase = true
+		}
+		if finding.Procedure == "PostAccessMutation" {
+			seenPostAccessMutation = true
+		}
+		if finding.Procedure == "SameLineScalarCall" {
+			seenSameLineScalarCall = true
+		}
+		if finding.Procedure == "MixedAccess" {
+			seenMixedAccess = true
+		}
+		if finding.Procedure == "MutatedByRef" {
+			seenMutatedByRef = true
+		}
+		if finding.Procedure == "MutatedScalar" {
+			seenMutatedScalar = true
+		}
+		if finding.Procedure == "AfterProbeMutation" {
+			seenAfterProbeMutation = true
+		}
+		if finding.Procedure == "PostAccessStepMutation" {
+			seenPostAccessStepMutation = true
+		}
+		if finding.Procedure == "PostAccessMemberStepMutation" {
+			seenPostAccessMemberStepMutation = true
+		}
+		if finding.Procedure == "PostAccessMemberCallMutation" {
+			seenPostAccessMemberCallMutation = true
+		}
+		if finding.Procedure == "MutatingSafeArrayLenAccess" {
+			seenMutatingSafeArrayLenAccess = true
+		}
+		if finding.Procedure == "ConditionalStep" {
+			seenConditionalStep = true
+		}
+		if finding.Procedure == "SingleLineMutatedIndex" {
+			seenSingleLineMutatedIndex = true
+		}
+		if finding.Procedure == "ConditionalMemberStep" {
+			seenConditionalMemberStep = true
+		}
+		if finding.Procedure == "ConditionalAliasMemberStep" {
+			seenConditionalAliasMemberStep = true
+		}
+		if finding.Procedure == "ForeignMemberStep" {
+			seenForeignMemberStep = true
+		}
+		if finding.Procedure == "SkippingMemberStep" {
+			seenSkippingMemberStep = true
+		}
+		if finding.Procedure == "UncalledMemberStep" {
+			seenUncalledMemberStep = true
+		}
+		if finding.Procedure == "OrderedMemberStep" {
+			seenOrderedMemberStep = true
+		}
+		if finding.Procedure == "LateMemberStep" {
+			seenLateMemberStep = true
+		}
+		if finding.Procedure == "ConditionalRedimParameter" {
+			seenConditionalRedimParameter = true
+		}
+		if finding.Procedure == "ConditionalRedimByRef" {
+			seenConditionalRedimByRef = true
+		}
+	}
+	if !seenPlainIndex || !seenVariableStep || !seenMutatedIndex || !seenUnrelatedBound || !seenConditionalProbe || !seenConditionalIndex || !seenSameLineErase || !seenSameLineLengthReset || !seenAccessLineErase || !seenPostAccessMutation || !seenSameLineScalarCall || !seenMixedAccess || !seenMutatedByRef || !seenMutatedScalar || !seenAfterProbeMutation || !seenPostAccessStepMutation || !seenPostAccessMemberStepMutation || !seenPostAccessMemberCallMutation || !seenMutatingSafeArrayLenAccess || !seenConditionalStep || !seenSingleLineMutatedIndex || !seenConditionalMemberStep || !seenConditionalAliasMemberStep || !seenForeignMemberStep || !seenSkippingMemberStep || !seenUncalledMemberStep || seenOrderedMemberStep || !seenLateMemberStep || !seenConditionalRedimParameter || !seenConditionalRedimByRef {
+		t.Fatalf("SafeArrayLen proofs must remain conservative for a plain, unrelated-bound, or mutated access: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227RecognizesNotNotByteArrayGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Guarded(ByRef payload() As Byte, ByVal payloadLen As Long)
+  If payloadLen > 0 Then
+    If (Not Not payload) <> 0 Then
+      Debug.Print LBound(payload)
+      Debug.Print payload(LBound(payload))
+    End If
+  End If
+End Sub
+
+Private Sub GuardedLoopErase(ByRef payload() As Byte)
+  Dim index As Long
+  If (Not Not payload) <> 0 Then
+    index = 0
+    Do While index < 1
+      Debug.Print payload(LBound(payload) + index)
+      Erase payload
+      index = index + 1
+    Loop
+  End If
+End Sub
+
+Private Sub ZeroBranch(ByRef payload() As Byte)
+  If (Not Not payload) = 0 Then
+    Debug.Print LBound(payload)
+  End If
+End Sub
+
+Private Sub ErasedAfterGuard(ByRef payload() As Byte)
+  If (Not Not payload) <> 0 Then
+    Erase payload
+    Debug.Print LBound(payload)
+  End If
+End Sub
+
+Private Sub InlineElse(ByRef payload() As Byte)
+  If (Not Not payload) <> 0 Then Debug.Print LBound(payload) Else Debug.Print LBound(payload)
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenGuardedEmpty := false
+	seenGuardedLoopErase := false
+	seenZeroBranch := false
+	seenErasedAfterGuard := false
+	seenInlineElse := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		switch finding.Procedure {
+		case "Guarded":
+			if finding.arrayOperationKey != arrayIndexOperationKey("payload", "empty") {
+				t.Fatalf("the positive Not Not guard should remove only the unallocated-array finding: %+v", finding)
+			}
+			seenGuardedEmpty = true
+		case "GuardedLoopErase":
+			seenGuardedLoopErase = true
+		case "ZeroBranch":
+			seenZeroBranch = true
+		case "ErasedAfterGuard":
+			seenErasedAfterGuard = true
+		case "InlineElse":
+			seenInlineElse = true
+		}
+	}
+	if !seenGuardedEmpty || !seenGuardedLoopErase || !seenZeroBranch || !seenErasedAfterGuard || !seenInlineElse {
+		t.Fatalf("the positive guard should retain the possible-empty warning and the = 0 branch must remain conservative: %+v", findingsByCode(findings, "VBA227"))
 	}
 }
 

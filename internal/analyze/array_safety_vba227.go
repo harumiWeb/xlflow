@@ -54,6 +54,7 @@ func arrayVBA227ResumeFactsFor(proc sourceProcedure) *arrayVBA227ResumeFacts {
 func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges) (arrayFlowState, []Finding) {
 	state = arrayVBA227ClearLoopBodyBounds(state, line)
 	state = arrayVBA227ClearConditionalAllocationGuards(state, proc, text, line, variables)
+	state = arrayVBA227InvalidateNotNotMutationState(file, proc, line, state, variables, ctx)
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "case ") || arrayBoundCallRe.MatchString(text) {
 		state = arrayVBA227RepeatedSelectCaseBoundsState(file, proc, line, state, variables)
 	}
@@ -188,7 +189,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	if argument, _, ok := arrayIsArrayGuardCondition(text); ok {
 		state = arrayElementGuardState(state, argument, variables)
 	}
-	if name, ok := arraySafeArrayPointerGuardTarget(file, proc, line, text, variables); ok {
+	if name, ok := arraySafeArrayPointerGuardTarget(file, proc, line, text, variables, ctx.arrayVBA227ExternalAPIs); ok {
 		if value, known := state[name]; known {
 			value.kind = arrayAllocated
 			value.knownArray = true
@@ -201,6 +202,30 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		}
 	}
 	return state, findings
+}
+
+func arrayVBA227InvalidateNotNotMutationState(file parsedFile, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, ctx analysisContext) arrayFlowState {
+	access := procedureStatementAtLine(proc, line)
+	if access.ID == 0 {
+		return state
+	}
+	name, guardLine, ok := arrayVBA227EnclosingNotNotGuard(proc, access, variables)
+	if !ok || arrayVBA227NoArrayMutationAfterGuard(file, proc, name, guardLine, line, ctx) {
+		return state
+	}
+	value, known := state[name]
+	if !known {
+		return state
+	}
+	updated := cloneArrayState(state)
+	value.kind = arrayUnknown
+	value.knownArray = true
+	value.mayBeEmpty = true
+	value.mayBeUnallocated = true
+	value.dimensions = nil
+	value.preserveShape = nil
+	updated[name] = value
+	return updated
 }
 
 // arrayVBA227PreserveResumeNextArrayFailure keeps a possible failed call
@@ -293,7 +318,7 @@ func arrayVBA227QualifiedArrayReturnValue(rhs string, ctx analysisContext, varia
 // enough to make later bounds queries valid. Keep the contract contiguous and
 // structural; a pointer-slot check alone, a different memory-copy shape, or a
 // missing descriptor check must remain conservative.
-func arraySafeArrayPointerGuardTarget(file parsedFile, proc sourceProcedure, line int, text string, variables map[string]arrayVariable) (string, bool) {
+func arraySafeArrayPointerGuardTarget(file parsedFile, proc sourceProcedure, line int, text string, variables map[string]arrayVariable, externalAPIs arrayVBA227ExternalAPISet) (string, bool) {
 	if line <= proc.StartLine || line > proc.EndLine || line > len(file.Lines) {
 		return "", false
 	}
@@ -319,7 +344,7 @@ func arraySafeArrayPointerGuardTarget(file parsedFile, proc sourceProcedure, lin
 	ptrGuard := previous[1]
 	pointerAssignment := previous[2]
 	copyMatch := arraySafeArrayPointerCopyRe.FindStringSubmatch(copyText)
-	if len(copyMatch) != 4 || !strings.EqualFold(copyMatch[1], descriptorName) || !strings.EqualFold(copyMatch[1], copyMatch[3]) {
+	if len(copyMatch) != 4 || !externalAPIs.hasExternalDeclare(file, "CopyMemoryFromPtr") || !strings.EqualFold(copyMatch[1], descriptorName) || !strings.EqualFold(copyMatch[1], copyMatch[3]) {
 		return "", false
 	}
 	ptrName := strings.ToLower(cleanIdentifier(copyMatch[2]))
@@ -328,7 +353,7 @@ func arraySafeArrayPointerGuardTarget(file parsedFile, proc sourceProcedure, lin
 		return "", false
 	}
 	lhs, rhs, indexed, assigned := arrayAssignment(pointerAssignment)
-	if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), ptrName) || !strings.EqualFold(arrayCallName(rhs), "varptrarray") {
+	if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), ptrName) || !strings.EqualFold(arrayCallName(rhs), "varptrarray") || !externalAPIs.hasExternalDeclare(file, arrayCallName(rhs)) {
 		return "", false
 	}
 	open := firstParenOutsideString(rhs)
@@ -349,6 +374,64 @@ func arraySafeArrayPointerGuardTarget(file parsedFile, proc sourceProcedure, lin
 		return "", false
 	}
 	return arrayName, true
+}
+
+func buildArrayVBA227ExternalAPISet(files []parsedFile) arrayVBA227ExternalAPISet {
+	apis := arrayVBA227ExternalAPISet{
+		declared:        map[string]bool{},
+		privateByModule: map[string]map[string]bool{},
+		procedures:      map[string]bool{},
+	}
+	for _, file := range files {
+		for _, declaration := range file.IR.Declarations {
+			kind := strings.ToLower(strings.TrimSpace(declaration.Kind))
+			if strings.HasPrefix(kind, "declare") {
+				name := strings.ToLower(cleanIdentifier(declaration.Name))
+				if name == "" {
+					continue
+				}
+				if strings.EqualFold(strings.TrimSpace(declaration.Visibility), "Private") {
+					module := arrayVBA227ModuleKey(file)
+					if apis.privateByModule[module] == nil {
+						apis.privateByModule[module] = map[string]bool{}
+					}
+					apis.privateByModule[module][name] = true
+				} else {
+					apis.declared[name] = true
+				}
+			}
+		}
+		procedures := file.procedureView()
+		for index := 0; index < procedures.Len(); index++ {
+			name := strings.ToLower(cleanIdentifier(procedures.valueAt(index).Name))
+			if name != "" {
+				apis.procedures[name] = true
+			}
+		}
+	}
+	return apis
+}
+
+func arrayVBA227ModuleKey(file parsedFile) string {
+	module := strings.TrimSpace(file.IR.ModuleName)
+	if module == "" {
+		module = strings.TrimSpace(file.Module)
+	}
+	if module == "" {
+		module = strings.TrimSpace(file.Path)
+	}
+	return strings.ToLower(module)
+}
+
+func (apis arrayVBA227ExternalAPISet) hasExternalDeclare(file parsedFile, name string) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" || apis.procedures[name] {
+		return false
+	}
+	if apis.declared[name] {
+		return true
+	}
+	return apis.privateByModule[arrayVBA227ModuleKey(file)][name]
 }
 
 // arrayVBA227DerivedZeroBasedLoopArray recognizes the narrow StrConv-to-Byte
@@ -423,6 +506,905 @@ func arrayVBA227DerivedZeroBasedLoopArray(file parsedFile, proc sourceProcedure,
 	return arrayName, true
 }
 
+func arrayVBA227NoArrayMutationAfterSafeArrayLength(file parsedFile, proc sourceProcedure, arrayName, indexName, lengthName string, line int, ctx analysisContext) bool {
+	if line <= 0 || line > len(file.Lines) {
+		return false
+	}
+	arrayName = strings.ToLower(cleanIdentifier(arrayName))
+	lengthName = strings.ToLower(cleanIdentifier(lengthName))
+	spans := splitRangeValueSourceStatementsWithOffsets(normalizedCodeLine(file.Lines[line-1]))
+	found := false
+	for index, span := range spans {
+		lhs, rhs, indexed, assigned := arrayAssignment(span.text)
+		if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), lengthName) {
+			continue
+		}
+		if _, ok := arrayVBA227SafeArrayLengthSource(rhs, ctx); !ok {
+			continue
+		}
+		found = true
+		for _, later := range spans[index+1:] {
+			if arrayVBA227SourceMutatesArray(later.text, arrayName) {
+				return false
+			}
+			lhs, _, indexed, assigned := arrayAssignment(later.text)
+			if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), lengthName) {
+				return false
+			}
+			if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), indexName) {
+				_, rhs, _, _ := arrayAssignment(later.text)
+				value, zero := integerLiteral(rhs)
+				if !zero || value != 0 {
+					return false
+				}
+			}
+		}
+		break
+	}
+	if !found {
+		return false
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine != line || arrayVBA227SafeArrayLengthCall(proc, call, arrayName, ctx) {
+			continue
+		}
+		if arrayVBA227CallMayInvalidateArray(proc, call, arrayName, ctx) || arrayVBA227CallMayMutateScalar(proc, call, arrayName, indexName, lengthName, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227NoArrayOrScalarMutationOnAccessLine(file parsedFile, proc sourceProcedure, arrayName, indexName, lengthName string, line int, ctx analysisContext) bool {
+	if line <= 0 || line > len(file.Lines) {
+		return false
+	}
+	arrayName = strings.ToLower(cleanIdentifier(arrayName))
+	indexName = strings.ToLower(cleanIdentifier(indexName))
+	lengthName = strings.ToLower(cleanIdentifier(lengthName))
+	for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
+		if arrayVBA227SourceMutatesArray(source, arrayName) {
+			return false
+		}
+		lhs, _, indexed, assigned := arrayAssignment(source)
+		if assigned && !indexed {
+			lhs = strings.ToLower(cleanIdentifier(lhs))
+			if lhs == indexName || lhs == lengthName {
+				return false
+			}
+		}
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine != line {
+			continue
+		}
+		arrayMutates := arrayVBA227CallMayInvalidateArray(proc, call, arrayName, ctx)
+		scalarMutates := arrayVBA227CallMayMutateScalar(proc, call, arrayName, indexName, lengthName, ctx)
+		if arrayMutates || scalarMutates {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227NoUnsafeDoWhileBodyMutationAfterAccess(file parsedFile, proc sourceProcedure, loop procedureir.Statement, arrayName, indexName, lengthName string, accessLine, endLine int, ctx analysisContext) bool {
+	if accessLine <= 0 || endLine <= accessLine {
+		return false
+	}
+	stepDependencies := arrayVBA227LoopStepDependencies(file, proc, loop, indexName)
+	if !arrayVBA227NoArrayMutationBetweenWithCalls(file, proc, arrayName, accessLine+1, endLine, ctx) {
+		return false
+	}
+	if accessLine <= len(file.Lines) && arrayVBA227SourceAssignsStepDependency(normalizedCodeLine(file.Lines[accessLine-1]), stepDependencies) {
+		return false
+	}
+	for line := max(accessLine+1, proc.StartLine); line < endLine && line <= len(file.Lines); line++ {
+		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
+			if arrayVBA227UnsafeDoWhileScalarMutation(file, proc, loop, arrayName, line, source, indexName, lengthName, stepDependencies, ctx) {
+				return false
+			}
+		}
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine < accessLine || call.Range.StartLine >= endLine {
+			continue
+		}
+		if (call.Range.StartLine > accessLine && arrayVBA227CallMayMutateScalar(proc, call, arrayName, indexName, lengthName, ctx)) || arrayVBA227CallMayMutateStepDependency(file, proc, call, stepDependencies, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227UnsafeDoWhileScalarMutation(file parsedFile, proc sourceProcedure, loop procedureir.Statement, arrayName string, line int, text, indexName, lengthName string, stepDependencies map[string]bool, ctx analysisContext) bool {
+	for _, source := range splitRangeValueSourceStatements(text) {
+		if arrayVBA227SourceAssignsStepDependency(source, stepDependencies) {
+			return true
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(source)
+		if assigned && !indexed {
+			name := strings.ToLower(cleanIdentifier(lhs))
+			if name == lengthName {
+				return true
+			}
+			if name == indexName && !arrayVBA227IsProvenForwardLoopIncrement(file, proc, loop, arrayName, line, rhs, indexName, lengthName, ctx) {
+				return true
+			}
+		}
+		if _, body, ok := arrayIfThenParts(source); ok && strings.TrimSpace(body) != "" {
+			thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+			branches := []string{thenBody}
+			if hasElse {
+				branches = append(branches, elseBody)
+			}
+			for _, branch := range branches {
+				for _, nested := range splitRangeValueSourceStatements(branch) {
+					lhs, rhs, indexed, assigned := arrayAssignment(nested)
+					if assigned && !indexed {
+						name := strings.ToLower(cleanIdentifier(lhs))
+						if name == lengthName || name == indexName && !arrayVBA227IsProvenForwardLoopIncrement(file, proc, loop, arrayName, line, rhs, indexName, lengthName, ctx) {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func arrayVBA227LoopStepDependencies(file parsedFile, proc sourceProcedure, loop procedureir.Statement, indexName string) map[string]bool {
+	dependencies := map[string]bool{}
+	var collect func(string)
+	collect = func(text string) {
+		for _, source := range splitRangeValueSourceStatements(text) {
+			lhs, rhs, indexed, assigned := arrayAssignment(source)
+			if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), indexName) {
+				arrayVBA227AddLoopStepDependency(file, rhs, indexName, dependencies)
+			}
+			if _, body, ok := arrayIfThenParts(source); ok && strings.TrimSpace(body) != "" {
+				thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+				collect(thenBody)
+				if hasElse {
+					collect(elseBody)
+				}
+			}
+		}
+	}
+	for line := loop.Range.StartLine + 1; line <= loop.Range.EndLine && line <= len(file.Lines); line++ {
+		collect(normalizedCodeLine(file.Lines[line-1]))
+	}
+	queue := make([]string, 0, len(dependencies))
+	for dependency := range dependencies {
+		queue = append(queue, dependency)
+	}
+	visited := map[string]bool{}
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		if visited[name] {
+			continue
+		}
+		visited[name] = true
+		before := len(dependencies)
+		for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+			for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
+				lhs, rhs, indexed, assigned := arrayAssignment(source)
+				if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), name) {
+					arrayVBA227AddLoopStepDependency(file, rhs, name, dependencies)
+				}
+			}
+		}
+		for dependency := range dependencies {
+			if !visited[dependency] && len(dependencies) > before {
+				queue = append(queue, dependency)
+			}
+		}
+	}
+	return dependencies
+}
+
+func arrayVBA227AddLoopStepDependency(file parsedFile, rhs, indexName string, dependencies map[string]bool) {
+	compact := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(rhs))), "")
+	prefix := strings.ToLower(cleanIdentifier(indexName)) + "+"
+	if !strings.HasPrefix(compact, prefix) {
+		return
+	}
+	step := strings.TrimSpace(strings.TrimPrefix(compact, prefix))
+	if step == "" {
+		return
+	}
+	if value, ok := integerLiteral(step); ok && value > 0 {
+		return
+	}
+	if value, err := constantIntegerExpression(step, arrayIntegerModuleConstants(file)); err == nil && value > 0 {
+		return
+	}
+	if name := arrayVBA227DirectScalarReference(step); name != "" && name != strings.ToLower(cleanIdentifier(indexName)) {
+		dependencies[name] = true
+	}
+}
+
+func arrayVBA227SourceAssignsStepDependency(text string, dependencies map[string]bool) bool {
+	if len(dependencies) == 0 {
+		return false
+	}
+	for _, source := range splitRangeValueSourceStatements(text) {
+		lhs, _, indexed, assigned := arrayAssignment(source)
+		if assigned && !indexed && dependencies[strings.ToLower(cleanIdentifier(lhs))] {
+			return true
+		}
+		if _, body, ok := arrayIfThenParts(source); ok && strings.TrimSpace(body) != "" {
+			thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+			if arrayVBA227SourceAssignsStepDependency(thenBody, dependencies) || hasElse && arrayVBA227SourceAssignsStepDependency(elseBody, dependencies) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func arrayVBA227CallMayMutateStepDependency(file parsedFile, proc sourceProcedure, call procedureir.CallSite, dependencies map[string]bool, ctx analysisContext) bool {
+	for dependency := range dependencies {
+		if !strings.Contains(dependency, ".") {
+			if arrayVBA227CallMayMutateNamedScalar(file, proc, call, dependency, ctx) {
+				return true
+			}
+			continue
+		}
+		receiver := dependency[:strings.IndexByte(dependency, '.')]
+		for _, argument := range arrayCallArgumentTexts(proc, call) {
+			if directArrayArgumentName(argument) == receiver {
+				return true
+			}
+		}
+		for _, argument := range call.Arguments.Named {
+			if directArrayArgumentName(argument.ValueText) == receiver {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func arrayVBA227IsForwardLoopIncrement(rhs, indexName string) bool {
+	compact := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(rhs)), " ", "")
+	prefix := strings.ToLower(cleanIdentifier(indexName)) + "+"
+	if !strings.HasPrefix(compact, prefix) {
+		return false
+	}
+	step := strings.TrimSpace(strings.TrimPrefix(compact, prefix))
+	if step == "" || strings.HasPrefix(step, "-") {
+		return false
+	}
+	if value, ok := integerLiteral(step); ok {
+		return value > 0
+	}
+	return false
+}
+
+func arrayVBA227IsProvenForwardLoopIncrement(file parsedFile, proc sourceProcedure, loop procedureir.Statement, arrayName string, line int, rhs, indexName, lengthName string, ctx analysisContext) bool {
+	if arrayVBA227IsForwardLoopIncrement(rhs, indexName) {
+		return true
+	}
+	compact := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(rhs))), "")
+	prefix := strings.ToLower(cleanIdentifier(indexName)) + "+"
+	if !strings.HasPrefix(compact, prefix) {
+		return false
+	}
+	stepName := arrayVBA227DirectScalarReference(strings.TrimPrefix(compact, prefix))
+	if stepName == "" || stepName == strings.ToLower(cleanIdentifier(indexName)) || stepName == strings.ToLower(cleanIdentifier(lengthName)) {
+		return false
+	}
+	return arrayVBA227PositiveLoopScalarAtLine(file, proc, loop, stepName, indexName, lengthName, line, ctx, map[string]bool{})
+}
+
+func arrayVBA227PositiveLoopScalarAtLine(file parsedFile, proc sourceProcedure, loop procedureir.Statement, name, indexName, lengthName string, line int, ctx analysisContext, visiting map[string]bool) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" || visiting[name] {
+		return false
+	}
+	if strings.Contains(name, ".") {
+		return arrayVBA227PositiveMemberExpression(file, proc, name, line, ctx)
+	}
+	visiting[name] = true
+	defer delete(visiting, name)
+	target := procedureStatementAtLine(proc, line)
+	if target.ID == 0 {
+		return false
+	}
+	found := false
+	dominatingAssignment := false
+	for sourceLine := proc.StartLine; sourceLine <= line && sourceLine <= len(file.Lines); sourceLine++ {
+		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[sourceLine-1])) {
+			lhs, rhs, indexed, assigned := arrayAssignment(source)
+			if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), name) {
+				continue
+			}
+			found = true
+			positive := arrayVBA227PositiveLoopScalarExpression(file, proc, loop, name, rhs, indexName, lengthName, sourceLine, ctx, visiting)
+			positiveAfterReDim := false
+			if !positive {
+				positiveAfterReDim = arrayVBA227PositiveScalarAfterSuccessfulReDim(file, proc, name, line, ctx)
+				positive = positiveAfterReDim
+			}
+			if !positive {
+				return false
+			}
+			if positiveAfterReDim || arrayVBA227StatementLineDominates(proc, sourceLine, target) {
+				dominatingAssignment = true
+			}
+		}
+	}
+	if !found || !dominatingAssignment {
+		return false
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine < proc.StartLine || call.Range.StartLine > line {
+			continue
+		}
+		if arrayVBA227CallMayMutateNamedScalar(file, proc, call, name, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+// A successful normal-path ReDim with an upper bound of step - 1 also proves
+// that the step is positive at the following access. This is useful when the
+// step is loaded from persistent member state and the access is after the
+// scratch-array allocation: a zero or negative step would fail at ReDim and
+// cannot reach the later array access. Keep the inference narrow and reject
+// procedures with error handling, where a failed ReDim could resume elsewhere.
+func arrayVBA227PositiveScalarAfterSuccessfulReDim(file parsedFile, proc sourceProcedure, name string, accessLine int, ctx analysisContext) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" || accessLine <= proc.StartLine || arrayProcedureHasErrorHandling(proc) {
+		return false
+	}
+	target := procedureStatementAtLine(proc, accessLine)
+	if target.ID == 0 {
+		return false
+	}
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementReDim || statement.Range.StartLine >= accessLine || !arrayVBA227StatementLineDominates(proc, statement.Range.StartLine, target) {
+			continue
+		}
+		line := statement.Range.StartLine
+		if line <= 0 || line > len(file.Lines) || len(splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1]))) != 1 {
+			continue
+		}
+		text := strings.TrimSpace(normalizedCodeLine(statement.Text))
+		match := arrayRedimRe.FindStringSubmatch(text)
+		if len(match) == 0 || strings.TrimSpace(match[1]) != "" {
+			continue
+		}
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if !direct || !arrayVBA227RedimUsesPositiveScalar(redim.dimensions, name) {
+				continue
+			}
+			if !arrayVBA227NoScalarAssignmentBeforeAccess(file, proc, name, line+1, accessLine, ctx) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227RedimUsesPositiveScalar(dimensions, name string) bool {
+	parts := splitArgs(dimensions)
+	if len(parts) != 1 {
+		return false
+	}
+	bound := canonicalArrayBoundExpression(parts[0])
+	return bound == "0to"+name+"-1"
+}
+
+func arrayVBA227DirectScalarReference(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" || !isIdentifierStart(text[0]) {
+		return ""
+	}
+	for index := 1; index < len(text); index++ {
+		if text[index] == '.' {
+			if index+1 >= len(text) || !isIdentifierStart(text[index+1]) {
+				return ""
+			}
+			index++
+			continue
+		}
+		if !isIdentifierPart(text[index]) {
+			return ""
+		}
+	}
+	return strings.ToLower(cleanIdentifier(text))
+}
+
+func arrayVBA227PositiveLoopScalarExpression(file parsedFile, proc sourceProcedure, loop procedureir.Statement, name, rhs, indexName, lengthName string, line int, ctx analysisContext, visiting map[string]bool) bool {
+	expression := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(rhs))), "")
+	for len(expression) >= 2 && expression[0] == '(' && expression[len(expression)-1] == ')' {
+		expression = strings.TrimSpace(expression[1 : len(expression)-1])
+	}
+	if value, ok := integerLiteral(expression); ok {
+		return value > 0
+	}
+	if value, err := constantIntegerExpression(expression, arrayIntegerModuleConstants(file)); err == nil {
+		return value > 0
+	}
+	if arrayVBA227PositiveMemberExpression(file, proc, expression, line, ctx) {
+		return true
+	}
+	if expression == strings.ToLower(cleanIdentifier(lengthName))+"-"+strings.ToLower(cleanIdentifier(indexName)) {
+		return true
+	}
+	if arrayVBA227PositiveScalarFallback(file, proc, loop, name, line) {
+		return true
+	}
+	referenceName := directArrayArgumentName(expression)
+	if referenceName == "" {
+		return false
+	}
+	return arrayVBA227PositiveLoopScalarAtLine(file, proc, loop, referenceName, indexName, lengthName, line, ctx, visiting)
+}
+
+func arrayVBA227PositiveScalarFallback(file parsedFile, proc sourceProcedure, loop procedureir.Statement, name string, sourceLine int) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" || sourceLine <= 0 || loop.Range.StartLine <= sourceLine {
+		return false
+	}
+	target := procedureStatementAtLine(proc, loop.Range.StartLine)
+	if target.ID == 0 {
+		return false
+	}
+	constants := arrayIntegerModuleConstants(file)
+	for guardLine := sourceLine + 1; guardLine < loop.Range.StartLine && guardLine <= len(file.Lines); guardLine++ {
+		if !arrayVBA227NonPositiveScalarGuard(normalizedCodeLine(file.Lines[guardLine-1]), name) {
+			continue
+		}
+		if !arrayVBA227StatementLineDominates(proc, guardLine, target) {
+			continue
+		}
+		for candidateLine := guardLine + 1; candidateLine < loop.Range.StartLine && candidateLine <= len(file.Lines); candidateLine++ {
+			candidate := strings.TrimSpace(normalizedCodeLine(file.Lines[candidateLine-1]))
+			lower := strings.ToLower(candidate)
+			if strings.HasPrefix(lower, "end if") {
+				break
+			}
+			if strings.HasPrefix(lower, "else") {
+				break
+			}
+			for _, source := range splitRangeValueSourceStatements(candidate) {
+				lhs, rhs, indexed, assigned := arrayAssignment(source)
+				if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), name) {
+					continue
+				}
+				value, err := constantIntegerExpression(strings.TrimSpace(rhs), constants)
+				if err == nil && value > 0 {
+					return true
+				}
+				return false
+			}
+		}
+	}
+	return false
+}
+
+func arrayVBA227NonPositiveScalarGuard(text, name string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(text))
+	if !strings.HasPrefix(trimmed, "if ") || !strings.HasSuffix(trimmed, " then") {
+		return false
+	}
+	condition := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "if "), " then"))
+	return condition == strings.ToLower(cleanIdentifier(name))+" <= 0"
+}
+
+func arrayVBA227PositiveMemberExpression(file parsedFile, proc sourceProcedure, expression string, line int, ctx analysisContext) bool {
+	expression = strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(expression))), "")
+	if expression == "" || !strings.Contains(expression, ".") {
+		return false
+	}
+	for _, char := range expression {
+		if char != '.' && !isVBAIdentifierRune(char) {
+			return false
+		}
+	}
+	found := false
+	constants := arrayIntegerModuleConstants(file)
+	target := procedureStatementAtLine(proc, line)
+	for sourceLine := 1; sourceLine < line && sourceLine <= len(file.Lines); sourceLine++ {
+		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[sourceLine-1])) {
+			lhs, rhs, indexed, assigned := arrayAssignment(source)
+			if !assigned || indexed || !arrayVBA227MemberAssignmentMatches(lhs, expression) {
+				continue
+			}
+			found = true
+			owner, ok := arrayModuleProcedureAtLine(file, sourceLine)
+			if !ok || !arrayVBA227MemberAssignmentIsUnconditional(owner, sourceLine) {
+				return false
+			}
+			if arrayProcedureKey(owner) != arrayProcedureKey(proc) {
+				if !arrayProcedureIsParticipant(ctx, owner) || !arrayVBA227MemberAssignmentAvailableBefore(proc, owner, target, ctx) {
+					return false
+				}
+			} else if target.ID == 0 || !arrayVBA227StatementLineDominates(owner, sourceLine, target) {
+				return false
+			}
+			positive := arrayVBA227PositiveProcedureScalarExpression(file, owner, rhs, sourceLine, constants, ctx, map[string]bool{})
+			if !positive {
+				return false
+			}
+		}
+		if arrayVBA227SourceAssignsMemberConditionally(normalizedCodeLine(file.Lines[sourceLine-1]), expression) {
+			return false
+		}
+	}
+	if line >= 1 && line <= len(file.Lines) && arrayVBA227SourceAssignsMember(normalizedCodeLine(file.Lines[line-1]), expression) {
+		// A source line may contain both the loop access and a later colon-
+		// separated member write. The IR range is line-based here, so reject
+		// the whole line rather than carrying the earlier positive value past
+		// an update whose exact segment cannot be proven.
+		return false
+	}
+	return found
+}
+
+// arrayVBA227MemberAssignmentAvailableBefore proves the interprocedural part
+// of a member-step contract. Participant membership only says that two
+// procedures may exchange array facts; it does not say that a setter ran on
+// the path reaching this access. Require a reachable call that dominates the
+// access, and recursively require the same property for private helper calls.
+func arrayVBA227MemberAssignmentAvailableBefore(caller, owner sourceProcedure, access procedureir.Statement, ctx analysisContext) bool {
+	if access.ID == 0 || caller.Graph == nil {
+		return false
+	}
+	return arrayVBA227MemberAssignmentCallBefore(caller, owner, access, ctx, map[string]bool{})
+}
+
+func arrayVBA227MemberAssignmentCallBefore(caller, owner sourceProcedure, access procedureir.Statement, ctx analysisContext, visiting map[string]bool) bool {
+	for call := range caller.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine >= access.Range.StartLine || !applicationStateCallReachable(caller, call) {
+			continue
+		}
+		if !arrayVBA227StatementLineDominates(caller, call.Range.StartLine, access) {
+			continue
+		}
+		if arrayVBA227CallTargetsProcedure(ctx, call, owner) {
+			return true
+		}
+		_, callee, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if !ok || !arrayProcedureIsParticipant(ctx, callee) || arrayProcedureKey(callee) == arrayProcedureKey(caller) {
+			continue
+		}
+		if arrayVBA227ProcedureCallsMemberBeforeNormalExit(callee, owner, ctx, visiting) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227ProcedureCallsMemberBeforeNormalExit(proc, owner sourceProcedure, ctx analysisContext, visiting map[string]bool) bool {
+	key := arrayProcedureKey(proc)
+	if key == "" || visiting[key] || proc.Graph == nil {
+		return false
+	}
+	visiting[key] = true
+	defer delete(visiting, key)
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || !applicationStateCallReachable(proc, call) || !arrayVBA227StatementLineDominatesNormalExit(proc, call.Range.StartLine) {
+			continue
+		}
+		if arrayVBA227CallTargetsProcedure(ctx, call, owner) {
+			return true
+		}
+		_, callee, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if !ok || !arrayProcedureIsParticipant(ctx, callee) {
+			continue
+		}
+		if arrayVBA227ProcedureCallsMemberBeforeNormalExit(callee, owner, ctx, visiting) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227CallTargetsProcedure(ctx analysisContext, call procedureir.CallSite, target sourceProcedure) bool {
+	resolution := arrayCallResolution(ctx, call)
+	if resolution.Status != procedureir.ResolutionMatched || len(resolution.Candidates) != 1 {
+		return false
+	}
+	qualified := strings.ToLower(strings.TrimSpace(resolution.Candidates[0].QualifiedName))
+	if qualified == arrayProcedureKey(target) || qualified == strings.ToLower(strings.TrimSpace(target.Name)) {
+		return true
+	}
+	_, resolved, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+	return ok && arrayProcedureKey(resolved) == arrayProcedureKey(target)
+}
+
+func arrayVBA227MemberAssignmentIsUnconditional(proc sourceProcedure, line int) bool {
+	statement := procedureStatementAtLine(proc, line)
+	return statement.ID != 0 && arrayVBA227BranchOwner(proc, statement) == 0 && arrayVBA227StatementLineDominatesNormalExit(proc, line)
+}
+
+func arrayVBA227SourceAssignsMemberConditionally(text, member string) bool {
+	for _, source := range splitRangeValueSourceStatements(text) {
+		if _, _, indexed, assigned := arrayAssignment(source); assigned && !indexed {
+			lhs, _, _, _ := arrayAssignment(source)
+			if arrayVBA227MemberAssignmentMatches(lhs, member) {
+				continue
+			}
+		}
+		_, body, ok := arrayIfThenParts(source)
+		if !ok || strings.TrimSpace(body) == "" {
+			continue
+		}
+		thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+		if arrayVBA227SourceAssignsMember(thenBody, member) || hasElse && arrayVBA227SourceAssignsMember(elseBody, member) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227SourceAssignsMember(text, member string) bool {
+	for _, source := range splitRangeValueSourceStatements(text) {
+		lhs, _, indexed, assigned := arrayAssignment(source)
+		if assigned && !indexed && arrayVBA227MemberAssignmentMatches(lhs, member) {
+			return true
+		}
+		_, body, ok := arrayIfThenParts(source)
+		if !ok || strings.TrimSpace(body) == "" {
+			continue
+		}
+		thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+		if arrayVBA227SourceAssignsMember(thenBody, member) || hasElse && arrayVBA227SourceAssignsMember(elseBody, member) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227MemberAssignmentMatches(lhs, member string) bool {
+	lhs = strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(lhs))), "")
+	member = strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(member))), "")
+	return lhs == member || strings.HasPrefix(member, ".") && strings.HasSuffix(lhs, member)
+}
+
+func arrayVBA227PositiveProcedureScalarExpression(file parsedFile, proc sourceProcedure, rhs string, line int, constants map[string]int, ctx analysisContext, visiting map[string]bool) bool {
+	expression := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(rhs))), "")
+	for len(expression) >= 2 && expression[0] == '(' && expression[len(expression)-1] == ')' {
+		expression = strings.TrimSpace(expression[1 : len(expression)-1])
+	}
+	if value, err := constantIntegerExpression(expression, constants); err == nil {
+		return value > 0
+	}
+	name := directArrayArgumentName(expression)
+	if name == "" {
+		return false
+	}
+	return arrayVBA227PositiveProcedureScalarAtLine(file, proc, name, line, constants, ctx, visiting)
+}
+
+func arrayVBA227PositiveProcedureScalarAtLine(file parsedFile, proc sourceProcedure, name string, line int, constants map[string]int, ctx analysisContext, visiting map[string]bool) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" || visiting[name] {
+		return false
+	}
+	visiting[name] = true
+	defer delete(visiting, name)
+	found := false
+	dominatingPositive := false
+	target := procedureStatementAtLine(proc, line)
+	if target.ID == 0 {
+		return false
+	}
+	for sourceLine := proc.StartLine; sourceLine <= line && sourceLine <= len(file.Lines); sourceLine++ {
+		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[sourceLine-1])) {
+			lhs, rhs, indexed, assigned := arrayAssignment(source)
+			if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), name) {
+				continue
+			}
+			found = true
+			expressionPositive := arrayVBA227PositiveProcedureScalarExpression(file, proc, rhs, sourceLine, constants, ctx, visiting)
+			floorPositive := arrayVBA227PositiveScalarFloor(file, proc, name, sourceLine, line, constants)
+			if !expressionPositive && !floorPositive {
+				return false
+			}
+			if arrayVBA227StatementLineDominates(proc, sourceLine, target) {
+				dominatingPositive = true
+			}
+		}
+	}
+	if !found || !dominatingPositive {
+		return false
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine < proc.StartLine || call.Range.StartLine > line {
+			continue
+		}
+		if arrayVBA227CallMayMutateNamedScalar(file, proc, call, name, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227PositiveScalarFloor(file parsedFile, proc sourceProcedure, name string, sourceLine, targetLine int, constants map[string]int) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" || sourceLine <= 0 || targetLine <= sourceLine {
+		return false
+	}
+	for guardLine := sourceLine + 1; guardLine < targetLine && guardLine <= len(file.Lines); guardLine++ {
+		floor, ok := arrayVBA227PositiveScalarFloorGuard(normalizedCodeLine(file.Lines[guardLine-1]), name, constants)
+		if !ok {
+			continue
+		}
+		for candidateLine := guardLine + 1; candidateLine < targetLine && candidateLine <= len(file.Lines); candidateLine++ {
+			candidate := strings.TrimSpace(normalizedCodeLine(file.Lines[candidateLine-1]))
+			lower := strings.ToLower(candidate)
+			if strings.HasPrefix(lower, "end if") || strings.HasPrefix(lower, "else") {
+				break
+			}
+			for _, source := range splitRangeValueSourceStatements(candidate) {
+				lhs, rhs, indexed, assigned := arrayAssignment(source)
+				if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), name) {
+					continue
+				}
+				value, err := constantIntegerExpression(strings.TrimSpace(rhs), constants)
+				if err == nil && value >= floor {
+					return true
+				}
+				return false
+			}
+		}
+	}
+	return false
+}
+
+func arrayVBA227PositiveScalarFloorGuard(text, name string, constants map[string]int) (int, bool) {
+	trimmed := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(text))), " ")
+	if !strings.HasPrefix(trimmed, "if ") || !strings.HasSuffix(trimmed, " then") {
+		return 0, false
+	}
+	condition := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "if "), " then"))
+	operator := strings.Index(condition, "<")
+	if operator < 0 {
+		return 0, false
+	}
+	lhs := directArrayArgumentName(condition[:operator])
+	if lhs != strings.ToLower(cleanIdentifier(name)) {
+		return 0, false
+	}
+	floorText := strings.TrimSpace(condition[operator+1:])
+	if strings.HasPrefix(floorText, "=") {
+		floorText = strings.TrimSpace(floorText[1:])
+	}
+	floor, err := constantIntegerExpression(floorText, constants)
+	if err != nil || floor <= 0 {
+		return 0, false
+	}
+	return floor, true
+}
+
+func arrayVBA227CallMayMutateNamedScalar(file parsedFile, proc sourceProcedure, call procedureir.CallSite, name string, ctx analysisContext) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" || arrayByRefCallIsReadOnly(call) {
+		return false
+	}
+	_, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+	if !resolved {
+		if arrayVBA227ExternalCallPassesNamedScalarByVal(file, proc, call, name) {
+			return false
+		}
+		for _, argument := range call.Arguments.Named {
+			if directArrayArgumentName(argument.ValueText) == name {
+				return true
+			}
+		}
+		for _, argument := range arrayCallArgumentTexts(proc, call) {
+			if directArrayArgumentName(argument) == name {
+				return true
+			}
+		}
+		return false
+	}
+	bindings, mapped := arrayCallArgumentBindings(proc, target, call)
+	if !mapped {
+		return arrayCallPassesDirectArrayArgument(proc, call, name)
+	}
+	for _, binding := range bindings {
+		if directArrayArgumentName(binding.text) != name || binding.parameterIndex < 0 || binding.parameterIndex >= target.Params.Len() {
+			continue
+		}
+		if parameterIsByRefScalar(target.Params.valueAt(binding.parameterIndex)) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227ExternalCallPassesNamedScalarByVal(file parsedFile, proc sourceProcedure, call procedureir.CallSite, name string) bool {
+	callee := strings.ToLower(cleanIdentifier(call.Callee.BaseName))
+	if callee == "" {
+		return false
+	}
+	matchedDeclaration := false
+	for _, declaration := range file.IR.Declarations {
+		kind := strings.ToLower(strings.TrimSpace(declaration.Kind))
+		if !strings.HasPrefix(kind, "declare") || !strings.EqualFold(cleanIdentifier(declaration.Name), callee) {
+			continue
+		}
+		matchedDeclaration = true
+		target := sourceProcedure{Params: newReadOnlySpan(declaration.Parameters)}
+		bindings, mapped := arrayCallArgumentBindings(proc, target, call)
+		if !mapped {
+			return false
+		}
+		argumentFound := false
+		for _, binding := range bindings {
+			if directArrayArgumentName(binding.text) != name {
+				continue
+			}
+			argumentFound = true
+			if binding.parameterIndex < 0 || binding.parameterIndex >= target.Params.Len() || parameterIsByRefScalar(target.Params.valueAt(binding.parameterIndex)) {
+				return false
+			}
+		}
+		if !argumentFound {
+			return false
+		}
+	}
+	return matchedDeclaration
+}
+
+func arrayVBA227CallMayMutateScalar(proc sourceProcedure, call procedureir.CallSite, arrayName, indexName, lengthName string, ctx analysisContext) bool {
+	if arrayByRefCallIsReadOnly(call) {
+		return false
+	}
+	if strings.EqualFold(cleanIdentifier(call.Callee.BaseName), cleanIdentifier(arrayName)) {
+		return false
+	}
+	_, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+	if !resolved {
+		for _, argument := range call.Arguments.Named {
+			name := directArrayArgumentName(argument.ValueText)
+			if name == indexName || name == lengthName {
+				return true
+			}
+		}
+		for _, argument := range arrayCallArgumentTexts(proc, call) {
+			name := directArrayArgumentName(argument)
+			if name == indexName || name == lengthName {
+				return true
+			}
+		}
+		return false
+	}
+	bindings, mapped := arrayCallArgumentBindings(proc, target, call)
+	if !mapped {
+		return arrayCallPassesDirectArrayArgument(proc, call, indexName) || arrayCallPassesDirectArrayArgument(proc, call, lengthName)
+	}
+	for _, binding := range bindings {
+		name := directArrayArgumentName(binding.text)
+		if name != indexName && name != lengthName || binding.parameterIndex < 0 || binding.parameterIndex >= target.Params.Len() {
+			continue
+		}
+		if parameterIsByRefScalar(target.Params.valueAt(binding.parameterIndex)) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227SafeArrayLengthCall(proc sourceProcedure, call procedureir.CallSite, arrayName string, ctx analysisContext) bool {
+	callee := strings.ToLower(cleanIdentifier(call.Callee.BaseName))
+	if callee == "" || !ctx.arraySafeArrayLengthGuards[callee] {
+		return false
+	}
+	arguments := arrayCallArgumentTexts(proc, call)
+	return len(arguments) == 1 && directArrayArgumentName(arguments[0]) == strings.ToLower(cleanIdentifier(arrayName))
+}
+
 // arrayVBA227DerivedDoWhileArray recognizes the lifecycle-safe part of a
 // zero-based `Do While index < length` loop. A local index initialized to zero
 // makes a reachable body imply a positive length; SafeArrayLen then proves
@@ -467,15 +1449,18 @@ func arrayVBA227DerivedDoWhileArray(file parsedFile, proc sourceProcedure, loop 
 	if indexZeroLine == 0 {
 		return "", false
 	}
+	if !arrayVBA227StatementLineDominatesOrUnconditional(proc, indexZeroLine, loop) {
+		return "", false
+	}
+	if !arrayVBA227NoScalarAssignmentBeforeAccess(file, proc, indexName, indexZeroLine+1, loop.Range.StartLine, ctx) {
+		return "", false
+	}
 	for line := proc.StartLine; line < loop.Range.StartLine && line <= len(file.Lines); line++ {
 		if line == indexZeroLine {
 			continue
 		}
-		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
-			lhs, _, indexed, assigned := arrayAssignment(source)
-			if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), indexName) {
-				return "", false
-			}
+		if arrayVBA227SourceAssignsScalar(normalizedCodeLine(file.Lines[line-1]), indexName) {
+			return "", false
 		}
 	}
 	lengthLine := 0
@@ -505,6 +1490,9 @@ func arrayVBA227DerivedDoWhileArray(file parsedFile, proc sourceProcedure, loop 
 	if !arrayKnown || !arrayVariable.isArray || !isByteArrayVariable(arrayVariable) {
 		return "", false
 	}
+	if !arrayVBA227StatementLineDominates(proc, lengthLine, loop) {
+		return "", false
+	}
 	for line := proc.StartLine; line < lengthLine && line <= len(file.Lines); line++ {
 		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
 			lhs, _, indexed, assigned := arrayAssignment(source)
@@ -513,11 +1501,37 @@ func arrayVBA227DerivedDoWhileArray(file parsedFile, proc sourceProcedure, loop 
 			}
 		}
 	}
-	sourceLine, ok := arrayVBA227ZeroBasedArraySourceLine(file, proc, arrayName, lengthLine)
-	if !ok || sourceLine == 0 || lengthLine <= sourceLine || !arrayVBA227NoArrayMutationBetween(file, proc, arrayName, sourceLine+1, lengthLine) {
+	sourceLine, sourceOK := arrayVBA227ZeroBasedArraySourceLine(file, proc, arrayName, lengthLine)
+	if sourceOK {
+		if sourceLine == 0 || lengthLine <= sourceLine || !arrayVBA227NoArrayMutationBetween(file, proc, arrayName, sourceLine+1, lengthLine) {
+			return "", false
+		}
+	} else if !arrayVBA227AllIndexedUsesUseLowerBound(file, arrayName, accessLine, variables) {
+		// A SafeArrayLen result may validate a ByRef array directly, without a
+		// local zero-based factory assignment. That form is accepted only when
+		// every indexed use on the normalized source line explicitly derives its
+		// index from LBound; a plain values(offset) access still needs a proven
+		// zero-based source.
 		return "", false
 	}
-	if accessLine <= lengthLine || !arrayVBA227NoArrayMutationBetween(file, proc, arrayName, lengthLine+1, accessLine) {
+	if !arrayVBA227NoArrayMutationAfterSafeArrayLength(file, proc, arrayName, indexName, lengthName, lengthLine, ctx) {
+		return "", false
+	}
+	noBetween := arrayVBA227NoArrayMutationBetweenWithCalls(file, proc, arrayName, lengthLine+1, accessLine, ctx)
+	noAccess := arrayVBA227NoArrayOrScalarMutationOnAccessLine(file, proc, arrayName, indexName, lengthName, accessLine, ctx)
+	if accessLine <= lengthLine || !noBetween || !noAccess {
+		return "", false
+	}
+	noUnsafe := arrayVBA227NoUnsafeDoWhileBodyMutationAfterAccess(file, proc, loop, arrayName, indexName, lengthName, accessLine, loop.Range.EndLine, ctx)
+	noIndex := arrayVBA227NoScalarAssignmentBetween(file, proc, indexName, loop.Range.StartLine+1, accessLine, ctx)
+	noLength := arrayVBA227NoScalarAssignmentBetween(file, proc, lengthName, lengthLine+1, accessLine, ctx)
+	if !noUnsafe {
+		return "", false
+	}
+	if !noIndex {
+		return "", false
+	}
+	if !noLength {
 		return "", false
 	}
 	return arrayName, true
@@ -554,6 +1568,83 @@ func arrayVBA227ZeroBasedArraySourceLine(file parsedFile, proc sourceProcedure, 
 	return 0, false
 }
 
+func arrayVBA227ZeroBasedArraySourceBeforeOffset(file parsedFile, proc sourceProcedure, arrayName string, beforeLine, beforeOffset int) (int, int, bool) {
+	arrayName = strings.ToLower(cleanIdentifier(arrayName))
+	if arrayName == "" || beforeLine < proc.StartLine || beforeLine > len(file.Lines) {
+		return 0, 0, false
+	}
+	for line := beforeLine; line >= proc.StartLine; line-- {
+		spans := splitRangeValueSourceStatementsWithOffsets(arraySourceOrderStripComment(file.Lines[line-1]))
+		for index := len(spans) - 1; index >= 0; index-- {
+			span := spans[index]
+			if line == beforeLine && (beforeOffset < 0 || span.start >= beforeOffset) {
+				continue
+			}
+			lhs, rhs, indexed, assigned := arrayAssignment(span.text)
+			if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), arrayName) {
+				continue
+			}
+			callee := arrayCallName(rhs)
+			if strings.EqualFold(callee, "strconv") || arrayVBA227ZeroBasedArrayFactoryFromLines(file, callee) || arrayVBA227ZeroBasedArrayFactory(file, callee) {
+				return line, span.start, true
+			}
+			return 0, 0, false
+		}
+	}
+	return 0, 0, false
+}
+
+func arrayVBA227NoArrayMutationBetweenSourceAndProbe(file parsedFile, proc sourceProcedure, arrayName string, sourceLine, sourceOffset, probeLine, probeOffset int, ctx analysisContext) bool {
+	if sourceLine <= 0 || probeLine < sourceLine || sourceOffset < 0 || probeOffset < 0 || probeLine == sourceLine && probeOffset <= sourceOffset {
+		return false
+	}
+	if sourceLine == probeLine {
+		return arrayVBA227NoArrayMutationWithinLine(file, proc, arrayName, sourceLine, sourceOffset, probeOffset, ctx)
+	}
+	if !arrayVBA227NoArrayMutationWithinLine(file, proc, arrayName, sourceLine, sourceOffset, len(arraySourceOrderStripComment(file.Lines[sourceLine-1])), ctx) {
+		return false
+	}
+	if !arrayVBA227NoArrayMutationBetweenWithCalls(file, proc, arrayName, sourceLine+1, probeLine, ctx) {
+		return false
+	}
+	return arrayVBA227NoArrayMutationWithinLine(file, proc, arrayName, probeLine, -1, probeOffset, ctx)
+}
+
+func arrayVBA227NoArrayMutationWithinLine(file parsedFile, proc sourceProcedure, arrayName string, line, startOffset, endOffset int, ctx analysisContext) bool {
+	if line <= 0 || line > len(file.Lines) || startOffset < -1 || endOffset <= startOffset {
+		return false
+	}
+	text := arraySourceOrderStripComment(file.Lines[line-1])
+	for _, span := range splitRangeValueSourceStatementsWithOffsets(text) {
+		if span.start <= startOffset || span.start >= endOffset {
+			continue
+		}
+		if arrayVBA227SourceMutatesArray(span.text, arrayName) {
+			return false
+		}
+	}
+	lineStart := arraySourceOrderLineStartByteFrom(arraySourceOrderLineStarts(file.Source), line)
+	if lineStart < 0 {
+		return false
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine != line {
+			continue
+		}
+		if call.Range.StartByte == 0 {
+			if arrayVBA227CallMayInvalidateArray(proc, call, arrayName, ctx) {
+				return false
+			}
+			continue
+		}
+		relative := call.Range.StartByte - lineStart
+		if relative > startOffset && relative < endOffset && arrayVBA227CallMayInvalidateArray(proc, call, arrayName, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
 func arrayVBA227NoArrayMutationBetween(file parsedFile, proc sourceProcedure, arrayName string, startLine, endLine int) bool {
 	for line := max(startLine, proc.StartLine); line < endLine && line <= len(file.Lines); line++ {
 		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
@@ -563,6 +1654,332 @@ func arrayVBA227NoArrayMutationBetween(file parsedFile, proc sourceProcedure, ar
 		}
 	}
 	return true
+}
+
+func arrayVBA227NoArrayMutationBetweenWithCalls(file parsedFile, proc sourceProcedure, arrayName string, startLine, endLine int, ctx analysisContext) bool {
+	if !arrayVBA227NoArrayMutationBetween(file, proc, arrayName, startLine, endLine) {
+		return false
+	}
+	for line := max(startLine, proc.StartLine); line < endLine && line <= len(file.Lines); line++ {
+		if arrayVBA227SourceMutatesArray(normalizedCodeLine(file.Lines[line-1]), arrayName) {
+			return false
+		}
+	}
+	arrayName = strings.ToLower(cleanIdentifier(arrayName))
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine < startLine || call.Range.StartLine >= endLine {
+			continue
+		}
+		if arrayVBA227CallMayInvalidateArray(proc, call, arrayName, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227NoArrayMutationAfterGuard(file parsedFile, proc sourceProcedure, arrayName string, guardLine, accessLine int, ctx analysisContext) bool {
+	if guardLine <= 0 || accessLine < guardLine {
+		return false
+	}
+	if guardLine != accessLine && !arrayVBA227NoArrayMutationBetweenWithCalls(file, proc, arrayName, guardLine+1, accessLine, ctx) {
+		return false
+	}
+	if !arrayVBA227NoArrayMutationOnLine(file, proc, arrayName, accessLine, ctx) {
+		return false
+	}
+	return arrayVBA227NoArrayMutationAfterLoopAccess(file, proc, arrayName, accessLine, ctx)
+}
+
+func arrayVBA227NoArrayMutationOnLine(file parsedFile, proc sourceProcedure, arrayName string, line int, ctx analysisContext) bool {
+	if line <= 0 || line > len(file.Lines) {
+		return false
+	}
+	if arrayVBA227SourceMutatesArray(normalizedCodeLine(file.Lines[line-1]), arrayName) {
+		return false
+	}
+	arrayName = strings.ToLower(cleanIdentifier(arrayName))
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine != line {
+			continue
+		}
+		if arrayVBA227CallMayInvalidateArray(proc, call, arrayName, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227NoArrayMutationAfterLoopAccess(file parsedFile, proc sourceProcedure, arrayName string, accessLine int, ctx analysisContext) bool {
+	for loop := range proc.Statements.All() {
+		switch loop.Kind {
+		case procedureir.StatementFor, procedureir.StatementForEach, procedureir.StatementDo, procedureir.StatementWhile:
+		default:
+			continue
+		}
+		if accessLine <= loop.Range.StartLine || accessLine >= loop.Range.EndLine {
+			continue
+		}
+		if !arrayVBA227NoArrayMutationBetweenWithCalls(file, proc, arrayName, accessLine+1, loop.Range.EndLine, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227SourceMutatesArray(text, arrayName string) bool {
+	for _, source := range splitRangeValueSourceStatements(text) {
+		if arrayVBA227MutatesArray(source, arrayName) {
+			return true
+		}
+		if _, body, ok := arrayIfThenParts(source); ok && strings.TrimSpace(body) != "" {
+			thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+			branches := []string{thenBody}
+			if hasElse {
+				branches = append(branches, elseBody)
+			}
+			for _, branch := range branches {
+				for _, nested := range splitRangeValueSourceStatements(branch) {
+					if arrayVBA227MutatesArray(nested, arrayName) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func arrayVBA227CallMayInvalidateArray(proc sourceProcedure, call procedureir.CallSite, name string, ctx analysisContext) bool {
+	if name == "" || arrayByRefCallIsReadOnly(call) {
+		return false
+	}
+	if arrayVBA227SafeArrayLengthCall(proc, call, name, ctx) {
+		return false
+	}
+	_, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+	if !resolved {
+		for _, argument := range call.Arguments.Named {
+			if directArrayArgumentName(argument.ValueText) == name {
+				return true
+			}
+		}
+		for _, argument := range arrayCallArgumentTexts(proc, call) {
+			if directArrayArgumentName(argument) == name {
+				return true
+			}
+		}
+		return false
+	}
+	bindings, mapped := arrayCallArgumentBindings(proc, target, call)
+	if !mapped {
+		return arrayCallPassesDirectArrayArgument(proc, call, name)
+	}
+	for _, binding := range bindings {
+		if directArrayArgumentName(binding.text) != name || binding.parameterIndex < 0 || binding.parameterIndex >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(binding.parameterIndex)) {
+			continue
+		}
+		if arrayByRefParameterMayInvalidate(target, binding.parameterIndex, ctx, map[string]bool{}) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227NoScalarAssignmentBetween(file parsedFile, proc sourceProcedure, name string, startLine, endLine int, ctx analysisContext) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" {
+		return false
+	}
+	for line := max(startLine, proc.StartLine); line < endLine && line <= len(file.Lines); line++ {
+		if arrayVBA227SourceAssignsScalar(normalizedCodeLine(file.Lines[line-1]), name) {
+			return false
+		}
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine < startLine || call.Range.StartLine >= endLine || arrayByRefCallIsReadOnly(call) {
+			continue
+		}
+		_, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if !resolved {
+			if arrayVBA227ExternalCallPassesNamedScalarByVal(file, proc, call, name) {
+				continue
+			}
+			for _, argument := range call.Arguments.Named {
+				if directArrayArgumentName(argument.ValueText) == name {
+					return false
+				}
+			}
+			for _, argument := range arrayCallArgumentTexts(proc, call) {
+				if directArrayArgumentName(argument) == name {
+					return false
+				}
+			}
+			continue
+		}
+		bindings, mapped := arrayCallArgumentBindings(proc, target, call)
+		if !mapped {
+			if arrayCallPassesDirectArrayArgument(proc, call, name) {
+				return false
+			}
+			continue
+		}
+		for _, binding := range bindings {
+			if directArrayArgumentName(binding.text) != name || binding.parameterIndex < 0 || binding.parameterIndex >= target.Params.Len() {
+				continue
+			}
+			if parameterIsByRefScalar(target.Params.valueAt(binding.parameterIndex)) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// arrayVBA227NoScalarAssignmentBeforeAccess extends the line-based scan with
+// the physical access line. A colon-separated assignment on that line can
+// occur after the ReDim and before the loop increment, even though the
+// statement range exposes only the shared source line. Treating any matching
+// assignment on the access line as invalid is deliberately conservative when
+// the recovered statement column is unavailable.
+func arrayVBA227NoScalarAssignmentBeforeAccess(file parsedFile, proc sourceProcedure, name string, startLine, accessLine int, ctx analysisContext) bool {
+	if !arrayVBA227NoScalarAssignmentBetween(file, proc, name, startLine, accessLine, ctx) {
+		return false
+	}
+	if accessLine < startLine || accessLine < 1 || accessLine > len(file.Lines) {
+		return true
+	}
+	for _, source := range splitRangeValueSourceStatements(arraySourceOrderStripComment(file.Lines[accessLine-1])) {
+		if arrayVBA227SourceAssignsScalar(source, name) {
+			return false
+		}
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine != accessLine || arrayByRefCallIsReadOnly(call) {
+			continue
+		}
+		if arrayVBA227CallMayMutateNamedScalar(file, proc, call, name, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227BranchRoot(proc sourceProcedure, statement procedureir.Statement) int {
+	current := statement
+	visited := map[int]bool{}
+	for current.ParentID != 0 && !visited[current.ParentID] {
+		visited[current.ParentID] = true
+		parent := procedureStatementByID(proc, current.ParentID)
+		if parent.ID == 0 {
+			return 0
+		}
+		if parent.Kind == procedureir.StatementIf || parent.Kind == procedureir.StatementElseIf {
+			return parent.ID
+		}
+		current = parent
+	}
+	return 0
+}
+
+func arrayVBA227IsAlternativeBranch(proc sourceProcedure, probe, candidate procedureir.Statement) bool {
+	probeBranch := arrayVBA227BranchOwner(proc, probe)
+	candidateBranch := arrayVBA227BranchOwner(proc, candidate)
+	return probeBranch != 0 && candidateBranch != 0 && probeBranch != candidateBranch && arrayVBA227BranchRoot(proc, probe) == arrayVBA227BranchRoot(proc, candidate)
+}
+
+func arrayVBA227ScalarAssignmentsAllowedAfterSafeArrayProbe(text, name string, proc sourceProcedure, probe procedureir.Statement, line int) bool {
+	for _, source := range splitRangeValueSourceStatements(text) {
+		lhs, rhs, indexed, assigned := arrayAssignment(source)
+		if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), name) {
+			value, ok := integerLiteral(rhs)
+			if !ok || value != 0 || !arrayVBA227IsAlternativeBranch(proc, probe, procedureStatementAtLine(proc, line)) {
+				return false
+			}
+		}
+		_, body, ok := arrayIfThenParts(source)
+		if !ok || strings.TrimSpace(body) == "" {
+			continue
+		}
+		thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+		if !arrayVBA227ScalarAssignmentsAllowedAfterSafeArrayProbe(thenBody, name, proc, probe, line) || hasElse && !arrayVBA227ScalarAssignmentsAllowedAfterSafeArrayProbe(elseBody, name, proc, probe, line) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227NoScalarAssignmentAfterSafeArrayProbe(file parsedFile, proc sourceProcedure, name string, startLine, accessLine int, probe procedureir.Statement, ctx analysisContext) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" || probe.ID == 0 {
+		return false
+	}
+	for line := max(startLine, proc.StartLine); line <= accessLine && line <= len(file.Lines); line++ {
+		if !arrayVBA227ScalarAssignmentsAllowedAfterSafeArrayProbe(arraySourceOrderStripComment(file.Lines[line-1]), name, proc, probe, line) {
+			return false
+		}
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine < startLine || call.Range.StartLine > accessLine || arrayByRefCallIsReadOnly(call) {
+			continue
+		}
+		if arrayVBA227CallMayMutateNamedScalar(file, proc, call, name, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227SourceAssignsScalar(text, name string) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" {
+		return false
+	}
+	for _, source := range splitRangeValueSourceStatements(text) {
+		lhs, _, indexed, assigned := arrayAssignment(source)
+		if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), name) {
+			return true
+		}
+		_, body, ok := arrayIfThenParts(source)
+		if !ok || strings.TrimSpace(body) == "" {
+			continue
+		}
+		thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+		if arrayVBA227SourceAssignsScalar(thenBody, name) || hasElse && arrayVBA227SourceAssignsScalar(elseBody, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227AccessUsesBound(file parsedFile, arrayName string, line int, variables map[string]arrayVariable, kind string) bool {
+	if line <= 0 || line > len(file.Lines) {
+		return false
+	}
+	arrayName = strings.ToLower(cleanIdentifier(arrayName))
+	for _, use := range arrayIndexedUsesForSource(normalizedCodeLine(file.Lines[line-1]), variables) {
+		if strings.EqualFold(cleanIdentifier(use.name), arrayName) && arrayUseHasSelfBoundQuery(use, kind) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227AllIndexedUsesUseLowerBound(file parsedFile, arrayName string, line int, variables map[string]arrayVariable) bool {
+	if line <= 0 || line > len(file.Lines) {
+		return false
+	}
+	want := strings.ToLower(cleanIdentifier(arrayName))
+	found := false
+	for _, use := range arrayIndexedUsesForSource(normalizedCodeLine(file.Lines[line-1]), variables) {
+		if !strings.EqualFold(cleanIdentifier(use.name), want) {
+			continue
+		}
+		found = true
+		if !arrayUseHasSelfBoundQuery(use, "lbound") {
+			return false
+		}
+	}
+	return found
 }
 
 func arrayVBA227ZeroBasedArrayFactory(file parsedFile, name string) bool {
@@ -720,6 +2137,15 @@ func arrayVBA227HasZeroBasedStrConvAssignment(file parsedFile, proc sourceProced
 }
 
 func arrayVBA227MutatesArray(text, arrayName string) bool {
+	for _, source := range splitRangeValueSourceStatements(text) {
+		if arrayVBA227MutatesArraySource(source, arrayName) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227MutatesArraySource(text, arrayName string) bool {
 	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
 		for _, clause := range splitArgs(match[2]) {
 			redim, direct := parseDirectArrayRedimClause(clause)
@@ -743,7 +2169,34 @@ func arrayVBA227MutatesArray(text, arrayName string) bool {
 		}
 	}
 	lhs, _, indexed, assigned := arrayAssignment(text)
-	return assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), arrayName)
+	if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), arrayName) {
+		return true
+	}
+	if _, body, ok := arrayIfThenParts(text); ok && strings.TrimSpace(body) != "" {
+		thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+		if arrayVBA227MutatesArray(thenBody, arrayName) || hasElse && arrayVBA227MutatesArray(elseBody, arrayName) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227SafeArrayLengthHelperMayMutateArray(proc sourceProcedure, line int, text, arrayName string) bool {
+	if arrayVBA227MutatesArray(text, arrayName) {
+		return true
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine != line || arrayByRefCallIsReadOnly(call) {
+			continue
+		}
+		if strings.EqualFold(cleanIdentifier(call.Callee.BaseName), "varptrarray") {
+			continue
+		}
+		if arrayCallPassesDirectArrayArgument(proc, call, arrayName) {
+			return true
+		}
+	}
+	return false
 }
 
 func arrayVBA227StatementLineDominates(proc sourceProcedure, line int, target procedureir.Statement) bool {
@@ -765,12 +2218,50 @@ func arrayVBA227StatementLineDominates(proc sourceProcedure, line int, target pr
 	return proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).Dominates(sourceBlock.ID, targetBlock.ID)
 }
 
+func arrayVBA227StatementLineDominatesNormalExit(proc sourceProcedure, line int) bool {
+	if proc.Graph == nil || line <= 0 {
+		return false
+	}
+	source := procedureStatementAtLine(proc, line)
+	if source.ID == 0 {
+		return false
+	}
+	sourceBlock, ok := proc.Graph.BlockForStatement(source.ID)
+	if !ok {
+		return false
+	}
+	return proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).Dominates(sourceBlock.ID, proc.Graph.NormalExit)
+}
+
+func arrayVBA227StatementLineDominatesOrUnconditional(proc sourceProcedure, line int, target procedureir.Statement) bool {
+	if arrayVBA227StatementLineDominates(proc, line, target) {
+		return true
+	}
+	if proc.Graph == nil || line <= 0 || target.ID <= 0 {
+		return false
+	}
+	source := procedureStatementAtLine(proc, line)
+	if source.ID <= 0 || source.ParentID != 0 || source.Range.StartLine >= target.Range.StartLine {
+		return false
+	}
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementGoTo && statement.Kind != procedureir.StatementOnError && statement.Kind != procedureir.StatementResume && statement.Kind != procedureir.StatementLabel {
+			continue
+		}
+		if statement.Range.StartLine >= source.Range.StartLine && statement.Range.StartLine < target.Range.StartLine {
+			return false
+		}
+	}
+	return true
+}
+
 // arrayVBA227FilterForBodyIndexFindings removes only the unallocated/empty
 // index observations for a loop body whose For bound necessarily succeeded
 // before the body could run. Source-line CFG blocks include a For header and
 // its nested body in one scan, so the edge refinement is applied too late for
-// the first body visit; this narrow filter preserves the bound finding itself
-// and any known lower/upper-bound violation.
+// the first body visit. A bound query embedded in a proven SafeArrayLen access
+// is also removed when that query is itself known to be safe; unrelated bound
+// findings and any known lower/upper-bound violation remain.
 func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, ctx analysisContext, resumeNextBefore []bool, vba227Graph *vbacfg.CFGView, resumeNextEdges arrayVBA227ResumeNextEdges) []Finding {
 	if line <= 0 {
 		return findings
@@ -778,6 +2269,7 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 	resumeNext := arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line)
 	proven := map[string]bool{}
 	provenNonEmpty := map[string]bool{}
+	provenBounds := map[string]map[string]bool{}
 	for statement := range proc.Statements.All() {
 		if line <= statement.Range.StartLine || line >= statement.Range.EndLine {
 			continue
@@ -795,6 +2287,15 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 				if name, ok := arrayVBA227DerivedDoWhileArray(file, proc, statement, line, variables, ctx); ok {
 					proven[name] = true
 					provenNonEmpty[name] = true
+					for _, kind := range []string{"lbound", "ubound"} {
+						if !arrayVBA227AccessUsesBound(file, name, line, variables, kind) {
+							continue
+						}
+						if provenBounds[name] == nil {
+							provenBounds[name] = map[string]bool{}
+						}
+						provenBounds[name][kind] = true
+					}
 				}
 			}
 		}
@@ -880,6 +2381,12 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 					remove = true
 					break
 				}
+				for kind := range provenBounds[name] {
+					if finding.arrayOperationKey == arrayBoundOperationKey(kind, name, "unallocated") {
+						remove = true
+						break
+					}
+				}
 			}
 		}
 		if !remove {
@@ -891,11 +2398,11 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 
 // arrayVBA227FilterConditionalBodyIndexFindings removes an unallocated-array
 // observation from a source-line CFG block when the block is inside the true
-// body of a matching positive-length guard. With blocks can keep the If header
-// and its first body statement in one CFG block, so the edge refinement runs
-// after the body has already been visited. The filter is limited to the
-// conditional ByRef allocation contract; unrelated conditions and Else bodies
-// remain conservative.
+// body of a matching allocation guard. With blocks can keep the If header and
+// its first body statement in one CFG block, so the edge refinement runs after
+// the body has already been visited. Positive Not Not descriptor guards also
+// make their bound queries safe, while their possible-empty fact remains
+// conservative. Unrelated conditions and Else bodies remain conservative.
 func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, ctx analysisContext, resumeNextBefore []bool) []Finding {
 	if line <= 0 || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 		return findings
@@ -907,6 +2414,11 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file pars
 	access := statement
 	proven := map[string]bool{}
 	provenNonEmpty := map[string]bool{}
+	provenBounds := map[string]map[string]bool{}
+	if name, guardLine, ok := arrayVBA227EnclosingNotNotGuard(proc, access, variables); ok && arrayVBA227NoArrayMutationAfterGuard(file, proc, name, guardLine, line, ctx) {
+		proven[name] = true
+		provenBounds[name] = map[string]bool{"lbound": true, "ubound": true}
+	}
 	inAlternative := false
 	visited := map[int]bool{}
 	for statement.ParentID != 0 && !visited[statement.ParentID] {
@@ -920,6 +2432,10 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file pars
 			inAlternative = true
 		case procedureir.StatementElseIf:
 			if !inAlternative {
+				if name, positive := arrayNotNotByteArrayGuardTarget(parent.Text, variables); positive && arrayVBA227NoArrayMutationAfterGuard(file, proc, name, parent.Range.StartLine, line, ctx) {
+					proven[name] = true
+					provenBounds[name] = map[string]bool{"lbound": true, "ubound": true}
+				}
 				if lengthName, positive := arrayVBA227PositiveGuardConditionSource(parent, variables); positive {
 					for name, value := range state {
 						if value.allocationCountSource != "" && arrayCountExpressionMatches(lengthName, value.allocationCountSource) {
@@ -930,7 +2446,7 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file pars
 						proven[name] = true
 						provenNonEmpty[name] = true
 					}
-					if name, ok := arrayVBA227AllocationProbeLengthArray(state, lengthName, variables); ok {
+					if name, ok := arrayVBA227AllocationProbeLengthArray(file, proc, access, state, lengthName, variables, ctx); ok {
 						proven[name] = true
 						provenNonEmpty[name] = true
 					}
@@ -938,7 +2454,7 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file pars
 						proven[name] = true
 						provenNonEmpty[name] = true
 					}
-					if name, ok := arrayVBA227PositiveConditionalReDimArray(file, proc, &access, lengthName, variables); ok {
+					if name, ok := arrayVBA227PositiveConditionalReDimArray(file, proc, &access, &parent, lengthName, variables, ctx); ok {
 						proven[name] = true
 						provenNonEmpty[name] = true
 					}
@@ -947,6 +2463,10 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file pars
 			inAlternative = true
 		case procedureir.StatementIf:
 			if !inAlternative {
+				if name, positive := arrayNotNotByteArrayGuardTarget(parent.Text, variables); positive && arrayVBA227NoArrayMutationAfterGuard(file, proc, name, parent.Range.StartLine, line, ctx) {
+					proven[name] = true
+					provenBounds[name] = map[string]bool{"lbound": true, "ubound": true}
+				}
 				if lengthName, positive := arrayVBA227PositiveGuardConditionSource(parent, variables); positive {
 					for name, value := range state {
 						if value.allocationCountSource != "" && arrayCountExpressionMatches(lengthName, value.allocationCountSource) {
@@ -957,7 +2477,7 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file pars
 						proven[name] = true
 						provenNonEmpty[name] = true
 					}
-					if name, ok := arrayVBA227AllocationProbeLengthArray(state, lengthName, variables); ok {
+					if name, ok := arrayVBA227AllocationProbeLengthArray(file, proc, access, state, lengthName, variables, ctx); ok {
 						proven[name] = true
 						provenNonEmpty[name] = true
 					}
@@ -965,7 +2485,7 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file pars
 						proven[name] = true
 						provenNonEmpty[name] = true
 					}
-					if name, ok := arrayVBA227PositiveConditionalReDimArray(file, proc, &access, lengthName, variables); ok {
+					if name, ok := arrayVBA227PositiveConditionalReDimArray(file, proc, &access, &parent, lengthName, variables, ctx); ok {
 						proven[name] = true
 						provenNonEmpty[name] = true
 					}
@@ -980,18 +2500,25 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file pars
 			text = strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
 		}
 		if condition, body, ok := arrayIfThenParts(text); ok && body != "" {
-			if lengthName, positive := arrayVBA227PositiveLengthCondition(condition); positive {
-				if name, probe := arrayVBA227AllocationProbeLengthArray(state, lengthName, variables); probe {
+			_, _, hasElse := arrayIfThenBodyParts(body)
+			if !hasElse {
+				if name, probe := arrayNotNotByteArrayGuardTarget(condition, variables); probe && arrayVBA227NoArrayMutationAfterGuard(file, proc, name, line, line, ctx) {
 					proven[name] = true
-					provenNonEmpty[name] = true
+					provenBounds[name] = map[string]bool{"lbound": true, "ubound": true}
 				}
-				if name, probe := arrayVBA227PositiveSafeArrayLengthArray(file, proc, &access, lengthName, variables, ctx); probe {
-					proven[name] = true
-					provenNonEmpty[name] = true
-				}
-				if name, probe := arrayVBA227PositiveConditionalReDimArray(file, proc, &access, lengthName, variables); probe {
-					proven[name] = true
-					provenNonEmpty[name] = true
+				if lengthName, positive := arrayVBA227PositiveLengthCondition(condition); positive {
+					if name, probe := arrayVBA227AllocationProbeLengthArray(file, proc, access, state, lengthName, variables, ctx); probe {
+						proven[name] = true
+						provenNonEmpty[name] = true
+					}
+					if name, probe := arrayVBA227PositiveSafeArrayLengthArray(file, proc, &access, lengthName, variables, ctx); probe {
+						proven[name] = true
+						provenNonEmpty[name] = true
+					}
+					if name, probe := arrayVBA227PositiveConditionalReDimArray(file, proc, &access, &access, lengthName, variables, ctx); probe {
+						proven[name] = true
+						provenNonEmpty[name] = true
+					}
 				}
 			}
 		}
@@ -1009,6 +2536,12 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file pars
 					remove = true
 					break
 				}
+				for kind := range provenBounds[name] {
+					if finding.arrayOperationKey == arrayBoundOperationKey(kind, name, "unallocated") {
+						remove = true
+						break
+					}
+				}
 			}
 		}
 		if !remove {
@@ -1016,6 +2549,41 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, file pars
 		}
 	}
 	return filtered
+}
+
+func arrayVBA227EnclosingNotNotGuard(proc sourceProcedure, access procedureir.Statement, variables map[string]arrayVariable) (string, int, bool) {
+	current := access
+	skippedIfID := 0
+	visited := map[int]bool{}
+	for current.ParentID != 0 && !visited[current.ParentID] {
+		visited[current.ParentID] = true
+		parent := procedureStatementByID(proc, current.ParentID)
+		if parent.ID == 0 {
+			break
+		}
+		switch parent.Kind {
+		case procedureir.StatementElse:
+			// Skip only the If that owns this Else branch. An enclosing
+			// positive guard may still dominate an unrelated nested Else.
+			skippedIfID = parent.ParentID
+		case procedureir.StatementElseIf:
+			if parent.ID == skippedIfID {
+				skippedIfID = 0
+			} else if name, ok := arrayNotNotByteArrayGuardTarget(parent.Text, variables); ok {
+				return name, parent.Range.StartLine, true
+			} else {
+				skippedIfID = parent.ParentID
+			}
+		case procedureir.StatementIf:
+			if parent.ID == skippedIfID {
+				skippedIfID = 0
+			} else if name, ok := arrayNotNotByteArrayGuardTarget(parent.Text, variables); ok {
+				return name, parent.Range.StartLine, true
+			}
+		}
+		current = parent
+	}
+	return "", 0, false
 }
 
 // arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings removes the
@@ -1234,9 +2802,13 @@ func arrayVBA227FilterNestedBoundIndexFindings(findings []Finding, text string, 
 }
 
 func arrayUseHasSelfBoundsQuery(use arrayUse) bool {
+	return arrayUseHasSelfBoundQuery(use, "lbound") || arrayUseHasSelfBoundQuery(use, "ubound")
+}
+
+func arrayUseHasSelfBoundQuery(use arrayUse, kind string) bool {
 	for _, argument := range use.args {
 		for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(argument, -1) {
-			if strings.EqualFold(cleanIdentifier(bound[2]), use.name) {
+			if strings.EqualFold(bound[1], kind) && strings.EqualFold(cleanIdentifier(bound[2]), use.name) {
 				return true
 			}
 		}
@@ -1663,34 +3235,61 @@ func arrayVBA227PositiveSafeArrayLengthArray(file parsedFile, proc sourceProcedu
 	}
 	arrayName := ""
 	probeLine := 0
+	probeOffset := -1
+	probeStatement := procedureir.Statement{}
+	probeNonDominating := false
+	hasZeroFallback := false
 	for line := proc.StartLine; line < lengthLine && line <= len(file.Lines); line++ {
-		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
-			lhs, rhs, indexed, assigned := arrayAssignment(source)
+		for _, span := range splitRangeValueSourceStatementsWithOffsets(arraySourceOrderStripComment(file.Lines[line-1])) {
+			lhs, rhs, indexed, assigned := arrayAssignment(span.text)
 			if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), lengthName) {
 				continue
 			}
 			if candidate, ok := arrayVBA227SafeArrayLengthSource(rhs, ctx); ok {
+				statement := procedureStatementAtLine(proc, line)
+				if statement.ID == 0 {
+					return "", false
+				}
+				if !arrayVBA227StatementLineDominates(proc, line, *access) {
+					probeNonDominating = true
+				}
 				if probeLine != 0 && !strings.EqualFold(candidate, arrayName) {
 					return "", false
 				}
 				arrayName = candidate
 				probeLine = line
+				probeOffset = span.start
+				probeStatement = statement
 				continue
 			}
-			if value, ok := integerLiteral(rhs); !ok || value != 0 {
-				return "", false
+			if value, ok := integerLiteral(rhs); ok && value == 0 {
+				hasZeroFallback = true
+				continue
 			}
+			return "", false
 		}
 	}
 	if probeLine == 0 || arrayName == "" {
+		return "", false
+	}
+	if probeNonDominating && !hasZeroFallback {
 		return "", false
 	}
 	arrayValue, known := variables[arrayName]
 	if !known || !arrayValue.isArray || !isByteArrayVariable(arrayValue) {
 		return "", false
 	}
-	sourceLine, ok := arrayVBA227ZeroBasedArraySourceLine(file, proc, arrayName, probeLine)
-	if !ok || sourceLine == 0 || probeLine <= sourceLine || !arrayVBA227NoArrayMutationBetween(file, proc, arrayName, sourceLine+1, access.Range.StartLine) {
+	sourceLine, sourceOffset, ok := arrayVBA227ZeroBasedArraySourceBeforeOffset(file, proc, arrayName, probeLine, probeOffset)
+	if !ok || sourceLine == 0 || probeLine < sourceLine || probeLine == sourceLine && sourceOffset >= probeOffset || !arrayVBA227NoArrayMutationBetweenSourceAndProbe(file, proc, arrayName, sourceLine, sourceOffset, probeLine, probeOffset, ctx) {
+		return "", false
+	}
+	if !arrayVBA227NoArrayMutationWithinLine(file, proc, arrayName, probeLine, probeOffset, len(arraySourceOrderStripComment(file.Lines[probeLine-1])), ctx) {
+		return "", false
+	}
+	if probeLine+1 < access.Range.StartLine && !arrayVBA227NoArrayMutationBetweenWithCalls(file, proc, arrayName, probeLine+1, access.Range.StartLine, ctx) {
+		return "", false
+	}
+	if !arrayVBA227NoScalarAssignmentAfterSafeArrayProbe(file, proc, lengthName, probeLine+1, access.Range.StartLine, probeStatement, ctx) {
 		return "", false
 	}
 	return arrayName, true
@@ -1718,7 +3317,7 @@ func arrayVBA227BranchOwner(proc sourceProcedure, statement procedureir.Statemen
 // zero fallback on the other branch. A later positive-length guard selects the
 // ReDim arm, so the guarded element access cannot observe an unallocated or
 // empty array.
-func arrayVBA227PositiveConditionalReDimArray(file parsedFile, proc sourceProcedure, access *procedureir.Statement, lengthName string, variables map[string]arrayVariable) (string, bool) {
+func arrayVBA227PositiveConditionalReDimArray(file parsedFile, proc sourceProcedure, access, guard *procedureir.Statement, lengthName string, variables map[string]arrayVariable, ctx analysisContext) (string, bool) {
 	if access == nil || lengthName == "" {
 		return "", false
 	}
@@ -1785,13 +3384,47 @@ func arrayVBA227PositiveConditionalReDimArray(file parsedFile, proc sourceProced
 			redimLine = statement.Range.StartLine
 		}
 	}
-	if arrayName == "" || redimLine == 0 || redimLine >= positiveLine || !arrayVBA227NoArrayMutationBetween(file, proc, arrayName, redimLine+1, access.Range.StartLine) {
+	if arrayName == "" || redimLine == 0 || redimLine >= positiveLine {
+		return "", false
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine < proc.StartLine || call.Range.StartLine >= access.Range.StartLine {
+			continue
+		}
+		if arrayVBA227CallMayMutateNamedScalar(file, proc, call, lengthName, ctx) {
+			return "", false
+		}
+	}
+	positivePathDominates := arrayVBA227StatementLineDominates(proc, positiveLine, *access) && arrayVBA227StatementLineDominates(proc, redimLine, *access)
+	if !positivePathDominates {
+		if guard == nil {
+			return "", false
+		}
+		guardLength, positiveGuard := arrayVBA227PositiveGuardConditionSource(*guard, variables)
+		if !positiveGuard || guardLength != lengthName || !arrayVBA227LocalScalarStartsAtZero(proc, lengthName) {
+			return "", false
+		}
+	}
+	if !arrayVBA227NoArrayMutationBetweenWithCalls(file, proc, arrayName, redimLine+1, access.Range.StartLine, ctx) {
 		return "", false
 	}
 	return arrayName, true
 }
 
-func arrayVBA227AllocationProbeLengthArray(state arrayFlowState, lengthName string, variables map[string]arrayVariable) (string, bool) {
+func arrayVBA227LocalScalarStartsAtZero(proc sourceProcedure, name string) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if declaration.Scope == procedureir.ScopeLocal && !declaration.IsStatic && !declaration.IsArray && strings.EqualFold(cleanIdentifier(declaration.Name), name) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227AllocationProbeLengthArray(file parsedFile, proc sourceProcedure, access procedureir.Statement, state arrayFlowState, lengthName string, variables map[string]arrayVariable, ctx analysisContext) (string, bool) {
 	value, known := state[strings.ToLower(cleanIdentifier(lengthName))]
 	if !known || value.allocationProbe == "" {
 		return "", false
@@ -1800,6 +3433,46 @@ func arrayVBA227AllocationProbeLengthArray(state arrayFlowState, lengthName stri
 	variable, known := variables[arrayName]
 	if !known || !variable.isArray {
 		return "", false
+	}
+	arrayValue, tracked := state[arrayName]
+	if !tracked || !arrayValue.knownArray || arrayValue.kind == arrayUnallocated {
+		return "", false
+	}
+	probeLine := 0
+	probeStatement := procedureir.Statement{}
+	probeNonDominating := false
+	hasZeroFallback := false
+	for line := proc.StartLine; line < access.Range.StartLine && line <= len(file.Lines); line++ {
+		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
+			lhs, rhs, indexed, assigned := arrayAssignment(source)
+			if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), lengthName) {
+				continue
+			}
+			candidate, ok := arrayVBA227SafeArrayLengthSource(rhs, ctx)
+			if !ok {
+				if value, literal := integerLiteral(rhs); literal && value == 0 {
+					hasZeroFallback = true
+				}
+				continue
+			}
+			if !strings.EqualFold(candidate, arrayName) {
+				continue
+			}
+			statement := procedureStatementAtLine(proc, line)
+			if statement.ID == 0 {
+				return "", false
+			}
+			if !arrayVBA227StatementLineDominates(proc, line, access) {
+				probeNonDominating = true
+			}
+			probeLine = line
+			probeStatement = statement
+		}
+	}
+	if probeLine != 0 {
+		if probeNonDominating && !hasZeroFallback || !arrayVBA227NoScalarAssignmentAfterSafeArrayProbe(file, proc, lengthName, probeLine+1, access.Range.StartLine, probeStatement, ctx) {
+			return "", false
+		}
 	}
 	return arrayName, true
 }

@@ -224,6 +224,9 @@ func applyArrayAllocationGuard(state arrayFlowState, statement *procedureir.Stat
 	if statement.Condition == nil {
 		return state
 	}
+	if updated, ok := arrayNotNotByteArrayGuardState(state, statement.Condition.Text, edge.Kind, variables); ok {
+		return updated
+	}
 	if updated, ok := arrayStrPtrGuardState(state, statement.Condition.Text, edge.Kind, variables); ok {
 		return arrayVBA227PropagateNonEmptyReturnInputs(updated, statement.Condition.Text, variables)
 	}
@@ -686,6 +689,64 @@ func arrayStrPtrGuardState(state arrayFlowState, text string, branch vbacfg.Edge
 		value.mayBeEmpty = false
 		updated[name] = value
 	}
+	return updated, true
+}
+
+func arrayNotNotByteArrayGuardTarget(text string, variables map[string]arrayVariable) (string, bool) {
+	text = strings.TrimSpace(text)
+	if condition, _, ok := arrayIfThenParts(text); ok {
+		text = condition
+	}
+	lower := strings.ToLower(text)
+	if strings.HasPrefix(lower, "if ") {
+		text = strings.TrimSpace(text[len("if "):])
+	} else if strings.HasPrefix(lower, "elseif ") {
+		text = strings.TrimSpace(text[len("elseif "):])
+	}
+	if then := strings.LastIndex(strings.ToLower(text), " then"); then >= 0 && strings.TrimSpace(text[then+len(" then"):]) == "" {
+		text = strings.TrimSpace(text[:then])
+	}
+	for len(text) >= 2 && text[0] == '(' && text[len(text)-1] == ')' {
+		text = strings.TrimSpace(text[1 : len(text)-1])
+	}
+	match := arrayNotNotByteArrayGuardRe.FindStringSubmatch(text)
+	if len(match) != 2 {
+		return "", false
+	}
+	name := strings.ToLower(cleanIdentifier(match[1]))
+	variable, known := variables[name]
+	if !known || !isByteArrayVariable(variable) {
+		return "", false
+	}
+	return name, true
+}
+
+// arrayNotNotByteArrayGuardState recognizes the positive form of VBA's
+// dynamic-array descriptor test. It proves that bounds can be queried, but
+// deliberately retains a possible-empty fact because a nonzero descriptor is
+// not a non-empty-element proof. The `= 0` form is intentionally not handled;
+// callers that rely on its unallocated branch remain conservative.
+func arrayNotNotByteArrayGuardState(state arrayFlowState, text string, branch vbacfg.EdgeKind, variables map[string]arrayVariable) (arrayFlowState, bool) {
+	if branch != vbacfg.EdgeBranchTrue {
+		return state, false
+	}
+	name, ok := arrayNotNotByteArrayGuardTarget(text, variables)
+	if !ok {
+		return state, false
+	}
+	value, known := state[name]
+	if !known {
+		return state, false
+	}
+	wasAllocated := value.kind == arrayAllocated && value.knownArray && !value.mayBeUnallocated
+	updated := cloneArrayState(state)
+	value.kind = arrayAllocated
+	value.knownArray = true
+	value.mayBeUnallocated = false
+	if !wasAllocated {
+		value.mayBeEmpty = true
+	}
+	updated[name] = value
 	return updated, true
 }
 
