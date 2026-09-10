@@ -2798,6 +2798,28 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PropagatesDirectModuleCollectionInitialization(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Public Sub BuildInterface()
+  Set m_Interface = New Collection
+  m_Interface.Add "item"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a directly initialized module Collection should remain non-Nothing: %+v", got)
+	}
+}
+
 func TestVBA202Issue448RejectsCompositeNonzeroResult(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
