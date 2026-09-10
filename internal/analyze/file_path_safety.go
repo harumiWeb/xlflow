@@ -488,6 +488,13 @@ func fileOperationUsesWithLookup(stmt string, localProcedure func(string) bool, 
 	}
 	if m := fileNameRe.FindStringIndex(stmt); m != nil {
 		rest := strings.TrimSpace(stmt[m[1]:])
+		// A procedure parameter named `Name` can start a declaration such as
+		// `Name As String, ...`; it is not the VBA Name source-to-destination
+		// statement. Do not let the declaration's later `As` clauses become
+		// synthetic file paths.
+		if strings.HasPrefix(strings.ToLower(rest), "as ") || strings.EqualFold(rest, "as") {
+			return out
+		}
 		if parts := fileNameAsRe.FindStringSubmatch(rest); len(parts) == 3 {
 			out = append(out, fileOperationUse{operation: "Name", paths: []fileOperationPath{{role: "source", expr: strings.TrimSpace(parts[1])}, {role: "destination", expr: strings.TrimSpace(parts[2])}}, column: m[0]})
 			return out

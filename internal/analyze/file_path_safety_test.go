@@ -242,6 +242,24 @@ End Sub
 	}
 }
 
+func TestVBA245IgnoresNameParameterDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub RegisterConverter(Name As String, MediaType As String, ParseCallback As String)
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA245"); len(got) != 0 {
+		t.Fatalf("a Name parameter declaration must not be parsed as a file rename: %+v", got)
+	}
+}
+
 func TestVBA245IgnoresUnreachableFileOperationAfterErrRaise(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
