@@ -2820,6 +2820,93 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PropagatesClassFactoryIntoLateBoundObject(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "stdStringBuilder.cls", `Attribute VB_Name = "stdStringBuilder"
+Option Explicit
+
+Public JoinStr As String
+
+Public Function Create() As stdStringBuilder
+  Set Create = New stdStringBuilder
+End Function
+
+Public Function Exercise() As Long
+  Dim sb As Object
+  Set sb = Create()
+  sb.JoinStr = "-"
+
+  Dim sbNoParens As Object
+  Set sbNoParens = Create
+  sbNoParens.JoinStr = "+"
+  Exercise = 1
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an object assigned from a class factory should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PreservesSelectionListObjectGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function CreateFromSelection() As Long
+  Dim lo As ListObject
+  If TypeOf Selection Is Range Then
+    If Not Selection.ListObject Is Nothing Then
+      Dim lo As ListObject: Set lo = Selection.ListObject
+      Dim iRow As Long: iRow = Selection.Row - lo.Range.Row
+      If iRow < 1 Then iRow = 1
+      CreateFromSelection = iRow
+    End If
+  End If
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("the TypeOf and ListObject Nothing guards should prove both receivers: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesProcedurelessProjectClassReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "EmptyClass.cls", `Attribute VB_Name = "EmptyClass"
+Option Explicit
+`)
+	writeModule(t, dir, "Factories.bas", `Option Explicit
+Public Function Create() As EmptyClass
+  Set Create = New EmptyClass
+End Function
+
+Public Function Exercise() As Long
+  Dim value As Object
+  Set value = Create
+  value.Caption = "ready"
+  Exercise = 1
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a project class without procedures should still establish its typed factory return: %+v", got)
+	}
+}
+
 func TestVBA202Issue448RejectsCompositeNonzeroResult(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

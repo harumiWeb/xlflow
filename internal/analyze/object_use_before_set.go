@@ -146,6 +146,22 @@ func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 		}
 	}
 	analysis.objectTypeNames = map[string]bool{}
+	for _, file := range files {
+		moduleKind := strings.TrimSpace(file.ModuleKind)
+		if moduleKind == "" {
+			moduleKind = strings.TrimSpace(file.IR.ModuleKind)
+		}
+		if !strings.EqualFold(moduleKind, "class") && !strings.EqualFold(moduleKind, "form") {
+			continue
+		}
+		module := strings.TrimSpace(file.IR.ModuleName)
+		if module == "" {
+			module = strings.TrimSpace(file.Module)
+		}
+		if module = strings.ToLower(cleanIdentifier(module)); module != "" {
+			analysis.objectTypeNames[module] = true
+		}
+	}
 	for _, plan := range analysis.plans {
 		if plan == nil || !strings.EqualFold(strings.TrimSpace(plan.proc.ModuleKind), "class") && !strings.EqualFold(strings.TrimSpace(plan.proc.ModuleKind), "form") {
 			continue
@@ -157,6 +173,15 @@ func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 	for _, plan := range analysis.plans {
 		if plan == nil {
 			continue
+		}
+		if !isObjectType(plan.proc.ReturnType) && objectTypeKnown(plan.proc.ReturnType, analysis.objectTypeNames) {
+			// Project-typed factory returns are object values too, but their
+			// return type is not covered by the generic Object/Collection test
+			// used while constructing the initial plan.  Mark them relevant now
+			// so a definite `Set FunctionName = New ProjectClass` can flow through
+			// calls assigned to late-bound Object variables.
+			plan.relevant = true
+			markProjectObjectReturnSlot(plan, analysis.objectTypeNames)
 		}
 		plan.flowContext.objectTypeNames = analysis.objectTypeNames
 	}
@@ -1956,6 +1981,61 @@ func objectGuardProvesNonNothingAt(proc sourceProcedure, objectName string, useI
 	return false
 }
 
+func objectMemberChainGuardProvesNonNothingAt(proc sourceProcedure, expression string, useID int, flowContext objectFlowContext) bool {
+	if proc.Graph == nil {
+		return false
+	}
+	guardedExpression := objectMemberNothingGuardExpression(expression)
+	if guardedExpression == "" {
+		return false
+	}
+	useBlock, ok := flowContext.graph.BlockForStatement(useID)
+	if !ok {
+		return false
+	}
+	dominators := flowContext.graph.Dominators()
+	successors := map[vbacfg.BlockID][]vbacfg.BlockID{}
+	flowContext.graph.ForEachEdge(func(edge vbacfg.Edge) bool {
+		if edge.Class != vbacfg.EdgeExceptional {
+			successors[edge.From] = append(successors[edge.From], edge.To)
+		}
+		return true
+	})
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementIf || statement.Condition == nil {
+			continue
+		}
+		guarded, nonNothingOnTrue, ok := objectMemberNothingGuard(statement.Condition.Text)
+		if !ok || !strings.EqualFold(guarded, guardedExpression) {
+			continue
+		}
+		guardBlock, ok := flowContext.graph.BlockForStatement(statement.ID)
+		if !ok || !objectBlockSetContains(dominators[useBlock.ID], guardBlock.ID) {
+			continue
+		}
+		safeReachable := false
+		unsafeReachable := false
+		flowContext.graph.ForEachOutgoing(guardBlock.ID, func(edge vbacfg.Edge) bool {
+			if edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
+				return true
+			}
+			reachesUse := objectFlowCanReach(successors, edge.To, useBlock.ID)
+			nonNothing := (edge.Kind == vbacfg.EdgeBranchTrue && nonNothingOnTrue) ||
+				(edge.Kind == vbacfg.EdgeBranchFalse && !nonNothingOnTrue)
+			if nonNothing {
+				safeReachable = safeReachable || reachesUse
+			} else {
+				unsafeReachable = unsafeReachable || reachesUse
+			}
+			return true
+		})
+		if safeReachable && !unsafeReachable {
+			return true
+		}
+	}
+	return false
+}
+
 func objectStatementDominates(proc sourceProcedure, assignmentID, useID int) bool {
 	if proc.Graph == nil {
 		return false
@@ -3367,6 +3447,35 @@ func objectSingleNothingGuard(text string) (string, bool, bool) {
 	return name, negated, true
 }
 
+func objectMemberNothingGuard(text string) (string, bool, bool) {
+	text = objectTrimOuterParens(strings.ToLower(strings.TrimSpace(text)))
+	if then := strings.Index(text, " then"); then >= 0 {
+		text = strings.TrimSpace(text[:then])
+	}
+	negated := false
+	if strings.HasPrefix(text, "not ") {
+		negated = true
+		text = objectTrimOuterParens(strings.TrimSpace(strings.TrimPrefix(text, "not ")))
+	}
+	const marker = " is nothing"
+	if !strings.HasSuffix(text, marker) {
+		return "", false, false
+	}
+	parts := objectMemberChainParts(strings.TrimSpace(strings.TrimSuffix(text, marker)))
+	if len(parts) < 2 {
+		return "", false, false
+	}
+	return strings.ToLower(strings.Join(parts, ".")), negated, true
+}
+
+func objectMemberNothingGuardExpression(text string) string {
+	parts := objectMemberChainParts(strings.TrimSpace(text))
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.ToLower(strings.Join(parts, "."))
+}
+
 func objectSplitTopLevel(text, operator string) []string {
 	text = strings.TrimSpace(text)
 	operator = " " + strings.ToLower(strings.TrimSpace(operator)) + " "
@@ -3939,6 +4048,13 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		}
 		return objectConstructorCallText(lower)
 	case procedureir.ExpressionMember:
+		if objectMemberChainGuardProvesNonNothingAt(proc, expression.Text, statementID, flowContext) {
+			// A member expression used as a Set value is safe when the same
+			// expression is checked by a dominating `Not ... Is Nothing` guard.
+			// This covers host properties such as Selection.ListObject, whose
+			// nullable result is made definite by the enclosing branch.
+			return true
+		}
 		if objectExcelMemberExpressionAssigned(expression.Text, proc, declarations) {
 			return true
 		}
@@ -3982,7 +4098,7 @@ func objectBareObjectFunctionAssigned(proc sourceProcedure, name string, summari
 	var match objectProcedureSummary
 	found := false
 	for _, summary := range summaries {
-		if !summary.ReturnObject || !isObjectType(summary.ReturnType) || !strings.EqualFold(summary.Module, proc.Module) {
+		if !objectSummaryReturnsObject(summary) || strings.TrimSpace(summary.ReturnType) == "" || !strings.EqualFold(summary.Module, proc.Module) {
 			continue
 		}
 		qualifiedName := strings.TrimSpace(summary.QualifiedName)
