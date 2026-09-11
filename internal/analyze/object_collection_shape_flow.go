@@ -185,8 +185,22 @@ func objectCollectionShapePathText(text string) (string, bool) {
 		for position < len(text) && (text[position] == '_' || text[position] >= '0' && text[position] <= '9' || text[position] >= 'A' && text[position] <= 'Z' || text[position] >= 'a' && text[position] <= 'z') {
 			position++
 		}
-		if memberStart == position || !strings.EqualFold(text[memberStart:position], "item") {
+		if memberStart == position {
 			return "", false
+		}
+		member := text[memberStart:position]
+		if !strings.EqualFold(member, "item") {
+			for position < len(text) && (text[position] == ' ' || text[position] == '\t') {
+				position++
+			}
+			// A callable member is not a stable shape path.  Plain member
+			// fields, such as a UDT's RegexObj, are stable and may be
+			// followed by another field.
+			if position < len(text) && text[position] == '(' {
+				return "", false
+			}
+			path = objectCollectionShapePath(path, member)
+			continue
 		}
 		for position < len(text) && (text[position] == ' ' || text[position] == '\t') {
 			position++
@@ -358,6 +372,21 @@ func objectCollectionShapeSetValue(state *objectCollectionShapeState, path, valu
 	if source, ok := objectCollectionShapePathText(value); ok {
 		objectCollectionShapeCopy(state, source, path)
 	}
+}
+
+func objectCollectionShapeRegExpKnown(state objectCollectionShapeState, path string) bool {
+	if path == "" || state.regexp[path] {
+		return path != ""
+	}
+	segments := strings.Split(path, "|")
+	for index := range segments {
+		wildcard := append([]string(nil), segments...)
+		wildcard[index] = "*"
+		if state.regexp[strings.Join(wildcard, "|")] {
+			return true
+		}
+	}
+	return false
 }
 
 func objectCollectionShapeRegExpExecuteReceiver(text string) (string, bool) {
@@ -677,14 +706,22 @@ func objectCollectionShapeApplyStatement(index *objectContainerIndex, proc sourc
 	if target, value, ok := objectCollectionShapeSetAssignment(text); ok {
 		path, pathOK := objectCollectionShapePathText(target)
 		if pathOK {
-			objectCollectionShapeSetValue(state, path, strings.ToLower(strings.TrimSpace(value)))
+			value = strings.ToLower(strings.TrimSpace(value))
+			if objectCollectionShapeApplyKnownFactory(index, proc, state, path, value) {
+				return
+			}
+			objectCollectionShapeSetValue(state, path, value)
 		}
 		return
 	}
 	if target, value, ok := objectCollectionShapeBareAssignment(text); ok {
 		path, pathOK := objectCollectionShapePathText(target)
 		if pathOK {
-			objectCollectionShapeSetValue(state, path, strings.ToLower(strings.TrimSpace(value)))
+			value = strings.ToLower(strings.TrimSpace(value))
+			if objectCollectionShapeApplyKnownFactory(index, proc, state, path, value) {
+				return
+			}
+			objectCollectionShapeSetValue(state, path, value)
 		}
 		return
 	}
@@ -1185,10 +1222,6 @@ func objectCollectionShapeExpressionAssigned(proc sourceProcedure, expression pr
 	if !declared || !declaration.Object {
 		return false
 	}
-	path, pathOK := objectCollectionShapePathText(expression.Text)
-	if !pathOK {
-		return false
-	}
 	if context.shapeStateReady == nil {
 		context.shapeStateReady = map[int]bool{}
 		context.shapeStates = map[int]objectCollectionShapeState{}
@@ -1200,6 +1233,13 @@ func objectCollectionShapeExpressionAssigned(proc sourceProcedure, expression pr
 		context.shapeStateReady[statementID] = true
 	}
 	if !ready {
+		return false
+	}
+	if receiver, receiverOK := objectCollectionShapeRegExpExecuteReceiver(expression.Text); receiverOK && objectCollectionShapeRegExpKnown(state, receiver) {
+		return true
+	}
+	path, pathOK := objectCollectionShapePathText(expression.Text)
+	if !pathOK {
 		return false
 	}
 	return state.objects[path] || state.collections[path] || state.guarded[path] && dcKindFromType(declaration.Type) == dcCollection

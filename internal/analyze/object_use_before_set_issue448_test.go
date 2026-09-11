@@ -2747,6 +2747,83 @@ End Function
 	}
 }
 
+func TestVBA202Issue448TracksRegExpThroughUDTArrayFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Lambda.cls", `Attribute VB_Name = "Lambda"
+Option Explicit
+Private Type TokenDefinition
+  RegexObj As Object
+End Type
+
+Private Function getTokenDefinition(ByVal pattern As String) As TokenDefinition
+  Set getTokenDefinition.RegexObj = CreateObject("VBScript.Regexp")
+  getTokenDefinition.RegexObj.Pattern = pattern
+End Function
+
+Private Function getTokenDefinitions() As TokenDefinition()
+  Dim arr() As TokenDefinition
+  ReDim arr(1 To 1)
+  arr(1) = getTokenDefinition("^x")
+  getTokenDefinitions = arr
+End Function
+
+Public Function MatchCount(ByVal inputText As String) As Long
+  Dim defs() As TokenDefinition
+  defs = getTokenDefinitions()
+  Dim match As Object
+  Set match = defs(1).RegexObj.Execute(inputText)
+  MatchCount = match.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a RegExp returned through an initialized UDT array should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalUDTArrayRegExpFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Lambda.cls", `Attribute VB_Name = "Lambda"
+Option Explicit
+Private Type TokenDefinition
+  RegexObj As Object
+End Type
+
+Private Function getTokenDefinition(ByVal pattern As String, ByVal initialize As Boolean) As TokenDefinition
+  If initialize Then Set getTokenDefinition.RegexObj = CreateObject("VBScript.Regexp")
+End Function
+
+Private Function getTokenDefinitions() As TokenDefinition()
+  Dim arr() As TokenDefinition
+  ReDim arr(1 To 1)
+  arr(1) = getTokenDefinition("^x", False)
+  getTokenDefinitions = arr
+End Function
+
+Public Function MatchCount(ByVal inputText As String) As Long
+  Dim defs() As TokenDefinition
+  defs = getTokenDefinitions()
+  Dim match As Object
+  Set match = defs(1).RegexObj.Execute(inputText)
+  MatchCount = match.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a conditional UDT array RegExp factory must remain nullable: %+v", got)
+	}
+}
+
 func TestVBA202Issue448PropagatesRegExpExecuteThroughDictionaryCache(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
