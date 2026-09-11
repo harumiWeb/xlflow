@@ -512,9 +512,9 @@ func arrayDictionaryItemAllocationContract(index *objectContainerIndex, owner so
 		return false
 	}
 	parameterIndex := -1
-	for index, candidate := range owner.Params.AllIndexed() {
+	for candidateIndex, candidate := range owner.Params.AllIndexed() {
 		if strings.EqualFold(cleanIdentifier(candidate.Name), receiver) {
-			parameterIndex = index
+			parameterIndex = candidateIndex
 			break
 		}
 	}
@@ -868,6 +868,11 @@ func arrayDictionaryItemExactAssignment(statement procedureir.Statement, receive
 	return false
 }
 
+type arrayObjectContainerIndexCacheEntry struct {
+	index      *objectContainerIndex
+	procedures []sourceProcedure
+}
+
 func arrayObjectContainerIndex(ctx analysisContext, file parsedFile, proc sourceProcedure) (*objectContainerIndex, sourceProcedure) {
 	if ctx.objectAnalysis != nil {
 		key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
@@ -876,12 +881,42 @@ func arrayObjectContainerIndex(ctx analysisContext, file parsedFile, proc source
 		}
 	}
 	if ctx.procedureResolver != nil {
+		cacheKey := file.Path
+		if cacheKey == "" {
+			cacheKey = file.IR.Path
+		}
+		if cacheKey != "" && ctx.arrayObjectContainerIndexCache != nil {
+			if ctx.arrayObjectContainerIndexCacheMu != nil {
+				ctx.arrayObjectContainerIndexCacheMu.RLock()
+			}
+			cached, cachedOK := ctx.arrayObjectContainerIndexCache[cacheKey]
+			if ctx.arrayObjectContainerIndexCacheMu != nil {
+				ctx.arrayObjectContainerIndexCacheMu.RUnlock()
+			}
+			if cachedOK {
+				for _, candidate := range cached.procedures {
+					if candidate.StartLine == proc.StartLine && strings.EqualFold(candidate.Name, proc.Name) {
+						return cached.index, candidate
+					}
+				}
+				return cached.index, proc
+			}
+		}
 		resolvedIR := procedureir.Resolve(file.IR, ctx.procedureResolver)
 		resolvedProcedures := sourceProceduresFromIRRef(&resolvedIR, file.CFG)
 		resolvedFile := file
 		resolvedFile.IR = resolvedIR
 		resolvedFile.Procedures = resolvedProcedures
 		index := buildObjectContainerIndex(resolvedFile)
+		if cacheKey != "" && ctx.arrayObjectContainerIndexCache != nil {
+			if ctx.arrayObjectContainerIndexCacheMu != nil {
+				ctx.arrayObjectContainerIndexCacheMu.Lock()
+			}
+			ctx.arrayObjectContainerIndexCache[cacheKey] = arrayObjectContainerIndexCacheEntry{index: index, procedures: resolvedProcedures}
+			if ctx.arrayObjectContainerIndexCacheMu != nil {
+				ctx.arrayObjectContainerIndexCacheMu.Unlock()
+			}
+		}
 		for _, candidate := range resolvedProcedures {
 			if candidate.StartLine == proc.StartLine && strings.EqualFold(candidate.Name, proc.Name) {
 				return index, candidate

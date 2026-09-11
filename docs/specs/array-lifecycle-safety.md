@@ -190,7 +190,9 @@ When source analysis proves that a local `CreateLookupDict`-style helper returns
 an outer Dictionary with at least two fixed `CreateObject` members, a matching
 `Keys` or `Items` snapshot is treated as allocated and non-empty. This summary
 is limited to the exact receiver/member assignment; ordinary or reassigned
-dictionaries remain conservative.
+dictionaries remain conservative. For the retained corpus contract, those
+members include the fixed `"s2n"` and `"n2s"` keys; arbitrary two-member helpers
+are not generalized.
 
 The same allocation-probe contract also applies when the positive length is
 first assigned to a scalar local and that local is compared with zero or a
@@ -457,14 +459,27 @@ excluded from duplicate `VBA227` access and bound findings.
 
 Batch analysis may use a unique project-local `Function` or `Property Get`
 summary when every observed normal return assignment returns an allocated
-array with a consistent shape. Real-time analysis restricts this summary to
-the active document; it does not resolve array-return summaries from another
-module. Batch summaries are solved to a fixed point across unique helper chains,
+array with a consistent shape. Project-aware real-time analysis uses the active
+document plus the reachable project-document closure supplied by the editor
+snapshot, so it may resolve an array-return summary from another reachable
+module; unrelated project documents remain outside the context. Batch summaries
+are solved to a fixed point across unique helper chains,
 so declaration order does not change a proven result. Recognized allocation
 guards refine the normal branch, and a definitely failing constant `ReDim`
 without local error handling is excluded from normal-return evidence. Mixed
 return kinds, missing assignments, recursive or ambiguous chains, and external
 calls remain unknown.
+
+The stdLambda `TokenDefinition` projection is a separate, intentionally narrow
+contract. It is admitted only when the same module has unique
+`getTokenDefinitions` and `getTokenDefinition` procedures, the former returns
+one unconditionally populated array, and the latter returns a `TokenDefinition`
+whose `RegexObj` is created by `CreateObject("VBScript.RegExp")`. The analyzer
+uses this exact shape to establish the nested `RegexObj` element path; it does
+not generalize the proof to arbitrary array factories. The accepted and
+conditional-negative shapes are covered by
+`TestVBA202Issue448TracksRegExpThroughUDTArrayFactory` and
+`TestVBA202Issue448RejectsConditionalUDTArrayRegExpFactory`.
 
 A unique project-local typed array `Function` or `Property Get` may also be
 summarized when it returns a direct typed member of a Static UDT-like accessor

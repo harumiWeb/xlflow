@@ -377,18 +377,20 @@ type analysisContext struct {
 	// compatibility helpers. Production planning derives both feature-unknown
 	// boundaries from one shared graph; complete IR with an unknown array
 	// capability remains local unless a real seed reaches that procedure.
-	arrayIgnoreFeatureUnknown bool
-	arrayStats                *arrayInterproceduralStats
-	arrayByRefEntryStates     map[string]map[int]bool
-	arrayByRefEntryConditions map[string]map[int]string
-	arrayCapabilityIndex      *semanticArrayCapabilityIndex
-	procedures                map[string]procedureSignature
-	procedureResolver         procedureir.Resolver
-	projectResolver           procedureir.Resolver
-	objectAnalysis            *objectAnalysisContext
-	worksheetCodenames        map[string]string
-	projectEffects            effects.ProjectSummary
-	queryRevision             *semanticquery.Revision
+	arrayIgnoreFeatureUnknown        bool
+	arrayStats                       *arrayInterproceduralStats
+	arrayByRefEntryStates            map[string]map[int]bool
+	arrayByRefEntryConditions        map[string]map[int]string
+	arrayCapabilityIndex             *semanticArrayCapabilityIndex
+	arrayObjectContainerIndexCache   map[string]arrayObjectContainerIndexCacheEntry
+	arrayObjectContainerIndexCacheMu *sync.RWMutex
+	procedures                       map[string]procedureSignature
+	procedureResolver                procedureir.Resolver
+	projectResolver                  procedureir.Resolver
+	objectAnalysis                   *objectAnalysisContext
+	worksheetCodenames               map[string]string
+	projectEffects                   effects.ProjectSummary
+	queryRevision                    *semanticquery.Revision
 }
 
 type arrayInterproceduralStats struct {
@@ -2786,6 +2788,8 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayStats:                       &arrayInterproceduralStats{strategy: a.arrayStrategy},
 		arrayByRefEntryStates:            map[string]map[int]bool{},
 		arrayByRefEntryConditions:        map[string]map[int]string{},
+		arrayObjectContainerIndexCache:   map[string]arrayObjectContainerIndexCacheEntry{},
+		arrayObjectContainerIndexCacheMu: &sync.RWMutex{},
 		procedures:                       map[string]procedureSignature{},
 		objectAnalysis:                   objectAnalysis,
 		worksheetCodenames:               map[string]string{},
@@ -2865,8 +2869,8 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	// that proven-negative case; any call or incomplete fact fails this gate
 	// open through buildProcedureAnalysisPlan.
 	if capabilityPlan.requires(projectCapabilityArrayInterprocedural) {
-		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
-		ctx.arraySafeArrayLengthGuards = inferArraySafeArrayLengthGuards(files)
+		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files, ctx.arrayVBA227ExternalAPIs)
+		ctx.arraySafeArrayLengthGuards = inferArraySafeArrayLengthGuards(files, ctx.arrayVBA227ExternalAPIs)
 		ctx.arraySafeBoundGuards = inferArraySafeBoundGuards(files)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
 		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayModuleEffectParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)

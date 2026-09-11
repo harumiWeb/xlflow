@@ -648,7 +648,21 @@ func objectPredicateResultUsesObjectMember(plan *objectProcedurePlan, statement 
 	}
 	value := strings.ToLower(strings.TrimSpace(maskStringLiterals(statement.Text)))
 	parameter := strings.ToLower(cleanIdentifier(parameterName))
-	return parameter != "" && strings.Contains(value, parameter+".")
+	if parameter == "" {
+		return false
+	}
+	needle := parameter + "."
+	for offset := 0; ; {
+		position := strings.Index(value[offset:], needle)
+		if position < 0 {
+			return false
+		}
+		position += offset
+		if position == 0 || !isIdentifierPart(value[position-1]) {
+			return true
+		}
+		offset = position + 1
+	}
 }
 
 func objectPredicateHandlerReachesResult(plan *objectProcedurePlan, handlerStatementID, resultStatementID int) bool {
@@ -964,6 +978,11 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 					addSummaryDependency(summaryKey, callerKey)
 				}
 			case procedureir.ExpressionMember, procedureir.ExpressionCall:
+				if expression.Kind == procedureir.ExpressionCall {
+					for _, summaryKey := range bareObjectFunctionKeys(caller, objectBareCallName(expression.Text)) {
+						addSummaryDependency(summaryKey, callerKey)
+					}
+				}
 				if summaryKey, _, found := objectQualifiedObjectFunctionSummary(expression.Text, caller.declarations, analysis.summaries, analysis.qualifiedObjectFunctionKeys); found {
 					addSummaryDependency(summaryKey, callerKey)
 					continue
@@ -2050,10 +2069,99 @@ func objectMemberChainGuardProvesNonNothingAt(proc sourceProcedure, expression s
 			return true
 		})
 		if safeReachable && !unsafeReachable {
+			if !objectMemberChainHasInterveningMutation(proc, guardedExpression, statement.ID, useID, flowContext) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func objectMemberChainHasInterveningMutation(proc sourceProcedure, guardedExpression string, guardID, useID int, flowContext objectFlowContext) bool {
+	guardedPath, ok := objectCollectionShapePathText(guardedExpression)
+	if !ok {
+		return true
+	}
+	for _, mutationPath := range objectMemberChainMutationPaths(proc, guardID, useID, flowContext) {
+		if objectCollectionShapePathHasPrefix(guardedPath, mutationPath) {
 			return true
 		}
 	}
 	return false
+}
+
+func objectMemberChainMutationPaths(proc sourceProcedure, guardID, useID int, flowContext objectFlowContext) []string {
+	cacheKey := objectMemberChainMutationCacheKey{guardStatementID: guardID, useStatementID: useID}
+	if flowContext.memberChainMutationPathsReady != nil && flowContext.memberChainMutationPathsReady[cacheKey] {
+		return flowContext.memberChainMutationPathsCache[cacheKey]
+	}
+	cacheResult := func(paths []string) []string {
+		if flowContext.memberChainMutationPathsReady != nil && flowContext.memberChainMutationPathsCache != nil {
+			flowContext.memberChainMutationPathsReady[cacheKey] = true
+			flowContext.memberChainMutationPathsCache[cacheKey] = paths
+		}
+		return paths
+	}
+	graph := flowContext.graph
+	if graph.BlockCount() == 0 && proc.Graph != nil {
+		graph = proc.Graph.WithoutNormalErrRaiseContinuationView()
+	}
+	paths := make([]string, 0)
+	seen := make(map[string]bool)
+	appendPath := func(path string) {
+		if path != "" && !seen[path] {
+			seen[path] = true
+			paths = append(paths, path)
+		}
+	}
+	canReachStatement := func(fromID, targetID int) bool {
+		reachabilityKey := objectStatementReachabilityCacheKey{fromStatementID: fromID, targetStatementID: targetID}
+		if flowContext.statementReachabilityReady != nil && flowContext.statementReachabilityReady[reachabilityKey] {
+			return flowContext.statementReachabilityCache[reachabilityKey]
+		}
+		reachable := objectStatementCanReachInGraph(graph, fromID, targetID)
+		if flowContext.statementReachabilityReady != nil && flowContext.statementReachabilityCache != nil {
+			flowContext.statementReachabilityReady[reachabilityKey] = true
+			flowContext.statementReachabilityCache[reachabilityKey] = reachable
+		}
+		return reachable
+	}
+	canReachUse := func(statementID int) bool {
+		return statementID != guardID && statementID != useID &&
+			canReachStatement(guardID, statementID) && canReachStatement(statementID, useID)
+	}
+	for statement := range proc.Statements.All() {
+		if !canReachUse(statement.ID) || (statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) {
+			continue
+		}
+		if statement.Target == nil {
+			continue
+		}
+		targetPath, targetOK := objectCollectionShapePathText(statement.Target.Text)
+		if targetOK {
+			appendPath(targetPath)
+		}
+	}
+	for call := range proc.Calls.All() {
+		if !canReachUse(call.StatementID) {
+			continue
+		}
+		if receiver := objectCallWithReceiverName(proc, call); receiver != "" {
+			if receiverPath, receiverOK := objectCollectionShapePathText(receiver); receiverOK {
+				appendPath(receiverPath)
+			}
+		}
+		for _, actual := range objectCallActuals(call, flowContext.facts) {
+			if actual.parenthesized {
+				continue
+			}
+			actualPath, actualOK := objectCollectionShapePathText(actual.text)
+			if actualOK {
+				appendPath(actualPath)
+			}
+		}
+	}
+	return cacheResult(paths)
 }
 
 func objectStatementDominates(proc sourceProcedure, assignmentID, useID int) bool {
@@ -2072,11 +2180,7 @@ func objectStatementDominates(proc sourceProcedure, assignmentID, useID int) boo
 	return objectBlockSetContains(graph.Dominators()[useBlock.ID], assignmentBlock.ID)
 }
 
-func objectStatementCanReach(proc sourceProcedure, statementID, targetID int) bool {
-	if proc.Graph == nil {
-		return false
-	}
-	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+func objectStatementCanReachInGraph(graph vbacfg.CFGView, statementID, targetID int) bool {
 	statementBlock, statementOK := graph.BlockForStatement(statementID)
 	targetBlock, targetOK := graph.BlockForStatement(targetID)
 	if !statementOK || !targetOK {
@@ -2116,11 +2220,7 @@ func objectStatementCanReach(proc sourceProcedure, statementID, targetID int) bo
 	return objectBlockCanReach(graph, statementBlock.ID, targetBlock.ID)
 }
 
-func objectStatementCanReachNormalExit(proc sourceProcedure, statementID int) bool {
-	if proc.Graph == nil {
-		return false
-	}
-	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+func objectStatementCanReachNormalExitInGraph(graph vbacfg.CFGView, statementID int) bool {
 	statementBlock, ok := graph.BlockForStatement(statementID)
 	if !ok {
 		return false
@@ -2129,6 +2229,10 @@ func objectStatementCanReachNormalExit(proc sourceProcedure, statementID int) bo
 }
 
 func objectNonzeroModuleFieldMutationAfter(proc sourceProcedure, fromID int, fields map[string]bool, declarations declarationScope, flowContext objectFlowContext, normalExit bool) bool {
+	graph := flowContext.graph
+	if graph.BlockCount() == 0 && proc.Graph != nil {
+		graph = proc.Graph.WithoutNormalErrRaiseContinuationView()
+	}
 	for statement := range proc.Statements.All() {
 		if statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet {
 			continue
@@ -2137,10 +2241,10 @@ func objectNonzeroModuleFieldMutationAfter(proc sourceProcedure, fromID int, fie
 		if !ok || target.Scope != procedureir.ScopeModule || !fields[strings.ToLower(cleanIdentifier(target.Name))] {
 			continue
 		}
-		if !objectStatementCanReach(proc, fromID, statement.ID) {
+		if !objectStatementCanReachInGraph(graph, fromID, statement.ID) {
 			continue
 		}
-		if normalExit && !objectStatementCanReachNormalExit(proc, statement.ID) {
+		if normalExit && !objectStatementCanReachNormalExitInGraph(graph, statement.ID) {
 			continue
 		}
 		return true
@@ -2879,35 +2983,62 @@ type objectFlowResult struct {
 	normalExit map[string]bool
 }
 
+type objectNonzeroReturnModuleFieldsCacheKey struct {
+	resultName       string
+	guardStatementID int
+}
+
+type objectMemberChainMutationCacheKey struct {
+	guardStatementID int
+	useStatementID   int
+}
+
+type objectStatementReachabilityCacheKey struct {
+	fromStatementID   int
+	targetStatementID int
+}
+
 type objectFlowContext struct {
-	facts                       *procedureAnalysisFacts
-	graph                       vbacfg.CFGView
-	predecessors                map[vbacfg.BlockID][]vbacfg.Edge
-	vars                        map[string]objectVariable
-	summaries                   map[string]objectProcedureSummary
-	objectTypeNames             map[string]bool
-	qualifiedObjectFunctionKeys map[string][]string
-	memberContracts             map[string]bool
-	containerIndex              *objectContainerIndex
-	receiverSummaryKeys         map[string][]string
-	valueState                  map[string]bool
-	predicateContracts          map[string]bool
-	nonzeroReturnModuleFields   map[string]objectNonzeroReturnModuleFieldContract
-	terminalCalls               map[int]bool
-	shapeStates                 map[int]objectCollectionShapeState
-	shapeStateReady             map[int]bool
+	facts                          *procedureAnalysisFacts
+	graph                          vbacfg.CFGView
+	predecessors                   map[vbacfg.BlockID][]vbacfg.Edge
+	vars                           map[string]objectVariable
+	summaries                      map[string]objectProcedureSummary
+	objectTypeNames                map[string]bool
+	qualifiedObjectFunctionKeys    map[string][]string
+	memberContracts                map[string]bool
+	containerIndex                 *objectContainerIndex
+	receiverSummaryKeys            map[string][]string
+	valueState                     map[string]bool
+	predicateContracts             map[string]bool
+	nonzeroReturnModuleFields      map[string]objectNonzeroReturnModuleFieldContract
+	nonzeroReturnModuleFieldsCache map[objectNonzeroReturnModuleFieldsCacheKey]map[string]bool
+	nonzeroReturnModuleFieldsReady map[objectNonzeroReturnModuleFieldsCacheKey]bool
+	memberChainMutationPathsCache  map[objectMemberChainMutationCacheKey][]string
+	memberChainMutationPathsReady  map[objectMemberChainMutationCacheKey]bool
+	statementReachabilityCache     map[objectStatementReachabilityCacheKey]bool
+	statementReachabilityReady     map[objectStatementReachabilityCacheKey]bool
+	terminalCalls                  map[int]bool
+	shapeStates                    map[int]objectCollectionShapeState
+	shapeStateReady                map[int]bool
 }
 
 func newObjectFlowContext(proc sourceProcedure, graph vbacfg.CFGView, containerIndex *objectContainerIndex) objectFlowContext {
 	context := objectFlowContext{
-		facts:           proc.analysisFacts(),
-		graph:           graph,
-		predecessors:    make(map[vbacfg.BlockID][]vbacfg.Edge),
-		vars:            map[string]objectVariable{},
-		memberContracts: map[string]bool{},
-		containerIndex:  containerIndex,
-		shapeStates:     map[int]objectCollectionShapeState{},
-		shapeStateReady: map[int]bool{},
+		facts:                          proc.analysisFacts(),
+		graph:                          graph,
+		predecessors:                   make(map[vbacfg.BlockID][]vbacfg.Edge),
+		vars:                           map[string]objectVariable{},
+		memberContracts:                map[string]bool{},
+		containerIndex:                 containerIndex,
+		shapeStates:                    map[int]objectCollectionShapeState{},
+		shapeStateReady:                map[int]bool{},
+		nonzeroReturnModuleFieldsCache: map[objectNonzeroReturnModuleFieldsCacheKey]map[string]bool{},
+		nonzeroReturnModuleFieldsReady: map[objectNonzeroReturnModuleFieldsCacheKey]bool{},
+		memberChainMutationPathsCache:  map[objectMemberChainMutationCacheKey][]string{},
+		memberChainMutationPathsReady:  map[objectMemberChainMutationCacheKey]bool{},
+		statementReachabilityCache:     map[objectStatementReachabilityCacheKey]bool{},
+		statementReachabilityReady:     map[objectStatementReachabilityCacheKey]bool{},
 	}
 	if proc.Graph != nil {
 		graph.ForEachEdge(func(edge vbacfg.Edge) bool {
@@ -3397,23 +3528,41 @@ func objectNonzeroNumericGuard(text string) (string, bool, bool) {
 }
 
 func objectNonzeroReturnModuleFieldsAt(proc sourceProcedure, resultName string, guardStatementID int, flowContext objectFlowContext, declarations declarationScope) map[string]bool {
+	cacheKey := objectNonzeroReturnModuleFieldsCacheKey{
+		resultName:       strings.ToLower(cleanIdentifier(resultName)),
+		guardStatementID: guardStatementID,
+	}
+	if flowContext.nonzeroReturnModuleFieldsReady != nil && flowContext.nonzeroReturnModuleFieldsReady[cacheKey] {
+		return flowContext.nonzeroReturnModuleFieldsCache[cacheKey]
+	}
+	cacheResult := func(fields map[string]bool) map[string]bool {
+		if flowContext.nonzeroReturnModuleFieldsReady != nil && flowContext.nonzeroReturnModuleFieldsCache != nil {
+			flowContext.nonzeroReturnModuleFieldsReady[cacheKey] = true
+			flowContext.nonzeroReturnModuleFieldsCache[cacheKey] = fields
+		}
+		return fields
+	}
 	if flowContext.nonzeroReturnModuleFields == nil || flowContext.facts == nil || proc.Graph == nil {
-		return nil
+		return cacheResult(nil)
+	}
+	graph := flowContext.graph
+	if graph.BlockCount() == 0 {
+		graph = proc.Graph.WithoutNormalErrRaiseContinuationView()
 	}
 	var fields map[string]bool
 	found := false
 	for statement := range proc.Statements.All() {
 		if objectInlineResultAssignment(statement.Text, resultName) {
-			if objectStatementCanReach(proc, statement.ID, guardStatementID) {
-				return nil
+			if objectStatementCanReachInGraph(graph, statement.ID, guardStatementID) {
+				return cacheResult(nil)
 			}
 			continue
 		}
-		if (statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) || statement.Target == nil || !strings.EqualFold(cleanIdentifier(statement.Target.Text), cleanIdentifier(resultName)) || !objectStatementCanReach(proc, statement.ID, guardStatementID) {
+		if (statement.Kind != procedureir.StatementAssignment && statement.Kind != procedureir.StatementSet) || statement.Target == nil || !strings.EqualFold(cleanIdentifier(statement.Target.Text), cleanIdentifier(resultName)) || !objectStatementCanReachInGraph(graph, statement.ID, guardStatementID) {
 			continue
 		}
 		if statement.Value == nil || statement.Value.Kind != procedureir.ExpressionCall {
-			return nil
+			return cacheResult(nil)
 		}
 		var callFields map[string]bool
 		callFound := false
@@ -3430,10 +3579,10 @@ func objectNonzeroReturnModuleFieldsAt(proc sourceProcedure, resultName string, 
 			}
 		})
 		if !callFound {
-			return nil
+			return cacheResult(nil)
 		}
 		if objectNonzeroModuleFieldMutationAfter(proc, statement.ID, callFields, declarations, flowContext, false) {
-			return nil
+			return cacheResult(nil)
 		}
 		if found {
 			for name := range fields {
@@ -3447,9 +3596,9 @@ func objectNonzeroReturnModuleFieldsAt(proc sourceProcedure, resultName string, 
 		}
 	}
 	if !found {
-		return nil
+		return cacheResult(nil)
 	}
-	return fields
+	return cacheResult(fields)
 }
 
 func objectInlineResultAssignment(text, resultName string) bool {

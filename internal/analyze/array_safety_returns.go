@@ -569,8 +569,7 @@ func firstParenOutsideString(text string) int {
 // positive UBound-based length on its normal path and returns zero from an
 // On Error GoTo recovery label. That contract is enough to prove the positive
 // branch of a direct call, while arbitrary helper functions remain unknown.
-func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
-	externalAPIs := buildArrayVBA227ExternalAPISet(files)
+func inferArrayAllocationGuards(files []parsedFile, externalAPIs arrayVBA227ExternalAPISet) map[string]bool {
 	candidates := map[string][]string{}
 	procedureNames := map[string]int{}
 	recognizedNames := map[string]int{}
@@ -610,8 +609,7 @@ func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 	return guards
 }
 
-func inferArraySafeArrayLengthGuards(files []parsedFile) map[string]bool {
-	externalAPIs := buildArrayVBA227ExternalAPISet(files)
+func inferArraySafeArrayLengthGuards(files []parsedFile, externalAPIs arrayVBA227ExternalAPISet) map[string]bool {
 	procedureNames := map[string]int{}
 	recognizedNames := map[string]int{}
 	for _, file := range files {

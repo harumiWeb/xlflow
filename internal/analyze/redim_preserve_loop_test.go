@@ -244,8 +244,19 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA241"); len(got) != 4 {
-		t.Fatalf("enum-case reachability findings = %+v, want alias, post-write, qualified-selector, and shadowed-constant loops", got)
+	got := findingsByCode(findings, "VBA241")
+	wantLines := []int{31, 43, 54, 66}
+	if len(got) != len(wantLines) {
+		t.Fatalf("enum-case reachability findings = %+v, want findings on lines %v", got, wantLines)
+	}
+	seen := make(map[int]bool, len(got))
+	for _, finding := range got {
+		seen[finding.Line] = true
+	}
+	for _, line := range wantLines {
+		if !seen[line] {
+			t.Fatalf("enum-case reachability findings = %+v, missing line %d", got, line)
+		}
 	}
 }
 

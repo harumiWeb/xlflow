@@ -50,6 +50,42 @@ try {
     if ($LASTEXITCODE -ne 2) {
         throw "FailOnRegression exit code = $LASTEXITCODE, want 2."
     }
+
+    function Assert-ComparisonRejectsShape {
+        param(
+            [string] $Name,
+            [string[]] $BaseLines,
+            [string[]] $HeadLines
+        )
+
+        $shapeBaseLog = Join-Path $testRoot ($Name + "-base.txt")
+        $shapeHeadLog = Join-Path $testRoot ($Name + "-head.txt")
+        [System.IO.File]::WriteAllLines($shapeBaseLog, $BaseLines, [Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllLines($shapeHeadLog, $HeadLines, [Text.UTF8Encoding]::new($false))
+        $shapeOutput = Join-Path $testRoot ($Name + "-output")
+        $shapeExitCode = 0
+        try {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "Compare-AnalyzerPerformance.ps1") -BaseLog $shapeBaseLog -HeadLog $shapeHeadLog -OutputDirectory $shapeOutput *> $null
+            $shapeExitCode = $LASTEXITCODE
+        } catch {
+            $shapeExitCode = $LASTEXITCODE
+        }
+        if ($shapeExitCode -eq 0) {
+            throw "Shape mismatch '$Name' was accepted."
+        }
+    }
+
+    Assert-ComparisonRejectsShape -Name "missing-group" -BaseLines @(
+        "BenchmarkRealWorldCorpus/ronecone/analyze-only/cold-20 1 100 ns/op 10 counter_object_summary_evaluations/op"
+        "BenchmarkRealWorldCorpus/ronecone/analyze-only/warm-20 1 100 ns/op 10 counter_object_summary_evaluations/op"
+    ) -HeadLines @(
+        "BenchmarkRealWorldCorpus/ronecone/analyze-only/cold-20 1 100 ns/op 10 counter_object_summary_evaluations/op"
+    )
+    Assert-ComparisonRejectsShape -Name "missing-metric" -BaseLines @(
+        "BenchmarkRealWorldCorpus/ronecone/analyze-only/cold-20 1 100 ns/op 10 counter_object_summary_evaluations/op"
+    ) -HeadLines @(
+        "BenchmarkRealWorldCorpus/ronecone/analyze-only/cold-20 1 100 ns/op"
+    )
     Write-Output "Analyzer performance comparison self-test passed."
 } finally {
     if (Test-Path -LiteralPath $testRoot) {

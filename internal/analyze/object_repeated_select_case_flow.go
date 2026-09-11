@@ -42,7 +42,7 @@ func objectFlowApplyRepeatedSelectCaseObjectState(proc sourceProcedure, state ma
 		return state
 	}
 	proven := objectRepeatedSelectCaseFactoryAssignments(proc, previousCase, flowContext, declarations)
-	if len(proven) == 0 || !objectRepeatedSelectCaseRegionStable(proc, selectorKey, previousSelect, currentSelect, previousCase, proven, declarations, flowContext.objectTypeNames) {
+	if flowContext.containerIndex == nil || len(proven) == 0 || !objectRepeatedSelectCaseRegionStable(proc, flowContext.containerIndex.file, selectorKey, previousSelect, currentSelect, currentCase, previousCase, proven, declarations, flowContext.objectTypeNames) {
 		return state
 	}
 	updated := state
@@ -126,11 +126,32 @@ func objectRepeatedSelectCasePrevious(proc sourceProcedure, currentSelect proced
 	return previousSelect, previousCase, previousCase.ID != 0
 }
 
-func objectRepeatedSelectCaseRegionStable(proc sourceProcedure, selectorKey string, previousSelect, currentSelect, previousCase procedureir.Statement, proven map[string]bool, declarations declarationScope, objectTypeNames map[string]bool) bool {
+func objectRepeatedSelectCaseRegionStable(proc sourceProcedure, file parsedFile, selectorKey string, previousSelect, currentSelect, currentCase, previousCase procedureir.Statement, proven map[string]bool, declarations declarationScope, objectTypeNames map[string]bool) bool {
+	if !objectRepeatedSelectCaseFlowStable(proc, previousSelect, currentCase) {
+		return false
+	}
 	if previousCase.ID == 0 || !objectRepeatedSelectCaseLinesStable(proc, selectorKey, previousCase.Range.StartLine+1, previousCase.Range.EndLine-1, nil, declarations, objectTypeNames) {
 		return false
 	}
-	return objectRepeatedSelectCaseLinesStable(proc, selectorKey, previousSelect.Range.EndLine+1, currentSelect.Range.StartLine-1, proven, declarations, objectTypeNames)
+	return objectRepeatedSelectCaseRegionStraightLine(file, previousSelect.Range.EndLine+1, currentSelect.Range.StartLine-1) &&
+		objectRepeatedSelectCaseLinesStable(proc, selectorKey, previousSelect.Range.EndLine+1, currentSelect.Range.StartLine-1, proven, declarations, objectTypeNames)
+}
+
+func objectRepeatedSelectCaseFlowStable(proc sourceProcedure, previousSelect, currentCase procedureir.Statement) bool {
+	if proc.Graph == nil || previousSelect.ID == 0 || currentCase.ID == 0 {
+		return false
+	}
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	previousBlock, previousOK := graph.BlockForStatement(previousSelect.ID)
+	currentBlock, currentOK := graph.BlockForStatement(currentCase.ID)
+	if !previousOK || !currentOK {
+		return false
+	}
+	// A Case arm is an alternative CFG entry, so the previous matching Case
+	// itself cannot dominate the later arm. Require the previous Select block
+	// to dominate the later matching Case instead; this rejects GoTo paths that
+	// enter the later arm without evaluating the earlier selector.
+	return graph.Dominates(previousBlock.ID, currentBlock.ID)
 }
 
 func objectRepeatedSelectCaseLinesStable(proc sourceProcedure, selectorKey string, start, end int, objectTargets map[string]bool, declarations declarationScope, objectTypeNames map[string]bool) bool {
@@ -147,7 +168,7 @@ func objectRepeatedSelectCaseLinesStable(proc sourceProcedure, selectorKey strin
 			if !ok {
 				continue
 			}
-			if objectRepeatedSelectCaseSelectorKey(target) == selectorKey {
+			if objectRepeatedSelectCaseSelectorWrite(target, selectorKey) {
 				return false
 			}
 			if len(objectTargets) > 0 && isIdentifier(target) {
@@ -159,6 +180,14 @@ func objectRepeatedSelectCaseLinesStable(proc sourceProcedure, selectorKey strin
 		}
 	}
 	return true
+}
+
+func objectRepeatedSelectCaseSelectorWrite(target, selectorKey string) bool {
+	targetKey := objectRepeatedSelectCaseSelectorKey(target)
+	if targetKey == "" || targetKey == selectorKey {
+		return targetKey != ""
+	}
+	return objectCollectionShapePathHasPrefix(selectorKey, targetKey)
 }
 
 func objectRepeatedSelectCaseFactoryAssignments(proc sourceProcedure, branch procedureir.Statement, flowContext objectFlowContext, declarations declarationScope) map[string]bool {
@@ -229,19 +258,42 @@ func objectRepeatedSelectCaseSourceStraightLine(file parsedFile, branch procedur
 		if strings.HasPrefix(text, "#") {
 			return false
 		}
-		for _, prefix := range []string{
-			"if ", "elseif ", "else", "end if", "for ", "for each ", "next", "do", "loop", "while ", "wend",
-			"select ", "case ", "goto ", "exit ", "on error ", "resume ", "with ", "end with",
-		} {
-			if strings.HasPrefix(lower, prefix) {
-				return false
-			}
-		}
-		if strings.HasSuffix(lower, ":") {
+		if objectRepeatedSelectCaseControlLine(lower) || strings.HasSuffix(lower, ":") {
 			return false
 		}
 	}
 	return true
+}
+
+func objectRepeatedSelectCaseRegionStraightLine(file parsedFile, start, end int) bool {
+	start = max(start, 1)
+	end = min(end, len(file.Lines))
+	for line := start; line <= end; line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
+		lower := strings.ToLower(text)
+		if text == "" || strings.HasPrefix(text, "'") || lower == "end select" || strings.HasPrefix(lower, "case ") {
+			continue
+		}
+		if strings.HasPrefix(text, "#") || strings.HasSuffix(lower, ":") {
+			return false
+		}
+		if objectRepeatedSelectCaseControlLine(lower) {
+			return false
+		}
+	}
+	return true
+}
+
+func objectRepeatedSelectCaseControlLine(lower string) bool {
+	for _, keyword := range []string{
+		"if", "elseif", "else", "end if", "for", "next", "do", "loop", "while", "wend",
+		"select", "case", "goto", "exit", "on error", "resume", "with", "end with", "end select",
+	} {
+		if lower == keyword || strings.HasPrefix(lower, keyword+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 func isIdentifier(text string) bool {

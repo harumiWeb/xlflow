@@ -7503,6 +7503,89 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RejectsRepeatedSelectCaseAfterGotoBypass(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CreateDictionary() As Object
+  Set CreateDictionary = CreateObject("Scripting.Dictionary")
+End Function
+
+Public Sub Run(ByVal selector As Long)
+  Dim ret As Object
+  GoTo Later
+  Select Case selector
+    Case 0
+      Set ret = CreateDictionary()
+    Case 1
+      Set ret = New Collection
+  End Select
+
+Later:
+  Select Case selector
+    Case 0
+      ret.Add "key", 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a GoTo path that bypasses the first Select Case must not restore the object proof")
+	}
+}
+
+func TestVBA202Issue448RejectsRepeatedSelectCaseAfterSelectorParentWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CreateDictionary() As Object
+  Set CreateDictionary = CreateObject("Scripting.Dictionary")
+End Function
+
+Public Sub Run()
+  Dim ret As Object
+  Select Case This.Cache.Value
+    Case 0
+      Set ret = CreateDictionary()
+    Case 1
+      Set ret = New Collection
+  End Select
+  Set This.Cache = Nothing
+
+  Select Case This.Cache.Value
+    Case 0
+      ret.Add "key", 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a write to a selector parent must invalidate the repeated Select Case proof")
+	}
+}
+
+func TestObjectRepeatedSelectCaseControlLineUsesKeywordBoundaries(t *testing.T) {
+	t.Parallel()
+	for _, line := range []string{"Elsewhere = 1", "NextValue = 1", "Document = 1", "Format = 1"} {
+		if objectRepeatedSelectCaseControlLine(strings.ToLower(line)) {
+			t.Fatalf("identifier prefix was treated as a control keyword: %q", line)
+		}
+	}
+	for _, line := range []string{"Else", "Next value", "Do While ready", "GoTo Later", "End Select"} {
+		if !objectRepeatedSelectCaseControlLine(strings.ToLower(line)) {
+			t.Fatalf("control keyword was not recognized: %q", line)
+		}
+	}
+}
+
 func TestVBA202Issue448RejectsProducerIndexedElementAlias(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

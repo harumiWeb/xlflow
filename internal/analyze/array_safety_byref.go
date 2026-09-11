@@ -1273,16 +1273,11 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 		var baseView vbacfg.CFGView
 		var summaryGraph *vbacfg.CFGView
-		var vba227Graph *vbacfg.CFGView
-		var vba227ResumeNextEdges arrayVBA227ResumeNextEdges
 		var worklistReachable map[vbacfg.BlockID]bool
 		worklistReachableLines := map[int]bool{}
 		if proc.Graph != nil {
 			baseView = proc.Graph.View(vbacfg.EdgeFilter{})
 			summaryGraph = &baseView
-			graph := arrayVBA227Graph(proc, localCtx)
-			vba227Graph = &graph
-			vba227ResumeNextEdges = arrayVBA227ResumeNextContinuationEdges(proc)
 			worklistReachable = arrayCFGWorklistReachable(&baseView)
 			for statement := range proc.Statements.All() {
 				line := statement.Range.StartLine
@@ -1359,7 +1354,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 			// ByRef entry proofs must use the same logical-line normalization as
 			// VBA227 itself; otherwise a continued Split assignment can make a
 			// later call-site argument look unallocated.
-			out, _ := a.arrayVBA227Transfer(file, proc, localCtx, variables, in, text, line, constants, nil, nil, vba227Graph, vba227ResumeNextEdges)
+			out, _ := a.arrayVBA227Transfer(file, proc, localCtx, variables, in, text, line, constants, nil, nil, nil, nil)
 			out = applyArrayLocalGoSubStatementEffects(out, text, localGoSubAllocations)
 			forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 				if ownerStatementID > 0 && call.StatementID != ownerStatementID {

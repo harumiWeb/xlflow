@@ -258,6 +258,13 @@ func arrayVBA227PreserveResumeNextArrayFailure(input, output arrayFlowState, tex
 	if !provenArray || !value.knownArray {
 		return output
 	}
+	if value.origin == arrayOriginRangeValue {
+		// Range.Value/Value2 already has an explicit Range-origin contract.
+		// Preserve that contract when the probe is protected by Resume Next;
+		// otherwise the failure-preservation meet would duplicate VBA226 as a
+		// spurious unallocated-array warning.
+		return output
+	}
 	if _, assignedOutput := output[name]; !assignedOutput {
 		return output
 	}

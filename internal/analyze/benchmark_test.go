@@ -351,7 +351,7 @@ End Sub
 	}
 	for _, summary := range analysis.summaries {
 		if strings.EqualFold(summary.QualifiedName, "Chain.AForward") && !summary.ReturnAssigned {
-			t.Fatal("bare Collection forwarding summary was not invalidated")
+			t.Fatal("bare Collection forwarding summary lacks return-assignment proof")
 		}
 	}
 }

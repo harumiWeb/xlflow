@@ -375,8 +375,11 @@ func objectCollectionShapeSetValue(state *objectCollectionShapeState, path, valu
 }
 
 func objectCollectionShapeRegExpKnown(state objectCollectionShapeState, path string) bool {
-	if path == "" || state.regexp[path] {
-		return path != ""
+	if path == "" {
+		return false
+	}
+	if state.regexp[path] {
+		return true
 	}
 	segments := strings.Split(path, "|")
 	for index := range segments {
@@ -1001,8 +1004,8 @@ func objectCollectionShapeStaticDictionaryKeyAbsent(proc sourceProcedure, receiv
 		if call.StatementID == guardID {
 			continue
 		}
-		if call.Callee.Receiver != nil {
-			receiverText := strings.TrimSpace(*call.Callee.Receiver)
+		receiverText := objectCallWithReceiverName(proc, call)
+		if receiverText != "" {
 			if objectCollectionShapePath(receiverText) == receiverPath {
 				member := strings.ToLower(cleanIdentifier(call.Callee.Member))
 				switch member {

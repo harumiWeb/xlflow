@@ -139,6 +139,24 @@ function Get-Aggregates {
 function Compare-Aggregates {
     param([object[]] $Aggregates)
 
+    $groups = @($Aggregates | Group-Object project, mode)
+    foreach ($group in $groups) {
+        $baseRows = @($group.Group | Where-Object side -eq "base")
+        $headRows = @($group.Group | Where-Object side -eq "head")
+        if ($group.Group.Count -ne 2 -or $baseRows.Count -ne 1 -or $headRows.Count -ne 1) {
+            throw "Aggregate group $($group.Name) must contain exactly one base and one head row (base=$($baseRows.Count), head=$($headRows.Count))."
+        }
+        $baseMetricNames = @($baseRows[0].metrics.Keys | Sort-Object)
+        $headMetricNames = @($headRows[0].metrics.Keys | Sort-Object)
+        $baseOnly = @($baseMetricNames | Where-Object { $_ -notin $headMetricNames })
+        $headOnly = @($headMetricNames | Where-Object { $_ -notin $baseMetricNames })
+        if ($baseOnly.Count -gt 0 -or $headOnly.Count -gt 0) {
+            $baseOnlyText = [string]::Join(", ", $baseOnly)
+            $headOnlyText = [string]::Join(", ", $headOnly)
+            throw "Metric sets differ for $($group.Name) (base-only: [$baseOnlyText], head-only: [$headOnlyText])."
+        }
+    }
+
     $comparisons = [System.Collections.Generic.List[object]]::new()
     $headRows = @($Aggregates | Where-Object side -eq "head")
     foreach ($head in $headRows) {
@@ -146,7 +164,7 @@ function Compare-Aggregates {
         if ($null -eq $base) {
             throw "Missing base samples for $($head.project)/$($head.mode)."
         }
-        foreach ($metricName in @($head.metrics.Keys | Where-Object { $base.metrics.Contains($_) })) {
+        foreach ($metricName in @($head.metrics.Keys)) {
             $baseValue = [double]$base.metrics[$metricName]
             $headValue = [double]$head.metrics[$metricName]
             $deltaPercent = if ($baseValue -eq 0.0) {
