@@ -111,13 +111,15 @@ type objectAnalysisContext struct {
 	summaries map[string]objectProcedureSummary
 	entries   map[string]map[string]bool
 
-	summaryDependents           map[string][]string
-	entryOutgoing               map[string][]*objectEntryCall
-	entryIncoming               map[string][]*objectEntryCall
-	moduleProcedureKeys         map[string][]string
-	callReachable               map[string]bool
-	objectTypeNames             map[string]bool
-	qualifiedObjectFunctionKeys map[string][]string
+	summaryDependents                map[string][]string
+	projectObjectSummaryDependencies map[string][]string
+	entryOutgoing                    map[string][]*objectEntryCall
+	entryIncoming                    map[string][]*objectEntryCall
+	moduleProcedureKeys              map[string][]string
+	callReachable                    map[string]bool
+	objectTypeNames                  map[string]bool
+	qualifiedObjectFunctionKeys      map[string][]string
+	bareObjectFunctionKeys           map[string][]string
 
 	summaryEvaluations   int
 	entryFlowEvaluations int
@@ -125,13 +127,14 @@ type objectAnalysisContext struct {
 
 func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 	analysis := &objectAnalysisContext{
-		plans:               map[string]*objectProcedurePlan{},
-		summaries:           map[string]objectProcedureSummary{},
-		entries:             map[string]map[string]bool{},
-		summaryDependents:   map[string][]string{},
-		entryOutgoing:       map[string][]*objectEntryCall{},
-		entryIncoming:       map[string][]*objectEntryCall{},
-		moduleProcedureKeys: map[string][]string{},
+		plans:                            map[string]*objectProcedurePlan{},
+		summaries:                        map[string]objectProcedureSummary{},
+		entries:                          map[string]map[string]bool{},
+		summaryDependents:                map[string][]string{},
+		projectObjectSummaryDependencies: map[string][]string{},
+		entryOutgoing:                    map[string][]*objectEntryCall{},
+		entryIncoming:                    map[string][]*objectEntryCall{},
+		moduleProcedureKeys:              map[string][]string{},
 	}
 	for _, file := range files {
 		procedures := file.procedureView()
@@ -174,20 +177,12 @@ func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 		if plan == nil {
 			continue
 		}
-		if !isObjectType(plan.proc.ReturnType) && objectTypeKnown(plan.proc.ReturnType, analysis.objectTypeNames) {
-			// Project-typed factory returns are object values too, but their
-			// return type is not covered by the generic Object/Collection test
-			// used while constructing the initial plan.  Mark them relevant now
-			// so a definite `Set FunctionName = New ProjectClass` can flow through
-			// calls assigned to late-bound Object variables.
-			plan.relevant = true
-			markProjectObjectReturnSlot(plan, analysis.objectTypeNames)
-		}
 		plan.flowContext.objectTypeNames = analysis.objectTypeNames
 	}
 	sort.Strings(analysis.order)
 	analysis.initializeObjectSummaries()
 	analysis.qualifiedObjectFunctionKeys = objectQualifiedObjectFunctionIndex(analysis.summaries)
+	analysis.bareObjectFunctionKeys = objectBareObjectFunctionIndex(analysis.summaries)
 	for _, plan := range analysis.plans {
 		plan.flowContext.qualifiedObjectFunctionKeys = analysis.qualifiedObjectFunctionKeys
 		addProjectObjectFlowVariables(plan, analysis.objectTypeNames, analysis.summaries)
@@ -195,6 +190,7 @@ func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 	analysis.buildObjectIndexes()
 	analysis.buildObjectCallReachability()
 	analysis.buildObjectDependencies()
+	analysis.activateProjectObjectSummaryDependencies()
 	analysis.restrictObjectModuleVariables()
 	analysis.prepareTerminalCallGraphs()
 	return analysis
@@ -934,6 +930,27 @@ func objectInitialEntryState(plan *objectProcedurePlan) map[string]bool {
 func (analysis *objectAnalysisContext) buildObjectDependencies() {
 	addSummaryDependency := func(calleeKey, callerKey string) {
 		analysis.summaryDependents[calleeKey] = append(analysis.summaryDependents[calleeKey], callerKey)
+		if objectSummaryHasCustomReturn(analysis.summaries[calleeKey]) {
+			analysis.projectObjectSummaryDependencies[callerKey] = append(analysis.projectObjectSummaryDependencies[callerKey], calleeKey)
+		}
+	}
+	bareObjectFunctionKeys := func(caller *objectProcedurePlan, name string) []string {
+		name = cleanIdentifier(name)
+		if caller == nil || name == "" || objectIntrinsicIdentifierAssigned(caller.proc, name) {
+			return nil
+		}
+		if _, ok := objectDeclarationByName(name, caller.declarations); ok {
+			return nil
+		}
+		indexKey := objectReceiverSummaryIndexKey(caller.proc.Module, name)
+		indexed := analysis.bareObjectFunctionKeys[indexKey]
+		keys := make([]string, 0, len(indexed))
+		for _, summaryKey := range indexed {
+			if summaryKey != caller.key {
+				keys = append(keys, summaryKey)
+			}
+		}
+		return keys
 	}
 	for _, callerKey := range analysis.order {
 		caller := analysis.plans[callerKey]
@@ -943,27 +960,11 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 		for expression := range caller.proc.Expressions.All() {
 			switch expression.Kind {
 			case procedureir.ExpressionIdentifier:
-				name := cleanIdentifier(expression.Text)
-				if name == "" || objectIntrinsicIdentifierAssigned(caller.proc, name) {
-					continue
-				}
-				if _, ok := objectDeclarationByName(name, caller.declarations); ok {
-					continue
-				}
-				for summaryKey, summary := range analysis.summaries {
-					if summaryKey == callerKey || !summary.ReturnObject || !isObjectType(summary.ReturnType) || !strings.EqualFold(summary.Module, caller.proc.Module) || !strings.EqualFold(lastName(summary.QualifiedName), name) {
-						continue
-					}
+				for _, summaryKey := range bareObjectFunctionKeys(caller, expression.Text) {
 					addSummaryDependency(summaryKey, callerKey)
 				}
 			case procedureir.ExpressionMember, procedureir.ExpressionCall:
-				if summaryKey, summary, found := objectQualifiedObjectFunctionSummary(expression.Text, caller.declarations, analysis.summaries, analysis.qualifiedObjectFunctionKeys); found {
-					if targetPlan := analysis.plans[summaryKey]; targetPlan != nil {
-						targetPlan.relevant = true
-						if summary.ReturnProjectObject {
-							markProjectObjectReturnSlot(targetPlan, analysis.objectTypeNames)
-						}
-					}
+				if summaryKey, _, found := objectQualifiedObjectFunctionSummary(expression.Text, caller.declarations, analysis.summaries, analysis.qualifiedObjectFunctionKeys); found {
 					addSummaryDependency(summaryKey, callerKey)
 					continue
 				}
@@ -978,12 +979,6 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 						}
 						if targetIndex == len(targets)-1 && objectSummaryHasCustomReturn(summary) {
 							continue
-						}
-						if targetIndex < len(targets)-1 && (!objectClassOrFormProcedure(caller.proc) || !strings.EqualFold(objectTypeIdentity(summary.ReturnType), objectTypeIdentity(caller.proc.Module))) {
-							if targetPlan := analysis.plans[summaryKey]; targetPlan != nil && summary.ReturnProjectObject {
-								targetPlan.relevant = true
-								markProjectObjectReturnSlot(targetPlan, analysis.objectTypeNames)
-							}
 						}
 						addSummaryDependency(summaryKey, callerKey)
 					}
@@ -1035,6 +1030,11 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 					statementIDs := map[int]bool{entryCall.call.StatementID: true}
 					name := cleanIdentifier(actual.text)
 					if name != "" {
+						for _, factoryKey := range bareObjectFunctionKeys(caller, name) {
+							if factoryKey != calleeKey {
+								addSummaryDependency(factoryKey, calleeKey)
+							}
+						}
 						for statement := range caller.proc.Statements.All() {
 							if statement.Kind == procedureir.StatementSet && statement.Target != nil && strings.EqualFold(cleanIdentifier(statement.Target.Text), name) {
 								statementIDs[statement.ID] = true
@@ -1072,6 +1072,10 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 		sort.Strings(dependents)
 		analysis.summaryDependents[key] = uniqueStrings(dependents)
 	}
+	for key, dependencies := range analysis.projectObjectSummaryDependencies {
+		sort.Strings(dependencies)
+		analysis.projectObjectSummaryDependencies[key] = uniqueStrings(dependencies)
+	}
 	for key, calls := range analysis.entryOutgoing {
 		sort.SliceStable(calls, func(i, j int) bool {
 			if calls[i].callee.key != calls[j].callee.key {
@@ -1089,6 +1093,35 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 			return calls[i].call.ID < calls[j].call.ID
 		})
 		analysis.entryIncoming[key] = calls
+	}
+}
+
+// activateProjectObjectSummaryDependencies limits interprocedural object-flow
+// work to project-typed factory summaries consumed by an already relevant
+// procedure. These returns need an object return slot, but unrelated factories
+// must not make the fixed-point worklist grow with the whole project.
+func (analysis *objectAnalysisContext) activateProjectObjectSummaryDependencies() {
+	queue := make([]string, 0, len(analysis.order))
+	for _, key := range analysis.order {
+		plan := analysis.plans[key]
+		if plan == nil || !plan.relevant {
+			continue
+		}
+		markProjectObjectReturnSlot(plan, analysis.objectTypeNames)
+		queue = append(queue, key)
+	}
+	for next := 0; next < len(queue); next++ {
+		callerKey := queue[next]
+		for _, calleeKey := range analysis.projectObjectSummaryDependencies[callerKey] {
+			callee := analysis.plans[calleeKey]
+			if callee == nil || callee.relevant {
+				continue
+			}
+			callee.relevant = true
+			markProjectObjectReturnSlot(callee, analysis.objectTypeNames)
+			addProjectObjectFlowVariables(callee, analysis.objectTypeNames, analysis.summaries)
+			queue = append(queue, calleeKey)
+		}
 	}
 }
 
@@ -4425,6 +4458,22 @@ func objectQualifiedObjectFunctionIndex(summaries map[string]objectProcedureSumm
 	return index
 }
 
+func objectBareObjectFunctionIndex(summaries map[string]objectProcedureSummary) map[string][]string {
+	index := map[string][]string{}
+	for key, summary := range summaries {
+		if !objectSummaryReturnsObject(summary) {
+			continue
+		}
+		indexKey := objectReceiverSummaryIndexKey(summary.Module, lastName(summary.QualifiedName))
+		index[indexKey] = append(index[indexKey], key)
+	}
+	for indexKey, keys := range index {
+		sort.Strings(keys)
+		index[indexKey] = uniqueStrings(keys)
+	}
+	return index
+}
+
 func objectQualifiedObjectFunctionSummary(text string, declarations declarationScope, summaries map[string]objectProcedureSummary, index map[string][]string) (string, objectProcedureSummary, bool) {
 	parts := objectMemberChainParts(text)
 	if len(parts) != 2 {
@@ -6163,7 +6212,7 @@ func objectCallParameterAssigned(proc sourceProcedure, declarations declarationS
 			return true, true
 		}
 		declaration, scope, ok := objectDeclarationBinding(name, declarations)
-		if !ok && proc.Name != "" && strings.EqualFold(name, cleanIdentifier(proc.Name)) && isObjectType(proc.ReturnType) {
+		if !ok && proc.Name != "" && strings.EqualFold(name, cleanIdentifier(proc.Name)) {
 			// A function's return slot is an object binding even though it is not
 			// represented by a source Dim declaration. Keep it aligned with the
 			// special return-slot handling in objectFlowTarget.
@@ -6171,6 +6220,9 @@ func objectCallParameterAssigned(proc sourceProcedure, declarations declarationS
 			if _, exists := vars[variable.key()]; exists {
 				return state[variable.key()], true
 			}
+		}
+		if !ok && objectBareObjectFunctionAssigned(proc, name, summaries) {
+			return true, true
 		}
 		if !ok || !declaration.Object {
 			return false, false

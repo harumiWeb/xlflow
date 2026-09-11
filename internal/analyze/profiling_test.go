@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -517,5 +518,56 @@ func TestVBA202WorklistEvaluationCountScalesWithDependencyChain(t *testing.T) {
 	}
 	if values["object_entry_flow_evaluations"] > limit {
 		t.Fatalf("entry flow evaluations = %d, want no more than %d for %d procedures", values["object_entry_flow_evaluations"], limit, procedureCount+1)
+	}
+}
+
+func TestVBA202WorklistIgnoresUnrelatedProjectObjectFactories(t *testing.T) {
+	run := func(t *testing.T, unrelatedFactoryCount int) uint64 {
+		t.Helper()
+		root := t.TempDir()
+		writeClass(t, root, "Widget.cls", `Attribute VB_Name = "Widget"
+Option Explicit
+`)
+		var source strings.Builder
+		source.WriteString(`Option Explicit
+Public Sub Run()
+  Dim value As Object
+  Set value = UsedFactory
+  Debug.Print value.Caption
+End Sub
+
+Private Function UsedFactory() As Widget
+  Set UsedFactory = New Widget
+End Function
+	`)
+		for index := range unrelatedFactoryCount {
+			source.WriteString("\nPrivate Function UnusedFactory" + strconv.Itoa(index) + "() As Widget\n")
+			source.WriteString("  Set UnusedFactory" + strconv.Itoa(index) + " = New Widget\n")
+			source.WriteString("End Function\n")
+		}
+		writeModule(t, root, "Factories.bas", source.String())
+		t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
+		recorder := analysisstats.NewRecorder()
+		result, err := (Analyzer{RootDir: root, Config: config.Default()}).RunResultContext(analysisstats.WithRecorder(t.Context(), recorder))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := findingsByCode(result.Findings, "VBA202"); len(got) != 0 {
+			t.Fatalf("used project-object factory produced VBA202 findings: %+v", got)
+		}
+		_, counters := recorder.Totals()
+		for _, counter := range counters {
+			if counter.Name == "object_summary_evaluations" {
+				return counter.Value
+			}
+		}
+		t.Fatalf("missing object_summary_evaluations counter: %+v", counters)
+		return 0
+	}
+
+	baseline := run(t, 0)
+	withUnrelatedFactories := run(t, 100)
+	if withUnrelatedFactories != baseline {
+		t.Fatalf("unrelated project-object factories changed summary evaluations: baseline=%d, with unrelated factories=%d", baseline, withUnrelatedFactories)
 	}
 }

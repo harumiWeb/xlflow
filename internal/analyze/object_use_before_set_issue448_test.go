@@ -3082,6 +3082,66 @@ End Function
 	}
 }
 
+func TestVBA202Issue448PropagatesBareClassFactoryIntoObjectConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Widget.cls", `Attribute VB_Name = "Widget"
+Option Explicit
+`)
+	writeModule(t, dir, "Factories.bas", `Option Explicit
+Public Sub Run()
+  Consume UsedFactory
+End Sub
+
+Private Sub Consume(ByVal value As Object)
+  Debug.Print value.Caption
+End Sub
+
+Private Function UsedFactory() As Widget
+  Set UsedFactory = New Widget
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a bare project-object factory passed to an Object consumer should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotTreatBareFactoryReturnSlotAsAssignedBeforeSet(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Widget.cls", `Attribute VB_Name = "Widget"
+Option Explicit
+`)
+	writeModule(t, dir, "Factories.bas", `Option Explicit
+Public Sub Run()
+  Dim value As Object
+  Set value = Factory
+End Sub
+
+Private Function Factory() As Widget
+  Consume Factory
+  Set Factory = New Widget
+End Function
+
+Private Sub Consume(ByVal value As Object)
+  Debug.Print value.Caption
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("a factory return slot passed before Set should remain nullable in the consumer: %+v", got)
+	}
+}
+
 func TestVBA202Issue448PreservesSelectionListObjectGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
