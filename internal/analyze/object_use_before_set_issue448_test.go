@@ -78,6 +78,45 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PropagatesCollectionCountGuardIntoPrivateHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function PopCol(ByRef col As Collection) As Object
+  Set PopCol = col(col.Count)
+End Function
+
+Private Function ShiftCol(ByRef col As Collection) As Object
+  Set ShiftCol = col(1)
+End Function
+
+Public Sub Run(ByVal stack As Collection)
+  If stack.Count > 0 Then
+    Dim value As Object
+    Set value = PopCol(stack)
+    Set value = ShiftCol(stack)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	for _, finding := range got {
+		if finding.Procedure == "PopCol" || finding.Procedure == "ShiftCol" {
+			t.Fatalf("a Count guard on the caller must establish the Collection helper parameter: %+v", got)
+		}
+	}
+	for _, finding := range got {
+		if finding.Procedure == "Run" && finding.Line == 11 {
+			return
+		}
+	}
+	t.Fatalf("the nullable caller parameter must remain reportable at Count: %+v", got)
+}
+
 func TestVBA202Issue448PreservesIndexedDictionaryWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -3211,6 +3211,21 @@ func objectFlowApplyGuard(proc sourceProcedure, state map[string]bool, flowConte
 		}
 		return updated
 	}
+	if statement.Kind == procedureir.StatementIf || statement.Kind == procedureir.StatementElseIf {
+		if name, ok := objectPositiveCollectionCountGuard(text); ok {
+			key := objectGuardVariableKey(name, state, declarations, flowContext.objectTypeNames)
+			if key == "" {
+				return state
+			}
+			// Reaching either normal branch means that Count was evaluated
+			// successfully, which proves that the Collection receiver was not
+			// Nothing.  The comparison result itself is intentionally irrelevant:
+			// an empty Collection is still a live object.
+			updated := cloneObjectState(state)
+			updated[key] = true
+			return updated
+		}
+	}
 	if names, ok := objectNothingOrGuard(text); ok && edge.Kind == vbacfg.EdgeBranchFalse {
 		updated := cloneObjectState(state)
 		for _, name := range names {
@@ -3255,6 +3270,39 @@ func objectFlowApplyGuard(proc sourceProcedure, state map[string]bool, flowConte
 		return updated
 	}
 	return state
+}
+
+// objectPositiveCollectionCountGuard recognizes only simple block If guards;
+// loop-bound Count expressions remain outside state refinement because their
+// first evaluation may still dereference a Nothing receiver.
+func objectPositiveCollectionCountGuard(text string) (string, bool) {
+	text = objectTrimOuterParens(strings.ToLower(strings.TrimSpace(text)))
+	if then := strings.Index(text, " then"); then >= 0 {
+		text = strings.TrimSpace(text[:then])
+	}
+	text = objectTrimOuterParens(text)
+	if strings.HasPrefix(text, "not ") {
+		text = objectTrimOuterParens(strings.TrimSpace(strings.TrimPrefix(text, "not ")))
+	}
+	if strings.Contains(text, " and ") || strings.Contains(text, " or ") {
+		return "", false
+	}
+	compact := compactStatement(text)
+	operator := ">"
+	position := strings.Index(compact, operator)
+	if position < 0 {
+		return "", false
+	}
+	left := strings.TrimSpace(compact[:position])
+	right := strings.TrimSpace(compact[position+len(operator):])
+	if !strings.HasSuffix(left, ".count") || right != "0" {
+		return "", false
+	}
+	name := cleanIdentifier(strings.TrimSuffix(left, ".count"))
+	if name == "" || strings.ContainsAny(name, ".()") {
+		return "", false
+	}
+	return name, true
 }
 
 func objectFlowApplyNonzeroReturnGuard(proc sourceProcedure, state map[string]bool, flowContext objectFlowContext, edge vbacfg.Edge, declarations declarationScope) (map[string]bool, bool) {
