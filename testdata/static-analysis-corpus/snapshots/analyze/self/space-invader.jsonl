@@ -125,6 +125,7 @@
 {"project":"self/space-invader","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":186,"column":0}
 {"project":"self/space-invader","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":282,"column":0}
 {"project":"self/space-invader","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":282,"column":0}
+{"project":"self/space-invader","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA227","severity":"warning","line":329,"column":0}
 {"project":"self/space-invader","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":527,"column":0}
 {"project":"self/space-invader","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":543,"column":0}
 {"project":"self/space-invader","file":"src/workbook/ThisWorkbook.bas","surface":"analyze","code":"VBA220","severity":"warning","line":6,"column":0}

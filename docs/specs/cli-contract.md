@@ -1623,6 +1623,27 @@ reads. Safe use requires a dominating proof across all reachable paths; an
 explicit reset or a possibly empty loop therefore invalidates later use until
 another definite initialization.
 
+Known late-bound Dictionary cache values are carried through a proven item
+assignment, including object-producing `VBScript.RegExp.Execute` results.
+For a persistent local Dictionary, `If Not cache(key) Then` may discard only
+the absent branch when the procedure proves that no keyed write or alias can
+mutate the Dictionary; dynamically different-looking keys are not assumed to
+remain distinct across invocations. Scalar project-local helpers may refine a
+module Object on a nonzero result only when every nonzero result assignment is dominated by
+that field's non-`Nothing` guard; arbitrary numeric return values do not create
+an object proof.
+
+Resolved, visible project-local Boolean predicates also refine the matching
+true branch when their single object parameter is protected by an explicit `Is
+Nothing` exit or when every true result is assigned only after a successful
+member access under a terminating `On Error GoTo` handler. A result assigned
+only on an exception-handler path does not establish the contract, and an
+unresolved or ambiguous same-name call remains conservative. The predicate's
+own member access remains subject to the normal `VBA202` check; this contract
+only proves that a caller reaching the true branch supplied a non-`Nothing`
+object. The true branch of a negated predicate remains nullable. The
+`IsExcelTable` type fact is limited to that exact predicate name.
+
 Private project-local object procedures may additionally establish parameter
 entry state when every reachable direct call site supplies a definitely
 non-`Nothing` object. `ByVal` calls and resolved `ByRef` calls that only read
@@ -1661,7 +1682,7 @@ and standalone getter predicates, remain allowed.
 `VBA226` is default-enabled, non-blocking, warning-level, inline-suppressible, and supported in batch and real-time analysis. Its legacy configuration key is `detect_range_value_array_shape`; add `VBA226` to `[analyze].disabled_rules` to disable it. Known single-cell values are scalars, known multi-cell values are two-dimensional arrays, and dynamic or merged shapes remain uncertain unless unsafe consumption or a statically proven mismatch is visible.
 
 For `VBA226`, the configurable analyzer mapping is `VBA226 = detect_range_value_array_shape`.
-`VBA227` is default-enabled, non-blocking, warning-level, inline-suppressible, and supported in batch and real-time analysis. It uses a conservative CFG allocation lattice (`allocated`, `unallocated`, and `unknown`) for fixed, dynamic, multidimensional, object, and Variant arrays. It reports unallocated bound/access operations, invalid dimensions or known bounds, fixed-array `ReDim`, incompatible `Erase`, known scalar bound/iterable sources, and impossible constant `ReDim` bounds. Unknown Variant operations remain fail-open. The shared state supplies `VBA208` `ReDim Preserve` findings and object-array missing-`Set` findings under `VBA101` / `VBA102`, which retain their existing ownership and configuration contracts. Unique project-local Function and Property Get return assignments may establish an array value; mixed, recursive, ambiguous, and external returns remain unknown. Batch summaries may use project-local files, while real-time summaries are limited to the active document. `Range.Value` / `Value2` shape findings remain owned by `VBA226` and are not duplicated. Disable it with `[analyze].disabled_rules = ["VBA227"]` or use `detect_array_lifecycle_safety`.
+`VBA227` is default-enabled, non-blocking, warning-level, inline-suppressible, and supported in batch and real-time analysis. It uses a conservative CFG allocation lattice (`allocated`, `unallocated`, and `unknown`) for fixed, dynamic, multidimensional, object, and Variant arrays. It reports unallocated bound/access operations, invalid dimensions or known bounds, fixed-array `ReDim`, incompatible `Erase`, known scalar bound/iterable sources, and impossible constant `ReDim` bounds. Unknown Variant operations remain fail-open. The shared state supplies `VBA208` `ReDim Preserve` findings and object-array missing-`Set` findings under `VBA101` / `VBA102`, which retain their existing ownership and configuration contracts. Unique project-local Function and Property Get return assignments may establish an array value; mixed, recursive, ambiguous, and external returns remain unknown. Batch summaries may use project-local files, while project-aware real-time summaries use the active document and its reachable project-document closure; unrelated documents remain outside the context. `Range.Value` / `Value2` shape findings remain owned by `VBA226` and are not duplicated. Disable it with `[analyze].disabled_rules = ["VBA227"]` or use `detect_array_lifecycle_safety`.
 The analyzer materializes one immutable procedure-local array semantic result
 for these compatible projections. The result is discarded with the current
 analysis revision, is read-only during projection, and does not contain

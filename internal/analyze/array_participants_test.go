@@ -10,8 +10,52 @@ import (
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+func TestRealtimeProjectContextDocumentsFollowsQualifiedArrayTypeClosure(t *testing.T) {
+	current := parsedFile{
+		Path: "Main.bas",
+		IR: procedureir.DocumentIR{
+			Path:       "Main.bas",
+			ModuleName: "Main",
+			ModuleKind: "standard",
+			Declarations: []procedureir.Declaration{{
+				Name: "driver", Type: "SeleniumVBA.WebDriver", Kind: "variable",
+			}},
+		},
+	}
+	documents := []intel.ProjectAnalysisDocument{
+		{IR: procedureir.DocumentIR{
+			Path:       "WebDriver.cls",
+			ModuleName: "WebDriver",
+			ModuleKind: "class",
+			Procedures: []procedureir.ProcedureIR{{
+				Symbol: procedureir.ProcedureSymbol{Name: "FindElement", ReturnType: "WebElement"},
+			}},
+		}},
+		{IR: procedureir.DocumentIR{
+			Path:       "WebElement.cls",
+			ModuleName: "WebElement",
+			ModuleKind: "class",
+		}},
+		{IR: procedureir.DocumentIR{
+			Path:       "Unrelated.cls",
+			ModuleName: "Unrelated",
+			ModuleKind: "class",
+		}},
+	}
+	selected := realtimeProjectContextDocuments(current, documents, nil)
+	got := make([]string, 0, len(selected))
+	for _, document := range selected {
+		got = append(got, document.IR.ModuleName)
+	}
+	want := []string{"WebDriver", "WebElement"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("project context modules = %v, want %v", got, want)
+	}
+}
 
 func TestBuildArrayParticipantSetExcludesUnrelatedProcedures(t *testing.T) {
 	matched := func(callee, caller string) procedureir.CallSite {

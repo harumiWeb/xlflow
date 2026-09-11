@@ -167,6 +167,99 @@ End Sub
 	}
 }
 
+func TestVBA241ExcludesLoopContradictedByEnclosingEnumCase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Const Limit As Long = 1
+
+Private Enum EBufferType
+    BinaryFragment = 1
+    Utf8Fragment = 3
+    Utf8FragmentAlias = 3
+End Enum
+
+Public Sub Receive()
+    Dim state As EBufferType
+    Dim values() As Long
+    Dim i As Long
+    Select Case state
+    Case EBufferType.Utf8Fragment
+        For i = 1 To 2
+            While state = EBufferType.BinaryFragment
+                ReDim Preserve values(1 To 10)
+            Wend
+        Next i
+    End Select
+End Sub
+
+Public Sub ReceiveAlias()
+    Dim state As EBufferType
+    Dim values() As Long
+    Select Case state
+    Case EBufferType.Utf8Fragment
+        While state = EBufferType.Utf8FragmentAlias
+            ReDim Preserve values(1 To 10)
+        Wend
+    End Select
+End Sub
+
+Public Sub ReceiveAfterChange()
+    Dim state As EBufferType
+    Dim values() As Long
+    Select Case state
+    Case EBufferType.Utf8Fragment
+        state = EBufferType.BinaryFragment
+        While state = EBufferType.BinaryFragment
+            ReDim Preserve values(1 To 10)
+        Wend
+    End Select
+End Sub
+
+Public Sub ReceiveQualified()
+    Dim holder As Object
+    Dim values() As Long
+    Select Case holder.State
+    Case EBufferType.Utf8Fragment
+        While holder.State = EBufferType.BinaryFragment
+            ReDim Preserve values(1 To 10)
+        Wend
+    End Select
+End Sub
+
+Public Sub ReceiveShadowed()
+    Dim state As EBufferType
+    Dim Limit As Long
+    Dim values() As Long
+    Select Case state
+    Case EBufferType.Utf8Fragment
+        While state = Limit
+            ReDim Preserve values(1 To 10)
+        Wend
+    End Select
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA241")
+	wantLines := []int{31, 43, 54, 66}
+	if len(got) != len(wantLines) {
+		t.Fatalf("enum-case reachability findings = %+v, want findings on lines %v", got, wantLines)
+	}
+	seen := make(map[int]bool, len(got))
+	for _, finding := range got {
+		seen[finding.Line] = true
+	}
+	for _, line := range wantLines {
+		if !seen[line] {
+			t.Fatalf("enum-case reachability findings = %+v, missing line %d", got, line)
+		}
+	}
+}
+
 func TestVBA241DetectsVariantArrayTarget(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

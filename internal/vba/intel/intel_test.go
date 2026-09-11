@@ -1302,6 +1302,37 @@ End Sub
 	}
 }
 
+func TestResolveDocumentExpressionTypeAtPrefersLocalCollectionOverCellsGlobal(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: "Main.bas",
+		Source: `Option Explicit
+Public Sub Run()
+    Dim cells As Collection
+    Dim columns As Collection
+    Debug.Print cells.Item(1)
+    Debug.Print columns.Item(1)
+End Sub
+`,
+	}
+	for _, expression := range []string{"cells", "columns"} {
+		if got, ok := analyzer.ResolveDocumentExpressionTypeAt(doc, expression, 4); !ok || !strings.EqualFold(got, "Collection") {
+			t.Fatalf("local %s type = %q, %v; want Collection, true", expression, got, ok)
+		}
+	}
+	globalDoc := Document{
+		Path: "Global.bas",
+		Source: `Option Explicit
+Public Sub Run()
+    Debug.Print Cells(1, 1).Value2
+End Sub
+`,
+	}
+	if got, ok := analyzer.ResolveDocumentExpressionTypeAt(globalDoc, "Cells(1, 1)", 2); !ok || !strings.EqualFold(got, "Excel.Range") {
+		t.Fatalf("built-in Cells type = %q, %v; want Excel.Range, true", got, ok)
+	}
+}
+
 func TestArgumentDiagnosticsResolveProjectClassMembersByReceiverType(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {

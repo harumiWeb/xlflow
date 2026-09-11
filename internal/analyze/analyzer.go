@@ -338,6 +338,8 @@ var traceHelperDependencies = map[string]helperDependencyRule{
 
 type analysisContext struct {
 	functionReturns                      map[string]string
+	functionReturnsQualified             map[string]string
+	projectObjectTypes                   map[string]bool
 	functionShapes                       map[string]procedureir.ValueShapeKind
 	functionNamesSeen                    map[string]bool
 	functionAmbiguous                    map[string]bool
@@ -359,6 +361,7 @@ type analysisContext struct {
 	arrayModuleEntryStates               arrayModuleEntryStates
 	arrayModuleReadyGuards               arrayModuleReadyGuardStates
 	arrayPrivateTargets                  map[string]sourceProcedure
+	arrayVBA227ExternalAPIs              arrayVBA227ExternalAPISet
 	arrayParticipants                    map[string]bool
 	arrayParticipantKeys                 map[string]string
 	// arrayModuleEffectParticipants is the narrower caller-closed boundary
@@ -374,18 +377,20 @@ type analysisContext struct {
 	// compatibility helpers. Production planning derives both feature-unknown
 	// boundaries from one shared graph; complete IR with an unknown array
 	// capability remains local unless a real seed reaches that procedure.
-	arrayIgnoreFeatureUnknown bool
-	arrayStats                *arrayInterproceduralStats
-	arrayByRefEntryStates     map[string]map[int]bool
-	arrayByRefEntryConditions map[string]map[int]string
-	arrayCapabilityIndex      *semanticArrayCapabilityIndex
-	procedures                map[string]procedureSignature
-	procedureResolver         procedureir.Resolver
-	projectResolver           procedureir.Resolver
-	objectAnalysis            *objectAnalysisContext
-	worksheetCodenames        map[string]string
-	projectEffects            effects.ProjectSummary
-	queryRevision             *semanticquery.Revision
+	arrayIgnoreFeatureUnknown        bool
+	arrayStats                       *arrayInterproceduralStats
+	arrayByRefEntryStates            map[string]map[int]bool
+	arrayByRefEntryConditions        map[string]map[int]string
+	arrayCapabilityIndex             *semanticArrayCapabilityIndex
+	arrayObjectContainerIndexCache   map[string]arrayObjectContainerIndexCacheEntry
+	arrayObjectContainerIndexCacheMu *sync.RWMutex
+	procedures                       map[string]procedureSignature
+	procedureResolver                procedureir.Resolver
+	projectResolver                  procedureir.Resolver
+	objectAnalysis                   *objectAnalysisContext
+	worksheetCodenames               map[string]string
+	projectEffects                   effects.ProjectSummary
+	queryRevision                    *semanticquery.Revision
 }
 
 type arrayInterproceduralStats struct {
@@ -646,11 +651,12 @@ type sourceProcedure struct {
 	// provides range/len compatibility for the analyzer while exposing no
 	// mutable slice through a package boundary.  New consumers should prefer
 	// the view/facts accessors.
-	Declarations readOnlySpan[procedureir.Declaration]
-	Statements   readOnlySpan[procedureir.Statement]
-	Expressions  readOnlySpan[procedureir.Expression]
-	Calls        readOnlySpan[procedureir.CallSite]
-	Accesses     readOnlySpan[procedureir.VariableAccess]
+	Declarations           readOnlySpan[procedureir.Declaration]
+	Statements             readOnlySpan[procedureir.Statement]
+	Expressions            readOnlySpan[procedureir.Expression]
+	Calls                  readOnlySpan[procedureir.CallSite]
+	Accesses               readOnlySpan[procedureir.VariableAccess]
+	arrayVBA227ResumeFacts *arrayVBA227ResumeFacts
 	// Features is the immutable, analyzer-owned applicability summary built
 	// with the procedure facts. It contains no parser-owned values.
 	Features procedureFeatureSet
@@ -1894,7 +1900,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 // the snapshot-aware form used by LSP and other project callers that already
 // own a value-bearing constant environment.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, nil, 0)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, nil, nil, 0)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext is
@@ -1902,7 +1908,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 // and reads project-dependent call/access/event facts through resolution
 // views, avoiding a full resolved DocumentIR clone per file.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, 0)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, nil, 0)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext
@@ -1910,7 +1916,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(c
 // immutable document index instead of reparsing the complete buffer for every
 // expression they resolve.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, &sourceDocument, procedureWorkerLimit)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, &sourceDocument, procedureWorkerLimit)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverContext
@@ -1918,10 +1924,268 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentC
 // procedure facts, while projectResolver retains the complete symbol index
 // needed for source-level value and receiver validation.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, &sourceDocument, procedureWorkerLimit)
+	return SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, nil, sourceDocument, procedureWorkerLimit)
 }
 
-func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, sourceDocument *intel.Document, procedureWorkerLimit int) ([]Finding, error) {
+// SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext
+// is the project-aware editor entry point. In addition to the resolver, it
+// carries the coherent workspace documents needed for interprocedural array
+// return summaries. The legacy resolver entry point remains document-local.
+func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, projectDocuments, &sourceDocument, procedureWorkerLimit)
+}
+
+func realtimeProjectContextFiles(current parsedFile, documents []intel.ProjectAnalysisDocument, project effects.ProjectSummary, cfg config.AnalyzeConfig, projectResolver procedureir.Resolver) []parsedFile {
+	projectDocuments := realtimeProjectContextDocuments(current, documents, projectResolver)
+	files := make([]parsedFile, 0, len(projectDocuments)+1)
+	files = append(files, current)
+	seen := map[string]bool{realtimeProjectPathKey(current.Path): true}
+	for _, document := range projectDocuments {
+		path := strings.TrimSpace(document.IR.Path)
+		key := realtimeProjectPathKey(path)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		file := parsedFile{
+			Path:       path,
+			Lines:      normalizedSourceLines(document.Source),
+			Module:     strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			ModuleKind: string(document.IR.ModuleKind),
+			Source:     []byte(document.Source),
+			IR:         document.IR,
+			CFG:        document.CFG,
+		}
+		resolution := document.Resolution
+		file.Resolution = &resolution
+		file.Procedures, file.ResolvedProcedures = sourceProceduresFromIRRefWithResolution(&file.IR, file.Resolution, file.CFG)
+		file.ensureModuleAnalysisFacts()
+		materializeProcedureAnalysisPlans(&file, project, cfg)
+		if arrayAnalysisEnabled(cfg) {
+			file.ArrayOptionBase = optionBase(file.Lines)
+			file.ArrayOptionBaseSet = true
+			file.ArrayIntegerModuleConstants = arrayIntegerModuleConstants(file)
+			file.ArrayVariableCatalog = buildArrayVariableCatalog(file, file.moduleDecls())
+		}
+		files = append(files, file)
+	}
+	return files
+}
+
+func realtimeProjectResolverFiles(current parsedFile, documents []intel.ProjectAnalysisDocument) []parsedFile {
+	files := []parsedFile{current}
+	seen := map[string]bool{realtimeProjectPathKey(current.Path): true}
+	for _, document := range documents {
+		path := strings.TrimSpace(document.IR.Path)
+		key := realtimeProjectPathKey(path)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		files = append(files, parsedFile{
+			Path: path, Module: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			ModuleKind: string(document.IR.ModuleKind), IR: document.IR,
+		})
+	}
+	return files
+}
+
+// realtimeProjectContextDocuments narrows the immutable workspace snapshot to
+// the type/call closure that can contribute an interprocedural array summary
+// for the edited document. The project resolver supplies exact call targets;
+// declaration and return types cover member chains whose external-looking
+// qualifier is not resolved by the generic resolver.
+func realtimeProjectContextDocuments(current parsedFile, documents []intel.ProjectAnalysisDocument, projectResolver procedureir.Resolver) []intel.ProjectAnalysisDocument {
+	if len(documents) == 0 {
+		return nil
+	}
+	byModule := make(map[string][]int, len(documents)*2)
+	for index, document := range documents {
+		for _, key := range realtimeProjectDocumentModuleKeys(document) {
+			byModule[key] = append(byModule[key], index)
+		}
+	}
+
+	selected := make(map[int]bool, len(documents))
+	queued := make(map[string]bool, len(documents)*2)
+	queue := make([]string, 0, len(documents))
+	enqueueModule := func(name string) {
+		for _, key := range realtimeProjectTypeKeys(name) {
+			if key == "" || queued[key] {
+				continue
+			}
+			queued[key] = true
+			queue = append(queue, key)
+		}
+	}
+	collectDocumentReferences := func(document procedureir.DocumentIR, procedures []procedureir.ProcedureIR) {
+		collectType := func(typeName string) {
+			enqueueModule(typeName)
+		}
+		for _, declaration := range document.Declarations {
+			collectType(declaration.Type)
+			for _, parameter := range declaration.Parameters {
+				collectType(parameter.Type)
+			}
+		}
+		for _, procedure := range procedures {
+			collectType(procedure.Symbol.ReturnType)
+			for _, parameter := range procedure.Symbol.Parameters {
+				collectType(parameter.Type)
+			}
+			for _, declaration := range procedure.Declarations {
+				collectType(declaration.Type)
+				for _, parameter := range declaration.Parameters {
+					collectType(parameter.Type)
+				}
+			}
+			for _, call := range procedure.Calls {
+				resolution := call.Resolution
+				if projectResolver != nil {
+					resolution = projectResolver.ResolveCall(call)
+				}
+				for _, candidate := range resolution.Candidates {
+					if separator := strings.LastIndexAny(candidate.QualifiedName, ".!"); separator > 0 {
+						enqueueModule(candidate.QualifiedName[:separator])
+					}
+				}
+				if call.Callee.Receiver != nil {
+					enqueueModule(*call.Callee.Receiver)
+				}
+			}
+			for _, access := range procedure.Accesses {
+				if !realtimeProjectAccessCanBeProcedure(access) {
+					continue
+				}
+				for _, candidate := range access.Resolution.Candidates {
+					if separator := strings.LastIndexAny(candidate.QualifiedName, ".!"); separator > 0 {
+						enqueueModule(candidate.QualifiedName[:separator])
+					}
+				}
+				if projectResolver == nil || strings.TrimSpace(access.Name) == "" {
+					continue
+				}
+				resolution := projectResolver.ResolveCall(procedureir.CallSite{
+					Module: document.ModuleName,
+					Caller: procedureir.ProcedureRef{
+						Name: procedure.Symbol.Name, Kind: procedure.Symbol.Kind,
+						QualifiedName: procedure.Symbol.QualifiedName,
+					},
+					Callee: procedureir.Callee{
+						Text: access.Name, BaseName: access.Name, Member: access.Name,
+					},
+					Range: access.Range, NonCallableNames: realtimeProjectNonCallableNames(document, procedure),
+				})
+				for _, candidate := range resolution.Candidates {
+					if separator := strings.LastIndexAny(candidate.QualifiedName, ".!"); separator > 0 {
+						enqueueModule(candidate.QualifiedName[:separator])
+					}
+				}
+			}
+		}
+		for _, reference := range document.TypeReferences {
+			collectType(reference.Target)
+		}
+	}
+	collectDocumentReferences(current.IR, realtimeProjectProcedures(current.IR, current.Resolution))
+	for head := 0; head < len(queue); head++ {
+		for _, index := range byModule[queue[head]] {
+			if selected[index] {
+				continue
+			}
+			selected[index] = true
+			collectDocumentReferences(documents[index].IR, realtimeProjectProcedures(documents[index].IR, &documents[index].Resolution))
+		}
+	}
+
+	result := make([]intel.ProjectAnalysisDocument, 0, len(selected))
+	currentPath := realtimeProjectPathKey(current.Path)
+	for index, document := range documents {
+		if !selected[index] || realtimeProjectPathKey(document.IR.Path) == currentPath {
+			continue
+		}
+		result = append(result, document)
+	}
+	return result
+}
+
+func realtimeProjectAccessCanBeProcedure(access procedureir.VariableAccess) bool {
+	switch access.Scope {
+	case procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule:
+		return false
+	default:
+		return true
+	}
+}
+
+func realtimeProjectNonCallableNames(document procedureir.DocumentIR, procedure procedureir.ProcedureIR) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(document.Declarations)+len(procedure.Declarations))
+	appendDeclaration := func(declaration procedureir.Declaration) {
+		name := strings.TrimSpace(declaration.Name)
+		if name == "" || seen[strings.ToLower(name)] {
+			return
+		}
+		switch strings.ToLower(strings.TrimSpace(declaration.Kind)) {
+		case "sub", "function", "property", "property_get", "property_let", "property_set", "declare", "declare_sub", "declare_function":
+			return
+		}
+		seen[strings.ToLower(name)] = true
+		result = append(result, name)
+	}
+	for _, declaration := range document.Declarations {
+		appendDeclaration(declaration)
+	}
+	for _, declaration := range procedure.Declarations {
+		appendDeclaration(declaration)
+	}
+	return result
+}
+
+func realtimeProjectProcedures(document procedureir.DocumentIR, resolution *procedureir.ResolvedDocumentView) []procedureir.ProcedureIR {
+	if resolution == nil || !resolution.HasOverlay() {
+		return document.Procedures
+	}
+	procedures := make([]procedureir.ProcedureIR, len(document.Procedures))
+	for index, procedure := range document.Procedures {
+		if resolved, ok := resolution.ResolvedProcedure(index); ok {
+			procedures[index] = resolved
+		} else {
+			procedures[index] = procedure
+		}
+	}
+	return procedures
+}
+
+func realtimeProjectDocumentModuleKeys(document intel.ProjectAnalysisDocument) []string {
+	module := strings.TrimSpace(document.IR.ModuleName)
+	if module == "" {
+		module = strings.TrimSuffix(filepath.Base(document.IR.Path), filepath.Ext(document.IR.Path))
+	}
+	return realtimeProjectTypeKeys(module)
+}
+
+func realtimeProjectTypeKeys(typeName string) []string {
+	typeName = strings.ToLower(cleanIdentifier(strings.TrimSpace(typeName)))
+	if typeName == "" {
+		return nil
+	}
+	keys := []string{typeName}
+	if short := strings.ToLower(cleanIdentifier(lastName(typeName))); short != "" && short != typeName {
+		keys = append(keys, short)
+	}
+	return keys
+}
+
+func realtimeProjectPathKey(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	return strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+}
+
+func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument *intel.Document, procedureWorkerLimit int) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -2052,7 +2316,10 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
-		contextFiles := []parsedFile{file}
+		if projectResolver == nil {
+			projectResolver = buildResolutionResolver(realtimeProjectResolverFiles(file, projectDocuments), true, typeDB)
+		}
+		contextFiles := realtimeProjectContextFiles(file, projectDocuments, projectEffects, cfg.Analyze, projectResolver)
 		if queryContext.Store != nil && queryRevision == nil {
 			revisionID := queryContext.Revision
 			if revisionID == "" {
@@ -2064,9 +2331,6 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		// analysis. In particular, checked Resume Next probes may use a
 		// project-visible Const or enum member as an argument; leaving this
 		// resolver nil would make the editor path reject those known values.
-		if projectResolver == nil {
-			projectResolver = buildResolutionResolver(contextFiles, true, typeDB)
-		}
 		analysisCtx := analyzer.buildContextWithObjectAnalysisPlan(
 			contextFiles,
 			nil,
@@ -2473,8 +2737,35 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 }
 
 func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectAnalysis *objectAnalysisContext, capabilityPlan projectCapabilityPlan, projectResolver procedureir.Resolver) analysisContext {
+	projectObjectTypes := make(map[string]bool)
+	projectNamePrefixes := projectObjectTypePrefixes(a.Config.Project.Name)
+	for _, file := range files {
+		if !strings.EqualFold(file.ModuleKind, "class") && !strings.EqualFold(file.ModuleKind, "form") {
+			continue
+		}
+		module := strings.TrimSpace(file.IR.ModuleName)
+		if module == "" {
+			module = strings.TrimSpace(file.Module)
+		}
+		module = strings.ToLower(cleanIdentifier(module))
+		if module == "" {
+			continue
+		}
+		projectObjectTypes[module] = true
+		shortModule := strings.ToLower(cleanIdentifier(lastName(module)))
+		if shortModule != "" {
+			projectObjectTypes[shortModule] = true
+			if !strings.Contains(module, ".") {
+				for _, projectName := range projectNamePrefixes {
+					projectObjectTypes[projectName+"."+shortModule] = true
+				}
+			}
+		}
+	}
 	ctx := analysisContext{
 		functionReturns:                  map[string]string{},
+		functionReturnsQualified:         map[string]string{},
+		projectObjectTypes:               projectObjectTypes,
 		functionShapes:                   map[string]procedureir.ValueShapeKind{},
 		functionNamesSeen:                map[string]bool{},
 		functionAmbiguous:                map[string]bool{},
@@ -2493,9 +2784,12 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayModuleEntryStates:           arrayModuleEntryStates{},
 		arrayModuleReadyGuards:           arrayModuleReadyGuardStates{},
 		arrayPrivateTargets:              map[string]sourceProcedure{},
+		arrayVBA227ExternalAPIs:          buildArrayVBA227ExternalAPISet(files),
 		arrayStats:                       &arrayInterproceduralStats{strategy: a.arrayStrategy},
 		arrayByRefEntryStates:            map[string]map[int]bool{},
 		arrayByRefEntryConditions:        map[string]map[int]string{},
+		arrayObjectContainerIndexCache:   map[string]arrayObjectContainerIndexCacheEntry{},
+		arrayObjectContainerIndexCacheMu: &sync.RWMutex{},
 		procedures:                       map[string]procedureSignature{},
 		objectAnalysis:                   objectAnalysis,
 		worksheetCodenames:               map[string]string{},
@@ -2544,6 +2838,10 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 					}
 				}
 			}
+			returnTypeName := strings.ToLower(cleanIdentifier(lastName(strings.TrimSpace(proc.ReturnType))))
+			if (proc.ProcedureKind == procedureir.ProcedureFunction || proc.ProcedureKind == procedureir.ProcedurePropertyGet) && (isObjectType(proc.ReturnType) || projectObjectTypes[returnTypeName]) {
+				ctx.functionReturnsQualified[arrayProcedureKey(proc)] = proc.ReturnType
+			}
 			// Only built-in scalar return types are strong enough to reject a
 			// For Each source. A user-defined class/UDT may expose an enumerator
 			// and therefore remains unknown even when its IR shape is scalar.
@@ -2571,8 +2869,8 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	// that proven-negative case; any call or incomplete fact fails this gate
 	// open through buildProcedureAnalysisPlan.
 	if capabilityPlan.requires(projectCapabilityArrayInterprocedural) {
-		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
-		ctx.arraySafeArrayLengthGuards = inferArraySafeArrayLengthGuards(files)
+		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files, ctx.arrayVBA227ExternalAPIs)
+		ctx.arraySafeArrayLengthGuards = inferArraySafeArrayLengthGuards(files, ctx.arrayVBA227ExternalAPIs)
 		ctx.arraySafeBoundGuards = inferArraySafeBoundGuards(files)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
 		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayModuleEffectParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
@@ -2603,6 +2901,47 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions = inferArrayByRefEntryStates(a, files, ctx)
 	}
 	return ctx
+}
+
+// projectObjectTypePrefixes returns the configured project identity forms that
+// can appear before a project class name in VBA. Corpus projects sometimes
+// use a repository-like configured name (for example
+// "third_party/selenium-vba") while their VBA project name is the compact
+// basename ("SeleniumVBA"). Keep the exact configured name and add only
+// deterministic path/basename forms; this still prevents an unrelated
+// qualifier such as OtherLib from borrowing a same-named project class.
+func projectObjectTypePrefixes(projectName string) []string {
+	projectName = strings.TrimSpace(projectName)
+	if projectName == "" {
+		return nil
+	}
+	candidates := []string{projectName}
+	if separator := strings.LastIndexAny(projectName, `/\\`); separator >= 0 {
+		if base := strings.TrimSpace(projectName[separator+1:]); base != "" {
+			candidates = append(candidates, base)
+		}
+	}
+	seen := make(map[string]bool, len(candidates)*2)
+	prefixes := make([]string, 0, len(candidates)*2)
+	for _, candidate := range candidates {
+		candidate = strings.ToLower(cleanIdentifier(candidate))
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		prefixes = append(prefixes, candidate)
+		compact := strings.Map(func(r rune) rune {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+				return unicode.ToLower(r)
+			}
+			return -1
+		}, candidate)
+		if compact != "" && !seen[compact] {
+			seen[compact] = true
+			prefixes = append(prefixes, compact)
+		}
+	}
+	return prefixes
 }
 
 func recordBatchWorkload(ctx context.Context, files []parsedFile) {
@@ -3500,12 +3839,61 @@ func sourceProceduresFromProcedureSlice(document *procedureir.DocumentIR, proced
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
 			source.Graph = &controlFlow[0].Graphs[procedureIndex]
 		}
+		source.arrayVBA227ResumeFacts = buildArrayVBA227ResumeFacts(source)
 		graphUnknown := source.Graph != nil && len(source.Graph.UnknownFlowSources) > 0
 		source.Features = finalizeProcedureFeatures(source.Facts.features, *document, *procedure, source.Graph != nil, graphUnknown)
 		source.Facts.features = source.Features
 		procedures = append(procedures, source)
 	}
 	return procedures
+}
+
+type declarationSourcePart struct {
+	text   string
+	static bool
+}
+
+type declarationSourcePartIterator struct {
+	single      declarationSourcePart
+	singleValid bool
+	multiple    []declarationSourcePart
+	index       int
+}
+
+func declarationSourceParts(stmt string) declarationSourcePartIterator {
+	if !declRe.MatchString(stmt) {
+		return declarationSourcePartIterator{}
+	}
+	if !strings.Contains(stmt, ":") {
+		trimmed := strings.TrimSpace(stmt)
+		return declarationSourcePartIterator{
+			single:      declarationSourcePart{text: trimmed, static: strings.HasPrefix(strings.ToLower(trimmed), "static ")},
+			singleValid: true,
+		}
+	}
+	var parts []declarationSourcePart
+	for _, part := range splitRangeValueSourceStatements(stmt) {
+		trimmed := strings.TrimSpace(part)
+		lower := strings.ToLower(trimmed)
+		if !declRe.MatchString(trimmed) {
+			continue
+		}
+		parts = append(parts, declarationSourcePart{text: trimmed, static: strings.HasPrefix(lower, "static ")})
+	}
+	return declarationSourcePartIterator{multiple: parts}
+}
+
+func (iterator *declarationSourcePartIterator) next() (declarationSourcePart, bool) {
+	if iterator.singleValid {
+		iterator.singleValid = false
+		return iterator.single, true
+	}
+	if iterator.index >= len(iterator.multiple) {
+		return declarationSourcePart{}, false
+	}
+	part := iterator.multiple[iterator.index]
+	iterator.index++
+	return part, true
 }
 
 func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sourceDeclaration {
@@ -3517,19 +3905,23 @@ func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sour
 		if lineNo == proc.StartLine && isProcedureHeaderLine(lower) {
 			continue
 		}
-		if !strings.HasPrefix(lower, "dim ") && !strings.HasPrefix(lower, "static ") && !strings.HasPrefix(lower, "private ") && !strings.HasPrefix(lower, "public ") {
-			continue
-		}
-		m := declRe.FindStringSubmatch(stmt)
-		if len(m) == 0 {
-			continue
-		}
-		for _, part := range splitArgs(m[1]) {
-			name, typ, array, newExpr := declarationNameAndType(part)
-			if name == "" {
+		parts := declarationSourceParts(stmt)
+		for {
+			sourcePart, ok := parts.next()
+			if !ok {
+				break
+			}
+			match := declRe.FindStringSubmatch(sourcePart.text)
+			if len(match) == 0 {
 				continue
 			}
-			decls[strings.ToLower(name)] = sourceDeclaration{Name: name, Type: typ, Line: lineNo, Object: isObjectType(typ), Array: array, NewExpression: newExpr, Static: strings.HasPrefix(lower, "static ")}
+			for _, part := range splitArgs(match[1]) {
+				name, typ, array, newExpr := declarationNameAndType(part)
+				if name == "" {
+					continue
+				}
+				decls[strings.ToLower(name)] = sourceDeclaration{Name: name, Type: typ, Line: lineNo, Object: isObjectType(typ), Array: array, NewExpression: newExpr, Static: sourcePart.static}
+			}
 		}
 	}
 	return decls
@@ -3592,6 +3984,14 @@ func declarationNameAndType(text string) (string, string, bool, bool) {
 	if idx := strings.Index(lower, " as "); idx >= 0 {
 		namePart = strings.TrimSpace(text[:idx])
 		typ = strings.TrimSpace(text[idx+4:])
+	}
+	// A declaration may share a physical line with the next VBA statement,
+	// for example `Dim value As Object: Set value = ...`. The declaration
+	// parser receives the complete colon-separated segment; keep only the type
+	// before the following statement so object flow does not lose the Object
+	// classification.
+	if colon := strings.IndexByte(typ, ':'); colon >= 0 {
+		typ = strings.TrimSpace(typ[:colon])
 	}
 	newExpr := false
 	if strings.HasPrefix(strings.ToLower(typ), "new ") {

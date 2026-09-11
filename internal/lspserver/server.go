@@ -298,6 +298,7 @@ func New(opts Options) (*Server, func(), error) {
 		})
 		initializeCapabilityTelemetry(ctx)
 		projectByPath := make(map[string]intel.ProjectAnalysisDocument, len(project.Documents))
+		resolvedProjectDocuments := make([]intel.ProjectAnalysisDocument, 0, len(project.Documents))
 		capabilityDocuments := make([]analyze.ProjectCapabilityDocument, 0, len(project.Documents))
 		resolutionComplete := project.Complete && typeDB.Complete
 		resolutionResolver, resolvedProjectViews, resolvedDiagnosticViews, resolutionKey, resolutionErr := s.projectResolution(ctx, project, resolutionComplete)
@@ -313,6 +314,7 @@ func New(opts Options) (*Server, func(), error) {
 				projectDocument.Resolution = resolved
 			}
 			projectByPath[key] = projectDocument
+			resolvedProjectDocuments = append(resolvedProjectDocuments, projectDocument)
 			capabilityDocuments = append(capabilityDocuments, analyze.ProjectCapabilityDocument{
 				IR: projectDocument.IR, Resolution: projectDocument.Resolution,
 				CFG: projectDocument.CFG, Source: projectDocument.Source,
@@ -367,7 +369,7 @@ func New(opts Options) (*Server, func(), error) {
 				resolution = &projectDocument.Resolution
 				controlFlow = projectDocument.CFG
 			}
-			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, projectConstants.values, resolution, resolutionResolver, request.Document, s.backgroundProcedureWorkerLimit())
+			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, projectConstants.values, resolution, resolutionResolver, resolvedProjectDocuments, request.Document, s.backgroundProcedureWorkerLimit())
 			if err != nil {
 				return nil, err
 			}

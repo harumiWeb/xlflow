@@ -13,13 +13,13 @@ import (
 // an array-return summary at the call site. The summary records a formal
 // parameter; this step maps it to the actual argument and keeps the fact
 // path-sensitive until the caller proves the corresponding condition.
-func arrayVBA227AttachReturnProvenance(state arrayFlowState, text string, ctx analysisContext, variables map[string]arrayVariable, constants map[string]int) arrayFlowState {
+func arrayVBA227AttachReturnProvenance(state arrayFlowState, text string, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, constants map[string]int) arrayFlowState {
 	lhs, rhs, indexed, ok := arrayAssignment(text)
 	if !ok || indexed {
 		return state
 	}
 	callee := arrayCallName(rhs)
-	if callee == "" || ctx.functionAmbiguous[callee] {
+	if callee == "" || ctx.functionAmbiguous[callee] || arrayProcedureNameShadowed(proc, arrayBareCallName(rhs)) {
 		return state
 	}
 	summary, ok := ctx.arrayReturns[callee]
@@ -569,7 +569,7 @@ func firstParenOutsideString(text string) int {
 // positive UBound-based length on its normal path and returns zero from an
 // On Error GoTo recovery label. That contract is enough to prove the positive
 // branch of a direct call, while arbitrary helper functions remain unknown.
-func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
+func inferArrayAllocationGuards(files []parsedFile, externalAPIs arrayVBA227ExternalAPISet) map[string]bool {
 	candidates := map[string][]string{}
 	procedureNames := map[string]int{}
 	recognizedNames := map[string]int{}
@@ -583,7 +583,7 @@ func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 			}
 			parameter, ok := arrayAllocationGuardParameter(proc)
 			if !ok {
-				parameter, ok = arraySafeArrayPointerLengthGuardParameter(file, proc)
+				parameter, ok = arraySafeArrayPointerLengthGuardParameter(file, proc, externalAPIs)
 			}
 			if !ok {
 				parameter, ok = arrayDimensionCountGuardParameter(proc)
@@ -609,7 +609,7 @@ func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 	return guards
 }
 
-func inferArraySafeArrayLengthGuards(files []parsedFile) map[string]bool {
+func inferArraySafeArrayLengthGuards(files []parsedFile, externalAPIs arrayVBA227ExternalAPISet) map[string]bool {
 	procedureNames := map[string]int{}
 	recognizedNames := map[string]int{}
 	for _, file := range files {
@@ -621,7 +621,7 @@ func inferArraySafeArrayLengthGuards(files []parsedFile) map[string]bool {
 				continue
 			}
 			procedureNames[name]++
-			if _, ok := arraySafeArrayPointerLengthGuardParameter(file, proc); ok {
+			if _, ok := arraySafeArrayPointerLengthGuardParameter(file, proc, externalAPIs); ok {
 				recognizedNames[name]++
 			}
 		}
@@ -786,7 +786,7 @@ func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {
 // returned expression to be derived from preceding LBound and UBound
 // assignments so an arbitrary pointer check cannot become an allocation
 // contract.
-func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProcedure) (string, bool) {
+func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProcedure, externalAPIs arrayVBA227ExternalAPISet) (string, bool) {
 	if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
 		return "", false
 	}
@@ -805,12 +805,15 @@ func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProce
 	}
 	guardLine := 0
 	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
-		if target, ok := arraySafeArrayPointerGuardTarget(file, proc, line, file.Lines[line-1], variables); ok && target == parameterName {
+		if target, ok := arraySafeArrayPointerGuardTarget(file, proc, line, file.Lines[line-1], variables, externalAPIs); ok && target == parameterName {
 			guardLine = line
 			break
 		}
 	}
 	if guardLine == 0 {
+		return "", false
+	}
+	if arrayProcedureHasErrorHandling(proc) || procedureStatementAtLine(proc, guardLine).ID == 0 {
 		return "", false
 	}
 	lowerName := ""
@@ -822,6 +825,9 @@ func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProce
 		if text == "" || strings.HasPrefix(text, "'") || strings.HasPrefix(text, "#") {
 			continue
 		}
+		if arrayVBA227SafeArrayLengthHelperMayMutateArray(proc, line, text, parameterName) {
+			return "", false
+		}
 		lhs, rhs, indexed, assigned := arrayAssignment(text)
 		if !assigned || indexed {
 			continue
@@ -829,16 +835,28 @@ func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProce
 		compact := strings.Join(strings.Fields(strings.ToLower(rhs)), "")
 		switch {
 		case compact == "lbound("+parameterName+")":
+			statement := procedureStatementAtLine(proc, line)
+			if statement.ID == 0 || !arrayVBA227StatementLineDominates(proc, guardLine, statement) {
+				return "", false
+			}
 			if lowerName != "" {
 				return "", false
 			}
 			lowerName = strings.ToLower(cleanIdentifier(lhs))
 		case compact == "ubound("+parameterName+")":
+			statement := procedureStatementAtLine(proc, line)
+			if statement.ID == 0 || !arrayVBA227StatementLineDominates(proc, guardLine, statement) {
+				return "", false
+			}
 			if upperName != "" {
 				return "", false
 			}
 			upperName = strings.ToLower(cleanIdentifier(lhs))
 		case strings.EqualFold(cleanIdentifier(lhs), proc.Name):
+			statement := procedureStatementAtLine(proc, line)
+			if statement.ID == 0 || !arrayVBA227StatementLineDominates(proc, guardLine, statement) {
+				return "", false
+			}
 			returnCount++
 			expected := upperName + "-" + lowerName + "+1"
 			if lowerName == "" || upperName == "" || compact != expected {
@@ -1113,6 +1131,13 @@ func arrayProcedureDocumentsArray(file parsedFile, proc sourceProcedure) bool {
 		}
 	}
 	return false
+}
+
+func arrayProcedureDeclaresArrayReturn(proc sourceProcedure) bool {
+	return proc.ReturnValueShape == procedureir.ValueShapeFixedArray ||
+		proc.ReturnValueShape == procedureir.ValueShapeDynamicArray ||
+		strings.Contains(strings.ReplaceAll(proc.ReturnType, " ", ""), "()") ||
+		proc.IR != nil && proc.IR.Symbol.IsArray
 }
 
 func arrayProcedureHasReturnAllocation(file parsedFile, proc sourceProcedure) bool {
@@ -1527,7 +1552,7 @@ func arrayProcedureHasNonEmptyReturnAllocation(file parsedFile, proc sourceProce
 	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
 	walkArrayCFGWithStopStats(&graph, file.Lines, arrayInitialState(variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 		if lhs, rhs, indexed, assigned := arrayAssignment(text); assigned && !indexed && strings.EqualFold(lhs, proc.Name) {
-			value, known := arrayExpressionState(rhs, in, ctx)
+			value, known := arrayExpressionStateForProcedure(rhs, in, ctx, proc)
 			returnCandidates[line] = returnCandidate{
 				value: value,
 				ok:    known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue,
@@ -1602,6 +1627,7 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
 	})
 	ambiguousReturnNames := arrayReturnSummaryDuplicateNames(allReturnProcedures)
+	qualifiedSummaries := map[string]arrayValue{}
 
 	evaluate := func(procedure returnProcedure, summaries map[string]arrayValue) (candidate, bool) {
 		proc := procedure.proc
@@ -1622,9 +1648,23 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 				}
 			}
 		}
+		arrayReturnsQualified := qualifiedSummaries
+		qualifiedKey := arrayProcedureKey(proc)
+		if _, self := qualifiedSummaries[qualifiedKey]; self {
+			arrayReturnsQualified = make(map[string]arrayValue, len(qualifiedSummaries)-1)
+			for name, value := range qualifiedSummaries {
+				if name != qualifiedKey {
+					arrayReturnsQualified[name] = value
+				}
+			}
+		}
 		ctx := analysisContext{
-			arrayReturns:           arrayReturns,
-			arrayAllowVariantRedim: arrayProcedureDocumentsArray(procedure.file, proc) && arrayProcedureHasReturnAllocation(procedure.file, proc),
+			arrayReturns:             arrayReturns,
+			arrayReturnsQualified:    arrayReturnsQualified,
+			arrayAllowVariantRedim:   (arrayProcedureDocumentsArray(procedure.file, proc) || arrayProcedureDeclaresArrayReturn(proc)) && arrayProcedureHasReturnAllocation(procedure.file, proc),
+			functionReturnsQualified: participantCtx.functionReturnsQualified,
+			projectObjectTypes:       participantCtx.projectObjectTypes,
+			procedureResolver:        participantCtx.procedureResolver,
 		}
 		returnCandidates := map[int]candidate{}
 		base := arrayOptionBase(procedure.file)
@@ -1635,7 +1675,10 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 		baseView := proc.Graph.View(vbacfg.EdgeFilter{})
 		walkArrayCFGWithStopStats(&baseView, procedure.file.Lines, arrayInitialState(procedure.variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 			if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
-				value, known := arrayExpressionState(rhs, in, ctx)
+				value, known := arrayExpressionStateForProcedure(rhs, in, ctx, proc)
+				if qualifiedValue, qualifiedKnown := arrayQualifiedReturnExpressionState(proc, line, rhs, procedure.variables, ctx); qualifiedKnown {
+					value, known = qualifiedValue, true
+				}
 				returnCandidates[line] = candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue}
 			}
 			out, _ := (Analyzer{}).arrayTransfer(procedure.file, proc, ctx, procedure.variables, in, text, line, procedure.constants, nil)
@@ -1684,14 +1727,23 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 	}
 
 	dependents := make(map[string][]int)
+	qualifiedDependents := make(map[string][]int)
 	for index, procedure := range procedures {
+		dependencyContext := analysisContext{
+			functionReturnsQualified: participantCtx.functionReturnsQualified,
+			projectObjectTypes:       participantCtx.projectObjectTypes,
+		}
 		for call := range procedure.proc.Calls.All() {
 			resolution := call.Resolution
 			if participantCtx.procedureResolver != nil {
 				resolution = participantCtx.procedureResolver.ResolveCall(call)
 			}
 			for _, candidate := range resolution.Candidates {
-				name := strings.ToLower(strings.TrimSpace(candidate.QualifiedName))
+				qualifiedName := strings.ToLower(strings.TrimSpace(candidate.QualifiedName))
+				if qualifiedName != "" {
+					qualifiedDependents[qualifiedName] = append(qualifiedDependents[qualifiedName], index)
+				}
+				name := qualifiedName
 				if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
 					name = name[dot+1:]
 				}
@@ -1699,16 +1751,28 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 					dependents[name] = append(dependents[name], index)
 				}
 			}
+			if call.Callee.Receiver != nil {
+				receiverType, ok := arrayQualifiedReturnObjectType(*call.Callee.Receiver, procedure.variables, dependencyContext)
+				member := cleanIdentifier(call.Callee.Member)
+				if ok && member != "" {
+					for _, typeKey := range arrayQualifiedReturnLookupKeys(receiverType, participantCtx.projectObjectTypes) {
+						qualifiedName := typeKey + "." + strings.ToLower(member)
+						qualifiedDependents[qualifiedName] = append(qualifiedDependents[qualifiedName], index)
+					}
+				}
+			}
 		}
 	}
 	for name := range dependents {
 		sort.Ints(dependents[name])
 	}
+	for name := range qualifiedDependents {
+		sort.Ints(qualifiedDependents[name])
+	}
 	contributions := make(map[string]candidate, len(procedures))
 	present := make(map[string]bool, len(procedures))
 	groups := make(map[string]map[string]candidate)
 	summaries := map[string]arrayValue{}
-	qualifiedSummaries := map[string]arrayValue{}
 	documentedSummaries := inferDocumentedArrayReturnSummaries(files)
 	documentedBareSummaries := inferDocumentedNonEmptyArrayReturnSummaries(files)
 	documentedLowerBoundSummaries := inferDocumentedArrayReturnLowerBoundSummaries(files)
@@ -1728,23 +1792,42 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 		name := strings.ToLower(strings.TrimSpace(procedure.proc.Name))
 		key := arrayProcedureKey(procedure.proc)
 		value, hasContribution := evaluate(procedure, summaries)
+		previousQualified, hadPreviousQualified := qualifiedSummaries[key]
 		if hasContribution && value.ok {
 			qualifiedSummaries[key] = value.value
 		} else {
 			delete(qualifiedSummaries, key)
 		}
+		qualifiedChanged := hadPreviousQualified != (hasContribution && value.ok) ||
+			(hasContribution && value.ok && !arrayValueEqual(previousQualified, value.value))
 		if ambiguousReturnNames[name] {
 			// Summary lookups use bare names for compatibility with the existing
 			// expression resolver. A duplicate bare name is therefore permanently
 			// ambiguous for this revision. Keep it at the unknown bottom of the
 			// lattice instead of allowing iteration order to delete and recreate a
 			// summary while duplicate candidates are evaluated.
+			if qualifiedChanged {
+				for _, dependent := range qualifiedDependents[key] {
+					if !queued[dependent] {
+						queued[dependent] = true
+						queue = append(queue, dependent)
+					}
+				}
+			}
 			continue
 		}
 		if head >= len(procedures) && participantCtx.arrayStats != nil {
 			participantCtx.arrayStats.addRevisit()
 		}
 		if present[key] == hasContribution && (!hasContribution || arrayValueEqual(contributions[key].value, value.value) && contributions[key].ok == value.ok) {
+			if qualifiedChanged {
+				for _, dependent := range qualifiedDependents[key] {
+					if !queued[dependent] {
+						queued[dependent] = true
+						queue = append(queue, dependent)
+					}
+				}
+			}
 			continue
 		}
 		if hasContribution {
@@ -1786,6 +1869,14 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 			if !queued[dependent] {
 				queued[dependent] = true
 				queue = append(queue, dependent)
+			}
+		}
+		if qualifiedChanged {
+			for _, dependent := range qualifiedDependents[key] {
+				if !queued[dependent] {
+					queued[dependent] = true
+					queue = append(queue, dependent)
+				}
 			}
 		}
 	}
@@ -1849,7 +1940,7 @@ func arraySummaryStatementAlwaysFails(text string, base int, constants map[strin
 }
 
 func arrayValueEqual(left, right arrayValue) bool {
-	return arrayValueCompatible(left, right) && left.mayBeEmpty == right.mayBeEmpty
+	return arrayValueCompatible(left, right) && left.mayBeEmpty == right.mayBeEmpty && left.mayBeUnallocated == right.mayBeUnallocated
 }
 
 // arrayReturnValueCompatible keeps a return summary when every normal return
@@ -1869,5 +1960,5 @@ func arrayReturnValueCompatible(proc sourceProcedure, left, right arrayValue) bo
 }
 
 func arrayValueCompatible(left, right arrayValue) bool {
-	return left.kind == right.kind && left.knownArray == right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.allocationCountSource == right.allocationCountSource && left.returnNonEmptyArrayParameter == right.returnNonEmptyArrayParameter && left.returnPositiveScalarParameter == right.returnPositiveScalarParameter && left.nonEmptySource == right.nonEmptySource && left.returnDescriptorSourceParameter == right.returnDescriptorSourceParameter && left.returnDescriptorStartParameter == right.returnDescriptorStartParameter && left.returnDescriptorLengthParameter == right.returnDescriptorLengthParameter && left.returnDescriptorLowerParameter == right.returnDescriptorLowerParameter && arrayDimensionsEqual(left.dimensions, right.dimensions) && arrayDimensionsEqual(left.preserveShape, right.preserveShape)
+	return left.kind == right.kind && left.knownArray == right.knownArray && left.mayBeUnallocated == right.mayBeUnallocated && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.allocationCountSource == right.allocationCountSource && left.returnNonEmptyArrayParameter == right.returnNonEmptyArrayParameter && left.returnPositiveScalarParameter == right.returnPositiveScalarParameter && left.nonEmptySource == right.nonEmptySource && left.returnDescriptorSourceParameter == right.returnDescriptorSourceParameter && left.returnDescriptorStartParameter == right.returnDescriptorStartParameter && left.returnDescriptorLengthParameter == right.returnDescriptorLengthParameter && left.returnDescriptorLowerParameter == right.returnDescriptorLowerParameter && arrayDimensionsEqual(left.dimensions, right.dimensions) && arrayDimensionsEqual(left.preserveShape, right.preserveShape)
 }

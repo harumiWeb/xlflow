@@ -251,25 +251,32 @@ func declarationDimensions(lines []string, line int, name string, base int) ([]a
 		return nil, false
 	}
 	stmt := normalizedCodeLine(lines[line-1])
-	m := declRe.FindStringSubmatch(stmt)
-	if len(m) == 0 {
-		return nil, false
-	}
-	for _, part := range splitArgs(m[1]) {
-		candidate, _, array, _ := declarationNameAndType(part)
-		if !array || !strings.EqualFold(candidate, name) {
+	parts := declarationSourceParts(stmt)
+	for {
+		sourcePart, ok := parts.next()
+		if !ok {
+			break
+		}
+		match := declRe.FindStringSubmatch(sourcePart.text)
+		if len(match) == 0 {
 			continue
 		}
-		start := strings.Index(part, "(")
-		end := strings.LastIndex(part, ")")
-		if start < 0 || end < start {
-			return nil, false
+		for _, part := range splitArgs(match[1]) {
+			candidate, _, array, _ := declarationNameAndType(part)
+			if !array || !strings.EqualFold(candidate, name) {
+				continue
+			}
+			start := strings.Index(part, "(")
+			end := strings.LastIndex(part, ")")
+			if start < 0 || end < start {
+				return nil, false
+			}
+			raw := strings.TrimSpace(part[start+1 : end])
+			if raw == "" {
+				return nil, false
+			}
+			return parseArrayDimensions(raw, base), true
 		}
-		raw := strings.TrimSpace(part[start+1 : end])
-		if raw == "" {
-			return nil, false
-		}
-		return parseArrayDimensions(raw, base), true
 	}
 	return nil, false
 }
@@ -421,6 +428,7 @@ func arrayIntegerModuleConstants(file parsedFile) map[string]int {
 		n := *next + 1
 		next = &n
 	}
+	addQualifiedEnumIntegerConstants(file, constants)
 	return constants
 }
 
@@ -446,7 +454,7 @@ func impossibleArrayBounds(dimensions []arrayDimension) bool {
 	return false
 }
 
-func iterableSourceKnownInvalid(source string, variables map[string]arrayVariable, state arrayFlowState, ctx analysisContext) bool {
+func iterableSourceKnownInvalid(source string, variables map[string]arrayVariable, state arrayFlowState, ctx analysisContext, proc sourceProcedure) bool {
 	source = strings.TrimSpace(source)
 	if source == "" {
 		return false
@@ -479,7 +487,7 @@ func iterableSourceKnownInvalid(source string, variables map[string]arrayVariabl
 			return true
 		}
 	}
-	if value, known := arrayExpressionState(source, state, ctx); known {
+	if value, known := arrayExpressionStateForProcedure(source, state, ctx, proc); known {
 		if value.knownArray {
 			return false
 		}
@@ -735,6 +743,33 @@ func arrayAssignment(text string) (lhs, rhs string, indexed, ok bool) {
 	return "", "", false, false
 }
 
+func arrayAssignmentIsDirectElement(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	lower := strings.ToLower(trimmed)
+	for _, prefix := range []string{"set ", "let "} {
+		if strings.HasPrefix(lower, prefix) {
+			trimmed = strings.TrimSpace(trimmed[len(prefix):])
+			break
+		}
+	}
+	for i := 0; i < len(trimmed); i++ {
+		if trimmed[i] != '=' || i > 0 && (trimmed[i-1] == '<' || trimmed[i-1] == '>' || trimmed[i-1] == '=') {
+			continue
+		}
+		lhs := strings.TrimSpace(trimmed[:i])
+		if lhs == "" || strings.HasPrefix(strings.ToLower(lhs), "if ") {
+			return false
+		}
+		open := strings.IndexByte(lhs, '(')
+		if open < 0 {
+			return false
+		}
+		close := matchingParen(lhs, open)
+		return close == len(lhs)-1 && strings.TrimSpace(lhs[open+1:close]) != ""
+	}
+	return false
+}
+
 func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext) (arrayValue, bool) {
 	lower := strings.ToLower(strings.TrimSpace(rhs))
 	if strings.HasPrefix(lower, "array(") || lower == "array" {
@@ -773,4 +808,53 @@ func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext)
 		return arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}, true
 	}
 	return arrayValue{}, false
+}
+
+// arrayExpressionStateForProcedure keeps a bare array-return summary from
+// overriding a lexical variable or parameter with the same name. The summary
+// is intentionally keyed by the unqualified name, so it needs this procedure
+// context before it can be used as a call-site fact.
+func arrayExpressionStateForProcedure(rhs string, state arrayFlowState, ctx analysisContext, proc sourceProcedure) (arrayValue, bool) {
+	if arrayProcedureNameShadowed(proc, arrayBareCallName(rhs)) {
+		ctx.arrayReturns = nil
+	}
+	return arrayExpressionState(rhs, state, ctx)
+}
+
+func arrayBareCallName(text string) string {
+	if strings.ContainsAny(strings.TrimSpace(text), ".!") {
+		return ""
+	}
+	return arrayCallName(text)
+}
+
+func arrayProcedureNameShadowed(proc sourceProcedure, name string) bool {
+	name = strings.TrimSpace(cleanIdentifier(name))
+	if name == "" {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		switch declaration.Scope {
+		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
+			if strings.EqualFold(cleanIdentifier(declaration.Name), name) {
+				return true
+			}
+		}
+	}
+	for parameter := range proc.Params.All() {
+		if strings.EqualFold(cleanIdentifier(parameter.Name), name) {
+			return true
+		}
+	}
+	if proc.Document != nil {
+		for _, declaration := range proc.Document.Declarations {
+			switch declaration.Scope {
+			case procedureir.ScopeModule, procedureir.ScopeProject:
+				if strings.EqualFold(cleanIdentifier(declaration.Name), name) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

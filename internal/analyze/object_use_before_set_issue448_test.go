@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -77,6 +78,45 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PropagatesCollectionCountGuardIntoPrivateHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function PopCol(ByRef col As Collection) As Object
+  Set PopCol = col(col.Count)
+End Function
+
+Private Function ShiftCol(ByRef col As Collection) As Object
+  Set ShiftCol = col(1)
+End Function
+
+Public Sub Run(ByVal stack As Collection)
+  If stack.Count > 0 Then
+    Dim value As Object
+    Set value = PopCol(stack)
+    Set value = ShiftCol(stack)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	for _, finding := range got {
+		if finding.Procedure == "PopCol" || finding.Procedure == "ShiftCol" {
+			t.Fatalf("a Count guard on the caller must establish the Collection helper parameter: %+v", got)
+		}
+	}
+	for _, finding := range got {
+		if finding.Procedure == "Run" && finding.Line == 11 {
+			return
+		}
+	}
+	t.Fatalf("the nullable caller parameter must remain reportable at Count: %+v", got)
+}
+
 func TestVBA202Issue448PreservesIndexedDictionaryWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -117,6 +157,105 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("constructor-backed objects should not produce VBA202: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesColonSeparatedFactoryInitialization(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CreateDictionary(ParamArray args()) As Object
+  Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+  Dim i As Long
+  For i = 0 To UBound(args) Step 2
+    dict.Add args(i), args(i + 1)
+  Next
+  Set CreateDictionary = dict
+End Function
+
+Private Function CreateCollection() As Collection
+  Dim values As Collection: Set values = New Collection
+  values.Add "item"
+  Set CreateCollection = values
+End Function
+
+Private Function DispatchObject() As Object
+  Dim response As Object: Set response = CreateObject("Scripting.Dictionary")
+  Set DispatchObject = response
+End Function
+
+Private Function ForwardObject() As Object
+  Dim response As Object: Set response = DispatchObject()
+  Set ForwardObject = response
+End Function
+
+Private Sub ConsumeCollection(ByVal values As Collection)
+  Debug.Print values.Count
+End Sub
+
+Public Sub Run()
+  Dim ast As Object
+  Set ast = CreateDictionary("value", New Collection)
+  ast("value").Add "item"
+
+  Dim values As Collection: Set values = CreateCollection()
+  ConsumeCollection values
+
+  Dim request As Object: Set request = ForwardObject()
+  Debug.Print request.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("colon-separated object factories and their callers must establish returned objects: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RegistersMultipleColonSeparatedDeclarations(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim marker As Long: Dim service As Object: Debug.Print service.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 3 || !strings.Contains(got[0].Message, "service") {
+		t.Fatalf("every colon-separated declaration must participate in object flow: %+v", got)
+	}
+}
+
+func TestVBA202Issue448KeepsInlineForEachObjectAssignedAcrossIntersect(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim area As Range: Set area = Application.Range("A1")
+  Dim cell As Range: For Each cell In area.Cells
+    If Not Application.Intersect(cell, area) Is Nothing Then
+      Debug.Print cell.Row
+    End If
+  Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if strings.Contains(finding.Message, "cell may") {
+			t.Fatalf("For Each must establish the object before a read-only Intersect call: %+v", findings)
+		}
 	}
 }
 
@@ -432,6 +571,119 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("a nested Dictionary Collection item materialized on every branch should establish object state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesClassInitializeNestedLookupDictionary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "stdAcc.cls", `Attribute VB_Name = "stdAcc"
+Option Explicit
+
+Private Type TLookupState
+  Lookups As Object
+End Type
+
+Private Type TThis
+  Singleton As TLookupState
+End Type
+
+Private This As TThis
+
+Public Property Get States() As String
+  Dim lookup As Object
+  Set lookup = This.Singleton.Lookups("EAccStates")("S2N")
+  Dim key As Variant
+  For Each key In lookup.Keys()
+    States = States & key
+  Next
+End Property
+
+Friend Function protGetLookups() As Object
+  If This.Singleton.Lookups Is Nothing Then
+    Set This.Singleton.Lookups = CreateObject("Scripting.Dictionary")
+    Set This.Singleton.Lookups("EAccStates") = CreateLookupDict(Array("STATE_NORMAL", 0))
+  End If
+  Set protGetLookups = This.Singleton.Lookups
+End Function
+
+Private Sub Class_Initialize()
+  Set This.Singleton.Lookups = stdAcc.protGetLookups()
+End Sub
+
+	Private Function CreateLookupDict(values As Variant) As Object
+  Dim result As Object
+  Set result = CreateObject("Scripting.Dictionary")
+  Set result("S2N") = CreateObject("Scripting.Dictionary")
+  Set result("N2S") = CreateObject("Scripting.Dictionary")
+  Set CreateLookupDict = result
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Class_Initialize should establish nested lookup dictionaries: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalNestedLookupDictionary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "stdAcc.cls", `Attribute VB_Name = "stdAcc"
+Option Explicit
+
+Private Type TLookupState
+  Lookups As Object
+End Type
+
+Private Type TThis
+  Singleton As TLookupState
+End Type
+
+Private This As TThis
+
+Public Property Get States() As String
+  Dim lookup As Object
+  Set lookup = This.Singleton.Lookups("EAccStates")("S2N")
+  Dim key As Variant
+  For Each key In lookup.Keys()
+    States = States & key
+  Next
+End Property
+
+Friend Function protGetLookups() As Object
+  Dim materialize As Boolean
+  If This.Singleton.Lookups Is Nothing Then
+    Set This.Singleton.Lookups = CreateObject("Scripting.Dictionary")
+    If materialize Then
+      Set This.Singleton.Lookups("EAccStates") = CreateLookupDict(Array("STATE_NORMAL", 0))
+    End If
+  End If
+  Set protGetLookups = This.Singleton.Lookups
+End Function
+
+Private Sub Class_Initialize()
+  Set This.Singleton.Lookups = stdAcc.protGetLookups()
+End Sub
+
+Private Function CreateLookupDict(values As Variant) As Object
+  Dim result As Object
+  Set result = CreateObject("Scripting.Dictionary")
+  Set result("S2N") = CreateObject("Scripting.Dictionary")
+  Set result("N2S") = CreateObject("Scripting.Dictionary")
+  Set CreateLookupDict = result
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a nested lookup dictionary initialized only on a conditional path must remain unknown")
 	}
 }
 
@@ -1045,6 +1297,172 @@ End Sub
 	got := findingsByCode(findings, "VBA202")
 	if len(got) != 1 || got[0].Line != 9 {
 		t.Fatalf("the true branch of a negated predicate remains nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesGenericNonNothingPredicate(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function IsShape(ByVal candidate As Object) As Boolean
+  If candidate Is Nothing Then Exit Function
+  IsShape = (TypeName(candidate) = "Shape")
+End Function
+
+Public Sub Run(ByVal candidate As Object)
+  If IsShape(candidate) Then
+    Debug.Print candidate.Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a uniquely resolved generic predicate with a Nothing guard should establish non-Nothing state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesErrorGuardedNonNothingPredicate(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function DetectShape(ByVal candidate As Object) As Boolean
+  On Error GoTo Failed
+  DetectShape = candidate.ShapeRange.Count > 0
+Failed:
+End Function
+
+Public Sub Run(ByVal candidate As Object)
+  If DetectShape(candidate) Then
+    Debug.Print candidate.ShapeRange(1).Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 4 {
+		t.Fatalf("the helper dereference remains reportable but its successful result should guard the caller: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotUsePrivatePredicateFromOtherModule(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helper.bas", `Option Explicit
+Private Function IsReady(ByVal candidate As Object) As Boolean
+  If candidate Is Nothing Then Exit Function
+  IsReady = True
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal candidate As Object)
+  If IsReady(candidate) Then
+    Debug.Print candidate.Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "Run" {
+		t.Fatalf("a private predicate from another module must not refine its caller: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsErrorHandlerOnlyPredicateResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function IsReady(ByVal candidate As Object) As Boolean
+  On Error GoTo Failed
+  Debug.Print candidate.Name
+  Exit Function
+Failed:
+  IsReady = True
+End Function
+
+Public Sub Run(ByVal candidate As Object)
+  If IsReady(candidate) Then
+    Debug.Print candidate.Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 2 {
+		t.Fatalf("an error-handler-only True result must not establish a caller proof: %+v", got)
+	}
+	if got[0].Procedure != "IsReady" || got[1].Procedure != "Run" {
+		t.Fatalf("unexpected error-handler-only predicate findings: %+v", got)
+	}
+}
+
+func TestVBA202Issue448IgnoresStringLiteralPredicateMemberText(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function IsReady(ByVal candidate As Object) As Boolean
+  On Error GoTo Failed
+  IsReady = ("candidate.Name" = "candidate.Name")
+Failed:
+End Function
+
+Public Sub Run(ByVal candidate As Object)
+  If IsReady(candidate) Then
+    Debug.Print candidate.Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "Run" {
+		t.Fatalf("string literal text must not establish a predicate member proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RequiresExactIsExcelTablePredicateName(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function FooIsExcelTable(ByVal candidate As Object) As Boolean
+  If candidate Is Nothing Then Exit Function
+  FooIsExcelTable = (candidate.Name <> "")
+End Function
+
+Public Sub Run(ByVal candidate As Object)
+  Dim value As Object
+  If FooIsExcelTable(candidate) Then
+    Set value = candidate.Range
+    Debug.Print value.Name
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "Run" {
+		t.Fatalf("a similarly named predicate must not establish ListObject type facts: %+v", got)
 	}
 }
 
@@ -2365,6 +2783,710 @@ End Function
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("RegExp.Execute should establish a MatchCollection after the module initializer: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksRegExpThroughUDTArrayFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Lambda.cls", `Attribute VB_Name = "Lambda"
+Option Explicit
+Private Type TokenDefinition
+  RegexObj As Object
+End Type
+
+Private Function getTokenDefinition(ByVal pattern As String) As TokenDefinition
+  Set getTokenDefinition.RegexObj = CreateObject("VBScript.Regexp")
+  getTokenDefinition.RegexObj.Pattern = pattern
+End Function
+
+Private Function getTokenDefinitions() As TokenDefinition()
+  Dim arr() As TokenDefinition
+  ReDim arr(1 To 1)
+  arr(1) = getTokenDefinition("^x")
+  getTokenDefinitions = arr
+End Function
+
+Public Function MatchCount(ByVal inputText As String) As Long
+  Dim defs() As TokenDefinition
+  defs = getTokenDefinitions()
+  Dim match As Object
+  Set match = defs(1).RegexObj.Execute(inputText)
+  MatchCount = match.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a RegExp returned through an initialized UDT array should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalUDTArrayRegExpFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Lambda.cls", `Attribute VB_Name = "Lambda"
+Option Explicit
+Private Type TokenDefinition
+  RegexObj As Object
+End Type
+
+Private Function getTokenDefinition(ByVal pattern As String, ByVal initialize As Boolean) As TokenDefinition
+  If initialize Then Set getTokenDefinition.RegexObj = CreateObject("VBScript.Regexp")
+End Function
+
+Private Function getTokenDefinitions() As TokenDefinition()
+  Dim arr() As TokenDefinition
+  ReDim arr(1 To 1)
+  arr(1) = getTokenDefinition("^x", False)
+  getTokenDefinitions = arr
+End Function
+
+Public Function MatchCount(ByVal inputText As String) As Long
+  Dim defs() As TokenDefinition
+  defs = getTokenDefinitions()
+  Dim match As Object
+  Set match = defs(1).RegexObj.Execute(inputText)
+  MatchCount = match.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a conditional UDT array RegExp factory must remain nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesRegExpExecuteThroughDictionaryCache(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal inputText As String) As Long
+  Dim expression As Object
+  Dim cache As Object
+  Dim matches As Object
+  Set expression = CreateObject("VBScript.RegExp")
+  Set cache = CreateObject("Scripting.Dictionary")
+  Set cache("expression") = expression.Execute(inputText)
+  Set matches = cache("expression")
+  MatchCount = matches.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a cached RegExp.Execute MatchCollection should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesRegExpExecuteThroughConditionallyInitializedDictionaryCache(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal inputText As String) As Long
+  Static expression As Object
+  Static cache As Object
+  If expression Is Nothing Then Set expression = CreateObject("VBScript.RegExp")
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  Set cache("matches") = expression.Execute(inputText)
+  Dim matches As Object
+  Set matches = cache("matches")
+  MatchCount = matches.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a cached RegExp.Execute result after conditional initialization should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsPotentiallyCollidingStaticCacheProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal inputText As String) As Long
+  Static expression As Object
+  Static cache As Object
+  If expression Is Nothing Then Set expression = CreateObject("VBScript.RegExp")
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  If Not cache(inputText) Then
+    Set cache(")" & inputText) = expression.Execute(inputText)
+  End If
+  Dim matches As Object
+  Set matches = cache(")" & inputText)
+  MatchCount = matches.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("dynamic static cache keys that only look distinct must remain conservative: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsUnrelatedStaticCacheKeyProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal key As String, ByVal otherKey As String) As Long
+  Static cache As Object
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  If Not cache(otherKey) Then
+    Set cache(otherKey) = CreateObject("Scripting.Dictionary")
+  End If
+  Dim value As Object
+  Set value = cache(key)
+  MatchCount = value.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("an unrelated static cache key must remain conservative: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsUnprovenDictionaryItemObjectValue(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal key As String) As Long
+  Static cache As Object
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  Dim value As Object
+  If cache.Exists(key) Then
+    Set value = cache(key)
+  Else
+    Set value = New Collection
+  End If
+  MatchCount = value.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("Dictionary.Exists should not prove that an arbitrary item is an object: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesNonzeroModulePointerGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  Dim p As Long
+  If m_Interface Is Nothing Then Exit Function
+  For p = 1 To m_Interface.Count
+    If Not m_Interface.Item(p) = 0 Then
+      GetInterfacePointer = m_Interface.Item(p)
+      Exit For
+    End If
+  Next
+End Function
+
+Public Sub GetInterface()
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a nonzero result from a Nothing-guarded module pointer helper should prove the receiver: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesDirectModuleCollectionInitialization(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Public Sub BuildInterface()
+  Set m_Interface = New Collection
+  m_Interface.Add "item"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a directly initialized module Collection should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesClassFactoryIntoLateBoundObject(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "stdStringBuilder.cls", `Attribute VB_Name = "stdStringBuilder"
+Option Explicit
+
+Public JoinStr As String
+
+Public Function Create() As stdStringBuilder
+  Set Create = New stdStringBuilder
+End Function
+
+Public Function Exercise() As Long
+  Dim sb As Object
+  Set sb = Create()
+  sb.JoinStr = "-"
+
+  Dim sbNoParens As Object
+  Set sbNoParens = Create
+  sbNoParens.JoinStr = "+"
+  Exercise = 1
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an object assigned from a class factory should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesBareClassFactoryIntoObjectConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Widget.cls", `Attribute VB_Name = "Widget"
+Option Explicit
+`)
+	writeModule(t, dir, "Factories.bas", `Option Explicit
+Public Sub Run()
+  Consume UsedFactory
+End Sub
+
+Private Sub Consume(ByVal value As Object)
+  Debug.Print value.Caption
+End Sub
+
+Private Function UsedFactory() As Widget
+  Set UsedFactory = New Widget
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a bare project-object factory passed to an Object consumer should remain non-Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotTreatBareFactoryReturnSlotAsAssignedBeforeSet(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Widget.cls", `Attribute VB_Name = "Widget"
+Option Explicit
+`)
+	writeModule(t, dir, "Factories.bas", `Option Explicit
+Public Sub Run()
+  Dim value As Object
+  Set value = Factory
+End Sub
+
+Private Function Factory() As Widget
+  Consume Factory
+  Set Factory = New Widget
+End Function
+
+Private Sub Consume(ByVal value As Object)
+  Debug.Print value.Caption
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("a factory return slot passed before Set should remain nullable in the consumer: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PreservesSelectionListObjectGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function CreateFromSelection() As Long
+  Dim lo As ListObject
+  If TypeOf Selection Is Range Then
+    If Not Selection.ListObject Is Nothing Then
+      Dim lo As ListObject: Set lo = Selection.ListObject
+      Dim iRow As Long: iRow = Selection.Row - lo.Range.Row
+      If iRow < 1 Then iRow = 1
+      CreateFromSelection = iRow
+    End If
+  End If
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("the TypeOf and ListObject Nothing guards should prove both receivers: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesProcedurelessProjectClassReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "EmptyClass.cls", `Attribute VB_Name = "EmptyClass"
+Option Explicit
+`)
+	writeModule(t, dir, "Factories.bas", `Option Explicit
+Public Function Create() As EmptyClass
+  Set Create = New EmptyClass
+End Function
+
+Public Function Exercise() As Long
+  Dim value As Object
+  Set value = Create
+  value.Caption = "ready"
+  Exercise = 1
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a project class without procedures should still establish its typed factory return: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesTypeNameSelectCaseObjectGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function GetObjID(ByRef obj As Object) As String
+  Select Case TypeName(obj)
+    Case "Range": GetObjID = obj.Address
+    Case "Axis": GetObjID = obj.Type & "-" & obj.AxisGroup
+    Case Else: GetObjID = obj.Name
+  End Select
+End Function
+
+Public Function GetObjIDWithNothing(ByRef obj As Object) As String
+  Select Case TypeName(obj)
+    Case "Nothing": GetObjIDWithNothing = ""
+    Case Else: GetObjIDWithNothing = obj.Name
+  End Select
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "GetObjID" {
+		t.Fatalf("TypeName Case Else should remain nullable without an explicit Nothing case: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsCompositeNonzeroResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+End Function
+
+Public Sub GetInterface()
+  Dim ptr As Long
+  ptr = GetInterfacePointer() + 1
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a composite nonzero result must not prove the module receiver: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsNonzeroResultOverwrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+End Function
+
+Public Sub GetInterface(ByVal force As Boolean)
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  If force Then ptr = 1
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a later conditional result overwrite must invalidate the nonzero proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsMultilineNonzeroResultOverwrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+End Function
+
+Public Sub GetInterface(ByVal force As Boolean)
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  If force Then
+    ptr = 1
+  End If
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a multiline result overwrite must invalidate the nonzero proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsCallerFieldResetAfterNonzeroHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+End Function
+
+Public Sub GetInterface()
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  Set m_Interface = Nothing
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a caller-side module field reset must invalidate the nonzero proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsHelperFieldResetAfterNonzeroResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Interface.cls", `Attribute VB_Name = "Interface"
+Option Explicit
+Private m_Interface As Collection
+
+Private Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+  Set m_Interface = Nothing
+End Function
+
+Public Sub GetInterface()
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Item(ptr)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a helper-side module field reset must invalidate its nonzero contract: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotCrossModuleNonzeroFieldProof(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helper.bas", `Option Explicit
+Private m_Interface As Collection
+
+Public Function GetInterfacePointer() As Long
+  If m_Interface Is Nothing Then Exit Function
+  GetInterfacePointer = m_Interface.Count
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private m_Interface As Collection
+
+Public Sub GetInterface()
+  Dim ptr As Long
+  ptr = GetInterfacePointer()
+  If Not ptr = 0 Then
+    Debug.Print m_Interface.Count
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a helper in another module must not prove a same-named caller field: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesConditionalDictionaryAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function CountItems() As Long
+  Static cache As Object
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  Dim cacheAlias As Object
+  Set cacheAlias = cache
+  CountItems = cacheAlias.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a conditionally initialized Dictionary should remain an object through its alias: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsDictionaryAliasMutationForAbsentProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal key As String, ByVal unknownValue As Variant) As Long
+  Static cache As Object
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  Dim cacheAlias As Object
+  Set cacheAlias = cache
+  cacheAlias.Add key, unknownValue
+  If Not cache(key) Then
+    Set cache(key) = New Collection
+  End If
+  Dim value As Object
+  Set value = cache(key)
+  MatchCount = value.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("an alias mutation must keep the static cache probe conservative: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsBareDictionaryItemWriteForAbsentProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MatchCount(ByVal key As String, ByVal unknownValue As Variant) As Long
+  Static cache As Object
+  If cache Is Nothing Then Set cache = CreateObject("Scripting.Dictionary")
+  cache(key) = unknownValue
+  If Not cache(key) Then
+    Set cache(key) = New Collection
+  End If
+  Dim value As Object
+  Set value = cache(key)
+  MatchCount = value.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a bare Dictionary item write must keep the static cache probe conservative: %+v", got)
 	}
 }
 
@@ -6286,6 +7408,181 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
 		t.Fatal("an indexed alias in an append helper must invalidate the element contract")
+	}
+}
+
+func TestVBA202Issue448TracksRepeatedSelectCaseObjectFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CreateDictionary() As Object
+  Set CreateDictionary = CreateObject("Scripting.Dictionary")
+End Function
+
+Public Sub Run()
+  Dim ret As Object
+  Select Case This.iType
+    Case 0
+      Set ret = CreateDictionary()
+    Case 1
+      Set ret = New Collection
+  End Select
+
+  Select Case This.iType
+    Case 0
+      ret.Add "key", 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("the matching repeated Select Case should preserve the object factory proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalRepeatedSelectCaseObjectFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal selector As Long, ByVal initialize As Boolean)
+  Dim ret As Object
+  Select Case selector
+    Case 0
+      If initialize Then Set ret = CreateObject("Scripting.Dictionary")
+    Case 1
+      Set ret = New Collection
+  End Select
+
+  Select Case selector
+    Case 0
+      ret.Add "key", 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a conditional factory must not restore the object proof")
+	}
+}
+
+func TestVBA202Issue448RejectsRepeatedSelectCaseAfterObjectReset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal selector As Long)
+  Dim ret As Object
+  Select Case selector
+    Case 0
+      Set ret = CreateObject("Scripting.Dictionary")
+    Case 1
+      Set ret = New Collection
+  End Select
+  Set ret = Nothing
+
+  Select Case selector
+    Case 0
+      ret.Add "key", 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an object reset between the Select Case statements must invalidate the proof")
+	}
+}
+
+func TestVBA202Issue448RejectsRepeatedSelectCaseAfterGotoBypass(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CreateDictionary() As Object
+  Set CreateDictionary = CreateObject("Scripting.Dictionary")
+End Function
+
+Public Sub Run(ByVal selector As Long)
+  Dim ret As Object
+  GoTo Later
+  Select Case selector
+    Case 0
+      Set ret = CreateDictionary()
+    Case 1
+      Set ret = New Collection
+  End Select
+
+Later:
+  Select Case selector
+    Case 0
+      ret.Add "key", 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a GoTo path that bypasses the first Select Case must not restore the object proof")
+	}
+}
+
+func TestVBA202Issue448RejectsRepeatedSelectCaseAfterSelectorParentWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CreateDictionary() As Object
+  Set CreateDictionary = CreateObject("Scripting.Dictionary")
+End Function
+
+Public Sub Run()
+  Dim ret As Object
+  Select Case This.Cache.Value
+    Case 0
+      Set ret = CreateDictionary()
+    Case 1
+      Set ret = New Collection
+  End Select
+  Set This.Cache = Nothing
+
+  Select Case This.Cache.Value
+    Case 0
+      ret.Add "key", 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a write to a selector parent must invalidate the repeated Select Case proof")
+	}
+}
+
+func TestObjectRepeatedSelectCaseControlLineUsesKeywordBoundaries(t *testing.T) {
+	t.Parallel()
+	for _, line := range []string{"Elsewhere = 1", "NextValue = 1", "Document = 1", "Format = 1"} {
+		if objectRepeatedSelectCaseControlLine(strings.ToLower(line)) {
+			t.Fatalf("identifier prefix was treated as a control keyword: %q", line)
+		}
+	}
+	for _, line := range []string{"Else", "Next value", "Do While ready", "GoTo Later", "End Select"} {
+		if !objectRepeatedSelectCaseControlLine(strings.ToLower(line)) {
+			t.Fatalf("control keyword was not recognized: %q", line)
+		}
 	}
 }
 

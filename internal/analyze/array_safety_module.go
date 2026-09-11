@@ -960,7 +960,7 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 		if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed {
 			name := strings.ToLower(cleanIdentifier(lhs))
 			if moduleArrays[name] {
-				if value, known := arrayExpressionState(rhs, arrayFlowState{}, ctx); known && value.kind == arrayAllocated && value.knownArray {
+				if value, known := arrayExpressionStateForProcedure(rhs, arrayFlowState{}, ctx, proc); known && value.kind == arrayAllocated && value.knownArray {
 					if !arrayProcedureLineHasInlineConditional(file, statement.Range.StartLine) {
 						addDirectAllocation(statement.ID, name)
 					}
@@ -1249,6 +1249,7 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 	ctx.arrayStats.addModuleReadyGuardCFGWalk()
 
 	graph := arrayVBA227Graph(proc, ctx)
+	resumeNextEdges := arrayVBA227ResumeNextContinuationEdges(proc)
 	initial := arrayInitialState(variables)
 	seenReady := false
 	failed := map[string]bool{}
@@ -1262,7 +1263,7 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 				}
 			}
 		}
-		out, _ := (Analyzer{}).arrayVBA227Transfer(file, proc, ctx, variables, in, text, line, nil, nil, nil)
+		out, _ := (Analyzer{}).arrayVBA227Transfer(file, proc, ctx, variables, in, text, line, nil, nil, nil, &graph, resumeNextEdges)
 		forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 			out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 			out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
@@ -1271,6 +1272,7 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 	}
 	edgeState := func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 		out = applyArrayConditionalAllocationBranch(out, &graph, block, edge)
+		out = applyArrayResumeNextFailureFlagBranch(out, block.Statement, edge)
 		out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
 		return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
 	}
@@ -1320,7 +1322,7 @@ func arrayModuleReadyGuardLifecycleSafe(file parsedFile, guardName string, array
 					safe = false
 					return
 				}
-				value, known := arrayExpressionState(rhs, arrayFlowState{}, ctx)
+				value, known := arrayExpressionStateForProcedure(rhs, arrayFlowState{}, ctx, owner)
 				if !known || value.kind != arrayAllocated || !value.knownArray {
 					safe = false
 				}

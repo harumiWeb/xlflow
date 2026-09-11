@@ -141,6 +141,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA237","severity":"warning","line":1732,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA214","severity":"warning","line":1740,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA249","severity":"error","line":1796,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1797,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1804,"column":21}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1807,"column":21}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1836,"column":21}
@@ -284,6 +285,9 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdCanvas.cls","surface":"analyze","code":"VBA206","severity":"warning","line":523,"column":36}
 {"project":"third_party/std-vba","file":"src/WIP/stdCanvas.cls","surface":"analyze","code":"VBA206","severity":"warning","line":523,"column":36}
 {"project":"third_party/std-vba","file":"src/WIP/stdCanvas.cls","surface":"analyze","code":"VBA206","severity":"warning","line":528,"column":10}
+{"project":"third_party/std-vba","file":"src/WIP/stdCanvas.cls","surface":"analyze","code":"VBA249","severity":"error","line":594,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdCanvas.cls","surface":"analyze","code":"VBA249","severity":"error","line":599,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdCanvas.cls","surface":"analyze","code":"VBA249","severity":"error","line":618,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCanvas.cls","surface":"analyze","code":"VBA227","severity":"warning","line":691,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCrypto/MD5.cls","surface":"analyze","code":"VBA227","severity":"warning","line":120,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCrypto/MD5.cls","surface":"analyze","code":"VBA214","severity":"warning","line":183,"column":0}
@@ -522,7 +526,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA224","severity":"warning","line":33,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA224","severity":"warning","line":39,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorksheet.cls","surface":"analyze","code":"VBA202","severity":"warning","line":32,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdShapeEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":149,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdShapeEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":161,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdShapeEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":173,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdShapeEvents.cls","surface":"analyze","code":"VBA214","severity":"warning","line":183,"column":0}
@@ -544,7 +547,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":139,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":141,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":141,"column":14}
-{"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":204,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":215,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":227,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdHTTPServer.cls","surface":"analyze","code":"VBA227","severity":"warning","line":280,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"analyze","code":"VBA222","severity":"warning","line":8,"column":0}
@@ -558,9 +561,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":89,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":90,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":90,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":95,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":100,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA245","severity":"warning","line":105,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA206","severity":"warning","line":164,"column":29}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA237","severity":"warning","line":187,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdMath.cls","surface":"analyze","code":"VBA206","severity":"warning","line":49,"column":23}
@@ -573,7 +573,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdMath.cls","surface":"analyze","code":"VBA206","severity":"warning","line":57,"column":10}
 {"project":"third_party/std-vba","file":"src/WIP/stdMath.cls","surface":"analyze","code":"VBA206","severity":"warning","line":57,"column":10}
 {"project":"third_party/std-vba","file":"src/WIP/stdMath.cls","surface":"analyze","code":"VBA206","severity":"warning","line":57,"column":10}
-{"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA202","severity":"warning","line":183,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":183,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":185,"column":12}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA202","severity":"warning","line":220,"column":0}
@@ -614,7 +613,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":551,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":555,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":557,"column":5}
-{"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA202","severity":"warning","line":187,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA206","severity":"warning","line":187,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA206","severity":"warning","line":189,"column":12}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA202","severity":"warning","line":224,"column":0}
@@ -670,13 +668,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdPowerPointLibraries/ShapeHook.cls","surface":"analyze","code":"VBA206","severity":"warning","line":145,"column":19}
 {"project":"third_party/std-vba","file":"src/WIP/stdPowerPointLibraries/ShapeHook.cls","surface":"analyze","code":"VBA206","severity":"warning","line":145,"column":19}
 {"project":"third_party/std-vba","file":"src/WIP/stdPowerPointLibraries/ShapeHook.cls","surface":"analyze","code":"VBA214","severity":"warning","line":183,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA202","severity":"warning","line":172,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA202","severity":"warning","line":187,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA202","severity":"warning","line":203,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA202","severity":"warning","line":250,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA244","severity":"information","line":275,"column":27}
-{"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA202","severity":"warning","line":316,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA202","severity":"warning","line":625,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA202","severity":"warning","line":663,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA202","severity":"warning","line":677,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA202","severity":"warning","line":702,"column":0}
@@ -686,6 +678,8 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA206","severity":"warning","line":48,"column":22}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA219","severity":"warning","line":88,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA245","severity":"warning","line":88,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA249","severity":"error","line":287,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA249","severity":"error","line":288,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA219","severity":"warning","line":293,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA202","severity":"warning","line":300,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA227","severity":"warning","line":320,"column":0}
@@ -701,19 +695,13 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdSettings.cls","surface":"analyze","code":"VBA202","severity":"warning","line":215,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdSettings.cls","surface":"analyze","code":"VBA202","severity":"warning","line":221,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA206","severity":"warning","line":49,"column":19}
-{"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA202","severity":"warning","line":54,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA206","severity":"warning","line":61,"column":19}
-{"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA202","severity":"warning","line":66,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA206","severity":"warning","line":71,"column":19}
-{"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA202","severity":"warning","line":74,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA206","severity":"warning","line":81,"column":19}
-{"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA202","severity":"warning","line":83,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA206","severity":"warning","line":95,"column":19}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA103","severity":"warning","line":104,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA202","severity":"warning","line":104,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA206","severity":"warning","line":109,"column":19}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA206","severity":"warning","line":120,"column":19}
-{"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA202","severity":"warning","line":124,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA227","severity":"warning","line":149,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA227","severity":"warning","line":149,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdSharepointSite.cls","surface":"analyze","code":"VBA224","severity":"warning","line":220,"column":0}
@@ -745,7 +733,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdShell.cls","surface":"analyze","code":"VBA237","severity":"warning","line":2141,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdShell.cls","surface":"analyze","code":"VBA237","severity":"warning","line":2142,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdShell.cls","surface":"analyze","code":"VBA237","severity":"warning","line":2172,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdShell.cls","surface":"analyze","code":"VBA202","severity":"warning","line":2190,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdShell.cls","surface":"analyze","code":"VBA206","severity":"warning","line":2224,"column":40}
 {"project":"third_party/std-vba","file":"src/WIP/stdShell.cls","surface":"analyze","code":"VBA206","severity":"warning","line":2224,"column":40}
 {"project":"third_party/std-vba","file":"src/WIP/stdShell.cls","surface":"analyze","code":"VBA204","severity":"warning","line":2281,"column":0}
@@ -753,6 +740,8 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdShell.cls","surface":"analyze","code":"VBA204","severity":"warning","line":2304,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdShell.cls","surface":"analyze","code":"VBA237","severity":"warning","line":2304,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdShell.cls","surface":"analyze","code":"VBA206","severity":"warning","line":2382,"column":15}
+{"project":"third_party/std-vba","file":"src/WIP/stdShellMTP.cls","surface":"analyze","code":"VBA202","severity":"warning","line":27,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdShellMTP.cls","surface":"analyze","code":"VBA202","severity":"warning","line":58,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdString.cls","surface":"analyze","code":"VBA206","severity":"warning","line":64,"column":24}
 {"project":"third_party/std-vba","file":"src/WIP/stdString.cls","surface":"analyze","code":"VBA206","severity":"warning","line":68,"column":13}
 {"project":"third_party/std-vba","file":"src/WIP/stdString.cls","surface":"analyze","code":"VBA244","severity":"information","line":68,"column":14}
@@ -761,11 +750,9 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdString.cls","surface":"analyze","code":"VBA206","severity":"warning","line":77,"column":13}
 {"project":"third_party/std-vba","file":"src/WIP/stdString.cls","surface":"analyze","code":"VBA206","severity":"warning","line":85,"column":15}
 {"project":"third_party/std-vba","file":"src/WIP/stdString.cls","surface":"analyze","code":"VBA206","severity":"warning","line":87,"column":9}
-{"project":"third_party/std-vba","file":"src/WIP/stdStringBuilder.cls","surface":"analyze","code":"VBA202","severity":"warning","line":162,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"analyze","code":"VBA202","severity":"warning","line":37,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"analyze","code":"VBA202","severity":"warning","line":51,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"analyze","code":"VBA202","severity":"warning","line":56,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"analyze","code":"VBA249","severity":"error","line":58,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"analyze","code":"VBA249","severity":"error","line":59,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"analyze","code":"VBA202","severity":"warning","line":66,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"analyze","code":"VBA202","severity":"warning","line":73,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"analyze","code":"VBA202","severity":"warning","line":81,"column":0}
@@ -787,7 +774,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":139,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":141,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA206","severity":"warning","line":141,"column":14}
-{"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":204,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":215,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":227,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTable.cls","surface":"analyze","code":"VBA202","severity":"warning","line":57,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTable.cls","surface":"analyze","code":"VBA202","severity":"warning","line":95,"column":0}
@@ -845,6 +832,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA227","severity":"warning","line":199,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA227","severity":"warning","line":200,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA222","severity":"warning","line":211,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA241","severity":"information","line":232,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA227","severity":"warning","line":438,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"analyze","code":"VBA227","severity":"warning","line":438,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocketNew.cls","surface":"analyze","code":"VBA222","severity":"warning","line":150,"column":0}
@@ -854,6 +842,8 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocketNew.cls","surface":"analyze","code":"VBA227","severity":"warning","line":202,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocketNew.cls","surface":"analyze","code":"VBA227","severity":"warning","line":203,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocketNew.cls","surface":"analyze","code":"VBA222","severity":"warning","line":214,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocketNew.cls","surface":"analyze","code":"VBA241","severity":"information","line":235,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocketNew.cls","surface":"analyze","code":"VBA241","severity":"information","line":252,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocketNew.cls","surface":"analyze","code":"VBA227","severity":"warning","line":448,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocketNew.cls","surface":"analyze","code":"VBA227","severity":"warning","line":448,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWordLibraries/stdWordDocument.cls","surface":"analyze","code":"VBA202","severity":"warning","line":23,"column":0}
@@ -957,6 +947,8 @@
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA249","severity":"error","line":560,"column":0}
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA249","severity":"error","line":564,"column":0}
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA249","severity":"error","line":568,"column":0}
+{"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":610,"column":0}
+{"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":617,"column":0}
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA249","severity":"error","line":720,"column":0}
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA241","severity":"information","line":722,"column":0}
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":727,"column":22}
@@ -968,9 +960,13 @@
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1457,"column":52}
 {"project":"third_party/std-vba","file":"src/stdFiber.cls","surface":"analyze","code":"VBA206","severity":"warning","line":202,"column":8}
 {"project":"third_party/std-vba","file":"src/stdFiber.cls","surface":"analyze","code":"VBA249","severity":"error","line":402,"column":0}
+{"project":"third_party/std-vba","file":"src/stdFiber.cls","surface":"analyze","code":"VBA249","severity":"error","line":402,"column":0}
+{"project":"third_party/std-vba","file":"src/stdFiber.cls","surface":"analyze","code":"VBA249","severity":"error","line":403,"column":0}
 {"project":"third_party/std-vba","file":"src/stdFiber.cls","surface":"analyze","code":"VBA249","severity":"error","line":403,"column":0}
 {"project":"third_party/std-vba","file":"src/stdFiber.cls","surface":"analyze","code":"VBA249","severity":"error","line":404,"column":0}
+{"project":"third_party/std-vba","file":"src/stdFiber.cls","surface":"analyze","code":"VBA249","severity":"error","line":404,"column":0}
 {"project":"third_party/std-vba","file":"src/stdFiber.cls","surface":"analyze","code":"VBA249","severity":"error","line":412,"column":0}
+{"project":"third_party/std-vba","file":"src/stdFiber.cls","surface":"analyze","code":"VBA249","severity":"error","line":418,"column":0}
 {"project":"third_party/std-vba","file":"src/stdHTML.cls","surface":"analyze","code":"VBA202","severity":"warning","line":642,"column":0}
 {"project":"third_party/std-vba","file":"src/stdHTML.cls","surface":"analyze","code":"VBA206","severity":"warning","line":709,"column":20}
 {"project":"third_party/std-vba","file":"src/stdHTML.cls","surface":"analyze","code":"VBA206","severity":"warning","line":717,"column":32}
@@ -1017,31 +1013,10 @@
 {"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"analyze","code":"VBA202","severity":"warning","line":1145,"column":0}
 {"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"analyze","code":"VBA249","severity":"error","line":1209,"column":0}
 {"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA219","severity":"warning","line":151,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":207,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":207,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":208,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":208,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":209,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":209,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":224,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":224,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":438,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":438,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":438,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":439,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":439,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":439,"column":0}
 {"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":442,"column":0}
 {"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA219","severity":"warning","line":486,"column":0}
 {"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA245","severity":"warning","line":486,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":503,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":503,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":503,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":504,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":504,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA249","severity":"error","line":504,"column":0}
 {"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":507,"column":0}
-{"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA202","severity":"warning","line":510,"column":0}
 {"project":"third_party/std-vba","file":"src/stdJSON.cls","surface":"analyze","code":"VBA244","severity":"information","line":646,"column":17}
 {"project":"third_party/std-vba","file":"src/stdLambda.cls","surface":"analyze","code":"VBA240","severity":"warning","line":202,"column":0}
 {"project":"third_party/std-vba","file":"src/stdLambda.cls","surface":"analyze","code":"VBA206","severity":"warning","line":305,"column":31}
@@ -1245,6 +1220,7 @@
 {"project":"third_party/std-vba","file":"src/stdRegex.cls","surface":"analyze","code":"VBA202","severity":"warning","line":403,"column":0}
 {"project":"third_party/std-vba","file":"src/stdRegex.cls","surface":"analyze","code":"VBA202","severity":"warning","line":538,"column":0}
 {"project":"third_party/std-vba","file":"src/stdRegex.cls","surface":"analyze","code":"VBA202","severity":"warning","line":569,"column":0}
+{"project":"third_party/std-vba","file":"src/stdRegex.cls","surface":"analyze","code":"VBA227","severity":"warning","line":581,"column":0}
 {"project":"third_party/std-vba","file":"src/stdSentry.cls","surface":"analyze","code":"VBA206","severity":"warning","line":146,"column":44}
 {"project":"third_party/std-vba","file":"src/stdSentry.cls","surface":"analyze","code":"VBA206","severity":"warning","line":155,"column":50}
 {"project":"third_party/std-vba","file":"src/stdSentry.cls","surface":"analyze","code":"VBA206","severity":"warning","line":179,"column":44}
@@ -1316,13 +1292,8 @@
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA206","severity":"warning","line":2300,"column":44}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA206","severity":"warning","line":2317,"column":46}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA206","severity":"warning","line":2324,"column":41}
-{"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA202","severity":"warning","line":2341,"column":0}
-{"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA202","severity":"warning","line":2350,"column":0}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA249","severity":"error","line":2498,"column":0}
-{"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA249","severity":"error","line":2498,"column":0}
-{"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA249","severity":"error","line":2507,"column":0}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA206","severity":"warning","line":2543,"column":17}
-{"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA249","severity":"error","line":2549,"column":0}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA206","severity":"warning","line":2554,"column":40}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA241","severity":"information","line":2598,"column":0}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA241","severity":"information","line":2623,"column":0}
@@ -1337,11 +1308,17 @@
 {"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA244","severity":"warning","line":133,"column":6}
 {"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA214","severity":"warning","line":159,"column":0}
 {"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA202","severity":"warning","line":166,"column":0}
+{"project":"third_party/std-vba","file":"tests/lib/xlsProjectBuilder.cls","surface":"analyze","code":"VBA202","severity":"warning","line":34,"column":0}
+{"project":"third_party/std-vba","file":"tests/lib/xlsProjectBuilder.cls","surface":"analyze","code":"VBA202","severity":"warning","line":57,"column":0}
 {"project":"third_party/std-vba","file":"tests/lib/xlsProjectBuilder.cls","surface":"analyze","code":"VBA244","severity":"information","line":94,"column":28}
 {"project":"third_party/std-vba","file":"tests/stdCallbackTests.bas","surface":"analyze","code":"VBA240","severity":"warning","line":10,"column":0}
 {"project":"third_party/std-vba","file":"tests/stdEnumeratorTests.bas","surface":"analyze","code":"VBA214","severity":"warning","line":92,"column":0}
 {"project":"third_party/std-vba","file":"tests/stdEnumeratorTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":106,"column":0}
 {"project":"third_party/std-vba","file":"tests/stdEnumeratorTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":106,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdEnumeratorTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":107,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdEnumeratorTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":107,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdEnumeratorTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":108,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdEnumeratorTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":108,"column":0}
 {"project":"third_party/std-vba","file":"tests/stdHTTPTests.bas","surface":"analyze","code":"VBA206","severity":"warning","line":25,"column":67}
 {"project":"third_party/std-vba","file":"tests/stdHTTPTests.bas","surface":"analyze","code":"VBA206","severity":"warning","line":30,"column":76}
 {"project":"third_party/std-vba","file":"tests/stdHTTPTests.bas","surface":"analyze","code":"VBA206","severity":"warning","line":43,"column":71}
@@ -1353,6 +1330,13 @@
 {"project":"third_party/std-vba","file":"tests/stdLambdaTests.bas","surface":"analyze","code":"VBA206","severity":"warning","line":85,"column":48}
 {"project":"third_party/std-vba","file":"tests/stdProcessTests.bas","surface":"analyze","code":"VBA240","severity":"warning","line":4,"column":0}
 {"project":"third_party/std-vba","file":"tests/stdProcessTests.bas","surface":"analyze","code":"VBA240","severity":"warning","line":5,"column":0}
-{"project":"third_party/std-vba","file":"tests/stdProcessTests.bas","surface":"analyze","code":"VBA202","severity":"warning","line":32,"column":0}
 {"project":"third_party/std-vba","file":"tests/stdRegexTests.bas","surface":"analyze","code":"VBA214","severity":"warning","line":12,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdRegexTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":79,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdRegexTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":79,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdRegexTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":80,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdRegexTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":80,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdRegexTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":81,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdRegexTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":82,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdRegexTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":83,"column":0}
+{"project":"third_party/std-vba","file":"tests/stdRegexTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":84,"column":0}
 {"project":"third_party/std-vba","file":"tests/stdSentryTests.bas","surface":"analyze","code":"VBA240","severity":"warning","line":3,"column":0}

@@ -160,10 +160,10 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		// A Variant has no statically proven array nature.  Keep this path
 		// fail-open; only a proven array (or a proven scalar handled above) is
 		// actionable here.
-		if variable.isVariant && !value.knownArray {
+		if variable.isVariant && !variable.isArray && !value.knownArray && !value.mayBeUnallocated {
 			continue
 		}
-		if value.kind != arrayAllocated || !value.knownArray {
+		if value.mayBeUnallocated || value.kind != arrayAllocated || !value.knownArray {
 			if arrayResumeNextCapacityProofApplies(capacityGuards, name, line) {
 				// A recognized Resume Next capacity probe deliberately catches
 				// this bounds failure before its fallback allocation branch.
@@ -193,7 +193,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 	}
 
 	if match := arrayForEachRe.FindStringSubmatch(text); len(match) > 0 {
-		if iterableSourceKnownInvalid(match[1], variables, state, ctx) {
+		if iterableSourceKnownInvalid(match[1], variables, state, ctx, proc) {
 			add("VBA227", strings.TrimSpace(match[1])+" is not a collection or array and cannot be used as a For Each source.", "For Each requires an iterable Collection or array value; this source is a known scalar.", "Iterate an array or Collection, or change the source expression to an iterable value.")
 		}
 	}
@@ -209,13 +209,13 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			continue
 		}
 		value := state[strings.ToLower(use.name)]
-		if variable, ok := variables[strings.ToLower(use.name)]; ok && variable.isVariant && !value.knownArray {
+		if variable, ok := variables[strings.ToLower(use.name)]; ok && variable.isVariant && !variable.isArray && !value.knownArray && !value.mayBeUnallocated {
 			continue
 		}
 		if value.origin == arrayOriginRangeValue {
 			continue
 		}
-		if value.kind != arrayAllocated || !value.knownArray {
+		if value.mayBeUnallocated || value.kind != arrayAllocated || !value.knownArray {
 			addWithKey(arrayIndexOperationKey(use.name, "unallocated"), "VBA227", use.name+" is indexed before its array allocation is guaranteed.", "An array access can fail after Erase, before ReDim, or on a branch where allocation is not established.", "Allocate the array on every path before indexing it, or guard the access with a proven allocation check.")
 			continue
 		}
@@ -265,7 +265,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 				state[name] = value
 			}
 		}
-		if variable, exists := variables[name]; exists && variable.isArray && variable.isObject && indexed && !strings.HasPrefix(lower, "set ") {
+		if variable, exists := variables[name]; exists && variable.isArray && variable.isObject && indexed && arrayAssignmentIsDirectElement(text) && !strings.HasPrefix(lower, "set ") {
 			code := "VBA101"
 			typ := variable.typ
 			callee := arrayCallName(rhs)
@@ -280,14 +280,21 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			}
 		}
 		if !indexed {
-			if value, known := arrayDictionaryMemberExpressionState(file, proc, line, rhs, variables); known {
+			if value, known := arrayDictionaryMemberExpressionState(file, proc, line, rhs, variables, ctx); known {
 				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 					state[name] = value
 				}
-			} else if value, known := arrayExpressionState(rhs, state, ctx); known {
+			} else if value, known := arrayExpressionStateForProcedure(rhs, state, ctx, proc); known {
+				if qualifiedValue, qualifiedKnown := arrayQualifiedReturnExpressionState(proc, line, rhs, variables, ctx); qualifiedKnown {
+					value = qualifiedValue
+				}
 				if value.mayBeEmpty && arrayExpressionKnownNonEmpty(file, proc, line, rhs, variables) {
 					value.mayBeEmpty = false
 				}
+				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
+					state[name] = value
+				}
+			} else if value, known := arrayQualifiedReturnExpressionState(proc, line, rhs, variables, ctx); known {
 				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 					state[name] = value
 				}

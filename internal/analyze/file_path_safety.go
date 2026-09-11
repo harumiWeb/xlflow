@@ -5,6 +5,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 )
 
 // filePathValue is deliberately small and procedure-local. It mirrors the
@@ -106,37 +109,46 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 	cleanupLines := map[string][]int{}
 	binaryHandles := map[string]fileOperationPath{}
 	guardedDestinations := fileGuardedDestinations(file.Lines, proc.StartLine, proc.EndLine)
+	reachableStatements := filePathSafetyReachableStatements(proc)
 	var findings []Finding
 	seen := map[string]bool{}
 	for lineNo := proc.StartLine; lineNo <= proc.EndLine && lineNo <= len(file.Lines); lineNo++ {
-		raw := stripVBAFileComment(file.Lines[lineNo-1])
+		sourceLine := file.Lines[lineNo-1]
+		raw := stripVBAFileComment(sourceLine)
 		stmt := strings.TrimSpace(raw)
 		if stmt == "" {
 			continue
 		}
 		lower := strings.ToLower(stmt)
+		lineReachable := filePathSafetyLineReachable(proc, reachableStatements, lineNo, sourceLine)
 		// Track simple aliases and path construction before inspecting the sink
 		// on the same line. This is enough for the common `p = root & name`
 		// pattern while retaining unknown provenance for unsupported expressions.
-		if name, expr, ok := fileAssignment(stmt); ok {
-			value := classifyFilePathExpr(expr, values, params)
-			values[strings.ToLower(name)] = value
+		if lineReachable {
+			if name, expr, ok := fileAssignment(stmt); ok {
+				value := classifyFilePathExpr(expr, values, params)
+				values[strings.ToLower(name)] = value
+			}
 		}
-		if strings.Contains(lower, "createobject(\"scripting.filesystemobject\")") {
+		if lineReachable && strings.Contains(lower, "createobject(\"scripting.filesystemobject\")") {
 			if name, _, ok := fileAssignment(stmt); ok {
 				fsos[strings.ToLower(name)] = true
 			}
 		}
 		// File numbers are reusable. Any Open assignment invalidates the old
-		// binary mapping; a binary Open then installs the current path.
-		if match := fileOpenHandleRe.FindStringSubmatch(stmt); len(match) == 2 {
-			delete(binaryHandles, match[1])
-		}
-		if match := fileBinaryOpenRe.FindStringSubmatch(stmt); len(match) == 3 {
-			binaryHandles[match[2]] = fileOperationPath{role: "target", expr: strings.TrimSpace(match[1])}
-		}
-		if match := fileCloseRe.FindStringSubmatch(stmt); len(match) == 2 {
-			clearClosedBinaryHandles(match[1], binaryHandles)
+		// binary mapping; a binary Open then installs the current path. State
+		// changes from unreachable source statements must not affect a later
+		// reachable Put.
+		if lineReachable {
+			if match := fileOpenHandleRe.FindStringSubmatch(stmt); len(match) == 2 {
+				delete(binaryHandles, match[1])
+			}
+			if match := fileBinaryOpenRe.FindStringSubmatch(stmt); len(match) == 3 {
+				binaryHandles[match[2]] = fileOperationPath{role: "target", expr: strings.TrimSpace(match[1])}
+			}
+			if match := fileCloseRe.FindStringSubmatch(stmt); len(match) == 2 {
+				clearClosedBinaryHandles(match[1], binaryHandles)
+			}
 		}
 		uses := fileOperationUsesWithLookup(stmt, localProcedure, fsos, values, workbooks)
 		if match := fileBinaryWriteRe.FindStringSubmatch(stmt); len(match) == 2 {
@@ -145,6 +157,9 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 			}
 		}
 		for _, use := range uses {
+			if !filePathSafetyUseReachable(proc, reachableStatements, lineNo, sourceLine, use.column) {
+				continue
+			}
 			if len(use.paths) >= 2 && (use.operation == "Name" || strings.Contains(strings.ToLower(use.operation), "copy") || strings.Contains(strings.ToLower(use.operation), "move")) {
 				left := classifyFilePathExpr(use.paths[0].expr, values, params)
 				right := classifyFilePathExpr(use.paths[1].expr, values, params)
@@ -224,6 +239,103 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 		findings = append(findings, a.fileOperationFinding(file, proc, lineNo, use, path, value, "lifecycle", "temporary_cleanup_missing"))
 	}
 	return findings
+}
+
+func filePathSafetyReachableStatements(proc sourceProcedure) map[int]bool {
+	if proc.Graph == nil || proc.Statements.Len() == 0 {
+		return nil
+	}
+	// Reuse the established Resume Next continuation recovery used by the
+	// array analysis. It is based only on CFG/error-handler edges and restores
+	// the path from a handler's `Resume Next` to the statement after the fault.
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	graph = arrayVBA227AddResumeNextContinuationEdges(proc, graph)
+	reachableBlocks := map[vbacfg.BlockID]bool{}
+	for _, blockID := range graph.Reachable() {
+		reachableBlocks[blockID] = true
+	}
+	reachable := make(map[int]bool, proc.Statements.Len())
+	for statement := range proc.Statements.All() {
+		block, ok := graph.BlockForStatement(statement.ID)
+		reachable[statement.ID] = !ok || reachableBlocks[block.ID]
+	}
+	return reachable
+}
+
+func filePathSafetyUseReachable(proc sourceProcedure, reachableStatements map[int]bool, line int, raw string, column int) bool {
+	if len(reachableStatements) == 0 {
+		return true
+	}
+	leading := len(raw) - len(strings.TrimLeftFunc(raw, unicode.IsSpace))
+	return filePathSafetyPositionReachable(proc, reachableStatements, line, leading+max(0, column))
+}
+
+func filePathSafetyLineReachable(proc sourceProcedure, reachableStatements map[int]bool, line int, raw string) bool {
+	if len(reachableStatements) == 0 {
+		return true
+	}
+	leading := len(raw) - len(strings.TrimLeftFunc(raw, unicode.IsSpace))
+	return filePathSafetyPositionReachable(proc, reachableStatements, line, leading)
+}
+
+func filePathSafetyPositionReachable(proc sourceProcedure, reachableStatements map[int]bool, line, zeroBasedColumn int) bool {
+	statementID, ok := filePathSafetyStatementAt(proc, line, zeroBasedColumn)
+	if !ok {
+		// A parser-recovery or synthetic statement without a source range must
+		// not make a valid sink disappear.
+		return true
+	}
+	reachable, known := reachableStatements[statementID]
+	return !known || reachable
+}
+
+func filePathSafetyStatementAt(proc sourceProcedure, line, zeroBasedColumn int) (int, bool) {
+	if line <= 0 {
+		return 0, false
+	}
+	column := zeroBasedColumn + 1
+	bestID := 0
+	bestSpan := int(^uint(0) >> 1)
+	for statement := range proc.Statements.All() {
+		rng := statement.Range
+		startLine := rng.StartLine
+		endLine := rng.EndLine
+		if startLine <= 0 {
+			continue
+		}
+		if endLine < startLine {
+			endLine = startLine
+		}
+		if line < startLine || line > endLine {
+			continue
+		}
+		if line == startLine && rng.StartColumn > 0 && column < rng.StartColumn {
+			continue
+		}
+		if line == endLine && rng.EndColumn > 0 && column >= rng.EndColumn {
+			continue
+		}
+		span := filePathSafetyRangeSpan(rng.StartByte, rng.EndByte, startLine, rng.StartColumn, endLine, rng.EndColumn)
+		if span < bestSpan {
+			bestID = statement.ID
+			bestSpan = span
+		}
+	}
+	return bestID, bestID != 0
+}
+
+func filePathSafetyRangeSpan(startByte, endByte, startLine, startColumn, endLine, endColumn int) int {
+	if endByte > startByte && startByte >= 0 {
+		return endByte - startByte
+	}
+	if endLine < startLine {
+		endLine = startLine
+	}
+	span := (endLine-startLine)*1_000_000 + endColumn - startColumn
+	if span <= 0 {
+		return 1
+	}
+	return span
 }
 
 func fileFindingKey(line int, use fileOperationUse, path fileOperationPath, risk string) string {
@@ -376,6 +488,13 @@ func fileOperationUsesWithLookup(stmt string, localProcedure func(string) bool, 
 	}
 	if m := fileNameRe.FindStringIndex(stmt); m != nil {
 		rest := strings.TrimSpace(stmt[m[1]:])
+		// A procedure parameter named `Name` can start a declaration such as
+		// `Name As String, ...`; it is not the VBA Name source-to-destination
+		// statement. Do not let the declaration's later `As` clauses become
+		// synthetic file paths.
+		if strings.HasPrefix(strings.ToLower(rest), "as ") || strings.EqualFold(rest, "as") {
+			return out
+		}
 		if parts := fileNameAsRe.FindStringSubmatch(rest); len(parts) == 3 {
 			out = append(out, fileOperationUse{operation: "Name", paths: []fileOperationPath{{role: "source", expr: strings.TrimSpace(parts[1])}, {role: "destination", expr: strings.TrimSpace(parts[2])}}, column: m[0]})
 			return out
@@ -417,7 +536,7 @@ func fileOperationUsesWithLookup(stmt string, localProcedure func(string) bool, 
 		// the overwrite risk.
 		if named := fileNamedArguments(args); len(named) > 0 {
 			normalized, namedOverwrite, mode := normalizeFSOArguments(method, args, named)
-			if method == "opentextfile" && mode == "reading" {
+			if method == "opentextfile" && mode == "reading" && fileTextCreateDisabled(args, named) {
 				return out
 			}
 			if len(normalized) >= count {
@@ -440,8 +559,12 @@ func fileOperationUsesWithLookup(stmt string, localProcedure func(string) bool, 
 				return out
 			}
 		}
-		if method == "opentextfile" && len(args) > 1 {
-			if fileTextMode(args[1]) == "reading" {
+		if method == "opentextfile" {
+			modeExpr := ""
+			if len(args) > 1 {
+				modeExpr = args[1]
+			}
+			if fileTextMode(modeExpr) == "reading" && fileTextCreateDisabled(args, nil) {
 				return out
 			}
 		}
@@ -518,13 +641,34 @@ func fileNamedArgument(arg string) (string, string, bool) {
 	return key, strings.TrimSpace(parts[1]), true
 }
 
-func normalizeFSOArguments(method string, args []string, named map[string]string) ([]string, *bool, string) {
+func filePositionalArguments(args []string) []string {
 	positional := make([]string, 0, len(args))
 	for _, arg := range args {
 		if _, _, ok := fileNamedArgument(arg); !ok {
 			positional = append(positional, strings.TrimSpace(arg))
 		}
 	}
+	return positional
+}
+
+func fileTextCreateDisabled(args []string, named map[string]string) bool {
+	expr, ok := named["create"]
+	if !ok {
+		positional := filePositionalArguments(args)
+		if len(positional) <= 2 {
+			return true
+		}
+		expr = positional[2]
+	}
+	if strings.TrimSpace(expr) == "" {
+		return true
+	}
+	value, ok := parseFileBool(expr)
+	return ok && !value
+}
+
+func normalizeFSOArguments(method string, args []string, named map[string]string) ([]string, *bool, string) {
+	positional := filePositionalArguments(args)
 	path := func(position int, keys ...string) string {
 		for _, key := range keys {
 			if value, ok := named[key]; ok {
@@ -611,6 +755,10 @@ func normalizeFSOArguments(method string, args []string, named map[string]string
 func fileTextMode(expr string) string {
 	lower := strings.ToLower(strings.TrimSpace(expr))
 	switch lower {
+	case "":
+		// FileSystemObject.OpenTextFile defaults IOMode to ForReading when
+		// the optional argument is omitted.
+		return "reading"
 	case "1", "forreading", "iomode:=forreading":
 		return "reading"
 	case "2", "forwriting", "iomode:=forwriting":

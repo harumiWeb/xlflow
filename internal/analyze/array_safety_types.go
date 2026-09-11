@@ -67,14 +67,32 @@ type arrayVariable struct {
 }
 
 type arrayValue struct {
-	kind            arrayAllocation
-	knownArray      bool
-	mayBeEmpty      bool
-	dimensions      []arrayDimension
-	preserveShape   []arrayDimension
-	origin          arrayOrigin
-	allocationProbe string
-	safeBoundProbe  string
+	kind       arrayAllocation
+	knownArray bool
+	mayBeEmpty bool
+	// mayBeUnallocated records a possible failed array-return assignment under
+	// On Error Resume Next. It is kept separate from knownArray because a CFG
+	// join may retain the possible failure while the normal path remains an
+	// otherwise unknown Variant.
+	mayBeUnallocated bool
+	// resumeNextFailureFlagSource records a Boolean assigned from Err.Number
+	// immediately after a Range.Value/Value2 assignment under Resume Next. A
+	// false branch of that flag proves that the assignment completed normally;
+	// the relation is cleared at the corresponding condition so unrelated
+	// Boolean checks cannot recover the allocation fact.
+	resumeNextFailureFlagSource string
+	// resumeNextFailureFlagSuccessOnTrue records whether the flag's true branch
+	// is the successful Range assignment path. It is meaningful only when
+	// resumeNextFailureFlagSource is non-empty.
+	resumeNextFailureFlagSuccessOnTrue bool
+	// resumeBoundsFailurePossible records that a successful bounds probe may
+	// have failed before an error handler resumed into a later statement.
+	resumeBoundsFailurePossible bool
+	dimensions                  []arrayDimension
+	preserveShape               []arrayDimension
+	origin                      arrayOrigin
+	allocationProbe             string
+	safeBoundProbe              string
 	// allocationCountSource records a narrow conditional allocation contract:
 	// the array is allocated when the named scalar is positive, or when the
 	// named collection's Count is positive. The fact is refined only on a
@@ -113,11 +131,22 @@ type arrayValue struct {
 
 type arrayFlowState map[string]arrayValue
 
+// arrayVBA227ExternalAPISet is the project-wide declaration boundary for
+// low-level SAFEARRAY helpers. A declaration in one standard module is still
+// visible to a helper in another module, while a project procedure with the
+// same name must prevent the low-level proof from being inferred.
+type arrayVBA227ExternalAPISet struct {
+	declared        map[string]bool
+	privateByModule map[string]map[string]bool
+	procedures      map[string]bool
+}
+
 type arrayBoundsProof struct {
 	loopEndLine                      int
 	priorKind                        arrayAllocation
 	priorKnownArray                  bool
 	priorMayBeEmpty                  bool
+	priorMayBeUnallocated            bool
 	priorAllocationCount             string
 	priorConditionalAllocationSource string
 }
@@ -156,6 +185,7 @@ var (
 	arrayBoundCallRe       = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
 	arrayForBoundRe        = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
 	arrayForUBoundRe       = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+ubound\s*\(\s*([A-Za-z_]\w*)`)
+	arrayForBoundsRe       = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*lbound\s*\(\s*([A-Za-z_]\w*)\s*\)\s+to\s+ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
 	// A loop with this shape is safe for a zero-based Byte array when its
 	// length was obtained from a successful UBound(array) + 1 expression.
 	arrayForZeroBasedLengthRe         = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*0\s+to\s+([A-Za-z_]\w*)\s*-\s*1\s*$`)
@@ -177,6 +207,7 @@ var (
 	arrayIsArrayGuardRe               = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*(.+)\s*\)\s*$`)
 	arrayByteArrayGuardRe             = regexp.MustCompile(`(?i)^\s*(?:vartypeof|vartype)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*=\s*\(?\s*vbarray\s+or\s+vbbyte\s*\)?\s*$`)
 	arrayStrPtrGuardRe                = regexp.MustCompile(`(?i)^\s*strptr\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(=|<>)\s*0\s*$`)
+	arrayNotNotByteArrayGuardRe       = regexp.MustCompile(`(?i)^\s*\(?\s*not\s+not\s+([A-Za-z_]\w*)\s*\)?\s*<>\s*0\s*$`)
 	arraySafeArrayZeroExitGuardRe     = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s*=\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
 	arraySafeArrayPointerCopyRe       = regexp.MustCompile(`(?i)^\s*(?:call\s+)?(?:[A-Za-z_]\w*\.)?copymemoryfromptr\s+([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*,\s*lenb\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
 	arrayByteArrayReadRe              = regexp.MustCompile(`(?i)^\s*(?:[A-Za-z_]\w*\.)*read\s*\(\s*-1\s*\)\s*$`)
