@@ -7596,6 +7596,232 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PreservesResumeNextFailureThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef values() As Variant)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(actualRange As Object)
+  Dim values() As Variant
+  On Error Resume Next
+  values = actualRange.Value2
+  On Error GoTo 0
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	for _, finding := range got {
+		if finding.Procedure == "Consume" {
+			return
+		}
+	}
+	t.Fatalf("a possibly failed array assignment must remain unsafe in a private ByRef callee: %+v", got)
+}
+
+func TestAnalyzerVBA227DoesNotReuseResumeNextFailureGuardAcrossRangeAssignments(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef values() As Variant)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(firstRange As Object, secondRange As Object)
+  Dim firstValues() As Variant
+  Dim secondValues() As Variant
+  Dim failed As Boolean
+  On Error Resume Next
+  firstValues = firstRange.Value2
+  secondValues = secondRange.Value2
+  failed = Err.Number <> 0
+  On Error GoTo 0
+  If failed Then Exit Sub
+  Consume firstValues
+  Consume secondValues
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("only the most recent Range assignment may use the Err.Number guard: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustConditionalResumeNextRangeAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef values() As Variant)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(actualRange As Object, shouldLoad As Boolean)
+  Dim values() As Variant
+  Dim failed As Boolean
+  On Error Resume Next
+  If shouldLoad Then
+    values = actualRange.Value2
+  End If
+  failed = Err.Number <> 0
+  On Error GoTo 0
+  If failed Then Exit Sub
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	for _, finding := range got {
+		if finding.Procedure == "Consume" {
+			return
+		}
+	}
+	t.Fatalf("a conditional Range assignment must remain unsafe on the path that skips it: %+v", got)
+}
+
+func TestAnalyzerVBA227RecognizesDirectResumeNextErrNumberGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef values() As Variant)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(actualRange As Object)
+  Dim values() As Variant
+  On Error Resume Next
+  values = actualRange.Value2
+  If Err.Number <> 0 Then Exit Sub
+  On Error GoTo 0
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an explicit Err.Number failure exit should prove the normal Range path: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesSuccessfulResumeNextErrNumberFlag(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef values() As Variant)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(actualRange As Object)
+  Dim values() As Variant
+  Dim ok As Boolean
+  On Error Resume Next
+  values = actualRange.Value2
+  ok = Err.Number = 0
+  On Error GoTo 0
+  If Not ok Then Exit Sub
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a successful Err.Number flag should prove the normal Range path: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustErrNumberAfterErrClear(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef values() As Variant)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(actualRange As Object)
+  Dim values() As Variant
+  Dim failed As Boolean
+  On Error Resume Next
+  values = actualRange.Value2
+  Err.Clear
+  failed = Err.Number <> 0
+  On Error GoTo 0
+  If failed Then Exit Sub
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			return
+		}
+	}
+	t.Fatalf("Err.Clear must invalidate the Range assignment guard: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227AssociatesResumeNextGuardWithStatement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Consume(ByRef values() As Variant)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(firstRange As Object, secondRange As Object)
+  Dim firstValues() As Variant
+  Dim secondValues() As Variant
+  Dim firstFailed As Boolean
+  Dim secondFailed As Boolean
+  On Error Resume Next
+  firstValues = firstRange.Value2: firstFailed = Err.Number <> 0: secondValues = secondRange.Value2: secondFailed = Err.Number <> 0
+  On Error GoTo 0
+  If secondFailed Then Exit Sub
+  Consume firstValues
+  Consume secondValues
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("only the unguarded same-line Range assignment should remain diagnosed: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227PropagatesParamArrayReturnIntoByRefParameter(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -75,6 +75,16 @@ type arrayValue struct {
 	// join may retain the possible failure while the normal path remains an
 	// otherwise unknown Variant.
 	mayBeUnallocated bool
+	// resumeNextFailureFlagSource records a Boolean assigned from Err.Number
+	// immediately after a Range.Value/Value2 assignment under Resume Next. A
+	// false branch of that flag proves that the assignment completed normally;
+	// the relation is cleared at the corresponding condition so unrelated
+	// Boolean checks cannot recover the allocation fact.
+	resumeNextFailureFlagSource string
+	// resumeNextFailureFlagSuccessOnTrue records whether the flag's true branch
+	// is the successful Range assignment path. It is meaningful only when
+	// resumeNextFailureFlagSource is non-empty.
+	resumeNextFailureFlagSuccessOnTrue bool
 	// resumeBoundsFailurePossible records that a successful bounds probe may
 	// have failed before an error handler resumed into a later statement.
 	resumeBoundsFailurePossible bool

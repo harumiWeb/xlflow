@@ -42,6 +42,36 @@ End Sub
 	}
 }
 
+func TestVBA227AllowsErrStatusObservationBeforeResumeNextFlag(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run(actualRange As Object)
+  Dim actualValues As Variant
+  Dim rangeProbeFailed As Boolean
+  Dim rangeError As String
+  On Error Resume Next
+  actualValues = actualRange.Value2
+  rangeError = CStr(Err.Number) & ": " & Err.Description
+  rangeProbeFailed = Err.Number <> 0
+  Err.Clear
+  On Error GoTo 0
+  If rangeProbeFailed Then Exit Sub
+  Debug.Print actualValues(1, 1), rangeError
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an Err status observation before its Boolean guard must preserve the checked Range contract: %+v", got)
+	}
+}
+
 func TestVBA243DetectsBulkDynamicLoopAndVariantSignals(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

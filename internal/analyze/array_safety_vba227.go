@@ -13,10 +13,28 @@ import (
 
 type arrayVBA227ResumeNextEdges map[vbacfg.BlockID]map[vbacfg.BlockID]bool
 
+const arrayVBA227DirectErrNumberGuard = "\x00direct-err-number"
+
+type arrayVBA227ResumeNextFailureGuard struct {
+	target         string
+	assignmentText string
+	source         string
+	successOnTrue  bool
+}
+
+type arrayVBA227ResumeNextFailureConditionInfo struct {
+	source        string
+	successOnTrue bool
+	polarityKnown bool
+	negated       bool
+}
+
 type arrayVBA227ResumeFacts struct {
-	hasResumeTransfer       bool
-	boundsByName            map[string][]procedureir.Statement
-	resumeNextContinuations map[vbacfg.BlockID][]vbacfg.BlockID
+	hasResumeTransfer                      bool
+	boundsByName                           map[string][]procedureir.Statement
+	resumeNextContinuations                map[vbacfg.BlockID][]vbacfg.BlockID
+	resumeNextFailureGuardsByStatement     map[int]arrayVBA227ResumeNextFailureGuard
+	resumeNextFailureGuardStatementsByLine map[int][]int
 }
 
 func buildArrayVBA227ResumeFacts(proc sourceProcedure) *arrayVBA227ResumeFacts {
@@ -24,6 +42,7 @@ func buildArrayVBA227ResumeFacts(proc sourceProcedure) *arrayVBA227ResumeFacts {
 		boundsByName:            map[string][]procedureir.Statement{},
 		resumeNextContinuations: map[vbacfg.BlockID][]vbacfg.BlockID{},
 	}
+	facts.resumeNextFailureGuardsByStatement, facts.resumeNextFailureGuardStatementsByLine = buildArrayVBA227ResumeNextFailureGuards(proc)
 	for statement := range proc.Statements.All() {
 		if statement.Kind == procedureir.StatementResume && statement.Control != nil {
 			switch statement.Control.Transfer {
@@ -42,6 +61,285 @@ func buildArrayVBA227ResumeFacts(proc sourceProcedure) *arrayVBA227ResumeFacts {
 		facts.resumeNextContinuations = arrayVBA227ResumeNextContinuations(proc.Graph.View(vbacfg.EdgeFilter{}))
 	}
 	return facts
+}
+
+func buildArrayVBA227ResumeNextFailureGuards(proc sourceProcedure) (map[int]arrayVBA227ResumeNextFailureGuard, map[int][]int) {
+	var guards map[int]arrayVBA227ResumeNextFailureGuard
+	var statementIDsByLine map[int][]int
+	if proc.Graph == nil {
+		return nil, nil
+	}
+	// ProcedureIR statements are emitted in source order. Scan that immutable
+	// order directly so procedures without a Range.Value/Value2 candidate do
+	// not pay for a temporary slice or an O(S log S) sort.
+	var pendingRange procedureir.Statement
+	pendingRangeTarget := ""
+	hasPendingRange := false
+	var pendingFlag *arrayVBA227ResumeNextFailureGuard
+	var pendingFlagStatement procedureir.Statement
+	hasPendingFlag := false
+	for statement := range proc.Statements.All() {
+		if target := arrayVBA227RangeValueAssignment(statement.Text); target != "" {
+			pendingRange = statement
+			pendingRangeTarget = target
+			hasPendingRange = true
+			pendingFlag = nil
+			hasPendingFlag = false
+			continue
+		}
+		if !hasPendingRange {
+			continue
+		}
+		if source, successOnTrue, ok := arrayVBA227ResumeNextFailureFlagAssignment(statement.Text); ok {
+			if arrayVBA227StatementDominates(proc, pendingRange, statement) {
+				pendingFlag = &arrayVBA227ResumeNextFailureGuard{source: source, successOnTrue: successOnTrue}
+				pendingFlagStatement = statement
+				hasPendingFlag = true
+			} else {
+				hasPendingRange = false
+				pendingRange = procedureir.Statement{}
+				pendingRangeTarget = ""
+				pendingFlag = nil
+				hasPendingFlag = false
+			}
+			continue
+		}
+		if !hasPendingFlag && arrayVBA227ResumeNextErrObservationAssignment(statement.Text) {
+			// Reading Err.Number/Err.Description into a diagnostic string does
+			// not replace the status that the following Boolean capture observes.
+			// Keep this narrow: arbitrary assignments or calls still invalidate
+			// the candidate before its failure flag is captured.
+			continue
+		}
+		if hasPendingFlag && arrayVBA227ResumeNextCapturedStatusTransition(statement.Text) {
+			// These conventional transitions do not replace the Boolean value
+			// that was just captured from Err.Number. Keep the candidate through
+			// them, but still require the next executable statement to be the
+			// matching condition.
+			continue
+		}
+		condition, ok := arrayVBA227ResumeNextFailureCondition(statement.Text)
+		if !ok {
+			// Err.Clear, another assignment, a call, or any other statement
+			// can change the status captured by Err.Number. A guard is valid
+			// only for the immediately following flag/condition sequence.
+			hasPendingRange = false
+			pendingRange = procedureir.Statement{}
+			pendingRangeTarget = ""
+			pendingFlag = nil
+			hasPendingFlag = false
+			continue
+		}
+		if hasPendingFlag && pendingFlag != nil {
+			if condition.source == pendingFlag.source &&
+				(!condition.polarityKnown || condition.successOnTrue == pendingFlag.successOnTrue) &&
+				arrayVBA227StatementDominates(proc, pendingFlagStatement, statement) {
+				if guards == nil {
+					guards = make(map[int]arrayVBA227ResumeNextFailureGuard)
+					statementIDsByLine = make(map[int][]int)
+				}
+				guard := *pendingFlag
+				guard.target = pendingRangeTarget
+				guard.assignmentText = strings.TrimSpace(pendingRange.Text)
+				guards[pendingRange.ID] = guard
+				statementIDsByLine[pendingRange.Range.StartLine] = append(statementIDsByLine[pendingRange.Range.StartLine], pendingRange.ID)
+			}
+		} else if condition.source == arrayVBA227DirectErrNumberGuard && arrayVBA227ResumeNextFailureConditionTerminates(statement.Text) && arrayVBA227StatementDominates(proc, pendingRange, statement) {
+			if guards == nil {
+				guards = make(map[int]arrayVBA227ResumeNextFailureGuard)
+				statementIDsByLine = make(map[int][]int)
+			}
+			guards[pendingRange.ID] = arrayVBA227ResumeNextFailureGuard{
+				target:         pendingRangeTarget,
+				assignmentText: strings.TrimSpace(pendingRange.Text),
+				source:         condition.source,
+				successOnTrue:  condition.successOnTrue,
+			}
+			statementIDsByLine[pendingRange.Range.StartLine] = append(statementIDsByLine[pendingRange.Range.StartLine], pendingRange.ID)
+		}
+		hasPendingRange = false
+		pendingRange = procedureir.Statement{}
+		pendingRangeTarget = ""
+		pendingFlag = nil
+		hasPendingFlag = false
+	}
+	return guards, statementIDsByLine
+}
+
+func arrayVBA227ResumeNextCapturedStatusTransition(text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "on error goto 0", "on error goto -1", "err.clear":
+		return true
+	default:
+		return false
+	}
+}
+
+func arrayVBA227ResumeNextErrObservationAssignment(text string) bool {
+	lhs, rhs, indexed, ok := arrayAssignment(text)
+	if !ok || indexed || !errorSuccessIdentifierRE.MatchString(strings.TrimSpace(lhs)) {
+		return false
+	}
+	hasErrObservation := false
+	for _, term := range arrayVBA227TopLevelConcatenationTerms(rhs) {
+		normalized := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(term)), ""))
+		switch {
+		case resumeNextScopeExactErrNumber(term):
+			hasErrObservation = true
+		case normalized == "cstr(err.number)":
+			hasErrObservation = true
+		case resumeNextScopeErrDescriptionExpression(term):
+			hasErrObservation = true
+		case resumeNextScopeMaskedStringLiteral(strings.TrimSpace(term)):
+		default:
+			return false
+		}
+	}
+	return hasErrObservation
+}
+
+func arrayVBA227TopLevelConcatenationTerms(text string) []string {
+	terms := make([]string, 0, 2)
+	start := 0
+	depth := 0
+	inString := false
+	for index := 0; index < len(text); index++ {
+		switch text[index] {
+		case '"':
+			if inString && index+1 < len(text) && text[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case '&':
+			if !inString && depth == 0 {
+				terms = append(terms, text[start:index])
+				start = index + 1
+			}
+		}
+	}
+	return append(terms, text[start:])
+}
+
+func arrayVBA227ResumeNextFailureConditionTerminates(text string) bool {
+	_, body, ok := arrayIfThenParts(text)
+	if !ok {
+		return false
+	}
+	body = strings.ToLower(strings.TrimSpace(body))
+	for _, exitStatement := range []string{"exit sub", "exit function", "exit property"} {
+		if body == exitStatement || strings.HasPrefix(body, exitStatement+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227RangeValueAssignment(text string) string {
+	lhs, rhs, indexed, ok := arrayAssignment(text)
+	if !ok || indexed {
+		return ""
+	}
+	lower := strings.ToLower(strings.TrimSpace(rhs))
+	if !strings.Contains(lower, ".value") && !strings.Contains(lower, ".value2") {
+		return ""
+	}
+	return strings.ToLower(cleanIdentifier(lhs))
+}
+
+func arrayVBA227ResumeNextFailureFlagAssignment(text string) (string, bool, bool) {
+	lhs, rhs, indexed, ok := arrayAssignment(text)
+	if !ok || indexed {
+		return "", false, false
+	}
+	successOnTrue, ok := arrayVBA227ErrNumberGuardExpression(rhs)
+	if !ok {
+		return "", false, false
+	}
+	return strings.ToLower(cleanIdentifier(lhs)), successOnTrue, true
+}
+
+func arrayVBA227ErrNumberGuardExpression(text string) (bool, bool) {
+	left, operator, right, ok := resumeNextScopeComparison(text)
+	if !ok || strings.TrimSpace(right) == "" {
+		return false, false
+	}
+	if resumeNextScopeExactErrNumber(left) && strings.TrimSpace(right) == "0" ||
+		resumeNextScopeExactErrNumber(right) && strings.TrimSpace(left) == "0" {
+		switch operator {
+		case "=":
+			return true, true
+		case "<>":
+			return false, true
+		}
+	}
+	return false, false
+}
+
+func arrayVBA227ResumeNextFailureCondition(text string) (arrayVBA227ResumeNextFailureConditionInfo, bool) {
+	condition := text
+	if parsed, _, ok := arrayIfThenParts(condition); ok {
+		condition = parsed
+	}
+	condition = strings.TrimSpace(condition)
+	lower := strings.ToLower(condition)
+	if strings.HasPrefix(lower, "if ") {
+		condition = strings.TrimSpace(condition[len("if "):])
+	} else if strings.HasPrefix(lower, "elseif ") {
+		condition = strings.TrimSpace(condition[len("elseif "):])
+	}
+	if then := arrayTopLevelKeywordIndex(condition, "then"); then >= 0 {
+		condition = strings.TrimSpace(condition[:then])
+	}
+	for len(condition) >= 2 && condition[0] == '(' && condition[len(condition)-1] == ')' {
+		condition = strings.TrimSpace(condition[1 : len(condition)-1])
+	}
+	if successOnTrue, ok := arrayVBA227ErrNumberGuardExpression(condition); ok {
+		return arrayVBA227ResumeNextFailureConditionInfo{
+			source:        arrayVBA227DirectErrNumberGuard,
+			successOnTrue: successOnTrue,
+			polarityKnown: true,
+		}, true
+	}
+	negated := false
+	lower = strings.ToLower(condition)
+	if strings.HasPrefix(lower, "not ") {
+		condition = strings.TrimSpace(condition[len("not "):])
+		negated = true
+	}
+	if !arrayEraseNameRe.MatchString(condition) {
+		return arrayVBA227ResumeNextFailureConditionInfo{}, false
+	}
+	return arrayVBA227ResumeNextFailureConditionInfo{
+		source:  strings.ToLower(cleanIdentifier(condition)),
+		negated: negated,
+	}, true
+}
+
+func arrayVBA227StatementDominates(proc sourceProcedure, source, target procedureir.Statement) bool {
+	if proc.Graph == nil || source.ID <= 0 || target.ID <= 0 || source.ID == target.ID {
+		return false
+	}
+	sourceBlock, sourceOK := proc.Graph.BlockForStatement(source.ID)
+	targetBlock, targetOK := proc.Graph.BlockForStatement(target.ID)
+	if !sourceOK || !targetOK {
+		return false
+	}
+	if sourceBlock.ID == targetBlock.ID {
+		if source.Range.StartLine != target.Range.StartLine {
+			return source.Range.StartLine < target.Range.StartLine
+		}
+		return source.Range.StartByte < target.Range.StartByte
+	}
+	return proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).Dominates(sourceBlock.ID, targetBlock.ID)
 }
 
 func arrayVBA227ResumeFactsFor(proc sourceProcedure) *arrayVBA227ResumeFacts {
@@ -258,13 +556,6 @@ func arrayVBA227PreserveResumeNextArrayFailure(input, output arrayFlowState, tex
 	if !provenArray || !value.knownArray {
 		return output
 	}
-	if value.origin == arrayOriginRangeValue {
-		// Range.Value/Value2 already has an explicit Range-origin contract.
-		// Preserve that contract when the probe is protected by Resume Next;
-		// otherwise the failure-preservation meet would duplicate VBA226 as a
-		// spurious unallocated-array warning.
-		return output
-	}
 	if _, assignedOutput := output[name]; !assignedOutput {
 		return output
 	}
@@ -280,8 +571,50 @@ func arrayVBA227PreserveResumeNextArrayFailure(input, output arrayFlowState, tex
 		inputValue.mayBeUnallocated = true
 	}
 	updated := cloneArrayState(output)
-	updated[name] = meetArrayValue(output[name], inputValue)
+	updatedValue := meetArrayValue(output[name], inputValue)
+	if value.origin == arrayOriginRangeValue {
+		if guard, ok := arrayVBA227ResumeNextFailureGuardForAssignment(proc, line, text, name); ok {
+			updatedValue.resumeNextFailureFlagSource = guard.source
+			updatedValue.resumeNextFailureFlagSuccessOnTrue = guard.successOnTrue
+		} else {
+			updatedValue.resumeNextFailureFlagSource = ""
+			updatedValue.resumeNextFailureFlagSuccessOnTrue = false
+		}
+	}
+	updated[name] = updatedValue
 	return updated
+}
+
+func arrayVBA227ResumeNextFailureGuardForAssignment(proc sourceProcedure, line int, text, target string) (arrayVBA227ResumeNextFailureGuard, bool) {
+	facts := arrayVBA227ResumeFactsFor(proc)
+	statementIDs := facts.resumeNextFailureGuardStatementsByLine[line]
+	if len(statementIDs) == 0 {
+		return arrayVBA227ResumeNextFailureGuard{}, false
+	}
+	normalizedText := strings.TrimSpace(text)
+	var match arrayVBA227ResumeNextFailureGuard
+	matchedCount := 0
+	var exactMatch arrayVBA227ResumeNextFailureGuard
+	exactCount := 0
+	for _, statementID := range statementIDs {
+		guard, ok := facts.resumeNextFailureGuardsByStatement[statementID]
+		if !ok || !strings.EqualFold(guard.target, target) {
+			continue
+		}
+		matchedCount++
+		if strings.EqualFold(guard.assignmentText, normalizedText) {
+			exactMatch = guard
+			exactCount++
+		}
+		match = guard
+	}
+	if matchedCount == 0 || matchedCount > 1 && exactCount != 1 {
+		return arrayVBA227ResumeNextFailureGuard{}, false
+	}
+	if exactCount == 1 {
+		return exactMatch, true
+	}
+	return match, true
 }
 
 func arrayVBA227MayFailArrayExpression(rhs string) bool {

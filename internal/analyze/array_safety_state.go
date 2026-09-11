@@ -9,6 +9,9 @@ import (
 )
 
 func arrayAllocationTransferIsReliable(statement *procedureir.Statement, in, out arrayFlowState) bool {
+	if arrayResumeNextFailureTransferIsReliable(statement, out) {
+		return true
+	}
 	if statement == nil || !arrayStateAddsAllocation(in, out) {
 		return false
 	}
@@ -24,6 +27,18 @@ func arrayAllocationTransferIsReliable(statement *procedureir.Statement, in, out
 	}
 	lower := strings.ToLower(strings.TrimSpace(rhs))
 	return strings.HasPrefix(lower, "array(") || arrayCallName(rhs) == "split" || arrayCallName(rhs) == "filter"
+}
+
+func arrayResumeNextFailureTransferIsReliable(statement *procedureir.Statement, out arrayFlowState) bool {
+	if statement == nil {
+		return false
+	}
+	lhs, rhs, indexed, ok := arrayAssignment(statement.Text)
+	if !ok || indexed || !arrayVBA227MayFailArrayExpression(rhs) {
+		return false
+	}
+	value, known := out[strings.ToLower(cleanIdentifier(lhs))]
+	return known && value.resumeNextFailureFlagSource != ""
 }
 
 func arrayStateAddsAllocation(in, out arrayFlowState) bool {
@@ -318,6 +333,45 @@ func applyArrayAllocationFlagBranch(state arrayFlowState, statement *procedureir
 		value.kind = arrayAllocated
 		value.knownArray = true
 		value.mayBeEmpty = false
+		updated[name] = value
+	}
+	if updated == nil {
+		return state
+	}
+	return updated
+}
+
+// applyArrayResumeNextFailureFlagBranch restores a Range.Value/Value2 array
+// only on the successful side of a direct `flag = Err.Number <> 0` check. The
+// failure side remains conservative; if it can continue, the normal CFG meet
+// keeps the possible failed assignment visible.
+func applyArrayResumeNextFailureFlagBranch(state arrayFlowState, statement *procedureir.Statement, edge vbacfg.Edge) arrayFlowState {
+	if statement == nil || edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse || statement.Condition == nil {
+		return state
+	}
+	condition, ok := arrayVBA227ResumeNextFailureCondition(statement.Condition.Text)
+	if !ok {
+		return state
+	}
+	var updated arrayFlowState
+	for name, value := range state {
+		if value.resumeNextFailureFlagSource != condition.source ||
+			condition.polarityKnown && value.resumeNextFailureFlagSuccessOnTrue != condition.successOnTrue {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		successOnTrue := value.resumeNextFailureFlagSuccessOnTrue
+		if condition.negated {
+			successOnTrue = !successOnTrue
+		}
+		if (edge.Kind == vbacfg.EdgeBranchTrue) == successOnTrue {
+			value.kind = arrayAllocated
+			value.knownArray = true
+			value.mayBeUnallocated = false
+		}
+		value.resumeNextFailureFlagSource = ""
 		updated[name] = value
 	}
 	if updated == nil {
@@ -841,7 +895,63 @@ func arrayVBA227Graph(proc sourceProcedure, ctx analysisContext) vbacfg.CFGView 
 	if len(removed) != 0 {
 		graph = graph.WithoutNormalContinuationsFrom(removed)
 	}
-	return arrayVBA227AddResumeNextContinuationEdges(proc, graph)
+	graph = arrayVBA227AddResumeNextContinuationEdges(proc, graph)
+	return arrayVBA227RemoveResumeNextGuardErrorEdges(proc, graph)
+}
+
+// arrayVBA227RemoveResumeNextGuardErrorEdges removes the synthetic Resume
+// Next error edges for a guard that only reads Err.Number or a Boolean flag
+// derived from it. Evaluating either form cannot itself produce the assignment
+// failure represented by the marker, while retaining the edge would merge the
+// pre-assignment state back into the successful branch and erase the proof.
+func arrayVBA227RemoveResumeNextGuardErrorEdges(proc sourceProcedure, graph vbacfg.CFGView) vbacfg.CFGView {
+	guardSources := map[string]bool{}
+	for _, guard := range arrayVBA227ResumeFactsFor(proc).resumeNextFailureGuardsByStatement {
+		if guard.source != "" {
+			guardSources[guard.source] = true
+		}
+	}
+	if !arrayVBA227HasResumeNextGuardErrorEdge(graph, guardSources) {
+		return graph
+	}
+	materialized := graph.Materialize()
+	filtered := materialized.Edges[:0]
+	removed := false
+	for _, edge := range materialized.Edges {
+		if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeError {
+			if arrayVBA227IsResumeNextGuardStatement(graph, edge.From, guardSources) {
+				removed = true
+				continue
+			}
+		}
+		filtered = append(filtered, edge)
+	}
+	if !removed {
+		return graph
+	}
+	materialized.Edges = filtered
+	return materialized.View(vbacfg.EdgeFilter{})
+}
+
+func arrayVBA227HasResumeNextGuardErrorEdge(graph vbacfg.CFGView, guardSources map[string]bool) bool {
+	found := false
+	graph.ForEachEdge(func(edge vbacfg.Edge) bool {
+		if edge.Class == vbacfg.EdgeExceptional && edge.Kind == vbacfg.EdgeError && arrayVBA227IsResumeNextGuardStatement(graph, edge.From, guardSources) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func arrayVBA227IsResumeNextGuardStatement(graph vbacfg.CFGView, blockID vbacfg.BlockID, guardSources map[string]bool) bool {
+	block, ok := graph.BlockByID(blockID)
+	if !ok || block.Statement == nil {
+		return false
+	}
+	condition, ok := arrayVBA227ResumeNextFailureCondition(block.Statement.Text)
+	return ok && guardSources[condition.source]
 }
 
 func arrayVBA227AddResumeNextContinuationEdges(proc sourceProcedure, graph vbacfg.CFGView) vbacfg.CFGView {
@@ -1074,25 +1184,27 @@ func meetArrayState(left, right arrayFlowState) arrayFlowState {
 
 func meetArrayValue(left, right arrayValue) arrayValue {
 	out := arrayValue{
-		kind:                            left.kind,
-		knownArray:                      left.knownArray,
-		mayBeEmpty:                      left.mayBeEmpty,
-		mayBeUnallocated:                left.mayBeUnallocated,
-		resumeBoundsFailurePossible:     left.resumeBoundsFailurePossible,
-		origin:                          left.origin,
-		dimensions:                      append([]arrayDimension(nil), left.dimensions...),
-		preserveShape:                   append([]arrayDimension(nil), left.preserveShape...),
-		allocationCountSource:           left.allocationCountSource,
-		conditionalAllocationSource:     left.conditionalAllocationSource,
-		allocationFlagSource:            left.allocationFlagSource,
-		returnNonEmptyArrayParameter:    left.returnNonEmptyArrayParameter,
-		returnPositiveScalarParameter:   left.returnPositiveScalarParameter,
-		nonEmptySource:                  left.nonEmptySource,
-		returnDescriptorSourceParameter: left.returnDescriptorSourceParameter,
-		returnDescriptorStartParameter:  left.returnDescriptorStartParameter,
-		returnDescriptorLengthParameter: left.returnDescriptorLengthParameter,
-		returnDescriptorLowerParameter:  left.returnDescriptorLowerParameter,
-		boundsProof:                     left.boundsProof,
+		kind:                               left.kind,
+		knownArray:                         left.knownArray,
+		mayBeEmpty:                         left.mayBeEmpty,
+		mayBeUnallocated:                   left.mayBeUnallocated,
+		resumeNextFailureFlagSource:        left.resumeNextFailureFlagSource,
+		resumeNextFailureFlagSuccessOnTrue: left.resumeNextFailureFlagSuccessOnTrue,
+		resumeBoundsFailurePossible:        left.resumeBoundsFailurePossible,
+		origin:                             left.origin,
+		dimensions:                         append([]arrayDimension(nil), left.dimensions...),
+		preserveShape:                      append([]arrayDimension(nil), left.preserveShape...),
+		allocationCountSource:              left.allocationCountSource,
+		conditionalAllocationSource:        left.conditionalAllocationSource,
+		allocationFlagSource:               left.allocationFlagSource,
+		returnNonEmptyArrayParameter:       left.returnNonEmptyArrayParameter,
+		returnPositiveScalarParameter:      left.returnPositiveScalarParameter,
+		nonEmptySource:                     left.nonEmptySource,
+		returnDescriptorSourceParameter:    left.returnDescriptorSourceParameter,
+		returnDescriptorStartParameter:     left.returnDescriptorStartParameter,
+		returnDescriptorLengthParameter:    left.returnDescriptorLengthParameter,
+		returnDescriptorLowerParameter:     left.returnDescriptorLowerParameter,
+		boundsProof:                        left.boundsProof,
 	}
 	if left.kind != right.kind {
 		out.kind = arrayUnknown
@@ -1117,6 +1229,13 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 		} else {
 			out.allocationFlagSource = ""
 		}
+	}
+	if left.resumeNextFailureFlagSource != right.resumeNextFailureFlagSource {
+		out.resumeNextFailureFlagSource = ""
+		out.resumeNextFailureFlagSuccessOnTrue = false
+	} else if left.resumeNextFailureFlagSuccessOnTrue != right.resumeNextFailureFlagSuccessOnTrue {
+		out.resumeNextFailureFlagSource = ""
+		out.resumeNextFailureFlagSuccessOnTrue = false
 	}
 	if left.returnNonEmptyArrayParameter != right.returnNonEmptyArrayParameter {
 		out.returnNonEmptyArrayParameter = ""
@@ -1202,7 +1321,7 @@ func arrayStateEqual(left, right arrayFlowState) bool {
 	}
 	for key, l := range left {
 		r, ok := right[key]
-		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.mayBeUnallocated != r.mayBeUnallocated || l.resumeBoundsFailurePossible != r.resumeBoundsFailurePossible || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.allocationFlagSource != r.allocationFlagSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.returnDescriptorSourceParameter != r.returnDescriptorSourceParameter || l.returnDescriptorStartParameter != r.returnDescriptorStartParameter || l.returnDescriptorLengthParameter != r.returnDescriptorLengthParameter || l.returnDescriptorLowerParameter != r.returnDescriptorLowerParameter || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
+		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.mayBeUnallocated != r.mayBeUnallocated || l.resumeNextFailureFlagSource != r.resumeNextFailureFlagSource || l.resumeNextFailureFlagSuccessOnTrue != r.resumeNextFailureFlagSuccessOnTrue || l.resumeBoundsFailurePossible != r.resumeBoundsFailurePossible || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.allocationFlagSource != r.allocationFlagSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.returnDescriptorSourceParameter != r.returnDescriptorSourceParameter || l.returnDescriptorStartParameter != r.returnDescriptorStartParameter || l.returnDescriptorLengthParameter != r.returnDescriptorLengthParameter || l.returnDescriptorLowerParameter != r.returnDescriptorLowerParameter || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
 			return false
 		}
 	}

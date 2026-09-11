@@ -871,6 +871,7 @@ func arrayDictionaryItemExactAssignment(statement procedureir.Statement, receive
 type arrayObjectContainerIndexCacheEntry struct {
 	index      *objectContainerIndex
 	procedures []sourceProcedure
+	ready      chan struct{}
 }
 
 func arrayObjectContainerIndex(ctx analysisContext, file parsedFile, proc sourceProcedure) (*objectContainerIndex, sourceProcedure) {
@@ -885,44 +886,71 @@ func arrayObjectContainerIndex(ctx analysisContext, file parsedFile, proc source
 		if cacheKey == "" {
 			cacheKey = file.IR.Path
 		}
+		build := func() arrayObjectContainerIndexCacheEntry {
+			resolvedIR := procedureir.Resolve(file.IR, ctx.procedureResolver)
+			resolvedProcedures := sourceProceduresFromIRRef(&resolvedIR, file.CFG)
+			resolvedFile := file
+			resolvedFile.IR = resolvedIR
+			resolvedFile.Procedures = resolvedProcedures
+			return arrayObjectContainerIndexCacheEntry{
+				index:      buildObjectContainerIndex(resolvedFile),
+				procedures: resolvedProcedures,
+			}
+		}
+		find := func(cached arrayObjectContainerIndexCacheEntry) (*objectContainerIndex, sourceProcedure) {
+			for _, candidate := range cached.procedures {
+				if candidate.StartLine == proc.StartLine && strings.EqualFold(candidate.Name, proc.Name) {
+					return cached.index, candidate
+				}
+			}
+			return cached.index, proc
+		}
 		if cacheKey != "" && ctx.arrayObjectContainerIndexCache != nil {
 			if ctx.arrayObjectContainerIndexCacheMu != nil {
-				ctx.arrayObjectContainerIndexCacheMu.RLock()
+				for {
+					ctx.arrayObjectContainerIndexCacheMu.RLock()
+					cached, cachedOK := ctx.arrayObjectContainerIndexCache[cacheKey]
+					ctx.arrayObjectContainerIndexCacheMu.RUnlock()
+					if cachedOK {
+						if cached.ready != nil {
+							<-cached.ready
+							continue
+						}
+						return find(cached)
+					}
+
+					ctx.arrayObjectContainerIndexCacheMu.Lock()
+					cached, cachedOK = ctx.arrayObjectContainerIndexCache[cacheKey]
+					if !cachedOK {
+						ready := make(chan struct{})
+						ctx.arrayObjectContainerIndexCache[cacheKey] = arrayObjectContainerIndexCacheEntry{ready: ready}
+						ctx.arrayObjectContainerIndexCacheMu.Unlock()
+						built := build()
+						ctx.arrayObjectContainerIndexCacheMu.Lock()
+						ctx.arrayObjectContainerIndexCache[cacheKey] = built
+						close(ready)
+						ctx.arrayObjectContainerIndexCacheMu.Unlock()
+						return find(built)
+					}
+					ready := cached.ready
+					ctx.arrayObjectContainerIndexCacheMu.Unlock()
+					if ready != nil {
+						<-ready
+						continue
+					}
+					return find(cached)
+				}
 			}
 			cached, cachedOK := ctx.arrayObjectContainerIndexCache[cacheKey]
-			if ctx.arrayObjectContainerIndexCacheMu != nil {
-				ctx.arrayObjectContainerIndexCacheMu.RUnlock()
-			}
 			if cachedOK {
-				for _, candidate := range cached.procedures {
-					if candidate.StartLine == proc.StartLine && strings.EqualFold(candidate.Name, proc.Name) {
-						return cached.index, candidate
-					}
-				}
-				return cached.index, proc
+				return find(cached)
 			}
+			built := build()
+			ctx.arrayObjectContainerIndexCache[cacheKey] = built
+			return find(built)
 		}
-		resolvedIR := procedureir.Resolve(file.IR, ctx.procedureResolver)
-		resolvedProcedures := sourceProceduresFromIRRef(&resolvedIR, file.CFG)
-		resolvedFile := file
-		resolvedFile.IR = resolvedIR
-		resolvedFile.Procedures = resolvedProcedures
-		index := buildObjectContainerIndex(resolvedFile)
-		if cacheKey != "" && ctx.arrayObjectContainerIndexCache != nil {
-			if ctx.arrayObjectContainerIndexCacheMu != nil {
-				ctx.arrayObjectContainerIndexCacheMu.Lock()
-			}
-			ctx.arrayObjectContainerIndexCache[cacheKey] = arrayObjectContainerIndexCacheEntry{index: index, procedures: resolvedProcedures}
-			if ctx.arrayObjectContainerIndexCacheMu != nil {
-				ctx.arrayObjectContainerIndexCacheMu.Unlock()
-			}
-		}
-		for _, candidate := range resolvedProcedures {
-			if candidate.StartLine == proc.StartLine && strings.EqualFold(candidate.Name, proc.Name) {
-				return index, candidate
-			}
-		}
-		return index, proc
+		built := build()
+		return find(built)
 	}
 	return buildObjectContainerIndex(file), proc
 }

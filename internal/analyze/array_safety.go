@@ -212,6 +212,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				out = applyArrayConditionalAllocationBranch(out, vba227Graph, block, edge)
 				out = applyArrayVBA227ConditionalReDimBranch(out, proc, block.Statement, edge, vba227Variables)
 				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore, proc)
+				out = applyArrayResumeNextFailureFlagBranch(out, block.Statement, edge)
 				out = applyArrayModuleCapacityGuardBranch(out, block.Statement, edge, file, proc, ctx, vba227Variables, moduleDecls)
 				out = applyArrayNotEmptyGuardBranch(out, block.Statement, edge, proc, vba227Variables)
 				out = applyArrayAllocationFlagBranch(out, block.Statement, edge, vba227Variables)

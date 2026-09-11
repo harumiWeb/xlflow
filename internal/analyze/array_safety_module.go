@@ -1272,6 +1272,7 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 	}
 	edgeState := func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 		out = applyArrayConditionalAllocationBranch(out, &graph, block, edge)
+		out = applyArrayResumeNextFailureFlagBranch(out, block.Statement, edge)
 		out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
 		return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
 	}

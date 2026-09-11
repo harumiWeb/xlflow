@@ -1273,11 +1273,18 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 		var baseView vbacfg.CFGView
 		var summaryGraph *vbacfg.CFGView
+		var vba227ResumeNextBefore []bool
+		var vba227Graph *vbacfg.CFGView
+		var vba227ResumeNextEdges arrayVBA227ResumeNextEdges
 		var worklistReachable map[vbacfg.BlockID]bool
 		worklistReachableLines := map[int]bool{}
 		if proc.Graph != nil {
 			baseView = proc.Graph.View(vbacfg.EdgeFilter{})
 			summaryGraph = &baseView
+			vba227ResumeNextBefore = arrayVBA227ResumeNextPrefixes(file, proc)
+			graph := arrayVBA227Graph(proc, localCtx)
+			vba227Graph = &graph
+			vba227ResumeNextEdges = arrayVBA227ResumeNextContinuationEdges(proc)
 			worklistReachable = arrayCFGWorklistReachable(&baseView)
 			for statement := range proc.Statements.All() {
 				line := statement.Range.StartLine
@@ -1354,7 +1361,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 			// ByRef entry proofs must use the same logical-line normalization as
 			// VBA227 itself; otherwise a continued Split assignment can make a
 			// later call-site argument look unallocated.
-			out, _ := a.arrayVBA227Transfer(file, proc, localCtx, variables, in, text, line, constants, nil, nil, nil, nil)
+			out, _ := a.arrayVBA227Transfer(file, proc, localCtx, variables, in, text, line, constants, nil, vba227ResumeNextBefore, vba227Graph, vba227ResumeNextEdges)
 			out = applyArrayLocalGoSubStatementEffects(out, text, localGoSubAllocations)
 			forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
 				if ownerStatementID > 0 && call.StatementID != ownerStatementID {
@@ -1408,11 +1415,17 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		if ctx.arrayStats != nil {
 			ctx.arrayStats.addCFGWalk()
 		}
-		walkArrayCFGWithSourceLinesReliableStatsAndBlock(&baseView, file.Lines, initial, visit, visitBlock, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+		walkGraph := &baseView
+		if vba227Graph != nil {
+			walkGraph = vba227Graph
+		}
+		walkArrayCFGWithSourceLinesReliableStatsAndBlock(walkGraph, file.Lines, initial, visit, visitBlock, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 			out = applyArrayConditionalAllocationBranch(out, &baseView, block, edge)
+			out = applyArrayResumeNextFailureFlagBranch(out, block.Statement, edge)
 			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
-			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
-		}, nil, ctx.arrayStats)
+			out = applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
+			return out
+		}, arrayAllocationTransferIsReliable, ctx.arrayStats)
 		// A recovered source construct can make a call block unreachable in the
 		// CFG even though the call is valid VBA source.  The parser currently
 		// represents some colon-separated single-line statements this way.  For
