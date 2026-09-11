@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Analyzer Performance"
+  short_description: "Compare analyzer work scaling and real-world benchmarks"
+  default_prompt: "Use $analyzer-performance-review to compare this analyzer change with origin/main, diagnose structural regressions, and preserve reproducible performance evidence."

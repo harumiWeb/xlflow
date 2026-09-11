@@ -1,0 +1,37 @@
+{
+  "skill_name": "analyzer-performance-review",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "VBA202の手続き間オブジェクト要約を変更しました。PR前にorigin/mainから性能回帰していないか確認し、根拠も残してください。",
+      "expected_output": "Runs a matched base/head comparison, prioritizes deterministic counters, verifies the corpus, and reports reproducible evidence.",
+      "files": [],
+      "expectations": [
+        "The response resolves origin/main and HEAD and uses the same project, mode, benchtime, and sample count on both sides.",
+        "The response compares deterministic counter metrics in addition to ns/op, B/op, and allocs/op.",
+        "The response records the generated report and raw log paths and runs the corpus snapshot contract before completion."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "固定点計算の参加者を増やしたら巨大モジュールが遅くなりました。原因を特定して抑制してください。診断結果は変えないでください。",
+      "expected_output": "Uses telemetry to distinguish legitimate participation from repeated unrelated work, adds a focused scalability regression test, fixes the cause, and reruns real-world benchmarks.",
+      "files": [],
+      "expectations": [
+        "The response identifies the first expanding deterministic work metric and maps it to an owning traversal, worklist, cache, or invalidation path.",
+        "The implementation adds a timing-independent test with unrelated work and a positive control.",
+        "The response reruns the matched base/head benchmark and verifies that corpus diagnostics remain unchanged."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "READMEの誤字だけ直しました。PR前に必要な確認をしておいてください。",
+      "expected_output": "Recognizes that an analyzer performance review is unnecessary for a documentation-only change and selects documentation-focused verification.",
+      "files": [],
+      "expectations": [
+        "The response does not run the expensive analyzer corpus benchmark for a documentation-only change.",
+        "The response selects formatting, link, or documentation checks relevant to the actual diff."
+      ]
+    }
+  ]
+}
