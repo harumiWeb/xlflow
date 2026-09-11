@@ -4042,6 +4042,9 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 	if objectCollectionShapeExpressionAssigned(proc, expression, statementID, flowContext, declarations) {
 		return true
 	}
+	if objectStaticDictionaryItemExpressionAssigned(proc, expression.Text, statementID, flowContext) {
+		return true
+	}
 	switch expression.Kind {
 	case procedureir.ExpressionNew:
 		return true

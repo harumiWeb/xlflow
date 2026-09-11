@@ -535,6 +535,119 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RecognizesClassInitializeNestedLookupDictionary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "stdAcc.cls", `Attribute VB_Name = "stdAcc"
+Option Explicit
+
+Private Type TLookupState
+  Lookups As Object
+End Type
+
+Private Type TThis
+  Singleton As TLookupState
+End Type
+
+Private This As TThis
+
+Public Property Get States() As String
+  Dim lookup As Object
+  Set lookup = This.Singleton.Lookups("EAccStates")("S2N")
+  Dim key As Variant
+  For Each key In lookup.Keys()
+    States = States & key
+  Next
+End Property
+
+Friend Function protGetLookups() As Object
+  If This.Singleton.Lookups Is Nothing Then
+    Set This.Singleton.Lookups = CreateObject("Scripting.Dictionary")
+    Set This.Singleton.Lookups("EAccStates") = CreateLookupDict(Array("STATE_NORMAL", 0))
+  End If
+  Set protGetLookups = This.Singleton.Lookups
+End Function
+
+Private Sub Class_Initialize()
+  Set This.Singleton.Lookups = stdAcc.protGetLookups()
+End Sub
+
+	Private Function CreateLookupDict(values As Variant) As Object
+  Dim result As Object
+  Set result = CreateObject("Scripting.Dictionary")
+  Set result("S2N") = CreateObject("Scripting.Dictionary")
+  Set result("N2S") = CreateObject("Scripting.Dictionary")
+  Set CreateLookupDict = result
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Class_Initialize should establish nested lookup dictionaries: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalNestedLookupDictionary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "stdAcc.cls", `Attribute VB_Name = "stdAcc"
+Option Explicit
+
+Private Type TLookupState
+  Lookups As Object
+End Type
+
+Private Type TThis
+  Singleton As TLookupState
+End Type
+
+Private This As TThis
+
+Public Property Get States() As String
+  Dim lookup As Object
+  Set lookup = This.Singleton.Lookups("EAccStates")("S2N")
+  Dim key As Variant
+  For Each key In lookup.Keys()
+    States = States & key
+  Next
+End Property
+
+Friend Function protGetLookups() As Object
+  Dim materialize As Boolean
+  If This.Singleton.Lookups Is Nothing Then
+    Set This.Singleton.Lookups = CreateObject("Scripting.Dictionary")
+    If materialize Then
+      Set This.Singleton.Lookups("EAccStates") = CreateLookupDict(Array("STATE_NORMAL", 0))
+    End If
+  End If
+  Set protGetLookups = This.Singleton.Lookups
+End Function
+
+Private Sub Class_Initialize()
+  Set This.Singleton.Lookups = stdAcc.protGetLookups()
+End Sub
+
+Private Function CreateLookupDict(values As Variant) As Object
+  Dim result As Object
+  Set result = CreateObject("Scripting.Dictionary")
+  Set result("S2N") = CreateObject("Scripting.Dictionary")
+  Set result("N2S") = CreateObject("Scripting.Dictionary")
+  Set CreateLookupDict = result
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a nested lookup dictionary initialized only on a conditional path must remain unknown")
+	}
+}
+
 func TestVBA202Issue448RejectsNestedDictionaryCollectionMissingBranchMaterialization(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

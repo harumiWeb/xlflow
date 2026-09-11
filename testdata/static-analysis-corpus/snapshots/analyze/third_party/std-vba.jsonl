@@ -860,7 +860,6 @@
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA214","severity":"warning","line":822,"column":0}
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA214","severity":"warning","line":833,"column":0}
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA214","severity":"warning","line":844,"column":0}
-{"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA202","severity":"warning","line":858,"column":0}
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA214","severity":"warning","line":870,"column":0}
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA214","severity":"warning","line":881,"column":0}
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA214","severity":"warning","line":892,"column":0}
