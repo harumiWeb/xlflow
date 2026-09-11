@@ -1505,19 +1505,6 @@ func (analysis *objectAnalysisContext) buildSummaries() map[string]objectProcedu
 						queued[dependent] = true
 					}
 				}
-				if previous.ReturnAssigned != updated.ReturnAssigned && (previous.ReturnCollection || updated.ReturnCollection) {
-					// Bare object-returning function calls are represented as
-					// identifier expressions by the VBA IR and therefore have no
-					// explicit summary dependency edge. Revisit the full object
-					// worklist when a return contract changes so those implicit
-					// callers observe the new fixed-point value as well.
-					for _, dependent := range analysis.order {
-						if !queued[dependent] {
-							queue = append(queue, dependent)
-							queued[dependent] = true
-						}
-					}
-				}
 			}
 		}
 		if !analysis.seedRecursiveCollectionSummaries() {

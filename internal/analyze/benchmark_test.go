@@ -301,6 +301,61 @@ func writeObjectWorklistBenchmarkProject(tb testing.TB, root string, procedureCo
 	}
 }
 
+func TestObjectSummaryCollectionInvalidationIsDependencyScoped(t *testing.T) {
+	const unrelatedCount = 100
+	root := t.TempDir()
+	modules := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(modules, 0o755); err != nil {
+		t.Fatalf("create object worklist test directory: %v", err)
+	}
+
+	var source strings.Builder
+	source.WriteString("Option Explicit\n\n")
+	for index := 0; index < unrelatedCount; index++ {
+		fmt.Fprintf(&source, "Private Function AUnrelated%03d() As Object\n", index)
+		fmt.Fprintf(&source, "  Set AUnrelated%03d = CreateObject(\"Scripting.Dictionary\")\n", index)
+		source.WriteString("End Function\n\n")
+	}
+	source.WriteString(`Private Function AForward() As Collection
+  Set AForward = ZFactory
+End Function
+
+Private Function ZFactory() As Collection
+  Set ZFactory = New Collection
+End Function
+
+Public Sub Run()
+  Dim values As Collection
+  Set values = AForward
+  Debug.Print values.Count
+End Sub
+`)
+	if err := os.WriteFile(filepath.Join(modules, objectWorklistBenchmarkModuleFile), []byte(source.String()), 0o644); err != nil {
+		t.Fatalf("write object worklist test source: %v", err)
+	}
+
+	analysis := buildObjectAnalysisPlans(loadObjectWorklistBenchmarkFiles(t, root))
+	relevant := 0
+	for _, key := range analysis.order {
+		if plan := analysis.plans[key]; plan != nil && plan.relevant {
+			relevant++
+		}
+	}
+	analysis.buildSummaries()
+
+	// AForward sorts before ZFactory and therefore needs one dependency-driven
+	// revisit; its caller Run is revisited after that contract changes. The
+	// unrelated factories must remain outside both invalidations.
+	if want := relevant + 2; analysis.summaryEvaluations != want {
+		t.Fatalf("object summary evaluations = %d, want %d dependency-scoped evaluations", analysis.summaryEvaluations, want)
+	}
+	for _, summary := range analysis.summaries {
+		if strings.EqualFold(summary.QualifiedName, "Chain.AForward") && !summary.ReturnAssigned {
+			t.Fatal("bare Collection forwarding summary was not invalidated")
+		}
+	}
+}
+
 // TestSyntheticBenchmarkFixtureScale keeps the benchmark's workload contract
 // visible to ordinary tests. The benchmark itself remains free of timing
 // assertions so it can run on different developer machines and CI runners.
