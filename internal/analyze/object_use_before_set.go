@@ -2864,6 +2864,7 @@ type objectFlowContext struct {
 	graph                       vbacfg.CFGView
 	predecessors                map[vbacfg.BlockID][]vbacfg.Edge
 	vars                        map[string]objectVariable
+	summaries                   map[string]objectProcedureSummary
 	objectTypeNames             map[string]bool
 	qualifiedObjectFunctionKeys map[string][]string
 	memberContracts             map[string]bool
@@ -2947,6 +2948,7 @@ func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectP
 	flowGraph := plan.flowGraph
 	flowContext := plan.flowContext
 	flowContext.receiverSummaryKeys = plan.receiverSummaryKeys
+	flowContext.summaries = summaries
 	initial := map[string]bool{}
 	for key, variable := range plan.vars {
 		initial[key] = false
@@ -3101,6 +3103,7 @@ func objectClassLifecycleAssignedPlan(plan *objectProcedurePlan, variable object
 // short-circuit/eager Boolean diagnostics and this analysis stays conservative.
 func objectFlowApplyGuard(proc sourceProcedure, state map[string]bool, flowContext objectFlowContext, edge vbacfg.Edge, declarations declarationScope) map[string]bool {
 	if edge.Kind == vbacfg.EdgeCase {
+		state = objectFlowApplyRepeatedSelectCaseObjectState(proc, state, flowContext, edge, declarations)
 		return objectFlowApplySelectCaseTypeGuard(state, flowContext, edge, declarations)
 	}
 	if updated, applied := objectFlowApplyNonzeroReturnGuard(proc, state, flowContext, edge, declarations); applied {

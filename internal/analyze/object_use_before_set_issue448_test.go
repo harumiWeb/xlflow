@@ -7312,6 +7312,98 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksRepeatedSelectCaseObjectFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CreateDictionary() As Object
+  Set CreateDictionary = CreateObject("Scripting.Dictionary")
+End Function
+
+Public Sub Run()
+  Dim ret As Object
+  Select Case This.iType
+    Case 0
+      Set ret = CreateDictionary()
+    Case 1
+      Set ret = New Collection
+  End Select
+
+  Select Case This.iType
+    Case 0
+      ret.Add "key", 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("the matching repeated Select Case should preserve the object factory proof: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalRepeatedSelectCaseObjectFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal selector As Long, ByVal initialize As Boolean)
+  Dim ret As Object
+  Select Case selector
+    Case 0
+      If initialize Then Set ret = CreateObject("Scripting.Dictionary")
+    Case 1
+      Set ret = New Collection
+  End Select
+
+  Select Case selector
+    Case 0
+      ret.Add "key", 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("a conditional factory must not restore the object proof")
+	}
+}
+
+func TestVBA202Issue448RejectsRepeatedSelectCaseAfterObjectReset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal selector As Long)
+  Dim ret As Object
+  Select Case selector
+    Case 0
+      Set ret = CreateObject("Scripting.Dictionary")
+    Case 1
+      Set ret = New Collection
+  End Select
+  Set ret = Nothing
+
+  Select Case selector
+    Case 0
+      ret.Add "key", 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+		t.Fatal("an object reset between the Select Case statements must invalidate the proof")
+	}
+}
+
 func TestVBA202Issue448RejectsProducerIndexedElementAlias(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
