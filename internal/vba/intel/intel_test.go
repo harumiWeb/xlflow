@@ -1421,6 +1421,59 @@ End Sub
 	}
 }
 
+func TestArgumentDiagnosticsFailClosedForConditionalProjectMemberWithBuiltinFallback(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    rng.SpecialCells()
+End Sub
+`,
+	}
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "SpecialCells") {
+			return nil, nil
+		}
+		return []Symbol{{
+			Name: "SpecialCells", Kind: "function", Module: "Range", ModuleKind: "class", Visibility: "Public",
+			Parameters:          []Parameter{{Name: "Type"}, {Name: "Value", Optional: true}},
+			ConditionalBranches: []procedureir.ConditionalBranch{{Group: "platform", Branch: 0}},
+		}}, nil
+	}
+
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(got) != 0 {
+		t.Fatalf("conditional project member must not fall back to a built-in signature: %+v", got)
+	}
+}
+
+func TestArgumentDiagnosticsPreferLocalReceiverOverProjectModuleQualifier(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "TakeValue") {
+			return nil, nil
+		}
+		return []Symbol{
+			{Name: "TakeValue", Kind: "sub", Module: "Helpers", ModuleKind: "standard", Visibility: "Public", Parameters: []Parameter{{Name: "first"}, {Name: "second"}}},
+			{Name: "TakeValue", Kind: "sub", Module: "SomeClass", ModuleKind: "class", Visibility: "Public", Parameters: []Parameter{{Name: "value", Type: "String"}}},
+		}, nil
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim Helpers As SomeClass
+    Helpers.TakeValue "value"
+End Sub
+`,
+	}
+
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(got) != 0 {
+		t.Fatalf("local receiver must shadow a same-named project module: %+v", got)
+	}
+}
+
 func TestConditionalCompilationLinesIgnoreTrailingComments(t *testing.T) {
 	t.Parallel()
 	source := `#If Win64 Then
@@ -2009,6 +2062,33 @@ End Sub
 
 	if got := analyzer.ByRefArgumentDiagnostics(doc); len(got) != 0 {
 		t.Fatalf("conditional external procedures must not make a qualified or unqualified ByRef claim: %+v", got)
+	}
+}
+
+func TestByRefArgumentDiagnosticsPreferLocalReceiverOverProjectModuleQualifier(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "TakeValue") {
+			return nil, nil
+		}
+		return []Symbol{
+			{Name: "TakeValue", Kind: "sub", Module: "Helpers", ModuleKind: "standard", Visibility: "Public", Parameters: []Parameter{{Name: "value", Type: "Long", Passing: "ByRef"}}},
+			{Name: "TakeValue", Kind: "sub", Module: "SomeClass", ModuleKind: "class", Visibility: "Public", Parameters: []Parameter{{Name: "value", Type: "String", Passing: "ByRef"}}},
+		}, nil
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim Helpers As SomeClass
+    Dim text As String
+    Helpers.TakeValue text
+End Sub
+`,
+	}
+
+	if got := analyzer.ByRefArgumentDiagnostics(doc); len(got) != 0 {
+		t.Fatalf("local receiver must shadow a same-named project module for ByRef resolution: %+v", got)
 	}
 }
 

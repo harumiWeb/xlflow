@@ -1869,8 +1869,8 @@ func (a Analyzer) resolveCallSignatureAtContextWithLocalPriority(doc Document, t
 				receiverType = "Excel.Worksheet"
 			}
 			if preferLocal {
-				if sig, found := a.resolveProjectMemberSignature(doc, receiverType, memberName, pos); found {
-					return sig, true, nil
+				if sig, found, uncertain := a.resolveProjectMemberSignature(doc, receiverType, memberName, pos); found || uncertain {
+					return sig, found, nil
 				}
 			}
 			if member, found := a.DB.ResolveMember(receiverType, memberName); found {
@@ -1907,14 +1907,14 @@ func (a Analyzer) resolveCallSignatureAtContextWithLocalPriority(doc Document, t
 	return Signature{}, false, nil
 }
 
-func (a Analyzer) resolveProjectMemberSignature(doc Document, receiverType, memberName string, pos Position) (Signature, bool) {
+func (a Analyzer) resolveProjectMemberSignature(doc Document, receiverType, memberName string, pos Position) (Signature, bool, bool) {
 	receiverType = strings.TrimSpace(receiverType)
 	if receiverType == "" || memberName == "" {
-		return Signature{}, false
+		return Signature{}, false, false
 	}
 	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, []Document{doc}, WorkspaceSymbolQuery{Text: memberName, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
-		return Signature{}, false
+		return Signature{}, false, false
 	}
 	currentProcedure := currentProcedureNameForDocument(doc, pos)
 	var match *Symbol
@@ -1927,20 +1927,20 @@ func (a Analyzer) resolveProjectMemberSignature(doc Document, receiverType, memb
 			continue
 		}
 		if len(sym.ConditionalBranches) > 0 {
-			return Signature{}, false
+			return Signature{}, false, true
 		}
 		if !a.projectMemberSignatureComplete(*sym) {
-			return Signature{}, false
+			return Signature{}, false, true
 		}
 		if match != nil {
-			return Signature{}, false
+			return Signature{}, false, true
 		}
 		match = sym
 	}
 	if match == nil {
-		return Signature{}, false
+		return Signature{}, false, false
 	}
-	return signatureFromSymbol(*match), true
+	return signatureFromSymbol(*match), true, false
 }
 
 func (a Analyzer) projectMemberSignatureComplete(sym Symbol) bool {
@@ -2188,6 +2188,9 @@ func (a Analyzer) resolveArgumentProjectLocalCallSignature(doc Document, localSy
 		query = member
 	}
 	currentProcedure := currentProcedureNameForDocument(doc, pos)
+	if qualified && nonCallableLocalShadowsProjectCall(a, doc, currentProcedure, localSymbolsByName[strings.ToLower(strings.TrimSpace(receiver))], receiver) {
+		return Signature{}, false, false, nil
+	}
 	localCandidates := localSymbolsByName[strings.ToLower(strings.TrimSpace(query))]
 	localMatches := argumentProjectCallSymbols(a, doc, currentProcedure, localCandidates, target, receiver, member, qualified)
 	if !qualified {

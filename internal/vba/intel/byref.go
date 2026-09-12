@@ -119,6 +119,9 @@ func (a Analyzer) resolveProjectLocalCallSignature(doc Document, localSymbolsByN
 	}
 	currentProcedure := currentProcedureNameForDocument(doc, pos)
 	localCandidates := localSymbolsByName[strings.ToLower(strings.TrimSpace(query))]
+	if qualified && nonCallableLocalShadowsProjectCall(a, doc, currentProcedure, localSymbolsByName[strings.ToLower(strings.TrimSpace(receiver))], receiver) {
+		return Signature{}, false, nil
+	}
 	if !qualified && nonCallableLocalShadowsProjectCall(a, doc, currentProcedure, localCandidates, target) {
 		return Signature{}, false, nil
 	}
