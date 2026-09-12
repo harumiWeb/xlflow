@@ -486,7 +486,7 @@ func callsKnownTarget(proc procedureir.ProcedureIR, statement procedureir.Statem
 		if call.StatementID != statement.ID {
 			continue
 		}
-		if key, ok := knownUniqueProjectCandidate(call.Resolution, candidateKeys); ok && targets[key] {
+		if key, ok := knownMatchedProjectCandidate(call.Resolution, candidateKeys); ok && targets[key] {
 			return true
 		}
 	}

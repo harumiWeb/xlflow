@@ -88,13 +88,17 @@ codes, or configuration semantics.
 
 ### Amendment: candidate-bounded edges for incomplete resolution (Issue #786)
 
-A `ResolutionIncomplete` call with exactly one known project-local candidate
-retains a candidate-bounded effect and error-summary edge. The call remains
+A `ResolutionIncomplete` call with exactly one known callable project-local
+candidate retains a candidate-bounded effect and error-summary edge. The call remains
 uncertain for compile-equivalent diagnostics, but retaining its possible callee
 facts prevents conditional or recovered declarations from causing effect and
-error-summary false negatives. Incomplete calls with multiple candidates, or
-without a project-local candidate, do not create an edge. Direct uncertainty
-continues to be recorded for every incomplete call.
+error-summary false negatives. The candidate does not prove that the call
+always rethrows or terminates, so those deterministic control-flow summaries
+still require `ResolutionMatched`. A negative project-local resolution, such as
+an inaccessible private procedure, is not callable and does not create an
+edge. Incomplete calls with multiple candidates, or without a project-local
+candidate, do not create an edge. Direct uncertainty continues to be recorded
+for every incomplete call.
 
 ## Alternatives Considered
 

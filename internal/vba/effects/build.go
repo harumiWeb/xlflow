@@ -405,12 +405,26 @@ func knownUniqueProjectCandidate(resolution procedureir.CallResolution, candidat
 		return "", false
 	}
 	switch resolution.Status {
-	case procedureir.ResolutionMatched, procedureir.ResolutionIncomplete:
+	case procedureir.ResolutionMatched:
+	case procedureir.ResolutionIncomplete:
+		// ProjectLocal marks a negative resolution such as an inaccessible
+		// private procedure. Its candidate is evidence for diagnostics, not a
+		// callable target for possible-effect propagation.
+		if resolution.ProjectLocal {
+			return "", false
+		}
 	default:
 		return "", false
 	}
 	target, ok := candidateKeys[candidateKey(resolution.Candidates[0])]
 	return target, ok
+}
+
+func knownMatchedProjectCandidate(resolution procedureir.CallResolution, candidateKeys map[string]string) (string, bool) {
+	if resolution.Status != procedureir.ResolutionMatched {
+		return "", false
+	}
+	return knownUniqueProjectCandidate(resolution, candidateKeys)
 }
 
 // procedureResolutionFingerprint captures the project-dependent facts that
