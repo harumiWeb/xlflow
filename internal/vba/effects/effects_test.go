@@ -1068,6 +1068,41 @@ func TestErrorSummaryPreservesExternalCallUncertainty(t *testing.T) {
 	}
 }
 
+func TestIncompleteUniqueProjectCallPropagatesPossibleEffects(t *testing.T) {
+	const file = "Calls.bas"
+	candidate := procedureir.Candidate{QualifiedName: "Calls.Child", Kind: string(procedureir.ProcedureSub), File: file, Line: 10}
+	doc := procedureir.DocumentIR{
+		Path: file, ModuleName: "Calls", ModuleKind: "standard",
+		Procedures: []procedureir.ProcedureIR{
+			{
+				Symbol:     procedureir.ProcedureSymbol{Name: "Root", QualifiedName: "Calls.Root", Kind: procedureir.ProcedureSub, DeclarationRange: rangeAt(1)},
+				Statements: []procedureir.Statement{{ID: 1, Kind: procedureir.StatementCall, Text: "Child", Range: rangeAt(2)}},
+				Calls: []procedureir.CallSite{{
+					ID: 1, StatementID: 1, Callee: procedureir.Callee{Text: "Child", BaseName: "Child"}, Range: rangeAt(2),
+					Resolution: procedureir.CallResolution{Status: procedureir.ResolutionIncomplete, Candidates: []procedureir.Candidate{candidate}},
+				}},
+			},
+			{
+				Symbol: procedureir.ProcedureSymbol{Name: "Child", QualifiedName: "Calls.Child", Kind: procedureir.ProcedureSub, DeclarationRange: rangeAt(10)},
+				Statements: []procedureir.Statement{{
+					ID: 1, Kind: procedureir.StatementAssignment, Target: &procedureir.Expression{Text: "Application.EnableEvents"},
+					Value: &procedureir.Expression{Text: "False"}, Range: rangeAt(11),
+				}},
+			},
+		},
+	}
+	root := find(t, Build([]Document{{IR: doc, CFG: cfg.BuildDocument(doc)}}), "Calls.Root")
+	if got := count(root.Direct, DisablesEvents); got != 0 {
+		t.Fatalf("incomplete call created direct effect = %d: %#v", got, root.Direct)
+	}
+	if got := count(root.Propagated, DisablesEvents); got != 1 {
+		t.Fatalf("incomplete unique call propagated effects = %d: %#v", got, root.Propagated)
+	}
+	if len(root.DirectUncertainty) != 1 {
+		t.Fatalf("incomplete call uncertainty = %#v", root.DirectUncertainty)
+	}
+}
+
 func TestGenericApplicationStateEvidencePreservesVBA203Properties(t *testing.T) {
 	summary := buildSources(t, sourceFile{"State.bas", "State", `Private savedAlerts As Boolean
 Public Sub PushState()

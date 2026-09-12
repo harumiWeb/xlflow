@@ -160,9 +160,15 @@ A call creates a project propagation edge only when all of these conditions
 hold:
 
 - its statement is conservatively reachable;
-- resolution status is `matched`;
+- resolution status is `matched`, or `incomplete` with exactly one candidate;
 - resolution contains exactly one candidate; and
 - that candidate identifies one procedure in the current project summary.
+
+An `incomplete` call with one known project candidate is a candidate-bounded
+possible-effect edge: its callee's effects and error outcomes may propagate,
+while the call remains explicit uncertainty for compile-equivalent diagnostics.
+An incomplete call without exactly one known project candidate (including an
+ambiguous call with multiple candidates) does not create an edge.
 
 Receiver-less cross-module resolution considers standard-module procedures
 only. Class, document, and UserForm procedures require an explicit receiver

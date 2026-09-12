@@ -86,6 +86,16 @@ codes, or configuration semantics.
   ambiguous, external, and dynamic calls do not become confirmed effects just
   because provenance is compacted.
 
+### Amendment: candidate-bounded edges for incomplete resolution (Issue #786)
+
+A `ResolutionIncomplete` call with exactly one known project-local candidate
+retains a candidate-bounded effect and error-summary edge. The call remains
+uncertain for compile-equivalent diagnostics, but retaining its possible callee
+facts prevents conditional or recovered declarations from causing effect and
+error-summary false negatives. Incomplete calls with multiple candidates, or
+without a project-local candidate, do not create an edge. Direct uncertainty
+continues to be recorded for every incomplete call.
+
 ## Alternatives Considered
 
 1. **Keep eagerly copying every transitive collection** - Rejected because

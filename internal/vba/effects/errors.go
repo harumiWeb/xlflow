@@ -483,10 +483,10 @@ func procedureAlwaysRethrows(proc procedureir.ProcedureIR, graph cfg.Graph, cand
 
 func callsKnownTarget(proc procedureir.ProcedureIR, statement procedureir.Statement, candidateKeys map[string]string, targets map[string]bool) bool {
 	for _, call := range proc.Calls {
-		if call.StatementID != statement.ID || call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
+		if call.StatementID != statement.ID {
 			continue
 		}
-		if key, ok := candidateKeys[candidateKey(call.Resolution.Candidates[0])]; ok && targets[key] {
+		if key, ok := knownUniqueProjectCandidate(call.Resolution, candidateKeys); ok && targets[key] {
 			return true
 		}
 	}
@@ -609,10 +609,10 @@ func loggerProcedureIndex(inputs []procedureInput, candidateKeys map[string]stri
 			}
 			reachable := input.reachable
 			for _, call := range input.proc.Calls {
-				if !reachable[call.StatementID] || call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
+				if !reachable[call.StatementID] {
 					continue
 				}
-				if target, ok := candidateKeys[candidateKey(call.Resolution.Candidates[0])]; ok && len(loggers[target]) > 0 {
+				if target, ok := knownUniqueProjectCandidate(call.Resolution, candidateKeys); ok && len(loggers[target]) > 0 {
 					contract := forwardedLoggerParameters(input.proc, call, procedures[target], loggers[target])
 					if len(contract) == 0 {
 						continue
@@ -629,10 +629,10 @@ func loggerProcedureIndex(inputs []procedureInput, candidateKeys map[string]stri
 
 func callsKnownLogger(proc procedureir.ProcedureIR, statement procedureir.Statement, copied string, candidateKeys map[string]string, loggerTargets map[string]loggerContract) bool {
 	for _, call := range proc.Calls {
-		if call.StatementID != statement.ID || call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
+		if call.StatementID != statement.ID {
 			continue
 		}
-		target, ok := candidateKeys[candidateKey(call.Resolution.Candidates[0])]
+		target, ok := knownUniqueProjectCandidate(call.Resolution, candidateKeys)
 		if !ok {
 			continue
 		}
