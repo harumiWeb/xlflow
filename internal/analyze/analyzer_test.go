@@ -1895,7 +1895,7 @@ End Sub
 	}
 }
 
-func TestAnalyzerContinuesAfterIdentifierTypeCharacterRecovery(t *testing.T) {
+func TestAnalyzerAcceptsIdentifierTypeCharacters(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -1905,7 +1905,28 @@ End Sub
 `)
 
 	if _, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run(); err != nil {
-		t.Fatalf("legal identifier type-character recovery should not abort analyzer: %v", err)
+		t.Fatalf("legal identifier type characters should not abort analyzer: %v", err)
+	}
+}
+
+func TestAnalyzerAcceptsComparisonExpressionInCaseClause(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function IsAvailabilityRepro() As Boolean
+  Dim viaWebSocket As Object
+
+  Select Case False
+    Case viaWebSocket Is Nothing
+      IsAvailabilityRepro = True
+    Case Else
+      IsAvailabilityRepro = False
+  End Select
+End Function
+`)
+
+	if _, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run(); err != nil {
+		t.Fatalf("comparison expression in Case clause should not abort analyzer: %v", err)
 	}
 }
 

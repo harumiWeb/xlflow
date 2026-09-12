@@ -123,7 +123,7 @@ func TestIsDeclarationKeywordRecoveryIsNarrow(t *testing.T) {
 	sameLineError.Close()
 }
 
-func TestIsIdentifierTypeCharacterRecoveryRecognizesOnlyDeclarationSuffixes(t *testing.T) {
+func TestParserRepresentsIdentifierTypeCharacterAsBangIdentifier(t *testing.T) {
 	parser, err := NewParser()
 	if err != nil {
 		t.Fatal(err)
@@ -131,25 +131,54 @@ func TestIsIdentifierTypeCharacterRecoveryRecognizesOnlyDeclarationSuffixes(t *t
 	defer parser.Close()
 
 	typed := parser.Parse("Typed.bas", []byte("Sub Test()\n  Dim value!\nEnd Sub\n"))
-	if !IsIdentifierTypeCharacterRecovery(typed.Root, typed.Source) {
-		t.Fatalf("expected legal Single suffix recovery: %s", typed.Root.ToSexp())
+	if typed.HasError || typed.HasMissing {
+		t.Fatalf("identifier type character should parse without recovery: error=%t missing=%t tree=%s", typed.HasError, typed.HasMissing, typed.Root.ToSexp())
 	}
+	found := false
+	Walk(typed.Root, func(node *tree_sitter.Node) bool {
+		if node.Kind() != "bang_identifier" {
+			return true
+		}
+		found = true
+		if got := node.Utf8Text(typed.Source); got != "value!" {
+			t.Errorf("bang_identifier text = %q, want %q", got, "value!")
+		}
+		if node.NamedChildCount() != 1 || node.NamedChild(0).Kind() != "identifier" {
+			t.Errorf("bang_identifier children = %s, want one identifier child", node.ToSexp())
+		}
+		return false
+	})
 	typed.Close()
+	if !found {
+		t.Fatal("expected v0.14 bang_identifier declaration node")
+	}
+}
 
-	ordinary := parser.Parse("Broken.bas", []byte("Sub Test()\n  value!\nEnd Sub\n"))
-	if IsIdentifierTypeCharacterRecovery(ordinary.Root, ordinary.Source) {
-		t.Fatalf("ordinary bang recovery was misclassified: %s", ordinary.Root.ToSexp())
+func TestParserAcceptsComparisonExpressionInCaseClause(t *testing.T) {
+	parser, err := NewParser()
+	if err != nil {
+		t.Fatal(err)
 	}
-	ordinary.Close()
+	defer parser.Close()
 
-	sameLineError := parser.Parse("Trailing.bas", []byte("Sub Test()\n  Dim value!: other =\nEnd Sub\n"))
-	if !sameLineError.HasError && !sameLineError.HasMissing {
-		t.Fatalf("expected trailing syntax to require parser recovery: %s", sameLineError.Root.ToSexp())
+	result := parser.Parse("CaseNothing.bas", []byte(`Public Function IsAvailabilityRepro() As Boolean
+    Dim viaWebSocket As Object
+
+    Select Case False
+        Case viaWebSocket Is Nothing
+            IsAvailabilityRepro = True
+        Case Else
+            IsAvailabilityRepro = False
+    End Select
+End Function
+`))
+	defer result.Close()
+	if result.HasError || result.HasMissing {
+		t.Fatalf("comparison expression in Case clause should parse without recovery: error=%t missing=%t tree=%s", result.HasError, result.HasMissing, result.Root.ToSexp())
 	}
-	if IsIdentifierTypeCharacterRecovery(sameLineError.Root, sameLineError.Source) {
-		t.Fatalf("unrelated same-line recovery was misclassified: %s", sameLineError.Root.ToSexp())
+	if !strings.Contains(result.Root.ToSexp(), "comparison_expression") {
+		t.Fatalf("expected comparison_expression in Case clause: %s", result.Root.ToSexp())
 	}
-	sameLineError.Close()
 }
 
 func TestIsNumericLiteralRecoveryRecognizesOptionalDefaults(t *testing.T) {

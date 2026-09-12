@@ -83,6 +83,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `backup_scan_failed`
 - `bad_arg_count`
 - `bad_prog`
+- `bang_identifier`
 - `base_workbook`
 - `before_dialog_action`
 - `binary_expression`

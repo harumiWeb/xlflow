@@ -39,6 +39,11 @@ type recoveredCallArgument struct {
 	valueRange vbaast.Range
 }
 
+type recoveredArgumentSegment struct {
+	start int
+	end   int
+}
+
 type recoveredCallSyntax struct {
 	callee    Callee
 	arguments []recoveredCallArgument
@@ -489,7 +494,7 @@ func (v *singleVisitor) addCall(procedure *ProcedureIR, node *tree_sitter.Node, 
 func (v *singleVisitor) appendRecoveredCall(procedure *ProcedureIR, node *tree_sitter.Node, recovered recoveredCallSyntax, ctx visitContext) int {
 	facts := make([]argumentFact, 0, len(recovered.arguments))
 	for _, argument := range recovered.arguments {
-		if argument.text == "" && argument.name == "" && argument.valueText == "" && argument.rng.EndByte <= argument.rng.StartByte {
+		if recoveredArgumentOmitted(argument) {
 			// Keep an omitted positional argument as a zero ExpressionID so
 			// later argument binding does not shift subsequent values left.
 			facts = append(facts, argumentFact{})
@@ -591,10 +596,21 @@ func calleeFromRecoveredText(text string) Callee {
 }
 
 func recoveredCallArguments(text string, start, end, absoluteStart int, source []byte) []recoveredCallArgument {
+	segments := recoveredArgumentSegments(text, start, end)
+	arguments := make([]recoveredCallArgument, 0, len(segments))
+	for _, segment := range segments {
+		if argument, ok := parseRecoveredCallArgument(text, segment.start, segment.end, absoluteStart, source); ok {
+			arguments = append(arguments, argument)
+		}
+	}
+	return arguments
+}
+
+func recoveredArgumentSegments(text string, start, end int) []recoveredArgumentSegment {
 	if start >= end {
 		return nil
 	}
-	arguments := make([]recoveredCallArgument, 0, 1)
+	segments := make([]recoveredArgumentSegment, 0, 1)
 	segmentStart := start
 	depth := 0
 	inString := false
@@ -631,17 +647,17 @@ func recoveredCallArguments(text string, start, end, absoluteStart int, source [
 			}
 		case ',':
 			if depth == 0 {
-				if argument, ok := parseRecoveredCallArgument(text, segmentStart, position, absoluteStart, source); ok {
-					arguments = append(arguments, argument)
-				}
+				segments = append(segments, recoveredArgumentSegment{start: segmentStart, end: position})
 				segmentStart = position + 1
 			}
 		}
 	}
-	if argument, ok := parseRecoveredCallArgument(text, segmentStart, end, absoluteStart, source); ok {
-		arguments = append(arguments, argument)
-	}
-	return arguments
+	return append(segments, recoveredArgumentSegment{start: segmentStart, end: end})
+}
+
+func recoveredArgumentSegmentOmitted(text string, segment recoveredArgumentSegment) bool {
+	start, end := recoveredTrimSpace(text, segment.start, segment.end)
+	return start >= end || recoveredCallCommentlessText(text[start:end]) == ""
 }
 
 func parseRecoveredCallArgument(text string, start, end, absoluteStart int, source []byte) (recoveredCallArgument, bool) {
@@ -675,6 +691,10 @@ func parseRecoveredCallArgument(text string, start, end, absoluteStart int, sour
 	}
 	rng := recoveredSourceRange(source, absoluteStart+trimmedStart, absoluteStart+trimmedEnd)
 	return recoveredCallArgument{text: argumentText, rng: rng, valueRange: rng}, true
+}
+
+func recoveredArgumentOmitted(argument recoveredCallArgument) bool {
+	return argument.text == "" && argument.name == "" && argument.valueText == "" && argument.rng.EndByte <= argument.rng.StartByte
 }
 
 func recoveredNamedArgumentSeparator(text string) int {
@@ -954,23 +974,28 @@ func (v *singleVisitor) argumentsForCall(node *tree_sitter.Node) (Arguments, []a
 	if list == nil {
 		return arguments, nil
 	}
-	facts := make([]argumentFact, 0, list.NamedChildCount())
-	for i := uint(0); i < list.NamedChildCount(); i++ {
-		child := list.NamedChild(i)
-		if !isSemanticArgumentNode(child) {
+	return arguments, argumentFactsFromList(list, v.builder.source)
+}
+
+func argumentFactsFromList(node *tree_sitter.Node, source []byte) []argumentFact {
+	nodes := argumentNodesFromList(node, source)
+	facts := make([]argumentFact, 0, len(nodes))
+	for _, child := range nodes {
+		if child == nil {
+			facts = append(facts, argumentFact{})
 			continue
 		}
 		fact := argumentFact{rng: vbaast.NodeRange(child)}
 		if child.Kind() == "named_argument" {
-			fact.name = cleanIdentifier(nodeText(child.ChildByFieldName("name"), v.builder.source))
+			fact.name = cleanIdentifier(nodeText(child.ChildByFieldName("name"), source))
 			if value := child.ChildByFieldName("value"); value != nil {
-				fact.valueText = nodeText(value, v.builder.source)
+				fact.valueText = nodeText(value, source)
 				fact.valueRange = vbaast.NodeRange(value)
 			}
 		}
 		facts = append(facts, fact)
 	}
-	return arguments, facts
+	return facts
 }
 
 func (v *singleVisitor) addAccess(procedure *ProcedureIR, node *tree_sitter.Node, ctx visitContext) {
@@ -1217,8 +1242,12 @@ func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitC
 		if child.Kind() == "redim_declarator" {
 			if statement := statementByID(v.procedure(ctx.procedure), ctx.statementID); statement != nil {
 				childCtx.accessMode = targetAccessMode(*statement)
-				if target := childByKind(child, "identifier"); target != nil {
-					statement.Target = expressionStub(target, ctx.statementID, v.builder.source)
+				target := child.ChildByFieldName("name")
+				if target == nil {
+					target = childByKind(child, "identifier")
+				}
+				if target != nil {
+					statement.Target = expressionStub(identifierExpressionNode(target), ctx.statementID, v.builder.source)
 				}
 			}
 		}
@@ -1357,6 +1386,15 @@ func expressionStub(node *tree_sitter.Node, statementID int, source []byte) *Exp
 		StatementID: statementID, Kind: expressionKind(node.Kind()), SyntaxKind: node.Kind(),
 		Text: nodeText(node, source), Range: vbaast.NodeRange(node), Recovered: recovered(node),
 	}
+}
+
+func identifierExpressionNode(node *tree_sitter.Node) *tree_sitter.Node {
+	if node != nil && node.Kind() == "bang_identifier" {
+		if identifier := childByKind(node, "identifier"); identifier != nil {
+			return identifier
+		}
+	}
+	return node
 }
 
 func canonicalExpression(expressions []Expression, id int, fallback *Expression) *Expression {

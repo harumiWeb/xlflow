@@ -822,6 +822,50 @@ End Sub
 	}
 }
 
+func TestReDimIdentifierTypeCharacterUsesBangIdentifierName(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Bang.bas"}, []byte(`Public Sub Run()
+  Dim values!
+  values = 1
+  ReDim values!(10)
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Parse.HasError || doc.Parse.HasMissing {
+		t.Fatalf("identifier type character should not produce parser recovery: %+v", doc.Parse)
+	}
+	if len(doc.Procedures) != 1 {
+		t.Fatalf("procedures = %#v", doc.Procedures)
+	}
+	if len(doc.Procedures[0].Declarations) != 1 || doc.Procedures[0].Declarations[0].Name != "values" {
+		t.Fatalf("identifier type-character declaration = %#v", doc.Procedures[0].Declarations)
+	}
+	if len(doc.Procedures[0].Accesses) != 2 {
+		t.Fatalf("identifier type-character accesses = %#v", doc.Procedures[0].Accesses)
+	}
+	for _, access := range doc.Procedures[0].Accesses {
+		if access.Name != "values" || access.Mode != AccessWrite {
+			t.Fatalf("identifier type-character access = %#v", access)
+		}
+	}
+	var redim *Statement
+	for i := range doc.Procedures[0].Statements {
+		statement := &doc.Procedures[0].Statements[i]
+		if statement.Kind == StatementReDim {
+			redim = statement
+			break
+		}
+	}
+	if redim == nil || redim.Target == nil {
+		t.Fatalf("ReDim target = %#v", redim)
+	}
+	if redim.TargetID == 0 || redim.Target.Kind != ExpressionIdentifier || redim.Target.SyntaxKind != "identifier" || redim.Target.Text != "values" {
+		t.Fatalf("ReDim target = %#v", redim.Target)
+	}
+}
+
 func TestProcedureReturnValueShapeRetainsArraySyntax(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Returns.bas"}, []byte(`Option Explicit
@@ -1051,6 +1095,34 @@ End Sub
 		expression := doc.Procedures[1].Expressions[expressionID-1]
 		if expression.Text != want || !expression.Recovered {
 			t.Fatalf("recovered argument %d = %+v, want %q", index, expression, want)
+		}
+	}
+}
+
+func TestUnparenthesizedCallPreservesParsedOmittedArgumentSlots(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+    SetDescriptorWithGap 1, , descriptor
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 1 || len(doc.Procedures[0].Calls) != 1 {
+		t.Fatalf("parsed unparenthesized call was not captured: %+v", doc.Procedures)
+	}
+	call := doc.Procedures[0].Calls[0]
+	if call.Arguments.Count != 3 || len(call.Arguments.ExpressionIDs) != 3 {
+		t.Fatalf("parsed call arguments = %+v, want three positional slots", call.Arguments)
+	}
+	if call.Arguments.ExpressionIDs[0] == 0 || call.Arguments.ExpressionIDs[1] != 0 || call.Arguments.ExpressionIDs[2] == 0 {
+		t.Fatalf("parsed omitted argument slot was not preserved: %+v", call.Arguments)
+	}
+	for index, want := range []string{"1", "descriptor"} {
+		expressionID := call.Arguments.ExpressionIDs[[]int{0, 2}[index]]
+		expression := doc.Procedures[0].Expressions[expressionID-1]
+		if expression.Text != want {
+			t.Fatalf("parsed argument %d = %+v, want %q", index, expression, want)
 		}
 	}
 }

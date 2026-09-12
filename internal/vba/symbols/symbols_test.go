@@ -72,6 +72,38 @@ End Function
 	assertNoSymbol(t, file.Symbols, "Start")
 }
 
+func TestInspectNormalizesBangIdentifierDeclarationNames(t *testing.T) {
+	file, err := InspectSource(SourceOptions{
+		RootDir: t.TempDir(), Path: "Main.bas", ModuleKind: "standard", IncludePrivate: true,
+	}, []byte(`Attribute VB_Name = "Main"
+Option Explicit
+Private moduleValue!
+Public Function ProcedureValue!() As Single
+End Function
+Public Sub Run(moduleValue!, ProcedureValue!)
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Parse.HasError || file.Parse.HasMissing {
+		t.Fatalf("identifier type characters should not produce parser recovery: %+v", file.Parse)
+	}
+	assertSymbol(t, file.Symbols, "moduleValue", "module_variable")
+	assertSymbol(t, file.Symbols, "ProcedureValue", "function")
+	run := assertSymbol(t, file.Symbols, "Run", "sub")
+	seen := map[string]bool{}
+	for _, symbol := range file.Symbols {
+		if symbol.Kind == "parameter" && symbol.Parent == run.Name {
+			seen[symbol.Name] = true
+		}
+	}
+	if !seen["moduleValue"] || !seen["ProcedureValue"] {
+		t.Fatalf("parameter declaration names were not normalized: %+v", file.Symbols)
+	}
+	assertNoSymbol(t, file.Symbols, "ProcedureValue!")
+}
+
 func TestInspectExtractsRepresentativeStandardModuleSymbols(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()

@@ -3,7 +3,6 @@ package ast
 import (
 	"bytes"
 	"regexp"
-	"strings"
 
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -11,8 +10,6 @@ import (
 var declarationLinePrefix = regexp.MustCompile(`(?i)^[\t ]*(?:Dim|ReDim)\b`)
 
 var declarationKeywordAfterComma = regexp.MustCompile(`(?i),[\t ]*((?:Dim|ReDim)\b)`)
-
-var declarationWithTypeCharacter = regexp.MustCompile(`(?i)^\s*(?:Dim|ReDim|Static|Public|Private|Friend|Const)\b`)
 
 var optionalNumericDefault = regexp.MustCompile(`(?i)\bOptional\b[^\r\n=]*=[\t ]*([+-]?[\t ]*(?:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|&H[0-9A-F]+|&O[0-7]+)[%&!#@^]?)`)
 
@@ -25,47 +22,6 @@ func IsDeclarationKeywordRecovery(root *tree_sitter.Node, source []byte) bool {
 		return false
 	}
 	spans := declarationKeywordRecoverySpans(source)
-	if len(spans) == 0 {
-		return false
-	}
-	return recoveryNodesOverlapSpans(root, spans)
-}
-
-// IsIdentifierTypeCharacterRecovery recognizes the v0.12.0 CST shape for a
-// legal declaration whose Single (!) suffix is recovered as an error node.
-// The source-level suffix check is deliberately tied to a variable declarator
-// so an unrelated bang expression cannot suppress parser diagnostics.
-func IsIdentifierTypeCharacterRecovery(root *tree_sitter.Node, source []byte) bool {
-	if root == nil || (!root.HasError() && !HasMissing(root)) {
-		return false
-	}
-	spans := make([]byteSpan, 0)
-	sourceLines := strings.Split(string(source), "\n")
-	Walk(root, func(node *tree_sitter.Node) bool {
-		if node.Kind() != "variable_declarator" {
-			return true
-		}
-		end := int(node.EndByte())
-		if end >= 0 && end < len(source) && source[end] == '!' {
-			lineNo := NodeRange(node).StartLine
-			if lineNo < 1 || lineNo > len(sourceLines) || !declarationWithTypeCharacter.MatchString(strings.TrimSuffix(sourceLines[lineNo-1], "\r")) {
-				return true
-			}
-			spanEnd := end + 1
-			// In a multi-declarator line, v0.12.0 attaches the recovery ERROR
-			// to the comma immediately after ! instead of to the suffix itself.
-			// Include only that declaration delimiter, not arbitrary trailing
-			// syntax on the same line.
-			for spanEnd < len(source) && (source[spanEnd] == ' ' || source[spanEnd] == '\t') {
-				spanEnd++
-			}
-			if spanEnd < len(source) && source[spanEnd] == ',' {
-				spanEnd++
-			}
-			spans = append(spans, byteSpan{start: end, end: spanEnd})
-		}
-		return true
-	})
 	if len(spans) == 0 {
 		return false
 	}

@@ -90,9 +90,9 @@ func (b *documentBuilder) build(root *tree_sitter.Node) DocumentIR {
 
 func (b *documentBuilder) procedureSymbol(node *tree_sitter.Node) ProcedureSymbol {
 	header := procedureHeader(node)
-	name := nodeText(childByFieldOrKind(node, "name", "identifier"), b.source)
+	name := cleanIdentifier(nodeText(childByFieldOrKind(node, "name", "identifier"), b.source))
 	if name == "" && header != node {
-		name = nodeText(childByFieldOrKind(header, "name", "identifier"), b.source)
+		name = cleanIdentifier(nodeText(childByFieldOrKind(header, "name", "identifier"), b.source))
 	}
 	kind := procedureKind(node, b.source)
 	qualified := name
@@ -176,7 +176,7 @@ func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
 			}
 		}
 		param := Parameter{
-			Name: nodeText(childByFieldOrKind(child, "name", "identifier"), b.source),
+			Name: cleanIdentifier(nodeText(childByFieldOrKind(child, "name", "identifier"), b.source)),
 			Type: typeText(child, b.source), Passing: passing, PassingExplicit: passingExplicit,
 			Range: vbaast.NodeRange(child), Optional: child.ChildByFieldName("optional_modifier") != nil,
 			ParamArray: child.ChildByFieldName("paramarray_modifier") != nil,
@@ -311,7 +311,7 @@ func (b *documentBuilder) declarations(node *tree_sitter.Node, scope SymbolScope
 		declVisibility := visibilityOfNode(node, b.source)
 		decl := Declaration{
 			ID:   b.takeDeclarationID(),
-			Name: nodeText(childByFieldOrKind(child, "name", "identifier"), b.source),
+			Name: cleanIdentifier(nodeText(childByFieldOrKind(child, "name", "identifier"), b.source)),
 			Type: typeText(child, b.source), Scope: declarationScope(scope, declVisibility), Visibility: declVisibility,
 			Kind: kind, IsArray: b.isArrayDeclarator(child), IsConst: kind == "const", Range: vbaast.NodeRange(child),
 			Recovered: recovered(child),
@@ -411,7 +411,7 @@ func valueShapeForDeclaration(decl Declaration, text string) ValueShapeKind {
 }
 
 func (b *documentBuilder) simpleDeclaration(node *tree_sitter.Node, scope SymbolScope) (Declaration, bool) {
-	name := nodeText(childByFieldOrKind(node, "name", "identifier"), b.source)
+	name := cleanIdentifier(nodeText(childByFieldOrKind(node, "name", "identifier"), b.source))
 	if name == "" {
 		return Declaration{}, false
 	}
@@ -691,7 +691,7 @@ func isNonExecutableStatement(kind string) bool {
 func expressionKind(kind string) ExpressionKind {
 	lower := strings.ToLower(kind)
 	switch {
-	case lower == "identifier":
+	case lower == "identifier" || lower == "bang_identifier":
 		return ExpressionIdentifier
 	case strings.HasSuffix(lower, "_literal"):
 		return ExpressionLiteral
@@ -904,7 +904,7 @@ func childByKind(node *tree_sitter.Node, kind string) *tree_sitter.Node {
 	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
-		if child != nil && child.Kind() == kind {
+		if child != nil && (child.Kind() == kind || kind == "identifier" && child.Kind() == "bang_identifier") {
 			return child
 		}
 	}
@@ -1112,6 +1112,9 @@ func argumentsFromCallExpression(node *tree_sitter.Node, source []byte) Argument
 		if child == nil || sameNode(child, fn) {
 			continue
 		}
+		if isArgumentContainerNode(child) {
+			return argumentsFromArgumentList(child, source)
+		}
 		out.Count++
 		if child.Kind() == "named_argument" {
 			out.Named = append(out.Named, namedArgument(child, source))
@@ -1122,6 +1125,17 @@ func argumentsFromCallExpression(node *tree_sitter.Node, source []byte) Argument
 
 func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments {
 	out := Arguments{Named: []NamedArgument{}}
+	if node.Kind() == "unparenthesized_argument_list" {
+		text := node.Utf8Text(source)
+		out.Count = len(recoveredArgumentSegments(text, 0, len(text)))
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			child := node.NamedChild(i)
+			if isSemanticArgumentNode(child) && child.Kind() == "named_argument" {
+				out.Named = append(out.Named, namedArgument(child, source))
+			}
+		}
+		return out
+	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if !isSemanticArgumentNode(child) {
@@ -1135,12 +1149,59 @@ func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments 
 	return out
 }
 
+func argumentNodesFromList(node *tree_sitter.Node, source []byte) []*tree_sitter.Node {
+	if node == nil {
+		return nil
+	}
+	children := make([]*tree_sitter.Node, 0, node.NamedChildCount())
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if isSemanticArgumentNode(child) {
+			children = append(children, child)
+		}
+	}
+	if node.Kind() != "unparenthesized_argument_list" {
+		return children
+	}
+	text := node.Utf8Text(source)
+	segments := recoveredArgumentSegments(text, 0, len(text))
+	if len(segments) == 0 {
+		return children
+	}
+	mapped := make([]*tree_sitter.Node, 0, len(segments))
+	childIndex := 0
+	for _, segment := range segments {
+		if recoveredArgumentSegmentOmitted(text, segment) {
+			mapped = append(mapped, nil)
+			continue
+		}
+		slot := vbaast.Range{StartByte: int(node.StartByte()) + segment.start, EndByte: int(node.StartByte()) + segment.end}
+		if childIndex >= len(children) || !argumentNodeOverlapsRange(children[childIndex], slot) {
+			return children
+		}
+		mapped = append(mapped, children[childIndex])
+		childIndex++
+	}
+	if childIndex != len(children) {
+		return children
+	}
+	return mapped
+}
+
+func argumentNodeOverlapsRange(node *tree_sitter.Node, slot vbaast.Range) bool {
+	if node == nil || slot.EndByte <= slot.StartByte {
+		return false
+	}
+	rng := vbaast.NodeRange(node)
+	return rng.StartByte < slot.EndByte && rng.EndByte > slot.StartByte
+}
+
 func isSemanticArgumentNode(node *tree_sitter.Node) bool {
 	return node != nil && node.Kind() != "line_continuation" && node.Kind() != "char_position"
 }
 
 func isArgumentContainerNode(node *tree_sitter.Node) bool {
-	return node != nil && (node.Kind() == "argument_list" || node.Kind() == "output_list")
+	return node != nil && (node.Kind() == "argument_list" || node.Kind() == "output_list" || node.Kind() == "unparenthesized_argument_list")
 }
 
 func namedArgument(node *tree_sitter.Node, source []byte) NamedArgument {

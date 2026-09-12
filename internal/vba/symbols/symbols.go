@@ -1102,10 +1102,10 @@ func moduleMetadata(path string, source []byte) (string, []Attribute) {
 
 func nodeName(node *tree_sitter.Node, source []byte) string {
 	if name := node.ChildByFieldName("name"); name != nil {
-		return name.Utf8Text(source)
+		return normalizeIdentifierNameNode(name, source)
 	}
 	if name := firstNamedChildKind(node, "identifier"); name != nil {
-		return name.Utf8Text(source)
+		return normalizeIdentifierNameNode(name, source)
 	}
 	if name := firstNamedChildKind(node, "line_number_literal"); name != nil {
 		return name.Utf8Text(source)
@@ -1113,10 +1113,21 @@ func nodeName(node *tree_sitter.Node, source []byte) string {
 	return ""
 }
 
+func normalizeIdentifierNameNode(node *tree_sitter.Node, source []byte) string {
+	if node == nil {
+		return ""
+	}
+	text := node.Utf8Text(source)
+	if node.Kind() == "bang_identifier" {
+		return strings.TrimRight(text, "!")
+	}
+	return text
+}
+
 func firstNamedChildKind(node *tree_sitter.Node, kind string) *tree_sitter.Node {
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
-		if child != nil && child.Kind() == kind {
+		if child != nil && (child.Kind() == kind || kind == "identifier" && child.Kind() == "bang_identifier") {
 			return child
 		}
 	}

@@ -825,7 +825,7 @@ func argumentsFromCallNode(callNode, target *tree_sitter.Node, source []byte) Ar
 		if child == nil || sameNode(child, target) {
 			continue
 		}
-		if isSemanticArgumentNode(child) && (child.Kind() == "argument_list" || child.Kind() == "output_list") {
+		if isArgumentContainerNode(child) {
 			return argumentsFromArgumentList(child, source)
 		}
 	}
@@ -842,6 +842,9 @@ func argumentsFromCallExpression(node *tree_sitter.Node, source []byte) Argument
 		child := node.NamedChild(i)
 		if child == nil || sameNode(child, fn) {
 			continue
+		}
+		if isArgumentContainerNode(child) {
+			return argumentsFromArgumentList(child, source)
 		}
 		args.Count++
 		if child.Kind() == "named_argument" {
@@ -865,12 +868,17 @@ func childByFieldNameAny(node *tree_sitter.Node, names ...string) *tree_sitter.N
 
 func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments {
 	args := Arguments{Named: []NamedArgument{}}
+	if node.Kind() == "unparenthesized_argument_list" {
+		args.Count = countUnparenthesizedArguments(node.Utf8Text(source))
+	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if !isSemanticArgumentNode(child) {
 			continue
 		}
-		args.Count++
+		if node.Kind() != "unparenthesized_argument_list" {
+			args.Count++
+		}
 		if child.Kind() == "named_argument" {
 			args.Named = append(args.Named, namedArgument(child, source))
 		}
@@ -880,6 +888,57 @@ func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments 
 
 func isSemanticArgumentNode(node *tree_sitter.Node) bool {
 	return node != nil && node.Kind() != "line_continuation" && node.Kind() != "char_position"
+}
+
+func isArgumentContainerNode(node *tree_sitter.Node) bool {
+	return node != nil && (node.Kind() == "argument_list" || node.Kind() == "output_list" || node.Kind() == "unparenthesized_argument_list")
+}
+
+func countUnparenthesizedArguments(text string) int {
+	if strings.TrimSpace(text) == "" {
+		return 0
+	}
+	count := 1
+	depth := 0
+	inString := false
+	inComment := false
+	for position := 0; position < len(text); position++ {
+		character := text[position]
+		if inComment {
+			if character == '\n' {
+				inComment = false
+			}
+			continue
+		}
+		if character == '"' {
+			if inString && position+1 < len(text) && text[position+1] == '"' {
+				position++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if !inString && character == '\'' {
+			inComment = true
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch character {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func namedArgument(node *tree_sitter.Node, source []byte) NamedArgument {
