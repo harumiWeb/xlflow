@@ -77,6 +77,10 @@ type Symbol struct {
 	Parameters    []Parameter                      `json:"parameters,omitempty"`
 	Documentation *doccomments.SymbolDocumentation `json:"documentation,omitempty"`
 	DocStartLine  int                              `json:"docStartLine,omitempty"`
+	// ConditionalBranches is internal resolver metadata. The JSON symbol
+	// contract intentionally remains unchanged; full procedure IR retains the
+	// exact branch details when semantic analysis is available.
+	ConditionalBranches []procedureir.ConditionalBranch `json:"-"`
 }
 
 type Attribute struct {
@@ -120,18 +124,19 @@ type SourceOptions struct {
 }
 
 type extractor struct {
-	ctx         context.Context
-	err         error
-	visited     uint64
-	opts        Options
-	rootDir     string
-	source      []byte
-	sourceLines []string
-	file        string
-	moduleName  string
-	moduleKind  string
-	attrs       []Attribute
-	symbols     []Symbol
+	ctx              context.Context
+	err              error
+	visited          uint64
+	opts             Options
+	rootDir          string
+	source           []byte
+	sourceLines      []string
+	conditionalLines map[int]bool
+	file             string
+	moduleName       string
+	moduleKind       string
+	attrs            []Attribute
+	symbols          []Symbol
 }
 
 var attrRe = regexp.MustCompile(`(?i)^\s*Attribute\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$`)
@@ -197,15 +202,16 @@ func InspectContext(ctx context.Context, opts Options) (*Result, error) {
 			continue
 		}
 		ext := extractor{
-			ctx:         ctx,
-			opts:        opts,
-			rootDir:     rootDir,
-			source:      parsed.Source,
-			sourceLines: doccomments.NormalizedLines(string(parsed.Source)),
-			file:        rel,
-			moduleName:  moduleName,
-			moduleKind:  file.moduleKind,
-			attrs:       attrs,
+			ctx:              ctx,
+			opts:             opts,
+			rootDir:          rootDir,
+			source:           parsed.Source,
+			sourceLines:      doccomments.NormalizedLines(string(parsed.Source)),
+			conditionalLines: conditionalSourceLines(parsed.Source),
+			file:             rel,
+			moduleName:       moduleName,
+			moduleKind:       file.moduleKind,
+			attrs:            attrs,
 		}
 		fileSymbols := ext.extract(parsed.Root)
 		result.Files = append(result.Files, FileResult{
@@ -432,13 +438,14 @@ func InspectParsedContext(ctx context.Context, opts SourceOptions, doc *vbaast.P
 				IncludeLabels:   opts.IncludeLabels,
 				DeclarationOnly: opts.DeclarationOnly,
 			},
-			rootDir:     rootDir,
-			source:      view.Source,
-			sourceLines: doccomments.NormalizedLines(string(view.Source)),
-			file:        rel,
-			moduleName:  moduleName,
-			moduleKind:  moduleKind,
-			attrs:       attrs,
+			rootDir:          rootDir,
+			source:           view.Source,
+			sourceLines:      doccomments.NormalizedLines(string(view.Source)),
+			conditionalLines: conditionalSourceLines(view.Source),
+			file:             rel,
+			moduleName:       moduleName,
+			moduleKind:       moduleKind,
+			attrs:            attrs,
 		}
 		symbols := ext.extract(view.Root)
 		if ext.err != nil {
@@ -808,6 +815,63 @@ func isPreprocessorNode(kind string) bool {
 	return strings.HasPrefix(kind, "preprocessor_")
 }
 
+// conditionalSourceLines identifies declaration lines whose active branch is
+// controlled by conditional compilation. The syntax extractor can encounter
+// the concrete declaration below a preprocessor wrapper, so the wrapper's
+// branch metadata is not available at that point. This conservative marker is
+// used only to keep project resolution fail-open; semantic procedure IR still
+// carries the exact branch structure.
+func conditionalSourceLines(source []byte) map[int]bool {
+	var active map[int]bool
+	depth := 0
+	for lineNumber, line := range doccomments.NormalizedLines(string(source)) {
+		if depth > 0 {
+			if active == nil {
+				active = make(map[int]bool)
+			}
+			active[lineNumber+1] = true
+		}
+		lower := strings.ToLower(strings.TrimSpace(stripSourceLineComment(line)))
+		switch {
+		case strings.HasPrefix(lower, "#if "):
+			depth++
+		case strings.HasPrefix(lower, "#elseif ") || lower == "#else":
+			// The enclosing conditional remains active for every branch.
+		case lower == "#end if" || lower == "#endif":
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return active
+}
+
+func stripSourceLineComment(line string) string {
+	inString := false
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			if inString && i+1 < len(line) && line[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '\'':
+			if !inString {
+				return line[:i]
+			}
+		}
+	}
+	return line
+}
+
+func (e *extractor) conditionalBranchesAt(line int) []procedureir.ConditionalBranch {
+	if e == nil || !e.conditionalLines[line] {
+		return nil
+	}
+	return []procedureir.ConditionalBranch{{Group: fmt.Sprintf("source-line:%d", line), Branch: 0}}
+}
+
 func (e *extractor) procedureSymbol(node *tree_sitter.Node) Symbol {
 	kind := strings.TrimSuffix(node.Kind(), "_declaration")
 	switch node.Kind() {
@@ -1002,19 +1066,20 @@ func (e *extractor) symbolFromNode(node *tree_sitter.Node, kind, parent string) 
 	name := nodeName(node, e.source)
 	sig := firstLine(e.symbolNodeText(node))
 	return Symbol{
-		Name:        name,
-		Kind:        kind,
-		Visibility:  visibilityTextMode(node, e.source, e.opts.DeclarationOnly),
-		Module:      e.moduleName,
-		File:        e.file,
-		Parent:      parent,
-		StartLine:   r.StartLine,
-		StartColumn: r.StartColumn,
-		EndLine:     r.EndLine,
-		EndColumn:   r.EndColumn,
-		StartByte:   r.StartByte,
-		EndByte:     r.EndByte,
-		Signature:   sig,
+		Name:                name,
+		Kind:                kind,
+		Visibility:          visibilityTextMode(node, e.source, e.opts.DeclarationOnly),
+		Module:              e.moduleName,
+		File:                e.file,
+		Parent:              parent,
+		StartLine:           r.StartLine,
+		StartColumn:         r.StartColumn,
+		EndLine:             r.EndLine,
+		EndColumn:           r.EndColumn,
+		StartByte:           r.StartByte,
+		EndByte:             r.EndByte,
+		Signature:           sig,
+		ConditionalBranches: e.conditionalBranchesAt(r.StartLine),
 	}
 }
 

@@ -1012,6 +1012,7 @@ func cloneAnalysisSymbols(syms []Symbol) []Symbol {
 	for i, sym := range syms {
 		out[i] = sym
 		out[i].Parameters = append([]Parameter(nil), sym.Parameters...)
+		out[i].ConditionalBranches = append([]procedureir.ConditionalBranch(nil), sym.ConditionalBranches...)
 		out[i].Documentation.ParameterEntries = append(out[i].Documentation.ParameterEntries[:0:0], sym.Documentation.ParameterEntries...)
 		if sym.Documentation.Parameters != nil {
 			out[i].Documentation.Parameters = make(map[string]string, len(sym.Documentation.Parameters))

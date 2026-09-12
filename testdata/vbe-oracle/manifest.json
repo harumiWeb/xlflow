@@ -202,6 +202,14 @@
       "path": "cases/issue590-undeclared-raiseevent-valid/case.json"
     },
     {
+      "id": "issue786-local-procedure-shadow-valid",
+      "path": "cases/issue786-local-procedure-shadow-valid/case.json"
+    },
+    {
+      "id": "issue786-external-standard-missing-argument",
+      "path": "cases/issue786-external-standard-missing-argument/case.json"
+    },
+    {
       "id": "issue591-duplicate-label",
       "path": "cases/issue591-duplicate-label/case.json"
     },

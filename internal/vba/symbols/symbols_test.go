@@ -311,7 +311,9 @@ Private mTimerId As LongPtr
 #Else
 Private Declare Function SetTimer Lib "user32" () As Long
 Private mTimerId As Long
-#End If
+Private Sub Shadow()
+End Sub
+#End If ' keep the following declarations unconditional
 
 Public Sub Run()
 End Sub
@@ -327,6 +329,14 @@ End Sub
 	file := result.Files[0]
 	assertSymbol(t, file.Symbols, "SetTimer", "declare_function")
 	assertSymbol(t, file.Symbols, "mTimerId", "module_variable")
+	shadow := assertSymbol(t, file.Symbols, "Shadow", "sub")
+	if len(shadow.ConditionalBranches) == 0 {
+		t.Fatalf("conditional procedure lacks resolver metadata: %+v", shadow)
+	}
+	run := assertSymbol(t, file.Symbols, "Run", "sub")
+	if len(run.ConditionalBranches) != 0 {
+		t.Fatalf("trailing comment on #End If kept later procedure conditional: %+v", run)
+	}
 }
 
 func TestInspectExtractsClassFieldsPropertiesAndImplements(t *testing.T) {

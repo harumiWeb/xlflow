@@ -161,17 +161,18 @@ type Candidate struct {
 // ResolverSymbol is the protocol-neutral symbol shape needed to resolve call
 // sites. Line is the 1-based declaration line reported in resolved candidates.
 type ResolverSymbol struct {
-	Name       string
-	Type       string
-	Module     string
-	ModuleKind string
-	Kind       string
-	Visibility string
-	File       string
-	Line       int
-	Parent     string
-	Recovered  bool
-	IsArray    bool
+	Name                string
+	Type                string
+	Module              string
+	ModuleKind          string
+	Kind                string
+	Visibility          string
+	File                string
+	Line                int
+	Parent              string
+	Recovered           bool
+	ConditionalBranches []procedureir.ConditionalBranch
+	IsArray             bool
 }
 
 type extractor struct {
@@ -496,16 +497,17 @@ func NewResolver(projectSymbols []symbols.Symbol) Resolver {
 	resolverSymbols := make([]ResolverSymbol, 0, len(projectSymbols))
 	for _, sym := range projectSymbols {
 		resolverSymbols = append(resolverSymbols, ResolverSymbol{
-			Name:       sym.Name,
-			Type:       sym.ReturnType,
-			Module:     sym.Module,
-			ModuleKind: sym.ModuleKind,
-			Kind:       sym.Kind,
-			Visibility: sym.Visibility,
-			File:       sym.File,
-			Line:       sym.StartLine,
-			Parent:     sym.Parent,
-			IsArray:    sym.IsArray,
+			Name:                sym.Name,
+			Type:                sym.ReturnType,
+			Module:              sym.Module,
+			ModuleKind:          sym.ModuleKind,
+			Kind:                sym.Kind,
+			Visibility:          sym.Visibility,
+			File:                sym.File,
+			Line:                sym.StartLine,
+			Parent:              sym.Parent,
+			ConditionalBranches: append([]procedureir.ConditionalBranch(nil), sym.ConditionalBranches...),
+			IsArray:             sym.IsArray,
 		})
 	}
 	return NewResolverFromSymbols(resolverSymbols)
@@ -517,17 +519,18 @@ func NewResolverFromSymbols(projectSymbols []ResolverSymbol) Resolver {
 	irSymbols := make([]procedureir.ResolverSymbol, 0, len(projectSymbols))
 	for _, sym := range projectSymbols {
 		irSymbols = append(irSymbols, procedureir.ResolverSymbol{
-			Name:       sym.Name,
-			Type:       sym.Type,
-			Module:     sym.Module,
-			ModuleKind: sym.ModuleKind,
-			Kind:       sym.Kind,
-			Visibility: sym.Visibility,
-			File:       sym.File,
-			Line:       sym.Line,
-			Parent:     sym.Parent,
-			Recovered:  sym.Recovered,
-			IsArray:    sym.IsArray,
+			Name:                sym.Name,
+			Type:                sym.Type,
+			Module:              sym.Module,
+			ModuleKind:          sym.ModuleKind,
+			Kind:                sym.Kind,
+			Visibility:          sym.Visibility,
+			File:                sym.File,
+			Line:                sym.Line,
+			Parent:              sym.Parent,
+			Recovered:           sym.Recovered,
+			ConditionalBranches: append([]procedureir.ConditionalBranch(nil), sym.ConditionalBranches...),
+			IsArray:             sym.IsArray,
 		})
 	}
 	return Resolver{symbols: procedureir.NewResolver(irSymbols)}

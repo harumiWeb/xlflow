@@ -436,6 +436,7 @@ func collectProcedureMetrics(ctx context.Context, root string, cfg config.Config
 				Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility,
 				File: item.relative, Line: procedure.Symbol.DeclarationRange.StartLine,
 				IsArray: procedure.Symbol.IsArray, ValueShape: procedure.Symbol.ValueShape,
+				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), procedure.Symbol.ConditionalBranches...),
 			})
 		}
 	}

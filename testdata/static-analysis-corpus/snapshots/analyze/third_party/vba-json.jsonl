@@ -22,5 +22,4 @@
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":590,"column":17}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":653,"column":43}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":659,"column":43}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":926,"column":20}
 {"project":"third_party/vba-json","file":"specs/Specs.bas","surface":"analyze","code":"VBA214","severity":"warning","line":6,"column":0}

@@ -1263,6 +1263,44 @@ End Sub
 	}
 }
 
+func TestArgumentDiagnosticsPreferCurrentClassProcedureOverStandardModule(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "PrintMsgOverrideRepro.cls"),
+		ModuleKind: "class",
+		Source: `VERSION 1.0 CLASS
+Attribute VB_Name = "PrintMsgOverrideRepro"
+Option Explicit
+
+Private Sub printMsg(ByVal level As Long, ByVal text As String, ByVal fromProcedure As String, Optional ByVal isHeader As Boolean = False)
+End Sub
+
+Public Sub CallIt()
+    printMsg 1, "hello", "CallIt"
+End Sub
+`,
+	}
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "printMsg") {
+			return nil, nil
+		}
+		return []Symbol{
+			{
+				Name: "printMsg", Kind: "sub", Module: "PrintMsgOverrideRepro", ModuleKind: "class", Visibility: "Private", File: doc.Path,
+				Parameters: []Parameter{{Name: "level"}, {Name: "text"}, {Name: "fromProcedure"}, {Name: "isHeader", Optional: true}},
+			},
+			{
+				Name: "printMsg", Kind: "sub", Module: "CDPHelpers", ModuleKind: "standard", Visibility: "Public", File: "CDPHelpers.bas",
+				Parameters: []Parameter{{Name: "level"}, {Name: "text"}, {Name: "fromProcedure"}, {Name: "logFileExtension"}},
+			},
+		}, nil
+	}
+
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(got) != 0 {
+		t.Fatalf("same-class procedure was resolved as the standard-module procedure: %+v", got)
+	}
+}
+
 func TestArgumentDiagnosticsFailClosedForConditionalProjectOverloads(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
@@ -1284,6 +1322,117 @@ End Sub
 	}
 	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(got) != 0 {
 		t.Fatalf("conditional project overload produced VB045: %+v", got)
+	}
+}
+
+func TestArgumentDiagnosticsFailClosedForConditionalLocalShadowOfExternalProcedure(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "PrintMsgOverrideRepro.cls"),
+		ModuleKind: "class",
+		Source: `Option Explicit
+#If Win64 Then
+Private Sub printMsg(ByVal first As Long, ByVal second As Long, ByVal third As Long, ByVal fourth As Long)
+End Sub
+#End If
+
+Public Sub CallIt()
+    printMsg 1, 2, 3
+End Sub
+`,
+	}
+	local := Symbol{
+		Name: "printMsg", Kind: "sub", Module: "PrintMsgOverrideRepro", ModuleKind: "class", Visibility: "Private", File: doc.Path,
+		Range:      Range{Start: Position{Line: lineIndex(doc.Source, "Private Sub printMsg")}},
+		Parameters: []Parameter{{Name: "first"}, {Name: "second"}, {Name: "third"}, {Name: "fourth"}},
+	}
+	analyzer.DocumentSymbolsFunc = func(Document, DocumentSymbolLoader) ([]Symbol, error) {
+		return []Symbol{local}, nil
+	}
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "printMsg") {
+			return nil, nil
+		}
+		return []Symbol{
+			local,
+			{Name: "printMsg", Kind: "sub", Module: "CDPHelpers", ModuleKind: "standard", Visibility: "Public", File: "CDPHelpers.bas", Parameters: []Parameter{{Name: "first"}, {Name: "second"}, {Name: "third"}}},
+		}, nil
+	}
+
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(got) != 0 {
+		t.Fatalf("conditional local procedure must not make a signature claim: %+v", got)
+	}
+}
+
+func TestArgumentDiagnosticsFailClosedForConditionalLocalProcedureWithoutExternalCandidate(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+#If Win64 Then
+Private Sub TakeValue(ByVal first As Long, ByVal second As Long, ByVal third As Long, ByVal fourth As Long)
+End Sub
+#End If
+
+Public Sub Run()
+    TakeValue 1, 2, 3
+End Sub
+`,
+	}
+	local := Symbol{
+		Name: "TakeValue", Kind: "sub", Module: "Main", ModuleKind: "standard", Visibility: "Private", File: doc.Path,
+		Range:      Range{Start: Position{Line: lineIndex(doc.Source, "Private Sub TakeValue")}},
+		Parameters: []Parameter{{Name: "first"}, {Name: "second"}, {Name: "third"}, {Name: "fourth"}},
+	}
+	analyzer.DocumentSymbolsFunc = func(Document, DocumentSymbolLoader) ([]Symbol, error) {
+		return []Symbol{local}, nil
+	}
+
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(got) != 0 {
+		t.Fatalf("conditional local procedure without an external candidate must not make a signature claim: %+v", got)
+	}
+}
+
+func TestArgumentDiagnosticsFailClosedForConditionalExternalProcedures(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    printMsg 1, 2, 3
+    Helpers.printMsg 1, 2, 3
+End Sub
+`,
+	}
+	external := Symbol{
+		Name: "printMsg", Kind: "sub", Module: "Helpers", ModuleKind: "standard", Visibility: "Public", File: "Helpers.bas",
+		Parameters:          []Parameter{{Name: "first"}, {Name: "second"}, {Name: "third"}, {Name: "fourth"}},
+		ConditionalBranches: []procedureir.ConditionalBranch{{Group: "platform", Branch: 0}},
+	}
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "printMsg") {
+			return nil, nil
+		}
+		return []Symbol{external}, nil
+	}
+
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(got) != 0 {
+		t.Fatalf("conditional external procedures must not make a qualified or unqualified signature claim: %+v", got)
+	}
+}
+
+func TestConditionalCompilationLinesIgnoreTrailingComments(t *testing.T) {
+	t.Parallel()
+	source := `#If Win64 Then
+Private Sub Shadow()
+End Sub
+#End If ' keep following code unconditional
+Public Sub Run()
+End Sub
+`
+	lines := conditionalCompilationLines(source)
+	if lines[lineIndex(source, "Public Sub Run")] {
+		t.Fatalf("procedure after commented #End If was marked conditional: %#v", lines)
 	}
 }
 
@@ -1762,6 +1911,104 @@ End Sub
 	diagnostics := analyzer.ByRefArgumentDiagnostics(doc)
 	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "requires Long") {
 		t.Fatalf("current-module ByRef diagnostic = %+v", diagnostics)
+	}
+}
+
+func TestByRefArgumentDiagnosticsFailClosedForConditionalLocalShadowOfExternalProcedure(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+#If Win64 Then
+Private Sub TakeValue(ByRef value As Long)
+End Sub
+#End If
+
+Public Sub Run()
+    Dim text As String
+    TakeValue text
+End Sub
+`,
+	}
+	local := Symbol{
+		Name: "TakeValue", Kind: "sub", Module: "Main", ModuleKind: "standard", Visibility: "Private", File: doc.Path,
+		Range:      Range{Start: Position{Line: lineIndex(doc.Source, "Private Sub TakeValue")}},
+		Parameters: []Parameter{{Name: "value", Type: "Long", Passing: "ByRef"}},
+	}
+	analyzer.DocumentSymbolsFunc = func(Document, DocumentSymbolLoader) ([]Symbol, error) {
+		return []Symbol{local}, nil
+	}
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "TakeValue") {
+			return nil, nil
+		}
+		return []Symbol{
+			local,
+			{Name: "TakeValue", Kind: "sub", Module: "Helpers", ModuleKind: "standard", Visibility: "Public", File: "Helpers.bas", Parameters: []Parameter{{Name: "value", Type: "String", Passing: "ByRef"}}},
+		}, nil
+	}
+
+	if got := analyzer.ByRefArgumentDiagnostics(doc); len(got) != 0 {
+		t.Fatalf("conditional local procedure must not make a ByRef claim: %+v", got)
+	}
+}
+
+func TestByRefArgumentDiagnosticsFailClosedForConditionalLocalProcedureWithoutExternalCandidate(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+#If Win64 Then
+Private Sub TakeValue(ByRef value As Long)
+End Sub
+#End If
+
+Public Sub Run()
+    Dim text As String
+    TakeValue text
+End Sub
+`,
+	}
+	local := Symbol{
+		Name: "TakeValue", Kind: "sub", Module: "Main", ModuleKind: "standard", Visibility: "Private", File: doc.Path,
+		Range:      Range{Start: Position{Line: lineIndex(doc.Source, "Private Sub TakeValue")}},
+		Parameters: []Parameter{{Name: "value", Type: "Long", Passing: "ByRef"}},
+	}
+	analyzer.DocumentSymbolsFunc = func(Document, DocumentSymbolLoader) ([]Symbol, error) {
+		return []Symbol{local}, nil
+	}
+
+	if got := analyzer.ByRefArgumentDiagnostics(doc); len(got) != 0 {
+		t.Fatalf("conditional local procedure without an external candidate must not make a ByRef claim: %+v", got)
+	}
+}
+
+func TestByRefArgumentDiagnosticsFailClosedForConditionalExternalProcedures(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim text As String
+    TakeValue text
+    Helpers.TakeValue text
+End Sub
+`,
+	}
+	external := Symbol{
+		Name: "TakeValue", Kind: "sub", Module: "Helpers", ModuleKind: "standard", Visibility: "Public", File: "Helpers.bas",
+		Parameters:          []Parameter{{Name: "value", Type: "Long", Passing: "ByRef"}},
+		ConditionalBranches: []procedureir.ConditionalBranch{{Group: "platform", Branch: 0}},
+	}
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "TakeValue") {
+			return nil, nil
+		}
+		return []Symbol{external}, nil
+	}
+
+	if got := analyzer.ByRefArgumentDiagnostics(doc); len(got) != 0 {
+		t.Fatalf("conditional external procedures must not make a qualified or unqualified ByRef claim: %+v", got)
 	}
 }
 

@@ -206,10 +206,18 @@ Call resolution statuses are:
 
 Candidates use deterministic order and preserve qualified name, kind, file, and
 declaration line needed by the existing `inspect calls` projection. Resolver
-symbols also retain module kind so receiver-less calls cannot bind non-standard
-module procedures across module boundaries. Private procedures are visible only
-from the same module. Resolution does not claim full VBA type inference, COM
-type-library binding, or Excel object-model dispatch.
+symbols also retain module kind so receiver-less calls first select callable
+declarations in the caller's module. A visible `Public` procedure in another
+standard module is only a fallback when the caller's module has no callable of
+that name; multiple same-module candidates remain ambiguous. Receiver-less
+calls cannot bind class, document, or UserForm procedures across module
+boundaries, and Private procedures are visible only from the same module. A
+candidate declared inside conditional compilation is retained as uncertain;
+consumers that require a definite call signature, such as argument-count or
+ByRef validation, fail open even when no external fallback exists because the
+active VBA configuration is not known.
+Resolution does not claim full VBA type inference, COM type-library binding, or
+Excel object-model dispatch.
 
 `Diagnostics` and `DiagnosticsView` share one resolution-diagnostic walker.
 The walker obtains syntax and recovery state from the base IR and obtains

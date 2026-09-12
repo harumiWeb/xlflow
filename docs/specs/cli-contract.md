@@ -1314,9 +1314,12 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB045`: deterministic argument-count, duplicate-name, unknown-name, or
   named/positional binding error rejected by the VBE; it is an error and blocks
   source preflight. Binding uses visible local/project declarations before
-  built-in signatures and fails closed for ambiguous conditional overloads;
-  the batch analyzer may project the same compile-equivalent diagnostic on its
-  `analyze` surface.
+  built-in signatures and fails closed for ambiguous or conditionally compiled
+  call signatures. For an unqualified call, a callable declaration in the
+  current module wins over a same-named Public procedure in another standard
+  module; the latter is used only when no current-module callable exists.
+  Qualified calls retain their explicit receiver. The batch analyzer may
+  project the same compile-equivalent diagnostic on its `analyze` surface.
 - `VB046`: duplicate declaration rejected by the VBE. Declaration names are
   compared case-insensitively within one module, procedure, Enum, or user-defined
   Type scope. Procedure parameters, local/Static variables, and local constants

@@ -2454,8 +2454,9 @@ func (l Linter) resolutionIssuesContextWithResult(ctx context.Context, files []s
 			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
 				Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
 				Visibility: sym.Visibility, File: sym.File, Line: sym.StartLine, Parent: sym.Parent, IsArray: sym.IsArray,
-				IsConst:   procedureir.IsConstKind(sym.Kind),
-				Recovered: strings.EqualFold(sym.Kind, "enum_member") && !typeDBComplete,
+				IsConst:             procedureir.IsConstKind(sym.Kind),
+				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), sym.ConditionalBranches...),
+				Recovered:           strings.EqualFold(sym.Kind, "enum_member") && !typeDBComplete,
 			})
 		}
 	}

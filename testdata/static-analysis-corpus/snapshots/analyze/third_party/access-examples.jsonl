@@ -104,6 +104,7 @@
 {"project":"third_party/access-examples","file":"Form_700_Create_Filelist_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":135,"column":18}
 {"project":"third_party/access-examples","file":"Form_700_Create_Filelist_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":135,"column":18}
 {"project":"third_party/access-examples","file":"Form_700_Create_Filelist_frm.cls","surface":"analyze","code":"VBA202","severity":"warning","line":163,"column":0}
+{"project":"third_party/access-examples","file":"Form_700_Create_Filelist_frm.cls","surface":"analyze","code":"VBA244","severity":"warning","line":181,"column":14}
 {"project":"third_party/access-examples","file":"Form_700_Create_Filelist_frm.cls","surface":"analyze","code":"VBA237","severity":"warning","line":186,"column":0}
 {"project":"third_party/access-examples","file":"Form_700_Create_Filelist_frm.cls","surface":"analyze","code":"VBA204","severity":"warning","line":188,"column":0}
 {"project":"third_party/access-examples","file":"Form_700_Create_Filelist_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":193,"column":18}

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "issue786-external-standard-missing-argument",
+  "description": "Without a current-module declaration, an unqualified call falls back to a Public standard-module procedure and rejects a missing required argument.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    },
+    {
+      "name": "CDPHelpers",
+      "kind": "standard",
+      "path": "CDPHelpers.bas"
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB045"],
+    "negative_controls": ["issue786-local-procedure-shadow-valid"],
+    "expected_diagnostics": [{ "code": "VB045", "severity": "error", "surfaces": ["lsp"] }]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-09-12T00:07:02Z"
+      }
+    ]
+  }
+}
