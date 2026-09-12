@@ -115,3 +115,21 @@ func TestIssue786ConditionalLocalProcedureDoesNotHideExternalFallback(t *testing
 		})
 	}
 }
+
+func TestIssue786SoleConditionalLocalProcedureIsIncomplete(t *testing.T) {
+	t.Parallel()
+	resolver := NewResolver([]ResolverSymbol{
+		{
+			Name: "printMsg", Module: "PrintMsgOverrideRepro", ModuleKind: "class", Kind: "sub", Visibility: "Private",
+			File: "PrintMsgOverrideRepro.cls", ConditionalBranches: []ConditionalBranch{{Group: "issue786", Branch: 0}},
+		},
+	})
+	got := resolver.ResolveCall(CallSite{
+		Module: "PrintMsgOverrideRepro",
+		Caller: ProcedureRef{QualifiedName: "PrintMsgOverrideRepro.CallIt"},
+		Callee: Callee{Text: "printMsg", BaseName: "printMsg", Member: "printMsg"},
+	})
+	if got.Status != ResolutionIncomplete || len(got.Candidates) != 1 || got.Candidates[0].QualifiedName != "PrintMsgOverrideRepro.printMsg" {
+		t.Fatalf("sole conditional local resolution = %#v, want incomplete local candidate", got)
+	}
+}

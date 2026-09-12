@@ -327,7 +327,7 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 		}
 		switch len(matches) {
 		case 1:
-			return CallResolution{Status: ResolutionMatched, Candidates: entriesToCandidates(matches)}
+			return matchedCallResolution(matches)
 		case 0:
 			if r.hostObjectReceiver(receiver) {
 				return CallResolution{Status: ResolutionExternal}
@@ -366,7 +366,7 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 	}
 	switch len(procedures) {
 	case 1:
-		return CallResolution{Status: ResolutionMatched, Candidates: entriesToCandidates(procedures)}
+		return matchedCallResolution(procedures)
 	default:
 		if len(procedures) > 1 {
 			return r.negativeCallResolution(CallResolution{Status: ResolutionAmbiguous, Candidates: entriesToCandidates(procedures)})
@@ -429,6 +429,17 @@ func (r SymbolResolver) negativeCallResolution(result CallResolution, evidence .
 		if result.Status == ResolutionNonCallable || result.Status == ResolutionAmbiguous || result.Status == ResolutionUnresolved {
 			result.Status = ResolutionIncomplete
 		}
+	}
+	return result
+}
+
+// matchedCallResolution keeps a sole candidate available to call-graph and
+// completion consumers, while making conditional or recovered declarations
+// fail open for compile-equivalent diagnostics.
+func matchedCallResolution(candidates []resolverEntry) CallResolution {
+	result := CallResolution{Status: ResolutionMatched, Candidates: entriesToCandidates(candidates)}
+	if hasUncertainEntries(candidates) {
+		result.Status = ResolutionIncomplete
 	}
 	return result
 }
@@ -737,6 +748,10 @@ func preferLocalReceiverlessProcedures(procedures []resolverEntry, callerModule 
 	if hasForeign && hasUncertainEntries(local) {
 		return procedures
 	}
+	// When no foreign candidate exists, retain the local procedure as the only
+	// usable candidate. ResolveCall marks that positive result incomplete below
+	// so callers can use the candidate without treating conditional metadata as
+	// definitive compile-time evidence.
 	return local
 }
 

@@ -412,6 +412,35 @@ End Sub
 	}
 }
 
+func TestInspectExtractsSymbolsInsideWhitespaceSeparatedConditionalBlocks(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	moduleDir := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Attribute VB_Name = \"Main\"\nOption Explicit\n#If\tVBA7\tThen\nPrivate Sub First()\nEnd Sub\n#ElseIf\tWin64\tThen\nPrivate Sub Second()\nEnd Sub\n#End\tIf\nPublic Sub Run()\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(moduleDir, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Inspect(Options{RootDir: dir, Config: cfg, IncludePrivate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := result.Files[0]
+	for _, name := range []string{"First", "Second"} {
+		symbol := assertSymbol(t, file.Symbols, name, "sub")
+		if len(symbol.ConditionalBranches) == 0 {
+			t.Fatalf("whitespace-separated conditional procedure %s lacks resolver metadata: %+v", name, symbol)
+		}
+	}
+	run := assertSymbol(t, file.Symbols, "Run", "sub")
+	if len(run.ConditionalBranches) != 0 {
+		t.Fatalf("procedure after whitespace-separated #End If kept conditional: %+v", run)
+	}
+}
+
 func TestInspectExtractsClassFieldsPropertiesAndImplements(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()

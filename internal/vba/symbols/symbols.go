@@ -823,6 +823,26 @@ func isPreprocessorNode(kind string) bool {
 // branch metadata is not available at that point. This conservative marker is
 // used only to keep project resolution fail-open; semantic procedure IR still
 // carries the exact branch structure.
+func conditionalDirective(line string) string {
+	fields := strings.Fields(strings.ToLower(strings.TrimSpace(line)))
+	if len(fields) == 0 {
+		return ""
+	}
+	switch fields[0] {
+	case "#if", "#elseif", "#endif":
+		return fields[0]
+	case "#else":
+		if len(fields) == 1 {
+			return fields[0]
+		}
+	case "#end":
+		if len(fields) == 2 && fields[1] == "if" {
+			return "#endif"
+		}
+	}
+	return ""
+}
+
 func conditionalSourceLines(source []byte) map[int]bool {
 	var active map[int]bool
 	depth := 0
@@ -833,13 +853,13 @@ func conditionalSourceLines(source []byte) map[int]bool {
 			}
 			active[lineNumber+1] = true
 		}
-		lower := strings.ToLower(strings.TrimSpace(stripSourceLineComment(line)))
-		switch {
-		case strings.HasPrefix(lower, "#if "):
+		directive := conditionalDirective(stripSourceLineComment(line))
+		switch directive {
+		case "#if":
 			depth++
-		case strings.HasPrefix(lower, "#elseif ") || lower == "#else":
+		case "#elseif", "#else":
 			// The enclosing conditional remains active for every branch.
-		case lower == "#end if" || lower == "#endif":
+		case "#endif":
 			if depth > 0 {
 				depth--
 			}

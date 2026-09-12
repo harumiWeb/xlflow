@@ -232,6 +232,26 @@ func (a Analyzer) conditionallyCompiledCallSymbol(doc Document, sym Symbol, cond
 	return len(sym.ConditionalBranches) > 0 || a.conditionallyCompiledCurrentModuleSymbol(doc, sym, conditionalLines)
 }
 
+func conditionalDirective(line string) string {
+	fields := strings.Fields(strings.ToLower(strings.TrimSpace(line)))
+	if len(fields) == 0 {
+		return ""
+	}
+	switch fields[0] {
+	case "#if", "#elseif", "#endif":
+		return fields[0]
+	case "#else":
+		if len(fields) == 1 {
+			return fields[0]
+		}
+	case "#end":
+		if len(fields) == 2 && fields[1] == "if" {
+			return "#endif"
+		}
+	}
+	return ""
+}
+
 func conditionalCompilationLines(source string) map[int]bool {
 	var active map[int]bool
 	depth := 0
@@ -242,13 +262,13 @@ func conditionalCompilationLines(source string) map[int]bool {
 			}
 			active[lineNumber] = true
 		}
-		lower := strings.ToLower(strings.TrimSpace(stripLineComment(line)))
-		switch {
-		case strings.HasPrefix(lower, "#if "):
+		directive := conditionalDirective(stripLineComment(line))
+		switch directive {
+		case "#if":
 			depth++
-		case strings.HasPrefix(lower, "#elseif ") || lower == "#else":
+		case "#elseif", "#else":
 			// The enclosing conditional remains active for every branch.
-		case lower == "#end if" || lower == "#endif":
+		case "#endif":
 			if depth > 0 {
 				depth--
 			}

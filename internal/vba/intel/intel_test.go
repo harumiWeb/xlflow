@@ -1489,6 +1489,20 @@ End Sub
 	}
 }
 
+func TestConditionalCompilationLinesAcceptWhitespaceSeparatedDirectives(t *testing.T) {
+	t.Parallel()
+	source := "#If\tWin64\tThen\n#If VBA7 Then\nPrivate Sub Inner()\nEnd Sub\n#EndIf\n#ElseIf\tMac\tThen\nPrivate Sub Alternate()\nEnd Sub\n#End\tIf\nPublic Sub Run()\nEnd Sub\n"
+	lines := conditionalCompilationLines(source)
+	for _, declaration := range []string{"Private Sub Inner()", "Private Sub Alternate()"} {
+		if !lines[lineIndex(source, declaration)] {
+			t.Fatalf("%s was not marked conditional: %#v", declaration, lines)
+		}
+	}
+	if lines[lineIndex(source, "Public Sub Run()")] {
+		t.Fatalf("procedure after whitespace-separated directives was marked conditional: %#v", lines)
+	}
+}
+
 func TestResolveDocumentExpressionTypeLocalShadowsBuiltinGlobal(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit

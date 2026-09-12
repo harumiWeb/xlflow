@@ -530,6 +530,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdError/stdDebug.cls","surface":"analyze","code":"VBA206","severity":"warning","line":141,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdError/stdDebug.cls","surface":"analyze","code":"VBA206","severity":"warning","line":146,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdError/stdDebug.cls","surface":"analyze","code":"VBA206","severity":"warning","line":151,"column":5}
+{"project":"third_party/std-vba","file":"src/WIP/stdErrorWIP.cls","surface":"analyze","code":"VB045","severity":"error","line":29,"column":21}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA245","severity":"warning","line":16,"column":3}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA224","severity":"warning","line":33,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA224","severity":"warning","line":39,"column":0}
