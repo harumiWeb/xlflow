@@ -271,6 +271,33 @@ End Sub
 	}
 }
 
+func TestExtractParsedPreservesUnparenthesizedOmittedArgumentSlots(t *testing.T) {
+	source := []byte(`Public Sub Run()
+    SetDescriptorWithGap 1, , descriptor
+End Sub
+`)
+	doc, err := vbaast.ParseDocument("Module1.bas", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+
+	got, err := ExtractParsed(SourceOptions{Path: "Module1.bas"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := extractParsedLegacy(SourceOptions{Path: "Module1.bas"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unparenthesized omitted-argument compatibility changed:\nIR=%+v\nlegacy=%+v", got, want)
+	}
+	if len(got.CallSites) != 1 || got.CallSites[0].Arguments.Count != 3 {
+		t.Fatalf("unparenthesized call arguments = %+v, want three positional slots", got.CallSites)
+	}
+}
+
 func TestResolverCanReResolveUnchangedCallSite(t *testing.T) {
 	site := CallSite{
 		File:      "src/modules/Main.bas",

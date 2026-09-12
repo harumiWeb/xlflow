@@ -727,7 +727,9 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 				sym.Kind = "declare_function"
 			}
 		}
-		sym.ReturnType = typeText(node, e.source)
+		if procedureir.ProcedureReturnTypeFromNode(node, e.source) != "" {
+			sym.ReturnType = typeText(node, e.source)
+		}
 		sym.Parameters = parameters(node, e.source)
 		e.attachDocumentation(&sym, "symbol")
 		if e.includeSymbol(sym) {
@@ -897,7 +899,9 @@ func (e *extractor) procedureSymbol(node *tree_sitter.Node) Symbol {
 	sym := e.simpleSymbol(node, kind, "")
 	sym.Signature = declarationHeader(e.symbolNodeText(node))
 	sym.Static = hasField(node, "static_modifier") || hasWord(sym.Signature, "Static")
-	sym.ReturnType = typeText(node, e.source)
+	if procedureir.ProcedureReturnTypeFromNode(node, e.source) != "" {
+		sym.ReturnType = procedureir.BaseTypeFromNode(node, e.source)
+	}
 	sym.IsArray = procedureReturnsArray(node, e.source)
 	sym.Parameters = parameters(node, e.source)
 	return sym
@@ -1167,10 +1171,10 @@ func moduleMetadata(path string, source []byte) (string, []Attribute) {
 
 func nodeName(node *tree_sitter.Node, source []byte) string {
 	if name := node.ChildByFieldName("name"); name != nil {
-		return name.Utf8Text(source)
+		return normalizeIdentifierNameNode(name, source)
 	}
 	if name := firstNamedChildKind(node, "identifier"); name != nil {
-		return name.Utf8Text(source)
+		return normalizeIdentifierNameNode(name, source)
 	}
 	if name := firstNamedChildKind(node, "line_number_literal"); name != nil {
 		return name.Utf8Text(source)
@@ -1178,10 +1182,21 @@ func nodeName(node *tree_sitter.Node, source []byte) string {
 	return ""
 }
 
+func normalizeIdentifierNameNode(node *tree_sitter.Node, source []byte) string {
+	if node == nil {
+		return ""
+	}
+	text := node.Utf8Text(source)
+	if node.Kind() == "bang_identifier" {
+		return strings.TrimRight(text, "!")
+	}
+	return text
+}
+
 func firstNamedChildKind(node *tree_sitter.Node, kind string) *tree_sitter.Node {
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
-		if child != nil && child.Kind() == kind {
+		if child != nil && (child.Kind() == kind || kind == "identifier" && child.Kind() == "bang_identifier") {
 			return child
 		}
 	}
@@ -1245,24 +1260,7 @@ func minSymbolTextEnd(start, end, length int) int {
 }
 
 func typeText(node *tree_sitter.Node, source []byte) string {
-	asType := node.ChildByFieldName("type")
-	if asType == nil {
-		asType = firstNamedChildKind(node, "as_type_clause")
-	}
-	if asType == nil {
-		return ""
-	}
-	if typeExpr := asType.ChildByFieldName("type"); typeExpr != nil {
-		return strings.TrimSpace(typeExpr.Utf8Text(source))
-	}
-	if asType.Kind() == "type_expression" {
-		return strings.TrimSpace(asType.Utf8Text(source))
-	}
-	text := strings.TrimSpace(asType.Utf8Text(source))
-	if strings.HasPrefix(strings.ToLower(text), "as ") {
-		return strings.TrimSpace(text[3:])
-	}
-	return text
+	return procedureir.BaseTypeFromNode(node, source)
 }
 
 func parameters(node *tree_sitter.Node, source []byte) []Parameter {

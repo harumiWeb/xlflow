@@ -822,6 +822,141 @@ End Sub
 	}
 }
 
+func TestReDimIdentifierTypeCharacterUsesBangIdentifierName(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Bang.bas"}, []byte(`Public Sub Run()
+  Dim values!
+  values = 1
+  ReDim values!(10)
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Parse.HasError || doc.Parse.HasMissing {
+		t.Fatalf("identifier type character should not produce parser recovery: %+v", doc.Parse)
+	}
+	if len(doc.Procedures) != 1 {
+		t.Fatalf("procedures = %#v", doc.Procedures)
+	}
+	if len(doc.Procedures[0].Declarations) != 1 || doc.Procedures[0].Declarations[0].Name != "values" {
+		t.Fatalf("identifier type-character declaration = %#v", doc.Procedures[0].Declarations)
+	}
+	if len(doc.Procedures[0].Accesses) != 2 {
+		t.Fatalf("identifier type-character accesses = %#v", doc.Procedures[0].Accesses)
+	}
+	for _, access := range doc.Procedures[0].Accesses {
+		if access.Name != "values" || access.Mode != AccessWrite {
+			t.Fatalf("identifier type-character access = %#v", access)
+		}
+	}
+	var redim *Statement
+	for i := range doc.Procedures[0].Statements {
+		statement := &doc.Procedures[0].Statements[i]
+		if statement.Kind == StatementReDim {
+			redim = statement
+			break
+		}
+	}
+	if redim == nil || redim.Target == nil {
+		t.Fatalf("ReDim target = %#v", redim)
+	}
+	if redim.TargetID == 0 || redim.Target.Kind != ExpressionIdentifier || redim.Target.SyntaxKind != "identifier" || redim.Target.Text != "values" {
+		t.Fatalf("ReDim target = %#v", redim.Target)
+	}
+}
+
+func TestIdentifierTypeCharactersPreserveProcedureIRTypes(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Typed.bas"}, []byte(`Option Explicit
+Public Function Calculate&(text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^)
+  Dim localSingle!
+  Dim explicit$ As Long
+End Function
+Public Function ExplicitResult!() As Double
+End Function
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Parse.HasError || doc.Parse.HasMissing {
+		t.Fatalf("identifier type characters should not produce parser recovery: %+v", doc.Parse)
+	}
+	if len(doc.Procedures) != 2 {
+		t.Fatalf("procedures = %#v", doc.Procedures)
+	}
+	calculate := doc.Procedures[0]
+	if calculate.Symbol.ReturnType != "Long" {
+		t.Fatalf("suffix-derived procedure return type = %q, want Long", calculate.Symbol.ReturnType)
+	}
+	if calculate.Symbol.ValueShape != ValueShapeScalar {
+		t.Fatalf("suffix-derived procedure return shape = %q, want %q", calculate.Symbol.ValueShape, ValueShapeScalar)
+	}
+	wantParameters := map[string]string{
+		"text": "String", "whole": "Integer", "longValue": "Long", "singleValue": "Single",
+		"doubleValue": "Double", "money": "Currency", "longLong": "LongLong",
+	}
+	if len(calculate.Symbol.Parameters) != len(wantParameters) {
+		t.Fatalf("parameters = %#v", calculate.Symbol.Parameters)
+	}
+	for _, parameter := range calculate.Symbol.Parameters {
+		if want, ok := wantParameters[parameter.Name]; !ok || parameter.Type != want {
+			t.Fatalf("suffix-derived parameter = %#v, want %q", parameter, want)
+		}
+	}
+	wantDeclarations := map[string]string{"localSingle": "Single", "explicit": "Long"}
+	for name, want := range wantDeclarations {
+		found := false
+		for _, declaration := range calculate.Declarations {
+			if declaration.Name == name {
+				found = true
+				if declaration.Type != want {
+					t.Fatalf("declaration %q type = %q, want %q", name, declaration.Type, want)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("declaration %q not found in %#v", name, calculate.Declarations)
+		}
+	}
+	if got := doc.Procedures[1].Symbol.ReturnType; got != "Double" {
+		t.Fatalf("explicit As return type = %q, want Double", got)
+	}
+}
+
+func TestProcedureIRDoesNotInventReturnTypesForNonReturningDeclarations(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Properties.cls", ModuleKind: "class"}, []byte(`VERSION 1.0 CLASS
+Attribute VB_Name = "Properties"
+Public Sub Run$
+End Sub
+Public Property Let Value$(ByVal rhs As String)
+End Property
+Public Property Set Item@(ByVal rhs As Object)
+End Property
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Parse.HasError || doc.Parse.HasMissing {
+		t.Fatalf("non-returning declarations should not produce parser recovery: %+v", doc.Parse)
+	}
+	if len(doc.Procedures) != 3 {
+		t.Fatalf("procedures = %#v", doc.Procedures)
+	}
+	for _, procedure := range doc.Procedures {
+		if procedure.Symbol.ReturnType != "" {
+			t.Fatalf("non-returning %s %q has return type %q", procedure.Symbol.Kind, procedure.Symbol.Name, procedure.Symbol.ReturnType)
+		}
+		for _, declaration := range procedure.Declarations {
+			if declaration.Kind == "return_slot" {
+				t.Fatalf("non-returning %s %q has return slot: %#v", procedure.Symbol.Kind, procedure.Symbol.Name, declaration)
+			}
+		}
+	}
+}
+
 func TestProcedureReturnValueShapeRetainsArraySyntax(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Returns.bas"}, []byte(`Option Explicit
@@ -1051,6 +1186,34 @@ End Sub
 		expression := doc.Procedures[1].Expressions[expressionID-1]
 		if expression.Text != want || !expression.Recovered {
 			t.Fatalf("recovered argument %d = %+v, want %q", index, expression, want)
+		}
+	}
+}
+
+func TestUnparenthesizedCallPreservesParsedOmittedArgumentSlots(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+    SetDescriptorWithGap 1, , descriptor
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 1 || len(doc.Procedures[0].Calls) != 1 {
+		t.Fatalf("parsed unparenthesized call was not captured: %+v", doc.Procedures)
+	}
+	call := doc.Procedures[0].Calls[0]
+	if call.Arguments.Count != 3 || len(call.Arguments.ExpressionIDs) != 3 {
+		t.Fatalf("parsed call arguments = %+v, want three positional slots", call.Arguments)
+	}
+	if call.Arguments.ExpressionIDs[0] == 0 || call.Arguments.ExpressionIDs[1] != 0 || call.Arguments.ExpressionIDs[2] == 0 {
+		t.Fatalf("parsed omitted argument slot was not preserved: %+v", call.Arguments)
+	}
+	for index, want := range []string{"1", "descriptor"} {
+		expressionID := call.Arguments.ExpressionIDs[[]int{0, 2}[index]]
+		expression := doc.Procedures[0].Expressions[expressionID-1]
+		if expression.Text != want {
+			t.Fatalf("parsed argument %d = %+v, want %q", index, expression, want)
 		}
 	}
 }

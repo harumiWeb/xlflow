@@ -2467,6 +2467,31 @@ End Sub
 	}
 }
 
+func TestLinterAcceptsComparisonExpressionInCaseClause(t *testing.T) {
+	t.Parallel()
+	source := `Attribute VB_Name = "Main"
+Option Explicit
+Public Function IsAvailabilityRepro() As Boolean
+  Dim viaWebSocket As Object
+
+  Select Case False
+    Case viaWebSocket Is Nothing
+      IsAvailabilityRepro = True
+    Case Else
+      IsAvailabilityRepro = False
+  End Select
+End Function
+`
+
+	issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("comparison expression in Case clause should not produce parser recovery: %+v", got)
+	}
+}
+
 func TestLinterAllowsQualifiedExcelAccessAndNarrowResumeNext(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -2540,6 +2565,36 @@ End Sub
 	}
 	if issue := findIssue(t, issues, "VB023", 16); issue.Symbol != "Item" {
 		t.Fatalf("expected VB023 to preserve declaration casing, got %+v", issue)
+	}
+}
+
+func TestLinterScopeShadowingNormalizesIdentifierTypeCharacters(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Private moduleValue!
+Public Function ProcedureValue!() As Single
+End Function
+Public Sub Run(moduleValue!, ProcedureValue!)
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectScopeShadowing = true
+
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB018")
+	if len(got) != 2 {
+		t.Fatalf("identifier type characters should participate in scope shadowing, got %+v", got)
+	}
+	seen := map[string]bool{}
+	for _, issue := range got {
+		seen[issue.Symbol] = true
+	}
+	if !seen["moduleValue"] || !seen["ProcedureValue"] {
+		t.Fatalf("scope shadowing should preserve parameter spelling, got %+v", got)
 	}
 }
 

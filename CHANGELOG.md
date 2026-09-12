@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated the `tree-sitter-vba` parser dependency to v0.14.1 and adapted VBA
+  declaration handling to its new `bang_identifier` node shape. The parser now
+  accepts comparison expressions such as `Case object Is Nothing`.
+
 - Fixed static-analysis edge cases around numeric `.Show` property assignments,
   multiline `With Application.FileDialog(...): .Show` flows, and known-true
   conditional-compilation branches so disabled code no longer leaks findings

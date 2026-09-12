@@ -415,11 +415,10 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 	if err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		numericLiteralRecovery := vbaast.IsNumericLiteralRecovery(view.Root, view.Source)
 		lintCtx := astLintContext{
-			ctx:                        ctx,
-			linter:                     l,
-			path:                       path,
-			source:                     source,
-			allowTypeCharacterRecovery: vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source),
+			ctx:    ctx,
+			linter: l,
+			path:   path,
+			source: source,
 		}
 		lintCtx.lint(view.Root)
 		if lintCtx.err != nil {
@@ -479,7 +478,7 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 			issue.Suggestion = syntax.Suggestion
 			issues = append(issues, issue)
 		}
-		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source) && !numericLiteralRecovery) ||
+		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !numericLiteralRecovery) ||
 			shouldReportStructuralParseIssue(string(source)) {
 			parseIssues := lintCtx.parseIssues(view.Root)
 			// Keep the historical single generic parser-recovery fallback for
@@ -976,16 +975,15 @@ func (l Linter) lineContinuationOverflowIssue(path string, lineNo int, logicalLi
 }
 
 type astLintContext struct {
-	ctx                        context.Context
-	err                        error
-	visited                    uint64
-	linter                     Linter
-	path                       string
-	source                     []byte
-	issues                     []Issue
-	hasOptionExplicit          bool
-	withDepth                  int
-	allowTypeCharacterRecovery bool
+	ctx               context.Context
+	err               error
+	visited           uint64
+	linter            Linter
+	path              string
+	source            []byte
+	issues            []Issue
+	hasOptionExplicit bool
+	withDepth         int
 }
 
 func (c *astLintContext) lint(root *tree_sitter.Node) {
@@ -1105,7 +1103,7 @@ func (c *astLintContext) memberAccessIssue(node *tree_sitter.Node) {
 }
 
 func (c *astLintContext) variableDeclarationIssues(node *tree_sitter.Node, inProcedure bool, inType bool) {
-	if (node.HasError() && !c.allowTypeCharacterRecovery) || node.IsError() || node.IsMissing() {
+	if node.HasError() || node.IsError() || node.IsMissing() {
 		return
 	}
 	if c.linter.Config.Lint.ForbidPublicModuleFields && !inProcedure && !inType && strings.EqualFold(visibilityText(node, c.source), "Public") {
@@ -2589,7 +2587,7 @@ func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {
 		moduleNames := map[string]symbols.Symbol{}
 		procedureNames := map[string]symbols.Symbol{}
 		for _, sym := range file.Symbols {
-			key := strings.ToLower(sym.Name)
+			key := scopeNameKey(sym.Name)
 			switch sym.Kind {
 			case "module_variable", "field", "withevents_field", "const":
 				if sym.Parent == "" && sym.Name != "" {
@@ -2607,7 +2605,7 @@ func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {
 				continue
 			}
 			if l.Config.Lint.DetectScopeShadowing {
-				key := strings.ToLower(sym.Name)
+				key := scopeNameKey(sym.Name)
 				if shadow, ok := moduleNames[key]; ok {
 					issue := l.issueForSymbol(sym, "VB018", "warning", "Local declaration shadows module-level declaration "+shadow.Name+".")
 					issue.Symbol = sym.Name
@@ -2676,7 +2674,7 @@ func (l Linter) parameterShadowingIssues(file symbols.FileResult, moduleNames, p
 		}
 		seen := map[string]symbols.Parameter{}
 		for _, param := range proc.Parameters {
-			key := strings.ToLower(param.Name)
+			key := scopeNameKey(param.Name)
 			if key == "" {
 				continue
 			}
@@ -2684,7 +2682,7 @@ func (l Linter) parameterShadowingIssues(file symbols.FileResult, moduleNames, p
 				issue := l.issueForRel(file.Path, proc.StartLine, proc.StartColumn, "VB018", "warning", "Parameter shadows module-level declaration "+shadow.Name+".")
 				issue.Symbol = param.Name
 				issues = append(issues, issue)
-			} else if shadow, ok := procedureNames[key]; ok && !strings.EqualFold(shadow.Name, proc.Name) {
+			} else if shadow, ok := procedureNames[key]; ok && scopeNameKey(shadow.Name) != scopeNameKey(proc.Name) {
 				issue := l.issueForRel(file.Path, proc.StartLine, proc.StartColumn, "VB018", "warning", "Parameter shadows procedure "+shadow.Name+".")
 				issue.Symbol = param.Name
 				issues = append(issues, issue)
@@ -2698,6 +2696,11 @@ func (l Linter) parameterShadowingIssues(file symbols.FileResult, moduleNames, p
 		}
 	}
 	return issues
+}
+
+func scopeNameKey(name string) string {
+	name = strings.TrimSpace(strings.Trim(name, "[]"))
+	return strings.ToLower(strings.TrimRight(name, "$%&#@^!"))
 }
 
 func (l Linter) unusedPrivateProcedureIssues(symbolResult *symbols.Result, callResult *calls.Result) ([]Issue, error) {
@@ -3263,7 +3266,7 @@ func identifierTypeCharacter(name *tree_sitter.Node, source []byte) string {
 func firstNamedChildKind(node *tree_sitter.Node, kind string) *tree_sitter.Node {
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
-		if child != nil && child.Kind() == kind {
+		if child != nil && (child.Kind() == kind || kind == "identifier" && child.Kind() == "bang_identifier") {
 			return child
 		}
 	}

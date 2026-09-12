@@ -488,7 +488,7 @@ func declarationNameNode(node *tree_sitter.Node) *tree_sitter.Node {
 		// These declaration forms have a single leading bare identifier when
 		// the grammar does not expose a named field. Do not guess from later
 		// identifiers such as library names, types, or bounds.
-		if child := node.NamedChild(0); child != nil && child.Kind() == "identifier" {
+		if child := node.NamedChild(0); child != nil && (child.Kind() == "identifier" || child.Kind() == "bang_identifier") {
 			return child
 		}
 	case "implements_statement":
