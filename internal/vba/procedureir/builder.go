@@ -106,8 +106,11 @@ func (b *documentBuilder) procedureSymbol(node *tree_sitter.Node) ProcedureSymbo
 		bodyRange = zeroRangeAtStart(vbaast.NodeRange(end))
 	}
 	event, eventKind := ClassifyEvent(b.moduleKind, name)
-	returnType := typeText(header, b.source)
-	isArray, valueShape, arrayBounds := b.procedureReturnShape(header)
+	returnType := ""
+	if procedureKindReturnsValue(kind) {
+		returnType = typeText(header, b.source)
+	}
+	isArray, valueShape, arrayBounds := b.procedureReturnShape(header, kind)
 	return ProcedureSymbol{
 		Name: name, QualifiedName: qualified, Kind: kind,
 		Visibility: visibilityOfNode(header, b.source),
@@ -119,12 +122,15 @@ func (b *documentBuilder) procedureSymbol(node *tree_sitter.Node) ProcedureSymbo
 	}
 }
 
-func (b *documentBuilder) procedureReturnShape(header *tree_sitter.Node) (bool, ValueShapeKind, []ArrayBound) {
-	if header == nil {
+func (b *documentBuilder) procedureReturnShape(header *tree_sitter.Node, kind ProcedureKind) (bool, ValueShapeKind, []ArrayBound) {
+	if header == nil || !procedureKindReturnsValue(kind) {
 		return false, ValueShapeUnknown, nil
 	}
 	asType := childByKind(header, "as_type_clause")
 	if asType == nil {
+		if typeText(header, b.source) != "" {
+			return false, ValueShapeScalar, nil
+		}
 		return false, ValueShapeUnknown, nil
 	}
 	text := strings.TrimSpace(nodeText(asType, b.source))
@@ -146,6 +152,10 @@ func (b *documentBuilder) procedureReturnShape(header *tree_sitter.Node) (bool, 
 		return true, ValueShapeFixedArray, nil
 	}
 	return true, ValueShapeFixedArray, b.arrayBounds(bounds)
+}
+
+func procedureKindReturnsValue(kind ProcedureKind) bool {
+	return kind == ProcedureFunction || kind == ProcedurePropertyGet || kind == ProcedureProperty
 }
 
 func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
@@ -223,6 +233,75 @@ func ParametersFromNode(node *tree_sitter.Node, source []byte) []Parameter {
 		return nil
 	}
 	return (&documentBuilder{source: source}).parameters(node)
+}
+
+// TypeFromNode exposes the canonical declaration type projection for symbol
+// and editor consumers that already own a parsed CST node. It preserves an
+// explicit As clause and derives VBA type-declaration characters from the
+// node's name when no As clause is present.
+func TypeFromNode(node *tree_sitter.Node, source []byte) string {
+	return typeText(node, source)
+}
+
+// ProcedureReturnTypeFromNode exposes the canonical return type projection
+// for a procedure CST node. Procedures without a return value, such as Sub
+// and Property Let/Set declarations, always return an empty type.
+func ProcedureReturnTypeFromNode(node *tree_sitter.Node, source []byte) string {
+	if node == nil {
+		return ""
+	}
+	switch node.Kind() {
+	case "declare_sub_statement":
+		return ""
+	case "declare_function_statement":
+		return typeText(node, source)
+	case "declare_statement":
+		text := nodeText(node, source)
+		if hasWord(text, "Sub") {
+			return ""
+		}
+		if hasWord(text, "Function") {
+			return typeText(node, source)
+		}
+		return ""
+	}
+	kind := procedureKind(node, source)
+	if !procedureKindReturnsValue(kind) {
+		return ""
+	}
+	return typeText(procedureHeader(node), source)
+}
+
+// BaseTypeFromNode exposes the canonical base type projection for symbol
+// consumers whose type field intentionally excludes array bounds and shape
+// syntax. It shares suffix inference with TypeFromNode.
+func BaseTypeFromNode(node *tree_sitter.Node, source []byte) string {
+	if node == nil {
+		return ""
+	}
+	typ := node.ChildByFieldName("type")
+	if typ == nil {
+		if clause := childByKind(node, "as_type_clause"); clause != nil {
+			typ = clause
+		}
+	}
+	if typ == nil {
+		return typeCharacterText(node.ChildByFieldName("name"), source)
+	}
+	if typeExpr := typ.ChildByFieldName("type"); typeExpr != nil {
+		return strings.TrimSpace(nodeText(typeExpr, source))
+	}
+	if typ.Kind() == "type_expression" {
+		return strings.TrimSpace(nodeText(typ, source))
+	}
+	text := strings.TrimSpace(nodeText(typ, source))
+	if strings.HasPrefix(strings.ToLower(text), "as ") {
+		text = strings.TrimSpace(text[3:])
+	}
+	if base, _, ok := strings.Cut(text, "("); ok {
+		text = strings.TrimSpace(base)
+	}
+	return text
 }
 
 func (b *documentBuilder) parameterArrayFacts(param *Parameter, node *tree_sitter.Node) {
@@ -735,7 +814,34 @@ func typeText(node *tree_sitter.Node, source []byte) string {
 	if strings.HasPrefix(strings.ToLower(text), "as ") {
 		text = strings.TrimSpace(text[3:])
 	}
-	return text
+	if text != "" {
+		// An explicit As clause is authoritative even when the identifier also
+		// carries a type-declaration character.
+		return text
+	}
+	return typeCharacterText(node.ChildByFieldName("name"), source)
+}
+
+func typeCharacterText(node *tree_sitter.Node, source []byte) string {
+	text := nodeText(node, source)
+	switch {
+	case strings.HasSuffix(text, "$"):
+		return "String"
+	case strings.HasSuffix(text, "%"):
+		return "Integer"
+	case strings.HasSuffix(text, "&"):
+		return "Long"
+	case strings.HasSuffix(text, "!"):
+		return "Single"
+	case strings.HasSuffix(text, "#"):
+		return "Double"
+	case strings.HasSuffix(text, "@"):
+		return "Currency"
+	case strings.HasSuffix(text, "^"):
+		return "LongLong"
+	default:
+		return ""
+	}
 }
 
 func initializerText(node *tree_sitter.Node, source []byte) string {

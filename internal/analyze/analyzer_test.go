@@ -18836,6 +18836,30 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RejectsSuffixScalarFunctionForEachSource(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function ScalarValue$()
+  ScalarValue = "value"
+End Function
+
+Public Sub Run()
+  Dim item As Variant
+  For Each item In ScalarValue()
+  Next item
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 8 {
+		t.Fatalf("suffix scalar function For Each source should produce VBA227: %#v", got)
+	}
+}
+
 func TestAnalyzerVBA227AllowsCollectionFunctionForEachSource(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

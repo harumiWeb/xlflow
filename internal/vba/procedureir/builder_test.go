@@ -866,6 +866,97 @@ End Sub
 	}
 }
 
+func TestIdentifierTypeCharactersPreserveProcedureIRTypes(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Typed.bas"}, []byte(`Option Explicit
+Public Function Calculate&(text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^)
+  Dim localSingle!
+  Dim explicit$ As Long
+End Function
+Public Function ExplicitResult!() As Double
+End Function
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Parse.HasError || doc.Parse.HasMissing {
+		t.Fatalf("identifier type characters should not produce parser recovery: %+v", doc.Parse)
+	}
+	if len(doc.Procedures) != 2 {
+		t.Fatalf("procedures = %#v", doc.Procedures)
+	}
+	calculate := doc.Procedures[0]
+	if calculate.Symbol.ReturnType != "Long" {
+		t.Fatalf("suffix-derived procedure return type = %q, want Long", calculate.Symbol.ReturnType)
+	}
+	if calculate.Symbol.ValueShape != ValueShapeScalar {
+		t.Fatalf("suffix-derived procedure return shape = %q, want %q", calculate.Symbol.ValueShape, ValueShapeScalar)
+	}
+	wantParameters := map[string]string{
+		"text": "String", "whole": "Integer", "longValue": "Long", "singleValue": "Single",
+		"doubleValue": "Double", "money": "Currency", "longLong": "LongLong",
+	}
+	if len(calculate.Symbol.Parameters) != len(wantParameters) {
+		t.Fatalf("parameters = %#v", calculate.Symbol.Parameters)
+	}
+	for _, parameter := range calculate.Symbol.Parameters {
+		if want, ok := wantParameters[parameter.Name]; !ok || parameter.Type != want {
+			t.Fatalf("suffix-derived parameter = %#v, want %q", parameter, want)
+		}
+	}
+	wantDeclarations := map[string]string{"localSingle": "Single", "explicit": "Long"}
+	for name, want := range wantDeclarations {
+		found := false
+		for _, declaration := range calculate.Declarations {
+			if declaration.Name == name {
+				found = true
+				if declaration.Type != want {
+					t.Fatalf("declaration %q type = %q, want %q", name, declaration.Type, want)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("declaration %q not found in %#v", name, calculate.Declarations)
+		}
+	}
+	if got := doc.Procedures[1].Symbol.ReturnType; got != "Double" {
+		t.Fatalf("explicit As return type = %q, want Double", got)
+	}
+}
+
+func TestProcedureIRDoesNotInventReturnTypesForNonReturningDeclarations(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Properties.cls", ModuleKind: "class"}, []byte(`VERSION 1.0 CLASS
+Attribute VB_Name = "Properties"
+Public Sub Run$
+End Sub
+Public Property Let Value$(ByVal rhs As String)
+End Property
+Public Property Set Item@(ByVal rhs As Object)
+End Property
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Parse.HasError || doc.Parse.HasMissing {
+		t.Fatalf("non-returning declarations should not produce parser recovery: %+v", doc.Parse)
+	}
+	if len(doc.Procedures) != 3 {
+		t.Fatalf("procedures = %#v", doc.Procedures)
+	}
+	for _, procedure := range doc.Procedures {
+		if procedure.Symbol.ReturnType != "" {
+			t.Fatalf("non-returning %s %q has return type %q", procedure.Symbol.Kind, procedure.Symbol.Name, procedure.Symbol.ReturnType)
+		}
+		for _, declaration := range procedure.Declarations {
+			if declaration.Kind == "return_slot" {
+				t.Fatalf("non-returning %s %q has return slot: %#v", procedure.Symbol.Kind, procedure.Symbol.Name, declaration)
+			}
+		}
+	}
+}
+
 func TestProcedureReturnValueShapeRetainsArraySyntax(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Returns.bas"}, []byte(`Option Explicit

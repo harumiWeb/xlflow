@@ -80,6 +80,8 @@ Option Explicit
 Private moduleValue!
 Public Function ProcedureValue!() As Single
 End Function
+Public Function InferredValue$()
+End Function
 Public Sub Run(moduleValue!, ProcedureValue!)
 End Sub
 `))
@@ -89,19 +91,58 @@ End Sub
 	if file.Parse.HasError || file.Parse.HasMissing {
 		t.Fatalf("identifier type characters should not produce parser recovery: %+v", file.Parse)
 	}
-	assertSymbol(t, file.Symbols, "moduleValue", "module_variable")
+	moduleValue := assertSymbol(t, file.Symbols, "moduleValue", "module_variable")
+	if moduleValue.ReturnType != "Single" {
+		t.Fatalf("moduleValue return type = %q, want Single", moduleValue.ReturnType)
+	}
 	assertSymbol(t, file.Symbols, "ProcedureValue", "function")
+	inferred := assertSymbol(t, file.Symbols, "InferredValue$", "function")
+	if inferred.ReturnType != "String" {
+		t.Fatalf("suffix-derived function return type = %q, want String", inferred.ReturnType)
+	}
 	run := assertSymbol(t, file.Symbols, "Run", "sub")
+	if run.ReturnType != "" {
+		t.Fatalf("sub return type = %q, want empty", run.ReturnType)
+	}
 	seen := map[string]bool{}
+	parameterTypes := map[string]string{}
 	for _, symbol := range file.Symbols {
 		if symbol.Kind == "parameter" && symbol.Parent == run.Name {
 			seen[symbol.Name] = true
+			parameterTypes[symbol.Name] = symbol.ReturnType
 		}
 	}
 	if !seen["moduleValue"] || !seen["ProcedureValue"] {
 		t.Fatalf("parameter declaration names were not normalized: %+v", file.Symbols)
 	}
+	if parameterTypes["moduleValue"] != "Single" || parameterTypes["ProcedureValue"] != "Single" {
+		t.Fatalf("parameter suffix types = %#v, want Single", parameterTypes)
+	}
 	assertNoSymbol(t, file.Symbols, "ProcedureValue!")
+}
+
+func TestInspectDoesNotInferDeclareSubReturnType(t *testing.T) {
+	file, err := InspectSource(SourceOptions{
+		RootDir: t.TempDir(), Path: "Main.bas", ModuleKind: "standard", IncludePrivate: true,
+	}, []byte(`Attribute VB_Name = "Main"
+Option Explicit
+Public Declare Sub Native$ Lib "native" ()
+Public Declare Function NativeFunction$ Lib "native" ()
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Parse.HasError || file.Parse.HasMissing {
+		t.Fatalf("declare suffix identifiers should not produce parser recovery: %+v", file.Parse)
+	}
+	native := assertSymbol(t, file.Symbols, "Native$", "declare_sub")
+	if native.ReturnType != "" {
+		t.Fatalf("declare sub return type = %q, want empty", native.ReturnType)
+	}
+	nativeFunction := assertSymbol(t, file.Symbols, "NativeFunction$", "declare_function")
+	if nativeFunction.ReturnType != "String" {
+		t.Fatalf("declare function suffix return type = %q, want String", nativeFunction.ReturnType)
+	}
 }
 
 func TestInspectExtractsRepresentativeStandardModuleSymbols(t *testing.T) {
@@ -378,7 +419,11 @@ Public Static Property Get Count(ByVal Prefix As String) As Long
 End Property
 Public Property Let Count(ByVal Value As Long)
 End Property
+Public Property Let Title$(ByVal Value As String)
+End Property
 Public Property Set Service(ByRef Value As Object)
+End Property
+Public Property Set Widget@(ByRef Value As Object)
 End Property
 `
 	if err := os.WriteFile(filepath.Join(classDir, "OrderService.cls"), []byte(body), 0o644); err != nil {
@@ -411,6 +456,14 @@ End Property
 	service := assertSymbol(t, file.Symbols, "Service", "property_set")
 	if len(service.Parameters) != 1 || service.Parameters[0].Passing != "ByRef" || service.Parameters[0].Type != "Object" {
 		t.Fatalf("unexpected property set symbol: %+v", service)
+	}
+	title := assertSymbol(t, file.Symbols, "Title$", "property_let")
+	if title.ReturnType != "" {
+		t.Fatalf("property let return type = %q, want empty", title.ReturnType)
+	}
+	widget := assertSymbol(t, file.Symbols, "Widget@", "property_set")
+	if widget.ReturnType != "" {
+		t.Fatalf("property set return type = %q, want empty", widget.ReturnType)
 	}
 }
 
