@@ -1895,7 +1895,7 @@ End Sub
 	}
 }
 
-func TestAnalyzerContinuesAfterIdentifierTypeCharacterRecovery(t *testing.T) {
+func TestAnalyzerAcceptsIdentifierTypeCharacters(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -1905,7 +1905,28 @@ End Sub
 `)
 
 	if _, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run(); err != nil {
-		t.Fatalf("legal identifier type-character recovery should not abort analyzer: %v", err)
+		t.Fatalf("legal identifier type characters should not abort analyzer: %v", err)
+	}
+}
+
+func TestAnalyzerAcceptsComparisonExpressionInCaseClause(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function IsAvailabilityRepro() As Boolean
+  Dim viaWebSocket As Object
+
+  Select Case False
+    Case viaWebSocket Is Nothing
+      IsAvailabilityRepro = True
+    Case Else
+      IsAvailabilityRepro = False
+  End Select
+End Function
+`)
+
+	if _, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run(); err != nil {
+		t.Fatalf("comparison expression in Case clause should not abort analyzer: %v", err)
 	}
 }
 
@@ -18812,6 +18833,30 @@ End Sub
 	got := findingsByCode(findings, "VBA227")
 	if len(got) != 1 || got[0].Line != 8 {
 		t.Fatalf("scalar function For Each source should produce VBA227: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsSuffixScalarFunctionForEachSource(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function ScalarValue$()
+  ScalarValue = "value"
+End Function
+
+Public Sub Run()
+  Dim item As Variant
+  For Each item In ScalarValue()
+  Next item
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 8 {
+		t.Fatalf("suffix scalar function For Each source should produce VBA227: %#v", got)
 	}
 }
 

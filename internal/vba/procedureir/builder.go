@@ -90,9 +90,9 @@ func (b *documentBuilder) build(root *tree_sitter.Node) DocumentIR {
 
 func (b *documentBuilder) procedureSymbol(node *tree_sitter.Node) ProcedureSymbol {
 	header := procedureHeader(node)
-	name := nodeText(childByFieldOrKind(node, "name", "identifier"), b.source)
+	name := cleanIdentifier(nodeText(childByFieldOrKind(node, "name", "identifier"), b.source))
 	if name == "" && header != node {
-		name = nodeText(childByFieldOrKind(header, "name", "identifier"), b.source)
+		name = cleanIdentifier(nodeText(childByFieldOrKind(header, "name", "identifier"), b.source))
 	}
 	kind := procedureKind(node, b.source)
 	qualified := name
@@ -106,8 +106,11 @@ func (b *documentBuilder) procedureSymbol(node *tree_sitter.Node) ProcedureSymbo
 		bodyRange = zeroRangeAtStart(vbaast.NodeRange(end))
 	}
 	event, eventKind := ClassifyEvent(b.moduleKind, name)
-	returnType := typeText(header, b.source)
-	isArray, valueShape, arrayBounds := b.procedureReturnShape(header)
+	returnType := ""
+	if procedureKindReturnsValue(kind) {
+		returnType = typeText(header, b.source)
+	}
+	isArray, valueShape, arrayBounds := b.procedureReturnShape(header, kind)
 	return ProcedureSymbol{
 		Name: name, QualifiedName: qualified, Kind: kind,
 		Visibility: visibilityOfNode(header, b.source),
@@ -119,12 +122,15 @@ func (b *documentBuilder) procedureSymbol(node *tree_sitter.Node) ProcedureSymbo
 	}
 }
 
-func (b *documentBuilder) procedureReturnShape(header *tree_sitter.Node) (bool, ValueShapeKind, []ArrayBound) {
-	if header == nil {
+func (b *documentBuilder) procedureReturnShape(header *tree_sitter.Node, kind ProcedureKind) (bool, ValueShapeKind, []ArrayBound) {
+	if header == nil || !procedureKindReturnsValue(kind) {
 		return false, ValueShapeUnknown, nil
 	}
 	asType := childByKind(header, "as_type_clause")
 	if asType == nil {
+		if typeText(header, b.source) != "" {
+			return false, ValueShapeScalar, nil
+		}
 		return false, ValueShapeUnknown, nil
 	}
 	text := strings.TrimSpace(nodeText(asType, b.source))
@@ -146,6 +152,10 @@ func (b *documentBuilder) procedureReturnShape(header *tree_sitter.Node) (bool, 
 		return true, ValueShapeFixedArray, nil
 	}
 	return true, ValueShapeFixedArray, b.arrayBounds(bounds)
+}
+
+func procedureKindReturnsValue(kind ProcedureKind) bool {
+	return kind == ProcedureFunction || kind == ProcedurePropertyGet || kind == ProcedureProperty
 }
 
 func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
@@ -176,7 +186,7 @@ func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
 			}
 		}
 		param := Parameter{
-			Name: nodeText(childByFieldOrKind(child, "name", "identifier"), b.source),
+			Name: cleanIdentifier(nodeText(childByFieldOrKind(child, "name", "identifier"), b.source)),
 			Type: typeText(child, b.source), Passing: passing, PassingExplicit: passingExplicit,
 			Range: vbaast.NodeRange(child), Optional: child.ChildByFieldName("optional_modifier") != nil,
 			ParamArray: child.ChildByFieldName("paramarray_modifier") != nil,
@@ -223,6 +233,75 @@ func ParametersFromNode(node *tree_sitter.Node, source []byte) []Parameter {
 		return nil
 	}
 	return (&documentBuilder{source: source}).parameters(node)
+}
+
+// TypeFromNode exposes the canonical declaration type projection for symbol
+// and editor consumers that already own a parsed CST node. It preserves an
+// explicit As clause and derives VBA type-declaration characters from the
+// node's name when no As clause is present.
+func TypeFromNode(node *tree_sitter.Node, source []byte) string {
+	return typeText(node, source)
+}
+
+// ProcedureReturnTypeFromNode exposes the canonical return type projection
+// for a procedure CST node. Procedures without a return value, such as Sub
+// and Property Let/Set declarations, always return an empty type.
+func ProcedureReturnTypeFromNode(node *tree_sitter.Node, source []byte) string {
+	if node == nil {
+		return ""
+	}
+	switch node.Kind() {
+	case "declare_sub_statement":
+		return ""
+	case "declare_function_statement":
+		return typeText(node, source)
+	case "declare_statement":
+		text := nodeText(node, source)
+		if hasWord(text, "Sub") {
+			return ""
+		}
+		if hasWord(text, "Function") {
+			return typeText(node, source)
+		}
+		return ""
+	}
+	kind := procedureKind(node, source)
+	if !procedureKindReturnsValue(kind) {
+		return ""
+	}
+	return typeText(procedureHeader(node), source)
+}
+
+// BaseTypeFromNode exposes the canonical base type projection for symbol
+// consumers whose type field intentionally excludes array bounds and shape
+// syntax. It shares suffix inference with TypeFromNode.
+func BaseTypeFromNode(node *tree_sitter.Node, source []byte) string {
+	if node == nil {
+		return ""
+	}
+	typ := node.ChildByFieldName("type")
+	if typ == nil {
+		if clause := childByKind(node, "as_type_clause"); clause != nil {
+			typ = clause
+		}
+	}
+	if typ == nil {
+		return typeCharacterText(node.ChildByFieldName("name"), source)
+	}
+	if typeExpr := typ.ChildByFieldName("type"); typeExpr != nil {
+		return strings.TrimSpace(nodeText(typeExpr, source))
+	}
+	if typ.Kind() == "type_expression" {
+		return strings.TrimSpace(nodeText(typ, source))
+	}
+	text := strings.TrimSpace(nodeText(typ, source))
+	if strings.HasPrefix(strings.ToLower(text), "as ") {
+		text = strings.TrimSpace(text[3:])
+	}
+	if base, _, ok := strings.Cut(text, "("); ok {
+		text = strings.TrimSpace(base)
+	}
+	return text
 }
 
 func (b *documentBuilder) parameterArrayFacts(param *Parameter, node *tree_sitter.Node) {
@@ -311,7 +390,7 @@ func (b *documentBuilder) declarations(node *tree_sitter.Node, scope SymbolScope
 		declVisibility := visibilityOfNode(node, b.source)
 		decl := Declaration{
 			ID:   b.takeDeclarationID(),
-			Name: nodeText(childByFieldOrKind(child, "name", "identifier"), b.source),
+			Name: cleanIdentifier(nodeText(childByFieldOrKind(child, "name", "identifier"), b.source)),
 			Type: typeText(child, b.source), Scope: declarationScope(scope, declVisibility), Visibility: declVisibility,
 			Kind: kind, IsArray: b.isArrayDeclarator(child), IsConst: kind == "const", Range: vbaast.NodeRange(child),
 			Recovered: recovered(child),
@@ -411,7 +490,7 @@ func valueShapeForDeclaration(decl Declaration, text string) ValueShapeKind {
 }
 
 func (b *documentBuilder) simpleDeclaration(node *tree_sitter.Node, scope SymbolScope) (Declaration, bool) {
-	name := nodeText(childByFieldOrKind(node, "name", "identifier"), b.source)
+	name := cleanIdentifier(nodeText(childByFieldOrKind(node, "name", "identifier"), b.source))
 	if name == "" {
 		return Declaration{}, false
 	}
@@ -691,7 +770,7 @@ func isNonExecutableStatement(kind string) bool {
 func expressionKind(kind string) ExpressionKind {
 	lower := strings.ToLower(kind)
 	switch {
-	case lower == "identifier":
+	case lower == "identifier" || lower == "bang_identifier":
 		return ExpressionIdentifier
 	case strings.HasSuffix(lower, "_literal"):
 		return ExpressionLiteral
@@ -735,7 +814,34 @@ func typeText(node *tree_sitter.Node, source []byte) string {
 	if strings.HasPrefix(strings.ToLower(text), "as ") {
 		text = strings.TrimSpace(text[3:])
 	}
-	return text
+	if text != "" {
+		// An explicit As clause is authoritative even when the identifier also
+		// carries a type-declaration character.
+		return text
+	}
+	return typeCharacterText(node.ChildByFieldName("name"), source)
+}
+
+func typeCharacterText(node *tree_sitter.Node, source []byte) string {
+	text := nodeText(node, source)
+	switch {
+	case strings.HasSuffix(text, "$"):
+		return "String"
+	case strings.HasSuffix(text, "%"):
+		return "Integer"
+	case strings.HasSuffix(text, "&"):
+		return "Long"
+	case strings.HasSuffix(text, "!"):
+		return "Single"
+	case strings.HasSuffix(text, "#"):
+		return "Double"
+	case strings.HasSuffix(text, "@"):
+		return "Currency"
+	case strings.HasSuffix(text, "^"):
+		return "LongLong"
+	default:
+		return ""
+	}
 }
 
 func initializerText(node *tree_sitter.Node, source []byte) string {
@@ -904,7 +1010,7 @@ func childByKind(node *tree_sitter.Node, kind string) *tree_sitter.Node {
 	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
-		if child != nil && child.Kind() == kind {
+		if child != nil && (child.Kind() == kind || kind == "identifier" && child.Kind() == "bang_identifier") {
 			return child
 		}
 	}
@@ -1112,6 +1218,9 @@ func argumentsFromCallExpression(node *tree_sitter.Node, source []byte) Argument
 		if child == nil || sameNode(child, fn) {
 			continue
 		}
+		if isArgumentContainerNode(child) {
+			return argumentsFromArgumentList(child, source)
+		}
 		out.Count++
 		if child.Kind() == "named_argument" {
 			out.Named = append(out.Named, namedArgument(child, source))
@@ -1122,6 +1231,17 @@ func argumentsFromCallExpression(node *tree_sitter.Node, source []byte) Argument
 
 func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments {
 	out := Arguments{Named: []NamedArgument{}}
+	if node.Kind() == "unparenthesized_argument_list" {
+		text := node.Utf8Text(source)
+		out.Count = len(recoveredArgumentSegments(text, 0, len(text)))
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			child := node.NamedChild(i)
+			if isSemanticArgumentNode(child) && child.Kind() == "named_argument" {
+				out.Named = append(out.Named, namedArgument(child, source))
+			}
+		}
+		return out
+	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if !isSemanticArgumentNode(child) {
@@ -1135,12 +1255,59 @@ func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments 
 	return out
 }
 
+func argumentNodesFromList(node *tree_sitter.Node, source []byte) []*tree_sitter.Node {
+	if node == nil {
+		return nil
+	}
+	children := make([]*tree_sitter.Node, 0, node.NamedChildCount())
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if isSemanticArgumentNode(child) {
+			children = append(children, child)
+		}
+	}
+	if node.Kind() != "unparenthesized_argument_list" {
+		return children
+	}
+	text := node.Utf8Text(source)
+	segments := recoveredArgumentSegments(text, 0, len(text))
+	if len(segments) == 0 {
+		return children
+	}
+	mapped := make([]*tree_sitter.Node, 0, len(segments))
+	childIndex := 0
+	for _, segment := range segments {
+		if recoveredArgumentSegmentOmitted(text, segment) {
+			mapped = append(mapped, nil)
+			continue
+		}
+		slot := vbaast.Range{StartByte: int(node.StartByte()) + segment.start, EndByte: int(node.StartByte()) + segment.end}
+		if childIndex >= len(children) || !argumentNodeOverlapsRange(children[childIndex], slot) {
+			return children
+		}
+		mapped = append(mapped, children[childIndex])
+		childIndex++
+	}
+	if childIndex != len(children) {
+		return children
+	}
+	return mapped
+}
+
+func argumentNodeOverlapsRange(node *tree_sitter.Node, slot vbaast.Range) bool {
+	if node == nil || slot.EndByte <= slot.StartByte {
+		return false
+	}
+	rng := vbaast.NodeRange(node)
+	return rng.StartByte < slot.EndByte && rng.EndByte > slot.StartByte
+}
+
 func isSemanticArgumentNode(node *tree_sitter.Node) bool {
 	return node != nil && node.Kind() != "line_continuation" && node.Kind() != "char_position"
 }
 
 func isArgumentContainerNode(node *tree_sitter.Node) bool {
-	return node != nil && (node.Kind() == "argument_list" || node.Kind() == "output_list")
+	return node != nil && (node.Kind() == "argument_list" || node.Kind() == "output_list" || node.Kind() == "unparenthesized_argument_list")
 }
 
 func namedArgument(node *tree_sitter.Node, source []byte) NamedArgument {
