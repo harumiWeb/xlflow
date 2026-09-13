@@ -86,6 +86,22 @@ loaded into the returned project. Missing configured roots and a missing
 legacy `tests` tree contribute no files; discovery, read, and cancellation
 errors are returned to the caller.
 
+## Source Encoding
+
+Tracked `.bas`, `.cls`, and `.frm` files use UTF-8 without a BOM. The shared
+`internal/vba/sourceencoding` package owns BOM detection, UTF-8 validation,
+diagnostic byte positions, managed-root discovery, and strict CP932 decoding
+for the explicit conversion command. It includes `.frm` files even when
+`[userform].code_source = "sidecar"` and excludes binary `.frx` companions.
+
+The parser's normal, context/realtime, incremental, and file-loading entry
+points validate source bytes before passing them to tree-sitter. Formatter and
+other parser consumers use the same checked entry point. Invalid bytes return
+a typed source-encoding error containing the logical path and first offending
+position; callers must not replace invalid bytes or silently convert them.
+Filesystem adapters may preserve the original bytes in `Source`, but any
+parser/analyzer operation that consumes them fails with that typed error.
+
 ## Validation and Adapters
 
 The model is a passive value contract and performs no construction-time

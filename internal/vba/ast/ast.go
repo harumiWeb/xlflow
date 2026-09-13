@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	tree_sitter_vba "github.com/harumiWeb/tree-sitter-vba/bindings/go"
+	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -26,6 +27,7 @@ type ParseResult struct {
 	Source     []byte
 	Tree       *tree_sitter.Tree
 	Root       *tree_sitter.Node
+	Err        error
 	HasError   bool
 	HasMissing bool
 }
@@ -73,6 +75,9 @@ func ParseDocumentContext(ctx context.Context, path string, source []byte) (*Par
 // The caller must fall back to ParseDocument when this returns
 // ErrIncrementalParseUnavailable.
 func ParseDocumentIncremental(path string, source []byte, previous *ParsedDocument, edits []tree_sitter.InputEdit) (*ParsedDocument, error) {
+	if err := sourceencoding.Validate(path, source); err != nil {
+		return nil, err
+	}
 	if previous == nil || len(edits) == 0 {
 		return nil, ErrIncrementalParseUnavailable
 	}
@@ -88,6 +93,9 @@ func ParseDocumentIncremental(path string, source []byte, previous *ParsedDocume
 // the previous tree can be leased immediately. Interactive document updates
 // must not wait behind a long-running reader of the obsolete revision.
 func ParseDocumentIncrementalIfAvailable(path string, source, previousSource []byte, previous *ParsedDocument, edits []tree_sitter.InputEdit) (*ParsedDocument, error) {
+	if err := sourceencoding.Validate(path, source); err != nil {
+		return nil, err
+	}
 	if previous == nil || len(edits) == 0 {
 		return nil, ErrIncrementalParseUnavailable
 	}
@@ -104,6 +112,9 @@ func parseDocumentContext(ctx context.Context, path string, source []byte, oldTr
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := sourceencoding.Validate(path, source); err != nil {
 		return nil, err
 	}
 	parser, err := NewParser()
@@ -357,10 +368,23 @@ func (p *Parser) ParseFile(path string) (*ParseResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return p.Parse(path, source), nil
+	return p.ParseChecked(path, source)
 }
 
 func (p *Parser) Parse(path string, source []byte) *ParseResult {
+	result, err := p.ParseChecked(path, source)
+	if err != nil {
+		return &ParseResult{Path: path, Source: append([]byte(nil), source...), Err: err}
+	}
+	return result
+}
+
+// ParseChecked is the checked parser entry point used by file and document
+// callers. Parse remains for compatibility with known-valid in-memory tests.
+func (p *Parser) ParseChecked(path string, source []byte) (*ParseResult, error) {
+	if err := sourceencoding.Validate(path, source); err != nil {
+		return nil, err
+	}
 	tree := p.parser.Parse(source, nil)
 	root := tree.RootNode()
 	return &ParseResult{
@@ -370,7 +394,7 @@ func (p *Parser) Parse(path string, source []byte) *ParseResult {
 		Root:       root,
 		HasError:   root.HasError(),
 		HasMissing: HasMissing(root),
-	}
+	}, nil
 }
 
 func (r *ParseResult) Close() {

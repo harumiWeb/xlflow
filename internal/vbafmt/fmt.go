@@ -2,6 +2,7 @@ package vbafmt
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 )
 
 const (
@@ -247,6 +249,12 @@ func formatFile(path string, cfg FormatConfig) (FileResult, error) {
 	original := string(data)
 	formatted, lineNumResult, err := formatTextDetailed(original, isClass, cfg)
 	if err != nil {
+		var encodingErr *sourceencoding.Error
+		if encodingErr, _ = errors.AsType[*sourceencoding.Error](err); encodingErr != nil {
+			withPath := *encodingErr
+			withPath.Path = path
+			return FileResult{}, fmt.Errorf("%s: %w", path, &withPath)
+		}
 		if isFormatParseError(err) {
 			return FileResult{
 				Path:       path,
@@ -538,6 +546,9 @@ func summarizeResults(results []FileResult, opts FmtOptions) (*Result, error) {
 			r.ChangedPaths = append(r.ChangedPaths, fr.Path)
 			r.FormattedByPath[fr.Path] = fr.Formatted
 			if opts.Write {
+				if err := sourceencoding.Validate(fr.Path, []byte(fr.Formatted)); err != nil {
+					return nil, fmt.Errorf("write %s: %w", fr.Path, err)
+				}
 				if err := os.WriteFile(fr.Path, []byte(fr.Formatted), 0644); err != nil {
 					return nil, fmt.Errorf("write %s: %w", fr.Path, err)
 				}

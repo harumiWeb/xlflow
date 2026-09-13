@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/lint"
+	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 )
 
 type UserFormCodeConflict struct {
@@ -164,9 +165,15 @@ func SyncUserFormCodeSidecars(formsDir string, targetForms map[string]bool) ([]U
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
+		if err := sourceencoding.Validate(path, formBody); err != nil {
+			return err
+		}
 		sidecarBody, err := os.ReadFile(sidecarPath)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", sidecarPath, err)
+		}
+		if err := sourceencoding.Validate(sidecarPath, sidecarBody); err != nil {
+			return err
 		}
 		frmCode := NormalizeUserFormCodeText(ExtractUserFormCodeFromFRM(string(formBody)))
 		sidecarCode := NormalizeUserFormCodeText(string(sidecarBody))
@@ -174,6 +181,9 @@ func SyncUserFormCodeSidecars(formsDir string, targetForms map[string]bool) ([]U
 			return nil
 		}
 		merged := MergeUserFormCodeIntoFRM(string(formBody), string(sidecarBody))
+		if err := sourceencoding.Validate(path, []byte(merged)); err != nil {
+			return err
+		}
 		if err := os.WriteFile(path, []byte(merged), 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}

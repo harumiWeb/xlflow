@@ -1,11 +1,13 @@
 package forms
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/lint"
+	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 )
 
 func TestExtractUserFormCodeFromFRM(t *testing.T) {
@@ -78,6 +80,31 @@ func TestSyncUserFormCodeSidecarsHonorsTargetFilter(t *testing.T) {
 	}
 	if got := NormalizeUserFormCodeText(ExtractUserFormCodeFromFRM(string(frmBody))); got != "Option Explicit" {
 		t.Fatalf("unfiltered form should remain unchanged, got %q", got)
+	}
+}
+
+func TestSyncUserFormCodeSidecarsRejectsInvalidEncodingBeforeWrite(t *testing.T) {
+	root := t.TempDir()
+	formsDir := filepath.Join(root, "src", "forms")
+	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frmPath := filepath.Join(formsDir, "CustomerForm.frm")
+	frmBody := []byte("Attribute VB_Name = \"CustomerForm\"\n\nOption Explicit\n")
+	if err := os.WriteFile(frmPath, frmBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "code", "CustomerForm.bas"), []byte{'O', 0xff}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := SyncUserFormCodeSidecars(formsDir, nil)
+	var encodingErr *sourceencoding.Error
+	if err == nil || !errors.As(err, &encodingErr) || encodingErr == nil {
+		t.Fatalf("SyncUserFormCodeSidecars error = %v, want source encoding error", err)
+	}
+	if after, readErr := os.ReadFile(frmPath); readErr != nil || string(after) != string(frmBody) {
+		t.Fatalf("form changed after invalid sidecar: %q, err=%v", after, readErr)
 	}
 }
 

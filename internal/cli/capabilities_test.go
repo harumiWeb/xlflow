@@ -40,6 +40,14 @@ func TestCapabilitiesCommandWritesV1JSONEnvelope(t *testing.T) {
 	if len(push.CLIPaths) != 1 || push.CLIPaths[0] != "push" || push.ResourceScope != coordination.ResourceWorkbook || push.OperationKind != coordination.OperationMutate || push.ParallelSafe || !push.RetryableWhenBusy || push.DefaultWaitPolicy != coordination.WaitFail || push.RecoveryBehavior != coordination.RecoveryBlock || !push.RequiresExcel {
 		t.Fatalf("push capability = %#v", push)
 	}
+	check, ok := got.Capabilities.Commands["encoding.check"]
+	if !ok || len(check.CLIPaths) != 1 || check.CLIPaths[0] != "encoding check" || check.ResourceScope != coordination.ResourceNone || check.OperationKind != coordination.OperationRead || !check.ParallelSafe || check.RequiresExcel {
+		t.Fatalf("encoding.check capability = %#v", check)
+	}
+	convert, ok := got.Capabilities.Commands["encoding.convert"]
+	if !ok || len(convert.CLIPaths) != 1 || convert.CLIPaths[0] != "encoding convert" || convert.ResourceScope != coordination.ResourceNone || convert.OperationKind != coordination.OperationMutate || !convert.ParallelSafe || convert.RequiresExcel {
+		t.Fatalf("encoding.convert capability = %#v", convert)
+	}
 }
 
 func TestCapabilitiesCommandDoesNotRequireAWorkbook(t *testing.T) {

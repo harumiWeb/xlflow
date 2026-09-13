@@ -87,6 +87,8 @@ func buildDescriptors() []Descriptor {
 		both("inspect.cell", "inspect cell", workbookRead, bridgeArgs("inspect", "Target", "cell")),
 		cli("fmt", "fmt", sourceMutate),
 		cli("lint", "lint", sourceRead),
+		cli("encoding.check", "encoding check", sourceRead),
+		cli("encoding.convert", "encoding convert", sourceMutate),
 		cli("lsp", "lsp", sourceRead),
 		cli("analyze", "analyze", sourceRead),
 		cli("metrics", "metrics", sourceRead),

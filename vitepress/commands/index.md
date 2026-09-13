@@ -54,6 +54,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [lint](./lint)                             | Lint VBA source files for agent-hostile and compile-dialog-prone patterns.                 |
 | [lsp](./lsp)                               | Start the reusable VBA language server for editor integrations.                            |
 | [fmt](./fmt)                               | Format VBA source files with a conservative, non-destructive formatter.                    |
+| [encoding](./encoding)                     | Check and convert managed VBA source encodings.                                            |
 | [analyze](./analyze)                       | Analyze VBA source for runtime-risk patterns without Excel COM.                            |
 | [metrics](./metrics)                       | Calculate procedure metrics and architectural hotspot rankings without Excel COM.          |
 | [check](./check)                           | Run lint, analyze, and doctor as a combined preflight.                                     |

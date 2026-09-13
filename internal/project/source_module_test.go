@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 	"gopkg.in/yaml.v3"
 )
 
@@ -204,6 +205,31 @@ func TestModuleMutationsRejectInvalidMissingDuplicateAndAmbiguousNames(t *testin
 	}
 	if _, err := RemoveModule(dir, "Ambiguous", cfg); !errors.Is(err, ErrModuleAmbiguous) {
 		t.Fatalf("RemoveModule ambiguous error = %v, want ErrModuleAmbiguous", err)
+	}
+}
+
+func TestRenameModuleRejectsInvalidSourceEncodingBeforeMutation(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default().Src
+	path := filepath.Join(dir, "src", "modules", "Existing.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte{'A', 0xff, 'B'}
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := RenameModule(dir, "Existing", "Renamed", cfg)
+	var encodingErr *sourceencoding.Error
+	if err == nil || !errors.As(err, &encodingErr) || encodingErr == nil || encodingErr.Path != path {
+		t.Fatalf("RenameModule error = %v, want source encoding error for %s", err, path)
+	}
+	if after, readErr := os.ReadFile(path); readErr != nil || string(after) != string(original) {
+		t.Fatalf("invalid source changed: %x, err=%v", after, readErr)
+	}
+	if pathExists(filepath.Join(dir, "src", "modules", "Renamed.bas")) {
+		t.Fatal("rename target was created after encoding validation failed")
 	}
 }
 

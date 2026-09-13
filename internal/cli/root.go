@@ -50,6 +50,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
+	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
@@ -245,6 +246,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.graphCommand(),
 		a.inspectGUICommand(),
 		a.lintCommand(),
+		a.encodingCommand(),
 		a.lspCommand(),
 		a.fmtCommand(),
 		a.analyzeCommand(),
@@ -870,6 +872,9 @@ func (a *app) formMigrateSidecarCommand() *cobra.Command {
 			before := cfg.UserForm.CodeSource
 			if before != "frm" && before != "sidecar" {
 				return a.writeFailure("form migrate sidecar", output.ExitConfig, "form_migrate_args_invalid", fmt.Errorf("userform.code_source must be one of frm, sidecar"))
+			}
+			if err := a.runSourceEncodingPreflight(cmd.Context(), "form migrate sidecar", cfg); err != nil {
+				return err
 			}
 			if err := a.rejectStaleSourceForFormMigration(cfg); err != nil {
 				return a.writeFailure("form migrate sidecar", output.ExitValidation, "form_migrate_conflict", err)
@@ -2647,13 +2652,16 @@ func buildPushOptions(backupMode string, fast bool, changedOnly bool, session bo
 }
 
 func (a *app) pushSource(ctx context.Context, command string, cfg config.Config, pushOpts excel.PushOptions, progressLabel string) (output.Envelope, int, error) {
+	if err := a.runSourceEncodingPreflight(ctx, command, cfg); err != nil {
+		return output.Envelope{}, 0, err
+	}
 	if err := a.runUserFormCodeSourcePreflight(command, cfg, nil); err != nil {
 		return output.Envelope{}, 0, err
 	}
 	if err := a.runUserFormArtifactPreflight(command, cfg, nil); err != nil {
 		return output.Envelope{}, 0, err
 	}
-	if err := a.runSourcePreflight(ctx, command, cfg, "pushing to Excel", nil, nil); err != nil {
+	if err := a.runSourcePreflightAfterEncoding(ctx, command, cfg, "pushing to Excel", nil, nil); err != nil {
 		return output.Envelope{}, 0, err
 	}
 	var env output.Envelope
@@ -6277,6 +6285,9 @@ func (a *app) writeUserFormSidecarMigration(before string, items []formMigration
 			if body != "" {
 				body += "\n"
 			}
+			if err := sourceencoding.Validate(item.CodePath, []byte(body)); err != nil {
+				return fail(err)
+			}
 			if err := os.WriteFile(item.CodePath, []byte(body), 0o644); err != nil {
 				return fail(err)
 			}
@@ -7206,6 +7217,9 @@ func (a *app) lintCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := a.runSourceEncodingPreflight(cmd.Context(), "lint", cfg); err != nil {
+				return err
+			}
 			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("lint", output.ExitEnvironment, "lint_failed", err)
@@ -7364,6 +7378,9 @@ func (a *app) analyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := a.runSourceEncodingPreflight(cmd.Context(), "analyze", cfg); err != nil {
+				return err
+			}
 			runCtx := cmd.Context()
 			var recorder *analysisstats.Recorder
 			if performanceLog {
@@ -7429,6 +7446,9 @@ func (a *app) checkCommand() *cobra.Command {
 			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("check")
 			if err != nil {
+				return err
+			}
+			if err := a.runSourceEncodingPreflight(cmd.Context(), "check", cfg); err != nil {
 				return err
 			}
 			env := output.New("check")
@@ -7651,8 +7671,24 @@ func (a *app) buildRunDiagnostic(ctx context.Context, cfg config.Config, env out
 }
 
 func (a *app) runSourcePreflight(ctx context.Context, command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool, pathFilter func(string) bool) error {
+	return a.runSourcePreflightInternal(ctx, command, cfg, action, ignoredAnalysisCodes, pathFilter, true)
+}
+
+func (a *app) runSourcePreflightAfterEncoding(ctx context.Context, command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool, pathFilter func(string) bool) error {
+	return a.runSourcePreflightInternal(ctx, command, cfg, action, ignoredAnalysisCodes, pathFilter, false)
+}
+
+func (a *app) runSourcePreflightInternal(ctx context.Context, command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool, pathFilter func(string) bool, validateEncoding bool) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if validateEncoding {
+		if err := a.runSourceEncodingPreflight(ctx, command, cfg); err != nil {
+			return err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -8189,7 +8225,16 @@ func (a *app) writeScaffoldWelcome(command string, skipUpdateCheck bool) error {
 }
 
 func (a *app) writeFailure(command string, code int, errCode string, err error) error {
-	env := output.Failure(command, output.Error{Code: errCode, Message: err.Error()})
+	failure := output.Error{Code: errCode, Message: err.Error()}
+	if projection, ok := sourceEncodingErrorProjection(err); ok {
+		code = output.ExitValidation
+		failure.Code = "source_encoding_invalid"
+		failure.Message = projection.Message
+		failure.Source = projection.Source
+		failure.Details = projection.Details
+		failure.Suggestions = projection.Suggestions
+	}
+	env := output.Failure(command, failure)
 	a.addConfigWarnings(&env)
 	a.addPreflightWaiverWarnings(&env)
 	if writeErr := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); writeErr != nil {

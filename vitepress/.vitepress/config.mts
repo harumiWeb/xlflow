@@ -93,6 +93,7 @@ function commandSidebar() {
         { text: "inspect", link: "/commands/inspect" },
         { text: "inspect-gui", link: "/commands/inspect-gui" },
         { text: "lint", link: "/commands/lint" },
+        { text: "encoding", link: "/commands/encoding" },
         { text: "analyze", link: "/commands/analyze" },
         { text: "metrics", link: "/commands/metrics" },
         { text: "check", link: "/commands/check" },

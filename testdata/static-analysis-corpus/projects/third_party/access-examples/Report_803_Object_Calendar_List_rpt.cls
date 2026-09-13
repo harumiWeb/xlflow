@@ -22,7 +22,7 @@ Private Type udtPrtMips_str
 strRGB As String * TwentyEight
 End Type
 
-' ' Structure from ADH97
+'Â ' Structure from ADH97
 Private Type udtPrtMips
     lngLeft As Long
     lngTop As Long

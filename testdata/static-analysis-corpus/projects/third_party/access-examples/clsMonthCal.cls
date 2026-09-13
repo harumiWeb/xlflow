@@ -29,7 +29,7 @@ Option Explicit
 'Purpose:
 '           To allow for the selection of a Date or Dates using the standard
 '           Windows Month Calendar control without having to use the ActiveX control.
-' 
+'Â 
 'Authors:   Stephen Lebans
 '           Pedro Gil
 
@@ -149,18 +149,18 @@ prgDayState(11) As MONTHDAYSTATE '; // points to cDayState MONTHDAYSTATEs
 End Type
 
 'Get the value of the Control
-'­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­ 
-' Private Type SYSTEMTIME
-'   wYear As Integer
-'   wMonth As Integer
-'   wDayOfWeek As Integer
-'   wDay As Integer
-'   wHour As Integer
-'   wMinute As Integer
-'   wSecond As Integer
-'   wMilliseconds As Integer
-' End Type
-'­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­ 
+'Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â 
+'Â Private Type SYSTEMTIME
+'Â   wYear As Integer
+'Â   wMonth As Integer
+'Â   wDayOfWeek As Integer
+'Â   wDay As Integer
+'Â   wHour As Integer
+'Â   wMinute As Integer
+'Â   wSecond As Integer
+'Â   wMilliseconds As Integer
+'Â End Type
+'Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â 
 
 
 Private Declare Function apiCreateWindowEx Lib "user32.dll" _
@@ -1290,24 +1290,24 @@ End Function
 ' cut down on your typing.
 ' ie. SetBoldDayState numYear 2004, numMonth:=1, day = 19
 Public Function SetBoldDayState(numYear As Long, numMonth As Long, day As Long, Optional ResetMonth As Boolean = False)   '_
-'­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­ 
-' Optional One As Boolean, Optional Two As Boolean, _
-' Optional Three As Boolean, Optional Four As Boolean, _
-' Optional Five As Boolean, Optional Six As Boolean, _
-' Optional Seven As Boolean, Optional Eight As Boolean, _
-' Optional Nine As Boolean, Optional Ten As Boolean, _
-' Optional Eleven As Boolean, Optional Twelve As Boolean, _
-' Optional Thirteen As Boolean, Optional Fourteen As Boolean, _
-' Optional Fifthteen As Boolean, Optional Sixteen As Boolean, _
-' Optional Seventeen As Boolean, Optional Eighteen As Boolean, _
-' Optional NineTeen As Boolean, Optional Twenty As Boolean, _
-' Optional TwentyOne As Boolean, Optional TwentyTwo As Boolean, _
-' Optional TwentyThree As Boolean, Optional TwentyFour As Boolean, _
-' Optional TwentyFive As Boolean, Optional TwentySix As Boolean, _
-' Optional TwentySeven As Boolean, Optional TwentyEight As Boolean, _
-' Optional TwentyNine As Boolean, Optional Thirty As Boolean, _
-' Optional ThirtyOne As Boolean, Optional ThirtyTwo As Boolean)
-'­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­ 
+'Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â 
+'Â Optional One As Boolean, Optional Two As Boolean, _
+'Â Optional Three As Boolean, Optional Four As Boolean, _
+'Â Optional Five As Boolean, Optional Six As Boolean, _
+'Â Optional Seven As Boolean, Optional Eight As Boolean, _
+'Â Optional Nine As Boolean, Optional Ten As Boolean, _
+'Â Optional Eleven As Boolean, Optional Twelve As Boolean, _
+'Â Optional Thirteen As Boolean, Optional Fourteen As Boolean, _
+'Â Optional Fifthteen As Boolean, Optional Sixteen As Boolean, _
+'Â Optional Seventeen As Boolean, Optional Eighteen As Boolean, _
+'Â Optional NineTeen As Boolean, Optional Twenty As Boolean, _
+'Â Optional TwentyOne As Boolean, Optional TwentyTwo As Boolean, _
+'Â Optional TwentyThree As Boolean, Optional TwentyFour As Boolean, _
+'Â Optional TwentyFive As Boolean, Optional TwentySix As Boolean, _
+'Â Optional TwentySeven As Boolean, Optional TwentyEight As Boolean, _
+'Â Optional TwentyNine As Boolean, Optional Thirty As Boolean, _
+'Â Optional ThirtyOne As Boolean, Optional ThirtyTwo As Boolean)
+'Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â 
 
 '
 ' Init the month we are working with.
@@ -1319,41 +1319,41 @@ End If
 If day > 0 And day < 31 Then day = day - 1
 'BoldDayStates(numMonth) = BoldDays
 BoldDayStates(numYear, numMonth).lpMONTHDAYSTATE = BoldDayStates(numYear, numMonth).lpMONTHDAYSTATE Or 2 ^ day
-'­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­ 
-' If One Then BoldDayStates(numMonth).lpMONTHDAYSTATE = 1 'BoldDayStates(numMonth).lpMONTHDAYSTATE Or 1
-' If Two Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 1
-' If Three Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 2
-' If Four Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 3
-' If Five Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 4
-' If Six Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 5
-' If Seven Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 6
-' If Eight Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 7
-' If Nine Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 8
-' If Ten Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 9
-' If Eleven Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 10
-' If Twelve Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 11
-' If Thirteen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 12
-' If Fourteen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 13
-' If Fifthteen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 14
-' If Sixteen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 15
-' If Seventeen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 16
-' If Eighteen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 17
-' If NineTeen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 18
-' 
-' If Twenty Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 19
-' If TwentyOne Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 20
-' If TwentyTwo Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 21
-' If TwentyThree Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 22
-' If TwentyFour Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 23
-' If TwentyFive Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 24
-' If TwentySix Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 25
-' If TwentySeven Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 26
-' If TwentyEight Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 27
-' If TwentyNine Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 28
-' 
-' If Thirty Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 29
-' If ThirtyOne Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 30
-'­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­ 
+'Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â 
+'Â If One Then BoldDayStates(numMonth).lpMONTHDAYSTATE = 1 'BoldDayStates(numMonth).lpMONTHDAYSTATE Or 1
+'Â If Two Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 1
+'Â If Three Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 2
+'Â If Four Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 3
+'Â If Five Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 4
+'Â If Six Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 5
+'Â If Seven Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 6
+'Â If Eight Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 7
+'Â If Nine Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 8
+'Â If Ten Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 9
+'Â If Eleven Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 10
+'Â If Twelve Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 11
+'Â If Thirteen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 12
+'Â If Fourteen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 13
+'Â If Fifthteen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 14
+'Â If Sixteen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 15
+'Â If Seventeen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 16
+'Â If Eighteen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 17
+'Â If NineTeen Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 18
+'Â 
+'Â If Twenty Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 19
+'Â If TwentyOne Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 20
+'Â If TwentyTwo Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 21
+'Â If TwentyThree Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 22
+'Â If TwentyFour Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 23
+'Â If TwentyFive Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 24
+'Â If TwentySix Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 25
+'Â If TwentySeven Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 26
+'Â If TwentyEight Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 27
+'Â If TwentyNine Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 28
+'Â 
+'Â If Thirty Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 29
+'Â If ThirtyOne Then BoldDayStates(numMonth).lpMONTHDAYSTATE = BoldDayStates(numMonth).lpMONTHDAYSTATE Or 2 ^ 30
+'Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â 
 
 
 End Function
@@ -1779,15 +1779,15 @@ End Sub
 
 
 
-'­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­ 
-'         lngStyle = GetWindowLong(m_hWndDTP, GWL_STYLE)
-'         'We can Set/Reset these styles with recreating the Control:
-'         lngStyle = lngStyle And Not (MCS_WEEKNUMBERS Or MCS_NOTODAY Or MCS_NOTODAYCIRCLE)
-'         If m_WeekNumbers Then lngStyle = lngStyle Or MCS_WEEKNUMBERS
-'         If Not m_ShowToday Then lngStyle = lngStyle Or MCS_NOTODAY
-'         If Not m_TodayCircle Then lngStyle = lngStyle Or MCS_NOTODAYCIRCLE
-'         SetWindowLong m_hWndDTP, GWL_STYLE, lngStyle
-'­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­ 
+'Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â 
+'Â         lngStyle = GetWindowLong(m_hWndDTP, GWL_STYLE)
+'Â         'We can Set/Reset these styles with recreating the Control:
+'Â         lngStyle = lngStyle And Not (MCS_WEEKNUMBERS Or MCS_NOTODAY Or MCS_NOTODAYCIRCLE)
+'Â         If m_WeekNumbers Then lngStyle = lngStyle Or MCS_WEEKNUMBERS
+'Â         If Not m_ShowToday Then lngStyle = lngStyle Or MCS_NOTODAY
+'Â         If Not m_TodayCircle Then lngStyle = lngStyle Or MCS_NOTODAYCIRCLE
+'Â         SetWindowLong m_hWndDTP, GWL_STYLE, lngStyle
+'Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â­Â 
 
 ' ************************
 ' DEBUG GPF

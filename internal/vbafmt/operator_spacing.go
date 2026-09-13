@@ -28,7 +28,10 @@ func formatOperatorSpacing(text string, isClass bool) (string, error) {
 	defer parser.Close()
 
 	source := []byte(text)
-	parsed := parser.Parse("<fmt>", source)
+	parsed, err := parser.ParseChecked("<fmt>", source)
+	if err != nil {
+		return "", err
+	}
 	defer parsed.Close()
 
 	if parsed.HasError || parsed.HasMissing {

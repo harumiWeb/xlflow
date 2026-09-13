@@ -121,6 +121,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `byref_parameter_count`
 - `byref_parameters`
 - `byref_symbols`
+- `byte_column`
 - `byval_modifier`
 - `cached_excel_reference`
 - `call_expression`
@@ -190,6 +191,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `command_reads_saved_file`
 - `command_role`
 - `command_text`
+- `commit_error`
 - `comparison_expression`
 - `compile_equivalent`
 - `compile_equivalent_diagnostics`
@@ -391,6 +393,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enable_vba_object_model_access`
 - `enabled_count`
 - `enabled_labs_experiments`
+- `encoding_args_invalid`
+- `encoding_check_failed`
+- `encoding_convert_failed`
+- `encoding_convert_rollback_failed`
 - `end_column`
 - `end_if_fragment`
 - `end_line`
@@ -594,6 +600,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invalid_color`
 - `invalid_column_selector`
 - `invalid_conversion`
+- `invalid_cp932`
 - `invalid_created_at`
 - `invalid_entry`
 - `invalid_event_module`
@@ -612,6 +619,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invalid_sheet_name`
 - `invalid_test_case`
 - `invalid_test_metadata`
+- `invalid_utf8`
 - `invalid_version`
 - `invalid_withevents_module`
 - `invalid_withevents_shape`
@@ -1004,6 +1012,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `risk_kind`
 - `rollback_args_invalid`
 - `rollback_backup_failed`
+- `rollback_error`
 - `rollback_failed`
 - `rollback_session_check_failed`
 - `root_count`
@@ -1101,6 +1110,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `source_bytes`
 - `source_counts`
 - `source_discovery`
+- `source_encoding_invalid`
 - `source_file`
 - `source_files`
 - `source_line_count`
@@ -1257,6 +1267,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `userforms_present`
 - `uses_resume_next`
 - `uses_type`
+- `utf16_bom`
+- `utf8_bom`
 - `vague_boolean_parameter_count`
 - `variable_declaration`
 - `variable_declarator`
