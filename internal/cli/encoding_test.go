@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/text/encoding/japanese"
@@ -317,6 +318,37 @@ func TestLintAndPushRejectInvalidSourceBeforeMutation(t *testing.T) {
 	}
 	if !bytes.Equal(after, bad) {
 		t.Fatalf("invalid source changed during rejected commands: %x -> %x", bad, after)
+	}
+}
+
+func TestEncodingCheckAndPushHumanFailuresSuggestConvert(t *testing.T) {
+	for _, command := range []string{"encoding check", "push"} {
+		t.Run(command, func(t *testing.T) {
+			root := t.TempDir()
+			writeEncodingConfig(t, root)
+			writeEncodingFile(t, root, "src/modules/Bad.bas", []byte("Sub Bad()\r\n  value = \xff\r\nEnd Sub\r\n"))
+
+			var stdout bytes.Buffer
+			a := &app{cwd: root, stdout: &stdout, stderr: &bytes.Buffer{}}
+			var err error
+			if command == "encoding check" {
+				cmd := a.rootCommand()
+				cmd.SetArgs([]string{"encoding", "check"})
+				err = cmd.Execute()
+			} else {
+				cfg, loadErr := config.Load(root)
+				if loadErr != nil {
+					t.Fatal(loadErr)
+				}
+				_, _, err = a.pushSource(context.Background(), "push", cfg, excel.PushOptions{}, "")
+			}
+			if err == nil || output.ExitCode(err) != output.ExitValidation {
+				t.Fatalf("%s error = %v, exit = %d\n%s", command, err, output.ExitCode(err), stdout.String())
+			}
+			if !strings.Contains(stdout.String(), "encoding convert --from cp932") {
+				t.Fatalf("%s output did not suggest conversion:\n%s", command, stdout.String())
+			}
+		})
 	}
 }
 

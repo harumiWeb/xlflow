@@ -22,6 +22,11 @@ BOM or invalid UTF-8 returns `source_encoding_invalid` with exit code `1` and
 the first invalid byte's offset, line, and byte column. Multiple violations
 are listed in `error.details.files`.
 
+When text output is used, the same recovery suggestions are shown under
+`Next:`. For non-BOM CP932 input, this includes
+`encoding convert --from cp932`; BOM and invalid CP932 input are directed to
+manual correction or inspection instead.
+
 ## Convert
 
 ```bash
