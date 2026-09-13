@@ -912,6 +912,7 @@ func (a Analyzer) workspaceSymbolsContextWithCompleteness(ctx context.Context, o
 		}
 		docSyms, err := a.DocumentSymbolsContext(ctx, doc)
 		if err != nil {
+			complete = false
 			continue
 		}
 		out = append(out, docSyms...)

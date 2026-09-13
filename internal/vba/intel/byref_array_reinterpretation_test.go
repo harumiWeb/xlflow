@@ -161,6 +161,22 @@ End Function
 	}
 }
 
+func TestWorkspaceSymbolsQueryContextTreatsOpenDocumentSymbolErrorAsIncomplete(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.DocumentSymbolsFunc = func(Document, DocumentSymbolLoader) ([]Symbol, error) {
+		return nil, errors.New("open document symbols unavailable")
+	}
+	doc := Document{
+		Path:   filepath.Join(t.TempDir(), "Main.bas"),
+		Source: "Option Explicit\nPublic Sub Run()\nEnd Sub\n",
+	}
+
+	_, err := analyzer.WorkspaceSymbolsQueryContext(t.Context(), []Document{doc}, WorkspaceSymbolQuery{Mode: WorkspaceSymbolQueryKind})
+	if !errors.Is(err, errWorkspaceSymbolsIncomplete) {
+		t.Fatalf("workspace query error = %v, want open-document incompleteness", err)
+	}
+}
+
 func TestByRefArrayReinterpretationKeepsQualifiedTypeIdentity(t *testing.T) {
 	localTypes := map[string]struct{}{"rawstorage": {}, "main.rawstorage": {}}
 	param := Parameter{Type: "LongPtr", IsArray: true}
