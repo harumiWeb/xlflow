@@ -3,9 +3,11 @@ package sourceencoding
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -229,6 +231,57 @@ func TestConvertStagesAllFilesBeforeChangingOriginals(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 {
 		t.Fatalf("mode = %o, want 640", info.Mode().Perm())
+	}
+}
+
+func TestCleanupConvertedFilesAttributesEachFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	tempPath := filepath.Join(tempDir, ".Converted.cls.xlflow-encoding-temp")
+	backupPath := filepath.Join(tempDir, ".Converted.cls.xlflow-encoding-backup")
+	pending := []*stagedFile{
+		{file: File{Path: "src/unchanged.cls"}},
+		{
+			file:   File{Path: "src/converted.cls"},
+			temp:   tempPath,
+			backup: backupPath,
+		},
+	}
+	var calls []string
+	err := cleanupConvertedFiles(pending, func(path string) error {
+		calls = append(calls, path)
+		return fs.ErrPermission
+	})
+	if err == nil {
+		t.Fatal("cleanupConvertedFiles succeeded despite removal failures")
+	}
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		t.Fatalf("cleanup error = %T, want joined error", err)
+	}
+	if len(joined.Unwrap()) != 2 {
+		t.Fatalf("cleanup errors = %d, want 2", len(joined.Unwrap()))
+	}
+	wantArtifacts := map[string]bool{tempPath: true, backupPath: true}
+	for _, child := range joined.Unwrap() {
+		transaction, ok := errors.AsType[*TransactionError](child)
+		if !ok || transaction == nil {
+			t.Fatalf("cleanup child = %v, want TransactionError", child)
+		}
+		if transaction.Path != "src/converted.cls" {
+			t.Fatalf("cleanup source path = %q, want src/converted.cls", transaction.Path)
+		}
+		for artifact := range wantArtifacts {
+			if strings.Contains(transaction.Error(), artifact) {
+				delete(wantArtifacts, artifact)
+				break
+			}
+		}
+	}
+	if len(wantArtifacts) != 0 {
+		t.Fatalf("cleanup artifacts = %#v, want both affected artifacts", wantArtifacts)
+	}
+	if len(calls) != 2 || calls[0] != tempPath || calls[1] != backupPath {
+		t.Fatalf("remove calls = %#v, want temporary then backup", calls)
 	}
 }
 

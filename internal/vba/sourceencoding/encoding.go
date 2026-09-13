@@ -314,28 +314,8 @@ func Convert(ctx context.Context, opts Options, from string) (Result, error) {
 		}
 		item.applied = true
 	}
-	var cleanupErrs []error
-	cleanupPath := ""
-	for _, item := range pending {
-		if item.temp != "" {
-			if removeErr := os.Remove(item.temp); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
-				cleanupErrs = append(cleanupErrs, fmt.Errorf("remove temporary file %s: %w", item.temp, removeErr))
-				if cleanupPath == "" {
-					cleanupPath = item.file.Path
-				}
-			}
-		}
-		if item.backup != "" {
-			if removeErr := os.Remove(item.backup); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
-				cleanupErrs = append(cleanupErrs, fmt.Errorf("remove conversion backup %s: %w", item.backup, removeErr))
-				if cleanupPath == "" {
-					cleanupPath = item.file.Path
-				}
-			}
-		}
-	}
-	if len(cleanupErrs) > 0 {
-		return result, &TransactionError{Path: cleanupPath, Cause: errors.Join(cleanupErrs...)}
+	if cleanupErr := cleanupConvertedFiles(pending, os.Remove); cleanupErr != nil {
+		return result, cleanupErr
 	}
 	return result, nil
 }
@@ -384,6 +364,7 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 
 	configured := []string{opts.Roots.Modules, opts.Roots.Classes, opts.Roots.Forms, opts.Roots.Workbook, "tests"}
 	managed := make([]string, 0, len(configured))
+	managedCanonical := make([]string, 0, len(configured))
 	for _, raw := range configured {
 		if strings.TrimSpace(raw) == "" {
 			continue
@@ -409,8 +390,10 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 		}
 		if info.IsDir() {
 			managed = append(managed, path)
+			managedCanonical = append(managedCanonical, filepath.Clean(canonical))
 		} else if isSourceExtension(path) {
 			managed = append(managed, path)
+			managedCanonical = append(managedCanonical, filepath.Clean(canonical))
 		} else {
 			return nil, &ScopeError{Path: path, Reason: "managed source root is not a VBA source file or directory"}
 		}
@@ -437,7 +420,7 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 		if statErr != nil {
 			return nil, &FileIOError{Path: raw, Operation: "discover", Cause: statErr}
 		}
-		if !pathManaged(path, managed) {
+		if !pathManaged(path, managedCanonical) {
 			return nil, &ScopeError{Path: raw, Reason: "path is outside the configured project source roots"}
 		}
 		if info.IsDir() {
@@ -453,7 +436,7 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 					if evalErr != nil {
 						return &ScopeError{Path: candidate, Reason: "source link could not be resolved", Cause: evalErr}
 					}
-					if !pathInside(rootCanonical, canonical) || !pathManagedCanonical(canonical, managed) {
+					if !pathInside(rootCanonical, canonical) || !pathManagedCanonical(canonical, managedCanonical) {
 						return &ScopeError{Path: candidate, Reason: "source link escapes the configured project source roots"}
 					}
 				}
@@ -463,7 +446,7 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 				if !isSourceExtension(candidate) {
 					return nil
 				}
-				item, itemErr := discovered(rootAbs, rootCanonical, candidate, managed)
+				item, itemErr := discovered(rootAbs, rootCanonical, candidate, managedCanonical)
 				if itemErr != nil {
 					return itemErr
 				}
@@ -477,7 +460,7 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 		if !isSourceExtension(path) {
 			return nil, &ScopeError{Path: raw, Reason: "path must have a .bas, .cls, or .frm extension"}
 		}
-		item, itemErr := discovered(rootAbs, rootCanonical, path, managed)
+		item, itemErr := discovered(rootAbs, rootCanonical, path, managedCanonical)
 		if itemErr != nil {
 			return nil, itemErr
 		}
@@ -705,18 +688,12 @@ func pathInside(root, path string) bool {
 	return relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator)) && !filepath.IsAbs(relative)
 }
 
-func pathManaged(path string, managed []string) bool {
+func pathManaged(path string, managedCanonical []string) bool {
 	canonical, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return false
 	}
-	for _, root := range managed {
-		rootCanonical, rootErr := filepath.EvalSymlinks(root)
-		if rootErr == nil && pathInside(rootCanonical, canonical) {
-			return true
-		}
-	}
-	return false
+	return pathManagedCanonical(canonical, managedCanonical)
 }
 
 func pathLexicallyManaged(path string, managed []string) bool {
@@ -728,12 +705,12 @@ func pathLexicallyManaged(path string, managed []string) bool {
 	return false
 }
 
-func discovered(rootAbs, rootCanonical, path string, managed []string) (File, error) {
+func discovered(rootAbs, rootCanonical, path string, managedCanonical []string) (File, error) {
 	canonical, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return File{}, &ScopeError{Path: path, Reason: "source path could not be resolved", Cause: err}
 	}
-	if !pathInside(rootCanonical, canonical) || !pathManagedCanonical(canonical, managed) {
+	if !pathInside(rootCanonical, canonical) || !pathManagedCanonical(canonical, managedCanonical) {
 		return File{}, &ScopeError{Path: path, Reason: "source path escapes the configured project source roots"}
 	}
 	relative, err := filepath.Rel(rootAbs, path)
@@ -743,14 +720,36 @@ func discovered(rootAbs, rootCanonical, path string, managed []string) (File, er
 	return File{absolutePath: path, Path: filepath.ToSlash(relative), canonical: filepath.Clean(canonical)}, nil
 }
 
-func pathManagedCanonical(path string, managed []string) bool {
-	for _, root := range managed {
-		rootCanonical, err := filepath.EvalSymlinks(root)
-		if err == nil && pathInside(rootCanonical, path) {
+func pathManagedCanonical(path string, managedCanonical []string) bool {
+	for _, rootCanonical := range managedCanonical {
+		if pathInside(rootCanonical, path) {
 			return true
 		}
 	}
 	return false
+}
+
+func cleanupConvertedFiles(pending []*stagedFile, remove func(string) error) error {
+	var cleanupErrs []error
+	for _, item := range pending {
+		if item.temp != "" {
+			if removeErr := remove(item.temp); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+				cleanupErrs = append(cleanupErrs, &TransactionError{
+					Path:  item.file.Path,
+					Cause: fmt.Errorf("remove temporary file %s: %w", item.temp, removeErr),
+				})
+			}
+		}
+		if item.backup != "" {
+			if removeErr := remove(item.backup); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+				cleanupErrs = append(cleanupErrs, &TransactionError{
+					Path:  item.file.Path,
+					Cause: fmt.Errorf("remove conversion backup %s: %w", item.backup, removeErr),
+				})
+			}
+		}
+	}
+	return errors.Join(cleanupErrs...)
 }
 
 func ensureDirectoryWritable(path string) error {
