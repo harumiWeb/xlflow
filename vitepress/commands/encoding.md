@@ -42,8 +42,10 @@ created. Decode failures, UTF-16 input, and UTF-8 BOMs are reported without
 modifying any file.
 
 Conversion is explicit. `analyze`, `lint`, `fmt`, `check`, `push`, and other
-commands never guess or convert a source encoding automatically. For a
+commands never guess or convert a source encoding automatically. Conversion is
+source-only and never starts Excel; on Windows, it is serialized per configured
+project workbook identity without requiring recovery clearance. For a
 machine-readable result, the `source` envelope contains `expected`, `from`,
 `to`, `files[]` (`path`, `status`), and `summary` counts. Conversion statuses
 include `converted` and `unchanged`; check statuses include `valid`,
-`utf8_bom`, and `invalid_utf8`.
+`utf8_bom`, `utf16_bom`, and `invalid_utf8`.

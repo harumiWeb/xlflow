@@ -93,6 +93,9 @@ func TestCheckDiscoversNestedRootsTestsAndSidecarForms(t *testing.T) {
 		got = append(got, file.Path)
 	}
 	want := []string{"src/forms/code/Form1.bas", "src/forms/Form1.frm", "src/modules/nested/Main.bas", "tests/nested/Test.cls"}
+	if runtime.GOOS != "windows" {
+		want = []string{"src/forms/Form1.frm", "src/forms/code/Form1.bas", "src/modules/nested/Main.bas", "tests/nested/Test.cls"}
+	}
 	if len(got) != len(want) {
 		t.Fatalf("files = %#v, want %#v", got, want)
 	}

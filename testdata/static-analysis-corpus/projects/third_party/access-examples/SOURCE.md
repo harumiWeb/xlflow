@@ -8,5 +8,5 @@
   - Removed binary files
   - Normalized line endings
   - Normalized VBA source encoding to UTF-8 without BOM
-  - Preserved legacy Windows-1252 comment bytes while normalizing encoding
+  - Preserved legacy Windows-1252 comment text while normalizing encoding
   - Kept only exported VBA source files for parser fixture coverage

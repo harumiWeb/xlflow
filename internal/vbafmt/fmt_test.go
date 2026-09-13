@@ -1,12 +1,14 @@
 package vbafmt
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 )
 
 func TestFormatBasIdempotent(t *testing.T) {
@@ -2477,6 +2479,29 @@ func TestRunLineNumberSummary(t *testing.T) {
 	}
 	if result.LineNumbers.LinesAdded != 2 {
 		t.Fatalf("lines_added = %d, want 2", result.LineNumbers.LinesAdded)
+	}
+}
+
+func TestRunInvalidEncodingReturnsTypedErrorWithSinglePath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Sample.bas")
+	if err := os.WriteFile(path, []byte("Sub Main()\n\xff\nEnd Sub\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Run(FmtOptions{Paths: []string{path}, Root: dir})
+	if err == nil {
+		t.Fatal("expected invalid encoding error")
+	}
+	encodingErr, ok := errors.AsType[*sourceencoding.Error](err)
+	if !ok || encodingErr == nil {
+		t.Fatalf("error = %v, want sourceencoding.Error", err)
+	}
+	if encodingErr.Path != path {
+		t.Fatalf("error path = %q, want %q", encodingErr.Path, path)
+	}
+	if strings.Count(err.Error(), path) != 1 {
+		t.Fatalf("error = %q, want path exactly once", err)
 	}
 }
 

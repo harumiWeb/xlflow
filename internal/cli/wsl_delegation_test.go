@@ -126,6 +126,7 @@ func TestShouldDelegateWorkbookBackedUserFormCommandsOnly(t *testing.T) {
 		{path: []string{"form", "new"}, delegate: false},
 		{path: []string{"module", "rename"}, delegate: false},
 		{path: []string{"module", "remove"}, delegate: false},
+		{path: []string{"encoding", "convert"}, delegate: false},
 	}
 	for _, tt := range tests {
 		cmd, _, err := root.Find(tt.path)

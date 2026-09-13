@@ -45,7 +45,7 @@ func TestCapabilitiesCommandWritesV1JSONEnvelope(t *testing.T) {
 		t.Fatalf("encoding.check capability = %#v", check)
 	}
 	convert, ok := got.Capabilities.Commands["encoding.convert"]
-	if !ok || len(convert.CLIPaths) != 1 || convert.CLIPaths[0] != "encoding convert" || convert.ResourceScope != coordination.ResourceNone || convert.OperationKind != coordination.OperationMutate || !convert.ParallelSafe || convert.RequiresExcel {
+	if !ok || len(convert.CLIPaths) != 1 || convert.CLIPaths[0] != "encoding convert" || convert.ResourceScope != coordination.ResourceWorkbook || convert.OperationKind != coordination.OperationMutate || convert.ParallelSafe || !convert.RetryableWhenBusy || convert.DefaultWaitPolicy != coordination.WaitFail || convert.RecoveryBehavior != coordination.RecoveryNotApplicable || convert.RequiresExcel {
 		t.Fatalf("encoding.convert capability = %#v", convert)
 	}
 }

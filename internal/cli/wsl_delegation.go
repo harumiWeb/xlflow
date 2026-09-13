@@ -105,10 +105,16 @@ func shouldDelegateCommand(cmd *cobra.Command, topLevel string) bool {
 		return false
 	}
 	if cmd != nil {
-		if descriptor, err := coordination.LookupCLI(cmd.CommandPath()); err == nil &&
-			descriptor.Policy.ResourceScope == coordination.ResourceWorkbook &&
-			!descriptor.Policy.ParallelSafe {
-			return true
+		if descriptor, err := coordination.LookupCLI(cmd.CommandPath()); err == nil {
+			// encoding.convert is source-only. It uses the configured workbook
+			// identity for Windows transaction coordination, but must remain local
+			// in WSL so paths under the Linux filesystem are not delegated.
+			if descriptor.ID == "encoding.convert" {
+				return false
+			}
+			if descriptor.Policy.ResourceScope == coordination.ResourceWorkbook && !descriptor.Policy.ParallelSafe {
+				return true
+			}
 		}
 	}
 	if topLevel == "test" && cmd != nil && cmd.Name() == "list" {

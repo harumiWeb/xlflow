@@ -5,6 +5,7 @@ func buildDescriptors() []Descriptor {
 	sourceMutate := Policy{ResourceScope: ResourceNone, OperationKind: OperationMutate, ParallelSafe: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryNotApplicable}
 	workbookRead := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationRead, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryBlock}
 	workbookMutate := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationMutate, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryBlock}
+	sourceTransaction := withRecovery(workbookMutate, RecoveryNotApplicable)
 	workbookExecute := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationExecute, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryBlock}
 	workbookDesigner := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationDesigner, RetryableWhenBusy: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryBlock}
 	workbookObserver := Policy{ResourceScope: ResourceWorkbook, OperationKind: OperationRead, ParallelSafe: true, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryObserve}
@@ -88,7 +89,7 @@ func buildDescriptors() []Descriptor {
 		cli("fmt", "fmt", sourceMutate),
 		cli("lint", "lint", sourceRead),
 		cli("encoding.check", "encoding check", sourceRead),
-		cli("encoding.convert", "encoding convert", sourceMutate),
+		cli("encoding.convert", "encoding convert", sourceTransaction),
 		cli("lsp", "lsp", sourceRead),
 		cli("analyze", "analyze", sourceRead),
 		cli("metrics", "metrics", sourceRead),

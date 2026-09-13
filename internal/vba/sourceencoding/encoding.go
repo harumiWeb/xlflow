@@ -315,20 +315,27 @@ func Convert(ctx context.Context, opts Options, from string) (Result, error) {
 		item.applied = true
 	}
 	var cleanupErrs []error
+	cleanupPath := ""
 	for _, item := range pending {
 		if item.temp != "" {
 			if removeErr := os.Remove(item.temp); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 				cleanupErrs = append(cleanupErrs, fmt.Errorf("remove temporary file %s: %w", item.temp, removeErr))
+				if cleanupPath == "" {
+					cleanupPath = item.file.Path
+				}
 			}
 		}
 		if item.backup != "" {
 			if removeErr := os.Remove(item.backup); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 				cleanupErrs = append(cleanupErrs, fmt.Errorf("remove conversion backup %s: %w", item.backup, removeErr))
+				if cleanupPath == "" {
+					cleanupPath = item.file.Path
+				}
 			}
 		}
 	}
 	if len(cleanupErrs) > 0 {
-		return result, &TransactionError{Path: pending[0].file.Path, Cause: errors.Join(cleanupErrs...)}
+		return result, &TransactionError{Path: cleanupPath, Cause: errors.Join(cleanupErrs...)}
 	}
 	return result, nil
 }
@@ -628,14 +635,16 @@ func firstInvalidUTF8(source []byte) int {
 }
 
 func firstInvalidCP932(source []byte) int {
+	decoder := japanese.ShiftJIS.NewDecoder()
 	for offset := 0; offset < len(source); {
 		size := 1
 		if isCP932Lead(source[offset]) {
 			size = 2
 		}
 		end := min(offset+size, len(source))
-		decoded, err := japanese.ShiftJIS.NewDecoder().Bytes(source[offset:end])
-		if err != nil || strings.ContainsRune(string(decoded), utf8.RuneError) {
+		decoder.Reset()
+		decoded, err := decoder.Bytes(source[offset:end])
+		if err != nil || bytes.ContainsRune(decoded, utf8.RuneError) {
 			return offset
 		}
 		offset = end

@@ -84,6 +84,10 @@ func Run(opts FmtOptions) (*Result, error) {
 	for _, path := range files {
 		fr, err := formatFile(path, formatCfg)
 		if err != nil {
+			var encodingErr *sourceencoding.Error
+			if encodingErr, _ = errors.AsType[*sourceencoding.Error](err); encodingErr != nil {
+				return nil, err
+			}
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		results = append(results, fr)
@@ -253,7 +257,7 @@ func formatFile(path string, cfg FormatConfig) (FileResult, error) {
 		if encodingErr, _ = errors.AsType[*sourceencoding.Error](err); encodingErr != nil {
 			withPath := *encodingErr
 			withPath.Path = path
-			return FileResult{}, fmt.Errorf("%s: %w", path, &withPath)
+			return FileResult{}, &withPath
 		}
 		if isFormatParseError(err) {
 			return FileResult{
