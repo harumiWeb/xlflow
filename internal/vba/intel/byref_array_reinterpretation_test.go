@@ -1,7 +1,9 @@
 package intel
 
 import (
+	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,6 +88,76 @@ End Sub
 
 	if diagnostics := diagnosticsByCode(analyzer.ByRefArgumentDiagnostics(doc), "VBA228"); len(diagnostics) != 0 {
 		t.Fatalf("legacy workspace UDT should be accepted for pointer reinterpretation: %+v", diagnostics)
+	}
+}
+
+func TestByRefArgumentDiagnosticsUseBuiltInWorkspaceSymbolsForUDT(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	typesPath := filepath.Join(moduleDir, "Types.bas")
+	if err := os.WriteFile(typesPath, []byte(`Attribute VB_Name = "Types"
+Option Explicit
+Public Type SharedStorage
+    value As Long
+End Type
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	doc := Document{
+		Path:       filepath.Join(moduleDir, "Main.bas"),
+		ModuleKind: "standard",
+		Source: `Attribute VB_Name = "Main"
+Option Explicit
+Private Sub WritePointerWords(ByRef words() As LongPtr)
+End Sub
+
+Public Sub Run()
+    Dim raw(0) As SharedStorage
+    WritePointerWords raw
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.ByRefArgumentDiagnostics(doc), "VBA228"); len(diagnostics) != 0 {
+		t.Fatalf("built-in workspace UDT should be accepted for pointer reinterpretation: %+v", diagnostics)
+	}
+}
+
+func TestWorkspaceSymbolsQueryContextHonorsCancellationForBuiltInFallback(t *testing.T) {
+	analyzer := Analyzer{RootDir: t.TempDir()}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := analyzer.WorkspaceSymbolsQueryContext(ctx, nil, WorkspaceSymbolQuery{Mode: WorkspaceSymbolQueryKind})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("built-in workspace query error = %v, want context.Canceled", err)
+	}
+}
+
+func TestWorkspaceSymbolsQueryContextTreatsParserRecoveryAsIncomplete(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "Broken.bas"), []byte(`Attribute VB_Name = "Broken"
+Option Explicit
+Public Function Broken(ByVal x As String
+End Function
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	analyzer := newTestAnalyzer(t)
+	analyzer.RootDir = root
+	_, err := analyzer.WorkspaceSymbolsQueryContext(t.Context(), nil, WorkspaceSymbolQuery{Mode: WorkspaceSymbolQueryKind})
+	if !errors.Is(err, errWorkspaceSymbolsIncomplete) {
+		t.Fatalf("workspace query error = %v, want parser-recovery incompleteness", err)
 	}
 }
 

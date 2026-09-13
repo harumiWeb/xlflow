@@ -42,7 +42,10 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 		key := strings.ToLower(strings.TrimSpace(symbol.Name))
 		localSymbolsByName[key] = append(localSymbolsByName[key], symbol)
 	}
-	localUserDefinedTypes, workspaceUserDefinedTypes, workspaceUserDefinedTypesComplete := a.byRefUserDefinedTypes(doc, localSymbols)
+	localUserDefinedTypes, workspaceUserDefinedTypes, workspaceUserDefinedTypesComplete := a.byRefUserDefinedTypes(ctx, doc, localSymbols)
+	if ctx.Err() != nil {
+		return nil
+	}
 	conditionalLines := conditionalCompilationLines(doc.Source)
 	var out []Diagnostic
 	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
@@ -316,26 +319,23 @@ func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int
 	return byRefDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` for ByRef parameter `%s` is an expression rather than a writable variable. VBA may pass a temporary value, so procedure changes can be lost.", expr, param.Name)), true
 }
 
-func (a Analyzer) byRefUserDefinedTypes(doc Document, localSymbols []Symbol) (map[string]struct{}, *WorkspaceUserDefinedTypeIndex, bool) {
+func (a Analyzer) byRefUserDefinedTypes(ctx context.Context, doc Document, localSymbols []Symbol) (map[string]struct{}, *WorkspaceUserDefinedTypeIndex, bool) {
 	types := a.byRefLocalUserDefinedTypesForDocument(doc, localSymbols)
 	if a.WorkspaceUserDefinedTypes != nil {
 		return types, a.WorkspaceUserDefinedTypes, a.WorkspaceUserDefinedTypesComplete
-	}
-	if a.WorkspaceSymbolQueryFunc == nil && a.WorkspaceSymbolQueryContextFunc == nil && a.WorkspaceSymbolsFunc == nil {
-		return types, nil, true
 	}
 	query := WorkspaceSymbolQuery{
 		Text: "type",
 		Mode: WorkspaceSymbolQueryKind,
 	}
-	// WorkspaceSymbolsFunc is the pre-query provider contract and receives only
-	// a contains-search string. An empty search is its all-symbols operation;
-	// filter those results by kind locally instead of asking it to find the
+	// The legacy WorkspaceSymbolsFunc and the built-in workspace fallback both
+	// receive only a name query. An empty search is their all-symbols operation;
+	// filter those results by kind locally instead of asking them to find the
 	// literal word "type".
-	if a.WorkspaceSymbolQueryFunc == nil && a.WorkspaceSymbolQueryContextFunc == nil && a.WorkspaceSymbolsFunc != nil {
+	if a.WorkspaceSymbolQueryFunc == nil && a.WorkspaceSymbolQueryContextFunc == nil {
 		query.Text = ""
 	}
-	projectTypes, err := a.WorkspaceSymbolsQuery([]Document{doc}, query)
+	projectTypes, err := a.WorkspaceSymbolsQueryContext(ctx, []Document{doc}, query)
 	if err != nil {
 		return types, nil, false
 	}
