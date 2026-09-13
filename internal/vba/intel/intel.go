@@ -90,10 +90,16 @@ type Analyzer struct {
 	WorkspaceSymbolQueryFunc        WorkspaceSymbolQueryFunc
 	WorkspaceSymbolQueryContextFunc WorkspaceSymbolQueryContextFunc
 	WorkspaceSymbolsSnapshotFunc    WorkspaceSymbolsSnapshotFunc
-	RealtimeFindingsFunc            RealtimeFindingsFunc
-	visibleDeclarations             map[string]bool
-	typeDeclarations                map[string]int
-	objectTypeDeclarations          map[string]int
+	// WorkspaceUserDefinedTypes is an optional immutable project-wide index
+	// used by ByRef compatibility checks. The caller must set
+	// WorkspaceUserDefinedTypesComplete when the index covers the whole
+	// request snapshot; incomplete indexes cannot prove a type mismatch.
+	WorkspaceUserDefinedTypes         *WorkspaceUserDefinedTypeIndex
+	WorkspaceUserDefinedTypesComplete bool
+	RealtimeFindingsFunc              RealtimeFindingsFunc
+	visibleDeclarations               map[string]bool
+	typeDeclarations                  map[string]int
+	objectTypeDeclarations            map[string]int
 }
 
 // RealtimeFinding is a protocol-neutral analyzer result that can be adapted by

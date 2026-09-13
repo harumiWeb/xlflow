@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed a false-positive `VBA228` diagnostic for the VBE-accepted low-level
+  ByRef array reinterpretation used by SafeArray pointer access. Local
+  user-defined-type arrays passed to pointer-sized intrinsic arrays are now
+  excluded structurally, while non-pointer array mismatches remain errors.
+
 - Updated the `tree-sitter-vba` parser dependency to v0.14.1 and adapted VBA
   declaration handling to its new `bang_identifier` node shape. The parser now
   accepts comparison expressions such as `Case object Is Nothing`.

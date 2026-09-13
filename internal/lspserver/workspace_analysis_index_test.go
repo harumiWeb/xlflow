@@ -1148,6 +1148,36 @@ func TestCachedWorkspaceSymbolQueryUsesCurrentSnapshotWhileOverlayPending(t *tes
 	heldRelease()
 }
 
+func TestCachedWorkspaceSymbolKindQueryFailsClosedWhileIndexIncomplete(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("Sub Main()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	s.analysisScheduler = newAnalysisScheduler(1)
+	heldRelease, _, acquireErr := s.acquireAnalysisPermit(context.Background(), analysisWorkBackground)
+	if acquireErr != nil {
+		t.Fatal(acquireErr)
+	}
+	defer heldRelease()
+	s.analysis.start()
+	if s.analysis.complete() {
+		t.Fatal("workspace index became complete while its background permit was held")
+	}
+	_, err = s.cachedWorkspaceSymbolQuery(nil, intel.WorkspaceSymbolQuery{Text: "type", Mode: intel.WorkspaceSymbolQueryKind})
+	if !errors.Is(err, errWorkspaceSymbolIndexIncomplete) {
+		t.Fatalf("incomplete kind query error = %v, want %v", err, errWorkspaceSymbolIndexIncomplete)
+	}
+}
+
 func waitForWorkspaceSymbol(t testing.TB, index *workspaceAnalysisIndex, name string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
