@@ -42,6 +42,10 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 		key := strings.ToLower(strings.TrimSpace(symbol.Name))
 		localSymbolsByName[key] = append(localSymbolsByName[key], symbol)
 	}
+	localUserDefinedTypes, workspaceUserDefinedTypes, workspaceUserDefinedTypesComplete := a.byRefUserDefinedTypes(ctx, doc, localSymbols)
+	if ctx.Err() != nil {
+		return nil
+	}
 	conditionalLines := conditionalCompilationLines(doc.Source)
 	var out []Diagnostic
 	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
@@ -68,7 +72,7 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 				if !ok || param.ParamArray || !isByRefParameter(param) {
 					continue
 				}
-				if diagnostic, found := a.byRefArgumentDiagnostic(doc, callRange.Start, callRange.Start.Line, call, arg.Text, param, sig.declaringModule); found && (diagnostic.Code != "VBA206" || a.Config.Analyze.DetectByRefArgumentMismatch) {
+				if diagnostic, found := a.byRefArgumentDiagnostic(doc, callRange.Start, callRange.Start.Line, call, arg.Text, param, sig.declaringModule, localUserDefinedTypes, workspaceUserDefinedTypes, workspaceUserDefinedTypesComplete); found && (diagnostic.Code != "VBA206" || a.Config.Analyze.DetectByRefArgumentMismatch) {
 					out = append(out, diagnostic)
 				}
 			}
@@ -281,7 +285,7 @@ func isByRefParameter(param Parameter) bool {
 	return !strings.EqualFold(strings.TrimSpace(param.Passing), "ByVal")
 }
 
-func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int, call parsedCall, text string, param Parameter, declaringModule string) (Diagnostic, bool) {
+func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int, call parsedCall, text string, param Parameter, declaringModule string, localUserDefinedTypes map[string]struct{}, workspaceUserDefinedTypes *WorkspaceUserDefinedTypeIndex, workspaceUserDefinedTypesComplete bool) (Diagnostic, bool) {
 	expr := strings.TrimSpace(text)
 	if expr == "" {
 		return Diagnostic{}, false
@@ -300,7 +304,8 @@ func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int
 		if !ok || lowConfidenceDiagnosticType(inferred.Type) {
 			return Diagnostic{}, false
 		}
-		if byRefTypesMismatch(inferred.Type, inferred.IsArray, param.Type, param.IsArray, declaringModule) {
+		mismatch := byRefTypesMismatch(inferred.Type, inferred.IsArray, param.Type, param.IsArray, declaringModule)
+		if mismatch && !byRefArrayReinterpretationWithWorkspace(inferred, param, localUserDefinedTypes, workspaceUserDefinedTypes) && !a.byRefArrayReinterpretationPending(inferred, param, localUserDefinedTypes, workspaceUserDefinedTypes, workspaceUserDefinedTypesComplete) {
 			return byRefTypeMismatchDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` has type %s, but ByRef parameter `%s` requires %s.", expr, displayInferredType(inferred), param.Name, displayParameterType(param))), true
 		}
 		return Diagnostic{}, false
@@ -312,6 +317,29 @@ func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int
 		return byRefDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` for ByRef parameter `%s` is an array element or indexed expression. Any mutation is indirect and may be surprising; pass a writable variable instead.", expr, param.Name)), true
 	}
 	return byRefDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` for ByRef parameter `%s` is an expression rather than a writable variable. VBA may pass a temporary value, so procedure changes can be lost.", expr, param.Name)), true
+}
+
+func (a Analyzer) byRefUserDefinedTypes(ctx context.Context, doc Document, localSymbols []Symbol) (map[string]struct{}, *WorkspaceUserDefinedTypeIndex, bool) {
+	types := a.byRefLocalUserDefinedTypesForDocument(doc, localSymbols)
+	if a.WorkspaceUserDefinedTypes != nil {
+		return types, a.WorkspaceUserDefinedTypes, a.WorkspaceUserDefinedTypesComplete
+	}
+	query := WorkspaceSymbolQuery{
+		Text: "type",
+		Mode: WorkspaceSymbolQueryKind,
+	}
+	// The legacy WorkspaceSymbolsFunc and the built-in workspace fallback both
+	// receive only a name query. An empty search is their all-symbols operation;
+	// filter those results by kind locally instead of asking them to find the
+	// literal word "type".
+	if a.WorkspaceSymbolQueryFunc == nil && a.WorkspaceSymbolQueryContextFunc == nil {
+		query.Text = ""
+	}
+	projectTypes, err := a.WorkspaceSymbolsQueryContext(ctx, []Document{doc}, query)
+	if err != nil {
+		return types, nil, false
+	}
+	return types, NewWorkspaceUserDefinedTypeIndexForProject(projectTypes, a.Config.Project.Name), true
 }
 
 func byRefDiagnostic(lineNo int, call parsedCall, message string) Diagnostic {
@@ -398,6 +426,169 @@ func byRefTypesMismatch(actual string, actualArray bool, expected string, expect
 		return false
 	}
 	return actual != expected
+}
+
+// byRefArrayReinterpretation is the VBA/VBE exception for low-level pointer
+// access: an array of a project-local user-defined type can be passed to a
+// pointer-sized intrinsic array ByRef. The compiler accepts this deliberate
+// representation trick even though the declared element types differ.
+// Keep the exception structural so it does not depend on a library's type
+// names. Non-pointer array mismatches remain VBA228 findings.
+func byRefArrayReinterpretation(inferred inferredType, param Parameter, localUserDefinedTypes map[string]struct{}) bool {
+	if !inferred.IsArray || !param.IsArray || !isByRefPointerSizedType(param.Type) {
+		return false
+	}
+	// Keep an explicit namespace while checking whether the inferred type is
+	// one of the current project's UDTs. byRefCanonicalType intentionally
+	// normalizes VBA./Excel. for ordinary compatibility checks, but doing that
+	// here could turn an external Excel.Range into a local Range UDT.
+	typeName := byRefLocalTypeIdentity(inferred.Type)
+	if strings.Contains(typeName, ".") {
+		_, ok := localUserDefinedTypes[typeName]
+		return ok
+	}
+	_, ok := localUserDefinedTypes[byRefShortLocalTypeName(typeName)]
+	return ok
+}
+
+func byRefArrayReinterpretationWithWorkspace(inferred inferredType, param Parameter, localUserDefinedTypes map[string]struct{}, workspaceUserDefinedTypes *WorkspaceUserDefinedTypeIndex) bool {
+	if byRefArrayReinterpretation(inferred, param, localUserDefinedTypes) {
+		return true
+	}
+	if !inferred.IsArray || !param.IsArray || !isByRefPointerSizedType(param.Type) || workspaceUserDefinedTypes == nil {
+		return false
+	}
+	return workspaceUserDefinedTypes.matches(inferred.Type)
+}
+
+func (a Analyzer) byRefArrayReinterpretationPending(inferred inferredType, param Parameter, localUserDefinedTypes map[string]struct{}, workspaceUserDefinedTypes *WorkspaceUserDefinedTypeIndex, workspaceUserDefinedTypesComplete bool) bool {
+	if workspaceUserDefinedTypesComplete || !inferred.IsArray || !param.IsArray || !isByRefPointerSizedType(param.Type) {
+		return false
+	}
+	if byRefArrayReinterpretationWithWorkspace(inferred, param, localUserDefinedTypes, workspaceUserDefinedTypes) {
+		return false
+	}
+	return a.byRefMayBeUserDefinedType(inferred.Type)
+}
+
+func (a Analyzer) byRefMayBeUserDefinedType(typ string) bool {
+	typeName := byRefLocalTypeIdentity(typ)
+	if typeName == "" || isBuiltinLocalTypeName(byRefShortLocalTypeName(typeName)) {
+		return false
+	}
+	if a.DB != nil {
+		if _, ok := a.DB.ResolveType(typeName); ok {
+			return false
+		}
+		if canonical := byRefCanonicalType(typeName); canonical != typeName {
+			if _, ok := a.DB.ResolveType(canonical); ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (a Analyzer) byRefLocalUserDefinedTypesForDocument(doc Document, symbols []Symbol) map[string]struct{} {
+	types := make(map[string]struct{})
+	for _, symbol := range symbols {
+		if symbol.Parent != "" || !strings.EqualFold(strings.TrimSpace(symbol.Kind), "type") || len(symbol.ConditionalBranches) > 0 {
+			continue
+		}
+		if !a.isCurrentModuleSymbol(doc, symbol) && strings.EqualFold(strings.TrimSpace(symbol.Visibility), "Private") {
+			continue
+		}
+		name := byRefShortLocalTypeName(symbol.Name)
+		if name == "" {
+			continue
+		}
+		types[name] = struct{}{}
+		if module := byRefLocalTypeIdentity(symbol.Module); module != "" {
+			types[module+"."+name] = struct{}{}
+		}
+		if project := byRefLocalTypeIdentity(a.Config.Project.Name); project != "" {
+			types[project+"."+name] = struct{}{}
+		}
+	}
+	return types
+}
+
+// WorkspaceUserDefinedTypeIndex stores only the project UDT identities that
+// are visible outside their declaring module and are unconditional. Private
+// types in the current module come from the document-local symbol set instead.
+type WorkspaceUserDefinedTypeIndex struct {
+	unqualified map[string]struct{}
+	qualified   map[string]struct{}
+}
+
+// NewWorkspaceUserDefinedTypeIndex builds a names-only index from one
+// immutable workspace symbol snapshot. The input is expected to contain type
+// symbols, but filtering here keeps custom providers fail-closed.
+func NewWorkspaceUserDefinedTypeIndex(symbols []Symbol) *WorkspaceUserDefinedTypeIndex {
+	return NewWorkspaceUserDefinedTypeIndexForProject(symbols, "")
+}
+
+// NewWorkspaceUserDefinedTypeIndexForProject also registers the VBA project
+// name as a qualifier. VBA accepts both Module.TypeName and
+// ProjectName.TypeName for project-local user-defined types.
+func NewWorkspaceUserDefinedTypeIndexForProject(symbols []Symbol, projectName string) *WorkspaceUserDefinedTypeIndex {
+	index := &WorkspaceUserDefinedTypeIndex{
+		unqualified: make(map[string]struct{}),
+		qualified:   make(map[string]struct{}),
+	}
+	projectName = byRefLocalTypeIdentity(projectName)
+	for _, symbol := range symbols {
+		if symbol.Parent != "" || !strings.EqualFold(strings.TrimSpace(symbol.Kind), "type") || len(symbol.ConditionalBranches) > 0 || strings.EqualFold(strings.TrimSpace(symbol.Visibility), "Private") {
+			continue
+		}
+		name := byRefShortLocalTypeName(symbol.Name)
+		if name == "" {
+			continue
+		}
+		index.unqualified[name] = struct{}{}
+		if module := byRefLocalTypeIdentity(symbol.Module); module != "" {
+			index.qualified[module+"."+name] = struct{}{}
+		}
+		if projectName != "" {
+			index.qualified[projectName+"."+name] = struct{}{}
+		}
+	}
+	return index
+}
+
+func (index *WorkspaceUserDefinedTypeIndex) matches(typ string) bool {
+	if index == nil {
+		return false
+	}
+	typeName := byRefLocalTypeIdentity(typ)
+	if strings.Contains(typeName, ".") {
+		_, ok := index.qualified[typeName]
+		return ok
+	}
+	_, ok := index.unqualified[byRefShortLocalTypeName(typeName)]
+	return ok
+}
+
+func byRefLocalTypeIdentity(typ string) string {
+	return strings.ToLower(strings.TrimSpace(typ))
+}
+
+func byRefShortLocalTypeName(typ string) string {
+	typ = byRefLocalTypeIdentity(typ)
+	if separator := strings.LastIndex(typ, "."); separator >= 0 {
+		typ = typ[separator+1:]
+	}
+	return typ
+}
+
+func isByRefPointerSizedType(typ string) bool {
+	// LONG_PTR is the Windows spelling used by VBA API declarations. Treat
+	// this explicit alias as equivalent to LongPtr, but do not normalize
+	// arbitrary underscores in user-defined type names.
+	if byRefCanonicalType(typ) == "longptr" {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(typ), "LONG"+"_"+"PTR")
 }
 
 func byRefQualifiedTypeMatchesDeclaringModule(actual, expected, declaringModule string) bool {

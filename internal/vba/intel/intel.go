@@ -2,6 +2,7 @@ package intel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,6 +42,8 @@ const (
 	WorkspaceSymbolQueryModule    WorkspaceSymbolQueryMode = "module"
 	WorkspaceSymbolQueryKind      WorkspaceSymbolQueryMode = "kind"
 )
+
+var errWorkspaceSymbolsIncomplete = errors.New("workspace symbol scan incomplete")
 
 // WorkspaceSymbolQuery lets workspace consumers state their lookup intent
 // without changing the LSP workspace/symbol contains-search contract.
@@ -90,10 +93,16 @@ type Analyzer struct {
 	WorkspaceSymbolQueryFunc        WorkspaceSymbolQueryFunc
 	WorkspaceSymbolQueryContextFunc WorkspaceSymbolQueryContextFunc
 	WorkspaceSymbolsSnapshotFunc    WorkspaceSymbolsSnapshotFunc
-	RealtimeFindingsFunc            RealtimeFindingsFunc
-	visibleDeclarations             map[string]bool
-	typeDeclarations                map[string]int
-	objectTypeDeclarations          map[string]int
+	// WorkspaceUserDefinedTypes is an optional immutable project-wide index
+	// used by ByRef compatibility checks. The caller must set
+	// WorkspaceUserDefinedTypesComplete when the index covers the whole
+	// request snapshot; incomplete indexes cannot prove a type mismatch.
+	WorkspaceUserDefinedTypes         *WorkspaceUserDefinedTypeIndex
+	WorkspaceUserDefinedTypesComplete bool
+	RealtimeFindingsFunc              RealtimeFindingsFunc
+	visibleDeclarations               map[string]bool
+	typeDeclarations                  map[string]int
+	objectTypeDeclarations            map[string]int
 }
 
 // RealtimeFinding is a protocol-neutral analyzer result that can be adapted by
@@ -796,6 +805,47 @@ func (a Analyzer) WorkspaceSymbolsQuery(open []Document, query WorkspaceSymbolQu
 	return a.workspaceSymbols(open, query.Text)
 }
 
+// WorkspaceSymbolsQueryContext is the cancellable variant of
+// WorkspaceSymbolsQuery. It preserves the provider boundary while allowing
+// the built-in workspace scan to observe the caller's context.
+func (a Analyzer) WorkspaceSymbolsQueryContext(ctx context.Context, open []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if a.WorkspaceSymbolQueryContextFunc != nil {
+		out, err := a.WorkspaceSymbolQueryContextFunc(ctx, open, query)
+		if err != nil {
+			return nil, err
+		}
+		return out, ctx.Err()
+	}
+	if a.WorkspaceSymbolQueryFunc != nil {
+		out, err := a.WorkspaceSymbolQueryFunc(open, query)
+		if err != nil {
+			return nil, err
+		}
+		return out, ctx.Err()
+	}
+	if a.WorkspaceSymbolsFunc != nil {
+		out, err := a.WorkspaceSymbolsFunc(open, query.Text)
+		if err != nil {
+			return nil, err
+		}
+		return out, ctx.Err()
+	}
+	out, complete, err := a.workspaceSymbolsContextWithCompleteness(ctx, open, query.Text)
+	if err != nil {
+		return nil, err
+	}
+	if !complete {
+		return nil, errWorkspaceSymbolsIncomplete
+	}
+	return out, nil
+}
+
 // interactiveWorkspaceSymbolsQuery annotates a lookup with the current
 // document scope. Workspace providers use the annotation to query immutable
 // module postings and load locals only from the active procedure.
@@ -813,11 +863,16 @@ func (a Analyzer) workspaceSymbols(open []Document, query string) ([]Symbol, err
 }
 
 func (a Analyzer) workspaceSymbolsContext(ctx context.Context, open []Document, query string) ([]Symbol, error) {
+	out, _, err := a.workspaceSymbolsContextWithCompleteness(ctx, open, query)
+	return out, err
+}
+
+func (a Analyzer) workspaceSymbolsContextWithCompleteness(ctx context.Context, open []Document, query string) ([]Symbol, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	result, err := symbols.InspectContext(ctx, symbols.Options{
 		RootDir:        a.RootDir,
@@ -826,21 +881,25 @@ func (a Analyzer) workspaceSymbolsContext(ctx context.Context, open []Document, 
 		IncludeLabels:  false,
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	openKeys := make(map[string]bool, len(open))
 	for _, doc := range open {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		for _, key := range a.workspacePathKeys(doc.Path) {
 			openKeys[key] = true
 		}
 	}
 	var out []Symbol
+	complete := true
 	for _, file := range result.Files {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, false, err
+		}
+		if file.Parse.HasError || file.Parse.HasMissing {
+			complete = false
 		}
 		if hasAnyPathKey(openKeys, a.workspacePathKeys(file.Path)) {
 			continue
@@ -849,10 +908,11 @@ func (a Analyzer) workspaceSymbolsContext(ctx context.Context, open []Document, 
 	}
 	for _, doc := range open {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		docSyms, err := a.DocumentSymbolsContext(ctx, doc)
 		if err != nil {
+			complete = false
 			continue
 		}
 		out = append(out, docSyms...)
@@ -876,7 +936,7 @@ func (a Analyzer) workspaceSymbolsContext(ctx context.Context, open []Document, 
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, ctx.Err()
+	return out, complete, ctx.Err()
 }
 
 func (a Analyzer) workspacePathKeys(path string) []string {

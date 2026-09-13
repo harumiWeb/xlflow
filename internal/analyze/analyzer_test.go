@@ -6855,6 +6855,33 @@ End Sub
 	}
 }
 
+func TestAnalyzerByRefAllowsProjectLocalUDTArrayPointerReinterpretation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Types.bas", `Option Explicit
+Public Type SharedStorage
+  value As Long
+End Type
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub WritePointerWords(ByRef words() As LongPtr)
+End Sub
+
+Public Sub Run()
+  Dim raw(0) As SharedStorage
+  WritePointerWords raw
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA228"); len(got) != 0 {
+		t.Fatalf("project-local UDT array should be accepted for pointer reinterpretation: %+v", got)
+	}
+}
+
 func TestAnalyzerByRefUsesProjectLocalSignaturesWithRelativeRoot(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {

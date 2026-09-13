@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "id": "byref-incompatible",
-  "description": "Pass a String variable to a ByRef Long parameter.",
+  "id": "issue787-byref-array-reinterpretation",
+  "description": "Pass an array of a private user-defined type to a pointer-sized intrinsic array ByRef for low-level memory access.",
   "modules": [
     {
       "name": "Main",
@@ -14,21 +14,15 @@
     "mode": "compile"
   },
   "vbe": {
-    "expected": "rejected",
+    "expected": "accepted",
     "evidence_phase": "compile",
-    "diagnostic_meaning": "compile-error"
+    "diagnostic_meaning": "specification"
   },
   "analysis": {
     "binding_status": "bound",
     "evidence_role": "compile-equivalent",
     "rule_codes": ["VBA228"],
-    "negative_controls": [
-      "byref-compatible",
-      "byref-bare-variable",
-      "byref-literal-temporaries",
-      "issue787-byref-array-reinterpretation"
-    ],
-    "expected_diagnostics": [
+    "forbidden_diagnostics": [
       {
         "code": "VBA228",
         "severity": "error",
@@ -44,7 +38,7 @@
         "excel_build": "17932",
         "bitness": "x64",
         "locale": "ja-JP",
-        "verified_at": "2026-08-06T04:33:57Z"
+        "verified_at": "2026-09-13T01:18:01Z"
       }
     ]
   }

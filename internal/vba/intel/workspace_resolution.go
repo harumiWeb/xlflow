@@ -105,6 +105,8 @@ func (a Analyzer) withRequestWorkspaceResolution(ctx context.Context, open []Doc
 	a.visibleDeclarations = visibleAssignmentDeclarations(symbols)
 	a.typeDeclarations = workspaceTypeDeclarations(symbols)
 	a.objectTypeDeclarations = workspaceObjectTypeDeclarations(symbols)
+	a.WorkspaceUserDefinedTypes = NewWorkspaceUserDefinedTypeIndexForProject(symbols, a.Config.Project.Name)
+	a.WorkspaceUserDefinedTypesComplete = true
 	view := NewWorkspaceResolutionView(symbols)
 	if recorder := analysisstats.FromContext(ctx); recorder != nil {
 		recorder.Add("workspace_resolution_views", 1)
