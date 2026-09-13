@@ -1626,7 +1626,7 @@ func (x *workspaceAnalysisIndex) projectSnapshotClassContext(ctx context.Context
 			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
 				Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
 				Visibility: sym.Visibility, File: file, Line: sym.Range.Start.Line + 1, Parent: sym.Parent, IsArray: sym.IsArray,
-				IsConst: procedureir.IsConstKind(sym.Kind),
+				IsConst: procedureir.IsConstKind(sym.Kind), ConditionalBranches: append([]procedureir.ConditionalBranch(nil), sym.ConditionalBranches...),
 			})
 			graphSymbols = append(graphSymbols, callgraph.Symbol{
 				Name: sym.Name, Kind: sym.Kind, Module: sym.Module, ModuleKind: sym.ModuleKind, File: file,
@@ -1874,7 +1874,7 @@ func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([
 			Visibility: sym.Visibility,
 			File:       workspaceDisplayPath(x.root, entry.path),
 			Line:       sym.Range.Start.Line + 1, Parent: sym.Parent, IsArray: sym.IsArray,
-			IsConst: procedureir.IsConstKind(sym.Kind),
+			IsConst: procedureir.IsConstKind(sym.Kind), ConditionalBranches: append([]procedureir.ConditionalBranch(nil), sym.ConditionalBranches...),
 		})
 	}
 	x.mu.RUnlock()
@@ -1921,7 +1921,7 @@ func (x *workspaceAnalysisIndex) callGraphSnapshot() (callgraph.Snapshot, error)
 		}
 		entry := x.effective[ref.path]
 		file := workspaceDisplayPath(x.root, entry.path)
-		resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind, Visibility: sym.Visibility, File: file, Line: sym.Range.Start.Line + 1, Parent: sym.Parent, IsArray: sym.IsArray, IsConst: procedureir.IsConstKind(sym.Kind)})
+		resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind, Visibility: sym.Visibility, File: file, Line: sym.Range.Start.Line + 1, Parent: sym.Parent, IsArray: sym.IsArray, IsConst: procedureir.IsConstKind(sym.Kind), ConditionalBranches: append([]procedureir.ConditionalBranch(nil), sym.ConditionalBranches...)})
 		graphSymbols = append(graphSymbols, callgraph.Symbol{
 			Name: sym.Name, Kind: sym.Kind, Module: sym.Module, ModuleKind: sym.ModuleKind, File: file,
 			Line: sym.Range.Start.Line + 1, Column: sym.Range.Start.Character + 1, EndLine: sym.Range.End.Line + 1, EndColumn: sym.Range.End.Character + 1,

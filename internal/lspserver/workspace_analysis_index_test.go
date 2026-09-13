@@ -576,8 +576,11 @@ func TestWorkspaceAnalysisIndexCallQueriesFailOpenDuringInitialBackgroundScan(t 
 		return indexedFileAnalysis{
 			path: file.Path, moduleKind: file.ModuleKind,
 			symbols: []intel.Symbol{
-				{Name: "Target", Kind: "sub", Module: "Main", ModuleKind: "standard", File: file.Path},
+				// Keep both candidates outside the caller module so this test
+				// remains focused on incomplete-index fail-open behavior rather
+				// than lexical same-module precedence.
 				{Name: "Target", Kind: "sub", Module: "Other", ModuleKind: "standard", File: file.Path},
+				{Name: "Target", Kind: "sub", Module: "Else", ModuleKind: "standard", File: file.Path},
 			},
 			callSites: []calls.CallSite{{
 				File: file.Path, Module: "Main",
@@ -598,8 +601,8 @@ func TestWorkspaceAnalysisIndexCallQueriesFailOpenDuringInitialBackgroundScan(t 
 	index.setOverlay(doc, indexedFileAnalysis{
 		path: path, moduleKind: "standard",
 		symbols: []intel.Symbol{
-			{Name: "Target", Kind: "sub", Module: "Main", ModuleKind: "standard", File: path},
 			{Name: "Target", Kind: "sub", Module: "Other", ModuleKind: "standard", File: path},
+			{Name: "Target", Kind: "sub", Module: "Else", ModuleKind: "standard", File: path},
 		},
 		callSites: []calls.CallSite{{
 			File: path, Module: "Main",

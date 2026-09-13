@@ -45,7 +45,7 @@ func (i *membershipIndex[T]) add(value T) bool {
 }
 
 // Build computes direct facts and then propagates bounded semantic state over
-// uniquely resolved, reachable project-local calls until a fixed point.
+// uniquely identified, reachable project-local calls until a fixed point.
 func Build(documents []Document) ProjectSummary {
 	project, _ := BuildWithStats(documents)
 	return project
@@ -171,10 +171,10 @@ func buildWithReuse(documents []Document, previous *ProjectSummary, changedFiles
 		statements := input.statements
 		for _, call := range input.proc.Calls {
 			statement := statements[call.StatementID]
-			if !input.reachable[call.StatementID] || statement.Recovered || call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
+			if !input.reachable[call.StatementID] || statement.Recovered {
 				continue
 			}
-			if target, ok := candidateKeys[candidateKey(call.Resolution.Candidates[0])]; ok {
+			if target, ok := knownUniqueProjectCandidate(call.Resolution, candidateKeys); ok {
 				edges = append(edges, edge{from: input.id.Key(), to: target})
 			}
 		}
@@ -398,6 +398,33 @@ func candidateIndex(inputs []procedureInput) map[string]string {
 
 func candidateKey(c procedureir.Candidate) string {
 	return strings.Join([]string{canonicalComparisonPath(c.File), strings.ToLower(c.QualifiedName), strings.ToLower(c.Kind), decimal(c.Line)}, "\x00")
+}
+
+func knownUniqueProjectCandidate(resolution procedureir.CallResolution, candidateKeys map[string]string) (string, bool) {
+	if len(resolution.Candidates) != 1 {
+		return "", false
+	}
+	switch resolution.Status {
+	case procedureir.ResolutionMatched:
+	case procedureir.ResolutionIncomplete:
+		// ProjectLocal marks a negative resolution such as an inaccessible
+		// private procedure. Its candidate is evidence for diagnostics, not a
+		// callable target for possible-effect propagation.
+		if resolution.ProjectLocal {
+			return "", false
+		}
+	default:
+		return "", false
+	}
+	target, ok := candidateKeys[candidateKey(resolution.Candidates[0])]
+	return target, ok
+}
+
+func knownMatchedProjectCandidate(resolution procedureir.CallResolution, candidateKeys map[string]string) (string, bool) {
+	if resolution.Status != procedureir.ResolutionMatched {
+		return "", false
+	}
+	return knownUniqueProjectCandidate(resolution, candidateKeys)
 }
 
 // procedureResolutionFingerprint captures the project-dependent facts that

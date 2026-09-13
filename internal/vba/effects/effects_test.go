@@ -1068,6 +1068,70 @@ func TestErrorSummaryPreservesExternalCallUncertainty(t *testing.T) {
 	}
 }
 
+func TestIncompleteUniqueProjectCallPropagatesPossibleEffects(t *testing.T) {
+	const file = "Calls.bas"
+	candidate := procedureir.Candidate{QualifiedName: "Calls.Child", Kind: string(procedureir.ProcedureSub), File: file, Line: 10}
+	for _, test := range []struct {
+		name           string
+		projectLocal   bool
+		wantPropagated int
+	}{
+		{name: "candidate bounded", wantPropagated: 1},
+		{name: "project local negative", projectLocal: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			doc := procedureir.DocumentIR{
+				Path: file, ModuleName: "Calls", ModuleKind: "standard",
+				Procedures: []procedureir.ProcedureIR{
+					{
+						Symbol:     procedureir.ProcedureSymbol{Name: "Root", QualifiedName: "Calls.Root", Kind: procedureir.ProcedureSub, DeclarationRange: rangeAt(1)},
+						Statements: []procedureir.Statement{{ID: 1, Kind: procedureir.StatementCall, Text: "Child", Range: rangeAt(2)}},
+						Calls: []procedureir.CallSite{{
+							ID: 1, StatementID: 1, Callee: procedureir.Callee{Text: "Child", BaseName: "Child"}, Range: rangeAt(2),
+							Resolution: procedureir.CallResolution{Status: procedureir.ResolutionIncomplete, Candidates: []procedureir.Candidate{candidate}, ProjectLocal: test.projectLocal},
+						}},
+					},
+					{
+						Symbol: procedureir.ProcedureSymbol{Name: "Child", QualifiedName: "Calls.Child", Kind: procedureir.ProcedureSub, DeclarationRange: rangeAt(10)},
+						Statements: []procedureir.Statement{{
+							ID: 1, Kind: procedureir.StatementAssignment, Target: &procedureir.Expression{Text: "Application.EnableEvents"},
+							Value: &procedureir.Expression{Text: "False"}, Range: rangeAt(11),
+						}},
+					},
+				},
+			}
+			root := find(t, Build([]Document{{IR: doc, CFG: cfg.BuildDocument(doc)}}), "Calls.Root")
+			if got := count(root.Direct, DisablesEvents); got != 0 {
+				t.Fatalf("incomplete call created direct effect = %d: %#v", got, root.Direct)
+			}
+			if got := count(root.Propagated, DisablesEvents); got != test.wantPropagated {
+				t.Fatalf("incomplete unique call propagated effects = %d, want %d: %#v", got, test.wantPropagated, root.Propagated)
+			}
+			if len(root.DirectUncertainty) != 1 {
+				t.Fatalf("incomplete call uncertainty = %#v", root.DirectUncertainty)
+			}
+		})
+	}
+}
+
+func TestIncompleteUniqueProjectCallDoesNotProveKnownTarget(t *testing.T) {
+	candidate := procedureir.Candidate{QualifiedName: "Calls.Child", Kind: string(procedureir.ProcedureSub), File: "Calls.bas", Line: 10}
+	proc := procedureir.ProcedureIR{Calls: []procedureir.CallSite{{
+		StatementID: 1,
+		Resolution:  procedureir.CallResolution{Status: procedureir.ResolutionIncomplete, Candidates: []procedureir.Candidate{candidate}},
+	}}}
+	statement := procedureir.Statement{ID: 1}
+	candidateKeys := map[string]string{candidateKey(candidate): "Calls.Child"}
+	targets := map[string]bool{"Calls.Child": true}
+	if callsKnownTarget(proc, statement, candidateKeys, targets) {
+		t.Fatal("incomplete call must not prove a rethrow or terminal target")
+	}
+	proc.Calls[0].Resolution.Status = procedureir.ResolutionMatched
+	if !callsKnownTarget(proc, statement, candidateKeys, targets) {
+		t.Fatal("matched call should prove a rethrow or terminal target")
+	}
+}
+
 func TestGenericApplicationStateEvidencePreservesVBA203Properties(t *testing.T) {
 	summary := buildSources(t, sourceFile{"State.bas", "State", `Private savedAlerts As Boolean
 Public Sub PushState()

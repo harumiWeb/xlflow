@@ -21,7 +21,6 @@
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"analyze","code":"VBA206","severity":"warning","line":725,"column":9}
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"analyze","code":"VBA206","severity":"warning","line":726,"column":9}
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"analyze","code":"VBA206","severity":"warning","line":782,"column":17}
-{"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"analyze","code":"VBA228","severity":"error","line":783,"column":17}
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"analyze","code":"VBA206","severity":"warning","line":802,"column":13}
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"analyze","code":"VBA206","severity":"warning","line":836,"column":9}
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"analyze","code":"VBA206","severity":"warning","line":837,"column":9}

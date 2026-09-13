@@ -304,6 +304,9 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 			procedures = append(procedures, entry)
 		}
 	}
+	if site.Callee.Receiver == nil {
+		procedures = preferLocalReceiverlessProcedures(procedures, caller)
+	}
 	if site.Callee.Receiver != nil {
 		receiver := cleanQualifiedName(*site.Callee.Receiver)
 		if isExternalLikeReceiver(receiver) {
@@ -324,7 +327,7 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 		}
 		switch len(matches) {
 		case 1:
-			return CallResolution{Status: ResolutionMatched, Candidates: entriesToCandidates(matches)}
+			return matchedCallResolution(matches)
 		case 0:
 			if r.hostObjectReceiver(receiver) {
 				return CallResolution{Status: ResolutionExternal}
@@ -363,7 +366,7 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 	}
 	switch len(procedures) {
 	case 1:
-		return CallResolution{Status: ResolutionMatched, Candidates: entriesToCandidates(procedures)}
+		return matchedCallResolution(procedures)
 	default:
 		if len(procedures) > 1 {
 			return r.negativeCallResolution(CallResolution{Status: ResolutionAmbiguous, Candidates: entriesToCandidates(procedures)})
@@ -426,6 +429,17 @@ func (r SymbolResolver) negativeCallResolution(result CallResolution, evidence .
 		if result.Status == ResolutionNonCallable || result.Status == ResolutionAmbiguous || result.Status == ResolutionUnresolved {
 			result.Status = ResolutionIncomplete
 		}
+	}
+	return result
+}
+
+// matchedCallResolution keeps a sole candidate available to call-graph and
+// completion consumers, while making conditional or recovered declarations
+// fail open for compile-equivalent diagnostics.
+func matchedCallResolution(candidates []resolverEntry) CallResolution {
+	result := CallResolution{Status: ResolutionMatched, Candidates: entriesToCandidates(candidates)}
+	if hasUncertainEntries(candidates) {
+		result.Status = ResolutionIncomplete
 	}
 	return result
 }
@@ -704,6 +718,41 @@ func isReceiverlessProcedureCandidate(entry resolverEntry, callerModule string) 
 		return true
 	}
 	return entry.moduleKind == "" || strings.EqualFold(entry.moduleKind, "standard")
+}
+
+// preferLocalReceiverlessProcedures applies VBA's lexical precedence to a
+// bare procedure call. A callable declared by the caller's module wins over
+// public standard-module procedures with the same name. If no local callable
+// exists, the caller may still fall back to the visible standard-module
+// candidates collected above. Multiple local candidates remain ambiguous.
+func preferLocalReceiverlessProcedures(procedures []resolverEntry, callerModule string) []resolverEntry {
+	if strings.TrimSpace(callerModule) == "" {
+		return procedures
+	}
+	local := make([]resolverEntry, 0, len(procedures))
+	hasForeign := false
+	for _, entry := range procedures {
+		if strings.EqualFold(entry.module, callerModule) {
+			local = append(local, entry)
+		} else {
+			hasForeign = true
+		}
+	}
+	if len(local) == 0 {
+		return procedures
+	}
+	// A recovered or conditionally compiled local declaration is not a stable
+	// lexical winner. Keep the visible foreign candidates so an incomplete
+	// resolver can preserve the ambiguity instead of reporting a branch-
+	// dependent match as definitive.
+	if hasForeign && hasUncertainEntries(local) {
+		return procedures
+	}
+	// When no foreign candidate exists, retain the local procedure as the only
+	// usable candidate. ResolveCall marks that positive result incomplete below
+	// so callers can use the candidate without treating conditional metadata as
+	// definitive compile-time evidence.
+	return local
 }
 
 func (r SymbolResolver) ResolveSymbol(ref SymbolReference) SymbolResolution {

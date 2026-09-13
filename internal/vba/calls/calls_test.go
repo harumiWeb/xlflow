@@ -469,6 +469,25 @@ func TestNewResolverFromSymbolsNormalizesAndDeterministicallyOrdersCandidates(t 
 	}
 }
 
+func TestResolverAdapterPreservesConditionalShadowUncertainty(t *testing.T) {
+	t.Parallel()
+	resolver := NewResolverFromSymbols([]ResolverSymbol{
+		{
+			Name: "printMsg", Module: "Widget", ModuleKind: "class", Kind: "sub", Visibility: "Private",
+			ConditionalBranches: []procedureir.ConditionalBranch{{Group: "issue786", Branch: 0}},
+		},
+		{Name: "printMsg", Module: "Helpers", ModuleKind: "standard", Kind: "sub", Visibility: "Public"},
+	})
+	got := resolver.ResolveCall(procedureir.CallSite{
+		Module: "Widget",
+		Caller: procedureir.ProcedureRef{QualifiedName: "Widget.Run"},
+		Callee: procedureir.Callee{Text: "printMsg", BaseName: "printMsg"},
+	})
+	if got.Status != procedureir.ResolutionAmbiguous || len(got.Candidates) != 2 {
+		t.Fatalf("conditional adapter resolution = %#v, want ambiguous with both candidates", got)
+	}
+}
+
 func TestResolverAdapterResolvesNonProcedureProjectSymbols(t *testing.T) {
 	resolver := NewResolverFromSymbols([]ResolverSymbol{{
 		Name: "SharedValue", Module: "Globals", Kind: "variable",

@@ -42,6 +42,7 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 		key := strings.ToLower(strings.TrimSpace(symbol.Name))
 		localSymbolsByName[key] = append(localSymbolsByName[key], symbol)
 	}
+	conditionalLines := conditionalCompilationLines(doc.Source)
 	var out []Diagnostic
 	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
 		if i&0x3f == 0 && ctx.Err() != nil {
@@ -54,7 +55,7 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 			}
 			callRange := logicalLine.callRange(call)
 			call.DiagnosticRange = &callRange
-			sig, resolved, err := a.resolveProjectLocalCallSignature(doc, localSymbolsByName, call.Target, callRange.Start)
+			sig, resolved, err := a.resolveProjectLocalCallSignature(doc, localSymbolsByName, call.Target, callRange.Start, conditionalLines)
 			if err != nil || !resolved || !sig.projectLocal {
 				continue
 			}
@@ -106,7 +107,7 @@ func byRefCallIsShadowedByWholeArgumentForm(call parsedCall, calls []parsedCall)
 // procedure symbol. Unlike general signature help, it neither falls back to a
 // built-in/member signature nor selects an arbitrary overload: VBA206 needs a
 // concrete callee declaration before it can make a ByRef claim.
-func (a Analyzer) resolveProjectLocalCallSignature(doc Document, localSymbolsByName map[string][]Symbol, target string, pos Position) (Signature, bool, error) {
+func (a Analyzer) resolveProjectLocalCallSignature(doc Document, localSymbolsByName map[string][]Symbol, target string, pos Position, conditionalLines map[int]bool) (Signature, bool, error) {
 	target = strings.TrimSpace(target)
 	if target == "" || strings.HasPrefix(target, ".") {
 		return Signature{}, false, nil
@@ -117,16 +118,21 @@ func (a Analyzer) resolveProjectLocalCallSignature(doc Document, localSymbolsByN
 		query = member
 	}
 	currentProcedure := currentProcedureNameForDocument(doc, pos)
-	module := moduleNameForDocument(doc)
 	localCandidates := localSymbolsByName[strings.ToLower(strings.TrimSpace(query))]
+	if qualified && nonCallableLocalShadowsProjectCall(a, doc, currentProcedure, localSymbolsByName[strings.ToLower(strings.TrimSpace(receiver))], receiver) {
+		return Signature{}, false, nil
+	}
 	if !qualified && nonCallableLocalShadowsProjectCall(a, doc, currentProcedure, localCandidates, target) {
 		return Signature{}, false, nil
 	}
 	localMatches := matchingProjectCallSymbols(a, doc, currentProcedure, localCandidates, target, receiver, member, qualified)
 	if !qualified {
-		localMatches = symbolsInModule(localMatches, module)
+		localMatches = a.symbolsInCurrentModule(doc, localMatches)
 	}
 	if len(localMatches) == 1 {
+		if a.conditionallyCompiledCallSymbol(doc, localMatches[0], conditionalLines) {
+			return Signature{}, false, nil
+		}
 		return signatureFromSymbol(localMatches[0]), true, nil
 	}
 	if len(localMatches) > 1 {
@@ -138,8 +144,11 @@ func (a Analyzer) resolveProjectLocalCallSignature(doc Document, localSymbolsByN
 	}
 	matches := matchingProjectCallSymbols(a, doc, currentProcedure, syms, target, receiver, member, qualified)
 	if !qualified {
-		local := symbolsInModule(matches, module)
+		local := a.symbolsInCurrentModule(doc, matches)
 		if len(local) == 1 {
+			if a.conditionallyCompiledCallSymbol(doc, local[0], conditionalLines) {
+				return Signature{}, false, nil
+			}
 			return signatureFromSymbol(local[0]), true, nil
 		}
 		if len(local) > 1 {
@@ -147,6 +156,9 @@ func (a Analyzer) resolveProjectLocalCallSignature(doc Document, localSymbolsByN
 		}
 	}
 	if len(matches) != 1 {
+		return Signature{}, false, nil
+	}
+	if a.conditionallyCompiledCallSymbol(doc, matches[0], conditionalLines) {
 		return Signature{}, false, nil
 	}
 	return signatureFromSymbol(matches[0]), true, nil
@@ -191,14 +203,78 @@ func matchingProjectCallSymbols(a Analyzer, doc Document, currentProcedure strin
 	return matches
 }
 
-func symbolsInModule(syms []Symbol, module string) []Symbol {
+func (a Analyzer) isCurrentModuleSymbol(doc Document, sym Symbol) bool {
+	if a.sameDocumentSymbol(doc, sym) {
+		return true
+	}
+	module := moduleNameForCurrentInstance(doc)
+	return module != "" && strings.EqualFold(strings.TrimSpace(sym.Module), module)
+}
+
+func (a Analyzer) symbolsInCurrentModule(doc Document, syms []Symbol) []Symbol {
 	local := make([]Symbol, 0, len(syms))
 	for _, sym := range syms {
-		if strings.EqualFold(sym.Module, module) {
+		if a.isCurrentModuleSymbol(doc, sym) {
 			local = append(local, sym)
 		}
 	}
 	return local
+}
+
+func (a Analyzer) conditionallyCompiledCurrentModuleSymbol(doc Document, sym Symbol, conditionalLines map[int]bool) bool {
+	if len(conditionalLines) == 0 || !a.isCurrentModuleSymbol(doc, sym) {
+		return false
+	}
+	return conditionalLines[sym.Range.Start.Line]
+}
+
+func (a Analyzer) conditionallyCompiledCallSymbol(doc Document, sym Symbol, conditionalLines map[int]bool) bool {
+	return len(sym.ConditionalBranches) > 0 || a.conditionallyCompiledCurrentModuleSymbol(doc, sym, conditionalLines)
+}
+
+func conditionalDirective(line string) string {
+	fields := strings.Fields(strings.ToLower(strings.TrimSpace(line)))
+	if len(fields) == 0 {
+		return ""
+	}
+	switch fields[0] {
+	case "#if", "#elseif", "#endif":
+		return fields[0]
+	case "#else":
+		if len(fields) == 1 {
+			return fields[0]
+		}
+	case "#end":
+		if len(fields) == 2 && fields[1] == "if" {
+			return "#endif"
+		}
+	}
+	return ""
+}
+
+func conditionalCompilationLines(source string) map[int]bool {
+	var active map[int]bool
+	depth := 0
+	for lineNumber, line := range normalizedLines(source) {
+		if depth > 0 {
+			if active == nil {
+				active = make(map[int]bool)
+			}
+			active[lineNumber] = true
+		}
+		directive := conditionalDirective(stripLineComment(line))
+		switch directive {
+		case "#if":
+			depth++
+		case "#elseif", "#else":
+			// The enclosing conditional remains active for every branch.
+		case "#endif":
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return active
 }
 
 func isByRefParameter(param Parameter) bool {

@@ -2809,13 +2809,14 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		if projectResolver == nil {
 			for _, procedure := range file.IR.Procedures {
 				resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
-					Name:       procedure.Symbol.Name,
-					Module:     module,
-					ModuleKind: file.IR.ModuleKind,
-					Kind:       string(procedure.Symbol.Kind),
-					Visibility: procedure.Symbol.Visibility,
-					File:       file.IR.Path,
-					Line:       procedure.Symbol.DeclarationRange.StartLine,
+					Name:                procedure.Symbol.Name,
+					Module:              module,
+					ModuleKind:          file.IR.ModuleKind,
+					Kind:                string(procedure.Symbol.Kind),
+					Visibility:          procedure.Symbol.Visibility,
+					File:                file.IR.Path,
+					Line:                procedure.Symbol.DeclarationRange.StartLine,
+					ConditionalBranches: append([]procedureir.ConditionalBranch(nil), procedure.Symbol.ConditionalBranches...),
 				})
 			}
 		}

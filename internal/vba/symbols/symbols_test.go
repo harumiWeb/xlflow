@@ -384,7 +384,9 @@ Private mTimerId As LongPtr
 #Else
 Private Declare Function SetTimer Lib "user32" () As Long
 Private mTimerId As Long
-#End If
+Private Sub Shadow()
+End Sub
+#End If ' keep the following declarations unconditional
 
 Public Sub Run()
 End Sub
@@ -400,6 +402,43 @@ End Sub
 	file := result.Files[0]
 	assertSymbol(t, file.Symbols, "SetTimer", "declare_function")
 	assertSymbol(t, file.Symbols, "mTimerId", "module_variable")
+	shadow := assertSymbol(t, file.Symbols, "Shadow", "sub")
+	if len(shadow.ConditionalBranches) == 0 {
+		t.Fatalf("conditional procedure lacks resolver metadata: %+v", shadow)
+	}
+	run := assertSymbol(t, file.Symbols, "Run", "sub")
+	if len(run.ConditionalBranches) != 0 {
+		t.Fatalf("trailing comment on #End If kept later procedure conditional: %+v", run)
+	}
+}
+
+func TestInspectExtractsSymbolsInsideWhitespaceSeparatedConditionalBlocks(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	moduleDir := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Attribute VB_Name = \"Main\"\nOption Explicit\n#If\tVBA7\tThen\nPrivate Sub First()\nEnd Sub\n#ElseIf\tWin64\tThen\nPrivate Sub Second()\nEnd Sub\n#End\tIf\nPublic Sub Run()\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(moduleDir, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Inspect(Options{RootDir: dir, Config: cfg, IncludePrivate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := result.Files[0]
+	for _, name := range []string{"First", "Second"} {
+		symbol := assertSymbol(t, file.Symbols, name, "sub")
+		if len(symbol.ConditionalBranches) == 0 {
+			t.Fatalf("whitespace-separated conditional procedure %s lacks resolver metadata: %+v", name, symbol)
+		}
+	}
+	run := assertSymbol(t, file.Symbols, "Run", "sub")
+	if len(run.ConditionalBranches) != 0 {
+		t.Fatalf("procedure after whitespace-separated #End If kept conditional: %+v", run)
+	}
 }
 
 func TestInspectExtractsClassFieldsPropertiesAndImplements(t *testing.T) {

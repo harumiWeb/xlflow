@@ -143,21 +143,22 @@ type Diagnostic struct {
 }
 
 type Symbol struct {
-	Name          string
-	Kind          string
-	Detail        string
-	ReturnType    string
-	IsArray       bool
-	Parameters    []Parameter
-	Documentation doccomments.SymbolDocumentation
-	DocStartLine  int
-	File          string
-	Module        string
-	ModuleKind    string
-	Parent        string
-	Visibility    string
-	Range         Range
-	Selection     Range
+	Name                string
+	Kind                string
+	Detail              string
+	ReturnType          string
+	IsArray             bool
+	Parameters          []Parameter
+	Documentation       doccomments.SymbolDocumentation
+	DocStartLine        int
+	File                string
+	Module              string
+	ModuleKind          string
+	Parent              string
+	Visibility          string
+	ConditionalBranches []procedureir.ConditionalBranch
+	Range               Range
+	Selection           Range
 }
 
 type Parameter struct {
@@ -1868,8 +1869,8 @@ func (a Analyzer) resolveCallSignatureAtContextWithLocalPriority(doc Document, t
 				receiverType = "Excel.Worksheet"
 			}
 			if preferLocal {
-				if sig, found := a.resolveProjectMemberSignature(doc, receiverType, memberName, pos); found {
-					return sig, true, nil
+				if sig, found, uncertain := a.resolveProjectMemberSignature(doc, receiverType, memberName, pos); found || uncertain {
+					return sig, found, nil
 				}
 			}
 			if member, found := a.DB.ResolveMember(receiverType, memberName); found {
@@ -1906,14 +1907,14 @@ func (a Analyzer) resolveCallSignatureAtContextWithLocalPriority(doc Document, t
 	return Signature{}, false, nil
 }
 
-func (a Analyzer) resolveProjectMemberSignature(doc Document, receiverType, memberName string, pos Position) (Signature, bool) {
+func (a Analyzer) resolveProjectMemberSignature(doc Document, receiverType, memberName string, pos Position) (Signature, bool, bool) {
 	receiverType = strings.TrimSpace(receiverType)
 	if receiverType == "" || memberName == "" {
-		return Signature{}, false
+		return Signature{}, false, false
 	}
 	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, []Document{doc}, WorkspaceSymbolQuery{Text: memberName, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
-		return Signature{}, false
+		return Signature{}, false, false
 	}
 	currentProcedure := currentProcedureNameForDocument(doc, pos)
 	var match *Symbol
@@ -1925,18 +1926,21 @@ func (a Analyzer) resolveProjectMemberSignature(doc Document, receiverType, memb
 		if !strings.EqualFold(sym.ModuleKind, "class") && !strings.EqualFold(sym.ModuleKind, "form") {
 			continue
 		}
+		if len(sym.ConditionalBranches) > 0 {
+			return Signature{}, false, true
+		}
 		if !a.projectMemberSignatureComplete(*sym) {
-			return Signature{}, false
+			return Signature{}, false, true
 		}
 		if match != nil {
-			return Signature{}, false
+			return Signature{}, false, true
 		}
 		match = sym
 	}
 	if match == nil {
-		return Signature{}, false
+		return Signature{}, false, false
 	}
-	return signatureFromSymbol(*match), true
+	return signatureFromSymbol(*match), true, false
 }
 
 func (a Analyzer) projectMemberSignatureComplete(sym Symbol) bool {
@@ -2086,6 +2090,7 @@ func (a Analyzer) argumentDiagnosticsContext(ctx context.Context, doc Document) 
 		key := strings.ToLower(strings.TrimSpace(symbol.Name))
 		localSymbolsByName[key] = append(localSymbolsByName[key], symbol)
 	}
+	conditionalLines := conditionalCompilationLines(doc.Source)
 	var out []Diagnostic
 	inUserDefinedType := false
 	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
@@ -2110,7 +2115,7 @@ func (a Analyzer) argumentDiagnosticsContext(ctx context.Context, doc Document) 
 		for _, call := range callsOnLine(logicalLine.Text) {
 			callRange := logicalLine.callRange(call)
 			call.DiagnosticRange = &callRange
-			sig, ok, err := a.resolveArgumentCallSignature(doc, localSymbolsByName, call.Target, callRange.Start)
+			sig, ok, err := a.resolveArgumentCallSignature(doc, localSymbolsByName, call.Target, callRange.Start, conditionalLines)
 			if err != nil || !ok || len(sig.Parameters) == 0 {
 				continue
 			}
@@ -2133,12 +2138,15 @@ func isUserDefinedTypeDeclaration(line string) bool {
 // by the blocking VB045 diagnostic. The general resolver is intentionally
 // broader for completion and signature help, but a compile-equivalent error
 // must not bind a local value or an unrelated class member to a built-in call.
-func (a Analyzer) resolveArgumentCallSignature(doc Document, localSymbolsByName map[string][]Symbol, target string, pos Position) (Signature, bool, error) {
+func (a Analyzer) resolveArgumentCallSignature(doc Document, localSymbolsByName map[string][]Symbol, target string, pos Position, conditionalLines map[int]bool) (Signature, bool, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return Signature{}, false, nil
 	}
 	if receiver, _, qualified := splitCallTarget(target); qualified && receiver != "" {
+		if sig, resolved, uncertain, err := a.resolveArgumentProjectLocalCallSignature(doc, localSymbolsByName, target, pos, conditionalLines); err != nil || resolved || uncertain {
+			return sig, resolved, err
+		}
 		return a.resolveCallSignatureAtContextWithLocalPriority(doc, target, pos, []Document{doc}, nil, true)
 	}
 
@@ -2147,7 +2155,7 @@ func (a Analyzer) resolveArgumentCallSignature(doc Document, localSymbolsByName 
 	if nonCallableLocalShadowsProjectCall(a, doc, currentProcedure, localCandidates, target) {
 		return Signature{}, false, nil
 	}
-	if sig, resolved, err := a.resolveArgumentProjectLocalCallSignature(doc, localSymbolsByName, target, pos); err != nil || resolved {
+	if sig, resolved, uncertain, err := a.resolveArgumentProjectLocalCallSignature(doc, localSymbolsByName, target, pos, conditionalLines); err != nil || resolved || uncertain {
 		return sig, resolved, err
 	}
 
@@ -2169,37 +2177,61 @@ func (a Analyzer) resolveArgumentCallSignature(doc Document, localSymbolsByName 
 	return a.resolveCallSignatureAtContext(doc, target, pos, []Document{doc}, nil)
 }
 
-func (a Analyzer) resolveArgumentProjectLocalCallSignature(doc Document, localSymbolsByName map[string][]Symbol, target string, pos Position) (Signature, bool, error) {
+func (a Analyzer) resolveArgumentProjectLocalCallSignature(doc Document, localSymbolsByName map[string][]Symbol, target string, pos Position, conditionalLines map[int]bool) (Signature, bool, bool, error) {
 	target = strings.TrimSpace(target)
 	if target == "" || strings.HasPrefix(target, ".") {
-		return Signature{}, false, nil
+		return Signature{}, false, false, nil
+	}
+	receiver, member, qualified := splitCallTarget(target)
+	query := target
+	if qualified {
+		query = member
 	}
 	currentProcedure := currentProcedureNameForDocument(doc, pos)
-	module := moduleNameForDocument(doc)
-	localCandidates := localSymbolsByName[strings.ToLower(target)]
-	localMatches := symbolsInModule(argumentProjectCallSymbols(a, doc, currentProcedure, localCandidates, target, "", "", false), module)
+	if qualified && nonCallableLocalShadowsProjectCall(a, doc, currentProcedure, localSymbolsByName[strings.ToLower(strings.TrimSpace(receiver))], receiver) {
+		return Signature{}, false, false, nil
+	}
+	localCandidates := localSymbolsByName[strings.ToLower(strings.TrimSpace(query))]
+	localMatches := argumentProjectCallSymbols(a, doc, currentProcedure, localCandidates, target, receiver, member, qualified)
+	if !qualified {
+		localMatches = a.symbolsInCurrentModule(doc, localMatches)
+	}
 	if len(localMatches) == 1 {
-		return signatureFromSymbol(localMatches[0]), true, nil
+		if a.conditionallyCompiledCallSymbol(doc, localMatches[0], conditionalLines) {
+			return Signature{}, false, true, nil
+		}
+		return signatureFromSymbol(localMatches[0]), true, false, nil
 	}
 	if len(localMatches) > 1 {
-		return Signature{}, false, nil
+		return Signature{}, false, true, nil
 	}
-	syms, err := a.WorkspaceSymbolsQuery([]Document{doc}, WorkspaceSymbolQuery{Text: target, Mode: WorkspaceSymbolQueryExact})
+	syms, err := a.WorkspaceSymbolsQuery([]Document{doc}, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
-		return Signature{}, false, err
+		return Signature{}, false, false, err
 	}
-	matches := argumentProjectCallSymbols(a, doc, currentProcedure, syms, target, "", "", false)
-	local := symbolsInModule(matches, module)
-	if len(local) == 1 {
-		return signatureFromSymbol(local[0]), true, nil
+	matches := argumentProjectCallSymbols(a, doc, currentProcedure, syms, target, receiver, member, qualified)
+	if !qualified {
+		local := a.symbolsInCurrentModule(doc, matches)
+		if len(local) == 1 {
+			if a.conditionallyCompiledCallSymbol(doc, local[0], conditionalLines) {
+				return Signature{}, false, true, nil
+			}
+			return signatureFromSymbol(local[0]), true, false, nil
+		}
+		if len(local) > 1 {
+			return Signature{}, false, true, nil
+		}
 	}
-	if len(local) > 1 {
-		return Signature{}, false, nil
+	if len(matches) > 1 {
+		return Signature{}, false, true, nil
 	}
 	if len(matches) != 1 {
-		return Signature{}, false, nil
+		return Signature{}, false, false, nil
 	}
-	return signatureFromSymbol(matches[0]), true, nil
+	if a.conditionallyCompiledCallSymbol(doc, matches[0], conditionalLines) {
+		return Signature{}, false, true, nil
+	}
+	return signatureFromSymbol(matches[0]), true, false, nil
 }
 
 func argumentProjectCallSymbols(a Analyzer, doc Document, currentProcedure string, syms []Symbol, target, receiver, member string, qualified bool) []Symbol {
@@ -2211,10 +2243,12 @@ func argumentProjectCallSymbols(a Analyzer, doc Document, currentProcedure strin
 	for _, sym := range matches {
 		switch strings.ToLower(strings.TrimSpace(sym.ModuleKind)) {
 		case "class", "form", "document":
-			continue
+			if !a.isCurrentModuleSymbol(doc, sym) {
+				continue
+			}
 		default:
-			out = append(out, sym)
 		}
+		out = append(out, sym)
 	}
 	return out
 }
@@ -6551,19 +6585,20 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 			documentation = *sym.Documentation
 		}
 		converted := Symbol{
-			Name:          sym.Name,
-			Kind:          sym.Kind,
-			Detail:        firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
-			ReturnType:    sym.ReturnType,
-			IsArray:       sym.IsArray,
-			Parameters:    symbolParameters(sym.Parameters),
-			Documentation: documentation,
-			DocStartLine:  sym.DocStartLine,
-			File:          firstNonEmpty(uri, file.Path, sym.File),
-			Module:        sym.Module,
-			ModuleKind:    file.ModuleKind,
-			Parent:        sym.Parent,
-			Visibility:    sym.Visibility,
+			Name:                sym.Name,
+			Kind:                sym.Kind,
+			Detail:              firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
+			ReturnType:          sym.ReturnType,
+			IsArray:             sym.IsArray,
+			Parameters:          symbolParameters(sym.Parameters),
+			Documentation:       documentation,
+			DocStartLine:        sym.DocStartLine,
+			File:                firstNonEmpty(uri, file.Path, sym.File),
+			Module:              sym.Module,
+			ModuleKind:          file.ModuleKind,
+			Parent:              sym.Parent,
+			Visibility:          sym.Visibility,
+			ConditionalBranches: append([]procedureir.ConditionalBranch(nil), sym.ConditionalBranches...),
 			Range: Range{
 				Start: Position{Line: sym.StartLine - 1, Character: max(0, sym.StartColumn-1)},
 				End:   Position{Line: sym.EndLine - 1, Character: max(0, sym.EndColumn-1)},

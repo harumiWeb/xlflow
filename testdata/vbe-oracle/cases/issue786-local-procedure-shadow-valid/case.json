@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "issue786-local-procedure-shadow-valid",
+  "description": "A same-class Private procedure wins over a same-named Public standard-module procedure for an unqualified call.",
+  "modules": [
+    {
+      "name": "PrintMsgOverrideRepro",
+      "kind": "class",
+      "path": "PrintMsgOverrideRepro.bas",
+      "entry": true
+    },
+    {
+      "name": "CDPHelpers",
+      "kind": "standard",
+      "path": "CDPHelpers.bas"
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "specification"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB045"],
+    "forbidden_diagnostics": [{ "code": "VB045", "severity": "error", "surfaces": ["lsp"] }]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-09-12T00:07:02Z"
+      }
+    ]
+  }
+}

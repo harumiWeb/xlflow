@@ -18,6 +18,13 @@ All notable changes to xlflow will be documented in this file.
   treating `True` as a safe `Byte` recovery assignment because VBA represents
   it as `-1`.
 
+- Fixed false-positive `VB045` diagnostics when an unqualified call resolves to
+  a same-named `Private` procedure in the current class or module. The resolver
+  now gives the current module lexical priority and retains same-named Public
+  standard-module procedures only as a fallback. Conditional local candidates
+  remain uncertain so signature-based diagnostics fail open when the active
+  compilation configuration is unknown.
+
 - Prevented project-object false-positive fixes from regressing giant-project
   analysis by caching file-level constant environments, indexing object-summary
   lookups, and limiting module-object flow state to participating procedures;
