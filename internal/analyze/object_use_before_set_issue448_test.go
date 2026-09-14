@@ -2694,6 +2694,326 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksMsxmlCreateElementResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Encode(ByVal text As String) As String
+  Dim provider As Object
+  Dim node As Object
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  Set node = provider.createElement("b64")
+  node.DataType = "bin.base64"
+  node.Text = text
+  Encode = node.Text
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("successful MSXML createElement should establish an element result: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksMsxmlCreateElementResultThroughFunctionReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function NewDocument() As Object
+  Set NewDocument = CreateObject("MSXML2.DOMDocument.6.0")
+End Function
+
+Public Sub Run()
+  Dim provider As Object
+  Dim node As Object
+  Set provider = NewDocument()
+  Set node = provider.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an MSXML ProgID from a function return should reach createElement: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotUseResumeNextMsxmlFunctionReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function NewDocument() As Object
+  On Error Resume Next
+  Set NewDocument = CreateObject("MSXML2.DOMDocument.6.0")
+  On Error GoTo 0
+End Function
+
+Public Sub Run()
+  Dim provider As Object
+  Dim node As Object
+  Set provider = NewDocument()
+  Set node = provider.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundNode := false
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if finding.Line == 13 {
+			foundNode = true
+			break
+		}
+	}
+	if !foundNode {
+		t.Fatalf("a function return created under Resume Next must remain nullable: %+v", findingsByCode(findings, "VBA202"))
+	}
+}
+
+func TestVBA202Issue448TracksVersionedMsxmlModuleFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private moduleDocument As Object
+
+Private Sub Initialize()
+  Set moduleDocument = CreateObject("MSXML2.DOMDocument.6.0")
+End Sub
+
+Public Sub Run()
+  Dim node As Object
+  Call Initialize
+  Set node = moduleDocument.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a versioned MSXML module factory should retain its normalized ProgID: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotUseResumeNextMsxmlModuleFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private moduleDocument As Object
+
+Private Sub Initialize()
+  On Error Resume Next
+  Set moduleDocument = CreateObject("MSXML2.DOMDocument.6.0")
+  On Error GoTo 0
+End Sub
+
+Public Sub Run()
+  Dim node As Object
+  Call Initialize
+  Set node = moduleDocument.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundNode := false
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if finding.Line == 13 {
+			foundNode = true
+			break
+		}
+	}
+	if !foundNode {
+		t.Fatalf("a module factory under Resume Next must remain nullable: %+v", findingsByCode(findings, "VBA202"))
+	}
+}
+
+func TestVBA202Issue448DoesNotUseForEachMsxmlModuleFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private moduleDocument As Object
+
+Private Sub Initialize(ByVal documents As Object)
+  Set moduleDocument = CreateObject("MSXML2.DOMDocument.6.0")
+  For Each moduleDocument In documents
+  Next moduleDocument
+End Sub
+
+Public Sub Run(ByVal documents As Object)
+  Dim node As Object
+  Call Initialize(documents)
+  Set node = moduleDocument.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundNode := false
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if finding.Line == 14 {
+			foundNode = true
+			break
+		}
+	}
+	if !foundNode {
+		t.Fatalf("a module factory overwritten by For Each must remain nullable: %+v", findingsByCode(findings, "VBA202"))
+	}
+}
+
+func TestVBA202Issue448DoesNotTreatUnknownCreateElementAsAssigned(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal document As Object)
+  Dim node As Object
+  Set node = document.createElement("script")
+  node.Text = "document.body = document.body"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	foundNode := false
+	for _, finding := range got {
+		if finding.Line == 5 {
+			foundNode = true
+			break
+		}
+	}
+	if !foundNode {
+		t.Fatalf("an unknown createElement receiver must keep the node nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotTreatCreateElementMemberChainAsAssigned(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim provider As Object
+  Dim child As Object
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  Set child = provider.createElement("b64").firstChild
+  child.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("a nullable member chained after createElement must remain nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotKeepMsxmlProgIDAfterResumeNextCreateObject(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim provider As Object
+  Dim node As Object
+  On Error Resume Next
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  On Error GoTo 0
+  Set node = provider.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	foundNode := false
+	for _, finding := range got {
+		if finding.Line == 9 {
+			foundNode = true
+			break
+		}
+	}
+	if !foundNode {
+		t.Fatalf("a CreateObject under Resume Next must not establish an MSXML receiver: %+v", got)
+	}
+}
+
+func TestVBA202Issue448ClearsMsxmlProgIDAfterByRefReplacement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub ResetObject(ByRef value As Object)
+  Set value = CreateObject("Scripting.Dictionary")
+End Sub
+
+Public Sub Run()
+  Dim provider As Object
+  Dim node As Object
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  Call ResetObject(provider)
+  Set node = provider.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 12 {
+		t.Fatalf("a ByRef replacement must clear the previous MSXML receiver fact: %+v", got)
+	}
+}
+
+func TestVBA202Issue448ClearsMsxmlProgIDAfterForEachReassignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal documents As Object)
+  Dim provider As Object
+  Dim node As Object
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  For Each provider In documents
+  Next provider
+  Set node = provider.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("a For Each reassignment must clear the previous MSXML receiver fact: %+v", got)
+	}
+}
+
 func TestVBA202Issue448DoesNotTreatMsxmlSelectNodesUnderResumeNextAsAssigned(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

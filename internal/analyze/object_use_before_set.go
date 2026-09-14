@@ -1540,7 +1540,7 @@ func (analysis *objectAnalysisContext) buildSummaries() map[string]objectProcedu
 				updated.ModuleAssigned[strings.ToLower(name)] = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
 				updated.ModuleWritten[strings.ToLower(name)] = objectProcedureWritesModuleFieldIndexed(plan.proc, declaration.Name, plan.flowContext.facts)
 			}
-			updated.ModuleProgID = objectModuleProgIDs(plan, analysis.summaries)
+			updated.ModuleProgID = objectModuleProgIDs(plan, flow)
 			if objectTypeKnown(plan.proc.ReturnType, analysis.objectTypeNames) {
 				variable := objectVariable{Scope: procedureir.ScopeLocal, Name: plan.proc.Name}
 				updated.ReturnAssigned = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
@@ -1548,7 +1548,7 @@ func (analysis *objectAnalysisContext) buildSummaries() map[string]objectProcedu
 			updated.ReturnCollectionItemParameter = objectReturnCollectionItemParameter(plan)
 			updated.ReturnParameter = objectReturnParameter(plan)
 			updated.ReturnParameterPreservesInput = objectReturnParameterPreservesInput(plan, updated.ReturnParameter, analysis.summaries)
-			updated.ReturnProgID = objectReturnProgID(plan, analysis.summaries)
+			updated.ReturnProgID = objectReturnProgID(plan, flow, analysis.summaries)
 			if !objectSummaryEqual(previous, updated) {
 				analysis.summaries[key] = updated
 				for _, dependent := range analysis.summaryDependents[key] {
@@ -4050,14 +4050,29 @@ func objectTypeNameFactKey(variableKey, typeName string) string {
 	return "typename:" + variableKey + ":" + strings.ToLower(cleanIdentifier(typeName))
 }
 
-const objectRegExpProgID = "vbscript.regexp"
+const (
+	objectRegExpProgID           = "vbscript.regexp"
+	objectMSXMLDOMDocumentProgID = "msxml2.domdocument"
+)
 
 func objectTrackedProgIDs() []string {
-	return []string{objectRegExpProgID}
+	return []string{objectRegExpProgID, objectMSXMLDOMDocumentProgID}
 }
 
 func objectProgIDFactKey(variableKey, progID string) string {
 	return "progid:" + variableKey + ":" + strings.ToLower(strings.TrimSpace(progID))
+}
+
+func objectIsMSXMLDOMDocumentProgID(progID string) bool {
+	progID = strings.ToLower(strings.TrimSpace(progID))
+	return progID == objectMSXMLDOMDocumentProgID || strings.HasPrefix(progID, objectMSXMLDOMDocumentProgID+".")
+}
+
+func objectProgIDMatchesFact(trackedProgID, progID string) bool {
+	if trackedProgID == objectMSXMLDOMDocumentProgID {
+		return objectIsMSXMLDOMDocumentProgID(progID)
+	}
+	return strings.EqualFold(strings.TrimSpace(progID), trackedProgID)
 }
 
 func objectNonNothingPredicateGuard(text string) (string, string, bool, bool) {
@@ -4134,21 +4149,22 @@ func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Bloc
 	case procedureir.StatementSet:
 		flowContext.valueState = valueState
 		state[target.key()] = objectFlowValueAssigned(proc, *statement, state, flowContext, declarations, summaries)
-		objectFlowUpdateProgIDFacts(file, state, target, statement.Value, declarations)
+		objectFlowUpdateProgIDFacts(file, proc, state, target, statement.Value, declarations, summaries, flowContext, statement.ID, !objectErrorResumeNextAt(proc, statement.ID))
 	case procedureir.StatementAssignment, procedureir.StatementReDim, procedureir.StatementFor:
 		// A value assignment is not an object Set.  Treat it as unsafe even if
 		// malformed VBA happens to compile through implicit coercion.
 		state[target.key()] = false
-		objectFlowUpdateProgIDFacts(file, state, target, nil, declarations)
+		objectFlowUpdateProgIDFacts(file, proc, state, target, nil, declarations, summaries, flowContext, statement.ID, false)
 	case procedureir.StatementForEach:
 		state[target.key()] = true
+		objectFlowUpdateProgIDFacts(file, proc, state, target, nil, declarations, summaries, flowContext, statement.ID, false)
 	}
-	_ = file
 	return state
 }
 
-func objectFlowUpdateProgIDFacts(file parsedFile, state map[string]bool, target objectVariable, value *procedureir.Expression, declarations declarationScope) {
+func objectFlowUpdateProgIDFacts(file parsedFile, proc sourceProcedure, state map[string]bool, target objectVariable, value *procedureir.Expression, declarations declarationScope, summaries map[string]objectProcedureSummary, flowContext objectFlowContext, statementID int, allowFactoryFacts bool) {
 	carried := map[string]bool{}
+	createdProgID := ""
 	if value != nil && value.Kind == procedureir.ExpressionIdentifier {
 		name := cleanIdentifier(value.Text)
 		if _, scope, ok := objectDeclarationBinding(name, declarations); ok {
@@ -4160,10 +4176,16 @@ func objectFlowUpdateProgIDFacts(file parsedFile, state map[string]bool, target 
 			}
 		}
 	}
+	if allowFactoryFacts && value != nil {
+		createdProgID = objectCreateObjectProgID(value.Text, file.ConstantValues)
+		if createdProgID == "" {
+			createdProgID = objectValueFactoryProgID(proc, flowContext.facts, flowContext.receiverSummaryKeys, value.Text, statementID, summaries)
+		}
+	}
 	for _, progID := range objectTrackedProgIDs() {
 		assigned := carried[progID]
-		if value != nil {
-			assigned = assigned || strings.EqualFold(objectCreateObjectProgID(value.Text, file.ConstantValues), progID)
+		if createdProgID != "" {
+			assigned = assigned || objectProgIDMatchesFact(progID, createdProgID)
 		}
 		state[objectProgIDFactKey(target.key(), progID)] = assigned
 	}
@@ -4331,6 +4353,9 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 			return true
 		}
 		if !objectErrorResumeNextAt(proc, statementID) && objectXMLSelectNodesExpressionAssigned(expression.Text) {
+			return true
+		}
+		if !objectErrorResumeNextAt(proc, statementID) && objectXMLCreateElementExpressionAssigned(expression.Text, state, declarations) {
 			return true
 		}
 		if !objectErrorResumeNextAt(proc, statementID) && objectRegExpExecuteExpressionAssigned(proc, expression.Text, state, declarations, statementID) {
@@ -4811,6 +4836,12 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 			// proven terminal.
 			return true
 		}
+		if !objectErrorResumeNextAt(proc, statementID) && objectXMLCreateElementAssigned(call, state, declarations) {
+			// MSXML's createElement returns an IXMLDOMElement on successful
+			// continuation.  Resume Next remains conservative because a failed
+			// late-bound call can leave the target Nothing.
+			return true
+		}
 		if !objectErrorResumeNextAt(proc, statementID) && objectWMIExecQueryAssigned(proc, call) {
 			// WMI's SWbemServices.ExecQuery always returns an SWbemObjectSet
 			// on a successful call, including when the result is empty.  Keep
@@ -5097,8 +5128,8 @@ func objectReturnParameterRecursiveAliasCall(proc sourceProcedure, call procedur
 	return false
 }
 
-func objectReturnProgID(plan *objectProcedurePlan, summaries map[string]objectProcedureSummary) string {
-	if plan == nil || !isObjectType(plan.proc.ReturnType) {
+func objectReturnProgID(plan *objectProcedurePlan, flow objectFlowResult, summaries map[string]objectProcedureSummary) string {
+	if plan == nil || !isObjectType(plan.proc.ReturnType) || flow.normalExit == nil {
 		return ""
 	}
 	returnName := cleanIdentifier(plan.proc.Name)
@@ -5108,10 +5139,17 @@ func objectReturnProgID(plan *objectProcedurePlan, summaries map[string]objectPr
 		if statement.Kind != procedureir.StatementSet || statement.Target == nil || statement.Value == nil || !strings.EqualFold(cleanIdentifier(statement.Target.Text), returnName) {
 			continue
 		}
+		if objectErrorResumeNextAt(plan.proc, statement.ID) {
+			return ""
+		}
 		returnValues = append(returnValues, statement.Value.Text)
 		returnStatementIDs = append(returnStatementIDs, statement.ID)
 	}
 	if len(returnValues) == 0 {
+		return ""
+	}
+	variable := objectVariable{Scope: procedureir.ScopeLocal, Name: plan.proc.Name}
+	if !flow.normalExit[variable.key()] {
 		return ""
 	}
 	progid := ""
@@ -5122,19 +5160,19 @@ func objectReturnProgID(plan *objectProcedurePlan, summaries map[string]objectPr
 		}
 		progid = progIDs[0]
 	}
+	for _, trackedProgID := range objectTrackedProgIDs() {
+		if objectProgIDMatchesFact(trackedProgID, progid) && !flow.normalExit[objectProgIDFactKey(variable.key(), trackedProgID)] {
+			return ""
+		}
+	}
 	return progid
 }
 
-func objectModuleProgIDs(plan *objectProcedurePlan, summaries map[string]objectProcedureSummary) map[string]string {
+func objectModuleProgIDs(plan *objectProcedurePlan, flow objectFlowResult) map[string]string {
 	result := map[string]string{}
-	if plan == nil || plan.unknownFlow || plan.flowGraph.BlockCount() == 0 {
+	if plan == nil || plan.unknownFlow || plan.flowGraph.BlockCount() == 0 || flow.normalExit == nil {
 		return result
 	}
-	normalExit := plan.flowGraph.NormalExit()
-	if !plan.flowGraph.IsReachable(normalExit) {
-		return result
-	}
-	dominators := plan.flowGraph.Dominators()
 	for name, declaration := range plan.moduleDecls {
 		if !declaration.Object {
 			continue
@@ -5142,24 +5180,15 @@ func objectModuleProgIDs(plan *objectProcedurePlan, summaries map[string]objectP
 		if _, tracked := plan.vars[(objectVariable{Scope: procedureir.ScopeModule, Name: declaration.Name}).key()]; !tracked {
 			continue
 		}
-		candidate := ""
-		for statement := range plan.proc.Statements.All() {
-			if statement.Kind != procedureir.StatementSet || statement.Target == nil || statement.Value == nil || !strings.EqualFold(cleanIdentifier(statement.Target.Text), cleanIdentifier(declaration.Name)) {
-				continue
-			}
-			block, ok := plan.flowGraph.BlockForStatement(statement.ID)
-			if !ok || !objectBlockSetContains(dominators[normalExit], block.ID) {
-				continue
-			}
-			progIDs := objectAssignedProgIDs(plan, statement.Value.Text, statement.ID, summaries, map[string]bool{})
-			if len(progIDs) != 1 || candidate != "" && !strings.EqualFold(candidate, progIDs[0]) {
-				candidate = ""
+		variable := objectVariable{Scope: procedureir.ScopeModule, Name: declaration.Name}
+		if !flow.normalExit[variable.key()] {
+			continue
+		}
+		for _, progID := range objectTrackedProgIDs() {
+			if flow.normalExit[objectProgIDFactKey(variable.key(), progID)] {
+				result[strings.ToLower(name)] = progID
 				break
 			}
-			candidate = progIDs[0]
-		}
-		if candidate != "" {
-			result[strings.ToLower(name)] = candidate
 		}
 	}
 	return result
@@ -5217,33 +5246,53 @@ func objectAssignedProgIDs(plan *objectProcedurePlan, valueText string, statemen
 }
 
 func objectCallReturnProgIDs(plan *objectProcedurePlan, valueText string, statementID int, summaries map[string]objectProcedureSummary) []string {
-	if plan == nil || strings.TrimSpace(valueText) == "" {
+	if plan == nil {
 		return nil
 	}
-	name := objectBareCallName(valueText)
-	if name == "" {
+	progid := objectValueFactoryProgID(plan.proc, plan.flowContext.facts, plan.receiverSummaryKeys, valueText, statementID, summaries)
+	if progid == "" {
 		return nil
+	}
+	return []string{progid}
+}
+
+func objectValueFactoryProgID(proc sourceProcedure, facts *procedureAnalysisFacts, receiverSummaryKeys map[string][]string, valueText string, statementID int, summaries map[string]objectProcedureSummary) string {
+	trimmed := strings.TrimSpace(valueText)
+	open := strings.IndexByte(trimmed, '(')
+	if facts == nil || open <= 0 || matchingParen(trimmed, open) != len(trimmed)-1 {
+		return ""
+	}
+	base := strings.TrimSpace(trimmed[:open])
+	if strings.ContainsAny(base, ". ") {
+		return ""
+	}
+	name := cleanIdentifier(base)
+	if name == "" {
+		return ""
 	}
 	var progid string
 	matched := false
-	for call := range plan.proc.Calls.All() {
-		if call.StatementID != statementID || call.Callee.Receiver != nil || !strings.EqualFold(cleanIdentifier(call.Callee.BaseName), name) {
-			continue
+	invalid := false
+	facts.forEachCallForStatement(statementID, func(call procedureir.CallSite) {
+		if invalid || call.StatementID != statementID || call.Callee.Receiver != nil || !strings.EqualFold(cleanIdentifier(call.Callee.BaseName), name) {
+			return
 		}
-		summary, ok := objectDirectCallSummaryIndexed(plan.proc, call, summaries, plan.receiverSummaryKeys)
+		summary, ok := objectDirectCallSummaryIndexed(proc, call, summaries, receiverSummaryKeys)
 		if !ok || summary.ReturnProgID == "" {
-			return nil
+			invalid = true
+			return
 		}
 		if matched && !strings.EqualFold(progid, summary.ReturnProgID) {
-			return nil
+			invalid = true
+			return
 		}
 		matched = true
 		progid = summary.ReturnProgID
+	})
+	if invalid || !matched {
+		return ""
 	}
-	if !matched {
-		return nil
-	}
-	return []string{strings.ToLower(strings.TrimSpace(progid))}
+	return strings.ToLower(strings.TrimSpace(progid))
 }
 
 func objectCreateObjectProgID(text string, constants map[string]constexpr.Value) string {
@@ -5870,10 +5919,45 @@ func objectXMLSelectNodesAssigned(call procedureir.CallSite) bool {
 	return call.Callee.Receiver != nil && strings.EqualFold(cleanIdentifier(call.Callee.Member), "selectnodes")
 }
 
+func objectXMLCreateElementAssigned(call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {
+	if call.Callee.Receiver == nil || !strings.EqualFold(cleanIdentifier(call.Callee.Member), "createelement") {
+		return false
+	}
+	return objectXMLCreateElementReceiverAssigned(*call.Callee.Receiver, state, declarations)
+}
+
 func objectXMLSelectNodesExpressionAssigned(text string) bool {
 	base := strings.TrimSpace(strings.SplitN(text, "(", 2)[0])
 	dot := strings.LastIndexByte(base, '.')
 	return dot >= 0 && strings.EqualFold(cleanIdentifier(strings.TrimSpace(base[dot+1:])), "selectnodes")
+}
+
+func objectXMLCreateElementExpressionAssigned(text string, state map[string]bool, declarations declarationScope) bool {
+	text = strings.TrimSpace(text)
+	open := strings.IndexByte(text, '(')
+	if open <= 0 || matchingParen(text, open) != len(text)-1 {
+		return false
+	}
+	base := strings.TrimSpace(text[:open])
+	dot := strings.LastIndexByte(base, '.')
+	if dot < 0 || !strings.EqualFold(cleanIdentifier(strings.TrimSpace(base[dot+1:])), "createelement") {
+		return false
+	}
+	return objectXMLCreateElementReceiverAssigned(base[:dot], state, declarations)
+}
+
+func objectXMLCreateElementReceiverAssigned(receiver string, state map[string]bool, declarations declarationScope) bool {
+	receiver = strings.TrimSpace(receiver)
+	if receiver == "" || strings.Contains(receiver, ".") {
+		return false
+	}
+	name := cleanIdentifier(strings.TrimSpace(strings.SplitN(receiver, "(", 2)[0]))
+	declaration, scope, ok := objectDeclarationBinding(name, declarations)
+	if !ok || !declaration.Object {
+		return false
+	}
+	variableKey := (objectVariable{Scope: scope, Name: name}).key()
+	return state[variableKey] && state[objectProgIDFactKey(variableKey, objectMSXMLDOMDocumentProgID)]
 }
 
 func objectRegExpExecuteAssigned(proc sourceProcedure, call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {
@@ -6105,7 +6189,7 @@ func applyObjectCallEffectsIndexed(proc sourceProcedure, call procedureir.CallSi
 			if _, exists := vars[variable.key()]; exists {
 				state[variable.key()] = assigned
 				for _, progID := range objectTrackedProgIDs() {
-					state[objectProgIDFactKey(variable.key(), progID)] = strings.EqualFold(summary.ModuleProgID[name], progID)
+					state[objectProgIDFactKey(variable.key(), progID)] = objectProgIDMatchesFact(progID, summary.ModuleProgID[name])
 				}
 			}
 		}
@@ -6134,16 +6218,19 @@ func applyObjectCallEffectsIndexed(proc sourceProcedure, call procedureir.CallSi
 		}
 		assigned := false
 		known := false
+		progIDMayChange := false
 		for _, summary := range candidates {
 			formalIndex := objectFormalIndex(call, summary, actualIndex)
 			if formalIndex < 0 || formalIndex >= len(summary.Params) || !summary.Params[formalIndex].Object {
 				continue
 			}
+			formal := summary.Params[formalIndex]
 			known = true
-			if strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) && summary.Params[formalIndex].ByRef {
+			if strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) && formal.ByRef {
 				// A recursive ByRef call may mutate the caller's object
 				// reference, so do not use the recursive summary to prove it
 				// remains assigned.
+				progIDMayChange = true
 				assigned = false
 				break
 			}
@@ -6155,11 +6242,17 @@ func applyObjectCallEffectsIndexed(proc sourceProcedure, call procedureir.CallSi
 				assigned = state[variable.key()]
 				continue
 			}
+			if formal.ByRef && summary.ByRefWritten[formalIndex] {
+				// A ByRef write can replace an object with a different runtime
+				// class.  The caller's object assignment may remain definite, but
+				// any ProgID-specific factory fact must be discarded.
+				progIDMayChange = true
+			}
 			if summary.ParamNonNothing[formalIndex] {
 				assigned = true
 				continue
 			}
-			if !summary.Params[formalIndex].ByRef {
+			if !formal.ByRef {
 				// ByVal receives a copy and cannot alter the caller's object
 				// reference; preserve its existing state.
 				assigned = state[variable.key()]
@@ -6182,6 +6275,7 @@ func applyObjectCallEffectsIndexed(proc sourceProcedure, call procedureir.CallSi
 			// An unresolved/external call may mutate a ByRef object or leave it
 			// Nothing; no definite state survives the call.
 			state[variable.key()] = false
+			objectResetProgIDFacts(state, variable)
 			continue
 		}
 		if !known {
@@ -6189,6 +6283,15 @@ func applyObjectCallEffectsIndexed(proc sourceProcedure, call procedureir.CallSi
 			continue
 		}
 		state[variable.key()] = assigned
+		if progIDMayChange {
+			objectResetProgIDFacts(state, variable)
+		}
+	}
+}
+
+func objectResetProgIDFacts(state map[string]bool, variable objectVariable) {
+	for _, progID := range objectTrackedProgIDs() {
+		state[objectProgIDFactKey(variable.key(), progID)] = false
 	}
 }
 
