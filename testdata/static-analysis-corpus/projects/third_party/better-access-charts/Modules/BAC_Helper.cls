@@ -72,14 +72,14 @@ Public Enum eShowCmd
     SW_HIDE = 0             'Blendet Fenster aus und aktiviert ein anderes Fenster
     SW_MAXIMIZE = 3         'Maximiert Fenster und aktiviert es
     SW_MINIMIZE = 6         'Minimiert Fenster und aktiviert ein anderes Fenster
-    SW_RESTORE = 9          'Aktiviert bisher minimiertes Fenster in aktueller Größe
-    SW_SHOW = 5             'Aktiviert Fenster in aktueller Größe
-    SW_SHOWDEFAULT = 10     'Aktiviert Fenster in ursprünglicher Größe
+    SW_RESTORE = 9          'Aktiviert bisher minimiertes Fenster in aktueller GrÃ¶ÃŸe
+    SW_SHOW = 5             'Aktiviert Fenster in aktueller GrÃ¶ÃŸe
+    SW_SHOWDEFAULT = 10     'Aktiviert Fenster in ursprÃ¼nglicher GrÃ¶ÃŸe
     SW_SHOWMINIMIZED = 2    'Minimiert Fenster und aktiviert es
     SW_SHOWMININOACTIVE = 7 'Minimiert Fenster. Das aktive Fenster bleibt aktiv
-    SW_SHOWNA = 8           'Fenster in aktueller Größe. Aktives Fenster bleibt aktiv
-    SW_SHOWNOACTIVATE = 4   'Fenster in neuer Größe. Das aktive Fenster bleibt aktiv
-    SW_SHOWNORMAL = 1       'Aktiviert Fenster. Falls schon min/maximiert, normale Größe
+    SW_SHOWNA = 8           'Fenster in aktueller GrÃ¶ÃŸe. Aktives Fenster bleibt aktiv
+    SW_SHOWNOACTIVATE = 4   'Fenster in neuer GrÃ¶ÃŸe. Das aktive Fenster bleibt aktiv
+    SW_SHOWNORMAL = 1       'Aktiviert Fenster. Falls schon min/maximiert, normale GrÃ¶ÃŸe
 End Enum
 
 

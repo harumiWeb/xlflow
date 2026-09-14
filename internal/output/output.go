@@ -4548,6 +4548,17 @@ func (r renderer) errorBlock(env Envelope) string {
 	if env.Error.Line != 0 {
 		b.WriteString(r.kvRows(kvRow{"Line", fmt.Sprintf("%d", env.Error.Line)}))
 	}
+	wroteSuggestion := false
+	for _, suggestion := range env.Error.Suggestions {
+		if strings.TrimSpace(suggestion) == "" {
+			continue
+		}
+		if !wroteSuggestion {
+			b.WriteString("\nNext:\n")
+			wroteSuggestion = true
+		}
+		fmt.Fprintf(&b, "  %s\n", suggestion)
+	}
 	return b.String()
 }
 

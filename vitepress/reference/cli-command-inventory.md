@@ -37,6 +37,7 @@ Generated from the Cobra command registrations in `internal/cli/root.go`. Run `p
 | `xlflow lint`               | [command guide](../commands/lint)               |
 | `xlflow lsp`                | [command guide](../commands/lsp)                |
 | `xlflow fmt`                | [command guide](../commands/fmt)                |
+| `xlflow encoding`           | [command guide](../commands/encoding)           |
 | `xlflow analyze`            | [command guide](../commands/analyze)            |
 | `xlflow metrics`            | [command guide](../commands/metrics)            |
 | `xlflow check`              | [command guide](../commands/check)              |

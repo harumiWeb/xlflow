@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 	"gopkg.in/yaml.v3"
 )
 
@@ -295,13 +296,30 @@ func moduleRenameOps(cwd string, src config.SourceConfig, module sourceModule, n
 				return nil, err
 			}
 		}
-		if shouldRewriteArtifact(module, oldPath) {
-			body, err := os.ReadFile(oldPath)
+		var body []byte
+		bodyRead := false
+		if isVBAPath(oldPath) {
+			body, err = os.ReadFile(oldPath)
 			if err != nil {
 				return nil, err
 			}
+			bodyRead = true
+			if err := sourceencoding.Validate(oldPath, body); err != nil {
+				return nil, err
+			}
+		}
+		if shouldRewriteArtifact(module, oldPath) {
+			if !bodyRead {
+				body, err = os.ReadFile(oldPath)
+				if err != nil {
+					return nil, err
+				}
+			}
 			rewritten, err := rewriteModuleArtifact(module, oldPath, body, newName)
 			if err != nil {
+				return nil, err
+			}
+			if err := sourceencoding.Validate(newPath, rewritten); err != nil {
 				return nil, err
 			}
 			op.OldContent = body
@@ -311,6 +329,15 @@ func moduleRenameOps(cwd string, src config.SourceConfig, module sourceModule, n
 		ops = append(ops, op)
 	}
 	return ops, nil
+}
+
+func isVBAPath(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".bas", ".cls", ".frm":
+		return true
+	default:
+		return false
+	}
 }
 
 func renamedArtifactPath(cwd string, src config.SourceConfig, module sourceModule, oldPath string, newName string) string {

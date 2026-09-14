@@ -517,6 +517,24 @@ func TestPushHumanOutputRendersDiagnosticSourcePathAndText(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersErrorSuggestions(t *testing.T) {
+	env := Failure("push", Error{
+		Code:        "source_encoding_invalid",
+		Message:     "src/modules/Japanese.cls is not UTF-8 without BOM",
+		Suggestions: []string{"encoding check", "encoding convert --from cp932"},
+	})
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Next:", "encoding check", "encoding convert --from cp932"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error suggestion output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRunHumanOutputRendersDiagnosticSourcePathAndText(t *testing.T) {
 	env := Failure("run", Error{Code: "vba_compile_failed", Message: "Compile error", Phase: "compile_vba"})
 	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 0}

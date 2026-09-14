@@ -68,7 +68,7 @@ Public Property Get Label(ByVal Index As Integer) As String
     Label = m_Labels(Index)
 End Property
 Public Property Let Label(ByVal Index As Integer, ByVal newValue As String)
-    m_Labels(Index) = Replace(newValue, "'", "´")
+    m_Labels(Index) = Replace(newValue, "'", "Â´")
 End Property
 
 Public Property Get Labels(Optional ByVal Quoted As Boolean = True) As String

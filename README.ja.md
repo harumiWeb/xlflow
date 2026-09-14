@@ -537,6 +537,7 @@ xlflowは人間にとっても最も優れたExcelVBAマクロ開発ツールを
 | `inspect`           | 保存済み workbook snapshot または明示的な live session 状態を確認    | `xlflow inspect range --sheet Result --address A1:F20 --session --json`      |
 | `lint`              | VBA source を lint                                                   | `xlflow lint --json`                                                         |
 | `fmt`               | VBA source を保守的にフォーマット                                    | `xlflow fmt --write --json`                                                  |
+| `encoding`          | 管理対象 VBA source の encoding を検証・変換                         | `xlflow encoding check --json`                                               |
 | `analyze`           | Excel を開かず runtime-risk pattern を解析                           | `xlflow analyze --json`                                                      |
 | `check`             | `lint` / `analyze` / `doctor` をまとめて実行                         | `xlflow check --keepalive --json`                                            |
 | `inspect-gui`       | GUI interaction boundary を検出                                      | `xlflow inspect-gui --json`                                                  |

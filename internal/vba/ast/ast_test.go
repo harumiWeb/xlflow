@@ -3,11 +3,62 @@ package ast
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
+
+func TestParserEntrypointsRejectInvalidUTF8WithTypedError(t *testing.T) {
+	invalid := []byte("Sub Run()\n  value = \xff\nEnd Sub\n")
+	parser, err := NewParser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parser.Close()
+
+	checked, err := parser.ParseChecked("Main.bas", invalid)
+	assertSourceEncodingError(t, err)
+	if checked != nil {
+		t.Fatal("ParseChecked returned a tree for invalid UTF-8")
+	}
+	compat := parser.Parse("Main.bas", invalid)
+	if compat == nil || compat.Err == nil {
+		t.Fatalf("Parse compatibility result = %#v, want typed error", compat)
+	}
+	assertSourceEncodingError(t, compat.Err)
+
+	path := filepath.Join(t.TempDir(), "Main.bas")
+	if err := os.WriteFile(path, invalid, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = parser.ParseFile(path)
+	assertSourceEncodingError(t, err)
+
+	_, err = ParseDocumentContext(context.Background(), "Main.bas", invalid)
+	assertSourceEncodingError(t, err)
+	previous, err := ParseDocument("Main.bas", []byte("Sub Run()\nEnd Sub\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer previous.Close()
+	edits := []tree_sitter.InputEdit{{}}
+	_, err = ParseDocumentIncremental("Main.bas", invalid, previous, edits)
+	assertSourceEncodingError(t, err)
+	_, err = ParseDocumentIncrementalIfAvailable("Main.bas", invalid, previous.result.Source, previous, edits)
+	assertSourceEncodingError(t, err)
+}
+
+func assertSourceEncodingError(t *testing.T, err error) {
+	t.Helper()
+	var encodingErr *sourceencoding.Error
+	if err == nil || !errors.As(err, &encodingErr) || encodingErr == nil || encodingErr.Status != sourceencoding.StatusInvalidUTF8 {
+		t.Fatalf("error = %v, want sourceencoding.Error invalid_utf8", err)
+	}
+}
 
 func TestParserParsesVBAAndReportsLocations(t *testing.T) {
 	parser, err := NewParser()

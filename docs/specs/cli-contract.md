@@ -64,6 +64,8 @@ xlflow [--json] inspect-gui
 xlflow [--json] lint
 xlflow lsp (--stdio | --check | --version) [--log-file <path>] [--performance-log]
 xlflow [--json] fmt [--write|--check|--diff] [--line-numbers <preserve|add|remove|renumber>] [--stdin] [<path>...]
+xlflow [--json] encoding check [<path>...]
+xlflow [--json] encoding convert --from cp932 [<path>...]
 xlflow [--json] analyze [--performance-log]
 xlflow [--json] metrics
 xlflow [--json] check
@@ -601,6 +603,10 @@ Text VBA components imported through the VBIDE file API (`.bas`, `.cls`, and
 `.frm`) are normalized to CRLF in the temporary import copy. This keeps Excel
 from misclassifying LF-only exported class headers; tracked source files remain
 UTF-8 and are not rewritten by the import normalization.
+
+`encoding check` recursively checks configured `[src].modules`, `[src].classes`, `[src].forms`, `[src].workbook`, and the legacy top-level `tests/` root for `.bas`, `.cls`, and `.frm` files; `.frx` files are excluded. UserForm `.frm` files are checked even in sidecar mode. When explicit positional paths are supplied, each normalized path must resolve inside a configured managed root and the project root; escaping symlinks or junctions and unsupported extensions are configuration failures. Results are deterministic, duplicate physical paths are removed, and successful JSON uses `source.expected = "utf-8"`, `source.files[]` with project-relative `path` and `status`, and `source.summary` counts. The required format is UTF-8 without BOM. A BOM, UTF-16 BOM, or invalid UTF-8 returns `source_encoding_invalid` with validation exit code `1`, `error.source` set to the first sorted invalid path, `error.details` containing `status`, `reason`, `offset`, `line`, and `byte_column`, and `error.details.files[]` for additional violations. Suggestions include `encoding check`; CP932 conversion is suggested only when the diagnostics contain no BOM or failed CP932 decode, while BOM input is directed to save as UTF-8 without BOM. JSON carries these suggestions in `error.suggestions`, and text output renders them under `Next:`.
+
+`encoding convert --from cp932` is the only supported source conversion in v1. It uses the same managed scope and path checks as `encoding check`. UTF-8 without BOM remains byte-identical; every other selected file must decode strictly as CP932 and is converted to UTF-8 without BOM while retaining line endings and permissions. UTF-8 BOM, UTF-16 BOM, malformed CP932, unreadable files, and unstageable destinations fail before any original is modified. The command stages replacements in the source file's directory, commits them as one transaction, and rolls back already-applied replacements from retained originals when a commit step fails. It leaves no permanent `.bak` files. JSON uses `source.expected`, `source.from`, `source.to`, `source.files[]`, and `source.summary`; statuses include `converted` and `unchanged`. `analyze`, `lint`, `fmt`, `check`, `push`, and other parser consumers validate source encoding but never perform implicit conversion. `check`, `push`, and other Excel-backed preflight paths reject invalid source before starting Excel or doctor. Encoding conversion is source-only and never starts Excel; on Windows, the CLI serializes its transaction per configured project workbook identity without requiring recovery clearance. Encoding I/O failures are environment errors and path/argument violations are configuration errors.
 
 ## Configuration
 

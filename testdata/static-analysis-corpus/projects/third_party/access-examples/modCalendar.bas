@@ -17,7 +17,7 @@ Attribute VB_Name = "modCalendar"
 '           Month Calendar control. Further provide a Menu interface
 '           to allow the user to modify the Calendar's properties.
 '           The Window procedure must reside in a standard Code module.
-' 
+'Â 
 'Author:    Stephen Lebans
 '
 'Email:     Stephen@lebans.com

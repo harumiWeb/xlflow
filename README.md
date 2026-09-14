@@ -566,6 +566,7 @@ You can install it from the [Visual Studio Marketplace](https://marketplace.visu
 | `inspect`           | Inspect saved workbook snapshots or explicit live session state         | `xlflow inspect range --sheet Result --address A1:F20 --session --json`      |
 | `lint`              | Lint VBA source                                                         | `xlflow lint --json`                                                         |
 | `fmt`               | Format VBA source conservatively                                        | `xlflow fmt --write --json`                                                  |
+| `encoding`          | Check or convert managed VBA source encoding                            | `xlflow encoding check --json`                                               |
 | `analyze`           | Analyze runtime-risk patterns without opening Excel                     | `xlflow analyze --json`                                                      |
 | `check`             | Run `lint`, `analyze`, and `doctor` as a preflight                      | `xlflow check --keepalive --json`                                            |
 | `inspect-gui`       | Detect GUI interaction boundaries                                       | `xlflow inspect-gui --json`                                                  |

@@ -48,7 +48,10 @@ func parseFormattingModel(text string) (*lineIndentModel, error) {
 	}
 	defer parser.Close()
 
-	parsed := parser.Parse("<fmt>", []byte(text))
+	parsed, err := parser.ParseChecked("<fmt>", []byte(text))
+	if err != nil {
+		return nil, err
+	}
 	defer parsed.Close()
 
 	if parsed.HasError || parsed.HasMissing {
