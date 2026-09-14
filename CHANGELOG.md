@@ -9,6 +9,10 @@ All notable changes to xlflow will be documented in this file.
 - Added `xlflow encoding check` and explicit `xlflow encoding convert --from cp932` commands. Managed `.bas`, `.cls`, and `.frm` source is now validated as UTF-8 without BOM before parsing, linting, analysis, and Excel-backed preflight; invalid input returns a structured `source_encoding_invalid` error without implicit conversion.
 
 - Added actionable `Next:` suggestions to human-readable failures. Eligible source-encoding failures now point agents to `encoding convert --from cp932`, while BOM and invalid CP932 input retain safe manual-correction guidance.
+- Fixed a false-positive `VBA228` diagnostic for the VBE-accepted low-level
+  ByRef array reinterpretation used by SafeArray pointer access. Local
+  user-defined-type arrays passed to pointer-sized intrinsic arrays are now
+  excluded structurally, while non-pointer array mismatches remain errors.
 
 - Updated the `tree-sitter-vba` parser dependency to v0.14.1 and adapted VBA
   declaration handling to its new `bang_identifier` node shape. The parser now

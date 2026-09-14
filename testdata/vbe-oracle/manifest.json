@@ -53,6 +53,10 @@
       "id": "byref-literal-temporaries",
       "path": "cases/byref-literal-temporaries/case.json"
     },
+    {
+      "id": "issue787-byref-array-reinterpretation",
+      "path": "cases/issue787-byref-array-reinterpretation/case.json"
+    },
     { "id": "unknown-as-type", "path": "cases/unknown-as-type/case.json" },
     { "id": "known-as-type", "path": "cases/known-as-type/case.json" },
     {

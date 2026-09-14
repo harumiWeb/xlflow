@@ -8,7 +8,7 @@ overrides:
   fast-uri: 3.1.6
   qs: 6.16.0
   undici: 7.29.0
-  js-yaml: 4.3.1
+  js-yaml: 4.3.2
   linkify-it: 5.0.2
 
 minimumReleaseAge: 1440

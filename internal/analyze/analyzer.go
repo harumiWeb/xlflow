@@ -119,6 +119,7 @@ type Analyzer struct {
 	visibleConstants           map[string]bool
 	visibleConstantValues      map[string]constexpr.Value
 	byRefSymbolIndex           *intel.WorkspaceResolutionView
+	byRefUserDefinedTypes      *intel.WorkspaceUserDefinedTypeIndex
 	physicalRootDir            string
 	errorGuardAliases          map[string]bool
 	errorValueWrappers         map[string]bool
@@ -1059,6 +1060,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 			return Result{}, err
 		}
 		analysis.byRefSymbolIndex = byRefSymbolIndex
+		analysis.byRefUserDefinedTypes = intel.NewWorkspaceUserDefinedTypeIndexForProject(byRefSymbolIndex.Query(intel.WorkspaceSymbolQuery{Text: "type", Mode: intel.WorkspaceSymbolQueryKind}), a.Config.Project.Name)
 		if recorder := analysisstats.FromContext(ctx); recorder != nil {
 			recorder.AddSum("project_symbol_count", uint64(symbolCount))
 		}
@@ -1295,11 +1297,13 @@ func (a Analyzer) byRefArgumentDiagnosticsContext(ctx context.Context, file pars
 		return batchByRefDiagnostics{computed: true}
 	}
 	diagnostics := (intel.Analyzer{
-		RootDir:                    a.intelRootDir(),
-		Config:                     a.Config,
-		DB:                         a.typeDB,
-		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
-		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
+		RootDir:                           a.intelRootDir(),
+		Config:                            a.Config,
+		DB:                                a.typeDB,
+		TypeDBResolutionIncomplete:        a.typeDBResolutionIncomplete,
+		WorkspaceSymbolQueryFunc:          a.byRefWorkspaceSymbolQuery,
+		WorkspaceUserDefinedTypes:         a.byRefUserDefinedTypes,
+		WorkspaceUserDefinedTypesComplete: a.byRefUserDefinedTypes != nil,
 	}).ByRefArgumentDiagnosticsContext(ctx, file.intelDocument())
 	return batchByRefDiagnostics{computed: true, diagnostics: diagnostics}
 }
@@ -1347,13 +1351,15 @@ func (a Analyzer) compileEquivalentFindings(file parsedFile) ([]Finding, []Findi
 
 func (a Analyzer) compileEquivalentFindingsContext(ctx context.Context, file parsedFile, byRefDiagnostics batchByRefDiagnostics) ([]Finding, []Finding) {
 	intelAnalyzer := intel.Analyzer{
-		RootDir:                    a.intelRootDir(),
-		Config:                     a.Config,
-		DB:                         a.typeDB,
-		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
-		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
-		VisibleConstants:           a.visibleConstants,
-		ConstantValues:             a.visibleConstantValues,
+		RootDir:                           a.intelRootDir(),
+		Config:                            a.Config,
+		DB:                                a.typeDB,
+		TypeDBResolutionIncomplete:        a.typeDBResolutionIncomplete,
+		WorkspaceSymbolQueryFunc:          a.byRefWorkspaceSymbolQuery,
+		WorkspaceUserDefinedTypes:         a.byRefUserDefinedTypes,
+		WorkspaceUserDefinedTypesComplete: a.byRefUserDefinedTypes != nil,
+		VisibleConstants:                  a.visibleConstants,
+		ConstantValues:                    a.visibleConstantValues,
 	}
 	var diagnostics []intel.Diagnostic
 	if byRefDiagnostics.computed {
@@ -1559,7 +1565,7 @@ func (a Analyzer) intelRootDir() string {
 }
 
 func (a Analyzer) byRefWorkspaceSymbolQuery(_ []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
-	if a.byRefSymbolIndex == nil || (query.Mode != intel.WorkspaceSymbolQueryExact && query.Mode != intel.WorkspaceSymbolQueryQualified) {
+	if a.byRefSymbolIndex == nil || (query.Mode != intel.WorkspaceSymbolQueryExact && query.Mode != intel.WorkspaceSymbolQueryQualified && query.Mode != intel.WorkspaceSymbolQueryKind) {
 		return nil, nil
 	}
 	return a.byRefSymbolIndex.Query(query), nil

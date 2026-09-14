@@ -53,6 +53,8 @@ const diagnosticsOpenDelay = 750 * time.Millisecond
 const diagnosticsFullIdleDelay = 2 * time.Second
 const diagnosticsLargeFileLines = 10_000
 
+var errWorkspaceSymbolIndexIncomplete = errors.New("workspace symbol index incomplete")
+
 type BuildInfo struct {
 	Version string
 	Commit  string
@@ -3126,9 +3128,15 @@ func (s *Server) cachedWorkspaceSymbols(open []intel.Document, query string) ([]
 }
 
 func (s *Server) cachedWorkspaceSymbolsSnapshot(open []intel.Document) ([]intel.Symbol, error) {
+	if !s.analysis.complete() {
+		return nil, errWorkspaceSymbolIndexIncomplete
+	}
 	indexed, err := s.analysis.symbolSnapshot()
 	if err != nil {
 		return nil, err
+	}
+	if !s.analysis.complete() {
+		return nil, errWorkspaceSymbolIndexIncomplete
 	}
 	openKeys := make(map[string]bool, len(open)*2)
 	for _, doc := range open {
@@ -3181,9 +3189,15 @@ func (s *Server) cachedWorkspaceSymbolQueryContext(ctx context.Context, open []i
 	// Queries never synchronously publish them; current snapshot symbols are
 	// merged here so interactive handlers remain available while publication is
 	// pending and stale disk/overlay entries stay hidden.
+	if query.Mode == intel.WorkspaceSymbolQueryKind && !s.analysis.complete() {
+		return nil, errWorkspaceSymbolIndexIncomplete
+	}
 	indexed, err := s.queryWorkspaceSymbolIndex(query)
 	if err != nil {
 		return nil, err
+	}
+	if query.Mode == intel.WorkspaceSymbolQueryKind && !s.analysis.complete() {
+		return nil, errWorkspaceSymbolIndexIncomplete
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

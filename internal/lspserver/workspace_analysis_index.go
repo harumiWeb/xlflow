@@ -757,6 +757,13 @@ func (x *workspaceAnalysisIndex) completeLocked() bool {
 	}
 }
 
+func (x *workspaceAnalysisIndex) complete() bool {
+	x.start()
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return x.completeLocked()
+}
+
 func (x *workspaceAnalysisIndex) buildInitial() {
 	started := time.Now()
 	x.beginInitialReadiness(started)

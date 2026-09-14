@@ -1512,7 +1512,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA204`: normal execution can fall through into an error-handler label
 - `VBA205`: ambiguous Excel workbook or worksheet scope: active UI objects, unqualified worksheet members (`Range`, `Cells`, `Rows`, and `Columns`), unqualified sheet collections, positional workbook/window access, uncaptured `Workbooks.Open`, or `ThisWorkbook` in an add-in standard module
 - `VBA206`: runtime-safety warning for temporary, parenthesized, property/member, or indirect ByRef argument forms; it remains configurable and inline-suppressible
-- `VBA228`: definite ByRef type or array-shape mismatch rejected by the VBE; it is an unsuppressible error and blocks source preflight. It remains enabled even when `VBA206` is disabled.
+- `VBA228`: definite ByRef type or array-shape mismatch rejected by the VBE; the VBE-accepted low-level reinterpretation of a project-local user-defined-type array, including a workspace-resolved type, as a pointer-sized intrinsic array is excluded structurally, without library-specific type-name exceptions. When workspace indexing is incomplete, defer a mismatch that depends on unresolved type information. It is an unsuppressible error and blocks source preflight, and remains enabled even when `VBA206` is disabled.
 - `VBA207`: `Dictionary` or `Collection` access without an obvious existence guard; definite absence is a warning and unknown existence is information
 - `VBA208`: `ReDim Preserve` is used on a multi-dimensional array
 - `VBA209`: object or array comparison mistake
