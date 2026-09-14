@@ -335,10 +335,17 @@ func objectCollectionShapeSetValue(state *objectCollectionShapeState, path, valu
 	if state == nil || path == "" {
 		return
 	}
-	objectCollectionShapeDelete(state, path)
 	if value == "nothing" || value == "" {
+		objectCollectionShapeDelete(state, path)
 		return
 	}
+	if source, ok := objectCollectionShapePathText(value); ok {
+		if state.objects[source] {
+			objectCollectionShapeCopy(state, source, path)
+			return
+		}
+	}
+	objectCollectionShapeDelete(state, path)
 	if strings.HasPrefix(value, "new collection") {
 		state.values[path] = true
 		state.objects[path] = true
@@ -368,9 +375,6 @@ func objectCollectionShapeSetValue(state *objectCollectionShapeState, path, valu
 		state.values[path] = true
 		state.objects[path] = true
 		return
-	}
-	if source, ok := objectCollectionShapePathText(value); ok {
-		objectCollectionShapeCopy(state, source, path)
 	}
 }
 
@@ -889,6 +893,63 @@ func objectCollectionShapeCollectionContracts(index *objectContainerIndex, proc 
 			}
 		}
 	}
+	// A same-module helper can mutate a dictionary passed ByRef even when the
+	// call itself has no receiver.  Do not let an earlier object-valued item
+	// write remain a collection contract after such a call; the helper's
+	// unsupported-mutation check is deliberately conservative about aliases.
+	for call := range proc.Calls.All() {
+		if call.Callee.Receiver != nil {
+			continue
+		}
+		name := cleanIdentifier(call.Callee.BaseName)
+		if name == "" {
+			continue
+		}
+		var callee sourceProcedure
+		found := false
+		for _, candidate := range index.procedures {
+			if !strings.EqualFold(candidate.Module, proc.Module) || !strings.EqualFold(candidate.Name, name) {
+				continue
+			}
+			if found {
+				found = false
+				break
+			}
+			callee, found = candidate, true
+		}
+		if !found {
+			continue
+		}
+		parameters := make([]string, 0, callee.Params.Len())
+		for parameter := range callee.Params.All() {
+			parameters = append(parameters, strings.ToLower(cleanIdentifier(parameter.Name)))
+		}
+		arguments := objectContainerCallArguments(proc, call)
+		knownObjectParameters := map[string]bool{}
+		for parameterIndex, parameter := range parameters {
+			if parameterIndex >= len(arguments) {
+				continue
+			}
+			argument := arguments[parameterIndex]
+			if objectCollectionShapeExternalObjectPath(proc, declarations, argument) {
+				knownObjectParameters[parameter] = true
+			}
+		}
+		if !objectCollectionShapeHelperHasUnsupportedMutation(index, callee, knownObjectParameters, map[int]bool{}) {
+			continue
+		}
+		for _, argument := range arguments {
+			path, ok := objectCollectionShapePathText(argument)
+			if !ok {
+				continue
+			}
+			for writtenPath := range writes {
+				if writtenPath == path || strings.HasPrefix(writtenPath, path+"|") {
+					unsafe[writtenPath] = true
+				}
+			}
+		}
+	}
 	for path := range writes {
 		if !unsafe[path] {
 			contracts[path] = true
@@ -1245,5 +1306,51 @@ func objectCollectionShapeExpressionAssigned(proc sourceProcedure, expression pr
 	if !pathOK {
 		return false
 	}
+	if objectCollectionShapeAliasAssignedBefore(proc, path, statementID, context.containerIndex) {
+		return false
+	}
 	return state.objects[path] || state.collections[path] || state.guarded[path] && dcKindFromType(declaration.Type) == dcCollection
+}
+
+func objectCollectionShapeAliasAssignedBefore(proc sourceProcedure, path string, statementID int, index *objectContainerIndex) bool {
+	root := strings.Split(path, "|")[0]
+	if root == "" || index == nil {
+		return false
+	}
+	declarations := objectFlowDeclarations(index.file, proc, index.moduleDecls)
+	declaration, scope, declared := objectDeclarationBinding(root, declarations)
+	if !declared || scope != procedureir.ScopeModule || !declaration.Object || dcKindFromType(declaration.Type) != dcDictionary {
+		return false
+	}
+	var use procedureir.Statement
+	foundUse := false
+	for statement := range proc.Statements.All() {
+		if statement.ID == statementID {
+			use = statement
+			foundUse = true
+			break
+		}
+	}
+	if !foundUse {
+		return false
+	}
+	for statement := range proc.Statements.All() {
+		if statement.ID == statementID || !objectStatementSourceBefore(statement, use) {
+			continue
+		}
+		target, value, set, ok := objectDictionaryAssignmentText(objectCollectionShapeStatementSource(index, statement))
+		if !ok || !set {
+			continue
+		}
+		targetPath, targetOK := objectCollectionShapePathText(target)
+		valuePath, valueOK := objectCollectionShapePathText(objectTrimOuterParens(value))
+		if !targetOK || !valueOK || strings.Contains(targetPath, "|") || strings.Contains(valuePath, "|") {
+			continue
+		}
+		targetRoot := strings.Split(targetPath, "|")[0]
+		if valuePath == root && targetRoot != root {
+			return true
+		}
+	}
+	return false
 }

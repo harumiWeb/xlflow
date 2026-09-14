@@ -1,12 +1,60 @@
 package analyze
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+func materializeCorpusAnalyzerProject(t *testing.T, project string) string {
+	t.Helper()
+	sourceRoot, err := filepath.Abs(filepath.Join("..", "..", "testdata", "static-analysis-corpus", "projects", "third_party", project))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	err = filepath.WalkDir(sourceRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		directory := ""
+		switch ext {
+		case ".bas":
+			directory = "src/modules"
+		case ".cls":
+			directory = "src/classes"
+		case ".frm":
+			directory = "src/forms"
+		default:
+			return nil
+		}
+		relative, err := filepath.Rel(sourceRoot, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(root, directory, relative)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(destination, body, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
 
 func TestVBA202Issue448TracksObjectStateAcrossCFGAndCalls(t *testing.T) {
 	t.Parallel()
@@ -157,6 +205,100 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("constructor-backed objects should not produce VBA202: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksDictionaryItemsAcrossLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim root As New Scripting.Dictionary
+  Dim late As Object
+  Dim early As Scripting.Dictionary
+  Dim i As Long
+  Set late = root
+  Set early = root
+  Do While i < 3
+    late.Add 1, New Scripting.Dictionary
+    late.Add 2, New Scripting.Dictionary
+    early.Add 1, New Scripting.Dictionary
+    early.Add 2, New Scripting.Dictionary
+    i = i + 1
+    Set late = late.Item(1)
+    Set early = early.Item(1)
+  Loop
+  Debug.Print late.Count
+  Debug.Print early.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Dictionary items added as objects should preserve the receiver proof across the loop: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksTypeOfBooleanAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal value As Object)
+  Dim dict As Object
+  Dim coll As Object
+  Dim isDict As Boolean
+  If value Is Nothing Then Exit Sub
+  isDict = (TypeOf value Is Scripting.Dictionary)
+  If isDict Then
+    Set dict = value
+  Else
+    Set coll = value
+  End If
+  If isDict Then
+    Debug.Print dict.Count
+  Else
+    Debug.Print coll.Count
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a TypeOf-derived boolean must preserve the matching object assignment: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsBooleanBranchAssignmentAfterSelectorMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal value As Object)
+  Dim result As Object
+  Dim isReady As Boolean
+  If value Is Nothing Then Exit Sub
+  isReady = True
+  If isReady Then
+    Set result = value
+  End If
+  isReady = False
+  If isReady Then
+    Debug.Print result.Count
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a mutated discriminator must not preserve an earlier branch assignment: %+v", got)
 	}
 }
 
@@ -1515,6 +1657,168 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("a caller guard must establish a non-Nothing entry for a private ByVal object helper: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PropagatesPrivateByValObjectEntryThroughClassLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Browser.cls", `Attribute VB_Name = "Browser"
+Option Explicit
+
+Public Sub Login()
+  On Error GoTo ErrorHandler
+#If Mac Then
+  Err.Raise 5
+#Else
+  Dim browser As Object
+  On Error GoTo Cleanup
+  Set browser = CreateObject("InternetExplorer.Application")
+  Do While Not IsComplete(browser)
+    DoEvents
+  Loop
+#End If
+Cleanup:
+  If Not browser Is Nothing Then browser.Quit
+  Set browser = Nothing
+  Exit Sub
+ErrorHandler:
+  Resume Cleanup
+End Sub
+
+Private Function IsComplete(browser As Object) As Boolean
+  If Not browser.Busy And browser.ReadyState = 4 Then
+    If IsApproved(browser) Or IsDenied(browser) Then IsComplete = True
+  End If
+End Function
+
+Private Function IsApproved(browser As Object) As Boolean
+  IsApproved = (browser.LocationURL <> "")
+End Function
+
+Private Function IsDenied(browser As Object) As Boolean
+  IsDenied = (browser.LocationURL = "denied")
+End Function
+`)
+	writeClass(t, dir, "OtherBrowser.cls", `Attribute VB_Name = "OtherBrowser"
+Option Explicit
+
+Public Sub Run()
+  Dim browser As Object
+  Set browser = CreateObject("InternetExplorer.Application")
+  IsComplete browser
+End Sub
+
+Private Function IsComplete(browser As Object) As Boolean
+  IsComplete = (browser.ReadyState = 4)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a class loop should preserve a constructed object through private ByVal helpers: %+v", got)
+	}
+}
+
+func TestVBA202Issue448FacebookAuthenticatorPrivateHelpers(t *testing.T) {
+	t.Parallel()
+	root := materializeCorpusAnalyzerProject(t, "vba-web")
+	findings, err := (Analyzer{
+		RootDir: root,
+		Config:  config.Default(),
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAbsent := map[int]bool{322: true, 332: true, 342: true, 350: true, 369: true, 396: true}
+	var got []Finding
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if strings.HasSuffix(filepath.ToSlash(finding.File), "/authenticators/FacebookAuthenticator.cls") && wantAbsent[finding.Line] {
+			got = append(got, finding)
+		}
+	}
+	if len(got) != 0 {
+		t.Fatalf("FacebookAuthenticator private helpers should receive the constructed IE object: %+v", got)
+	}
+}
+
+func TestVBA202Issue448FastJSONSerializeTypeBranches(t *testing.T) {
+	t.Parallel()
+	root := materializeCorpusAnalyzerProject(t, "vba-fast-json")
+	findings, err := (Analyzer{
+		RootDir: root,
+		Config:  config.Default(),
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAbsent := map[int]bool{1457: true, 1458: true, 1568: true}
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/LibJSON.bas") && wantAbsent[finding.Line] {
+			t.Fatalf("fast-json Serialize type-dispatch branch should preserve its assigned object: %+v", finding)
+		}
+	}
+}
+
+func TestVBA202Issue448VBAWebAuthenticatorPrivateHelpers(t *testing.T) {
+	t.Parallel()
+	root := materializeCorpusAnalyzerProject(t, "vba-web")
+	findings, err := (Analyzer{
+		RootDir: root,
+		Config:  config.Default(),
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAbsent := map[string]map[int]bool{
+		"/authenticators/GoogleAuthenticator.cls":  {378: true, 385: true, 395: true, 405: true, 413: true, 425: true},
+		"/authenticators/TodoistAuthenticator.cls": {329: true, 346: true, 359: true, 372: true, 385: true},
+	}
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		file := filepath.ToSlash(finding.File)
+		for suffix, lines := range wantAbsent {
+			if strings.HasSuffix(file, suffix) && lines[finding.Line] {
+				t.Fatalf("VBA-Web authenticators should receive the constructed IE object in private helpers: %+v", finding)
+			}
+		}
+	}
+}
+
+func TestVBA202Issue448VBAWebResponseLoopBooleanWitness(t *testing.T) {
+	t.Parallel()
+	root := materializeCorpusAnalyzerProject(t, "vba-web")
+	findings, err := (Analyzer{
+		RootDir: root,
+		Config:  config.Default(),
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/WebResponse.cls") && finding.Line == 238 {
+			t.Fatalf("ExtractHeaders carries a non-Nothing header through its multiline Boolean witness: %+v", finding)
+		}
+	}
+}
+
+func TestVBA202Issue448VBAWebHelpersConverterFactory(t *testing.T) {
+	t.Parallel()
+	root := materializeCorpusAnalyzerProject(t, "vba-web")
+	findings, err := (Analyzer{
+		RootDir: root,
+		Config:  config.Default(),
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAbsent := map[int]bool{762: true, 824: true}
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/WebHelpers.bas") && wantAbsent[finding.Line] {
+			t.Fatalf("a private converter factory either returns a Dictionary or raises: %+v", finding)
+		}
 	}
 }
 
@@ -3980,6 +4284,31 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RecognizesNameRefersToRangeFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal workbook As Workbook)
+  Dim namedRange As Name
+  Dim result As Range
+  Dim ranges As New Collection
+  If workbook Is Nothing Then Exit Sub
+  Set namedRange = workbook.Names("Results")
+  If namedRange Is Nothing Then Exit Sub
+  Set result = namedRange.RefersToRange
+  ranges.Add result.Offset(0, 1).Resize(result.Rows.Count, result.Columns.Count - 1)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Name.RefersToRange should establish the Range on normal continuation: %+v", got)
+	}
+}
+
 func TestVBA202Issue448UsesUserFormControlAsPrivateByValObject(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -4040,6 +4369,136 @@ End Function
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("boolean cleanup guard should prove stream is open before Close: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksObjectThroughLoopBooleanWitness(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Public Function BuildHeader() As Object
+  Set BuildHeader = New Collection
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim header As Object
+  Dim multiline As Boolean
+  Dim i As Long
+  For i = 1 To 3
+    If i = 2 And Not header Is Nothing Then
+      multiline = True
+    ElseIf multiline Then
+      multiline = False
+    End If
+    If Not multiline Then
+      Set header = Helpers.BuildHeader()
+    Else
+      header.Add "continued"
+    End If
+  Next i
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a loop Boolean witness should preserve the guarded object: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsLoopBooleanWitnessAfterObjectReset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim header As Object
+  Dim multiline As Boolean
+  Dim i As Long
+  For i = 1 To 3
+    If i = 2 And Not header Is Nothing Then
+      multiline = True
+    ElseIf multiline Then
+      multiline = False
+    End If
+    If Not multiline Then
+      Set header = New Collection
+    Else
+      Set header = Nothing
+      header.Add "continued"
+    End If
+  Next i
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("an explicit object reset must keep the loop access unsafe: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksDirectRaiseReturnContract(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function BuildCollection(ByVal takeIt As Boolean) As Collection
+  If takeIt Then
+    Set BuildCollection = New Collection
+  Else
+    Err.Raise 5
+  End If
+End Function
+
+Public Sub Run()
+  Dim values As Collection
+  Set values = BuildCollection(False)
+  Debug.Print values.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a direct Err.Raise branch should not make a collection factory nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksDirectRaiseReturnContractAfterLogging(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub LogError(ByVal message As String)
+End Sub
+
+Private Function BuildObject(ByVal takeIt As Boolean) As Object
+  If takeIt Then
+    Set BuildObject = New Collection
+  Else
+    LogError "missing"
+    Err.Raise 5
+  End If
+End Function
+
+Public Sub Run()
+  Dim value As Object
+  Set value = BuildObject(False)
+  Debug.Print value.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("logging before a direct Err.Raise must not make an object factory nullable: %+v", got)
 	}
 }
 
@@ -9347,5 +9806,261 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
 		t.Fatal("an indexed mutation inside an append helper must invalidate the element contract")
+	}
+}
+
+func TestVBA202Issue448RejectsUnsoundP1Proofs(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "negatedTypeOfPolarity",
+			source: `Option Explicit
+Public Sub Run(ByVal value As Object)
+  Dim result As Object
+  Dim isDict As Boolean
+  isDict = (TypeOf value Is Scripting.Dictionary)
+  If Not isDict Then
+    Set result = value
+  End If
+  Debug.Print result.Count
+End Sub
+`,
+		},
+		{
+			name: "runtimeConditionalAssignmentInCompilationBranch",
+			source: `Option Explicit
+Public Sub Run(ByVal condition As Boolean)
+  Dim result As Object
+#If Windows Then
+  If condition Then
+    Set result = New Collection
+  End If
+#Else
+  Err.Raise 5
+#End If
+  Debug.Print result.Count
+End Sub
+`,
+		},
+		{
+			name: "objectResetAfterNothingGuard",
+			source: `Option Explicit
+Public Sub Run()
+  Dim source As Object
+  Dim result As Object
+  If Not source Is Nothing Then
+    Set source = Nothing
+  End If
+  Set result = source
+  Debug.Print result.Count
+End Sub
+`,
+		},
+		{
+			name: "booleanWitnessAfterObjectReset",
+			source: `Option Explicit
+Public Sub Run()
+  Dim ready As Boolean
+  Dim value As Object
+  If Not value Is Nothing Then
+    Set value = Nothing
+    ready = True
+  End If
+  If ready Then
+    Debug.Print value.Count
+  End If
+End Sub
+`,
+		},
+		{
+			name: "conditionalSelectorMutation",
+			source: `Option Explicit
+Public Sub Run(ByVal mutate As Boolean)
+  Dim ready As Boolean
+  Dim value As Object
+  If ready Then
+    Set value = New Collection
+  End If
+  If mutate Then
+    ready = True
+  End If
+  If ready Then
+    Debug.Print value.Count
+  End If
+End Sub
+`,
+		},
+		{
+			name: "staticBooleanWitness",
+			source: `Option Explicit
+Public Sub Run()
+  Static ready As Boolean
+  Dim value As Object
+  If Not value Is Nothing Then
+    ready = True
+  End If
+  If ready Then
+    Debug.Print value.Count
+  End If
+End Sub
+`,
+		},
+		{
+			name: "publicDictionaryField",
+			source: `Option Explicit
+Public cache As Dictionary
+
+Public Sub Init()
+  Set cache = New Dictionary
+  Set cache("key") = New Collection
+End Sub
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  If cache.Exists("key") Then
+    Set value = cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name: "byRefDictionaryMutation",
+			source: `Option Explicit
+Private cache As Dictionary
+
+Private Sub Mutate(ByRef store As Dictionary)
+  store("key") = 1
+End Sub
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  Set cache = New Dictionary
+  Set cache("key") = New Collection
+  Mutate cache
+  If cache.Exists("key") Then
+    Set value = cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name: "dictionaryAliasMutation",
+			source: `Option Explicit
+Private cache As Dictionary
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  Dim alias As Dictionary
+  Set cache = New Dictionary
+  Set cache("key") = New Collection
+  Set alias = cache
+  Set alias("key") = Nothing
+  If cache.Exists("key") Then
+    Set value = cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name: "nestedConditionalCompilationPath",
+			source: `Option Explicit
+Public Sub Run()
+  Dim result As Object
+#If Windows Then
+  #If NestedBuild Then
+    Set result = New Collection
+  #End If
+  Debug.Print result.Count
+#Else
+  Err.Raise 5
+#End If
+End Sub
+`,
+		},
+		{
+			name: "typeOfGuardDoesNotMatchAssignmentValue",
+			source: `Option Explicit
+Public Sub Run(ByVal other As Object, ByVal maybe As Object)
+  Dim coll As Object
+  Dim isDict As Boolean
+  If Not other Is Nothing Then
+    Set coll = maybe
+  End If
+  If isDict Then
+  ElseIf isDict Then
+    If Not isDict Then GoTo SafeExit
+  Else
+    Debug.Print coll.Count
+  End If
+SafeExit:
+End Sub
+`,
+		},
+		{
+			name: "unreachableFallbackGoto",
+			source: `Option Explicit
+Public Sub Run(ByVal other As Object, ByVal maybe As Object)
+  Dim coll As Object
+  Dim isDict As Boolean
+  If Not other Is Nothing Then
+    Set coll = other
+  End If
+  If isDict Then
+  ElseIf isDict Then
+    If Not isDict Then GoTo SafeExit
+  Else
+    Debug.Print coll.Count
+  End If
+SafeExit:
+End Sub
+`,
+		},
+		{
+			name: "resumeNextRefersToRange",
+			source: `Option Explicit
+Public Sub Run(ByVal workbookName As Name)
+  Dim target As Range
+  On Error Resume Next
+  Set target = workbookName.RefersToRange
+  On Error GoTo 0
+  Debug.Print target.Count
+End Sub
+`,
+		},
+		{
+			name: "booleanWitnessSelectorOverwritten",
+			source: `Option Explicit
+Public Sub Run(ByVal value As Object, ByVal force As Boolean)
+  Dim result As Object
+  Dim isDict As Boolean
+  isDict = (TypeOf value Is Scripting.Dictionary)
+  If force Then isDict = True
+  If isDict Then
+    Set result = value
+  End If
+  Debug.Print result.Count
+End Sub
+`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeModule(t, dir, "Main.bas", test.source)
+			findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
+				t.Fatalf("unsafe proof was accepted: %+v", findings)
+			}
+		})
 	}
 }
