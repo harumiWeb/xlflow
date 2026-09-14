@@ -670,7 +670,7 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		"VBA224/dataflow": true, "VBA236/dataflow": true, "VBA239/dataflow": true,
 		"VBA245/dataflow": true, "VBA246/dataflow": true, "VBA247/dataflow": true,
 		"VBA219/resource": true,
-		"VBA225/excel":    true, "VBA238/excel": true, "VBA242/excel": true, "VBA243/excel": true,
+		"VBA225/excel":    true, "VBA238/excel": true, "VBA242/excel": true, "VBA243/excel": true, "VBA250/excel": true,
 		"VBA203/application_state": true, "VBA220/application_state": true, "VBA221/application_state": true,
 	}
 	seen := map[string]bool{}

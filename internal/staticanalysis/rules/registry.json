@@ -2574,6 +2574,28 @@
       "configuration_key": "detect_deterministic_runtime_errors",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA250",
+      "title": "Unsafe Select operation",
+      "description": "A Worksheet.Select or Range.Select operation may fail because its required active workbook or worksheet state is not known to be satisfied.",
+      "family": "analyze",
+      "category": "runtime-safety",
+      "evidence_class": "runtime-safety",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba250",
+      "configurable": true,
+      "configuration_key": "detect_unsafe_select_operations",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

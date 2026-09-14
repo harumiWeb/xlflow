@@ -125,6 +125,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA247`](#vba247) | analyze | warning     | procedure-local | yes     | Missing or unlimited HTTP timeout                  |
 | [`VBA248`](#vba248) | analyze | warning     | procedure-local | no      | Opaque Boolean control arguments                   |
 | [`VBA249`](#vba249) | analyze | error       | procedure-local | yes     | Deterministic runtime error                        |
+| [`VBA250`](#vba250) | analyze | warning     | procedure-local | yes     | Unsafe Select operation                            |
 
 ## VB001
 
@@ -2699,3 +2700,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                    |
 | Real-time editor diagnostic | yes                                   |
 | Fix available               | no                                    |
+
+## VBA250
+
+**Unsafe Select operation.** A Worksheet.Select or Range.Select operation may fail because its required active workbook or worksheet state is not known to be satisfied.
+
+| Property                    | Value                             |
+| --------------------------- | --------------------------------- |
+| Family                      | `analyze`                         |
+| Category                    | `runtime-safety`                  |
+| Evidence class              | `runtime-safety`                  |
+| Compile-equivalent          | no                                |
+| Default severity            | `warning`                         |
+| Supported severities        | `warning`                         |
+| Surfaces                    | `analyze`, `lsp`                  |
+| Scope                       | `procedure-local`                 |
+| Precision                   | `medium`                          |
+| Enabled by default          | yes                               |
+| Configuration               | `detect_unsafe_select_operations` |
+| Inline suppression          | yes                               |
+| Blocks source preflight     | no                                |
+| Real-time editor diagnostic | yes                               |
+| Fix available               | no                                |

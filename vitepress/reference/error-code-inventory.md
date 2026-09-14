@@ -319,6 +319,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_unsafe_command_construction`
 - `detect_unsafe_file_path`
 - `detect_unsafe_http_configuration`
+- `detect_unsafe_select_operations`
 - `detect_unsafe_sql_construction`
 - `detect_unstable_last_row_patterns`
 - `detect_untrusted_data_flow`

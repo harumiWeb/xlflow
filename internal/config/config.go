@@ -227,6 +227,7 @@ type AnalyzeConfig struct {
 	DetectMissingHTTPTimeout                 bool     `toml:"detect_missing_http_timeout"`
 	DetectOpaqueBooleanArguments             bool     `toml:"detect_opaque_boolean_arguments"`
 	DetectDeterministicRuntimeErrors         bool     `toml:"detect_deterministic_runtime_errors"`
+	DetectUnsafeSelectOperations             bool     `toml:"detect_unsafe_select_operations"`
 	DevelopmentHTTPOrigins                   []string `toml:"development_http_origins"`
 }
 
@@ -324,6 +325,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA247": {Get: func(c AnalyzeConfig) bool { return c.DetectMissingHTTPTimeout }, Set: func(c *AnalyzeConfig, v bool) { c.DetectMissingHTTPTimeout = v }},
 	"VBA248": {Get: func(c AnalyzeConfig) bool { return c.DetectOpaqueBooleanArguments }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOpaqueBooleanArguments = v }},
 	"VBA249": {Get: func(c AnalyzeConfig) bool { return c.DetectDeterministicRuntimeErrors }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDeterministicRuntimeErrors = v }},
+	"VBA250": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeSelectOperations }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeSelectOperations = v }},
 }
 
 var (
