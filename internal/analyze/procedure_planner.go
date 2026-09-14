@@ -39,6 +39,7 @@ const (
 	featureCalls
 	featureByRefCalls
 	featureMemberAccess
+	featureUIState
 	procedureFeatureLimit
 )
 
@@ -227,6 +228,12 @@ func (features *procedureFeatureSet) observeText(text string) {
 	if containsAny(lower, "application.", "workbook", "worksheet", "worksheets", "sheets", "range(", ".range", "cells(", ".cells", ".rows", ".columns") {
 		features.add(featureExcel)
 	}
+	if _, _, hasSelect := activeUIFindMember(text, "select"); hasSelect {
+		features.add(featureUIState | featureExcel)
+	}
+	if _, _, hasActivate := activeUIFindMember(text, "activate"); hasActivate {
+		features.add(featureUIState | featureExcel)
+	}
 	if containsAny(lower, ".value", ".value2", ".rows", ".columns", ".resize", ".find(") {
 		features.add(featureExcelOperation)
 	}
@@ -341,6 +348,7 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA238", domain: analysisstats.DomainExcel, any: featureExcel | featureCalls | featureMemberAccess, all: featureLoop, capabilities: projectCapabilityExcelLoopSymbols},
 	{id: "VBA242", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
 	{id: "VBA243", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
+	{id: "VBA250", domain: analysisstats.DomainExcel, any: featureUIState, capabilities: projectCapabilityTypeDB | projectCapabilityResolution},
 	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
 	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureApplicationState, capabilities: projectCapabilityEventReentry},
 	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
@@ -460,6 +468,7 @@ const (
 	procedureProjectionExcelInvariant
 	procedureProjectionExcelRange
 	procedureProjectionExcelValue2
+	procedureProjectionExcelUIState
 	procedureProjectionApplicationRestore
 	procedureProjectionApplicationEffects
 	procedureProjectionApplicationReentry
@@ -563,6 +572,8 @@ func procedureProjectionForRequirement(requirement procedureRuleRequirement) pro
 		return procedureProjectionExcelRange
 	case "VBA243":
 		return procedureProjectionExcelValue2
+	case "VBA250":
+		return procedureProjectionExcelUIState
 	case "VBA203":
 		return procedureProjectionApplicationRestore
 	case "VBA221":
@@ -724,7 +735,8 @@ func procedureKernelForProjection(projection procedureProjection) (procedureKern
 	case procedureProjectionResource:
 		return procedureKernelResource, true
 	case procedureProjectionExcelLoop, procedureProjectionExcelInvariant,
-		procedureProjectionExcelRange, procedureProjectionExcelValue2:
+		procedureProjectionExcelRange, procedureProjectionExcelValue2,
+		procedureProjectionExcelUIState:
 		return procedureKernelExcel, true
 	case procedureProjectionApplicationRestore, procedureProjectionApplicationEffects,
 		procedureProjectionApplicationReentry:

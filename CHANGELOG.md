@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled `VBA250` runtime-safety warnings for `Worksheet.Select`
+  and `Range.Select` calls whose required active workbook or worksheet state is
+  not proven within the procedure. The rule is warning-level, non-blocking,
+  realtime-capable, inline-suppressible, and configurable with
+  `detect_unsafe_select_operations`.
+
 ## v0.32.0
 
 - Added `xlflow encoding check` and explicit `xlflow encoding convert --from cp932` commands. Managed `.bas`, `.cls`, and `.frm` source is now validated as UTF-8 without BOM before parsing, linting, analysis, and Excel-backed preflight; invalid input returns a structured `source_encoding_invalid` error without implicit conversion.

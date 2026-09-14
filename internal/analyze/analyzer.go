@@ -776,7 +776,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	// always enabled because they represent VBE compile rejections and cannot
 	// be disabled by the legacy VBA206 runtime-safety setting.
 	needsByRefAnalysis := true
-	needsTypedExcelAnalysis := a.Config.Analyze.DetectRangeFindNothingCheck || a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops || a.Config.Analyze.DetectLoopInvariantExcelObjectResolution || a.Config.Analyze.DetectExpensiveFullRangeOperations || a.Config.Analyze.DetectValue2PerformanceOpportunities
+	needsTypedExcelAnalysis := a.Config.Analyze.DetectRangeFindNothingCheck || a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || a.Config.Analyze.DetectUnsafeSelectOperations || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops || a.Config.Analyze.DetectLoopInvariantExcelObjectResolution || a.Config.Analyze.DetectExpensiveFullRangeOperations || a.Config.Analyze.DetectValue2PerformanceOpportunities
 	needsDataFlowInputs := dataFlowInputsEnabled(a.Config.Analyze)
 	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety || needsDataFlowInputs
 	parsedFiles := make([]parsedFile, 0, len(project.Files))
@@ -2198,7 +2198,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
-	if (cfg.Analyze.DetectRangeFindNothingCheck || cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction || cfg.Analyze.DetectUnsafeFilePath) && typeDB == nil {
+	if (cfg.Analyze.DetectRangeFindNothingCheck || cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectUnsafeSelectOperations || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction || cfg.Analyze.DetectUnsafeFilePath) && typeDB == nil {
 		var err error
 		typeDB, err = vbadb.LoadBuiltin()
 		if err != nil {
@@ -2482,7 +2482,7 @@ sendJobs:
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -2694,6 +2694,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	}
 	if plan.runsProjection(procedureProjectionExcelValue2) && a.Config.Analyze.DetectValue2PerformanceOpportunities {
 		findings = append(findings, a.value2PerformanceFindings(file, proc)...)
+	}
+	if plan.runsProjection(procedureProjectionExcelUIState) && a.Config.Analyze.DetectUnsafeSelectOperations {
+		findings = append(findings, a.activeUIStateFindings(file, proc)...)
 	}
 	return findings, ctx.Err()
 }
@@ -3590,6 +3593,17 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		excelFindings := a.value2PerformanceFindings(file, proc)
 		profile.kernel()
 		profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+		excelMeasurement.finish(len(excelFindings))
+		findings = append(findings, excelFindings...)
+	}
+	if plan.runsProjection(procedureProjectionExcelUIState) && a.Config.Analyze.DetectUnsafeSelectOperations {
+		excelMeasurement := profile.begin(procedureDomainExcel)
+		excelFindings := a.activeUIStateFindings(file, proc)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+		if proc.Graph != nil {
+			profile.add(analysisstats.CounterExcelCFGWalks, 1)
+		}
 		excelMeasurement.finish(len(excelFindings))
 		findings = append(findings, excelFindings...)
 	}

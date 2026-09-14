@@ -477,6 +477,47 @@ disabled_rules = ["VBA249"]
 	}
 }
 
+func TestUnsafeSelectOperationsDefaultEnabledAndConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA250"); !ok || !enabled || !cfg.Analyze.DetectUnsafeSelectOperations {
+		t.Fatalf("VBA250 enabled = %v, known = %v, config = %v; want enabled configurable rule", enabled, ok, cfg.Analyze.DetectUnsafeSelectOperations)
+	}
+	cfg.Analyze.DetectUnsafeSelectOperations = false
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA250"); !ok || enabled {
+		t.Fatalf("disabled VBA250 enabled = %v, known = %v", enabled, ok)
+	}
+}
+
+func TestUnsafeSelectOperationsDisabledRulesTakePrecedence(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_unsafe_select_operations = true
+disabled_rules = ["VBA250"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA250"); !ok || enabled || cfg.Analyze.DetectUnsafeSelectOperations {
+		t.Fatalf("VBA250 enabled = %v, known = %v, config = %v; want disabled", enabled, ok, cfg.Analyze.DetectUnsafeSelectOperations)
+	}
+	if !hasConfigWarning(cfg.Warnings, "conflicting_analyze_rule_config", "VBA250") ||
+		!hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA250") {
+		t.Fatalf("expected disabled_rules precedence warnings for VBA250, got %+v", cfg.Warnings)
+	}
+}
+
 func TestProcedureCallCyclesDefaultEnabledAndConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()

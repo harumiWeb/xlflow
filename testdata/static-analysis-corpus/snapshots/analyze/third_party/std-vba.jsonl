@@ -805,6 +805,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTableRow.cls","surface":"analyze","code":"VBA202","severity":"warning","line":49,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTableRow.cls","surface":"analyze","code":"VBA227","severity":"warning","line":50,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTableRow.cls","surface":"analyze","code":"VBA202","severity":"warning","line":77,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTableRow.cls","surface":"analyze","code":"VBA250","severity":"warning","line":77,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTableRow.cls","surface":"analyze","code":"VBA202","severity":"warning","line":86,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTableRow.cls","surface":"analyze","code":"VBA202","severity":"warning","line":87,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdXLTableRow.cls","surface":"analyze","code":"VBA202","severity":"warning","line":98,"column":0}
@@ -1312,6 +1313,7 @@
 {"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA240","severity":"warning","line":12,"column":0}
 {"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA202","severity":"warning","line":48,"column":0}
 {"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA202","severity":"warning","line":61,"column":0}
+{"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA250","severity":"warning","line":64,"column":0}
 {"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA202","severity":"warning","line":78,"column":0}
 {"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA202","severity":"warning","line":111,"column":0}
 {"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA244","severity":"warning","line":133,"column":6}
