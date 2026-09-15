@@ -1,12 +1,18 @@
 package analyze
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/effects"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms"
 )
 
 type eventFindingCandidate struct {
@@ -20,10 +26,95 @@ type eventFindingCandidate struct {
 	same           bool
 }
 
+var userFormWithEventsFieldRE = regexp.MustCompile(`(?i)^\s*(?:(?:public|private|friend|dim|static)\s+)*with\s*events\s+([A-Za-z_][A-Za-z0-9_]*)\b`)
+var userFormWithEventsTokenRE = regexp.MustCompile(`(?i)\bwith\s*events\b`)
+
+func vbaCodeWithoutStringsAndComments(line string) string {
+	var code strings.Builder
+	for index := 0; index < len(line); index++ {
+		switch line[index] {
+		case '\'':
+			return code.String()
+		case '"':
+			index++
+			for index < len(line) {
+				if line[index] != '"' {
+					index++
+					continue
+				}
+				if index+1 < len(line) && line[index+1] == '"' {
+					index += 2
+					continue
+				}
+				break
+			}
+			code.WriteByte(' ')
+		default:
+			code.WriteByte(line[index])
+		}
+	}
+	withoutStrings := code.String()
+	for index := 0; index+3 <= len(withoutStrings); index++ {
+		if !strings.EqualFold(withoutStrings[index:index+3], "rem") {
+			continue
+		}
+		if index+3 < len(withoutStrings) && isVBAIdentifierByte(withoutStrings[index+3]) {
+			continue
+		}
+		prefix := strings.TrimSpace(withoutStrings[:index])
+		if prefix == "" {
+			return ""
+		}
+		if strings.HasSuffix(prefix, ":") {
+			return strings.TrimSpace(strings.TrimSuffix(prefix, ":"))
+		}
+	}
+	return withoutStrings
+}
+
+func isVBAIdentifierByte(value byte) bool {
+	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '_'
+}
+
+func userFormWithEventsFieldNames(source string) (map[string]struct{}, bool) {
+	names := make(map[string]struct{})
+	complete := true
+	for _, rawLine := range strings.Split(strings.ReplaceAll(source, "\r\n", "\n"), "\n") {
+		line := strings.TrimSpace(vbaCodeWithoutStringsAndComments(rawLine))
+		if line == "" || !userFormWithEventsTokenRE.MatchString(line) {
+			continue
+		}
+		match := userFormWithEventsFieldRE.FindStringSubmatch(line)
+		if len(match) != 2 {
+			complete = false
+			continue
+		}
+		names[strings.ToLower(strings.TrimSpace(match[1]))] = struct{}{}
+	}
+	return names, complete
+}
+
+func hasUserFormEventCandidate(file parsedFile) bool {
+	if !strings.EqualFold(file.ModuleKind, "form") {
+		return false
+	}
+	procedures := file.procedureView()
+	for procedure := range procedures.All() {
+		name := strings.ToLower(procedure.Name)
+		if strings.HasSuffix(name, "_change") || strings.HasSuffix(name, "_click") {
+			return true
+		}
+	}
+	return false
+}
+
 // VBA220 deliberately reports only the initial event surface. The IR records
 // broader event metadata, but treating every document procedure as a handler
-// would make this safety rule noisier than its published contract.
-func eventHandlerKind(proc sourceProcedure) string {
+// would make this safety rule noisier than its published contract. For forms,
+// the control prefix must also exist in the designer artifact when that
+// artifact is available; helper names such as Apply_BitmapVector_Change are
+// not UserForm events merely because they share an event suffix.
+func eventHandlerKind(file parsedFile, proc sourceProcedure) string {
 	name := strings.ToLower(proc.Name)
 	if proc.ModuleKind == "document" {
 		switch name {
@@ -40,18 +131,37 @@ func eventHandlerKind(proc sourceProcedure) string {
 		}
 	}
 	if proc.ModuleKind == "form" {
-		if strings.HasSuffix(name, "_change") && !strings.HasPrefix(name, "test") {
-			return "control-change"
+		suffix, kind := "", ""
+		switch {
+		case strings.HasSuffix(name, "_change"):
+			suffix, kind = "_change", "control-change"
+		case strings.HasSuffix(name, "_click"):
+			suffix, kind = "_click", "control-click"
+		default:
+			return ""
 		}
-		if strings.HasSuffix(name, "_click") && !strings.HasPrefix(name, "test") {
-			return "control-click"
+		if strings.HasPrefix(name, "test") {
+			return ""
 		}
+		if file.UserFormControlsKnown {
+			control := strings.TrimSuffix(name, suffix)
+			// UserForm_Click is the intrinsic form event procedure. It is
+			// not represented as a control in the designer artifact.
+			if control != "userform" {
+				if _, ok := file.UserFormControlNames[control]; !ok {
+					return ""
+				}
+			} else if suffix != "_click" {
+				return ""
+			}
+		}
+		return kind
 	}
 	return ""
 }
 
 func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProcedure, project effects.ProjectSummary) []Finding {
-	handler := eventHandlerKind(proc)
+	handler := eventHandlerKind(file, proc)
 	if handler == "" || proc.Effects == nil {
 		return nil
 	}
@@ -142,6 +252,234 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 		out = append(out, a.simpleFinding(file, proc, candidate.line, "VBA220", "warning", message, reason, "Disable Application.EnableEvents around Excel event-triggering work and restore it on every exit; use a re-entry guard for UserForm controls."))
 	}
 	return out
+}
+
+func (a Analyzer) userFormControlNames(file parsedFile) (map[string]struct{}, bool) {
+	if !strings.EqualFold(file.ModuleKind, "form") {
+		return nil, false
+	}
+
+	var source string
+	var designerPath string
+	designerFound := false
+	if strings.EqualFold(filepath.Ext(file.Path), ".frm") {
+		source = string(file.Source)
+		designerPath = file.Path
+		designerFound = true
+	} else {
+		name := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+		candidates := make([]string, 0, 2)
+		formsRoot := ""
+		if a.Config.Src.Forms != "" {
+			formsRoot = filepath.Join(a.RootDir, filepath.FromSlash(a.Config.Src.Forms))
+			candidates = append(candidates, filepath.Join(formsRoot, name+".frm"))
+		}
+		source, designerPath, designerFound = readUserFormDesigner(candidates)
+		if !designerFound {
+			return nil, false
+		}
+	}
+
+	form := userforms.Parse(source)
+	expectedName := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+	if !form.Complete || strings.TrimSpace(form.Name) == "" || !strings.EqualFold(strings.TrimSpace(form.Name), expectedName) {
+		return nil, false
+	}
+	controls := make(map[string]struct{}, len(form.Controls))
+	for _, control := range form.Controls {
+		name := strings.ToLower(strings.TrimSpace(control.Name))
+		if name != "" {
+			controls[name] = struct{}{}
+		}
+	}
+	for _, withEventsSource := range []string{string(file.Source), source} {
+		withEvents, complete := userFormWithEventsFieldNames(withEventsSource)
+		if !complete {
+			return controls, false
+		}
+		for name := range withEvents {
+			controls[name] = struct{}{}
+		}
+	}
+	if !designerFound {
+		return controls, false
+	}
+	frxPath, frxReferenced, err := userFormFRXPath(designerPath, source)
+	if err != nil {
+		return controls, false
+	}
+	if !frxReferenced {
+		return controls, true
+	}
+	frxControls, parsed, complete, err := cachedUserFormFRXControlNames(frxPath)
+	if err != nil || !parsed || !complete || len(frxControls) == 0 {
+		return controls, false
+	}
+	for name := range frxControls {
+		controls[name] = struct{}{}
+	}
+	return controls, true
+}
+
+func userFormFRXPath(designerPath, designerSource string) (string, bool, error) {
+	reference, referenced := userFormDesignerFRXReference(designerSource)
+	if !referenced {
+		return "", false, nil
+	}
+	if reference == "" {
+		return "", false, errors.New("invalid UserForm FRX reference")
+	}
+	entries, err := os.ReadDir(filepath.Dir(designerPath))
+	if err != nil {
+		return "", false, err
+	}
+	matches := make([]string, 0, 1)
+	for _, entry := range entries {
+		if !strings.EqualFold(entry.Name(), reference) {
+			continue
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return "", false, errors.New("UserForm FRX reference resolves through a symlink")
+		}
+		if entry.IsDir() {
+			continue
+		}
+		matches = append(matches, entry.Name())
+	}
+	if len(matches) == 0 {
+		return filepath.Join(filepath.Dir(designerPath), reference), true, nil
+	}
+	if len(matches) != 1 {
+		return "", false, errors.New("ambiguous UserForm FRX artifacts")
+	}
+	return filepath.Join(filepath.Dir(designerPath), matches[0]), true, nil
+}
+
+func userFormDesignerFRXReference(source string) (string, bool) {
+	sawReference := false
+	source = strings.ReplaceAll(source, "\r\n", "\n")
+	source = strings.ReplaceAll(source, "\r", "\n")
+	for _, line := range strings.Split(source, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if len(trimmed) < len("OleObjectBlob") || !strings.EqualFold(trimmed[:len("OleObjectBlob")], "OleObjectBlob") {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(trimmed), ".frx") {
+			continue
+		}
+		sawReference = true
+		start := strings.IndexByte(trimmed, '"')
+		if start < 0 {
+			continue
+		}
+		end := strings.IndexByte(trimmed[start+1:], '"')
+		if end < 0 {
+			continue
+		}
+		reference := strings.TrimSpace(trimmed[start+1 : start+1+end])
+		reference = filepath.Base(filepath.FromSlash(strings.ReplaceAll(reference, "\\", "/")))
+		if strings.EqualFold(filepath.Ext(reference), ".frx") && reference != "" {
+			return reference, true
+		}
+	}
+	return "", sawReference
+}
+
+func readUserFormDesigner(paths []string) (string, string, bool) {
+	for _, path := range paths {
+		if body, ok := readUserFormDesignerPath(path); ok {
+			return body, path, true
+		}
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if err != nil {
+			continue
+		}
+		matches := make([]string, 0, 1)
+		for _, entry := range entries {
+			if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.EqualFold(entry.Name(), filepath.Base(path)) {
+				continue
+			}
+			matches = append(matches, filepath.Join(filepath.Dir(path), entry.Name()))
+		}
+		if len(matches) != 1 {
+			continue
+		}
+		if body, ok := readUserFormDesignerPath(matches[0]); ok {
+			return body, matches[0], true
+		}
+	}
+	return "", "", false
+}
+
+func readUserFormDesignerPath(path string) (string, bool) {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || info.IsDir() {
+		return "", false
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	return string(body), true
+}
+
+type userFormFRXCacheEntry struct {
+	size     int64
+	modTime  int64
+	names    map[string]struct{}
+	parsed   bool
+	complete bool
+}
+
+var userFormFRXCache = struct {
+	sync.RWMutex
+	entries map[string]userFormFRXCacheEntry
+}{entries: make(map[string]userFormFRXCacheEntry)}
+
+func cachedUserFormFRXControlNames(path string) (map[string]struct{}, bool, bool, error) {
+	cachePath, err := filepath.Abs(path)
+	if err != nil {
+		cachePath = filepath.Clean(path)
+	}
+	info, err := os.Stat(cachePath)
+	if err != nil {
+		return nil, false, false, err
+	}
+	modTime := info.ModTime().UnixNano()
+	userFormFRXCache.RLock()
+	entry, ok := userFormFRXCache.entries[cachePath]
+	userFormFRXCache.RUnlock()
+	if ok && entry.size == info.Size() && entry.modTime == modTime {
+		return cloneUserFormFRXNames(entry.names), entry.parsed, entry.complete, nil
+	}
+
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		return nil, false, false, err
+	}
+	names, parsed, complete := userforms.ExtractFRXControlNames(data)
+	stored := userFormFRXCacheEntry{
+		size:     info.Size(),
+		modTime:  modTime,
+		names:    cloneUserFormFRXNames(names),
+		parsed:   parsed,
+		complete: complete,
+	}
+	userFormFRXCache.Lock()
+	userFormFRXCache.entries[cachePath] = stored
+	userFormFRXCache.Unlock()
+	return cloneUserFormFRXNames(stored.names), stored.parsed, stored.complete, nil
+}
+
+func cloneUserFormFRXNames(names map[string]struct{}) map[string]struct{} {
+	if len(names) == 0 {
+		return nil
+	}
+	clone := make(map[string]struct{}, len(names))
+	for name := range names {
+		clone[name] = struct{}{}
+	}
+	return clone
 }
 
 func eventFindingCandidatePreferred(candidate, previous eventFindingCandidate) bool {

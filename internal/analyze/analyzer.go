@@ -563,9 +563,15 @@ type parsedFile struct {
 	Module     string
 	ModuleKind string
 	Source     []byte
-	Root       *tree_sitter.Node
-	IR         procedureir.DocumentIR
-	CFG        vbacfg.Document
+	// UserFormControlNames is populated for form analysis when the matching
+	// designer artifact provides a complete control set. VBA220 uses it to
+	// distinguish a real control event procedure from a helper whose name merely
+	// ends in _Change or _Click.
+	UserFormControlNames  map[string]struct{}
+	UserFormControlsKnown bool
+	Root                  *tree_sitter.Node
+	IR                    procedureir.DocumentIR
+	CFG                   vbacfg.Document
 	// Procedures owns the analyzer-facing projection of IR for this file
 	// revision. It is materialized once during batch/realtime file setup and
 	// reused by all rule stages. Callers must treat the sourceProcedure values
@@ -3049,6 +3055,9 @@ func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analys
 		return nil, err
 	}
 	file.ensureModuleAnalysisFacts()
+	if a.Config.Analyze.DetectEventHandlerReentry && hasUserFormEventCandidate(file) {
+		file.UserFormControlNames, file.UserFormControlsKnown = a.userFormControlNames(file)
+	}
 	var findings []Finding
 	procedures := sourceProceduresWithEffects(file, projectEffects)
 	moduleDecls := file.moduleDecls()

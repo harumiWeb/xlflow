@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
+	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -20333,7 +20335,16 @@ Private Sub TextBox1_Change()
   Me.TextBox1.Value = "updated"
   Application.EnableEvents = True
 End Sub
-`)
+	`)
+	designer := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+   Begin MSForms.TextBox TextBox1
+   End
+End
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "Dialog.frm"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
 	if err != nil {
 		t.Fatal(err)
@@ -20341,6 +20352,354 @@ End Sub
 	got := findingsByCode(findings, "VBA220")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "same-event") {
 		t.Fatalf("UserForm control change should remain a same-event VBA220 hazard: %+v", got)
+	}
+}
+
+func TestVBA220ReportsUserFormClickWithKnownDesignerControls(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub UserForm_Click()
+  Me.TextBox1.Value = "updated"
+End Sub
+`)
+	designer := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+   Begin MSForms.TextBox TextBox1
+   End
+End
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "Dialog.frm"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 1 || got[0].Procedure != "UserForm_Click" {
+		t.Fatalf("the intrinsic UserForm click event should remain reportable with known controls: %+v", got)
+	}
+}
+
+func TestVBA220IgnoresHelperInEmptyKnownUserForm(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub Apply_Change()
+  Me.TextBox1.Value = "helper"
+End Sub
+`)
+	designer := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+End
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "Dialog.frm"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA220"); len(got) != 0 {
+		t.Fatalf("an empty known UserForm must not classify helpers as events: %+v", got)
+	}
+}
+
+func TestVBA220TreatsMismatchedUserFormDesignerAsUnknown(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub RealControl_Change()
+  Me.TextBox1.Value = "event"
+End Sub
+`)
+	designer := `VERSION 5.00
+	Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+	End
+Attribute VB_Name = "StaleDialog"
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "Dialog.frm"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 1 || got[0].Procedure != "RealControl_Change" {
+		t.Fatalf("a mismatched UserForm designer must not suppress the possible event: %+v", got)
+	}
+}
+
+func TestVBA220TreatsMissingReferencedFRXAsUnknown(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub RealControl_Change()
+  Me.TextBox1.Value = "event"
+End Sub
+`)
+	designer := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+   OleObjectBlob   =   "Dialog.frx":0000
+End
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "Dialog.frm"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 1 || got[0].Procedure != "RealControl_Change" {
+		t.Fatalf("a missing referenced FRX must not suppress a possible event: %+v", got)
+	}
+}
+
+func TestVBA220IgnoresUserFormHelperWithEventSuffix(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub ComboBoxBitmapVector_Change()
+  Me.TextBox1.Value = "event"
+  Apply_BitmapVector_Change
+End Sub
+
+Private Sub Apply_BitmapVector_Change()
+  Me.TextBox1.Value = "helper"
+End Sub
+`)
+	designer := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+   Begin MSForms.ComboBox ComboBoxBitmapVector
+   End
+   Begin MSForms.TextBox TextBox1
+   End
+End
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "Dialog.frm"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) == 0 {
+		t.Fatalf("the real UserForm control event should remain reportable: %+v", findings)
+	}
+	foundControlEvent := false
+	helperProcedure := "Apply" + "_BitmapVector" + "_Change"
+	for _, finding := range got {
+		if finding.Procedure == helperProcedure {
+			t.Fatalf("a helper named like a control event must not produce VBA220: %+v", finding)
+		}
+		if finding.Procedure == "ComboBoxBitmapVector_Change" {
+			foundControlEvent = true
+		}
+	}
+	if !foundControlEvent {
+		t.Fatalf("the actual control event call site should produce VBA220: %+v", got)
+	}
+}
+
+func TestVBA220KeepsWithEventsUserFormCallbackReportable(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private WithEvents DynamicTextBox As MSForms.TextBox
+
+Private Sub DynamicTextBox_Change()
+  DynamicTextBox.Value = "updated"
+End Sub
+
+Private Sub Apply_DynamicTextBox_Change()
+  DynamicTextBox.Value = "helper"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	foundWithEventsCallback := false
+	for _, finding := range got {
+		if finding.Procedure == "DynamicTextBox_Change" {
+			foundWithEventsCallback = true
+		}
+		if finding.Procedure == "Apply_DynamicTextBox_Change" {
+			t.Fatalf("a helper named like a WithEvents callback must not produce VBA220: %+v", finding)
+		}
+	}
+	if !foundWithEventsCallback {
+		t.Fatalf("the WithEvents callback should remain reportable: %+v", got)
+	}
+}
+
+func TestUserFormWithEventsFieldNamesIgnoreStringsAndPrefixes(t *testing.T) {
+	names, complete := userFormWithEventsFieldNames(`Option Explicit
+Const Marker = "WithEvents"
+Dim WithEventsCount As Long
+Rem WithEvents CommentedOut As MSForms.TextBox
+Value = 1: Rem WithEvents AlsoCommentedOut As MSForms.TextBox
+Private WithEvents DynamicTextBox As MSForms.TextBox
+`)
+	if !complete {
+		t.Fatalf("valid WithEvents source was marked incomplete: %#v", names)
+	}
+	if _, ok := names["dynamictextbox"]; !ok {
+		t.Fatalf("WithEvents field was not collected: %#v", names)
+	}
+	if len(names) != 1 {
+		t.Fatalf("non-declaration WithEvents text was collected: %#v", names)
+	}
+}
+
+func TestVBA220TreatsIncompleteUserFormDesignerAsUnknown(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub RealControl_Change()
+  Me.TextBox1.Value = "event"
+End Sub
+`)
+	designer := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+   Begin MSForms.TextBox
+End
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "Dialog.frm"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 1 || got[0].Procedure != "RealControl_Change" {
+		t.Fatalf("an incomplete UserForm designer must not suppress a possible event: %+v", got)
+	}
+}
+
+func TestVBA220MergesPartialFRXControlNames(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub ComboBoxBitmapVector_Change()
+  Me.TextBox1.Value = "event"
+End Sub
+
+Private Sub Apply_BitmapVector_Change()
+  Me.TextBox1.Value = "helper"
+End Sub
+`)
+	if err := os.Remove(filepath.Join(dir, "src", "forms", "Dialog.frm")); err != nil {
+		t.Fatal(err)
+	}
+	designer := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+   OleObjectBlob   =   "Dialog.frx":0000
+   Begin MSForms.TextBox TextBox1
+   End
+End
+`
+	formsDir := filepath.Join(dir, "src", "forms")
+	if err := os.MkdirAll(formsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "Dialog.FRM"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writer := cfb.NewWriter()
+	frxStream := make([]byte, 20+len("ComboBoxBitmapVector"))
+	frxStream[0] = 0xe5
+	binary.LittleEndian.PutUint32(frxStream[4:], uint32(len("ComboBoxBitmapVector"))|0x80000000)
+	copy(frxStream[20:], "ComboBoxBitmapVector")
+	writer.AddStream([]string{"f"}, frxStream)
+	frx, err := writer.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(formsDir, "Dialog.FRX"), frx, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	foundControlEvent := false
+	for _, finding := range got {
+		switch finding.Procedure {
+		case "ComboBoxBitmapVector_Change":
+			foundControlEvent = true
+		case "Apply_BitmapVector_Change":
+			t.Fatalf("helper was treated as an event despite partial FRX metadata: %+v", finding)
+		}
+	}
+	if !foundControlEvent {
+		t.Fatalf("FRX-only control event was suppressed: %+v", got)
+	}
+}
+
+func TestVBA220DoesNotUseNestedUserFormDesignersForSidecar(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub FirstControl_Change()
+  Me.SecondControl.Value = "first"
+End Sub
+
+Private Sub SecondControl_Change()
+  Me.FirstControl.Value = "second"
+End Sub
+`)
+	if err := os.Remove(filepath.Join(dir, "src", "forms", "Dialog.frm")); err != nil {
+		t.Fatal(err)
+	}
+	for _, form := range []struct {
+		directory string
+		control   string
+	}{
+		{directory: "one", control: "FirstControl"},
+		{directory: "two", control: "SecondControl"},
+	} {
+		formsDir := filepath.Join(dir, "src", "forms", form.directory)
+		if err := os.MkdirAll(formsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		designer := "VERSION 5.00\nBegin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog\n" +
+			"   Begin MSForms.TextBox " + form.control + "\n" +
+			"   End\nEnd\n"
+		if err := os.WriteFile(filepath.Join(formsDir, "Dialog.frm"), []byte(designer), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 2 {
+		t.Fatalf("nested sidecar designers must not suppress either possible event: %+v", got)
+	}
+	seen := map[string]bool{}
+	for _, finding := range got {
+		seen[finding.Procedure] = true
+	}
+	if !seen["FirstControl_Change"] || !seen["SecondControl_Change"] {
+		t.Fatalf("nested sidecar designer selection changed the event set: %+v", got)
 	}
 }
 
