@@ -3,8 +3,21 @@ package analyze
 import (
 	"strings"
 
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+type objectDictionaryFactoryCache struct {
+	moduleWrites      map[string]bool
+	moduleWritesReady map[string]bool
+	guarded           map[objectDictionaryGuardCacheKey]bool
+	guardedReady      map[objectDictionaryGuardCacheKey]bool
+}
+
+type objectDictionaryGuardCacheKey struct {
+	statementID int
+	receiver    string
+}
 
 // objectDictionaryFactoryItemAssigned proves a Dictionary item returned from
 // a module field when the key is guarded by Exists and every source write to
@@ -16,7 +29,7 @@ func objectDictionaryFactoryItemAssigned(proc sourceProcedure, statementID int, 
 		return false
 	}
 	receiver := cleanIdentifier(call.Callee.BaseName)
-	if receiver == "" || !objectDictionaryItemGuarded(proc, statementID, receiver) {
+	if receiver == "" || !objectDictionaryItemGuardedCached(proc, statementID, receiver, flowContext) {
 		return false
 	}
 	declaration, scope, ok := objectDeclarationBinding(receiver, declarations)
@@ -26,7 +39,43 @@ func objectDictionaryFactoryItemAssigned(proc sourceProcedure, statementID int, 
 	if !objectDictionaryModuleFieldIsPrivate(flowContext.containerIndex.file, declaration) {
 		return false
 	}
-	return objectDictionaryModuleWritesAreObject(flowContext.containerIndex, receiver)
+	return objectDictionaryModuleWritesAreObjectCached(flowContext.containerIndex, receiver, flowContext)
+}
+
+func objectDictionaryItemGuardedCached(proc sourceProcedure, statementID int, receiver string, flowContext objectFlowContext) bool {
+	cache := flowContext.dictionaryFactory
+	if cache == nil {
+		return objectDictionaryItemGuarded(proc, statementID, receiver)
+	}
+	if cache.guardedReady == nil {
+		cache.guardedReady = map[objectDictionaryGuardCacheKey]bool{}
+		cache.guarded = map[objectDictionaryGuardCacheKey]bool{}
+	}
+	key := objectDictionaryGuardCacheKey{statementID: statementID, receiver: strings.ToLower(cleanIdentifier(receiver))}
+	if cache.guardedReady[key] {
+		return cache.guarded[key]
+	}
+	cache.guarded[key] = objectDictionaryItemGuarded(proc, statementID, receiver)
+	cache.guardedReady[key] = true
+	return cache.guarded[key]
+}
+
+func objectDictionaryModuleWritesAreObjectCached(index *objectContainerIndex, receiver string, flowContext objectFlowContext) bool {
+	cache := flowContext.dictionaryFactory
+	if cache == nil {
+		return objectDictionaryModuleWritesAreObject(index, receiver)
+	}
+	if cache.moduleWritesReady == nil {
+		cache.moduleWritesReady = map[string]bool{}
+		cache.moduleWrites = map[string]bool{}
+	}
+	key := strings.ToLower(cleanIdentifier(receiver))
+	if cache.moduleWritesReady[key] {
+		return cache.moduleWrites[key]
+	}
+	cache.moduleWrites[key] = objectDictionaryModuleWritesAreObject(index, receiver)
+	cache.moduleWritesReady[key] = true
+	return cache.moduleWrites[key]
 }
 
 func objectDictionaryModuleWritesAreObject(index *objectContainerIndex, receiver string) bool {
@@ -38,9 +87,10 @@ func objectDictionaryModuleWritesAreObject(index *objectContainerIndex, receiver
 		if !strings.EqualFold(candidate.Module, index.file.Module) {
 			continue
 		}
+		reachable := objectDictionaryReachableStatements(candidate)
 		declarations := objectFlowDeclarations(index.file, candidate, index.moduleDecls)
 		for statement := range candidate.Statements.All() {
-			if !objectDictionaryStatementReachable(candidate, statement.ID) || objectErrorResumeNextAt(candidate, statement.ID) {
+			if !reachable[statement.ID] || objectErrorResumeNextAt(candidate, statement.ID) {
 				continue
 			}
 			text := objectCollectionShapeStatementSource(index, statement)
@@ -79,7 +129,7 @@ func objectDictionaryModuleWritesAreObject(index *objectContainerIndex, receiver
 			sawItemWrite = true
 		}
 		for call := range candidate.Calls.All() {
-			if !objectDictionaryStatementReachable(candidate, call.StatementID) || !objectDictionaryCallTouchesReceiver(candidate, call, receiver) {
+			if !reachable[call.StatementID] || !objectDictionaryCallTouchesReceiver(candidate, call, receiver) {
 				continue
 			}
 			if call.Callee.Receiver != nil {
@@ -146,13 +196,23 @@ func objectDictionaryStoredValueIsObject(proc sourceProcedure, value string, dec
 	return ok && declaration.Object && declaration.NewExpression
 }
 
-func objectDictionaryStatementReachable(proc sourceProcedure, statementID int) bool {
+func objectDictionaryReachableStatements(proc sourceProcedure) map[int]bool {
+	reachable := map[int]bool{}
 	if proc.Graph == nil {
-		return false
+		return reachable
 	}
 	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
-	block, ok := graph.BlockForStatement(statementID)
-	return ok && graph.IsReachable(block.ID)
+	blocks := map[vbacfg.BlockID]bool{}
+	for _, blockID := range graph.Reachable() {
+		blocks[blockID] = true
+	}
+	for statement := range proc.Statements.All() {
+		block, ok := graph.BlockForStatement(statement.ID)
+		if ok && blocks[block.ID] {
+			reachable[statement.ID] = true
+		}
+	}
+	return reachable
 }
 
 func objectDictionaryCallTouchesReceiver(proc sourceProcedure, call procedureir.CallSite, receiver string) bool {

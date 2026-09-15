@@ -2104,7 +2104,7 @@ func objectGuardProvesNonNothingAt(proc sourceProcedure, objectName string, useI
 	if !ok {
 		return false
 	}
-	dominators := flowContext.graph.Dominators()
+	dominators := objectFlowDominators(flowContext)
 	successors := map[vbacfg.BlockID][]vbacfg.BlockID{}
 	flowContext.graph.ForEachEdge(func(edge vbacfg.Edge) bool {
 		if edge.Class != vbacfg.EdgeExceptional {
@@ -2178,7 +2178,7 @@ func objectMemberChainGuardProvesNonNothingAt(proc sourceProcedure, expression s
 	if !ok {
 		return false
 	}
-	dominators := flowContext.graph.Dominators()
+	dominators := objectFlowDominators(flowContext)
 	successors := map[vbacfg.BlockID][]vbacfg.BlockID{}
 	flowContext.graph.ForEachEdge(func(edge vbacfg.Edge) bool {
 		if edge.Class != vbacfg.EdgeExceptional {
@@ -2750,7 +2750,7 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 		if objectConditionalTypeBranchObjectAssignedAt(proc, access.Name, access.StatementID, plan.flowContext) {
 			continue
 		}
-		if objectErrorResumeNextAt(proc, access.StatementID) {
+		if objectErrorResumeNextAtCached(proc, access.StatementID, plan.flowContext) {
 			continue
 		}
 		if objectFlowGuardedByOpenFlag(proc, access.StatementID, access.Name, guardCache) ||
@@ -2804,7 +2804,7 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 		if objectConditionalTypeBranchObjectAssignedAt(proc, name, call.StatementID, plan.flowContext) {
 			continue
 		}
-		if objectErrorResumeNextAt(proc, call.StatementID) {
+		if objectErrorResumeNextAtCached(proc, call.StatementID, plan.flowContext) {
 			continue
 		}
 		if objectFlowGuardedByOpenFlag(proc, call.StatementID, name, guardCache) ||
@@ -2861,6 +2861,18 @@ func objectErrorResumeNextAt(proc sourceProcedure, statementID int) bool {
 	return active
 }
 
+func objectErrorResumeNextAtCached(proc sourceProcedure, statementID int, flowContext objectFlowContext) bool {
+	if flowContext.errorResumeNext == nil || flowContext.errorResumeNextReady == nil {
+		return objectErrorResumeNextAt(proc, statementID)
+	}
+	if flowContext.errorResumeNextReady[statementID] {
+		return flowContext.errorResumeNext[statementID]
+	}
+	flowContext.errorResumeNext[statementID] = objectErrorResumeNextAt(proc, statementID)
+	flowContext.errorResumeNextReady[statementID] = true
+	return flowContext.errorResumeNext[statementID]
+}
+
 // objectResumeNextSelectNodesChecked recognizes the normal-continuation side
 // of a guarded compatibility probe:
 //
@@ -2875,14 +2887,14 @@ func objectErrorResumeNextAt(proc sourceProcedure, statementID int) bool {
 // existing negative test deliberately omits that Err.Number guard and must
 // remain nullable.
 func objectResumeNextSelectNodesChecked(proc sourceProcedure, statementID int, flowContext objectFlowContext) bool {
-	if proc.Graph == nil || !objectErrorResumeNextAt(proc, statementID) {
+	if proc.Graph == nil || !objectErrorResumeNextAtCached(proc, statementID, flowContext) {
 		return false
 	}
 	assignmentBlock, ok := flowContext.graph.BlockForStatement(statementID)
 	if !ok {
 		return false
 	}
-	dominators := flowContext.graph.Dominators()
+	dominators := objectFlowDominators(flowContext)
 	successors := make(map[vbacfg.BlockID][]vbacfg.BlockID)
 	flowContext.graph.ForEachEdge(func(edge vbacfg.Edge) bool {
 		if edge.Class != vbacfg.EdgeExceptional {
@@ -3057,6 +3069,7 @@ func objectFlowGuardedByBooleanWitness(proc sourceProcedure, statementID int, ob
 		return false
 	}
 	flowContext.graph = graph
+	flowContext.dominators = &objectDominatorCache{ready: true, dominators: cache.dominators}
 	flowContext.facts = proc.analysisFacts()
 	flowContext.summaries = summaries
 	for guard := range proc.Statements.All() {
@@ -3602,10 +3615,16 @@ type objectStatementReachabilityCacheKey struct {
 	targetStatementID int
 }
 
+type objectDominatorCache struct {
+	ready      bool
+	dominators map[vbacfg.BlockID][]vbacfg.BlockID
+}
+
 type objectFlowContext struct {
 	facts                          *procedureAnalysisFacts
 	graph                          vbacfg.CFGView
 	sourceLines                    []string
+	runtimeConditionalParents      *objectRuntimeConditionalParentCache
 	predecessors                   map[vbacfg.BlockID][]vbacfg.Edge
 	vars                           map[string]objectVariable
 	summaries                      map[string]objectProcedureSummary
@@ -3626,6 +3645,16 @@ type objectFlowContext struct {
 	terminalCalls                  map[int]bool
 	shapeStates                    map[int]objectCollectionShapeState
 	shapeStateReady                map[int]bool
+	shapeContracts                 *objectCollectionShapeContractsCache
+	dictionaryFactory              *objectDictionaryFactoryCache
+	dominators                     *objectDominatorCache
+	errorResumeNext                map[int]bool
+	errorResumeNextReady           map[int]bool
+}
+
+type objectRuntimeConditionalParentCache struct {
+	ready   bool
+	parents map[int]bool
 }
 
 func newObjectFlowContext(proc sourceProcedure, graph vbacfg.CFGView, containerIndex *objectContainerIndex) objectFlowContext {
@@ -3638,6 +3667,12 @@ func newObjectFlowContext(proc sourceProcedure, graph vbacfg.CFGView, containerI
 		containerIndex:                 containerIndex,
 		shapeStates:                    map[int]objectCollectionShapeState{},
 		shapeStateReady:                map[int]bool{},
+		shapeContracts:                 &objectCollectionShapeContractsCache{},
+		dictionaryFactory:              &objectDictionaryFactoryCache{},
+		runtimeConditionalParents:      &objectRuntimeConditionalParentCache{},
+		dominators:                     &objectDominatorCache{},
+		errorResumeNext:                map[int]bool{},
+		errorResumeNextReady:           map[int]bool{},
 		nonzeroReturnModuleFieldsCache: map[objectNonzeroReturnModuleFieldsCacheKey]map[string]bool{},
 		nonzeroReturnModuleFieldsReady: map[objectNonzeroReturnModuleFieldsCacheKey]bool{},
 		memberChainMutationPathsCache:  map[objectMemberChainMutationCacheKey][]string{},
@@ -3652,6 +3687,18 @@ func newObjectFlowContext(proc sourceProcedure, graph vbacfg.CFGView, containerI
 		})
 	}
 	return context
+}
+
+func objectFlowDominators(flowContext objectFlowContext) map[vbacfg.BlockID][]vbacfg.BlockID {
+	if flowContext.dominators == nil {
+		return flowContext.graph.Dominators()
+	}
+	cache := flowContext.dominators
+	if !cache.ready {
+		cache.dominators = flowContext.graph.Dominators()
+		cache.ready = true
+	}
+	return cache.dominators
 }
 
 func objectFlowDeclarations(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) declarationScope {
@@ -4771,7 +4818,7 @@ func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Bloc
 		}
 		flowContext.valueState = valueState
 		state[target.key()] = objectFlowValueAssigned(proc, *statement, state, flowContext, declarations, summaries)
-		objectFlowUpdateProgIDFacts(file, proc, state, target, statement.Value, declarations, summaries, flowContext, statement.ID, !objectErrorResumeNextAt(proc, statement.ID))
+		objectFlowUpdateProgIDFacts(file, proc, state, target, statement.Value, declarations, summaries, flowContext, statement.ID, !objectErrorResumeNextAtCached(proc, statement.ID, flowContext))
 	case procedureir.StatementAssignment, procedureir.StatementReDim, procedureir.StatementFor:
 		// A value assignment is not an object Set.  Treat it as unsafe even if
 		// malformed VBA happens to compile through implicit coercion.
@@ -4785,7 +4832,7 @@ func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Bloc
 }
 
 func objectFlowAssignmentHasRuntimeFalsePredecessor(proc sourceProcedure, statement procedureir.Statement, flowContext objectFlowContext) bool {
-	if !objectStatementHasRuntimeConditionalParent(proc, statement.ID, flowContext.sourceLines) {
+	if !objectFlowHasRuntimeConditionalParent(proc, statement.ID, flowContext) {
 		return false
 	}
 	block, ok := flowContext.graph.BlockForStatement(statement.ID)
@@ -4936,7 +4983,7 @@ func objectExpressionProvenNonNothingAt(proc sourceProcedure, expression string,
 			}
 		}
 	}
-	dominators := flowContext.graph.Dominators()
+	dominators := objectFlowDominators(flowContext)
 	for statement := range proc.Statements.All() {
 		if statement.Condition == nil || (statement.Kind != procedureir.StatementIf && statement.Kind != procedureir.StatementElseIf) {
 			continue
@@ -5293,19 +5340,20 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 			// nullable result is made definite by the enclosing branch.
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectExcelMemberExpressionAssigned(expression.Text, proc, declarations) {
+		resumeNext := objectErrorResumeNextAtCached(proc, statementID, flowContext)
+		if !resumeNext && objectExcelMemberExpressionAssigned(expression.Text, proc, declarations) {
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectDynamicExcelMemberExpressionAssigned(expression.Text, state, declarations) {
+		if !resumeNext && objectDynamicExcelMemberExpressionAssigned(expression.Text, state, declarations) {
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectXMLSelectNodesExpressionAssigned(expression.Text) {
+		if !resumeNext && objectXMLSelectNodesExpressionAssigned(expression.Text) {
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectXMLCreateElementExpressionAssigned(expression.Text, state, declarations) {
+		if !resumeNext && objectXMLCreateElementExpressionAssigned(expression.Text, state, declarations) {
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectRegExpExecuteExpressionAssigned(proc, expression.Text, state, declarations, statementID) {
+		if !resumeNext && objectRegExpExecuteExpressionAssigned(proc, expression.Text, state, declarations, statementID) {
 			return true
 		}
 		if objectMemberFunctionAssigned(proc, expression.Text, state, flowContext, declarations, summaries, statementID) {
@@ -5855,7 +5903,7 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 		return true
 	}
 	if objectDictionaryFactoryItemAssigned(proc, statementID, call, flowContext, declarations) ||
-		objectDictionaryItemAssigned(proc, statementID, call, state, declarations) {
+		objectDictionaryItemAssigned(proc, statementID, call, state, flowContext, declarations) {
 		return true
 	}
 	if objectLateBoundFactoryMemberAssigned(proc, call, summaries, flowContext.receiverSummaryKeys) {
@@ -5892,10 +5940,11 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 		if objectExcelMemberChainAssigned(call, state, declarations) {
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectDynamicExcelMemberCallAssigned(call, state, declarations) {
+		resumeNext := objectErrorResumeNextAtCached(proc, statementID, flowContext)
+		if !resumeNext && objectDynamicExcelMemberCallAssigned(call, state, declarations) {
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectExcelMemberFactoryAssigned(call, declarations) {
+		if !resumeNext && objectExcelMemberFactoryAssigned(call, declarations) {
 			// A successful Excel member/factory call produces an object even
 			// when its receiver came from a public boundary.  If the receiver
 			// were Nothing, VBA would raise before the assignment's normal
@@ -5904,7 +5953,7 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 			return true
 		}
 		if objectXMLSelectNodesAssigned(call) &&
-			(!objectErrorResumeNextAt(proc, statementID) || objectResumeNextSelectNodesChecked(proc, statementID, flowContext)) {
+			(!resumeNext || objectResumeNextSelectNodesChecked(proc, statementID, flowContext)) {
 			// MSXML's SelectNodes returns an IXMLDOMNodeList, including an
 			// empty list when the XPath matches no nodes.  A successful late-bound
 			// call therefore establishes a non-Nothing object result.  A Resume
@@ -5912,20 +5961,20 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 			// proven terminal.
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectXMLCreateElementAssigned(call, state, declarations) {
+		if !resumeNext && objectXMLCreateElementAssigned(call, state, declarations) {
 			// MSXML's createElement returns an IXMLDOMElement on successful
 			// continuation.  Resume Next remains conservative because a failed
 			// late-bound call can leave the target Nothing.
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectWMIExecQueryAssigned(proc, call) {
+		if !resumeNext && objectWMIExecQueryAssigned(proc, call) {
 			// WMI's SWbemServices.ExecQuery always returns an SWbemObjectSet
 			// on a successful call, including when the result is empty.  Keep
 			// this contract scoped to a service obtained from a WMI moniker;
 			// arbitrary late-bound user objects remain nullable.
 			return true
 		}
-		if !objectErrorResumeNextAt(proc, statementID) && objectRegExpExecuteAssigned(proc, call, state, declarations) {
+		if !resumeNext && objectRegExpExecuteAssigned(proc, call, state, declarations) {
 			return true
 		}
 		if receiver == "thisworkbook" || receiver == "application" || receiver == "excel.application" ||
@@ -6573,7 +6622,7 @@ func objectRegExpMatchItemAssigned(proc sourceProcedure, statementID int, call p
 	return false
 }
 
-func objectDictionaryItemAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {
+func objectDictionaryItemAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, flowContext objectFlowContext, declarations declarationScope) bool {
 	if call.Callee.Receiver != nil || call.Arguments.Count == 0 || strings.TrimSpace(call.Callee.BaseName) == "" {
 		return false
 	}
@@ -6582,7 +6631,7 @@ func objectDictionaryItemAssigned(proc sourceProcedure, statementID int, call pr
 	if !ok || !declaration.Object || dcKindFromType(declaration.Type) != dcDictionary && !strings.EqualFold(cleanIdentifier(declaration.Type), "object") {
 		return false
 	}
-	if !state[(objectVariable{Scope: scope, Name: name}).key()] || !objectDictionaryItemGuarded(proc, statementID, name) {
+	if !state[(objectVariable{Scope: scope, Name: name}).key()] || !objectDictionaryItemGuardedCached(proc, statementID, name, flowContext) {
 		return false
 	}
 	return objectDictionaryItemTargetIsCollection(proc, statementID, declarations)
@@ -7569,7 +7618,7 @@ func objectConditionalCompilationAssignment(proc sourceProcedure, variable objec
 		// contract; its assignment need not dominate every CFG path in the
 		// source-order graph.  A runtime If inside that branch is different:
 		// only use sites dominated by the runtime assignment may inherit it.
-		if objectStatementHasRuntimeConditionalParent(proc, assignment.ID, flowContext.sourceLines) &&
+		if objectFlowHasRuntimeConditionalParent(proc, assignment.ID, flowContext) &&
 			!objectStatementDominatesInGraph(flowContext.graph, assignment.ID, statementID) {
 			continue
 		}
@@ -7643,6 +7692,86 @@ func objectStatementHasRuntimeConditionalParent(proc sourceProcedure, statementI
 		depth++
 	}
 	return depth > 0
+}
+
+func objectFlowHasRuntimeConditionalParent(proc sourceProcedure, statementID int, flowContext objectFlowContext) bool {
+	if flowContext.runtimeConditionalParents != nil {
+		cache := flowContext.runtimeConditionalParents
+		if !cache.ready {
+			cache.parents = objectRuntimeConditionalParentMap(proc, flowContext.sourceLines)
+			cache.ready = true
+		}
+		return cache.parents[statementID]
+	}
+	return objectStatementHasRuntimeConditionalParent(proc, statementID, flowContext.sourceLines)
+}
+
+func objectRuntimeConditionalParentMap(proc sourceProcedure, sourceLines []string) map[int]bool {
+	statements := map[int]procedureir.Statement{}
+	for statement := range proc.Statements.All() {
+		statements[statement.ID] = statement
+	}
+	parents := map[int]bool{}
+	for statement := range proc.Statements.All() {
+		for parentID := statement.ParentID; parentID != 0; {
+			parent, ok := statements[parentID]
+			if !ok {
+				break
+			}
+			switch parent.Kind {
+			case procedureir.StatementIf, procedureir.StatementElseIf, procedureir.StatementElse:
+				parents[statement.ID] = true
+				parentID = 0
+			default:
+				parentID = parent.ParentID
+			}
+		}
+	}
+	if len(sourceLines) == 0 {
+		return parents
+	}
+	startLine := proc.StartLine
+	if startLine < 1 {
+		startLine = 1
+	}
+	endLine := startLine
+	for statement := range proc.Statements.All() {
+		if statement.Range.StartLine > endLine {
+			endLine = statement.Range.StartLine
+		}
+	}
+	if endLine > len(sourceLines) {
+		endLine = len(sourceLines)
+	}
+	lineDepth := map[int]bool{}
+	depth := 0
+	for line := startLine; line <= endLine; line++ {
+		lineDepth[line] = depth > 0
+		text := strings.TrimSpace(normalizedCodeLine(sourceLines[line-1]))
+		lower := strings.ToLower(text)
+		if strings.HasPrefix(lower, "#") {
+			continue
+		}
+		if strings.HasPrefix(lower, "end if") {
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if !strings.HasPrefix(lower, "if ") {
+			continue
+		}
+		then := strings.Index(lower, " then")
+		if then >= 0 && strings.TrimSpace(text[then+len(" then"):]) == "" {
+			depth++
+		}
+	}
+	for statement := range proc.Statements.All() {
+		if lineDepth[statement.Range.StartLine] {
+			parents[statement.ID] = true
+		}
+	}
+	return parents
 }
 
 func objectConditionalBranchesCompatible(assignment, use []procedureir.ConditionalBranch) bool {

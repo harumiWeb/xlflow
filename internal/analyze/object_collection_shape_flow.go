@@ -21,6 +21,11 @@ type objectCollectionShapeState struct {
 	regexp       map[string]bool
 }
 
+type objectCollectionShapeContractsCache struct {
+	ready     bool
+	contracts map[string]bool
+}
+
 func newObjectCollectionShapeState() objectCollectionShapeState {
 	return objectCollectionShapeState{
 		values:       map[string]bool{},
@@ -611,15 +616,11 @@ func objectCollectionShapeNormalExitCoveredByStatement(proc sourceProcedure, sta
 	return true
 }
 
-func objectCollectionShapeStatementReachable(proc sourceProcedure, statementID int, knownObjectParameters map[string]bool) bool {
+func objectCollectionShapeReachableBlocks(proc sourceProcedure, knownObjectParameters map[string]bool) (vbacfg.CFGView, map[vbacfg.BlockID]bool) {
 	if proc.Graph == nil {
-		return false
+		return vbacfg.CFGView{}, nil
 	}
 	view := proc.Graph.WithoutNormalErrRaiseContinuationView()
-	target, ok := view.BlockForStatement(statementID)
-	if !ok {
-		return false
-	}
 	blocks := map[vbacfg.BlockID]vbacfg.Block{}
 	view.ForEachBlock(func(block vbacfg.Block) bool {
 		blocks[block.ID] = block
@@ -627,6 +628,7 @@ func objectCollectionShapeStatementReachable(proc sourceProcedure, statementID i
 	})
 	queue := []vbacfg.BlockID{view.Entry()}
 	seen := map[vbacfg.BlockID]bool{}
+	reachable := map[vbacfg.BlockID]bool{}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
@@ -634,9 +636,7 @@ func objectCollectionShapeStatementReachable(proc sourceProcedure, statementID i
 			continue
 		}
 		seen[current] = true
-		if current == target.ID {
-			return true
-		}
+		reachable[current] = true
 		block := blocks[current]
 		view.ForEachOutgoing(current, func(edge vbacfg.Edge) bool {
 			if block.Statement != nil && edge.Kind == vbacfg.EdgeBranchFalse && objectCollectionShapeKnownObjectGuard(*block.Statement, knownObjectParameters) {
@@ -646,7 +646,7 @@ func objectCollectionShapeStatementReachable(proc sourceProcedure, statementID i
 			return true
 		})
 	}
-	return false
+	return view, reachable
 }
 
 func objectCollectionShapeExternalObjectPath(proc sourceProcedure, declarations declarationScope, text string) bool {
@@ -663,9 +663,14 @@ func objectCollectionShapeHelperHasUnsupportedMutation(index *objectContainerInd
 	if index == nil {
 		return true
 	}
+	if callee.Graph == nil {
+		return false
+	}
 	declarations := objectFlowDeclarations(index.file, callee, index.moduleDecls)
+	view, reachable := objectCollectionShapeReachableBlocks(callee, knownObjectParameters)
 	for statement := range callee.Statements.All() {
-		if !objectCollectionShapeStatementReachable(callee, statement.ID, knownObjectParameters) {
+		block, blockOK := view.BlockForStatement(statement.ID)
+		if !blockOK || !reachable[block.ID] {
 			continue
 		}
 		text := objectCollectionShapeStatementSource(index, statement)
@@ -683,7 +688,8 @@ func objectCollectionShapeHelperHasUnsupportedMutation(index *objectContainerInd
 		}
 	}
 	for call := range callee.Calls.All() {
-		if !objectCollectionShapeStatementReachable(callee, call.StatementID, knownObjectParameters) {
+		block, blockOK := view.BlockForStatement(call.StatementID)
+		if !blockOK || !reachable[block.ID] {
 			continue
 		}
 		if call.Callee.Receiver != nil {
@@ -1222,7 +1228,16 @@ func objectCollectionShapeBeforeStatement(proc sourceProcedure, statementID int,
 	seen[entry] = true
 	queue := []vbacfg.BlockID{entry}
 	queued := map[vbacfg.BlockID]bool{entry: true}
-	contracts := objectCollectionShapeCollectionContracts(context.containerIndex, proc)
+	contracts := map[string]bool{}
+	if context.shapeContracts != nil {
+		if !context.shapeContracts.ready {
+			context.shapeContracts.contracts = objectCollectionShapeCollectionContracts(context.containerIndex, proc)
+			context.shapeContracts.ready = true
+		}
+		contracts = context.shapeContracts.contracts
+	} else {
+		contracts = objectCollectionShapeCollectionContracts(context.containerIndex, proc)
+	}
 	blocks := map[vbacfg.BlockID]vbacfg.Block{}
 	context.graph.ForEachBlock(func(block vbacfg.Block) bool {
 		blocks[block.ID] = block
