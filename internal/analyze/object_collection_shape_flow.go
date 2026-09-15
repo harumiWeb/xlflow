@@ -21,6 +21,11 @@ type objectCollectionShapeState struct {
 	regexp       map[string]bool
 }
 
+type objectCollectionShapeContractsCache struct {
+	ready     bool
+	contracts map[string]bool
+}
+
 func newObjectCollectionShapeState() objectCollectionShapeState {
 	return objectCollectionShapeState{
 		values:       map[string]bool{},
@@ -335,10 +340,17 @@ func objectCollectionShapeSetValue(state *objectCollectionShapeState, path, valu
 	if state == nil || path == "" {
 		return
 	}
-	objectCollectionShapeDelete(state, path)
 	if value == "nothing" || value == "" {
+		objectCollectionShapeDelete(state, path)
 		return
 	}
+	if source, ok := objectCollectionShapePathText(value); ok {
+		if state.objects[source] {
+			objectCollectionShapeCopy(state, source, path)
+			return
+		}
+	}
+	objectCollectionShapeDelete(state, path)
 	if strings.HasPrefix(value, "new collection") {
 		state.values[path] = true
 		state.objects[path] = true
@@ -368,9 +380,6 @@ func objectCollectionShapeSetValue(state *objectCollectionShapeState, path, valu
 		state.values[path] = true
 		state.objects[path] = true
 		return
-	}
-	if source, ok := objectCollectionShapePathText(value); ok {
-		objectCollectionShapeCopy(state, source, path)
 	}
 }
 
@@ -607,15 +616,11 @@ func objectCollectionShapeNormalExitCoveredByStatement(proc sourceProcedure, sta
 	return true
 }
 
-func objectCollectionShapeStatementReachable(proc sourceProcedure, statementID int, knownObjectParameters map[string]bool) bool {
+func objectCollectionShapeReachableBlocks(proc sourceProcedure, knownObjectParameters map[string]bool) (vbacfg.CFGView, map[vbacfg.BlockID]bool) {
 	if proc.Graph == nil {
-		return false
+		return vbacfg.CFGView{}, nil
 	}
 	view := proc.Graph.WithoutNormalErrRaiseContinuationView()
-	target, ok := view.BlockForStatement(statementID)
-	if !ok {
-		return false
-	}
 	blocks := map[vbacfg.BlockID]vbacfg.Block{}
 	view.ForEachBlock(func(block vbacfg.Block) bool {
 		blocks[block.ID] = block
@@ -623,6 +628,7 @@ func objectCollectionShapeStatementReachable(proc sourceProcedure, statementID i
 	})
 	queue := []vbacfg.BlockID{view.Entry()}
 	seen := map[vbacfg.BlockID]bool{}
+	reachable := map[vbacfg.BlockID]bool{}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
@@ -630,9 +636,7 @@ func objectCollectionShapeStatementReachable(proc sourceProcedure, statementID i
 			continue
 		}
 		seen[current] = true
-		if current == target.ID {
-			return true
-		}
+		reachable[current] = true
 		block := blocks[current]
 		view.ForEachOutgoing(current, func(edge vbacfg.Edge) bool {
 			if block.Statement != nil && edge.Kind == vbacfg.EdgeBranchFalse && objectCollectionShapeKnownObjectGuard(*block.Statement, knownObjectParameters) {
@@ -642,7 +646,7 @@ func objectCollectionShapeStatementReachable(proc sourceProcedure, statementID i
 			return true
 		})
 	}
-	return false
+	return view, reachable
 }
 
 func objectCollectionShapeExternalObjectPath(proc sourceProcedure, declarations declarationScope, text string) bool {
@@ -659,9 +663,14 @@ func objectCollectionShapeHelperHasUnsupportedMutation(index *objectContainerInd
 	if index == nil {
 		return true
 	}
+	if callee.Graph == nil {
+		return false
+	}
 	declarations := objectFlowDeclarations(index.file, callee, index.moduleDecls)
+	view, reachable := objectCollectionShapeReachableBlocks(callee, knownObjectParameters)
 	for statement := range callee.Statements.All() {
-		if !objectCollectionShapeStatementReachable(callee, statement.ID, knownObjectParameters) {
+		block, blockOK := view.BlockForStatement(statement.ID)
+		if !blockOK || !reachable[block.ID] {
 			continue
 		}
 		text := objectCollectionShapeStatementSource(index, statement)
@@ -679,7 +688,8 @@ func objectCollectionShapeHelperHasUnsupportedMutation(index *objectContainerInd
 		}
 	}
 	for call := range callee.Calls.All() {
-		if !objectCollectionShapeStatementReachable(callee, call.StatementID, knownObjectParameters) {
+		block, blockOK := view.BlockForStatement(call.StatementID)
+		if !blockOK || !reachable[block.ID] {
 			continue
 		}
 		if call.Callee.Receiver != nil {
@@ -886,6 +896,63 @@ func objectCollectionShapeCollectionContracts(index *objectContainerIndex, proc 
 		if receiver, args, ok := objectCollectionShapeMemberCall(text, "Remove"); ok && len(args) >= 1 {
 			if receiverPath, receiverOK := objectCollectionShapePathText(receiver); receiverOK {
 				markWrite(objectCollectionShapePath(receiverPath, args[0]), false)
+			}
+		}
+	}
+	// A same-module helper can mutate a dictionary passed ByRef even when the
+	// call itself has no receiver.  Do not let an earlier object-valued item
+	// write remain a collection contract after such a call; the helper's
+	// unsupported-mutation check is deliberately conservative about aliases.
+	for call := range proc.Calls.All() {
+		if call.Callee.Receiver != nil {
+			continue
+		}
+		name := cleanIdentifier(call.Callee.BaseName)
+		if name == "" {
+			continue
+		}
+		var callee sourceProcedure
+		found := false
+		for _, candidate := range index.procedures {
+			if !strings.EqualFold(candidate.Module, proc.Module) || !strings.EqualFold(candidate.Name, name) {
+				continue
+			}
+			if found {
+				found = false
+				break
+			}
+			callee, found = candidate, true
+		}
+		if !found {
+			continue
+		}
+		parameters := make([]string, 0, callee.Params.Len())
+		for parameter := range callee.Params.All() {
+			parameters = append(parameters, strings.ToLower(cleanIdentifier(parameter.Name)))
+		}
+		arguments := objectContainerCallArguments(proc, call)
+		knownObjectParameters := map[string]bool{}
+		for parameterIndex, parameter := range parameters {
+			if parameterIndex >= len(arguments) {
+				continue
+			}
+			argument := arguments[parameterIndex]
+			if objectCollectionShapeExternalObjectPath(proc, declarations, argument) {
+				knownObjectParameters[parameter] = true
+			}
+		}
+		if !objectCollectionShapeHelperHasUnsupportedMutation(index, callee, knownObjectParameters, map[int]bool{}) {
+			continue
+		}
+		for _, argument := range arguments {
+			path, ok := objectCollectionShapePathText(argument)
+			if !ok {
+				continue
+			}
+			for writtenPath := range writes {
+				if writtenPath == path || strings.HasPrefix(writtenPath, path+"|") {
+					unsafe[writtenPath] = true
+				}
 			}
 		}
 	}
@@ -1161,7 +1228,16 @@ func objectCollectionShapeBeforeStatement(proc sourceProcedure, statementID int,
 	seen[entry] = true
 	queue := []vbacfg.BlockID{entry}
 	queued := map[vbacfg.BlockID]bool{entry: true}
-	contracts := objectCollectionShapeCollectionContracts(context.containerIndex, proc)
+	contracts := map[string]bool{}
+	if context.shapeContracts != nil {
+		if !context.shapeContracts.ready {
+			context.shapeContracts.contracts = objectCollectionShapeCollectionContracts(context.containerIndex, proc)
+			context.shapeContracts.ready = true
+		}
+		contracts = context.shapeContracts.contracts
+	} else {
+		contracts = objectCollectionShapeCollectionContracts(context.containerIndex, proc)
+	}
 	blocks := map[vbacfg.BlockID]vbacfg.Block{}
 	context.graph.ForEachBlock(func(block vbacfg.Block) bool {
 		blocks[block.ID] = block
@@ -1245,5 +1321,51 @@ func objectCollectionShapeExpressionAssigned(proc sourceProcedure, expression pr
 	if !pathOK {
 		return false
 	}
+	if objectCollectionShapeAliasAssignedBefore(proc, path, statementID, context.containerIndex) {
+		return false
+	}
 	return state.objects[path] || state.collections[path] || state.guarded[path] && dcKindFromType(declaration.Type) == dcCollection
+}
+
+func objectCollectionShapeAliasAssignedBefore(proc sourceProcedure, path string, statementID int, index *objectContainerIndex) bool {
+	root := strings.Split(path, "|")[0]
+	if root == "" || index == nil {
+		return false
+	}
+	declarations := objectFlowDeclarations(index.file, proc, index.moduleDecls)
+	declaration, scope, declared := objectDeclarationBinding(root, declarations)
+	if !declared || scope != procedureir.ScopeModule || !declaration.Object || dcKindFromType(declaration.Type) != dcDictionary {
+		return false
+	}
+	var use procedureir.Statement
+	foundUse := false
+	for statement := range proc.Statements.All() {
+		if statement.ID == statementID {
+			use = statement
+			foundUse = true
+			break
+		}
+	}
+	if !foundUse {
+		return false
+	}
+	for statement := range proc.Statements.All() {
+		if statement.ID == statementID || !objectStatementSourceBefore(statement, use) {
+			continue
+		}
+		target, value, set, ok := objectDictionaryAssignmentText(objectCollectionShapeStatementSource(index, statement))
+		if !ok || !set {
+			continue
+		}
+		targetPath, targetOK := objectCollectionShapePathText(target)
+		valuePath, valueOK := objectCollectionShapePathText(objectTrimOuterParens(value))
+		if !targetOK || !valueOK || strings.Contains(targetPath, "|") || strings.Contains(valuePath, "|") {
+			continue
+		}
+		targetRoot := strings.Split(targetPath, "|")[0]
+		if valuePath == root && targetRoot != root {
+			return true
+		}
+	}
+	return false
 }

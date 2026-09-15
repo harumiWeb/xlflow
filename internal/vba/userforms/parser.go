@@ -8,6 +8,10 @@ import (
 type Form struct {
 	Name     string
 	Controls []Control
+	// Complete is false when the designer text contains an unparseable or
+	// unbalanced Begin/End structure. Callers that use the control set to
+	// suppress diagnostics must remain conservative when it is false.
+	Complete bool
 }
 
 type Control struct {
@@ -24,7 +28,7 @@ var attrNameRe = regexp.MustCompile(`(?i)^\s*Attribute\s+VB_Name\s*=\s*"([^"]+)"
 
 func Parse(source string) Form {
 	lines := normalizedLines(source)
-	form := Form{}
+	form := Form{Complete: true}
 	type stackEntry struct {
 		name        string
 		typ         string
@@ -32,10 +36,26 @@ func Parse(source string) Form {
 		startColumn int
 	}
 	var stack []stackEntry
+	sawRoot := false
+	designerClosed := false
+	vbaSectionStarted := false
 	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
 		if m := beginRe.FindStringSubmatch(line); len(m) == 3 {
+			if len(stack) == 0 {
+				if sawRoot {
+					form.Complete = false
+				}
+				sawRoot = true
+				if form.Name != "" && !strings.EqualFold(strings.TrimSpace(form.Name), strings.TrimSpace(m[2])) {
+					form.Complete = false
+				}
+			}
 			name := m[2]
 			typ := normalizeType(m[1])
+			if len(stack) > 0 && typ == "" {
+				form.Complete = false
+			}
 			col := strings.Index(line, name)
 			if col < 0 {
 				col = 0
@@ -46,13 +66,26 @@ func Parse(source string) Form {
 			}
 			continue
 		}
-		if m := attrNameRe.FindStringSubmatch(line); len(m) == 2 && form.Name == "" {
-			form.Name = m[1]
+		if fields := strings.Fields(trimmed); len(fields) > 0 && strings.EqualFold(fields[0], "begin") {
+			form.Complete = false
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(line), "End") && len(stack) > 0 {
+		if m := attrNameRe.FindStringSubmatch(line); len(m) == 2 {
+			vbaSectionStarted = true
+			attributeName := strings.TrimSpace(m[1])
+			if form.Name == "" {
+				form.Name = attributeName
+			} else if !strings.EqualFold(strings.TrimSpace(form.Name), attributeName) {
+				form.Complete = false
+			}
+			continue
+		}
+		if strings.EqualFold(trimmed, "End") && len(stack) > 0 {
 			entry := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				designerClosed = true
+			}
 			if len(stack) >= 1 && entry.name != "" && entry.typ != "" {
 				form.Controls = append(form.Controls, Control{
 					Name:        entry.name,
@@ -63,7 +96,12 @@ func Parse(source string) Form {
 					EndColumn:   len(line) + 1,
 				})
 			}
+		} else if strings.EqualFold(trimmed, "End") && (!designerClosed || !vbaSectionStarted) {
+			form.Complete = false
 		}
+	}
+	if !sawRoot || len(stack) != 0 {
+		form.Complete = false
 	}
 	return form
 }

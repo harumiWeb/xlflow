@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed false-positive `VBA202` findings for MSXML `DOMDocument.createElement`
+  results that are assigned before accessing the created element.
+
 - Added default-enabled `VBA250` runtime-safety warnings for `Worksheet.Select`
   and `Range.Select` calls whose required active workbook or worksheet state is
   not proven within the procedure. The rule is warning-level, non-blocking,
