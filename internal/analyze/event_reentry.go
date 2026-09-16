@@ -79,17 +79,19 @@ func isVBAIdentifierByte(value byte) bool {
 func userFormWithEventsFieldNames(source string) (map[string]struct{}, bool) {
 	names := make(map[string]struct{})
 	complete := true
-	for _, rawLine := range strings.Split(strings.ReplaceAll(source, "\r\n", "\n"), "\n") {
-		line := strings.TrimSpace(vbaCodeWithoutStringsAndComments(rawLine))
-		if line == "" || !userFormWithEventsTokenRE.MatchString(line) {
-			continue
+	for rawLine := range strings.SplitSeq(strings.ReplaceAll(source, "\r\n", "\n"), "\n") {
+		for rawStatement := range strings.SplitSeq(vbaCodeWithoutStringsAndComments(rawLine), ":") {
+			line := strings.TrimSpace(rawStatement)
+			if line == "" || !userFormWithEventsTokenRE.MatchString(line) {
+				continue
+			}
+			match := userFormWithEventsFieldRE.FindStringSubmatch(line)
+			if len(match) != 2 {
+				complete = false
+				continue
+			}
+			names[strings.ToLower(strings.TrimSpace(match[1]))] = struct{}{}
 		}
-		match := userFormWithEventsFieldRE.FindStringSubmatch(line)
-		if len(match) != 2 {
-			complete = false
-			continue
-		}
-		names[strings.ToLower(strings.TrimSpace(match[1]))] = struct{}{}
 	}
 	return names, complete
 }
@@ -140,7 +142,7 @@ func eventHandlerKind(file parsedFile, proc sourceProcedure) string {
 		default:
 			return ""
 		}
-		if strings.HasPrefix(name, "test") {
+		if strings.HasPrefix(name, "test") && !file.UserFormControlsKnown {
 			return ""
 		}
 		if file.UserFormControlsKnown {

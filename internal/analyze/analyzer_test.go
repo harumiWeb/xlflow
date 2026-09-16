@@ -20550,16 +20550,48 @@ Const Marker = "WithEvents"
 Dim WithEventsCount As Long
 Rem WithEvents CommentedOut As MSForms.TextBox
 Value = 1: Rem WithEvents AlsoCommentedOut As MSForms.TextBox
-Private WithEvents DynamicTextBox As MSForms.TextBox
+Private WithEvents DynamicTextBox As MSForms.TextBox: Private WithEvents SecondaryTextBox As MSForms.TextBox
 `)
 	if !complete {
 		t.Fatalf("valid WithEvents source was marked incomplete: %#v", names)
 	}
-	if _, ok := names["dynamictextbox"]; !ok {
-		t.Fatalf("WithEvents field was not collected: %#v", names)
+	for _, name := range []string{"dynamictextbox", "secondarytextbox"} {
+		if _, ok := names[name]; !ok {
+			t.Fatalf("WithEvents field %q was not collected: %#v", name, names)
+		}
 	}
-	if len(names) != 1 {
+	if len(names) != 2 {
 		t.Fatalf("non-declaration WithEvents text was collected: %#v", names)
+	}
+}
+
+func TestVBA220ReportsTestPrefixedKnownUserFormControl(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub TestButton_Change()
+  Application.EnableEvents = False
+  Me.TestButton.Value = "updated"
+  Application.EnableEvents = True
+End Sub
+`)
+	designer := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+   Begin MSForms.TextBox TestButton
+   End
+End
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "Dialog.frm"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 1 || got[0].Procedure != "TestButton_Change" {
+		t.Fatalf("a designer-confirmed Test-prefixed control event should remain reportable: %+v", got)
 	}
 }
 

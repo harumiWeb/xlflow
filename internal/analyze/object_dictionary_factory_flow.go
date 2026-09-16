@@ -82,6 +82,7 @@ func objectDictionaryModuleWritesAreObject(index *objectContainerIndex, receiver
 	if index == nil || receiver == "" {
 		return false
 	}
+	receiverKey := strings.ToLower(cleanIdentifier(receiver))
 	sawItemWrite := false
 	for _, candidate := range index.procedures {
 		if !strings.EqualFold(candidate.Module, index.file.Module) {
@@ -101,15 +102,22 @@ func objectDictionaryModuleWritesAreObject(index *objectContainerIndex, receiver
 				if targetOK && valueOK {
 					targetRoot := strings.Split(aliasTargetPath, "|")[0]
 					valueRoot := strings.Split(aliasValuePath, "|")[0]
+					targetSegments := strings.Split(aliasTargetPath, "|")
+					valueSegments := strings.Split(aliasValuePath, "|")
+					functionResult := strings.EqualFold(targetRoot, cleanIdentifier(candidate.Name)) && len(valueSegments) == 2
 					// A private module field can be handed to another object
 					// variable and mutated through that alias.  Reject the
 					// factory contract rather than trying to infer all alias
-					// lifetimes here.
-					if targetRoot != receiver && (valueRoot == receiver || strings.HasPrefix(aliasValuePath, receiver+"|")) {
+					// lifetimes here.  Assigning a field item to the current
+					// function result is the supported factory-return path and
+					// does not expose a mutable alias to the field itself.
+					if !functionResult && targetRoot != receiverKey && (valueRoot == receiverKey || strings.HasPrefix(aliasValuePath, receiverKey+"|")) {
 						return false
 					}
-					if targetRoot == receiver && valueRoot != receiver {
-						return false
+					if targetRoot == receiverKey {
+						if len(targetSegments) != 2 {
+							return false
+						}
 					}
 				}
 			}

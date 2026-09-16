@@ -755,9 +755,9 @@ func objectCollectionShapeApplyStatement(index *objectContainerIndex, proc sourc
 	}
 }
 
-func objectCollectionShapeApplyHelper(index *objectContainerIndex, proc sourceProcedure, name string, args []string, state *objectCollectionShapeState) bool {
-	if index == nil || state == nil {
-		return false
+func objectCollectionShapeSameModuleProcedure(index *objectContainerIndex, proc sourceProcedure, name string) (sourceProcedure, bool, bool) {
+	if index == nil {
+		return sourceProcedure{}, false, false
 	}
 	var callee sourceProcedure
 	found := false
@@ -766,11 +766,20 @@ func objectCollectionShapeApplyHelper(index *objectContainerIndex, proc sourcePr
 			continue
 		}
 		if found {
-			return false
+			return sourceProcedure{}, false, true
 		}
-		callee, found = candidate, true
+		callee = candidate
+		found = true
 	}
-	if !found {
+	return callee, found, false
+}
+
+func objectCollectionShapeApplyHelper(index *objectContainerIndex, proc sourceProcedure, name string, args []string, state *objectCollectionShapeState) bool {
+	if index == nil || state == nil {
+		return false
+	}
+	callee, found, ambiguous := objectCollectionShapeSameModuleProcedure(index, proc, name)
+	if !found || ambiguous {
 		return false
 	}
 	parameters := make([]string, 0, callee.Params.Len())
@@ -911,17 +920,20 @@ func objectCollectionShapeCollectionContracts(index *objectContainerIndex, proc 
 		if name == "" {
 			continue
 		}
-		var callee sourceProcedure
-		found := false
-		for _, candidate := range index.procedures {
-			if !strings.EqualFold(candidate.Module, proc.Module) || !strings.EqualFold(candidate.Name, name) {
-				continue
+		callee, found, ambiguous := objectCollectionShapeSameModuleProcedure(index, proc, name)
+		if ambiguous {
+			for _, argument := range objectContainerCallArguments(proc, call) {
+				path, ok := objectCollectionShapePathText(argument)
+				if !ok {
+					continue
+				}
+				for writtenPath := range writes {
+					if writtenPath == path || strings.HasPrefix(writtenPath, path+"|") {
+						unsafe[writtenPath] = true
+					}
+				}
 			}
-			if found {
-				found = false
-				break
-			}
-			callee, found = candidate, true
+			continue
 		}
 		if !found {
 			continue

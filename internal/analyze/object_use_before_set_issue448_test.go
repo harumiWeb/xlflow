@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
@@ -54,6 +56,48 @@ func materializeCorpusAnalyzerProject(t *testing.T, project string) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+func loadObjectCollectionShapeProcedure(t *testing.T, source, name string) (*objectContainerIndex, sourceProcedure) {
+	t.Helper()
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := vbaast.ParseDocument(path, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{RootDir: root, Path: path, ModuleKind: "standard"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow := vbacfg.BuildDocument(ir)
+	procedures := sourceProceduresFromIRRef(&ir, flow)
+	file := parsedFile{
+		Path:       path,
+		Module:     ir.ModuleName,
+		ModuleKind: "standard",
+		Source:     []byte(source),
+		Lines:      normalizedSourceLines(source),
+		IR:         ir,
+		CFG:        flow,
+		Procedures: procedures,
+	}
+	file.ModuleFacts = buildModuleAnalysisFacts(file.Lines, file.IR, file.Procedures)
+	for index := range file.Procedures {
+		file.Procedures[index].ModuleFacts = file.ModuleFacts
+	}
+	containerIndex := buildObjectContainerIndex(file)
+	for _, procedure := range file.Procedures {
+		if strings.EqualFold(procedure.Name, name) {
+			return containerIndex, procedure
+		}
+	}
+	t.Fatalf("procedure %q not found", name)
+	return nil, sourceProcedure{}
 }
 
 func TestVBA202Issue448TracksObjectStateAcrossCFGAndCalls(t *testing.T) {
@@ -1723,7 +1767,7 @@ End Function
 	}
 }
 
-func TestVBA202Issue448FacebookAuthenticatorPrivateHelpers(t *testing.T) {
+func TestVBA202Issue448VBAWebAuthenticatorHelpers(t *testing.T) {
 	t.Parallel()
 	root := materializeCorpusAnalyzerProject(t, "vba-web")
 	findings, err := (Analyzer{
@@ -1733,16 +1777,50 @@ func TestVBA202Issue448FacebookAuthenticatorPrivateHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantAbsent := map[int]bool{322: true, 332: true, 342: true, 350: true, 369: true, 396: true}
-	var got []Finding
-	for _, finding := range findingsByCode(findings, "VBA202") {
-		if strings.HasSuffix(filepath.ToSlash(finding.File), "/authenticators/FacebookAuthenticator.cls") && wantAbsent[finding.Line] {
-			got = append(got, finding)
+	t.Run("FacebookAuthenticatorPrivateHelpers", func(t *testing.T) {
+		wantAbsent := map[int]bool{322: true, 332: true, 342: true, 350: true, 369: true, 396: true}
+		var got []Finding
+		for _, finding := range findingsByCode(findings, "VBA202") {
+			if strings.HasSuffix(filepath.ToSlash(finding.File), "/authenticators/FacebookAuthenticator.cls") && wantAbsent[finding.Line] {
+				got = append(got, finding)
+			}
 		}
-	}
-	if len(got) != 0 {
-		t.Fatalf("FacebookAuthenticator private helpers should receive the constructed IE object: %+v", got)
-	}
+		if len(got) != 0 {
+			t.Fatalf("FacebookAuthenticator private helpers should receive the constructed IE object: %+v", got)
+		}
+	})
+
+	t.Run("GoogleAndTodoistAuthenticatorPrivateHelpers", func(t *testing.T) {
+		wantAbsent := map[string]map[int]bool{
+			"/authenticators/GoogleAuthenticator.cls":  {378: true, 385: true, 395: true, 405: true, 413: true, 425: true},
+			"/authenticators/TodoistAuthenticator.cls": {329: true, 346: true, 359: true, 372: true, 385: true},
+		}
+		for _, finding := range findingsByCode(findings, "VBA202") {
+			file := filepath.ToSlash(finding.File)
+			for suffix, lines := range wantAbsent {
+				if strings.HasSuffix(file, suffix) && lines[finding.Line] {
+					t.Fatalf("VBA-Web authenticators should receive the constructed IE object in private helpers: %+v", finding)
+				}
+			}
+		}
+	})
+
+	t.Run("WebResponseLoopBooleanWitness", func(t *testing.T) {
+		for _, finding := range findingsByCode(findings, "VBA202") {
+			if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/WebResponse.cls") && finding.Line == 238 {
+				t.Fatalf("ExtractHeaders carries a non-Nothing header through its multiline Boolean witness: %+v", finding)
+			}
+		}
+	})
+
+	t.Run("WebHelpersConverterFactory", func(t *testing.T) {
+		wantAbsent := map[int]bool{762: true, 824: true}
+		for _, finding := range findingsByCode(findings, "VBA202") {
+			if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/WebHelpers.bas") && wantAbsent[finding.Line] {
+				t.Fatalf("a private converter factory either returns a Dictionary or raises: %+v", finding)
+			}
+		}
+	})
 }
 
 func TestVBA202Issue448FastJSONSerializeTypeBranches(t *testing.T) {
@@ -1759,65 +1837,6 @@ func TestVBA202Issue448FastJSONSerializeTypeBranches(t *testing.T) {
 	for _, finding := range findingsByCode(findings, "VBA202") {
 		if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/LibJSON.bas") && wantAbsent[finding.Line] {
 			t.Fatalf("fast-json Serialize type-dispatch branch should preserve its assigned object: %+v", finding)
-		}
-	}
-}
-
-func TestVBA202Issue448VBAWebAuthenticatorPrivateHelpers(t *testing.T) {
-	t.Parallel()
-	root := materializeCorpusAnalyzerProject(t, "vba-web")
-	findings, err := (Analyzer{
-		RootDir: root,
-		Config:  config.Default(),
-	}).Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantAbsent := map[string]map[int]bool{
-		"/authenticators/GoogleAuthenticator.cls":  {378: true, 385: true, 395: true, 405: true, 413: true, 425: true},
-		"/authenticators/TodoistAuthenticator.cls": {329: true, 346: true, 359: true, 372: true, 385: true},
-	}
-	for _, finding := range findingsByCode(findings, "VBA202") {
-		file := filepath.ToSlash(finding.File)
-		for suffix, lines := range wantAbsent {
-			if strings.HasSuffix(file, suffix) && lines[finding.Line] {
-				t.Fatalf("VBA-Web authenticators should receive the constructed IE object in private helpers: %+v", finding)
-			}
-		}
-	}
-}
-
-func TestVBA202Issue448VBAWebResponseLoopBooleanWitness(t *testing.T) {
-	t.Parallel()
-	root := materializeCorpusAnalyzerProject(t, "vba-web")
-	findings, err := (Analyzer{
-		RootDir: root,
-		Config:  config.Default(),
-	}).Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, finding := range findingsByCode(findings, "VBA202") {
-		if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/WebResponse.cls") && finding.Line == 238 {
-			t.Fatalf("ExtractHeaders carries a non-Nothing header through its multiline Boolean witness: %+v", finding)
-		}
-	}
-}
-
-func TestVBA202Issue448VBAWebHelpersConverterFactory(t *testing.T) {
-	t.Parallel()
-	root := materializeCorpusAnalyzerProject(t, "vba-web")
-	findings, err := (Analyzer{
-		RootDir: root,
-		Config:  config.Default(),
-	}).Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantAbsent := map[int]bool{762: true, 824: true}
-	for _, finding := range findingsByCode(findings, "VBA202") {
-		if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/WebHelpers.bas") && wantAbsent[finding.Line] {
-			t.Fatalf("a private converter factory either returns a Dictionary or raises: %+v", finding)
 		}
 	}
 }
@@ -9665,6 +9684,54 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RejectsAmbiguousCollectionHelper(t *testing.T) {
+	t.Parallel()
+	source := `Attribute VB_Name = "Main"
+Option Explicit
+
+Private Function Mutate(ByRef store As Dictionary) As Object
+  Set store("key") = Nothing
+End Function
+
+Private Function Mutate(ByRef store As Dictionary) As Object
+  Set store("key") = New Collection
+End Function
+
+Public Sub Run()
+  Dim store As Dictionary
+  Dim ignored As Object
+  Dim value As Object
+  Set store = New Dictionary
+  store.Add "key", New Collection
+  Set ignored = Mutate(store)
+  If store.Exists("key") Then
+    Set value = store("key")
+    Debug.Print value.Count
+  End If
+End Sub
+
+`
+	index, run := loadObjectCollectionShapeProcedure(t, source, "Run")
+	contracts := objectCollectionShapeCollectionContracts(index, run)
+	if contracts[objectCollectionShapePath("store", `"key"`)] {
+		t.Fatalf("an ambiguous same-module Dictionary helper retained the item contract: %+v", contracts)
+	}
+
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", source)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	for _, finding := range got {
+		if finding.Procedure == "Run" {
+			return
+		}
+	}
+	t.Fatalf("an ambiguous same-module Dictionary helper must invalidate the item contract: %+v", got)
+}
+
 func TestVBA202Issue448RejectsDynamicDefaultItemMutation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -9959,6 +10026,64 @@ Public Function ReadValue() As Long
   Set cache("key") = New Collection
   Set alias = cache
   Set alias("key") = Nothing
+  If cache.Exists("key") Then
+    Set value = cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name: "dictionaryAliasMutationMixedCase",
+			source: `Option Explicit
+Private Cache As Dictionary
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  Dim alias As Dictionary
+  Set Cache = New Dictionary
+  Set Cache("key") = New Collection
+  Set alias = cache
+  Set alias("key") = Nothing
+  If Cache.Exists("key") Then
+    Set value = Cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name: "dictionaryFunctionResultAliasMutation",
+			source: `Option Explicit
+Private cache As Dictionary
+
+Public Function GetCache() As Dictionary
+  Set GetCache = cache
+End Function
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  Dim alias As Dictionary
+  Set cache = New Dictionary
+  Set cache("key") = New Collection
+  Set alias = GetCache()
+  Set alias("key") = Nothing
+  If cache.Exists("key") Then
+    Set value = cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name: "dictionaryNestedMemberMutation",
+			source: `Option Explicit
+Private cache As Dictionary
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  Set cache = New Dictionary
+  Set cache("key").Nested = New Collection
   If cache.Exists("key") Then
     Set value = cache("key")
     ReadValue = value.Count

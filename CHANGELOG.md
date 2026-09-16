@@ -6,6 +6,9 @@ All notable changes to xlflow will be documented in this file.
 
 - Fixed false-positive `VBA202` findings for MSXML `DOMDocument.createElement`
   results that are assigned before accessing the created element.
+- Improved `VBA220` UserForm event classification to use complete designer and
+  `WithEvents` metadata, failing open when the metadata is incomplete or
+  ambiguous.
 
 - Added default-enabled `VBA250` runtime-safety warnings for `Worksheet.Select`
   and `Range.Select` calls whose required active workbook or worksheet state is
