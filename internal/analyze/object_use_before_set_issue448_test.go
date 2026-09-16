@@ -1,12 +1,104 @@
 package analyze
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+func materializeCorpusAnalyzerProject(t *testing.T, project string) string {
+	t.Helper()
+	sourceRoot, err := filepath.Abs(filepath.Join("..", "..", "testdata", "static-analysis-corpus", "projects", "third_party", project))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	err = filepath.WalkDir(sourceRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		directory := ""
+		switch ext {
+		case ".bas":
+			directory = "src/modules"
+		case ".cls":
+			directory = "src/classes"
+		case ".frm":
+			directory = "src/forms"
+		default:
+			return nil
+		}
+		relative, err := filepath.Rel(sourceRoot, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(root, directory, relative)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(destination, body, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func loadObjectCollectionShapeProcedure(t *testing.T, source, name string) (*objectContainerIndex, sourceProcedure) {
+	t.Helper()
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := vbaast.ParseDocument(path, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{RootDir: root, Path: path, ModuleKind: "standard"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow := vbacfg.BuildDocument(ir)
+	procedures := sourceProceduresFromIRRef(&ir, flow)
+	file := parsedFile{
+		Path:       path,
+		Module:     ir.ModuleName,
+		ModuleKind: "standard",
+		Source:     []byte(source),
+		Lines:      normalizedSourceLines(source),
+		IR:         ir,
+		CFG:        flow,
+		Procedures: procedures,
+	}
+	file.ModuleFacts = buildModuleAnalysisFacts(file.Lines, file.IR, file.Procedures)
+	for index := range file.Procedures {
+		file.Procedures[index].ModuleFacts = file.ModuleFacts
+	}
+	containerIndex := buildObjectContainerIndex(file)
+	for _, procedure := range file.Procedures {
+		if strings.EqualFold(procedure.Name, name) {
+			return containerIndex, procedure
+		}
+	}
+	t.Fatalf("procedure %q not found", name)
+	return nil, sourceProcedure{}
+}
 
 func TestVBA202Issue448TracksObjectStateAcrossCFGAndCalls(t *testing.T) {
 	t.Parallel()
@@ -157,6 +249,100 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("constructor-backed objects should not produce VBA202: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksDictionaryItemsAcrossLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim root As New Scripting.Dictionary
+  Dim late As Object
+  Dim early As Scripting.Dictionary
+  Dim i As Long
+  Set late = root
+  Set early = root
+  Do While i < 3
+    late.Add 1, New Scripting.Dictionary
+    late.Add 2, New Scripting.Dictionary
+    early.Add 1, New Scripting.Dictionary
+    early.Add 2, New Scripting.Dictionary
+    i = i + 1
+    Set late = late.Item(1)
+    Set early = early.Item(1)
+  Loop
+  Debug.Print late.Count
+  Debug.Print early.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Dictionary items added as objects should preserve the receiver proof across the loop: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksTypeOfBooleanAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal value As Object)
+  Dim dict As Object
+  Dim coll As Object
+  Dim isDict As Boolean
+  If value Is Nothing Then Exit Sub
+  isDict = (TypeOf value Is Scripting.Dictionary)
+  If isDict Then
+    Set dict = value
+  Else
+    Set coll = value
+  End If
+  If isDict Then
+    Debug.Print dict.Count
+  Else
+    Debug.Print coll.Count
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a TypeOf-derived boolean must preserve the matching object assignment: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsBooleanBranchAssignmentAfterSelectorMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal value As Object)
+  Dim result As Object
+  Dim isReady As Boolean
+  If value Is Nothing Then Exit Sub
+  isReady = True
+  If isReady Then
+    Set result = value
+  End If
+  isReady = False
+  If isReady Then
+    Debug.Print result.Count
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("a mutated discriminator must not preserve an earlier branch assignment: %+v", got)
 	}
 }
 
@@ -1518,6 +1704,143 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PropagatesPrivateByValObjectEntryThroughClassLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Browser.cls", `Attribute VB_Name = "Browser"
+Option Explicit
+
+Public Sub Login()
+  On Error GoTo ErrorHandler
+#If Mac Then
+  Err.Raise 5
+#Else
+  Dim browser As Object
+  On Error GoTo Cleanup
+  Set browser = CreateObject("InternetExplorer.Application")
+  Do While Not IsComplete(browser)
+    DoEvents
+  Loop
+#End If
+Cleanup:
+  If Not browser Is Nothing Then browser.Quit
+  Set browser = Nothing
+  Exit Sub
+ErrorHandler:
+  Resume Cleanup
+End Sub
+
+Private Function IsComplete(browser As Object) As Boolean
+  If Not browser.Busy And browser.ReadyState = 4 Then
+    If IsApproved(browser) Or IsDenied(browser) Then IsComplete = True
+  End If
+End Function
+
+Private Function IsApproved(browser As Object) As Boolean
+  IsApproved = (browser.LocationURL <> "")
+End Function
+
+Private Function IsDenied(browser As Object) As Boolean
+  IsDenied = (browser.LocationURL = "denied")
+End Function
+`)
+	writeClass(t, dir, "OtherBrowser.cls", `Attribute VB_Name = "OtherBrowser"
+Option Explicit
+
+Public Sub Run()
+  Dim browser As Object
+  Set browser = CreateObject("InternetExplorer.Application")
+  IsComplete browser
+End Sub
+
+Private Function IsComplete(browser As Object) As Boolean
+  IsComplete = (browser.ReadyState = 4)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a class loop should preserve a constructed object through private ByVal helpers: %+v", got)
+	}
+}
+
+func TestVBA202Issue448VBAWebAuthenticatorHelpers(t *testing.T) {
+	t.Parallel()
+	root := materializeCorpusAnalyzerProject(t, "vba-web")
+	findings, err := (Analyzer{
+		RootDir: root,
+		Config:  config.Default(),
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("FacebookAuthenticatorPrivateHelpers", func(t *testing.T) {
+		wantAbsent := map[int]bool{322: true, 332: true, 342: true, 350: true, 369: true, 396: true}
+		var got []Finding
+		for _, finding := range findingsByCode(findings, "VBA202") {
+			if strings.HasSuffix(filepath.ToSlash(finding.File), "/authenticators/FacebookAuthenticator.cls") && wantAbsent[finding.Line] {
+				got = append(got, finding)
+			}
+		}
+		if len(got) != 0 {
+			t.Fatalf("FacebookAuthenticator private helpers should receive the constructed IE object: %+v", got)
+		}
+	})
+
+	t.Run("GoogleAndTodoistAuthenticatorPrivateHelpers", func(t *testing.T) {
+		wantAbsent := map[string]map[int]bool{
+			"/authenticators/GoogleAuthenticator.cls":  {378: true, 385: true, 395: true, 405: true, 413: true, 425: true},
+			"/authenticators/TodoistAuthenticator.cls": {329: true, 346: true, 359: true, 372: true, 385: true},
+		}
+		for _, finding := range findingsByCode(findings, "VBA202") {
+			file := filepath.ToSlash(finding.File)
+			for suffix, lines := range wantAbsent {
+				if strings.HasSuffix(file, suffix) && lines[finding.Line] {
+					t.Fatalf("VBA-Web authenticators should receive the constructed IE object in private helpers: %+v", finding)
+				}
+			}
+		}
+	})
+
+	t.Run("WebResponseLoopBooleanWitness", func(t *testing.T) {
+		for _, finding := range findingsByCode(findings, "VBA202") {
+			if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/WebResponse.cls") && finding.Line == 238 {
+				t.Fatalf("ExtractHeaders carries a non-Nothing header through its multiline Boolean witness: %+v", finding)
+			}
+		}
+	})
+
+	t.Run("WebHelpersConverterFactory", func(t *testing.T) {
+		wantAbsent := map[int]bool{762: true, 824: true}
+		for _, finding := range findingsByCode(findings, "VBA202") {
+			if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/WebHelpers.bas") && wantAbsent[finding.Line] {
+				t.Fatalf("a private converter factory either returns a Dictionary or raises: %+v", finding)
+			}
+		}
+	})
+}
+
+func TestVBA202Issue448FastJSONSerializeTypeBranches(t *testing.T) {
+	t.Parallel()
+	root := materializeCorpusAnalyzerProject(t, "vba-fast-json")
+	findings, err := (Analyzer{
+		RootDir: root,
+		Config:  config.Default(),
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAbsent := map[int]bool{1457: true, 1458: true, 1568: true}
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if strings.HasSuffix(filepath.ToSlash(finding.File), "/src/LibJSON.bas") && wantAbsent[finding.Line] {
+			t.Fatalf("fast-json Serialize type-dispatch branch should preserve its assigned object: %+v", finding)
+		}
+	}
+}
+
 func TestVBA202Issue448PropagatesGuardThroughTypeNameDispatch(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -2694,6 +3017,326 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksMsxmlCreateElementResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Encode(ByVal text As String) As String
+  Dim provider As Object
+  Dim node As Object
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  Set node = provider.createElement("b64")
+  node.DataType = "bin.base64"
+  node.Text = text
+  Encode = node.Text
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("successful MSXML createElement should establish an element result: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksMsxmlCreateElementResultThroughFunctionReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function NewDocument() As Object
+  Set NewDocument = CreateObject("MSXML2.DOMDocument.6.0")
+End Function
+
+Public Sub Run()
+  Dim provider As Object
+  Dim node As Object
+  Set provider = NewDocument()
+  Set node = provider.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an MSXML ProgID from a function return should reach createElement: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotUseResumeNextMsxmlFunctionReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function NewDocument() As Object
+  On Error Resume Next
+  Set NewDocument = CreateObject("MSXML2.DOMDocument.6.0")
+  On Error GoTo 0
+End Function
+
+Public Sub Run()
+  Dim provider As Object
+  Dim node As Object
+  Set provider = NewDocument()
+  Set node = provider.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundNode := false
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if finding.Line == 13 {
+			foundNode = true
+			break
+		}
+	}
+	if !foundNode {
+		t.Fatalf("a function return created under Resume Next must remain nullable: %+v", findingsByCode(findings, "VBA202"))
+	}
+}
+
+func TestVBA202Issue448TracksVersionedMsxmlModuleFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private moduleDocument As Object
+
+Private Sub Initialize()
+  Set moduleDocument = CreateObject("MSXML2.DOMDocument.6.0")
+End Sub
+
+Public Sub Run()
+  Dim node As Object
+  Call Initialize
+  Set node = moduleDocument.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a versioned MSXML module factory should retain its normalized ProgID: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotUseResumeNextMsxmlModuleFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private moduleDocument As Object
+
+Private Sub Initialize()
+  On Error Resume Next
+  Set moduleDocument = CreateObject("MSXML2.DOMDocument.6.0")
+  On Error GoTo 0
+End Sub
+
+Public Sub Run()
+  Dim node As Object
+  Call Initialize
+  Set node = moduleDocument.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundNode := false
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if finding.Line == 13 {
+			foundNode = true
+			break
+		}
+	}
+	if !foundNode {
+		t.Fatalf("a module factory under Resume Next must remain nullable: %+v", findingsByCode(findings, "VBA202"))
+	}
+}
+
+func TestVBA202Issue448DoesNotUseForEachMsxmlModuleFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private moduleDocument As Object
+
+Private Sub Initialize(ByVal documents As Object)
+  Set moduleDocument = CreateObject("MSXML2.DOMDocument.6.0")
+  For Each moduleDocument In documents
+  Next moduleDocument
+End Sub
+
+Public Sub Run(ByVal documents As Object)
+  Dim node As Object
+  Call Initialize(documents)
+  Set node = moduleDocument.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundNode := false
+	for _, finding := range findingsByCode(findings, "VBA202") {
+		if finding.Line == 14 {
+			foundNode = true
+			break
+		}
+	}
+	if !foundNode {
+		t.Fatalf("a module factory overwritten by For Each must remain nullable: %+v", findingsByCode(findings, "VBA202"))
+	}
+}
+
+func TestVBA202Issue448DoesNotTreatUnknownCreateElementAsAssigned(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal document As Object)
+  Dim node As Object
+  Set node = document.createElement("script")
+  node.Text = "document.body = document.body"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	foundNode := false
+	for _, finding := range got {
+		if finding.Line == 5 {
+			foundNode = true
+			break
+		}
+	}
+	if !foundNode {
+		t.Fatalf("an unknown createElement receiver must keep the node nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotTreatCreateElementMemberChainAsAssigned(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim provider As Object
+  Dim child As Object
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  Set child = provider.createElement("b64").firstChild
+  child.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("a nullable member chained after createElement must remain nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotKeepMsxmlProgIDAfterResumeNextCreateObject(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim provider As Object
+  Dim node As Object
+  On Error Resume Next
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  On Error GoTo 0
+  Set node = provider.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	foundNode := false
+	for _, finding := range got {
+		if finding.Line == 9 {
+			foundNode = true
+			break
+		}
+	}
+	if !foundNode {
+		t.Fatalf("a CreateObject under Resume Next must not establish an MSXML receiver: %+v", got)
+	}
+}
+
+func TestVBA202Issue448ClearsMsxmlProgIDAfterByRefReplacement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub ResetObject(ByRef value As Object)
+  Set value = CreateObject("Scripting.Dictionary")
+End Sub
+
+Public Sub Run()
+  Dim provider As Object
+  Dim node As Object
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  Call ResetObject(provider)
+  Set node = provider.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 12 {
+		t.Fatalf("a ByRef replacement must clear the previous MSXML receiver fact: %+v", got)
+	}
+}
+
+func TestVBA202Issue448ClearsMsxmlProgIDAfterForEachReassignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal documents As Object)
+  Dim provider As Object
+  Dim node As Object
+  Set provider = CreateObject("MSXML2.DOMDocument.6.0")
+  For Each provider In documents
+  Next provider
+  Set node = provider.createElement("b64")
+  node.Text = "payload"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("a For Each reassignment must clear the previous MSXML receiver fact: %+v", got)
+	}
+}
+
 func TestVBA202Issue448DoesNotTreatMsxmlSelectNodesUnderResumeNextAsAssigned(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -3660,6 +4303,31 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RecognizesNameRefersToRangeFactory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal workbook As Workbook)
+  Dim namedRange As Name
+  Dim result As Range
+  Dim ranges As New Collection
+  If workbook Is Nothing Then Exit Sub
+  Set namedRange = workbook.Names("Results")
+  If namedRange Is Nothing Then Exit Sub
+  Set result = namedRange.RefersToRange
+  ranges.Add result.Offset(0, 1).Resize(result.Rows.Count, result.Columns.Count - 1)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Name.RefersToRange should establish the Range on normal continuation: %+v", got)
+	}
+}
+
 func TestVBA202Issue448UsesUserFormControlAsPrivateByValObject(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -3720,6 +4388,136 @@ End Function
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("boolean cleanup guard should prove stream is open before Close: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksObjectThroughLoopBooleanWitness(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Public Function BuildHeader() As Object
+  Set BuildHeader = New Collection
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim header As Object
+  Dim multiline As Boolean
+  Dim i As Long
+  For i = 1 To 3
+    If i = 2 And Not header Is Nothing Then
+      multiline = True
+    ElseIf multiline Then
+      multiline = False
+    End If
+    If Not multiline Then
+      Set header = Helpers.BuildHeader()
+    Else
+      header.Add "continued"
+    End If
+  Next i
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a loop Boolean witness should preserve the guarded object: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsLoopBooleanWitnessAfterObjectReset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim header As Object
+  Dim multiline As Boolean
+  Dim i As Long
+  For i = 1 To 3
+    If i = 2 And Not header Is Nothing Then
+      multiline = True
+    ElseIf multiline Then
+      multiline = False
+    End If
+    If Not multiline Then
+      Set header = New Collection
+    Else
+      Set header = Nothing
+      header.Add "continued"
+    End If
+  Next i
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 1 {
+		t.Fatalf("an explicit object reset must keep the loop access unsafe: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksDirectRaiseReturnContract(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function BuildCollection(ByVal takeIt As Boolean) As Collection
+  If takeIt Then
+    Set BuildCollection = New Collection
+  Else
+    Err.Raise 5
+  End If
+End Function
+
+Public Sub Run()
+  Dim values As Collection
+  Set values = BuildCollection(False)
+  Debug.Print values.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a direct Err.Raise branch should not make a collection factory nullable: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksDirectRaiseReturnContractAfterLogging(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub LogError(ByVal message As String)
+End Sub
+
+Private Function BuildObject(ByVal takeIt As Boolean) As Object
+  If takeIt Then
+    Set BuildObject = New Collection
+  Else
+    LogError "missing"
+    Err.Raise 5
+  End If
+End Function
+
+Public Sub Run()
+  Dim value As Object
+  Set value = BuildObject(False)
+  Debug.Print value.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("logging before a direct Err.Raise must not make an object factory nullable: %+v", got)
 	}
 }
 
@@ -8886,6 +9684,54 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448RejectsAmbiguousCollectionHelper(t *testing.T) {
+	t.Parallel()
+	source := `Attribute VB_Name = "Main"
+Option Explicit
+
+Private Function Mutate(ByRef store As Dictionary) As Object
+  Set store("key") = Nothing
+End Function
+
+Private Function Mutate(ByRef store As Dictionary) As Object
+  Set store("key") = New Collection
+End Function
+
+Public Sub Run()
+  Dim store As Dictionary
+  Dim ignored As Object
+  Dim value As Object
+  Set store = New Dictionary
+  store.Add "key", New Collection
+  Set ignored = Mutate(store)
+  If store.Exists("key") Then
+    Set value = store("key")
+    Debug.Print value.Count
+  End If
+End Sub
+
+`
+	index, run := loadObjectCollectionShapeProcedure(t, source, "Run")
+	contracts := objectCollectionShapeCollectionContracts(index, run)
+	if contracts[objectCollectionShapePath("store", `"key"`)] {
+		t.Fatalf("an ambiguous same-module Dictionary helper retained the item contract: %+v", contracts)
+	}
+
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", source)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	for _, finding := range got {
+		if finding.Procedure == "Run" {
+			return
+		}
+	}
+	t.Fatalf("an ambiguous same-module Dictionary helper must invalidate the item contract: %+v", got)
+}
+
 func TestVBA202Issue448RejectsDynamicDefaultItemMutation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -9027,5 +9873,359 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
 		t.Fatal("an indexed mutation inside an append helper must invalidate the element contract")
+	}
+}
+
+func TestVBA202Issue448RejectsUnsoundP1Proofs(t *testing.T) {
+	tests := []struct {
+		name          string
+		wantProcedure string
+		wantLine      int
+		source        string
+	}{
+		{
+			name:          "negatedTypeOfPolarity",
+			wantProcedure: "Run",
+			wantLine:      9,
+			source: `Option Explicit
+Public Sub Run(ByVal value As Object)
+  Dim result As Object
+  Dim isDict As Boolean
+  isDict = (TypeOf value Is Scripting.Dictionary)
+  If Not isDict Then
+    Set result = value
+  End If
+  Debug.Print result.Count
+End Sub
+`,
+		},
+		{
+			name:          "runtimeConditionalAssignmentInCompilationBranch",
+			wantProcedure: "Run",
+			wantLine:      11,
+			source: `Option Explicit
+Public Sub Run(ByVal condition As Boolean)
+  Dim result As Object
+#If Windows Then
+  If condition Then
+    Set result = New Collection
+  End If
+#Else
+  Err.Raise 5
+#End If
+  Debug.Print result.Count
+End Sub
+`,
+		},
+		{
+			name:          "objectResetAfterNothingGuard",
+			wantProcedure: "Run",
+			wantLine:      9,
+			source: `Option Explicit
+Public Sub Run()
+  Dim source As Object
+  Dim result As Object
+  If Not source Is Nothing Then
+    Set source = Nothing
+  End If
+  Set result = source
+  Debug.Print result.Count
+End Sub
+`,
+		},
+		{
+			name:          "booleanWitnessAfterObjectReset",
+			wantProcedure: "Run",
+			wantLine:      10,
+			source: `Option Explicit
+Public Sub Run()
+  Dim ready As Boolean
+  Dim value As Object
+  If Not value Is Nothing Then
+    Set value = Nothing
+    ready = True
+  End If
+  If ready Then
+    Debug.Print value.Count
+  End If
+End Sub
+`,
+		},
+		{
+			name:          "conditionalSelectorMutation",
+			wantProcedure: "Run",
+			wantLine:      12,
+			source: `Option Explicit
+Public Sub Run(ByVal mutate As Boolean)
+  Dim ready As Boolean
+  Dim value As Object
+  If ready Then
+    Set value = New Collection
+  End If
+  If mutate Then
+    ready = True
+  End If
+  If ready Then
+    Debug.Print value.Count
+  End If
+End Sub
+`,
+		},
+		{
+			name:          "staticBooleanWitness",
+			wantProcedure: "Run",
+			wantLine:      9,
+			source: `Option Explicit
+Public Sub Run()
+  Static ready As Boolean
+  Dim value As Object
+  If Not value Is Nothing Then
+    ready = True
+  End If
+  If ready Then
+    Debug.Print value.Count
+  End If
+End Sub
+`,
+		},
+		{
+			name:          "publicDictionaryField",
+			wantProcedure: "ReadValue",
+			wantLine:      13,
+			source: `Option Explicit
+Public cache As Dictionary
+
+Public Sub Init()
+  Set cache = New Dictionary
+  Set cache("key") = New Collection
+End Sub
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  If cache.Exists("key") Then
+    Set value = cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name:          "byRefDictionaryMutation",
+			wantProcedure: "ReadValue",
+			wantLine:      15,
+			source: `Option Explicit
+Private cache As Dictionary
+
+Private Sub Mutate(ByRef store As Dictionary)
+  store("key") = 1
+End Sub
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  Set cache = New Dictionary
+  Set cache("key") = New Collection
+  Mutate cache
+  If cache.Exists("key") Then
+    Set value = cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name:          "dictionaryAliasMutation",
+			wantProcedure: "ReadValue",
+			wantLine:      13,
+			source: `Option Explicit
+Private cache As Dictionary
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  Dim alias As Dictionary
+  Set cache = New Dictionary
+  Set cache("key") = New Collection
+  Set alias = cache
+  Set alias("key") = Nothing
+  If cache.Exists("key") Then
+    Set value = cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name:          "dictionaryAliasMutationMixedCase",
+			wantProcedure: "ReadValue",
+			wantLine:      13,
+			source: `Option Explicit
+Private Cache As Dictionary
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  Dim alias As Dictionary
+  Set Cache = New Dictionary
+  Set Cache("key") = New Collection
+  Set alias = cache
+  Set alias("key") = Nothing
+  If Cache.Exists("key") Then
+    Set value = Cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name:          "dictionaryFunctionResultAliasMutation",
+			wantProcedure: "ReadValue",
+			wantLine:      14,
+			source: `Option Explicit
+Private cache As Dictionary
+
+Public Function GetCache() As Dictionary
+  Set GetCache = cache
+End Function
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  Dim alias As Dictionary
+  Set cache = New Dictionary
+  Set cache("key") = New Collection
+  Set alias = GetCache()
+  Set alias("key") = Nothing
+  If cache.Exists("key") Then
+    Set value = cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name:          "dictionaryNestedMemberMutation",
+			wantProcedure: "ReadValue",
+			wantLine:      10,
+			source: `Option Explicit
+Private cache As Dictionary
+
+Public Function ReadValue() As Long
+  Dim value As Object
+  Set cache = New Dictionary
+  Set cache("key").Nested = New Collection
+  If cache.Exists("key") Then
+    Set value = cache("key")
+    ReadValue = value.Count
+  End If
+End Function
+`,
+		},
+		{
+			name:          "nestedConditionalCompilationPath",
+			wantProcedure: "Run",
+			wantLine:      8,
+			source: `Option Explicit
+Public Sub Run()
+  Dim result As Object
+#If Windows Then
+  #If NestedBuild Then
+    Set result = New Collection
+  #End If
+  Debug.Print result.Count
+#Else
+  Err.Raise 5
+#End If
+End Sub
+`,
+		},
+		{
+			name:          "typeOfGuardDoesNotMatchAssignmentValue",
+			wantProcedure: "Run",
+			wantLine:      12,
+			source: `Option Explicit
+Public Sub Run(ByVal other As Object, ByVal maybe As Object)
+  Dim coll As Object
+  Dim isDict As Boolean
+  If Not other Is Nothing Then
+    Set coll = maybe
+  End If
+  If isDict Then
+  ElseIf isDict Then
+    If Not isDict Then GoTo SafeExit
+  Else
+    Debug.Print coll.Count
+  End If
+SafeExit:
+End Sub
+`,
+		},
+		{
+			name:          "unreachableFallbackGoto",
+			wantProcedure: "Run",
+			wantLine:      12,
+			source: `Option Explicit
+Public Sub Run(ByVal other As Object, ByVal maybe As Object)
+  Dim coll As Object
+  Dim isDict As Boolean
+  If Not other Is Nothing Then
+    Set coll = other
+  End If
+  If isDict Then
+  ElseIf isDict Then
+    If Not isDict Then GoTo SafeExit
+  Else
+    Debug.Print coll.Count
+  End If
+SafeExit:
+End Sub
+`,
+		},
+		{
+			name:          "resumeNextRefersToRange",
+			wantProcedure: "Run",
+			wantLine:      7,
+			source: `Option Explicit
+Public Sub Run(ByVal workbookName As Name)
+  Dim target As Range
+  On Error Resume Next
+  Set target = workbookName.RefersToRange
+  On Error GoTo 0
+  Debug.Print target.Count
+End Sub
+`,
+		},
+		{
+			name:          "booleanWitnessSelectorOverwritten",
+			wantProcedure: "Run",
+			wantLine:      10,
+			source: `Option Explicit
+Public Sub Run(ByVal value As Object, ByVal force As Boolean)
+  Dim result As Object
+  Dim isDict As Boolean
+  isDict = (TypeOf value Is Scripting.Dictionary)
+  If force Then isDict = True
+  If isDict Then
+    Set result = value
+  End If
+  Debug.Print result.Count
+End Sub
+`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeModule(t, dir, "Main.bas", test.source)
+			findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := findingsByCode(findings, "VBA202")
+			for _, finding := range got {
+				if finding.Procedure == test.wantProcedure && finding.Line == test.wantLine {
+					return
+				}
+			}
+			t.Fatalf("unsafe proof was accepted at %s:%d: %+v", test.wantProcedure, test.wantLine, got)
+		})
 	}
 }

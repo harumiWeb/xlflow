@@ -131,7 +131,7 @@ func MaterializeThirdPartyProject(corpusRoot string, project Project, opts Mater
 		}
 		relSlash := filepath.ToSlash(rel)
 		ext := strings.ToLower(filepath.Ext(rel))
-		if ext != ".bas" && ext != ".cls" && ext != ".frm" {
+		if ext != ".bas" && ext != ".cls" && ext != ".frm" && ext != ".frx" {
 			return nil
 		}
 		kind := defaultModuleKind(ext)
@@ -215,6 +215,8 @@ func defaultModuleKind(ext string) string {
 	case ".cls":
 		return ModuleKindClass
 	case ".frm":
+		return ModuleKindForm
+	case ".frx":
 		return ModuleKindForm
 	default:
 		return ""

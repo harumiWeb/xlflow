@@ -1681,8 +1681,10 @@ the state is propagated. Public, unresolved, ambiguous, and dynamically bound
 boundaries remain conservative. Successful Excel member/factory expressions
 such as `Workbook.Worksheets(1)`, `Worksheet.Range(...)`, `Range.Resize(...)`,
 and `Shapes.AddShape` establish the assigned result on their normal
-continuation, but not under `On Error Resume Next`; nullable `Range.Find`
-results remain excluded. Form-code `Me.<control>` expressions are treated as
+continuation, but not under `On Error Resume Next`; known MSXML object-producing
+members such as `SelectNodes` and `createElement` follow the same successful-
+continuation rule. Nullable `Range.Find` results remain excluded. Form-code
+`Me.<control>` expressions are treated as
 designer-created objects when passed to a private helper. `TypeName` and
 `Is Nothing` guards, boolean open/cleanup flags, and exceptional-only
 `Err.Number` branches refine the CFG state. Recognized boolean open/cleanup
