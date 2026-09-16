@@ -86,7 +86,10 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		vba227Initial := arrayEntryStateForProcedure(file, proc, ctx, moduleDecls, vba227Variables)
 		baseState := initial
 		vba227State := vba227Initial
-		runtimeState := arrayInitialState(variables)
+		// The runtime lane must see the same entry and module-call facts as the
+		// shared array lifecycle lane; resetting to arrayInitialState would turn
+		// proven private setup calls into false unallocated-array findings.
+		runtimeState := cloneArrayState(initial)
 		probe := a
 		probe.Config.Analyze.DetectArrayLifecycleSafety = true
 		runtimeSeen := map[string]bool{}
@@ -139,6 +142,10 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 					*runtimeSink = append(*runtimeSink, finding)
 				}
 				runtimeState, _ = probe.arrayTransfer(file, proc, ctx, variables, runtimeState, text, line, constants, nil)
+				forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
+					runtimeState = applyArrayModuleCallEffects(runtimeState, file, proc, call, ctx, variables, moduleDecls)
+					runtimeState = applyArrayUnknownModuleCallEffects(runtimeState, file, proc, call, ctx, variables, moduleDecls)
+				}, ctx.arrayStats)
 			}
 		}
 		sortFindings(findings)
@@ -227,7 +234,8 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		probe := a
 		probe.Config.Analyze.DetectArrayLifecycleSafety = true
 		runtimeSeen := map[string]bool{}
-		runtimeState := arrayInitialState(variables)
+		// Keep runtime diagnostics on the shared entry/guard/module-flow facts.
+		runtimeState := cloneArrayState(initial)
 		lanes = append(lanes, arrayCFGWorklistLane{
 			Graph: &baseView, Initial: runtimeState, Stats: ctx.arrayStats,
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
@@ -244,7 +252,18 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 					*runtimeSink = append(*runtimeSink, finding)
 				}
 				out, _ := probe.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, nil)
+				forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
+					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
+					out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
+				}, ctx.arrayStats)
 				return out
+			},
+			EdgeState: func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+				out = applyArrayConditionalAllocationBranch(out, &baseView, block, edge)
+				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
+				out = applyArraySafeBoundGuard(out, block.Statement, edge, ctx.arraySafeBoundGuards, variables)
+				out = applyArrayForBoundState(out, block.Statement, edge, variables)
+				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
 			},
 		})
 	}

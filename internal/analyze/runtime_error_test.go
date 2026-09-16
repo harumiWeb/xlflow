@@ -406,6 +406,31 @@ End Sub
 	}
 }
 
+func TestVBA249PropagatesPrivateModuleAllocationAfterCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As Long
+
+Private Sub SetupValues()
+  ReDim values(0 To 1)
+End Sub
+
+Public Sub Run()
+  SetupValues
+  values(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA249"); len(got) != 0 {
+		t.Fatalf("a private module allocation before indexed use must be visible to VBA249: %+v", got)
+	}
+}
+
 func TestVBA249InvalidatesKnownValueAfterByRefMutation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
