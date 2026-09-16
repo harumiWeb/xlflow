@@ -9878,11 +9878,15 @@ End Sub
 
 func TestVBA202Issue448RejectsUnsoundP1Proofs(t *testing.T) {
 	tests := []struct {
-		name   string
-		source string
+		name          string
+		wantProcedure string
+		wantLine      int
+		source        string
 	}{
 		{
-			name: "negatedTypeOfPolarity",
+			name:          "negatedTypeOfPolarity",
+			wantProcedure: "Run",
+			wantLine:      9,
 			source: `Option Explicit
 Public Sub Run(ByVal value As Object)
   Dim result As Object
@@ -9896,7 +9900,9 @@ End Sub
 `,
 		},
 		{
-			name: "runtimeConditionalAssignmentInCompilationBranch",
+			name:          "runtimeConditionalAssignmentInCompilationBranch",
+			wantProcedure: "Run",
+			wantLine:      11,
 			source: `Option Explicit
 Public Sub Run(ByVal condition As Boolean)
   Dim result As Object
@@ -9912,7 +9918,9 @@ End Sub
 `,
 		},
 		{
-			name: "objectResetAfterNothingGuard",
+			name:          "objectResetAfterNothingGuard",
+			wantProcedure: "Run",
+			wantLine:      9,
 			source: `Option Explicit
 Public Sub Run()
   Dim source As Object
@@ -9926,7 +9934,9 @@ End Sub
 `,
 		},
 		{
-			name: "booleanWitnessAfterObjectReset",
+			name:          "booleanWitnessAfterObjectReset",
+			wantProcedure: "Run",
+			wantLine:      10,
 			source: `Option Explicit
 Public Sub Run()
   Dim ready As Boolean
@@ -9942,7 +9952,9 @@ End Sub
 `,
 		},
 		{
-			name: "conditionalSelectorMutation",
+			name:          "conditionalSelectorMutation",
+			wantProcedure: "Run",
+			wantLine:      12,
 			source: `Option Explicit
 Public Sub Run(ByVal mutate As Boolean)
   Dim ready As Boolean
@@ -9960,7 +9972,9 @@ End Sub
 `,
 		},
 		{
-			name: "staticBooleanWitness",
+			name:          "staticBooleanWitness",
+			wantProcedure: "Run",
+			wantLine:      9,
 			source: `Option Explicit
 Public Sub Run()
   Static ready As Boolean
@@ -9975,7 +9989,9 @@ End Sub
 `,
 		},
 		{
-			name: "publicDictionaryField",
+			name:          "publicDictionaryField",
+			wantProcedure: "ReadValue",
+			wantLine:      13,
 			source: `Option Explicit
 Public cache As Dictionary
 
@@ -9994,7 +10010,9 @@ End Function
 `,
 		},
 		{
-			name: "byRefDictionaryMutation",
+			name:          "byRefDictionaryMutation",
+			wantProcedure: "ReadValue",
+			wantLine:      15,
 			source: `Option Explicit
 Private cache As Dictionary
 
@@ -10015,7 +10033,9 @@ End Function
 `,
 		},
 		{
-			name: "dictionaryAliasMutation",
+			name:          "dictionaryAliasMutation",
+			wantProcedure: "ReadValue",
+			wantLine:      13,
 			source: `Option Explicit
 Private cache As Dictionary
 
@@ -10034,7 +10054,9 @@ End Function
 `,
 		},
 		{
-			name: "dictionaryAliasMutationMixedCase",
+			name:          "dictionaryAliasMutationMixedCase",
+			wantProcedure: "ReadValue",
+			wantLine:      13,
 			source: `Option Explicit
 Private Cache As Dictionary
 
@@ -10053,7 +10075,9 @@ End Function
 `,
 		},
 		{
-			name: "dictionaryFunctionResultAliasMutation",
+			name:          "dictionaryFunctionResultAliasMutation",
+			wantProcedure: "ReadValue",
+			wantLine:      14,
 			source: `Option Explicit
 Private cache As Dictionary
 
@@ -10076,7 +10100,9 @@ End Function
 `,
 		},
 		{
-			name: "dictionaryNestedMemberMutation",
+			name:          "dictionaryNestedMemberMutation",
+			wantProcedure: "ReadValue",
+			wantLine:      10,
 			source: `Option Explicit
 Private cache As Dictionary
 
@@ -10092,7 +10118,9 @@ End Function
 `,
 		},
 		{
-			name: "nestedConditionalCompilationPath",
+			name:          "nestedConditionalCompilationPath",
+			wantProcedure: "Run",
+			wantLine:      8,
 			source: `Option Explicit
 Public Sub Run()
   Dim result As Object
@@ -10108,7 +10136,9 @@ End Sub
 `,
 		},
 		{
-			name: "typeOfGuardDoesNotMatchAssignmentValue",
+			name:          "typeOfGuardDoesNotMatchAssignmentValue",
+			wantProcedure: "Run",
+			wantLine:      12,
 			source: `Option Explicit
 Public Sub Run(ByVal other As Object, ByVal maybe As Object)
   Dim coll As Object
@@ -10127,7 +10157,9 @@ End Sub
 `,
 		},
 		{
-			name: "unreachableFallbackGoto",
+			name:          "unreachableFallbackGoto",
+			wantProcedure: "Run",
+			wantLine:      12,
 			source: `Option Explicit
 Public Sub Run(ByVal other As Object, ByVal maybe As Object)
   Dim coll As Object
@@ -10146,7 +10178,9 @@ End Sub
 `,
 		},
 		{
-			name: "resumeNextRefersToRange",
+			name:          "resumeNextRefersToRange",
+			wantProcedure: "Run",
+			wantLine:      7,
 			source: `Option Explicit
 Public Sub Run(ByVal workbookName As Name)
   Dim target As Range
@@ -10158,7 +10192,9 @@ End Sub
 `,
 		},
 		{
-			name: "booleanWitnessSelectorOverwritten",
+			name:          "booleanWitnessSelectorOverwritten",
+			wantProcedure: "Run",
+			wantLine:      10,
 			source: `Option Explicit
 Public Sub Run(ByVal value As Object, ByVal force As Boolean)
   Dim result As Object
@@ -10183,9 +10219,13 @@ End Sub
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := findingsByCode(findings, "VBA202"); len(got) == 0 {
-				t.Fatalf("unsafe proof was accepted: %+v", findings)
+			got := findingsByCode(findings, "VBA202")
+			for _, finding := range got {
+				if finding.Procedure == test.wantProcedure && finding.Line == test.wantLine {
+					return
+				}
 			}
+			t.Fatalf("unsafe proof was accepted at %s:%d: %+v", test.wantProcedure, test.wantLine, got)
 		})
 	}
 }
