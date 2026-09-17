@@ -86,6 +86,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		vba227Initial := arrayEntryStateForProcedure(file, proc, ctx, moduleDecls, vba227Variables)
 		baseState := initial
 		vba227State := vba227Initial
+		runtimeCallLines := runtimeArrayCallLines(proc)
 		// The runtime lane must see the same entry and module-call facts as the
 		// shared array lifecycle lane; resetting to arrayInitialState would turn
 		// proven private setup calls into false unallocated-array findings.
@@ -129,7 +130,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				}
 			}
 			if runtimeSink != nil {
-				for _, issue := range deterministicArrayRuntimeIssues(text, line, runtimeState, variables, constants, proc, runtimeBase) {
+				for _, issue := range a.deterministicArrayRuntimeIssues(file, text, line, runtimeState, variables, constants, proc, runtimeBase, ctx, moduleDecls) {
 					key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.operationKey
 					if runtimeSeen[key] {
 						continue
@@ -142,10 +143,12 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 					*runtimeSink = append(*runtimeSink, finding)
 				}
 				runtimeState, _ = probe.arrayTransfer(file, proc, ctx, variables, runtimeState, text, line, constants, nil)
-				forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
-					runtimeState = applyArrayModuleCallEffects(runtimeState, file, proc, call, ctx, variables, moduleDecls)
-					runtimeState = applyArrayUnknownModuleCallEffects(runtimeState, file, proc, call, ctx, variables, moduleDecls)
-				}, ctx.arrayStats)
+				if runtimeCallLines[line] {
+					forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
+						runtimeState = applyArrayModuleCallEffects(runtimeState, file, proc, call, ctx, variables, moduleDecls)
+						runtimeState = applyArrayUnknownModuleCallEffects(runtimeState, file, proc, call, ctx, variables, moduleDecls)
+					}, ctx.arrayStats)
+				}
 			}
 		}
 		sortFindings(findings)
@@ -186,6 +189,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 			EdgeState: func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 				out = applyArrayConditionalAllocationBranch(out, &baseView, block, edge)
 				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
+				out = applyArrayModulePositiveCountGuardBranch(out, block.Statement, edge, file, proc, ctx, moduleDecls)
 				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
 			},
 		})
@@ -221,11 +225,13 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore, proc)
 				out = applyArrayResumeNextFailureFlagBranch(out, block.Statement, edge)
 				out = applyArrayModuleCapacityGuardBranch(out, block.Statement, edge, file, proc, ctx, vba227Variables, moduleDecls)
+				out = applyArrayModuleStorageGuardBranch(out, block.Statement, edge, file, proc, ctx, ctx.arrayModuleStorageGuards[file.Path])
 				out = applyArrayNotEmptyGuardBranch(out, block.Statement, edge, proc, vba227Variables)
 				out = applyArrayAllocationFlagBranch(out, block.Statement, edge, vba227Variables)
 				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, vba227Variables)
 				out = applyArraySafeBoundGuard(out, block.Statement, edge, ctx.arraySafeBoundGuards, vba227Variables)
 				out = applyArrayForBoundState(out, block.Statement, edge, vba227Variables)
+				out = applyArrayModulePositiveCountGuardBranch(out, block.Statement, edge, file, proc, ctx, moduleDecls)
 				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], vba227Variables, file, proc, moduleDecls)
 			},
 		})
@@ -233,13 +239,37 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 	if runtimeSink != nil {
 		probe := a
 		probe.Config.Analyze.DetectArrayLifecycleSafety = true
+		runtimeCtx := ctx
+		// The runtime projection is observational. Reuse the immutable
+		// interprocedural summaries and synchronized object index cache, but do
+		// not permit the projection to write back into either analysis fact.
+		runtimeCtx.arrayModuleInvalidations = ctx.arrayModuleInvalidations
+		runtimeCtx.arrayModuleInvalidationCacheWritable = false
+		runtimeCtx.arrayObjectContainerIndexCache = ctx.arrayObjectContainerIndexCache
+		runtimeCtx.arrayObjectContainerIndexCacheMu = ctx.arrayObjectContainerIndexCacheMu
 		runtimeSeen := map[string]bool{}
+		runtimeStopLines := map[int]bool{}
+		runtimeCallLines := runtimeArrayCallLines(proc)
 		// Keep runtime diagnostics on the shared entry/guard/module-flow facts.
 		runtimeState := cloneArrayState(initial)
-		lanes = append(lanes, arrayCFGWorklistLane{
-			Graph: &baseView, Initial: runtimeState, Stats: ctx.arrayStats,
-			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
-				for _, issue := range deterministicArrayRuntimeIssues(text, line, in, variables, constants, proc, runtimeBase) {
+		runtimeView := baseView
+		runtimeView = runtimeArrayCFGRefinedView(probe, file, proc, runtimeView, runtimeState, variables, moduleDecls, runtimeCtx, constants)
+		visitRuntime := func(text string, line int, in arrayFlowState, sourceOrdered bool) arrayFlowState {
+			out := in
+			if sourceOrdered {
+				out = cloneArrayState(in)
+				out = applyArrayModuleStorageSourceGuardState(out, file, proc, line, runtimeCtx, runtimeCtx.arrayModuleStorageGuards[file.Path])
+			}
+			segments := []string{text}
+			if sourceOrdered {
+				segments = splitRangeValueSourceStatements(text)
+			}
+			_, compoundBlock := runtimeArrayTextShape(text)
+			if sourceOrdered {
+				compoundBlock = false
+			}
+			emitIssues := func(lineIssues []deterministicArrayRuntimeIssue) {
+				for _, issue := range lineIssues {
 					key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.operationKey
 					if runtimeSeen[key] {
 						continue
@@ -251,19 +281,118 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 					finding.arrayOperationKey = issue.operationKey
 					*runtimeSink = append(*runtimeSink, finding)
 				}
-				out, _ := probe.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, nil)
+			}
+			for _, source := range segments {
+				segment := strings.TrimSpace(source)
+				if segment == "" {
+					continue
+				}
+				if compoundBlock {
+					continue
+				}
+				lineIssues := a.deterministicArrayRuntimeIssues(file, segment, line, out, variables, constants, proc, runtimeBase, runtimeCtx, moduleDecls)
+				emitIssues(lineIssues)
+				if runtimeArrayLineHasFatalIssue(file, segment, out, lineIssues, variables, constants, proc, line) {
+					runtimeStopLines[line] = true
+					break
+				}
+				if sourceOrdered {
+					before := cloneArrayState(out)
+					out, _ = probe.arrayTransfer(file, proc, runtimeCtx, variables, out, segment, line, constants, nil)
+					out = restoreRuntimePreserveState(out, before, segment, variables, proc, line)
+					out = applyArrayForBoundHeaderState(out, segment, variables)
+				}
+			}
+			if !sourceOrdered {
+				if compoundBlock {
+					// The deterministic runtime projection has its own source-ordered
+					// transfer for compound blocks. Reusing the CFG's coarse transfer
+					// here would promote allocation from a branch that may not execute.
+					compoundLines := normalizedSourceLines(text)
+					nestedSelect := false
+					for index, rawLine := range compoundLines {
+						if index == 0 {
+							continue
+						}
+						if strings.HasPrefix(strings.ToLower(strings.TrimSpace(normalizedCodeLine(rawLine))), "select case ") {
+							nestedSelect = true
+							break
+						}
+					}
+					if len(compoundLines) > 0 && nestedSelect && strings.HasPrefix(strings.ToLower(strings.TrimSpace(compoundLines[0])), "case ") {
+						// Preserve the historical conservative Case-block contract
+						// for nested control flow. The source-order scanner cannot
+						// relate an inner Case value to its enclosing Case value, so
+						// the block-entry check must remain eligible to report the
+						// possible outer use.
+						emitIssues(deterministicArrayRuntimeLineIssues(file, text, line, out, variables, constants, proc, runtimeBase))
+					}
+					var compoundIssues []deterministicArrayRuntimeIssue
+					var reachable bool
+					out, compoundIssues, reachable = a.deterministicArrayRuntimeCompoundAnalysis(file, text, line, out, variables, constants, proc, runtimeBase, runtimeCtx, moduleDecls)
+					emitIssues(compoundIssues)
+					if !reachable {
+						runtimeStopLines[line] = true
+					}
+				} else {
+					before := cloneArrayState(out)
+					out, _ = probe.arrayTransfer(file, proc, runtimeCtx, variables, out, text, line, constants, nil)
+					out = restoreRuntimePreserveState(out, before, text, variables, proc, line)
+				}
+				out = applyArrayForBoundHeaderState(out, text, variables)
+			}
+			if runtimeCallLines[line] {
 				forEachArrayCallAtLine(proc, line, func(call procedureir.CallSite) {
-					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
-					out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
-				}, ctx.arrayStats)
-				return out
+					out = applyArrayModuleCallEffects(out, file, proc, call, runtimeCtx, variables, moduleDecls)
+					out = applyArrayUnknownModuleCallEffects(out, file, proc, call, runtimeCtx, variables, moduleDecls)
+					if _, _, conditional := arrayIfThenParts(text); conditional {
+						out = applyArrayConditionalByRefCallEffects(out, proc, call, runtimeCtx)
+					} else {
+						out = applyArrayByRefCallEffects(out, proc, call, runtimeCtx)
+					}
+				}, runtimeCtx.arrayStats)
+			}
+			return out
+		}
+		lanes = append(lanes, arrayCFGWorklistLane{
+			Graph: &runtimeView, Initial: runtimeState, Stats: ctx.arrayStats,
+			Stop: func(_ string, line int) bool {
+				return runtimeStopLines[line]
+			},
+			SourceLinesFor: func(statement *procedureir.Statement) bool {
+				if statement == nil {
+					return false
+				}
+				switch statement.Kind {
+				case procedureir.StatementSelect:
+					return true
+				case procedureir.StatementCase, procedureir.StatementWith:
+					return runtimeArrayProcedureNeedsCFGRefinement(proc)
+				case procedureir.StatementDo:
+					// A loop block can own the complete physical body while the
+					// CFG also exposes its child statements. For a terminating
+					// error handler, scan that body in source order so a fatal
+					// Preserve suppresses all child normal-flow successors.
+					return runtimeArrayProcedureNeedsCFGRefinement(proc)
+				default:
+					return false
+				}
+			},
+			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
+				return visitRuntime(text, line, in, false)
+			},
+			SourceLineVisit: func(text string, line int, in arrayFlowState) arrayFlowState {
+				return visitRuntime(text, line, in, true)
 			},
 			EdgeState: func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-				out = applyArrayConditionalAllocationBranch(out, &baseView, block, edge)
-				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
-				out = applyArraySafeBoundGuard(out, block.Statement, edge, ctx.arraySafeBoundGuards, variables)
+				out = applyArrayConditionalAllocationBranch(out, &runtimeView, block, edge)
+				out = applyArrayModuleCapacityGuardBranch(out, block.Statement, edge, file, proc, runtimeCtx, variables, moduleDecls)
+				out = applyArrayAllocationGuard(out, block.Statement, edge, runtimeCtx.arrayAllocationGuards, variables)
+				out = applyArrayModuleStorageGuardBranch(out, block.Statement, edge, file, proc, runtimeCtx, runtimeCtx.arrayModuleStorageGuards[file.Path])
+				out = applyArraySafeBoundGuard(out, block.Statement, edge, runtimeCtx.arraySafeBoundGuards, variables)
 				out = applyArrayForBoundState(out, block.Statement, edge, variables)
-				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
+				out = applyArrayModulePositiveCountGuardBranch(out, block.Statement, edge, file, proc, runtimeCtx, moduleDecls)
+				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, runtimeCtx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
 			},
 		})
 	}

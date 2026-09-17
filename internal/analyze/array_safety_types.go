@@ -69,7 +69,11 @@ type arrayVariable struct {
 type arrayValue struct {
 	kind       arrayAllocation
 	knownArray bool
-	mayBeEmpty bool
+	// objectValue records a Variant proven to hold an object reference. Object
+	// default-member calls such as values("key") are not dynamic-array element
+	// accesses and must not enter the VBA227 allocation lattice.
+	objectValue bool
+	mayBeEmpty  bool
 	// mayBeUnallocated records a possible failed array-return assignment under
 	// On Error Resume Next. It is kept separate from knownArray because a CFG
 	// join may retain the possible failure while the normal path remains an
@@ -214,6 +218,9 @@ var (
 	arraySetupGuardRe                 = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+then\s+exit\s+sub\s*$`)
 	arrayStaticReadyGuardRe           = regexp.MustCompile(`(?i)^\s*if\s+not\s+([A-Za-z_]\w*)\s*\.\s*isset\s+then\s*$`)
 	arrayModuleReadyGuardRe           = regexp.MustCompile(`(?i)^\s*if\s+not\s+([A-Za-z_]\w*)\s+then\s+exit\s+(?:sub|function|property)\s*$`)
+	arrayModuleReadyGuardBlockRe      = regexp.MustCompile(`(?i)^\s*if\s+not\s+([A-Za-z_]\w*)\s+then\s*$`)
+	arrayModuleObjectNothingExitRe    = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+is\s+nothing\s+then\s*$`)
+	arrayModuleObjectSetRe            = regexp.MustCompile(`(?i)^\s*set\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*|nothing)\s*$`)
 	arrayOnErrorGotoRe                = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+([A-Za-z_]\w*)\s*$`)
 	arrayOnErrorResumeNextRe          = regexp.MustCompile(`(?i)^\s*on\s+error\s+resume\s+next\s*$`)
 	arrayOnErrorResumeNextStatementRe = regexp.MustCompile(`(?i)(?:^|\bthen\s+)on\s+error\s+resume\s+next(?:\s+else\b.*)?$`)
@@ -229,6 +236,7 @@ var (
 	arrayForZeroToCountRe             = regexp.MustCompile(`(?i)^\s*for\s+[A-Za-z_]\w*\s*=\s*0\s+to\s+[A-Za-z_]\w*\s*-\s*1\s*$`)
 	arrayLabelRe                      = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:\s*$`)
 	arrayCountComparisonRe            = regexp.MustCompile(`(?i)^\s*(.*?)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)\s*$`)
+	arrayModuleCountComparisonRe      = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*|-?\d+)\s*$`)
 	arrayConditionAndRe               = regexp.MustCompile(`(?i)\s+and\s+`)
 	arrayConditionOrRe                = regexp.MustCompile(`(?i)\s+or\s+`)
 	arrayScalarConditionRe            = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*(=|<>)\s*([A-Za-z_]\w*|-?\d+)\s*$`)

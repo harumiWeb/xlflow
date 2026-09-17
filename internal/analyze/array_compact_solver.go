@@ -210,11 +210,13 @@ type arrayCompactLane struct {
 	initial             arrayFlowState
 	stats               *arrayInterproceduralStats
 	visit               func(text string, line int, in arrayFlowState) arrayFlowState
+	sourceLineVisit     func(text string, line int, in arrayFlowState) arrayFlowState
 	visitBlock          func(block vbacfg.Block, text string, line int, in arrayFlowState) arrayFlowState
 	edgeState           func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState
 	stop                func(text string, line int) bool
 	reliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool
 	sourceLines         bool
+	sourceLinesFor      func(statement *procedureir.Statement) bool
 	// Conditional allocation facts are relational evidence: a positive branch
 	// can prove allocation while the sibling branch retains the count source.
 	// Preserve that source on the compact positive candidate so a later Select
@@ -294,7 +296,11 @@ func walkArrayCFGCompactLanes(ctx context.Context, graph *vbacfg.CFGView, lines 
 					return nil
 				}
 				in := transferCursor.load(input)
-				out, wasStopped := arrayCompactVisitBlockWithStop(lines, block, in, policy.visit, policy.visitBlock, policy.stop, policy.sourceLines)
+				sourceLines := policy.sourceLines
+				if policy.sourceLinesFor != nil && block.Statement != nil {
+					sourceLines = policy.sourceLinesFor(block.Statement)
+				}
+				out, wasStopped := arrayCompactVisitBlockWithStop(lines, block, in, policy.visit, policy.sourceLineVisit, policy.visitBlock, policy.stop, sourceLines)
 				if wasStopped {
 					stopped[ordinal] = true
 					output.Reset()
@@ -310,7 +316,13 @@ func walkArrayCFGCompactLanes(ctx context.Context, graph *vbacfg.CFGView, lines 
 					return semanticstate.EdgeSuppress, nil
 				}
 				if edge.Class == vbacfg.EdgeExceptional {
-					if policy.sourceLines && policy.reliableExceptional != nil {
+					sourceLines := policy.sourceLines
+					if policy.sourceLinesFor != nil {
+						if from, ok := graph.BlockAtOrdinal(vbacfg.BlockOrdinal(edge.From)); ok && from.Statement != nil {
+							sourceLines = policy.sourceLinesFor(from.Statement)
+						}
+					}
+					if sourceLines && policy.reliableExceptional != nil {
 						from, fromOK := graph.BlockAtOrdinal(vbacfg.BlockOrdinal(edge.From))
 						if fromOK {
 							in := inputCursor.load(input)
@@ -399,10 +411,12 @@ func walkArrayCFGCombinedCompact(ctx context.Context, lines []string, lanes []ar
 			initial:                     lane.Initial,
 			stats:                       lane.Stats,
 			visit:                       lane.Visit,
+			sourceLineVisit:             lane.SourceLineVisit,
 			edgeState:                   lane.EdgeState,
 			stop:                        lane.Stop,
 			reliableExceptional:         lane.ReliableExceptional,
 			sourceLines:                 lane.SourceLines,
+			sourceLinesFor:              lane.SourceLinesFor,
 			preserveConditionalEvidence: lane.EdgeState != nil,
 		})
 	}
@@ -438,16 +452,20 @@ func preserveArrayConditionalEvidence(sources map[string]string, after arrayFlow
 	return after
 }
 
-func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, visitBlock func(block vbacfg.Block, text string, line int, in arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) (arrayFlowState, bool) {
+func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, sourceLineVisit func(text string, line int, in arrayFlowState) arrayFlowState, visitBlock func(block vbacfg.Block, text string, line int, in arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) (arrayFlowState, bool) {
 	in := visitIn
 	if (visit == nil && visitBlock == nil) || block.Statement == nil {
 		return in, false
 	}
-	visitLine := func(text string, line int, state arrayFlowState) arrayFlowState {
+	visitLine := visit
+	if sourceLines && sourceLineVisit != nil {
+		visitLine = sourceLineVisit
+	}
+	visitLineWithBlock := func(text string, line int, state arrayFlowState) arrayFlowState {
 		if visitBlock != nil {
 			return visitBlock(block, text, line, state)
 		}
-		return visit(text, line, state)
+		return visitLine(text, line, state)
 	}
 	if !sourceLines {
 		line := block.Statement.Range.StartLine
@@ -458,7 +476,7 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 		if strings.TrimSpace(text) == "" && line >= 1 && line <= len(lines) {
 			text = normalizedCodeLine(lines[line-1])
 		}
-		out := visitLine(text, line, in)
+		out := visitLineWithBlock(text, line, in)
 		return out, stop != nil && stop(text, line)
 	}
 	start := block.Statement.Range.StartLine
@@ -470,9 +488,13 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 		end = start
 	}
 	out := in
-	if (block.Statement.Kind == procedureir.StatementSelect || block.Statement.Kind == procedureir.StatementCase) && start >= 1 && start <= len(lines) {
+	caseHeaderOnly := block.Statement.Kind == procedureir.StatementCase && sourceLineVisit == nil
+	if (block.Statement.Kind == procedureir.StatementSelect || caseHeaderOnly) && start >= 1 && start <= len(lines) {
+		// Keep the historical Case-header behavior for lanes that do not
+		// explicitly request source-order Case processing. The runtime lane
+		// supplies SourceLinesFor and therefore scans the branch body.
 		text := normalizedCodeLine(lines[start-1])
-		out = visitLine(text, start, out)
+		out = visitLineWithBlock(text, start, out)
 		return out, stop != nil && stop(text, start)
 	}
 	if start == end && start >= 1 && start <= len(lines) {
@@ -480,7 +502,7 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 		if strings.TrimSpace(text) == "" {
 			text = normalizedCodeLine(lines[start-1])
 		}
-		out = visitLine(text, start, out)
+		out = visitLineWithBlock(text, start, out)
 		return out, stop != nil && stop(text, start)
 	}
 	if start >= 1 && end <= len(lines) {
@@ -489,7 +511,7 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 			if len(text) == 0 {
 				continue
 			}
-			out = visitLine(text, line, out)
+			out = visitLineWithBlock(text, line, out)
 			if stop != nil && stop(text, line) {
 				return out, true
 			}
@@ -500,6 +522,6 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 	if strings.TrimSpace(text) == "" && start >= 1 && start <= len(lines) {
 		text = normalizedCodeLine(lines[start-1])
 	}
-	out = visitLine(text, start, out)
+	out = visitLineWithBlock(text, start, out)
 	return out, stop != nil && stop(text, start)
 }

@@ -353,6 +353,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	state = arrayVBA227ClearLoopBodyBounds(state, line)
 	state = arrayVBA227ClearConditionalAllocationGuards(state, proc, text, line, variables)
 	state = arrayVBA227InvalidateNotNotMutationState(file, proc, line, state, variables, ctx)
+	state = applyArrayModuleStorageSourceGuardState(state, file, proc, line, ctx, ctx.arrayModuleStorageGuards[file.Path])
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "case ") || arrayBoundCallRe.MatchString(text) {
 		state = arrayVBA227RepeatedSelectCaseBoundsState(file, proc, line, state, variables)
 	}
@@ -402,6 +403,9 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		text = assignment
 	}
 	if condition, body, ok := arrayIfThenParts(text); ok {
+		if strings.TrimSpace(body) != "" {
+			state = applyArrayModuleStorageCondition(state, condition, vbacfg.EdgeBranchTrue, line, file, proc, ctx, ctx.arrayModuleStorageGuards[file.Path])
+		}
 		if body != "" && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) && !arrayProcedureHasErrorHandling(proc) && arrayVBA227StatementAlwaysRaises(body) {
 			if guardedState, safe := arrayNonEmptyGuardState(state, condition, variables); safe {
 				_, findings := transfer(state, condition)
@@ -464,6 +468,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 			beforeBounds := cloneArrayState(state)
 			state, findings := transfer(state, condition)
 			state = arraySuccessfulBoundsState(state, condition, variables, arrayVBA227LoopBodyEndLine(proc, line))
+			state = applyArrayModuleCoupledBoundsState(state, file, variables, file.moduleDecls(), condition)
 			return arrayVBA227RetainBoundsFailureOnResume(state, beforeBounds, condition, variables, proc), findings
 		}
 	}
@@ -478,6 +483,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		!arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) &&
 		!strings.Contains(strings.ToLower(text), "on error resume next") {
 		state = arraySuccessfulBoundsState(state, text, variables, arrayVBA227LoopBodyEndLine(proc, line))
+		state = applyArrayModuleCoupledBoundsState(state, file, variables, file.moduleDecls(), text)
 		state = arrayVBA227RetainBoundsFailureOnResume(state, beforeBounds, text, variables, proc)
 	}
 	// Source-line CFG blocks can contain an If condition and its body. Apply
@@ -1364,7 +1370,14 @@ func arrayVBA227PositiveMemberExpression(file parsedFile, proc sourceProcedure, 
 				return false
 			}
 			if arrayProcedureKey(owner) != arrayProcedureKey(proc) {
-				if !arrayProcedureIsParticipant(ctx, owner) || !arrayVBA227MemberAssignmentAvailableBefore(proc, owner, target, ctx) {
+				participant := arrayProcedureIsParticipant(ctx, owner)
+				available := arrayVBA227MemberAssignmentAvailableBefore(proc, owner, target, ctx)
+				sameModule := strings.TrimSpace(owner.Module) != "" && strings.TrimSpace(proc.Module) != "" && strings.EqualFold(strings.TrimSpace(owner.Module), strings.TrimSpace(proc.Module))
+				// A same-module Private Type member is source-owned by the caller's
+				// module. A direct dominating call is enough to prove its value even
+				// when the participant planner intentionally excludes the scalar-only
+				// initializer from the array fixed-point cluster.
+				if (!participant && !sameModule) || !available {
 					return false
 				}
 			} else if target.ID == 0 || !arrayVBA227StatementLineDominates(owner, sourceLine, target) {
@@ -2624,7 +2637,8 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 			}
 		case procedureir.StatementDo, procedureir.StatementWhile:
 			if !resumeNext {
-				if name, ok := arrayVBA227DerivedDoWhileArray(file, proc, statement, line, variables, ctx); ok {
+				name, ok := arrayVBA227DerivedDoWhileArray(file, proc, statement, line, variables, ctx)
+				if ok {
 					proven[name] = true
 					provenNonEmpty[name] = true
 					for _, kind := range []string{"lbound", "ubound"} {

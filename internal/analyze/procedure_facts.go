@@ -3,6 +3,7 @@ package analyze
 import (
 	"iter"
 	"sort"
+	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
@@ -90,11 +91,18 @@ type procedureAnalysisFacts struct {
 	callsByLineBuilt bool
 	accessesByStatement
 	memberExpressionsByStatement map[int][]int
+	runtimeErrorModeEvents       []runtimeErrorModeEvent
+	runtimeErrorModeEventsBuilt  bool
 	// memberExpressionFallback is true only for hand-built/recovered IR where
 	// at least one expression omits StatementID. Production IR assigns the ID
 	// consistently, so MemberExpressionsForStatement can return its compact
 	// grouped index without traversing expression trees in that common case.
 	memberExpressionFallback bool
+}
+
+type runtimeErrorModeEvent struct {
+	line int
+	mode string
 }
 
 // newProcedureAnalysisFacts constructs facts from already-owned procedure IR
@@ -160,6 +168,20 @@ func (facts *procedureAnalysisFacts) initialize(
 			facts.features.observeStatement(statement)
 			facts.statementIndex[statement.ID] = index
 		}
+		facts.runtimeErrorModeEvents = make([]runtimeErrorModeEvent, 0)
+		for _, statement := range statements {
+			for _, part := range splitRangeValueSourceStatements(statement.Text) {
+				normalized := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(part))), " ")
+				if !strings.HasPrefix(normalized, "on error ") {
+					continue
+				}
+				facts.runtimeErrorModeEvents = append(facts.runtimeErrorModeEvents, runtimeErrorModeEvent{
+					line: statement.Range.StartLine,
+					mode: strings.TrimSpace(strings.TrimPrefix(normalized, "on error ")),
+				})
+			}
+		}
+		facts.runtimeErrorModeEventsBuilt = true
 	}
 	if len(expressions) > 0 {
 		facts.expressionIndex = make(map[int]int, len(expressions))

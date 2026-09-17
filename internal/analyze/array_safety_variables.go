@@ -322,6 +322,31 @@ func parseArrayDimensionsWithConstants(text string, base int, constants map[stri
 // enter the table, so dynamic bounds remain unclassified.
 func arrayIntegerConstants(file parsedFile, proc sourceProcedure, projectValues map[string]constexpr.Value, visibleNames map[string]bool) map[string]int {
 	constants := rangeValueIntegerConstants(arrayIntegerModuleConstants(file), proc)
+	// Procedure-local declarations shadow module constants and Enum members in
+	// VBA.  Keep local Const declarations in the constant environment, but do
+	// not let a same-named scalar/array/parameter be evaluated as the module
+	// constant when it is used as an array subscript or bound expression.
+	for declaration := range proc.Declarations.All() {
+		if declaration.IsConst {
+			continue
+		}
+		delete(constants, strings.ToLower(cleanIdentifier(declaration.Name)))
+	}
+	for parameter := range proc.Params.All() {
+		delete(constants, strings.ToLower(cleanIdentifier(parameter.Name)))
+	}
+	localConstants := map[string]bool{}
+	for statement := range proc.Statements.All() {
+		match := runtimeConstAssignmentRe.FindStringSubmatch(strings.TrimSpace(statement.Text))
+		if len(match) > 0 {
+			localConstants[strings.ToLower(cleanIdentifier(match[1]))] = true
+		}
+	}
+	for name := range runtimeLocalNames(proc) {
+		if !localConstants[name] {
+			delete(constants, name)
+		}
+	}
 	// Project constants fill names that are not already provided by the module
 	// projection, preserving the historical module-over-project precedence.
 	for name, value := range projectValues {
@@ -337,6 +362,11 @@ func arrayIntegerConstants(file parsedFile, proc sourceProcedure, projectValues 
 			if _, exists := constants[key]; !exists {
 				constants[key] = integer
 			}
+		}
+	}
+	for name := range runtimeLocalNames(proc) {
+		if !localConstants[name] {
+			delete(constants, name)
 		}
 	}
 	return constants
@@ -791,6 +821,13 @@ func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext)
 	}
 	if arrayByteArrayReadRe.MatchString(rhs) {
 		return arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal}, true
+	}
+	// Allocating an indexed container does not allocate a dynamic array field
+	// stored in one of its elements. Keep only indexed-member expressions
+	// conservative; a qualified method call such as `vFibers.AsArray()` may
+	// have a documented array-return summary and must remain eligible for it.
+	if receiver, _, indexedMember := arrayQualifiedReturnMemberCallParts(rhs); indexedMember && strings.Contains(receiver, "(") {
+		return arrayValue{kind: arrayUnknown, knownArray: true, origin: arrayOriginUnknown}, true
 	}
 	if value, ok := state[name]; ok && value.kind == arrayAllocated && value.knownArray {
 		return value, true
