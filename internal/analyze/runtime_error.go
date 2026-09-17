@@ -1960,8 +1960,8 @@ func runtimeScalarStateEqual(left, right runtimeScalarState) bool {
 	return true
 }
 
-func runtimeArrayCFGRefinedView(a Analyzer, file parsedFile, proc sourceProcedure, base vbacfg.CFGView, initial arrayFlowState, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, ctx analysisContext, constants map[string]int) vbacfg.CFGView {
-	if !runtimeArrayProcedureNeedsCFGRefinement(proc) {
+func runtimeArrayCFGRefinedView(a Analyzer, file parsedFile, proc sourceProcedure, base vbacfg.CFGView, initial arrayFlowState, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, ctx analysisContext, constants map[string]int, needsRefinement bool) vbacfg.CFGView {
+	if !needsRefinement {
 		return base
 	}
 	materialized := base.Materialize()

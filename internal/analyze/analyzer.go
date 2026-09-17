@@ -388,6 +388,8 @@ type analysisContext struct {
 	arrayCapabilityIndex             *semanticArrayCapabilityIndex
 	arrayObjectContainerIndexCache   map[string]arrayObjectContainerIndexCacheEntry
 	arrayObjectContainerIndexCacheMu *sync.RWMutex
+	arraySourceModuleTargetCache     map[arraySourceModuleTargetCacheKey]arraySourceModuleTargetCacheEntry
+	arraySourceModuleTargetCacheMu   *sync.RWMutex
 	procedures                       map[string]procedureSignature
 	procedureResolver                procedureir.Resolver
 	projectResolver                  procedureir.Resolver
@@ -2810,6 +2812,8 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayByRefEntryConditions:        map[string]map[int]string{},
 		arrayObjectContainerIndexCache:   map[string]arrayObjectContainerIndexCacheEntry{},
 		arrayObjectContainerIndexCacheMu: &sync.RWMutex{},
+		arraySourceModuleTargetCache:     map[arraySourceModuleTargetCacheKey]arraySourceModuleTargetCacheEntry{},
+		arraySourceModuleTargetCacheMu:   &sync.RWMutex{},
 		procedures:                       map[string]procedureSignature{},
 		objectAnalysis:                   objectAnalysis,
 		worksheetCodenames:               map[string]string{},

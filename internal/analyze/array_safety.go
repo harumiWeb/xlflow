@@ -240,6 +240,11 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		probe := a
 		probe.Config.Analyze.DetectArrayLifecycleSafety = true
 		runtimeCtx := ctx
+		// This decision scans the procedure's statements and error-handler
+		// regions. The compact solver asks for it once per compound block and
+		// exceptional edge, so keep the immutable procedure-level result outside
+		// those callbacks.
+		runtimeNeedsCFGRefinement := runtimeArrayProcedureNeedsCFGRefinement(proc)
 		// The runtime projection is observational. Reuse the immutable
 		// interprocedural summaries and synchronized object index cache, but do
 		// not permit the projection to write back into either analysis fact.
@@ -253,7 +258,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		// Keep runtime diagnostics on the shared entry/guard/module-flow facts.
 		runtimeState := cloneArrayState(initial)
 		runtimeView := baseView
-		runtimeView = runtimeArrayCFGRefinedView(probe, file, proc, runtimeView, runtimeState, variables, moduleDecls, runtimeCtx, constants)
+		runtimeView = runtimeArrayCFGRefinedView(probe, file, proc, runtimeView, runtimeState, variables, moduleDecls, runtimeCtx, constants, runtimeNeedsCFGRefinement)
 		visitRuntime := func(text string, line int, in arrayFlowState, sourceOrdered bool) arrayFlowState {
 			out := in
 			if sourceOrdered {
@@ -367,13 +372,13 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				case procedureir.StatementSelect:
 					return true
 				case procedureir.StatementCase, procedureir.StatementWith:
-					return runtimeArrayProcedureNeedsCFGRefinement(proc)
+					return runtimeNeedsCFGRefinement
 				case procedureir.StatementDo:
 					// A loop block can own the complete physical body while the
 					// CFG also exposes its child statements. For a terminating
 					// error handler, scan that body in source order so a fatal
 					// Preserve suppresses all child normal-flow successors.
-					return runtimeArrayProcedureNeedsCFGRefinement(proc)
+					return runtimeNeedsCFGRefinement
 				default:
 					return false
 				}

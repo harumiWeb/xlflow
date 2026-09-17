@@ -44,6 +44,19 @@ type arrayCompactAdapter struct {
 	// slice avoids a per-cursor/per-transfer allocation while preserving the
 	// environment's external ownership boundary.
 	names []string
+	// ids is aligned with names. Environment.Symbol would canonicalize and
+	// hash every name on each state store; the environment assigns IDs in the
+	// same canonical order returned by Names, so the mapping is immutable.
+	ids []semanticstate.SymbolID
+}
+
+func newArrayCompactAdapterWithEnvironment(environment semanticstate.Environment) arrayCompactAdapter {
+	names := environment.Names()
+	ids := make([]semanticstate.SymbolID, len(names))
+	for index := range names {
+		ids[index] = semanticstate.SymbolID(index)
+	}
+	return arrayCompactAdapter{environment: environment, names: names, ids: ids}
 }
 
 func newArrayCompactAdapter(initials ...arrayFlowState) arrayCompactAdapter {
@@ -58,7 +71,7 @@ func newArrayCompactAdapter(initials ...arrayFlowState) arrayCompactAdapter {
 		names = append(names, name)
 	}
 	environment := semanticstate.NewEnvironment(names, names)
-	return arrayCompactAdapter{environment: environment, names: environment.Names()}
+	return newArrayCompactAdapterWithEnvironment(environment)
 }
 
 // newArrayCompactAdapterForLines extends the initial semantic participants
@@ -112,7 +125,7 @@ func newArrayCompactAdapterForLines(graph *vbacfg.CFGView, lines []string, initi
 		names = append(names, name)
 	}
 	environment := semanticstate.NewEnvironment(names, names)
-	return arrayCompactAdapter{environment: environment, names: environment.Names()}
+	return newArrayCompactAdapterWithEnvironment(environment)
 }
 
 func (a arrayCompactAdapter) toFlow(view semanticstate.StateView[arrayValue]) arrayFlowState {
@@ -121,11 +134,10 @@ func (a arrayCompactAdapter) toFlow(view semanticstate.StateView[arrayValue]) ar
 		flow[name] = unknownArrayValue()
 	}
 	view.ForEach(func(id semanticstate.SymbolID, value arrayValue) bool {
-		name, ok := a.environment.Name(id)
-		if !ok {
+		if int(id) >= len(a.names) {
 			return true
 		}
-		flow[name] = arrayCompactLattice{}.Clone(value)
+		flow[a.names[id]] = arrayCompactLattice{}.Clone(value)
 		return true
 	})
 	return flow
@@ -133,16 +145,12 @@ func (a arrayCompactAdapter) toFlow(view semanticstate.StateView[arrayValue]) ar
 
 func (a arrayCompactAdapter) fromFlow(state *semanticstate.State[arrayValue], flow arrayFlowState) {
 	state.Reset()
-	for _, name := range a.names {
+	for index, name := range a.names {
 		value, ok := flow[name]
 		if !ok {
 			value = unknownArrayValue()
 		}
-		id, ok := a.environment.Symbol(name)
-		if !ok {
-			continue
-		}
-		state.Set(id, arrayCompactLattice{}.Clone(value))
+		state.Set(a.ids[index], arrayCompactLattice{}.Clone(value))
 	}
 }
 
@@ -176,9 +184,8 @@ func (c *arrayCompactCursor) load(view semanticstate.StateView[arrayValue]) arra
 		c.flow[name] = unknownArrayValue()
 	}
 	view.ForEach(func(id semanticstate.SymbolID, value arrayValue) bool {
-		name, ok := c.adapter.environment.Name(id)
-		if ok {
-			c.flow[name] = value
+		if int(id) < len(c.adapter.names) {
+			c.flow[c.adapter.names[id]] = value
 		}
 		return true
 	})
@@ -190,15 +197,12 @@ func (c *arrayCompactCursor) store(state *semanticstate.State[arrayValue], flow 
 		return
 	}
 	state.Reset()
-	for _, name := range c.adapter.names {
+	for index, name := range c.adapter.names {
 		value, ok := flow[name]
 		if !ok {
 			value = unknownArrayValue()
 		}
-		id, ok := c.adapter.environment.Symbol(name)
-		if ok {
-			state.Set(id, value)
-		}
+		state.Set(c.adapter.ids[index], value)
 	}
 }
 

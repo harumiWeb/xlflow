@@ -655,14 +655,28 @@ func (facts callsByLine) forEach(calls readOnlySpan[procedureir.CallSite], line 
 	if visit == nil {
 		return
 	}
-	facts.groups.forEach(line, func(index int) {
+	// Calls are source ordered, so the common case is a contiguous span. Keep
+	// this hot path local: the generic indexGroups callback would add a closure
+	// and a second method boundary for every CFG line visited by array flow.
+	if span, ok := facts.groups.spans[line]; ok {
+		for index := span.start; index < span.end; index++ {
+			if index < 0 || index >= len(facts.callIndexes) {
+				continue
+			}
+			if call, ok := calls.At(facts.callIndexes[index]); ok {
+				visit(call)
+			}
+		}
+		return
+	}
+	for _, index := range facts.groups.sparse[line] {
 		if index < 0 || index >= len(facts.callIndexes) {
-			return
+			continue
 		}
 		if call, ok := calls.At(facts.callIndexes[index]); ok {
 			visit(call)
 		}
-	})
+	}
 }
 
 func (facts callsByStatement) values(calls readOnlySpan[procedureir.CallSite], statementID int) []procedureir.CallSite {
@@ -789,28 +803,6 @@ func (groups indexGroups) contiguousSpan(id int) (indexSpan, bool) {
 	}
 	span, ok := groups.spans[id]
 	return span, ok
-}
-
-// forEach visits indexes for one group without materializing the contiguous
-// span as a slice. Sparse groups already own their compact index slices; the
-// common contiguous case is represented by one span in the immutable index.
-func (groups indexGroups) forEach(id int, visit func(int)) {
-	if visit == nil {
-		return
-	}
-	if indexes, ok := groups.sparse[id]; ok {
-		for _, index := range indexes {
-			visit(index)
-		}
-		return
-	}
-	span, ok := groups.spans[id]
-	if !ok {
-		return
-	}
-	for index := span.start; index < span.end; index++ {
-		visit(index)
-	}
 }
 
 // analysisFacts returns the attached facts and provides a compatibility path

@@ -1998,6 +1998,52 @@ func applyArrayUnknownModuleCallEffects(state arrayFlowState, file parsedFile, p
 	return updated
 }
 
+type arraySourceModuleTargetCacheKey struct {
+	file        string
+	module      string
+	caller      string
+	callee      string
+	baseName    string
+	receiver    string
+	member      string
+	id          int
+	startByte   int
+	endByte     int
+	statementID int
+}
+
+type arraySourceModuleTargetCacheEntry struct {
+	target   sourceProcedure
+	resolved bool
+}
+
+func arraySourceModuleTargetCacheKeyForCall(file parsedFile, call procedureir.CallSite) (arraySourceModuleTargetCacheKey, bool) {
+	fileKey := file.Path
+	if fileKey == "" {
+		fileKey = file.IR.Path
+	}
+	if fileKey == "" {
+		return arraySourceModuleTargetCacheKey{}, false
+	}
+	receiver := ""
+	if call.Callee.Receiver != nil {
+		receiver = *call.Callee.Receiver
+	}
+	return arraySourceModuleTargetCacheKey{
+		file:        fileKey,
+		module:      call.Module,
+		caller:      call.Caller.QualifiedName,
+		callee:      call.Callee.Text,
+		baseName:    call.Callee.BaseName,
+		receiver:    receiver,
+		member:      call.Callee.Member,
+		id:          call.ID,
+		startByte:   call.Range.StartByte,
+		endByte:     call.Range.EndByte,
+		statementID: call.StatementID,
+	}, true
+}
+
 // arraySourceModuleTargetForCall recovers a source-local target for the
 // source-order fallback. The project resolver may report a public target, but
 // it may also be incomplete for a recovered call. In the latter case a unique
@@ -2005,6 +2051,47 @@ func applyArrayUnknownModuleCallEffects(state arrayFlowState, file parsedFile, p
 // procedure's module-array accesses; an absent target remains an external or
 // late-bound call and must not invalidate all module arrays.
 func arraySourceModuleTargetForCall(file parsedFile, call procedureir.CallSite, ctx analysisContext) (sourceProcedure, bool) {
+	// With an explicit project resolver the call target is determined by the
+	// immutable project context. Contexts without one may rely on the call's
+	// embedded Resolution, which is intentionally not part of this cache key.
+	cacheable := ctx.procedureResolver != nil
+	key := arraySourceModuleTargetCacheKey{}
+	if cacheable {
+		key, cacheable = arraySourceModuleTargetCacheKeyForCall(file, call)
+	}
+	if cacheable && ctx.arraySourceModuleTargetCache != nil {
+		if ctx.arraySourceModuleTargetCacheMu != nil {
+			ctx.arraySourceModuleTargetCacheMu.RLock()
+			cached, ok := ctx.arraySourceModuleTargetCache[key]
+			ctx.arraySourceModuleTargetCacheMu.RUnlock()
+			if ok {
+				return cached.target, cached.resolved
+			}
+		} else if cached, ok := ctx.arraySourceModuleTargetCache[key]; ok {
+			return cached.target, cached.resolved
+		}
+	}
+
+	target, resolved := arraySourceModuleTargetForCallUncached(file, call, ctx)
+	if !cacheable || ctx.arraySourceModuleTargetCache == nil {
+		return target, resolved
+	}
+	entry := arraySourceModuleTargetCacheEntry{target: target, resolved: resolved}
+	if ctx.arraySourceModuleTargetCacheMu != nil {
+		ctx.arraySourceModuleTargetCacheMu.Lock()
+		if cached, ok := ctx.arraySourceModuleTargetCache[key]; ok {
+			entry = cached
+		} else {
+			ctx.arraySourceModuleTargetCache[key] = entry
+		}
+		ctx.arraySourceModuleTargetCacheMu.Unlock()
+	} else {
+		ctx.arraySourceModuleTargetCache[key] = entry
+	}
+	return entry.target, entry.resolved
+}
+
+func arraySourceModuleTargetForCallUncached(file parsedFile, call procedureir.CallSite, ctx analysisContext) (sourceProcedure, bool) {
 	procedures := file.procedureView()
 	if procedures.Len() == 0 {
 		return sourceProcedure{}, false
