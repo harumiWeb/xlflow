@@ -359,6 +359,9 @@ type analysisContext struct {
 	arraySkipModuleInvalidationEffects   bool
 	arrayModuleConfigurations            map[string]arrayModuleConfigurationState
 	arrayModuleInitializationStates      map[string]map[string]bool
+	arrayModuleStorageGuards             map[string][]arrayModuleStorageGuard
+	arrayModuleCountGuardArrays          map[string]map[string]bool
+	arrayModuleCountGuardArraysMu        *sync.RWMutex
 	arrayModuleEntryStates               arrayModuleEntryStates
 	arrayModuleReadyGuards               arrayModuleReadyGuardStates
 	arrayPrivateTargets                  map[string]sourceProcedure
@@ -385,6 +388,8 @@ type analysisContext struct {
 	arrayCapabilityIndex             *semanticArrayCapabilityIndex
 	arrayObjectContainerIndexCache   map[string]arrayObjectContainerIndexCacheEntry
 	arrayObjectContainerIndexCacheMu *sync.RWMutex
+	arraySourceModuleTargetCache     map[arraySourceModuleTargetCacheKey]arraySourceModuleTargetCacheEntry
+	arraySourceModuleTargetCacheMu   *sync.RWMutex
 	procedures                       map[string]procedureSignature
 	procedureResolver                procedureir.Resolver
 	projectResolver                  procedureir.Resolver
@@ -2795,6 +2800,9 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayModuleInvalidations:         arrayModuleInvalidationSummaries{},
 		arrayModuleConfigurations:        map[string]arrayModuleConfigurationState{},
 		arrayModuleInitializationStates:  map[string]map[string]bool{},
+		arrayModuleStorageGuards:         map[string][]arrayModuleStorageGuard{},
+		arrayModuleCountGuardArrays:      map[string]map[string]bool{},
+		arrayModuleCountGuardArraysMu:    &sync.RWMutex{},
 		arrayModuleEntryStates:           arrayModuleEntryStates{},
 		arrayModuleReadyGuards:           arrayModuleReadyGuardStates{},
 		arrayPrivateTargets:              map[string]sourceProcedure{},
@@ -2804,6 +2812,8 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayByRefEntryConditions:        map[string]map[int]string{},
 		arrayObjectContainerIndexCache:   map[string]arrayObjectContainerIndexCacheEntry{},
 		arrayObjectContainerIndexCacheMu: &sync.RWMutex{},
+		arraySourceModuleTargetCache:     map[arraySourceModuleTargetCacheKey]arraySourceModuleTargetCacheEntry{},
+		arraySourceModuleTargetCacheMu:   &sync.RWMutex{},
 		procedures:                       map[string]procedureSignature{},
 		objectAnalysis:                   objectAnalysis,
 		worksheetCodenames:               map[string]string{},
@@ -2900,6 +2910,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arrayByRefLengthAllocations = inferArrayByRefLengthAllocations(files)
 		ctx.arrayModuleAllocations = inferArrayModuleAllocationSummaries(files, ctx, ctx.arrayPrivateTargets, ctx.arrayByRefAllocations)
 		ctx.arrayModuleInitializationStates = arrayModuleInitializationStates(files, ctx.arrayModuleAllocations)
+		ctx.arrayModuleStorageGuards = inferArrayModuleStorageGuards(files)
 		ctx.arraySkipModuleInvalidationEffects = false
 		ctx.arrayModuleInvalidations = inferArrayModuleInvalidationSummaries(files, ctx)
 		ctx.arrayModuleConfigurations = inferArrayModuleConfigurationStates(files, ctx.arrayModuleAllocations)

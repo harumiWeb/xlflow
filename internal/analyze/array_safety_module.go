@@ -112,6 +112,9 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 	if updated == nil {
 		updated = arrayFlowState{}
 	}
+	if arrays := arrayModuleStorageCallEstablishesGroup(file, target, ctx, ctx.arrayModuleStorageGuards[file.Path]); len(arrays) > 0 {
+		updated = arrayModuleStorageAllocatedState(updated, arrays)
+	}
 	markArgument := func(name string) {
 		name = strings.ToLower(cleanIdentifier(name))
 		variable, known := variables[name]
@@ -239,6 +242,1416 @@ func hasModuleDynamicArrayDeclaration(moduleDecls map[string]sourceDeclaration) 
 	return false
 }
 
+// arrayModuleStorageGuard describes a source-owned storage invariant. The
+// named module arrays are resized with `0 To capacity - 1`, every erase of
+// those arrays resets the capacity to zero, and the optional count scalars
+// are changed only from zero by +/- one. A nonzero capacity (or count) is
+// therefore enough to establish allocation for the group without trusting an
+// arbitrary Boolean or numeric flag.
+type arrayModuleStorageGuard struct {
+	capacity string
+	counts   map[string]bool
+	arrays   map[string]bool
+}
+
+type arrayModuleStorageAssignment struct {
+	rhs     string
+	indexed bool
+	line    int
+	owner   sourceProcedure
+	ownerOK bool
+}
+
+type arrayModuleStorageErase struct {
+	line    int
+	owner   sourceProcedure
+	ownerOK bool
+}
+
+// arrayModuleStorageSourceFacts contains the source-level facts shared by all
+// capacity candidates in one module. Keeping this index local to guard
+// inference avoids reparsing every logical source line for every scalar.
+type arrayModuleStorageSourceFacts struct {
+	assignments map[string][]arrayModuleStorageAssignment
+	erases      map[string][]arrayModuleStorageErase
+}
+
+func buildArrayModuleStorageSourceFacts(file parsedFile, assignmentNames, eraseNames map[string]bool) arrayModuleStorageSourceFacts {
+	source := arrayModuleStorageSourceFacts{
+		assignments: make(map[string][]arrayModuleStorageAssignment),
+		erases:      make(map[string][]arrayModuleStorageErase),
+	}
+	for line := 1; line <= len(file.Lines); line++ {
+		text := arrayLogicalCodeLine(file.Lines, line)
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		owner, ownerOK := arrayModuleProcedureAtLine(file, line)
+		for _, part := range splitRangeValueSourceStatements(text) {
+			part = strings.TrimSpace(part)
+			if lhs, rhs, indexed, assigned := arrayAssignment(part); assigned {
+				name := strings.ToLower(cleanIdentifier(lhs))
+				if assignmentNames[name] {
+					source.assignments[name] = append(source.assignments[name], arrayModuleStorageAssignment{
+						rhs: rhs, indexed: indexed, line: line, owner: owner, ownerOK: ownerOK,
+					})
+				}
+			}
+			if match := arrayEraseRe.FindStringSubmatch(part); len(match) == 2 {
+				for _, target := range splitArgs(match[1]) {
+					name := strings.ToLower(cleanIdentifier(strings.TrimSpace(target)))
+					if !eraseNames[name] {
+						continue
+					}
+					source.erases[name] = append(source.erases[name], arrayModuleStorageErase{line: line, owner: owner, ownerOK: ownerOK})
+				}
+			}
+		}
+	}
+	return source
+}
+
+func inferArrayModuleStorageGuards(files []parsedFile) map[string][]arrayModuleStorageGuard {
+	guardsByFile := make(map[string][]arrayModuleStorageGuard)
+	for index := range files {
+		files[index].ensureModuleAnalysisFacts()
+	}
+	for _, file := range files {
+		guards := arrayModuleStorageGuardsForFile(file, file.moduleDecls())
+		if len(guards) > 0 {
+			guardsByFile[file.Path] = guards
+		}
+	}
+	return guardsByFile
+}
+
+func arrayModuleStorageGuardsForFile(file parsedFile, moduleDecls map[string]sourceDeclaration) []arrayModuleStorageGuard {
+	facts := file.moduleAnalysisFacts()
+	if facts == nil || len(moduleDecls) == 0 {
+		return nil
+	}
+	arrays := make(map[string]bool)
+	scalars := make(map[string]bool)
+	for name, declaration := range moduleDecls {
+		name = strings.ToLower(cleanIdentifier(name))
+		if name == "" || declaration.Parameter {
+			continue
+		}
+		if declaration.Array && !declaration.Fixed {
+			arrays[name] = true
+			continue
+		}
+		if !declaration.Array && !declaration.Object && arrayKnownScalarType(declaration.Type) {
+			scalars[name] = true
+		}
+	}
+	if len(arrays) == 0 || len(scalars) == 0 {
+		return nil
+	}
+
+	// The capacity scalar must occur in the exact source-owned ReDim shape
+	// before any of the more expensive lifecycle checks can succeed. Restrict
+	// the candidate set up front; large modules commonly contain many scalar
+	// declarations that are unrelated to their dynamic arrays.
+	candidateCapacities := make(map[string]bool)
+	for arrayName := range arrays {
+		facts.forEachArrayOperationFor(arrayName, func(operation moduleArrayOperationFact) {
+			if operation.Kind != moduleArrayDirectRedim || operation.Preserve {
+				return
+			}
+			capacity, ok := arrayModuleStorageCapacityName(operation.Dimensions)
+			if ok && scalars[capacity] {
+				candidateCapacities[capacity] = true
+			}
+		})
+	}
+	if len(candidateCapacities) == 0 {
+		return nil
+	}
+	source := buildArrayModuleStorageSourceFacts(file, scalars, arrays)
+
+	guards := make([]arrayModuleStorageGuard, 0)
+	for capacity := range candidateCapacities {
+		storageArrays := make(map[string]bool)
+		for name := range arrays {
+			if arrayModuleStorageArrayMatches(file, facts, source, moduleDecls, name, capacity) {
+				storageArrays[name] = true
+			}
+		}
+		if len(storageArrays) == 0 || !arrayModuleStorageScalarWritesValid(file, facts, source, storageArrays, capacity) {
+			continue
+		}
+		guard := arrayModuleStorageGuard{
+			capacity: capacity,
+			counts:   make(map[string]bool),
+			arrays:   storageArrays,
+		}
+		for count := range scalars {
+			if count == capacity || !arrayModuleStorageCountWritesValid(file, facts, source, storageArrays, count) {
+				continue
+			}
+			guard.counts[count] = true
+		}
+		guards = append(guards, guard)
+	}
+	return guards
+}
+
+func arrayModuleStorageCapacityName(dimensions string) (string, bool) {
+	compact := canonicalArrayBoundExpression(dimensions)
+	if !strings.HasPrefix(compact, "0to") || !strings.HasSuffix(compact, "-1") {
+		return "", false
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(compact, "0to"), "-1")
+	if !isIdentifier(name) {
+		return "", false
+	}
+	return strings.ToLower(cleanIdentifier(name)), true
+}
+
+func arrayModuleStorageArrayMatches(file parsedFile, facts *moduleAnalysisFacts, source arrayModuleStorageSourceFacts, moduleDecls map[string]sourceDeclaration, arrayName, capacity string) bool {
+	declaration, declared := moduleDecls[arrayName]
+	if !declared || !declaration.Array || declaration.Fixed || declaration.Parameter {
+		return false
+	}
+	wantDimensions := canonicalArrayBoundExpression("0 To " + capacity + " - 1")
+	redimCount := 0
+	valid := true
+	facts.forEachArrayOperationFor(arrayName, func(operation moduleArrayOperationFact) {
+		if !valid {
+			return
+		}
+		owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+		if !ok || arrayProcedureHasErrorHandling(owner) {
+			valid = false
+			return
+		}
+		switch operation.Kind {
+		case moduleArrayDirectRedim:
+			if operation.Preserve || canonicalArrayBoundExpression(operation.Dimensions) != wantDimensions {
+				valid = false
+				return
+			}
+			redimCount++
+		case moduleArrayErase:
+			if !arrayModuleStorageResetWritesScalar(source, owner, capacity, arrayName) {
+				valid = false
+			}
+		default:
+			valid = false
+		}
+	})
+	return valid && redimCount > 0
+}
+
+func arrayModuleStorageResetWritesScalar(source arrayModuleStorageSourceFacts, proc sourceProcedure, scalar, arrayName string) bool {
+	zeroWritten := false
+	erased := false
+	for _, erase := range source.erases[strings.ToLower(cleanIdentifier(arrayName))] {
+		if erase.ownerOK && arrayModuleStorageSameProcedure(erase.owner, proc) {
+			erased = true
+			break
+		}
+	}
+	for _, assignment := range source.assignments[strings.ToLower(cleanIdentifier(scalar))] {
+		if assignment.ownerOK && !assignment.indexed && arrayModuleStorageSameProcedure(assignment.owner, proc) {
+			if value, ok := integerLiteral(assignment.rhs); ok && value == 0 {
+				zeroWritten = true
+				break
+			}
+		}
+	}
+	return zeroWritten && erased
+}
+
+func arrayModuleStorageScalarWritesValid(file parsedFile, facts *moduleAnalysisFacts, source arrayModuleStorageSourceFacts, arrays map[string]bool, scalar string) bool {
+	seen := false
+	for _, assignment := range source.assignments[strings.ToLower(cleanIdentifier(scalar))] {
+		if assignment.indexed {
+			continue
+		}
+		seen = true
+		if !assignment.ownerOK {
+			return false
+		}
+		if value, literal := integerLiteral(assignment.rhs); literal && value == 0 {
+			if !arrayModuleStorageProcedureTouchesGroup(file, facts, assignment.owner, arrays) {
+				return false
+			}
+			continue
+		}
+		if !arrayModuleStoragePositiveExpression(file, assignment.rhs) || !arrayModuleStorageHasRedimAfter(file, facts, assignment.owner, arrays, assignment.line) {
+			return false
+		}
+	}
+	return seen
+}
+
+func arrayModuleStorageCountWritesValid(file parsedFile, facts *moduleAnalysisFacts, source arrayModuleStorageSourceFacts, arrays map[string]bool, count string) bool {
+	seenZero := false
+	seenDelta := false
+	for _, assignment := range source.assignments[strings.ToLower(cleanIdentifier(count))] {
+		if assignment.indexed {
+			continue
+		}
+		if !assignment.ownerOK {
+			return false
+		}
+		if value, literal := integerLiteral(assignment.rhs); literal && value == 0 {
+			if !arrayModuleStorageProcedureTouchesGroup(file, facts, assignment.owner, arrays) {
+				return false
+			}
+			seenZero = true
+			continue
+		}
+		compact := canonicalArrayBoundExpression(assignment.rhs)
+		name := strings.ToLower(cleanIdentifier(count))
+		if compact == name+"+1" || compact == name+"-1" {
+			seenDelta = true
+			continue
+		}
+		return false
+	}
+	return seenZero && seenDelta
+}
+
+func arrayModuleStorageSameProcedure(left, right sourceProcedure) bool {
+	return left.StartByte == right.StartByte && left.StartLine == right.StartLine && left.EndLine == right.EndLine
+}
+
+// applyArrayModuleCoupledBoundsState carries a successful bounds query from
+// one source-owned module array to another array whose complete lifecycle is
+// identical. VBA code commonly keeps parallel key/value arrays in lockstep:
+// both arrays are ReDim'ed and erased on the same source lines, and a
+// successful UBound(keys) condition therefore proves that values is allocated
+// too. Requiring identical operation locations and shapes keeps this
+// refinement fail-closed for unrelated arrays.
+func applyArrayModuleCoupledBoundsState(state arrayFlowState, file parsedFile, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, text string) arrayFlowState {
+	facts := file.moduleAnalysisFacts()
+	if facts == nil || len(state) == 0 || len(moduleDecls) == 0 || !arrayBoundCallRe.MatchString(text) {
+		return state
+	}
+	boundNames := make(map[string]bool)
+	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+		name := strings.ToLower(cleanIdentifier(bound[2]))
+		if name == "" || !strings.EqualFold(bound[1], "ubound") && !strings.EqualFold(bound[1], "lbound") {
+			continue
+		}
+		value, known := state[name]
+		variable, declared := variables[name]
+		declaration, moduleDeclared := moduleDecls[name]
+		if !known || value.kind != arrayAllocated || !value.knownArray || !declared || !variable.isArray || !moduleDeclared || !declaration.Array || declaration.Fixed || declaration.Parameter || !arrayModuleReadyGuardSourceOwned(file, declaration) {
+			continue
+		}
+		boundNames[name] = true
+	}
+	if len(boundNames) == 0 {
+		return state
+	}
+
+	operations := make(map[string][]moduleArrayOperationFact)
+	for name := range moduleDecls {
+		name = strings.ToLower(cleanIdentifier(name))
+		declaration := moduleDecls[name]
+		variable, declared := variables[name]
+		if name == "" || !declared || !declaration.Array || declaration.Fixed || declaration.Parameter || !variable.isArray || !arrayModuleReadyGuardSourceOwned(file, declaration) {
+			continue
+		}
+		facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+			operations[name] = append(operations[name], operation)
+		})
+	}
+
+	paired := make(map[string]bool)
+	for boundName := range boundNames {
+		boundOperations := operations[boundName]
+		if len(boundOperations) == 0 || !arrayModuleCoupledBoundsLifecycleComplete(boundOperations) {
+			continue
+		}
+		for candidateName, candidateOperations := range operations {
+			if candidateName == boundName || !arrayModuleCoupledBoundsLifecycleEqual(boundOperations, candidateOperations) {
+				continue
+			}
+			paired[candidateName] = true
+		}
+	}
+	if len(paired) == 0 {
+		return state
+	}
+
+	updated := cloneArrayState(state)
+	for name := range paired {
+		value, known := updated[name]
+		if !known {
+			continue
+		}
+		value.kind = arrayAllocated
+		value.knownArray = true
+		value.mayBeUnallocated = false
+		updated[name] = value
+	}
+	return updated
+}
+
+func arrayModuleCoupledBoundsLifecycleComplete(operations []moduleArrayOperationFact) bool {
+	hasRedim := false
+	hasErase := false
+	for _, operation := range operations {
+		switch operation.Kind {
+		case moduleArrayDirectRedim:
+			hasRedim = true
+		case moduleArrayErase:
+			hasErase = true
+		default:
+			return false
+		}
+	}
+	return hasRedim && hasErase
+}
+
+func arrayModuleCoupledBoundsLifecycleEqual(left, right []moduleArrayOperationFact) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		lineDistance := left[index].Line - right[index].Line
+		if lineDistance < 0 {
+			lineDistance = -lineDistance
+		}
+		if lineDistance > 4 || left[index].Kind != right[index].Kind || left[index].Preserve != right[index].Preserve || arrayModuleCoupledBoundsDimensions(left[index].Dimensions, left[index].Name) != arrayModuleCoupledBoundsDimensions(right[index].Dimensions, right[index].Name) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayModuleCoupledBoundsDimensions(dimensions, arrayName string) string {
+	compact := canonicalArrayBoundExpression(dimensions)
+	name := strings.ToLower(cleanIdentifier(arrayName))
+	if name == "" {
+		return compact
+	}
+	return strings.ReplaceAll(compact, name, "<array>")
+}
+
+func arrayModuleStorageProcedureTouchesGroup(file parsedFile, facts *moduleAnalysisFacts, proc sourceProcedure, arrays map[string]bool) bool {
+	touched := false
+	for name := range arrays {
+		facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+			if touched {
+				return
+			}
+			owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+			if ok && owner.StartByte == proc.StartByte && owner.StartLine == proc.StartLine && owner.EndLine == proc.EndLine {
+				touched = true
+			}
+		})
+		if touched {
+			break
+		}
+	}
+	return touched
+}
+
+func arrayModuleStorageHasRedimAfter(file parsedFile, facts *moduleAnalysisFacts, proc sourceProcedure, arrays map[string]bool, line int) bool {
+	for name := range arrays {
+		found := false
+		facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+			if found || operation.Kind != moduleArrayDirectRedim || operation.Line+1 <= line {
+				return
+			}
+			owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+			found = ok && owner.StartByte == proc.StartByte && owner.StartLine == proc.StartLine && owner.EndLine == proc.EndLine
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayModuleStoragePositiveExpression(file parsedFile, text string) bool {
+	if value, ok := integerLiteral(text); ok {
+		return value > 0
+	}
+	name := strings.ToLower(cleanIdentifier(arrayCallName(text)))
+	if name == "" {
+		return false
+	}
+	procedures := file.procedureView()
+	for index := 0; index < procedures.Len(); index++ {
+		proc := procedures.valueAt(index)
+		if strings.EqualFold(proc.Name, name) {
+			return arrayModuleStoragePositiveFunction(file, proc)
+		}
+	}
+	return false
+}
+
+func arrayModuleStoragePositiveFunction(file parsedFile, proc sourceProcedure) bool {
+	if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet || arrayProcedureHasErrorHandling(proc) {
+		return false
+	}
+	positive := map[string]bool{}
+	returnSeen := false
+	start := max(1, proc.StartLine)
+	end := min(len(file.Lines), proc.EndLine)
+	for line := start; line <= end; line++ {
+		for _, part := range splitRangeValueSourceStatements(arrayLogicalCodeLine(file.Lines, line)) {
+			lhs, rhs, indexed, assigned := arrayAssignment(part)
+			if !assigned || indexed {
+				continue
+			}
+			lhs = strings.ToLower(cleanIdentifier(lhs))
+			if lhs == strings.ToLower(cleanIdentifier(proc.Name)) {
+				returnSeen = true
+				if !arrayModuleStoragePositiveRHS(rhs, positive) {
+					return false
+				}
+				continue
+			}
+			if !arrayModuleStorageTracksPositiveScalar(lhs, rhs, positive) {
+				if positive[lhs] {
+					positive[lhs] = false
+				}
+				continue
+			}
+			positive[lhs] = true
+		}
+	}
+	return returnSeen
+}
+
+func arrayModuleStoragePositiveRHS(rhs string, positive map[string]bool) bool {
+	compact := canonicalArrayBoundExpression(rhs)
+	if value, ok := integerLiteral(compact); ok {
+		return value > 0
+	}
+	name := strings.ToLower(cleanIdentifier(compact))
+	if positive[name] && name == compact {
+		return true
+	}
+	for _, operator := range []string{"*", "+"} {
+		index := strings.Index(compact, operator)
+		if index <= 0 || index+len(operator) >= len(compact) {
+			continue
+		}
+		base := strings.ToLower(cleanIdentifier(compact[:index]))
+		if value, ok := integerLiteral(compact[index+len(operator):]); ok {
+			return positive[base] && value > 0
+		}
+	}
+	return false
+}
+
+func arrayModuleStorageTracksPositiveScalar(lhs, rhs string, positive map[string]bool) bool {
+	if value, ok := integerLiteral(rhs); ok {
+		return value > 0
+	}
+	compact := canonicalArrayBoundExpression(rhs)
+	name := strings.ToLower(cleanIdentifier(lhs))
+	if positive[strings.ToLower(cleanIdentifier(compact))] {
+		return true
+	}
+	for _, operator := range []string{"*", "+"} {
+		if !strings.HasPrefix(compact, name+operator) {
+			continue
+		}
+		if value, ok := integerLiteral(strings.TrimPrefix(compact, name+operator)); ok {
+			return positive[name] && value > 0
+		}
+	}
+	return false
+}
+
+func applyArrayModuleStorageGuardBranch(state arrayFlowState, statement *procedureir.Statement, edge vbacfg.Edge, file parsedFile, proc sourceProcedure, ctx analysisContext, guards []arrayModuleStorageGuard) arrayFlowState {
+	if statement == nil || (edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse) || statement.Condition == nil {
+		return state
+	}
+	return applyArrayModuleStorageCondition(state, statement.Condition.Text, edge.Kind, statement.Range.StartLine, file, proc, ctx, guards)
+}
+
+func applyArrayModuleStorageCondition(state arrayFlowState, condition string, branch vbacfg.EdgeKind, guardLine int, file parsedFile, proc sourceProcedure, ctx analysisContext, guards []arrayModuleStorageGuard) arrayFlowState {
+	if branch != vbacfg.EdgeBranchTrue && branch != vbacfg.EdgeBranchFalse {
+		return state
+	}
+	state = applyArrayModuleAllocationCondition(state, condition, branch, guardLine, file, proc, ctx)
+	if len(guards) == 0 {
+		return state
+	}
+	lhs, operator, literal, ok := arrayCountComparison(condition)
+	if !ok {
+		callName, successBranch, callOK := arrayModuleStorageSuccessfulCallBranch(condition)
+		if !callOK || branch != successBranch {
+			return state
+		}
+		for _, guard := range guards {
+			if arrayModuleStorageCallAllocatesGroup(file, proc, ctx, callName, guard, guardLine) {
+				return arrayModuleStorageAllocatedState(state, guard.arrays)
+			}
+		}
+		return state
+	}
+	lhs = strings.ToLower(cleanIdentifier(lhs))
+	for _, guard := range guards {
+		if lhs == guard.capacity && operator == "=" && literal == "0" && branch == vbacfg.EdgeBranchFalse {
+			return arrayModuleStorageAllocatedState(state, guard.arrays)
+		}
+		if guard.counts[lhs] && operator == "=" && literal == "0" && branch == vbacfg.EdgeBranchFalse {
+			return arrayModuleStorageAllocatedState(state, guard.arrays)
+		}
+		if arrayModuleStorageSuccessfulResultBranch(operator, literal, branch) && arrayModuleStorageCallProvesAllocation(file, proc, ctx, guard, lhs, guardLine) {
+			return arrayModuleStorageAllocatedState(state, guard.arrays)
+		}
+	}
+	return state
+}
+
+// applyArrayModuleAllocationCondition carries the allocation summary of a
+// source-local Boolean helper onto the successful branch of its call. This is
+// separate from the storage-capacity recognizer because a helper may establish
+// a module array through another private setup routine without exposing the
+// scalar capacity idiom at the call site. For example, `If Not ValidIndex(h)`
+// reaches its caller's normal path only after ValidIndex has returned True.
+func applyArrayModuleAllocationCondition(state arrayFlowState, condition string, branch vbacfg.EdgeKind, guardLine int, file parsedFile, proc sourceProcedure, ctx analysisContext) arrayFlowState {
+	callName, successBranch, ok := arrayModuleStorageSuccessfulCallBranch(condition)
+	if !ok || branch != successBranch || guardLine <= proc.StartLine {
+		return state
+	}
+	updated := state
+	cloned := false
+	forEachArrayCallAtLineUncounted(proc, guardLine, func(call procedureir.CallSite) {
+		if !strings.EqualFold(cleanIdentifier(call.Callee.BaseName), callName) && !strings.EqualFold(cleanIdentifier(call.Callee.Text), callName) {
+			return
+		}
+		key, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if !resolved {
+			target, resolved = arraySourceModuleTargetForCall(file, call, ctx)
+			if resolved {
+				key = arrayProcedureKey(target)
+			}
+		}
+		if !resolved || !strings.EqualFold(strings.TrimSpace(target.Module), strings.TrimSpace(file.Module)) {
+			return
+		}
+		allocated := ctx.arrayModuleAllocations[key]
+		if len(allocated) == 0 {
+			return
+		}
+		if !cloned {
+			updated = cloneArrayState(state)
+			cloned = true
+		}
+		for name := range allocated {
+			if !allocated[name] {
+				continue
+			}
+			value, tracked := updated[name]
+			if !tracked {
+				continue
+			}
+			value.kind = arrayAllocated
+			value.knownArray = true
+			value.mayBeUnallocated = false
+			updated[name] = value
+		}
+	})
+	return updated
+}
+
+func arrayModuleStorageSuccessfulCallBranch(condition string) (string, vbacfg.EdgeKind, bool) {
+	condition = strings.TrimSpace(condition)
+	if condition == "" {
+		return "", "", false
+	}
+	branch := vbacfg.EdgeBranchTrue
+	lower := strings.ToLower(condition)
+	if strings.HasPrefix(lower, "if ") {
+		condition = strings.TrimSpace(condition[len("if "):])
+		lower = strings.ToLower(condition)
+	}
+	if strings.HasPrefix(lower, "not ") {
+		condition = strings.TrimSpace(condition[4:])
+		branch = vbacfg.EdgeBranchFalse
+	}
+	if strings.HasPrefix(condition, "(") && strings.HasSuffix(condition, ")") {
+		condition = strings.TrimSpace(condition[1 : len(condition)-1])
+	}
+	if !strings.Contains(condition, "(") || strings.ContainsAny(condition, ".!<>=") {
+		return "", "", false
+	}
+	name := strings.TrimSpace(cleanIdentifier(arrayCallName(condition)))
+	if name == "" {
+		return "", "", false
+	}
+	return name, branch, true
+}
+
+func arrayModuleStorageCallAllocatesGroup(file parsedFile, proc sourceProcedure, ctx analysisContext, callName string, guard arrayModuleStorageGuard, guardLine int) bool {
+	if guardLine <= proc.StartLine || callName == "" {
+		return false
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine < proc.StartLine || call.Range.StartLine >= guardLine {
+			continue
+		}
+		if !strings.EqualFold(cleanIdentifier(call.Callee.BaseName), callName) && !strings.EqualFold(cleanIdentifier(call.Callee.Text), callName) {
+			continue
+		}
+		key, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if !resolved {
+			target, resolved = arraySourceModuleTargetForCall(file, call, ctx)
+			if resolved {
+				key = arrayProcedureKey(target)
+			}
+		}
+		if !resolved || !strings.EqualFold(strings.TrimSpace(target.Module), strings.TrimSpace(file.Module)) {
+			continue
+		}
+		allocation := ctx.arrayModuleAllocations[key]
+		if len(allocation) == 0 {
+			continue
+		}
+		proven := true
+		for name := range guard.arrays {
+			if !allocation[strings.ToLower(cleanIdentifier(name))] {
+				proven = false
+				break
+			}
+		}
+		if proven {
+			return true
+		}
+	}
+	return false
+}
+
+// arrayModuleStorageTargetDirectlyAllocatesGroup recognizes a same-module
+// helper that resizes every member of a storage group in the source. It is
+// used by the higher-level preparation proof below; the ordinary allocation
+// summary remains deliberately stricter because an early unsupported-state
+// exit can otherwise make a direct ReDim fail to dominate that summary's
+// broad normal-exit set.
+func arrayModuleStorageTargetDirectlyAllocatesGroup(file parsedFile, target sourceProcedure, guard arrayModuleStorageGuard) bool {
+	facts := file.moduleAnalysisFacts()
+	if facts == nil || arrayProcedureHasErrorHandling(target) || len(guard.arrays) == 0 {
+		return false
+	}
+	for name := range guard.arrays {
+		name = strings.ToLower(cleanIdentifier(name))
+		found := false
+		facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+			if found || operation.Kind != moduleArrayDirectRedim || operation.Preserve {
+				return
+			}
+			owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+			found = ok && arrayModuleStorageSameProcedure(owner, target)
+		})
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// arrayModuleStoragePreparationTarget recognizes the narrow capacity-based
+// dispatcher used by hash indexes: an existing nonzero capacity is already a
+// storage proof, while the zero-capacity branch calls a helper that directly
+// ReDims the complete group. The target itself must not erase or rewrite the
+// group; those effects would invalidate the post-call proof.
+func arrayModuleStoragePreparationTarget(file parsedFile, target sourceProcedure, ctx analysisContext, guard arrayModuleStorageGuard) bool {
+	if arrayProcedureHasErrorHandling(target) || target.StartLine < 1 || target.EndLine < target.StartLine {
+		return false
+	}
+	capacityGuard := false
+	for statement := range target.Statements.All() {
+		if statement.Kind != procedureir.StatementIf && statement.Kind != procedureir.StatementElseIf || statement.Condition == nil {
+			continue
+		}
+		lhs, operator, literal, ok := arrayCountComparison(statement.Condition.Text)
+		if ok && strings.EqualFold(cleanIdentifier(lhs), guard.capacity) && operator == "=" && literal == "0" {
+			capacityGuard = true
+			break
+		}
+	}
+	if !capacityGuard {
+		return false
+	}
+	facts := file.moduleAnalysisFacts()
+	for name := range guard.arrays {
+		name = strings.ToLower(cleanIdentifier(name))
+		invalid := false
+		facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+			if invalid {
+				return
+			}
+			owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+			if ok && arrayModuleStorageSameProcedure(owner, target) {
+				invalid = true
+			}
+		})
+		if invalid {
+			return false
+		}
+	}
+	for call := range target.Calls.All() {
+		_, callee, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if !resolved || !strings.EqualFold(strings.TrimSpace(callee.Module), strings.TrimSpace(file.Module)) {
+			continue
+		}
+		if arrayModuleStorageTargetDirectlyAllocatesGroup(file, callee, guard) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayModuleStorageCallEstablishesGroup(file parsedFile, target sourceProcedure, ctx analysisContext, guards []arrayModuleStorageGuard) map[string]bool {
+	for _, guard := range guards {
+		if arrayModuleStoragePreparationTarget(file, target, ctx, guard) {
+			return guard.arrays
+		}
+	}
+	return nil
+}
+
+// applyArrayModuleStorageSourceGuardState mirrors a proven branch at the
+// source-line boundary. A single-line `If capacity = 0 Then Exit Function`
+// can share a CFG block with the first indexed statement, so the worklist may
+// report that statement before the branch refinement is visible to the next
+// source-line visit. This fallback is deliberately restricted to top-level
+// early-exit guards and proven storage groups; it does not interpret an
+// arbitrary numeric comparison as an allocation fact.
+func applyArrayModuleStorageSourceGuardState(state arrayFlowState, file parsedFile, proc sourceProcedure, line int, ctx analysisContext, guards []arrayModuleStorageGuard) arrayFlowState {
+	if line <= proc.StartLine {
+		return state
+	}
+	state = applyArrayModuleAllocationSourceGuardState(state, file, proc, line, ctx)
+	if len(guards) == 0 {
+		return state
+	}
+	for _, guard := range guards {
+		for sourceLine := max(proc.StartLine, 1); sourceLine <= line && sourceLine <= len(file.Lines); sourceLine++ {
+			text := strings.TrimSpace(normalizedCodeLine(file.Lines[sourceLine-1]))
+			condition, body, ok := arrayIfThenParts(text)
+			if !ok {
+				continue
+			}
+			statement := procedureStatementAtLine(proc, sourceLine)
+			if statement.ID == 0 || !arrayModuleStorageSourceGuardDominates(proc, sourceLine, line) {
+				continue
+			}
+			lhs, operator, literal, comparisonOK := arrayCountComparison(condition)
+			if !comparisonOK {
+				if callName, successBranch, callOK := arrayModuleStorageSuccessfulCallBranch(condition); callOK && successBranch == vbacfg.EdgeBranchFalse && strings.TrimSpace(body) != "" {
+					thenBody, _, hasElse := arrayIfThenBodyParts(body)
+					callAllocates := arrayModuleStorageCallAllocatesGroup(file, proc, ctx, callName, guard, sourceLine)
+					if !hasElse && arrayModuleStorageExitBody(thenBody, proc) && !arrayModuleStorageGroupErasedBetween(file, guard, sourceLine, line) && callAllocates {
+						state = arrayModuleStorageAllocatedState(state, guard.arrays)
+					}
+				}
+				continue
+			}
+			if operator != "=" || literal != "0" {
+				continue
+			}
+			lhs = strings.ToLower(cleanIdentifier(lhs))
+			if lhs == guard.capacity {
+				thenBody, _, hasElse := arrayIfThenBodyParts(body)
+				if !hasElse && arrayModuleStorageExitBody(thenBody, proc) && !arrayModuleStorageGroupErasedBetween(file, guard, sourceLine, line) {
+					state = arrayModuleStorageAllocatedState(state, guard.arrays)
+				}
+				continue
+			}
+			safeBranch, safeResult := vbacfg.EdgeBranchTrue, false
+			if arrayModuleStorageSuccessfulResultBranch(operator, literal, vbacfg.EdgeBranchFalse) {
+				safeBranch, safeResult = vbacfg.EdgeBranchFalse, true
+			} else if arrayModuleStorageSuccessfulResultBranch(operator, literal, vbacfg.EdgeBranchTrue) {
+				safeResult = true
+			}
+			if safeResult {
+				state = applyArrayModuleStorageCondition(state, condition, safeBranch, sourceLine, file, proc, ctx, guards)
+				continue
+			}
+			if !guard.counts[lhs] || strings.TrimSpace(body) != "" {
+				continue
+			}
+			end := arraySourceIfEnd(file.Lines, sourceLine-1, min(len(file.Lines), proc.EndLine))
+			if end < 0 || line <= end+1 || !arrayModuleStorageMultilineExitBody(file, sourceLine, end, proc) || arrayModuleStorageGroupErasedBetween(file, guard, end+1, line) {
+				continue
+			}
+			state = arrayModuleStorageAllocatedState(state, guard.arrays)
+		}
+	}
+	return state
+}
+
+// applyArrayModuleAllocationSourceGuardState covers a source-level early-exit
+// guard whose CFG block can also contain the first normal-path access. The
+// interprocedural summary is still required; the source-order fallback only
+// mirrors `If Not Helper(...) Then Exit ...` and never treats an arbitrary
+// Boolean as proof of allocation.
+func applyArrayModuleAllocationSourceGuardState(state arrayFlowState, file parsedFile, proc sourceProcedure, line int, ctx analysisContext) arrayFlowState {
+	if line <= proc.StartLine || len(ctx.arrayModuleAllocations) == 0 {
+		return state
+	}
+	for sourceLine := max(proc.StartLine, 1); sourceLine < line && sourceLine <= len(file.Lines); sourceLine++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[sourceLine-1]))
+		condition, body, ok := arrayIfThenParts(text)
+		if !ok || strings.TrimSpace(body) == "" {
+			continue
+		}
+		statement := procedureStatementAtLine(proc, sourceLine)
+		if statement.ID == 0 || !arrayModuleStorageSourceGuardDominates(proc, sourceLine, line) {
+			continue
+		}
+		_, successBranch, callOK := arrayModuleStorageSuccessfulCallBranch(condition)
+		if !callOK || successBranch != vbacfg.EdgeBranchFalse {
+			continue
+		}
+		thenBody, _, hasElse := arrayIfThenBodyParts(body)
+		if hasElse || !arrayModuleStorageExitBody(thenBody, proc) {
+			continue
+		}
+		valid := arrayModuleAllocationSourceGuardStillValid(file, proc, sourceLine, line, condition, ctx)
+		if !valid {
+			continue
+		}
+		state = applyArrayModuleAllocationCondition(state, condition, vbacfg.EdgeBranchFalse, sourceLine, file, proc, ctx)
+	}
+	return state
+}
+
+func arrayModuleAllocationSourceGuardStillValid(file parsedFile, proc sourceProcedure, startLine, endLine int, condition string, ctx analysisContext) bool {
+	callName, _, ok := arrayModuleStorageSuccessfulCallBranch(condition)
+	if !ok {
+		return false
+	}
+	var allocated map[string]bool
+	forEachArrayCallAtLineUncounted(proc, startLine, func(call procedureir.CallSite) {
+		if allocated != nil || (!strings.EqualFold(cleanIdentifier(call.Callee.BaseName), callName) && !strings.EqualFold(cleanIdentifier(call.Callee.Text), callName)) {
+			return
+		}
+		key, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if !resolved {
+			target, resolved = arraySourceModuleTargetForCall(file, call, ctx)
+			if resolved {
+				key = arrayProcedureKey(target)
+			}
+		}
+		if !resolved || !strings.EqualFold(strings.TrimSpace(target.Module), strings.TrimSpace(file.Module)) {
+			return
+		}
+		if summary := ctx.arrayModuleAllocations[key]; len(summary) > 0 {
+			allocated = summary
+		}
+	})
+	if len(allocated) == 0 {
+		return false
+	}
+	for sourceLine := startLine + 1; sourceLine < endLine && sourceLine <= len(file.Lines); sourceLine++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[sourceLine-1]))
+		if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
+			for _, name := range splitArgs(match[1]) {
+				if allocated[strings.ToLower(cleanIdentifier(name))] {
+					return false
+				}
+			}
+		}
+		if lhs, _, indexed, assigned := arrayAssignment(text); assigned && !indexed && allocated[strings.ToLower(cleanIdentifier(lhs))] {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayModuleStorageSourceGuardDominates(proc sourceProcedure, sourceLine, accessLine int) bool {
+	if sourceLine == accessLine {
+		return true
+	}
+	guard := procedureStatementAtLine(proc, sourceLine)
+	access := procedureStatementAtLine(proc, accessLine)
+	if guard.ID == 0 || access.ID == 0 {
+		return false
+	}
+	if proc.Graph != nil {
+		return arrayVBA227StatementLineDominates(proc, sourceLine, access)
+	}
+	return guard.ParentID == 0
+}
+
+func arrayModuleStorageExitBody(body string, proc sourceProcedure) bool {
+	body = strings.ToLower(strings.TrimSpace(body))
+	switch proc.ProcedureKind {
+	case procedureir.ProcedureFunction, procedureir.ProcedurePropertyGet, procedureir.ProcedureProperty:
+		return body == "exit function" || body == "exit property"
+	default:
+		return body == "exit sub"
+	}
+}
+
+func arrayModuleStorageMultilineExitBody(file parsedFile, start, end int, proc sourceProcedure) bool {
+	for index := start; index < end && index < len(file.Lines); index++ {
+		if arrayModuleStorageExitBody(strings.TrimSpace(normalizedCodeLine(file.Lines[index])), proc) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayModuleStorageGroupErasedBetween(file parsedFile, guard arrayModuleStorageGuard, start, end int) bool {
+	start = max(start, 1)
+	end = min(end, len(file.Lines))
+	for line := start; line < end; line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
+		match := arrayEraseRe.FindStringSubmatch(text)
+		if len(match) != 2 {
+			continue
+		}
+		for _, target := range splitArgs(match[1]) {
+			if guard.arrays[strings.ToLower(cleanIdentifier(strings.TrimSpace(target)))] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func arrayModuleStorageSuccessfulResultBranch(operator, literal string, branch vbacfg.EdgeKind) bool {
+	if literal == "0" && operator == "<" {
+		return branch == vbacfg.EdgeBranchFalse
+	}
+	if literal == "0" && operator == ">=" {
+		return branch == vbacfg.EdgeBranchTrue
+	}
+	if literal == "-1" && operator == ">" {
+		return branch == vbacfg.EdgeBranchTrue
+	}
+	if literal == "-1" && operator == "<=" {
+		return branch == vbacfg.EdgeBranchFalse
+	}
+	return false
+}
+
+func arrayModuleStorageAllocatedState(state arrayFlowState, arrays map[string]bool) arrayFlowState {
+	updated := cloneArrayState(state)
+	changed := false
+	for name := range arrays {
+		value, ok := updated[name]
+		if !ok {
+			continue
+		}
+		value.kind = arrayAllocated
+		value.knownArray = true
+		value.mayBeUnallocated = false
+		value.allocationCountSource = ""
+		value.conditionalAllocationSource = ""
+		updated[name] = value
+		changed = true
+	}
+	if !changed {
+		return state
+	}
+	return updated
+}
+
+// applyArrayModulePositiveCountGuardBranch carries a class-owned array
+// allocation through the successful side of a positive count guard. A common
+// class layout initializes one or more dynamic buffers in a loader, then
+// exposes only methods that first reject token/index values outside a module
+// count. The count is a valid witness only when the source proves that it is
+// written positively after a plain ReDim and reset before the corresponding
+// Erase; an arbitrary scalar comparison must remain conservative.
+func applyArrayModulePositiveCountGuardBranch(state arrayFlowState, statement *procedureir.Statement, edge vbacfg.Edge, file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) arrayFlowState {
+	if statement == nil || edge.Kind != vbacfg.EdgeBranchFalse || statement.Condition == nil {
+		return state
+	}
+	count, ok := arrayModulePositiveCountGuardName(statement.Condition.Text)
+	if !ok {
+		return state
+	}
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
+	if declarations.shadowsModule(count) {
+		return state
+	}
+	return arrayModuleStorageAllocatedState(state, arrayModulePositiveCountGuardArrays(file, moduleDecls, count, ctx))
+}
+
+func arrayModulePositiveCountGuardName(condition string) (string, bool) {
+	condition = strings.TrimSpace(condition)
+	if parsed, _, ok := arrayIfThenParts(condition); ok {
+		condition = parsed
+	}
+	lower := strings.ToLower(strings.TrimSpace(condition))
+	for _, prefix := range []string{"if ", "elseif ", "else if "} {
+		if strings.HasPrefix(lower, prefix) {
+			condition = strings.TrimSpace(condition[len(prefix):])
+			break
+		}
+	}
+	if then := arrayTopLevelKeywordIndex(condition, "then"); then >= 0 {
+		condition = strings.TrimSpace(condition[:then])
+	}
+	terms := arrayConditionOrRe.Split(condition, -1)
+	if len(terms) == 2 {
+		left, leftOK := parseArrayModuleCountGuardComparison(terms[0])
+		right, rightOK := parseArrayModuleCountGuardComparison(terms[1])
+		if !leftOK || !rightOK || left.lhs != right.lhs {
+			return "", false
+		}
+		lowerBound := func(value arrayModuleCountGuardComparison) bool {
+			return value.rhsIsLiteral && ((value.operator == "<" && value.rhs == 1) || (value.operator == "<=" && value.rhs == 0))
+		}
+		upperBound := func(value arrayModuleCountGuardComparison) (string, bool) {
+			if value.rhsIsLiteral || value.operator != ">" || value.rhsName == "" {
+				return "", false
+			}
+			return value.rhsName, true
+		}
+		if lowerBound(left) {
+			return upperBound(right)
+		}
+		if lowerBound(right) {
+			return upperBound(left)
+		}
+		return "", false
+	}
+	if len(terms) != 1 {
+		return "", false
+	}
+	comparison, ok := parseArrayModuleCountGuardComparison(terms[0])
+	if !ok {
+		return "", false
+	}
+	if comparison.rhsIsLiteral && comparison.rhs != 0 && (comparison.operator != "<" || comparison.rhs != 1) {
+		return "", false
+	}
+	if comparison.operator != "=" && comparison.operator != "<=" && comparison.operator != "<" {
+		return "", false
+	}
+	if comparison.rhsIsLiteral {
+		return comparison.lhs, true
+	}
+	return "", false
+}
+
+type arrayModuleCountGuardComparison struct {
+	lhs          string
+	operator     string
+	rhs          int
+	rhsName      string
+	rhsIsLiteral bool
+}
+
+func parseArrayModuleCountGuardComparison(text string) (arrayModuleCountGuardComparison, bool) {
+	match := arrayModuleCountComparisonRe.FindStringSubmatch(strings.TrimSpace(text))
+	if len(match) != 4 {
+		return arrayModuleCountGuardComparison{}, false
+	}
+	comparison := arrayModuleCountGuardComparison{
+		lhs:      strings.ToLower(cleanIdentifier(match[1])),
+		operator: match[2],
+	}
+	if comparison.lhs == "" {
+		return arrayModuleCountGuardComparison{}, false
+	}
+	if value, ok := integerLiteral(match[3]); ok {
+		comparison.rhs = value
+		comparison.rhsIsLiteral = true
+	} else {
+		comparison.rhsName = strings.ToLower(cleanIdentifier(match[3]))
+		if comparison.rhsName == "" {
+			return arrayModuleCountGuardComparison{}, false
+		}
+	}
+	return comparison, true
+}
+
+func arrayModuleCountGuardCacheLookup(ctx analysisContext, key string) (map[string]bool, bool) {
+	if ctx.arrayModuleCountGuardArrays == nil {
+		return nil, false
+	}
+	if ctx.arrayModuleCountGuardArraysMu != nil {
+		ctx.arrayModuleCountGuardArraysMu.RLock()
+		defer ctx.arrayModuleCountGuardArraysMu.RUnlock()
+	}
+	arrays, ok := ctx.arrayModuleCountGuardArrays[key]
+	return arrays, ok
+}
+
+func arrayModuleCountGuardCacheStore(ctx analysisContext, key string, arrays map[string]bool) {
+	if ctx.arrayModuleCountGuardArrays == nil {
+		return
+	}
+	if ctx.arrayModuleCountGuardArraysMu != nil {
+		ctx.arrayModuleCountGuardArraysMu.Lock()
+		defer ctx.arrayModuleCountGuardArraysMu.Unlock()
+	}
+	ctx.arrayModuleCountGuardArrays[key] = arrays
+}
+
+func arrayModulePositiveCountGuardArrays(file parsedFile, moduleDecls map[string]sourceDeclaration, count string, ctx analysisContext) map[string]bool {
+	count = strings.ToLower(cleanIdentifier(count))
+	cacheKey := strings.ToLower(strings.TrimSpace(file.Path)) + "\x00" + count
+	if arrays, ok := arrayModuleCountGuardCacheLookup(ctx, cacheKey); ok {
+		return arrays
+	}
+	result := map[string]bool{}
+	if !strings.EqualFold(strings.TrimSpace(file.ModuleKind), "class") || count == "" {
+		arrayModuleCountGuardCacheStore(ctx, cacheKey, result)
+		return result
+	}
+	countDeclaration, countDeclared := moduleDeclarationForName(moduleDecls, count)
+	if !countDeclared || countDeclaration.Array || countDeclaration.Object || countDeclaration.Parameter || !arrayModuleReadyGuardSourceOwned(file, countDeclaration) {
+		arrayModuleCountGuardCacheStore(ctx, cacheKey, result)
+		return result
+	}
+	facts := file.moduleAnalysisFacts()
+	if facts == nil {
+		arrayModuleCountGuardCacheStore(ctx, cacheKey, result)
+		return result
+	}
+
+	var zeros, positives []arrayModuleCountOperation
+	facts.forEachArrayOperationFor(count, func(operation moduleArrayOperationFact) {
+		if operation.Kind != moduleArrayWholeAssignment {
+			return
+		}
+		owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+		if !ok || arrayProcedureHasErrorHandling(owner) {
+			return
+		}
+		entry := arrayModuleCountOperation{fact: operation, owner: owner, ok: true}
+		if value, literal := integerLiteral(operation.RHS); literal && value == 0 {
+			zeros = append(zeros, entry)
+		}
+		if arrayModulePositiveCountAssignment(operation.RHS, count) {
+			positives = append(positives, entry)
+		}
+	})
+	if len(zeros) == 0 || len(positives) == 0 {
+		arrayModuleCountGuardCacheStore(ctx, cacheKey, result)
+		return result
+	}
+
+	arrays := make(map[string]bool)
+	for name, declaration := range moduleDecls {
+		name = strings.ToLower(cleanIdentifier(name))
+		if name == "" || !declaration.Array || declaration.Fixed || declaration.Parameter {
+			continue
+		}
+		var accepted bool
+		facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+			if accepted || operation.Kind != moduleArrayDirectRedim || operation.Preserve {
+				return
+			}
+			owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+			if !ok || arrayProcedureHasErrorHandling(owner) {
+				return
+			}
+			for _, zero := range zeros {
+				if !zero.ok || !arrayModuleStorageSameProcedure(zero.owner, owner) || zero.fact.Line >= operation.Line {
+					continue
+				}
+				if !arrayModulePositiveCountWriteReachable(file, owner, operation.Line+1, positives, ctx) {
+					continue
+				}
+				if !arrayModulePositiveCountErasesSafe(file, name, owner, zero.fact.Line, ctx) {
+					continue
+				}
+				accepted = true
+				break
+			}
+		})
+		if accepted {
+			arrays[name] = true
+		}
+	}
+	for name := range arrays {
+		result[name] = true
+	}
+	arrayModuleCountGuardCacheStore(ctx, cacheKey, result)
+	return result
+}
+
+func arrayModulePositiveCountAssignment(rhs, count string) bool {
+	if value, ok := integerLiteral(rhs); ok {
+		return value > 0
+	}
+	compact := canonicalArrayBoundExpression(rhs)
+	prefix := count + "+"
+	if !strings.HasPrefix(compact, prefix) {
+		return false
+	}
+	value, ok := integerLiteral(strings.TrimPrefix(compact, prefix))
+	return ok && value > 0
+}
+
+type arrayModuleCountOperation struct {
+	fact  moduleArrayOperationFact
+	owner sourceProcedure
+	ok    bool
+}
+
+func arrayModulePositiveCountWriteReachable(file parsedFile, setup sourceProcedure, redimLine int, positives []arrayModuleCountOperation, ctx analysisContext) bool {
+	for _, positive := range positives {
+		if !positive.ok {
+			continue
+		}
+		if arrayModuleStorageSameProcedure(setup, positive.owner) {
+			if positive.fact.Line+1 > redimLine {
+				return true
+			}
+			continue
+		}
+		if arrayModuleProcedureReachesAfter(file, setup, positive.owner, redimLine, ctx, map[string]bool{}) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayModuleProcedureReachesAfter(file parsedFile, from, target sourceProcedure, afterLine int, ctx analysisContext, visiting map[string]bool) bool {
+	fromKey := arrayProcedureKey(from)
+	if visiting[fromKey] {
+		return false
+	}
+	visiting[fromKey] = true
+	defer delete(visiting, fromKey)
+	for call := range from.Calls.All() {
+		if afterLine > 0 && call.Range.StartLine <= afterLine {
+			continue
+		}
+		_, callee, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if !resolved {
+			callee, resolved = arraySourceModuleTargetForCall(file, call, ctx)
+		}
+		if !resolved || !strings.EqualFold(strings.TrimSpace(callee.Module), strings.TrimSpace(from.Module)) {
+			continue
+		}
+		if arrayModuleStorageSameProcedure(callee, target) || arrayModuleProcedureReachesAfter(file, callee, target, 0, ctx, visiting) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayModulePositiveCountErasesSafe(file parsedFile, arrayName string, setup sourceProcedure, zeroLine int, ctx analysisContext) bool {
+	facts := file.moduleAnalysisFacts()
+	if facts == nil {
+		return false
+	}
+	safe := true
+	facts.forEachArrayOperationFor(arrayName, func(operation moduleArrayOperationFact) {
+		if !safe || operation.Kind != moduleArrayErase {
+			return
+		}
+		owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+		if !ok {
+			safe = false
+			return
+		}
+		if arrayModuleStorageSameProcedure(owner, setup) {
+			if operation.Line > zeroLine {
+				safe = false
+			}
+			return
+		}
+		if strings.EqualFold(strings.TrimSpace(owner.Name), "class_terminate") {
+			return
+		}
+		calledBeforeReset := false
+		for caller := range file.procedureView().All() {
+			for call := range caller.Calls.All() {
+				_, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+				if !resolved || !arrayModuleStorageSameProcedure(target, owner) {
+					continue
+				}
+				if arrayModuleStorageSameProcedure(caller, setup) && call.Range.StartLine <= zeroLine+1 {
+					calledBeforeReset = true
+					continue
+				}
+				if strings.EqualFold(strings.TrimSpace(caller.Name), "class_terminate") {
+					calledBeforeReset = true
+					continue
+				}
+				safe = false
+			}
+		}
+		if !calledBeforeReset {
+			safe = false
+		}
+	})
+	return safe
+}
+
+func arrayModuleStorageCallProvesAllocation(file parsedFile, proc sourceProcedure, ctx analysisContext, guard arrayModuleStorageGuard, resultName string, guardLine int) bool {
+	if guardLine <= proc.StartLine {
+		return false
+	}
+	resultName = strings.ToLower(cleanIdentifier(resultName))
+	for line := proc.StartLine; line < guardLine && line <= len(file.Lines); line++ {
+		for _, part := range splitRangeValueSourceStatements(arrayLogicalCodeLine(file.Lines, line)) {
+			lhs, rhs, indexed, assigned := arrayAssignment(part)
+			if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), resultName) {
+				continue
+			}
+			callName := strings.ToLower(cleanIdentifier(arrayCallName(rhs)))
+			if callName == "" {
+				continue
+			}
+			matched := false
+			forEachArrayCallAtLineUncounted(proc, line, func(call procedureir.CallSite) {
+				if matched || !strings.EqualFold(cleanIdentifier(call.Callee.BaseName), callName) && !strings.EqualFold(cleanIdentifier(call.Callee.Text), callName) {
+					return
+				}
+				target, resolved := arraySourceModuleTargetForCall(file, call, ctx)
+				if key, privateTarget, privateResolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call); privateResolved {
+					_ = key
+					target, resolved = privateTarget, true
+				}
+				if resolved && arrayModuleStorageTargetHasCapacityGuard(file, target, guard.capacity) {
+					matched = true
+				}
+			})
+			if matched {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func arrayModuleStorageTargetHasCapacityGuard(file parsedFile, proc sourceProcedure, capacity string) bool {
+	if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet || arrayProcedureHasErrorHandling(proc) {
+		return false
+	}
+	defaultLine := 0
+	guardLine := 0
+	start := max(1, proc.StartLine)
+	end := min(len(file.Lines), proc.EndLine)
+	for line := start; line <= end; line++ {
+		for _, part := range splitRangeValueSourceStatements(arrayLogicalCodeLine(file.Lines, line)) {
+			if lhs, rhs, indexed, assigned := arrayAssignment(part); assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), proc.Name) {
+				if value, ok := integerLiteral(rhs); ok && value < 0 {
+					defaultLine = line
+				}
+			}
+			condition, body, ok := arrayIfThenParts(part)
+			if !ok || strings.TrimSpace(body) == "" {
+				continue
+			}
+			lhs, operator, literal, comparisonOK := arrayCountComparison(condition)
+			thenBody, _, hasElse := arrayIfThenBodyParts(body)
+			if comparisonOK && strings.EqualFold(cleanIdentifier(lhs), capacity) && operator == "=" && literal == "0" && !hasElse && strings.EqualFold(strings.TrimSpace(thenBody), "exit function") {
+				guardLine = line
+			}
+		}
+	}
+	return defaultLine > 0 && guardLine > defaultLine
+}
+
 // arrayPrivateModuleArrayInvalidationsWithVisiting identifies module arrays
 // that are not proven allocated at a target's normal exit. The summary starts
 // from allocated arrays so it models the effect on a caller that already has
@@ -257,10 +1670,7 @@ func arrayPrivateModuleArrayInvalidationsWithVisiting(file parsedFile, target so
 		return nil
 	}
 	if visiting[key] {
-		// A recursive effect cycle has no finite normal-return proof. Keep all
-		// visible module arrays conservative rather than assuming the cycle is
-		// read-only.
-		return names
+		return nil
 	}
 	if ctx.arrayModuleInvalidations != nil {
 		if summary, ok := ctx.arrayModuleInvalidations[key]; ok {
@@ -588,6 +1998,52 @@ func applyArrayUnknownModuleCallEffects(state arrayFlowState, file parsedFile, p
 	return updated
 }
 
+type arraySourceModuleTargetCacheKey struct {
+	file        string
+	module      string
+	caller      string
+	callee      string
+	baseName    string
+	receiver    string
+	member      string
+	id          int
+	startByte   int
+	endByte     int
+	statementID int
+}
+
+type arraySourceModuleTargetCacheEntry struct {
+	target   sourceProcedure
+	resolved bool
+}
+
+func arraySourceModuleTargetCacheKeyForCall(file parsedFile, call procedureir.CallSite) (arraySourceModuleTargetCacheKey, bool) {
+	fileKey := file.Path
+	if fileKey == "" {
+		fileKey = file.IR.Path
+	}
+	if fileKey == "" {
+		return arraySourceModuleTargetCacheKey{}, false
+	}
+	receiver := ""
+	if call.Callee.Receiver != nil {
+		receiver = *call.Callee.Receiver
+	}
+	return arraySourceModuleTargetCacheKey{
+		file:        fileKey,
+		module:      call.Module,
+		caller:      call.Caller.QualifiedName,
+		callee:      call.Callee.Text,
+		baseName:    call.Callee.BaseName,
+		receiver:    receiver,
+		member:      call.Callee.Member,
+		id:          call.ID,
+		startByte:   call.Range.StartByte,
+		endByte:     call.Range.EndByte,
+		statementID: call.StatementID,
+	}, true
+}
+
 // arraySourceModuleTargetForCall recovers a source-local target for the
 // source-order fallback. The project resolver may report a public target, but
 // it may also be incomplete for a recovered call. In the latter case a unique
@@ -595,6 +2051,47 @@ func applyArrayUnknownModuleCallEffects(state arrayFlowState, file parsedFile, p
 // procedure's module-array accesses; an absent target remains an external or
 // late-bound call and must not invalidate all module arrays.
 func arraySourceModuleTargetForCall(file parsedFile, call procedureir.CallSite, ctx analysisContext) (sourceProcedure, bool) {
+	// With an explicit project resolver the call target is determined by the
+	// immutable project context. Contexts without one may rely on the call's
+	// embedded Resolution, which is intentionally not part of this cache key.
+	cacheable := ctx.procedureResolver != nil
+	key := arraySourceModuleTargetCacheKey{}
+	if cacheable {
+		key, cacheable = arraySourceModuleTargetCacheKeyForCall(file, call)
+	}
+	if cacheable && ctx.arraySourceModuleTargetCache != nil {
+		if ctx.arraySourceModuleTargetCacheMu != nil {
+			ctx.arraySourceModuleTargetCacheMu.RLock()
+			cached, ok := ctx.arraySourceModuleTargetCache[key]
+			ctx.arraySourceModuleTargetCacheMu.RUnlock()
+			if ok {
+				return cached.target, cached.resolved
+			}
+		} else if cached, ok := ctx.arraySourceModuleTargetCache[key]; ok {
+			return cached.target, cached.resolved
+		}
+	}
+
+	target, resolved := arraySourceModuleTargetForCallUncached(file, call, ctx)
+	if !cacheable || ctx.arraySourceModuleTargetCache == nil {
+		return target, resolved
+	}
+	entry := arraySourceModuleTargetCacheEntry{target: target, resolved: resolved}
+	if ctx.arraySourceModuleTargetCacheMu != nil {
+		ctx.arraySourceModuleTargetCacheMu.Lock()
+		if cached, ok := ctx.arraySourceModuleTargetCache[key]; ok {
+			entry = cached
+		} else {
+			ctx.arraySourceModuleTargetCache[key] = entry
+		}
+		ctx.arraySourceModuleTargetCacheMu.Unlock()
+	} else {
+		ctx.arraySourceModuleTargetCache[key] = entry
+	}
+	return entry.target, entry.resolved
+}
+
+func arraySourceModuleTargetForCallUncached(file parsedFile, call procedureir.CallSite, ctx analysisContext) (sourceProcedure, bool) {
 	procedures := file.procedureView()
 	if procedures.Len() == 0 {
 		return sourceProcedure{}, false
@@ -726,6 +2223,10 @@ func arrayInternalStorageConfigurationArrays(proc sourceProcedure, configuration
 		return configurations.byProcedure["configuredatarow"]
 	case "internalinnerexceptions":
 		return configurations.byProcedure["configureaggregateerror"]
+	case "rebuildprimarykeyindex", "indexdatarow":
+		return configurations.dataTable
+	case "createcollectionnode":
+		return configurations.genericCollection
 	default:
 		return nil
 	}
@@ -939,10 +2440,11 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 		dominators[key] = normalExitDominators
 	}
 	idempotentSetupArrays := arrayModuleIdempotentSetupArrays(file, proc, moduleDecls, ctx)
+	countSetupArrays := arrayModuleCountSetupArrays(file, proc, moduleDecls, ctx)
 	allocated := map[string]bool{}
 	addDirectAllocation := func(statementID int, name string) {
 		name = strings.ToLower(cleanIdentifier(name))
-		if !moduleArrays[name] || (!arrayProcedureBlockDominatesNormalExit(proc, statementID, normalExitDominators) && !idempotentSetupArrays[name]) {
+		if !moduleArrays[name] || (!arrayProcedureBlockDominatesNormalExit(proc, statementID, normalExitDominators) && !idempotentSetupArrays[name] && !countSetupArrays[name]) {
 			return
 		}
 		allocated[name] = true
@@ -980,6 +2482,9 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 		}
 		guaranteed := !arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) && arrayProcedureBlockDominatesNormalExit(proc, call.StatementID, normalExitDominators)
 		if !guaranteed && arrayProcedureHasIdempotentSetupGuard(file, proc, call.Range.StartLine, moduleDecls) {
+			guaranteed = true
+		}
+		if !guaranteed && arrayProcedureCallPrecedesSuccessfulReturn(file, proc, call) {
 			guaranteed = true
 		}
 		if !guaranteed {
@@ -1100,6 +2605,143 @@ func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, mod
 				}
 				result[name] = true
 			})
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// arrayModuleCountSetupArrays recognizes the numeric ready-count variant of
+// the one-time module initialization idiom:
+//
+//	If connectionCount > 0 Then Exit Sub
+//	ReDim connections(0 To MAX_CONNECTIONS - 1)
+//	connectionCount = MAX_CONNECTIONS
+//
+// A positive count is written only after every direct ReDim in the helper has
+// completed. Since VBA leaves a module Long at zero initially and this helper
+// has no error handler or erase/reset path, a normal return with a positive
+// count proves the grouped arrays are allocated. The proof is intentionally
+// limited to a source-owned scalar, a single final positive write, direct
+// non-Preserve ReDim operations, and calls whose module effects are already
+// modeled.
+func arrayModuleCountSetupArrays(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext) map[string]bool {
+	if proc.Graph == nil || arrayProcedureHasErrorHandling(proc) || proc.StartLine < 1 || proc.EndLine < proc.StartLine || proc.StartLine > len(file.Lines) {
+		return nil
+	}
+	facts := file.moduleAnalysisFacts()
+	start := max(0, proc.StartLine-1)
+	end := min(len(file.Lines), proc.EndLine)
+	guardLine := -1
+	guardName := ""
+	for line := start; line < end; line++ {
+		condition, body, ok := arrayIfThenParts(normalizedCodeLine(file.Lines[line]))
+		if !ok || !strings.EqualFold(strings.TrimSpace(body), "exit sub") {
+			continue
+		}
+		lhs, operator, literal, comparisonOK := arrayCountComparison(condition)
+		if !comparisonOK || operator != ">" || literal != "0" {
+			continue
+		}
+		name := strings.ToLower(cleanIdentifier(lhs))
+		declaration, declared := moduleDecls[name]
+		if !declared || declaration.Array || declaration.Parameter || !arrayKnownScalarType(declaration.Type) {
+			continue
+		}
+		if guardLine >= 0 {
+			return nil
+		}
+		guardLine = line
+		guardName = name
+	}
+	if guardLine < 0 {
+		return nil
+	}
+
+	constants := arrayIntegerConstants(file, proc, nil, nil)
+	var countWrite moduleArrayOperationFact
+	countWrites := 0
+	facts.forEachArrayOperationFor(guardName, func(operation moduleArrayOperationFact) {
+		if operation.Kind != moduleArrayWholeAssignment {
+			return
+		}
+		countWrites++
+		countWrite = operation
+	})
+	if countWrites != 1 || countWrite.Line <= guardLine {
+		return nil
+	}
+	positiveCount, err := constantIntegerExpression(strings.TrimSpace(countWrite.RHS), constants)
+	if err != nil || positiveCount <= 0 {
+		return nil
+	}
+	for line := countWrite.Line + 1; line < end; line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line]))
+		lower := strings.ToLower(text)
+		if text == "" || strings.HasPrefix(text, "'") || lower == "end sub" || lower == "end function" || lower == "end property" {
+			continue
+		}
+		return nil
+	}
+
+	firstRedimLine := countWrite.Line
+	for name, declaration := range moduleDecls {
+		if name == "" || !declaration.Array || declaration.Fixed || declaration.Parameter {
+			continue
+		}
+		facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+			if operation.Kind == moduleArrayDirectRedim && !operation.Preserve && operation.Line > guardLine && operation.Line < firstRedimLine {
+				firstRedimLine = operation.Line
+			}
+		})
+	}
+
+	// Calls between the first allocation and the ready-count write must not be
+	// able to erase or replace the grouped arrays before the invariant becomes
+	// observable to callers. Calls before the first ReDim cannot invalidate the
+	// proof: the guarded path would have exited, while the fresh path has not
+	// established the grouped allocation yet.
+	for call := range proc.Calls.All() {
+		line := call.Range.StartLine - 1
+		if line <= firstRedimLine || line > countWrite.Line {
+			continue
+		}
+		if arrayCallIsIndexedArrayAccess(proc, call, arrayVariables(file, proc, moduleDecls)) || call.IsRaiseEvent || call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+			continue
+		}
+		_, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if !resolved || arrayPrivateCallMayInvalidateModuleArray(file, proc, target, call, moduleDecls, ctx) {
+			return nil
+		}
+	}
+
+	result := map[string]bool{}
+	for name, declaration := range moduleDecls {
+		name = strings.ToLower(cleanIdentifier(name))
+		if name == "" || !declaration.Array || declaration.Fixed || declaration.Parameter {
+			continue
+		}
+		redimCount := 0
+		valid := true
+		facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+			if !valid {
+				return
+			}
+			if operation.Kind != moduleArrayDirectRedim || operation.Preserve || operation.Line <= guardLine || operation.Line >= countWrite.Line {
+				valid = false
+				return
+			}
+			owner, ownerOK := arrayModuleProcedureAtLine(file, operation.Line+1)
+			if !ownerOK || arrayProcedureKey(owner) != arrayProcedureKey(proc) {
+				valid = false
+				return
+			}
+			redimCount++
+		})
+		if valid && redimCount > 0 {
+			result[name] = true
 		}
 	}
 	if len(result) == 0 {
@@ -1286,7 +2928,170 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 			result[name] = true
 		}
 	}
+	for name := range arrayModuleReadyGuardObjectSetupAllocationProof(file, proc, readyLine, candidates, moduleDecls) {
+		result[name] = true
+	}
 	return result
+}
+
+// arrayModuleReadyGuardObjectSetupAllocationProof handles a two-stage module
+// initializer whose object handle is the source-owned witness for an array
+// allocation. A common UserForm pattern allocates module arrays in
+// AttachForm, stores the form in a Private Object field, and later lets
+// BuildScene set a Boolean ready flag only after `If mForm Is Nothing Then Exit
+// Sub`. The Boolean guard's writer does not itself contain the ReDim, so the
+// ordinary ready-writer CFG walk cannot see this invariant.
+//
+// The proof is deliberately narrow: the object field is Private, every
+// non-Nothing assignment to it is a parameter assignment in one setup
+// procedure, that procedure directly allocates every dynamic candidate array,
+// and the object Nothing guard dominates the ready write.
+func arrayModuleReadyGuardObjectSetupAllocationProof(file parsedFile, writer sourceProcedure, readyLine int, candidates map[string]bool, moduleDecls map[string]sourceDeclaration) map[string]bool {
+	if writer.Graph == nil || readyLine <= writer.StartLine || readyLine > len(file.Lines) {
+		return nil
+	}
+	objectName, guardLine, ok := arrayModuleObjectNothingExitGuard(file, writer, readyLine)
+	if !ok {
+		return nil
+	}
+	objectDeclaration, declared := moduleDecls[objectName]
+	if !declared || !objectDeclaration.Object || objectDeclaration.Array || objectDeclaration.Parameter || !arrayModuleReadyGuardSourceOwned(file, objectDeclaration) {
+		return nil
+	}
+	guardStatement, guardOK := arrayModuleStatementAtLine(writer, guardLine)
+	readyStatement, readyOK := arrayModuleStatementAtLine(writer, readyLine)
+	if !guardOK || !readyOK {
+		return nil
+	}
+	normalGraph := writer.Graph.View(vbacfg.EdgeFilter{NormalOnly: true})
+	guardBlock, guardBlockOK := writer.Graph.BlockForStatement(guardStatement.ID)
+	readyBlock, readyBlockOK := writer.Graph.BlockForStatement(readyStatement.ID)
+	if !guardBlockOK || !readyBlockOK || !normalGraph.Dominates(guardBlock.ID, readyBlock.ID) {
+		return nil
+	}
+
+	facts := file.moduleAnalysisFacts()
+	if facts == nil {
+		return nil
+	}
+	setup, ok := arrayModuleObjectSetupProcedure(file, objectName, candidates, moduleDecls, facts)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]bool)
+	for name := range candidates {
+		declaration, declared := moduleDecls[name]
+		if !declared || !declaration.Array || declaration.Fixed {
+			continue
+		}
+		if arrayModuleSetupDirectlyAllocates(file, setup, name, facts) {
+			result[name] = true
+		}
+	}
+	return result
+}
+
+func arrayModuleObjectNothingExitGuard(file parsedFile, proc sourceProcedure, readyLine int) (string, int, bool) {
+	for line := proc.StartLine + 1; line < readyLine && line <= proc.EndLine && line <= len(file.Lines); line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
+		match := arrayModuleObjectNothingExitRe.FindStringSubmatch(text)
+		if len(match) != 2 {
+			continue
+		}
+		objectName := strings.ToLower(cleanIdentifier(match[1]))
+		for next := line + 1; next <= proc.EndLine && next <= len(file.Lines); next++ {
+			body := strings.TrimSpace(strings.ToLower(normalizedCodeLine(file.Lines[next-1])))
+			if body == "" || strings.HasPrefix(body, "'") {
+				continue
+			}
+			if body == "exit sub" || body == "exit function" || body == "exit property" {
+				return objectName, line, true
+			}
+			break
+		}
+	}
+	return "", 0, false
+}
+
+func arrayModuleObjectSetupProcedure(file parsedFile, objectName string, candidates map[string]bool, moduleDecls map[string]sourceDeclaration, facts *moduleAnalysisFacts) (sourceProcedure, bool) {
+	var match sourceProcedure
+	matched := false
+	procedures := file.procedureView()
+	for index := 0; index < procedures.Len(); index++ {
+		procedure := procedures.valueAt(index)
+		if procedure.StartLine >= procedure.EndLine || arrayProcedureHasErrorHandling(procedure) || !arrayModuleProcedureSetsObjectParameter(file, procedure, objectName) {
+			continue
+		}
+		allAllocated := true
+		for name, declaration := range moduleDecls {
+			name = strings.ToLower(cleanIdentifier(name))
+			if name == "" || !candidates[name] || !declaration.Array || declaration.Fixed {
+				continue
+			}
+			if !arrayModuleSetupDirectlyAllocates(file, procedure, name, facts) {
+				allAllocated = false
+				break
+			}
+		}
+		if !allAllocated || !arrayModuleObjectAssignmentsBelongToSetup(file, objectName, procedure) {
+			continue
+		}
+		if matched {
+			return sourceProcedure{}, false
+		}
+		match = procedure
+		matched = true
+	}
+	return match, matched
+}
+
+func arrayModuleProcedureSetsObjectParameter(file parsedFile, proc sourceProcedure, objectName string) bool {
+	parameters := make(map[string]bool)
+	for parameter := range proc.Params.All() {
+		if isObjectType(parameter.Type) && !parameter.IsArray {
+			parameters[strings.ToLower(cleanIdentifier(parameter.Name))] = true
+		}
+	}
+	startLine := proc.StartLine
+	if startLine < 1 {
+		startLine = 1
+	}
+	for line := startLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
+		match := arrayModuleObjectSetRe.FindStringSubmatch(text)
+		if len(match) == 3 && strings.EqualFold(cleanIdentifier(match[1]), objectName) && strings.ToLower(cleanIdentifier(match[2])) != "nothing" && parameters[strings.ToLower(cleanIdentifier(match[2]))] {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayModuleObjectAssignmentsBelongToSetup(file parsedFile, objectName string, setup sourceProcedure) bool {
+	seen := false
+	for line := 1; line <= len(file.Lines); line++ {
+		match := arrayModuleObjectSetRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(file.Lines[line-1])))
+		if len(match) != 3 || !strings.EqualFold(cleanIdentifier(match[1]), objectName) || strings.EqualFold(cleanIdentifier(match[2]), "nothing") {
+			continue
+		}
+		owner, ok := arrayModuleProcedureAtLine(file, line)
+		if !ok || owner.StartByte != setup.StartByte || owner.StartLine != setup.StartLine || owner.EndLine != setup.EndLine || !arrayModuleProcedureSetsObjectParameter(file, setup, objectName) {
+			return false
+		}
+		seen = true
+	}
+	return seen
+}
+
+func arrayModuleSetupDirectlyAllocates(file parsedFile, proc sourceProcedure, name string, facts *moduleAnalysisFacts) bool {
+	allocated := false
+	facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+		if allocated || operation.Kind != moduleArrayDirectRedim || operation.Preserve {
+			return
+		}
+		owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+		allocated = ok && owner.StartByte == proc.StartByte && owner.StartLine == proc.StartLine && owner.EndLine == proc.EndLine
+	})
+	return allocated
 }
 
 func arrayModuleReadyGuardLifecycleSafe(file parsedFile, guardName string, arrays map[string]bool, facts *moduleAnalysisFacts, moduleDecls map[string]sourceDeclaration, ctx analysisContext) bool {
@@ -1629,8 +3434,8 @@ func arrayProcedureLineHasInlineConditional(file parsedFile, line int) bool {
 	if line < 1 || line > len(file.Lines) {
 		return false
 	}
-	text := strings.ToLower(strings.TrimSpace(normalizedCodeLine(file.Lines[line-1])))
-	return strings.HasPrefix(text, "if ") && strings.Contains(text, " then ")
+	_, body, ok := arrayIfThenParts(normalizedCodeLine(file.Lines[line-1]))
+	return ok && strings.TrimSpace(body) != ""
 }
 
 func arrayProcedureLineInlineConditionIsFalse(file parsedFile, line int) bool {
@@ -1648,6 +3453,69 @@ func arrayProcedureLineInlineConditionIsFalse(file parsedFile, line int) bool {
 	}
 	value, known := arraySourceOrderConstantBoolean(condition, nil)
 	return known && !value
+}
+
+// arrayInlineConditionalCallIsConditionExpression distinguishes a call made
+// while evaluating an inline If condition from a call in the conditional body.
+// The former is always evaluated before VBA chooses the body, so an
+// unconditional module-allocation summary may be applied even when the line
+// itself also contains an Exit statement.
+func arrayInlineConditionalCallIsConditionExpression(file parsedFile, call procedureir.CallSite) bool {
+	if !arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) || call.Range.StartColumn <= 0 || call.Range.StartLine < 1 || call.Range.StartLine > len(file.Lines) {
+		return false
+	}
+	raw := gui.StripComment(file.Lines[call.Range.StartLine-1])
+	trimmed := strings.TrimSpace(raw)
+	leading := len(raw) - len(strings.TrimLeft(raw, " \t"))
+	lower := strings.ToLower(trimmed)
+	prefixLength := 0
+	switch {
+	case strings.HasPrefix(lower, "if "):
+		prefixLength = len("if ")
+	case strings.HasPrefix(lower, "elseif "):
+		prefixLength = len("elseif ")
+	default:
+		return false
+	}
+	rest := strings.TrimSpace(trimmed[prefixLength:])
+	thenIndex := arrayTopLevelKeywordIndex(rest, "then")
+	if thenIndex < 0 {
+		return false
+	}
+	bodyStart := leading + prefixLength + (len(trimmed[prefixLength:]) - len(rest)) + thenIndex + len("then")
+	return call.Range.StartColumn-1 < bodyStart
+}
+
+// arrayProcedureCallPrecedesSuccessfulReturn admits a helper allocation when
+// the call is followed by the procedure's successful Boolean return on a
+// straight-line path. This covers guards such as:
+//
+//	InitConnectionPool
+//	ValidIndex = True
+//
+// An early invalid-input Exit before the call does not reach that return, so
+// requiring the successful assignment after the call avoids treating that
+// bypass as an allocation proof.
+func arrayProcedureCallPrecedesSuccessfulReturn(file parsedFile, proc sourceProcedure, call procedureir.CallSite) bool {
+	if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
+		return false
+	}
+	start := max(proc.StartLine, call.Range.StartLine)
+	end := min(len(file.Lines), proc.EndLine)
+	for line := start; line <= end; line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
+		if text == "" || strings.HasPrefix(text, "'") {
+			continue
+		}
+		if lhs, rhs, indexed, assigned := arrayAssignment(text); assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), proc.Name) && strings.EqualFold(strings.TrimSpace(rhs), "true") {
+			return true
+		}
+		lower := strings.ToLower(text)
+		if strings.HasPrefix(lower, "exit function") || strings.HasPrefix(lower, "exit property") || arrayModuleSetupLineHasControlFlow(text) {
+			return false
+		}
+	}
+	return false
 }
 
 func arrayInlineConditionalCallIsReachable(file parsedFile, call procedureir.CallSite, conditionValue, hasElse bool) bool {
@@ -1836,19 +3704,21 @@ func arrayModuleInitializerName(moduleKind string) string {
 // assignment performed by the caller. A fact is retained only when every
 // resolved call from the same module reaches the helper with that array
 // allocated. The fixed point also covers chains of private helpers.
+type arrayModuleProcedureInfo struct {
+	file        parsedFile
+	proc        sourceProcedure
+	key         string
+	moduleDecls map[string]sourceDeclaration
+	variables   map[string]arrayVariable
+}
+
 func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisContext) arrayModuleEntryStates {
 	if len(ctx.arrayPrivateTargets) == 0 {
 		return arrayModuleEntryStates{}
 	}
 
-	type procedureInfo struct {
-		file        parsedFile
-		proc        sourceProcedure
-		key         string
-		moduleDecls map[string]sourceDeclaration
-		variables   map[string]arrayVariable
-	}
-	procedures := make([]procedureInfo, 0)
+	procedures := make([]arrayModuleProcedureInfo, 0)
+	allProcedures := make([]arrayModuleProcedureInfo, 0)
 	moduleArrays := map[string]map[string]bool{}
 	moduleFiles := map[string]string{}
 	for _, file := range files {
@@ -1856,23 +3726,23 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		moduleDecls := file.moduleDecls()
 		for procedureIndex := 0; procedureIndex < procs.Len(); procedureIndex++ {
 			proc := procs.valueAt(procedureIndex)
+			info := arrayModuleProcedureInfo{
+				file: file, proc: proc, moduleDecls: moduleDecls,
+				variables: arrayVariables(file, proc, moduleDecls),
+				key:       arrayParticipantLookupKey(proc, ctx.arrayParticipantKeys),
+			}
+			allProcedures = append(allProcedures, info)
 			if !arrayProcedureIsParticipant(ctx, proc) {
 				continue
 			}
-			key := arrayParticipantLookupKey(proc, ctx.arrayParticipantKeys)
-			procedures = append(procedures, procedureInfo{
-				file: file, proc: proc, moduleDecls: moduleDecls,
-				variables: arrayVariables(file, proc, moduleDecls),
-				key:       key,
-			})
-			moduleArrays[key] = arrayModuleNamesForProcedure(file, proc, moduleDecls)
-			moduleFiles[key] = file.Path
+			procedures = append(procedures, info)
+			moduleArrays[info.key] = arrayModuleNamesForProcedure(file, proc, moduleDecls)
+			moduleFiles[info.key] = file.Path
 		}
 	}
 	if len(procedures) == 0 {
 		return arrayModuleEntryStates{}
 	}
-
 	initializationStates := ctx.arrayModuleInitializationStates
 	if initializationStates == nil {
 		initializationStates = arrayModuleInitializationStates(files, ctx.arrayModuleAllocations)
@@ -1897,7 +3767,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		sort.Ints(dependents[key])
 	}
 
-	evaluate := func(procedure procedureInfo, entries arrayModuleEntryStates) map[string]map[string]bool {
+	evaluate := func(procedure arrayModuleProcedureInfo, entries arrayModuleEntryStates) map[string]map[string]bool {
 		variables := procedure.variables
 		initial := arrayInitialState(variables)
 		initial = applyArrayModuleInitializationState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, initializationStates)
@@ -1928,6 +3798,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 			}
 		}
 		visit := func(text string, line int, in arrayFlowState) arrayFlowState {
+			in = applyArrayModuleStorageSourceGuardState(in, procedure.file, procedure.proc, line, ctx, ctx.arrayModuleStorageGuards[procedure.file.Path])
 			forEachArrayCallAtLine(procedure.proc, line, func(call procedureir.CallSite) {
 				recordCall(call, in)
 			}, ctx.arrayStats)
@@ -1952,13 +3823,15 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		walkArrayCFGWithEdgesStats(&graph, procedure.file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 			out = applyArrayConditionalAllocationBranch(out, &graph, block, edge)
 			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
+			out = applyArrayModuleStorageGuardBranch(out, block.Statement, edge, procedure.file, procedure.proc, ctx, ctx.arrayModuleStorageGuards[procedure.file.Path])
+			out = applyArrayModulePositiveCountGuardBranch(out, block.Statement, edge, procedure.file, procedure.proc, ctx, procedure.moduleDecls)
 			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[procedure.file.Path], variables, procedure.file, procedure.proc, procedure.moduleDecls)
 		}, ctx.arrayStats)
 		return candidates
 	}
 
 	contributions := make(map[string]map[string]map[string]bool, len(procedures))
-	entries := arrayModuleEntryStates{}
+	entries := applyArrayModuleCallbackEntryStates(arrayModuleEntryStates{}, procedures, allProcedures, ctx)
 	aggregateTargets := func(targets map[string]bool) arrayModuleEntryStates {
 		aggregated := arrayModuleEntryStates{}
 		for _, caller := range procedures {
@@ -2041,6 +3914,198 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		}
 	}
 	return entries
+}
+
+type arrayModuleCallbackCaller struct {
+	procedure arrayModuleProcedureInfo
+	call      procedureir.CallSite
+}
+
+// applyArrayModuleCallbackEntryStates binds a module-array allocation proof to
+// a procedure installed as a callback. A callback has no ordinary VBA call
+// edge, so the normal entry-state fixed point cannot see that it is registered
+// only after its owner has initialized the module storage. The proof remains
+// source-owned and conservative: every known same-module caller on the path
+// to GetAddressOf(AddressOf callback) must have a dominating, successful
+// allocation call before the registration call.
+func applyArrayModuleCallbackEntryStates(entries arrayModuleEntryStates, procedures, allProcedures []arrayModuleProcedureInfo, ctx analysisContext) arrayModuleEntryStates {
+	byKey := make(map[string]arrayModuleProcedureInfo, len(allProcedures))
+	callers := make(map[string][]arrayModuleCallbackCaller)
+	for _, procedure := range allProcedures {
+		byKey[procedure.key] = procedure
+	}
+	for _, caller := range procedures {
+		for call := range caller.proc.Calls.All() {
+			_, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+			if !ok {
+				continue
+			}
+			targetKey := arrayParticipantLookupKey(target, ctx.arrayParticipantKeys)
+			targetProcedure, ok := byKey[targetKey]
+			if !ok || targetProcedure.file.Path != caller.file.Path {
+				continue
+			}
+			callers[targetKey] = append(callers[targetKey], arrayModuleCallbackCaller{procedure: caller, call: call})
+		}
+	}
+
+	type callbackProof struct {
+		arrays map[string]bool
+		ok     bool
+	}
+	memo := map[string]callbackProof{}
+	var prove func(string, map[string]bool) callbackProof
+	prove = func(key string, visiting map[string]bool) callbackProof {
+		if cached, ok := memo[key]; ok {
+			return cached
+		}
+		if visiting[key] {
+			return callbackProof{}
+		}
+		visiting[key] = true
+		defer delete(visiting, key)
+		paths := callers[key]
+		if len(paths) == 0 {
+			return callbackProof{}
+		}
+		var common map[string]bool
+		for _, path := range paths {
+			arrays := arrayModuleAllocationBeforeCallback(path.procedure, path.call, ctx)
+			pathOK := len(arrays) > 0
+			if !pathOK {
+				pathProof := prove(path.procedure.key, visiting)
+				arrays, pathOK = pathProof.arrays, pathProof.ok
+			}
+			if !pathOK {
+				return callbackProof{}
+			}
+			if common == nil {
+				common = cloneArrayNameSet(arrays)
+				continue
+			}
+			for name := range common {
+				if !arrays[name] {
+					delete(common, name)
+				}
+			}
+		}
+		result := callbackProof{arrays: common, ok: len(common) > 0}
+		memo[key] = result
+		return result
+	}
+
+	for _, registration := range procedures {
+		for call := range registration.proc.Calls.All() {
+			if !strings.EqualFold(call.Callee.BaseName, "GetAddressOf") {
+				continue
+			}
+			targetName := arrayCallbackTargetName(registration.file, call)
+			if targetName == "" {
+				continue
+			}
+			proof := prove(registration.key, map[string]bool{})
+			if !proof.ok {
+				continue
+			}
+			for _, target := range allProcedures {
+				if target.file.Path != registration.file.Path || !strings.EqualFold(target.proc.Name, targetName) {
+					continue
+				}
+				targetModuleArrays := arrayModuleNamesForProcedure(target.file, target.proc, target.moduleDecls)
+				for name := range proof.arrays {
+					if !targetModuleArrays[name] {
+						continue
+					}
+					if entries[target.key] == nil {
+						entries[target.key] = map[string]bool{}
+					}
+					entries[target.key][name] = true
+				}
+			}
+		}
+	}
+	return entries
+}
+
+func arrayModuleAllocationBeforeCallback(procedure arrayModuleProcedureInfo, registrationCall procedureir.CallSite, ctx analysisContext) map[string]bool {
+	allocated := map[string]bool{}
+	for candidate := range procedure.proc.Calls.All() {
+		if candidate.Range.StartLine >= registrationCall.Range.StartLine || arrayProcedureLineHasInlineConditional(procedure.file, candidate.Range.StartLine) && (!arrayInlineConditionalCallIsConditionExpression(procedure.file, candidate) || !arrayInlineConditionalCallHasSuccessfulExitGuard(procedure.file, candidate)) {
+			continue
+		}
+		key, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, candidate)
+		if !ok || !strings.EqualFold(strings.TrimSpace(target.Module), strings.TrimSpace(procedure.proc.Module)) {
+			continue
+		}
+		if !arrayModuleCallDominatesCallback(procedure.proc, candidate, registrationCall) {
+			continue
+		}
+		for name, isAllocated := range ctx.arrayModuleAllocations[key] {
+			if isAllocated {
+				allocated[strings.ToLower(cleanIdentifier(name))] = true
+			}
+		}
+	}
+	return allocated
+}
+
+func arrayModuleCallDominatesCallback(proc sourceProcedure, allocationCall, registrationCall procedureir.CallSite) bool {
+	if allocationCall.Range.StartLine >= registrationCall.Range.StartLine {
+		return false
+	}
+	if proc.Graph == nil || allocationCall.StatementID <= 0 || registrationCall.StatementID <= 0 {
+		return true
+	}
+	sourceBlock, sourceOK := proc.Graph.BlockForStatement(allocationCall.StatementID)
+	targetBlock, targetOK := proc.Graph.BlockForStatement(registrationCall.StatementID)
+	if !sourceOK || !targetOK {
+		return false
+	}
+	for _, dominator := range proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).DominatorsOf(targetBlock.ID) {
+		if dominator == sourceBlock.ID {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayInlineConditionalCallHasSuccessfulExitGuard(file parsedFile, call procedureir.CallSite) bool {
+	if !arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) {
+		return true
+	}
+	condition, body, ok := arrayIfThenParts(normalizedCodeLine(file.Lines[call.Range.StartLine-1]))
+	if !ok || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(body)), "exit ") {
+		return false
+	}
+	condition = strings.TrimSpace(condition)
+	if strings.HasPrefix(strings.ToLower(condition), "if ") {
+		condition = strings.TrimSpace(condition[len("if "):])
+	}
+	return strings.Contains(strings.ToLower(condition), "not "+strings.ToLower(cleanIdentifier(call.Callee.BaseName)))
+}
+
+func arrayCallbackTargetName(file parsedFile, call procedureir.CallSite) string {
+	if call.Range.StartLine < 1 || call.Range.StartLine > len(file.Lines) {
+		return ""
+	}
+	text := strings.ToLower(gui.StripComment(file.Lines[call.Range.StartLine-1]))
+	getAddressOf := strings.Index(text, "getaddressof")
+	if getAddressOf < 0 {
+		return ""
+	}
+	addressOf := strings.Index(text[getAddressOf+len("getaddressof"):], "addressof")
+	if addressOf < 0 {
+		return ""
+	}
+	start := getAddressOf + len("getaddressof") + addressOf + len("addressof")
+	for start < len(text) && (text[start] == ' ' || text[start] == '\t' || text[start] == '(') {
+		start++
+	}
+	end := start
+	for end < len(text) && isIdentifierPart(text[end]) {
+		end++
+	}
+	return cleanIdentifier(text[start:end])
 }
 
 func arrayModuleEntryContributionsEqual(left, right map[string]map[string]bool) bool {
@@ -2177,7 +4242,24 @@ func arrayModuleReadyGuardAtEntry(file parsedFile, proc sourceProcedure, moduleD
 		}
 		match := arrayModuleReadyGuardRe.FindStringSubmatch(text)
 		if len(match) != 2 {
-			return "", false
+			blockMatch := arrayModuleReadyGuardBlockRe.FindStringSubmatch(text)
+			if len(blockMatch) != 2 {
+				return "", false
+			}
+			for next := line + 1; next < end; next++ {
+				body := strings.TrimSpace(strings.ToLower(normalizedCodeLine(file.Lines[next-1])))
+				if body == "" || strings.HasPrefix(body, "'") {
+					continue
+				}
+				if body != "exit sub" && body != "exit function" && body != "exit property" {
+					return "", false
+				}
+				match = blockMatch
+				break
+			}
+			if len(match) != 2 || match[1] == "" {
+				return "", false
+			}
 		}
 		name := strings.ToLower(cleanIdentifier(match[1]))
 		declaration, declared := moduleDecls[name]

@@ -482,12 +482,45 @@ func applyArrayByRefCallEffects(state arrayFlowState, proc sourceProcedure, call
 		// refinement will establish the successful branch without losing that
 		// relation to an unknown state here.
 		if _, conditional := ctx.arrayByRefConditionalAllocations[key][index]; conditional {
+			countIndex := ctx.arrayByRefConditionalAllocations[key][index]
+			countArgument := ""
+			for _, candidate := range bindings {
+				if candidate.parameterIndex == countIndex {
+					countArgument = directArrayArgumentName(candidate.text)
+					break
+				}
+			}
+			if countArgument != "" {
+				value := updated[name]
+				value.allocationCountSource = strings.ToLower(cleanIdentifier(countArgument))
+				updated[name] = value
+			}
 			return
 		}
 		if _, pairedLength := ctx.arrayByRefLengthAllocations[key][index]; pairedLength {
 			return
 		}
-		if arrayByRefParameterMayInvalidate(target, index, ctx, map[string]bool{}) {
+		// A conditional allocation that is not expressed by one of the
+		// specialized count/length contracts still joins an allocated and an
+		// unallocated normal-return path. Do not leave the caller's prior
+		// unallocated state untouched, because that would promote a later access
+		// to deterministic VBA249.
+		mayProduce := arrayByRefParameterMayProduceAllocated(target, index, ctx, map[string]bool{})
+		mayInvalidate := arrayByRefParameterMayInvalidate(target, index, ctx, map[string]bool{})
+		if mayProduce {
+			value, exists := updated[name]
+			if exists && value.kind == arrayAllocated && value.knownArray && !value.mayBeUnallocated && !mayInvalidate {
+				// A whole-array replacement such as `items() = Split(...)`
+				// can allocate an unallocated input, but it cannot make an
+				// already allocated input unallocated on a normal return. Preserve
+				// that caller proof while retaining the unknown join for inputs
+				// whose allocation is not established.
+				return
+			}
+			updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+			return
+		}
+		if mayInvalidate {
 			updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
 		}
 	}
@@ -549,11 +582,366 @@ func applyArrayConditionalByRefCallEffects(state arrayFlowState, proc sourceProc
 		if name == "" {
 			continue
 		}
-		if arrayByRefParameterMayInvalidate(target, binding.parameterIndex, ctx, map[string]bool{}) {
-			updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+		if !arrayByRefParameterMayInvalidate(target, binding.parameterIndex, ctx, map[string]bool{}) {
+			continue
 		}
+		// A conditional call can return without touching an unallocated output
+		// (for example, a queue read with no item).  Preserve that deterministic
+		// state when the callee has no path that can produce an allocated array;
+		// otherwise the caller would lose a valid VBA249 proof.  An allocated
+		// input still becomes unknown when the callee can erase it, and an
+		// unknown input is already conservative.
+		mayProduce := arrayByRefParameterMayProduceAllocated(target, binding.parameterIndex, ctx, map[string]bool{})
+		if value, exists := updated[name]; exists && value.kind == arrayUnallocated && !mayProduce {
+			continue
+		}
+		if value, exists := updated[name]; exists && value.kind == arrayUnallocated && arrayByRefPriorCallProvesUnallocatedMemberOutput(proc, call, name, target, binding.parameterIndex, ctx) {
+			continue
+		}
+		updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
 	}
 	return updated
+}
+
+// arrayByRefPriorCallProvesUnallocatedMemberOutput preserves a caller-side
+// proof when a preceding ByRef call copied the same unallocated array into the
+// member later returned by the conditional helper. The relation is deliberately
+// narrow: both assignments must use the same member expression and the
+// producer must not have a path that allocates its ByRef parameter.
+func arrayByRefPriorCallProvesUnallocatedMemberOutput(caller sourceProcedure, call procedureir.CallSite, argumentName string, target sourceProcedure, parameterIndex int, ctx analysisContext) bool {
+	wantMember := arrayByRefOutputMemberExpression(target, parameterIndex)
+	if wantMember == "" {
+		return false
+	}
+	for producerCall := range caller.Calls.All() {
+		if producerCall.ID == call.ID || producerCall.Range.StartLine >= call.Range.StartLine || !arrayCallPassesDirectArrayArgument(caller, producerCall, argumentName) {
+			continue
+		}
+		if caller.Graph != nil && !arrayStatementDominatesCall(caller, producerCall.StatementID, producerCall.Range.StartLine, call) {
+			continue
+		}
+		producerKey, producer, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, producerCall)
+		if !resolved {
+			continue
+		}
+		bindings, mapped := arrayCallArgumentBindings(caller, producer, producerCall)
+		if !mapped {
+			continue
+		}
+		for _, binding := range bindings {
+			if directArrayArgumentName(binding.text) != strings.ToLower(cleanIdentifier(argumentName)) || binding.parameterIndex < 0 || binding.parameterIndex >= producer.Params.Len() || !parameterIsByRefArray(producer.Params.valueAt(binding.parameterIndex)) {
+				continue
+			}
+			if arrayByRefMemberAssignmentFromParameter(producer, binding.parameterIndex) != wantMember {
+				continue
+			}
+			if ctx.arrayByRefAllocations[producerKey][binding.parameterIndex] || arrayByRefParameterMayProduceAllocated(producer, binding.parameterIndex, ctx, map[string]bool{}) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func arrayByRefOutputMemberExpression(proc sourceProcedure, parameterIndex int) string {
+	if parameterIndex < 0 || parameterIndex >= proc.Params.Len() {
+		return ""
+	}
+	want := strings.ToLower(cleanIdentifier(proc.Params.valueAt(parameterIndex).Name))
+	member := ""
+	for statement := range proc.Statements.All() {
+		lhs, rhs, indexed, ok := arrayByRefRawAssignment(statement.Text)
+		if !ok || indexed || !strings.EqualFold(cleanIdentifier(lhs), want) || !strings.Contains(rhs, ".") || !strings.Contains(rhs, "(") {
+			continue
+		}
+		candidate := canonicalArrayBoundExpression(strings.ToLower(rhs))
+		if member != "" && member != candidate {
+			return ""
+		}
+		member = candidate
+	}
+	return member
+}
+
+func arrayByRefMemberAssignmentFromParameter(proc sourceProcedure, parameterIndex int) string {
+	if parameterIndex < 0 || parameterIndex >= proc.Params.Len() {
+		return ""
+	}
+	want := strings.ToLower(cleanIdentifier(proc.Params.valueAt(parameterIndex).Name))
+	member := ""
+	for statement := range proc.Statements.All() {
+		lhs, rhs, indexed, ok := arrayByRefRawAssignment(statement.Text)
+		if !ok || !indexed || !strings.Contains(lhs, ".") || !strings.Contains(lhs, "(") || !strings.EqualFold(cleanIdentifier(rhs), want) {
+			continue
+		}
+		candidate := canonicalArrayBoundExpression(strings.ToLower(lhs))
+		if member != "" && member != candidate {
+			return ""
+		}
+		member = candidate
+	}
+	return member
+}
+
+func arrayByRefRawAssignment(text string) (lhs, rhs string, indexed, ok bool) {
+	trimmed := strings.TrimSpace(text)
+	for _, prefix := range []string{"set ", "let "} {
+		if strings.HasPrefix(strings.ToLower(trimmed), prefix) {
+			trimmed = strings.TrimSpace(trimmed[len(prefix):])
+			break
+		}
+	}
+	for i := 0; i < len(trimmed); i++ {
+		if trimmed[i] != '=' || i > 0 && (trimmed[i-1] == '<' || trimmed[i-1] == '>' || trimmed[i-1] == '=') {
+			continue
+		}
+		lhs = strings.TrimSpace(trimmed[:i])
+		rhs = strings.TrimSpace(trimmed[i+1:])
+		if lhs == "" || rhs == "" || strings.HasPrefix(strings.ToLower(lhs), "if ") {
+			return "", "", false, false
+		}
+		open := firstParenOutsideString(lhs)
+		if open < 0 {
+			return lhs, rhs, false, true
+		}
+		close := matchingParen(lhs, open)
+		wholeArray := close == len(lhs)-1 && close > open && strings.TrimSpace(lhs[open+1:close]) == ""
+		return lhs, rhs, !wholeArray, true
+	}
+	return "", "", false, false
+}
+
+// arrayByRefParameterMayProduceAllocated reports whether a ByRef-array
+// parameter can be allocated on any normal-return path.  This is intentionally
+// a possibility query, not an allocation summary: the latter requires an
+// allocation on every normal path and is too strong for a conditional call
+// header where both the success and no-result paths are joined.
+func arrayByRefParameterMayProduceAllocated(proc sourceProcedure, parameterIndex int, ctx analysisContext, visiting map[string]bool) bool {
+	if parameterIndex < 0 || parameterIndex >= proc.Params.Len() || !parameterIsByRefArray(proc.Params.valueAt(parameterIndex)) {
+		return true
+	}
+	key := strings.ToLower(arrayProcedureKey(proc)) + "#produce#" + strconv.Itoa(parameterIndex)
+	if visiting[key] {
+		return false
+	}
+	visiting[key] = true
+	defer delete(visiting, key)
+
+	name := strings.ToLower(cleanIdentifier(proc.Params.valueAt(parameterIndex).Name))
+	state := arrayByRefProcedureInitialState(proc)
+	statements := make([]procedureir.Statement, 0, proc.Statements.Len())
+	for statement := range proc.Statements.All() {
+		statements = append(statements, statement)
+	}
+	sort.SliceStable(statements, func(i, j int) bool {
+		if statements[i].Range.StartLine != statements[j].Range.StartLine {
+			return statements[i].Range.StartLine < statements[j].Range.StartLine
+		}
+		return statements[i].ID < statements[j].ID
+	})
+	for _, statement := range statements {
+		if !arrayByRefStatementReachable(proc, statement) {
+			continue
+		}
+		if statement.Recovered {
+			return true
+		}
+		for _, part := range splitRangeValueSourceStatements(statement.Text) {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if arrayByRefStatementMayProduceAllocated(part, name, state, ctx, proc) {
+				return true
+			}
+			arrayByRefUpdateProductionState(part, state, ctx, proc)
+		}
+		mayProduce := false
+		forEachArrayCallAtLine(proc, statement.Range.StartLine, func(nested procedureir.CallSite) {
+			if mayProduce || arrayByRefCallIsReadOnly(nested) || !arrayCallPassesDirectArrayArgument(proc, nested, name) {
+				return
+			}
+			nestedKey, nestedTarget, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, nested)
+			if !resolved {
+				mayProduce = true
+				return
+			}
+			bindings, mapped := arrayCallArgumentBindings(proc, nestedTarget, nested)
+			if !mapped {
+				mayProduce = true
+				return
+			}
+			for _, binding := range bindings {
+				if directArrayArgumentName(binding.text) != name || binding.parameterIndex < 0 || binding.parameterIndex >= nestedTarget.Params.Len() || !parameterIsByRefArray(nestedTarget.Params.valueAt(binding.parameterIndex)) {
+					continue
+				}
+				if ctx.arrayByRefAllocations[nestedKey][binding.parameterIndex] || arrayByRefParameterMayProduceAllocated(nestedTarget, binding.parameterIndex, ctx, visiting) {
+					mayProduce = true
+					return
+				}
+			}
+		}, ctx.arrayStats)
+		if mayProduce {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayByRefProcedureInitialState(proc sourceProcedure) arrayFlowState {
+	state := arrayFlowState{}
+	for declaration := range proc.Declarations.All() {
+		if !declaration.IsArray && declaration.ValueShape != procedureir.ValueShapeFixedArray && declaration.ValueShape != procedureir.ValueShapeDynamicArray {
+			continue
+		}
+		value := arrayValue{kind: arrayUnallocated, knownArray: true, origin: arrayOriginLocal}
+		if declaration.ValueShape == procedureir.ValueShapeFixedArray {
+			value.kind = arrayAllocated
+		}
+		state[strings.ToLower(cleanIdentifier(declaration.Name))] = value
+	}
+	for parameter := range proc.Params.All() {
+		if !parameterIsByRefArray(parameter) && !parameter.ParamArray && parameter.ValueShape != procedureir.ValueShapeFixedArray && parameter.ValueShape != procedureir.ValueShapeDynamicArray {
+			continue
+		}
+		value := arrayValue{kind: arrayUnknown, knownArray: true, origin: arrayOriginLocal}
+		if parameter.ParamArray {
+			value.kind = arrayAllocated
+		}
+		state[strings.ToLower(cleanIdentifier(parameter.Name))] = value
+	}
+	return state
+}
+
+func arrayByRefStatementMayProduceAllocated(text, name string, state arrayFlowState, ctx analysisContext, proc sourceProcedure) bool {
+	if _, body, ok := arrayIfThenParts(text); ok && strings.TrimSpace(body) != "" {
+		thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+		branches := []string{thenBody}
+		if hasElse {
+			branches = append(branches, elseBody)
+		}
+		for _, branch := range branches {
+			for _, part := range splitRangeValueSourceStatements(branch) {
+				if arrayByRefStatementMayProduceAllocated(strings.TrimSpace(part), name, state, ctx, proc) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if match := arrayRedimRe.FindStringSubmatch(strings.TrimSpace(text)); len(match) > 0 {
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if !direct || !strings.EqualFold(cleanIdentifier(redim.name), name) {
+				continue
+			}
+			if strings.TrimSpace(match[1]) == "" {
+				return true
+			}
+			// ReDim Preserve cannot allocate an unallocated input. It either
+			// retains an allocated SAFEARRAY or raises before a normal return,
+			// so it must not widen a caller's unallocated state to unknown.
+			// The caller-side source-order proof separately enforces the required
+			// allocated input for a successful Preserve operation.
+			return false
+		}
+	}
+	if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(cleanIdentifier(lhs), name) {
+		return arrayByRefExpressionMayProduceAllocated(rhs, state, ctx, proc)
+	}
+	return false
+}
+
+func arrayByRefSuccessfulVariantAssignment(proc sourceProcedure, targetName, rhs string, variables map[string]arrayVariable) bool {
+	targetName = strings.ToLower(cleanIdentifier(targetName))
+	if targetName == "" || strings.EqualFold(strings.TrimSpace(rhs), "empty") || strings.EqualFold(strings.TrimSpace(rhs), "nothing") {
+		return false
+	}
+	target, targetKnown := variables[targetName]
+	if !targetKnown || !target.isArray || !target.isVariant {
+		return false
+	}
+	for parameter := range proc.Params.All() {
+		if !parameterIsByRefArray(parameter) || !strings.EqualFold(cleanIdentifier(parameter.Name), targetName) {
+			continue
+		}
+		sourceName := directArrayArgumentName(rhs)
+		if sourceName == "" {
+			return false
+		}
+		source, ok := variables[strings.ToLower(cleanIdentifier(sourceName))]
+		return ok && source.isVariant
+	}
+	return false
+}
+
+func arrayByRefExpressionMayProduceAllocated(rhs string, state arrayFlowState, ctx analysisContext, proc sourceProcedure) bool {
+	rhs = strings.TrimSpace(rhs)
+	if strings.EqualFold(rhs, "empty") || strings.EqualFold(rhs, "nothing") {
+		return false
+	}
+	if source := directArrayArgumentName(rhs); source != "" {
+		value, exists := state[strings.ToLower(cleanIdentifier(source))]
+		if exists && value.kind == arrayUnallocated && value.knownArray {
+			return false
+		}
+		if exists {
+			return true
+		}
+	}
+	value, known := arrayExpressionStateForProcedure(rhs, state, ctx, proc)
+	if known {
+		if value.kind == arrayUnallocated && value.knownArray {
+			return false
+		}
+		return true
+	}
+	// An unresolved whole-array expression may be an allocated result. The
+	// caller must not retain a deterministic unallocated proof across it.
+	return true
+}
+
+func arrayByRefUpdateProductionState(text string, state arrayFlowState, ctx analysisContext, proc sourceProcedure) {
+	if match := arrayRedimRe.FindStringSubmatch(strings.TrimSpace(text)); len(match) > 0 {
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if direct {
+				name := strings.ToLower(cleanIdentifier(redim.name))
+				if _, exists := state[name]; exists {
+					value := state[name]
+					value.kind = arrayAllocated
+					value.knownArray = true
+					state[name] = value
+				}
+			}
+		}
+	}
+	if match := arrayEraseRe.FindStringSubmatch(strings.TrimSpace(text)); len(match) == 2 {
+		for _, target := range splitArgs(match[1]) {
+			name := strings.ToLower(cleanIdentifier(strings.TrimSpace(target)))
+			if _, exists := state[name]; exists {
+				state[name] = arrayValue{kind: arrayUnallocated, knownArray: true, origin: arrayOriginLocal}
+			}
+		}
+	}
+	if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed {
+		name := strings.ToLower(cleanIdentifier(lhs))
+		if _, exists := state[name]; !exists {
+			return
+		}
+		if source := directArrayArgumentName(rhs); source != "" {
+			if value, sourceExists := state[strings.ToLower(cleanIdentifier(source))]; sourceExists {
+				state[name] = value
+				return
+			}
+		}
+		if value, known := arrayExpressionStateForProcedure(rhs, state, ctx, proc); known {
+			state[name] = value
+			return
+		}
+		state[name] = arrayValue{kind: arrayUnknown, knownArray: true, origin: arrayOriginUnknown}
+	}
 }
 
 // arrayByRefParameterMayInvalidate reports whether a private ByRef-array
@@ -1665,6 +2053,25 @@ func forEachArrayCallAtLine(proc sourceProcedure, line int, visit func(procedure
 		if len(stats) > 0 {
 			stats[0].addCallLineIndexHit()
 		}
+		proc.Facts.forEachCallAtLine(line, visit)
+		return
+	}
+	if visit == nil {
+		return
+	}
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Range.StartLine != line {
+			continue
+		}
+		visit(call)
+	}
+}
+
+// forEachArrayCallAtLineUncounted is used by source-level proof helpers that
+// already operate on a bounded call set. Those helpers must not inflate the
+// interprocedural flow telemetry for every empty source line.
+func forEachArrayCallAtLineUncounted(proc sourceProcedure, line int, visit func(procedureir.CallSite)) {
+	if proc.Facts != nil && proc.Facts.callsByLineBuilt {
 		proc.Facts.forEachCallAtLine(line, visit)
 		return
 	}

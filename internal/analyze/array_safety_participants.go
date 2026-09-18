@@ -604,7 +604,8 @@ func moduleDeclarationForName(moduleDecls map[string]sourceDeclaration, name str
 }
 
 func procedureUsesModuleArray(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
-	if len(moduleDecls) == 0 {
+	arrayNames := moduleArrayDeclarationNames(moduleDecls)
+	if len(arrayNames) == 0 {
 		return false
 	}
 	for access := range proc.Accesses.All() {
@@ -617,6 +618,11 @@ func procedureUsesModuleArray(file parsedFile, proc sourceProcedure, moduleDecls
 	}
 	for statement := range proc.Statements.All() {
 		text := strings.TrimSpace(statement.Text)
+		for _, name := range arrayNames {
+			if moduleArrayIndexedIdentifier(text, name) {
+				return true
+			}
+		}
 		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 && strings.TrimSpace(match[1]) == "" {
 			for _, clause := range splitArgs(match[2]) {
 				redim, direct := parseDirectArrayRedimClause(clause)
@@ -642,10 +648,7 @@ func procedureUsesModuleArray(file parsedFile, proc sourceProcedure, moduleDecls
 		return false
 	}
 	if facts := file.moduleAnalysisFacts(); facts != nil {
-		for name, declaration := range moduleDecls {
-			if !declaration.Array || declaration.Parameter {
-				continue
-			}
+		for _, name := range arrayNames {
 			used := false
 			facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
 				if operation.Line >= proc.StartLine && operation.Line <= proc.EndLine {
@@ -661,10 +664,14 @@ func procedureUsesModuleArray(file parsedFile, proc sourceProcedure, moduleDecls
 }
 
 func procedureHasDirectModuleArrayOperation(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
+	arrayNames := moduleArrayDeclarationNames(moduleDecls)
+	if len(arrayNames) == 0 {
+		return false
+	}
 	for statement := range proc.Statements.All() {
 		text := strings.TrimSpace(statement.Text)
-		for name, declaration := range moduleDecls {
-			if declaration.Array && !declaration.Parameter && moduleArrayIndexedIdentifier(text, name) {
+		for _, name := range arrayNames {
+			if moduleArrayIndexedIdentifier(text, name) {
 				return true
 			}
 		}
@@ -705,6 +712,20 @@ func hasModuleArrayDeclaration(moduleDecls map[string]sourceDeclaration) bool {
 		}
 	}
 	return false
+}
+
+func moduleArrayDeclarationNames(moduleDecls map[string]sourceDeclaration) []string {
+	names := make([]string, 0)
+	for name, declaration := range moduleDecls {
+		if !declaration.Array || declaration.Parameter {
+			continue
+		}
+		name = cleanIdentifier(name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func procedureHasDirectModuleArrayMutation(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {

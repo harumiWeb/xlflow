@@ -209,6 +209,12 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			continue
 		}
 		value := state[strings.ToLower(use.name)]
+		if value.objectValue {
+			// A Variant assigned with Set contains an object reference. Its
+			// parenthesized syntax is a default-member call, not an array
+			// element access, so VBA227 must remain silent here.
+			continue
+		}
 		if variable, ok := variables[strings.ToLower(use.name)]; ok && variable.isVariant && !variable.isArray && !value.knownArray && !value.mayBeUnallocated {
 			continue
 		}
@@ -280,7 +286,14 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			}
 		}
 		if !indexed {
-			if value, known := arrayDictionaryMemberExpressionState(file, proc, line, rhs, variables, ctx); known {
+			if variable, exists := variables[name]; exists && variable.isVariant && strings.HasPrefix(lower, "set ") {
+				state[name] = arrayValue{kind: arrayUnknown, objectValue: true, origin: arrayOriginUnknown}
+			} else if arrayByRefSuccessfulVariantAssignment(proc, name, rhs, variables) {
+				// Assigning a Variant to a Variant ByRef array can return normally
+				// only when the Variant contains a compatible SAFEARRAY. Keep this
+				// proof narrow: typed arrays still require their own bound evidence.
+				state[name] = arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal}
+			} else if value, known := arrayDictionaryMemberExpressionState(file, proc, line, rhs, variables, ctx); known {
 				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 					state[name] = value
 				}

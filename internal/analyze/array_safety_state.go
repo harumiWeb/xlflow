@@ -178,6 +178,42 @@ func positiveSelectCaseValue(statement *procedureir.Statement) bool {
 	return err == nil && value > 0
 }
 
+// applyArrayConditionalAllocationCaseState mirrors the CFG refinement for the
+// source-order runtime compound scanner. The scanner walks Select Case
+// branches without a CFG edge, so it needs the same positive-case allocation
+// proof explicitly.
+func applyArrayConditionalAllocationCaseState(state arrayFlowState, selectText, caseText string) arrayFlowState {
+	selectExpression := selectCaseExpression(selectText)
+	if strings.TrimSpace(selectExpression) == "" || !arrayPositiveCaseValue(caseText) {
+		return state
+	}
+	updated := state
+	cloned := false
+	for name, value := range state {
+		if value.allocationCountSource == "" || !arrayCountExpressionMatches(selectExpression, value.allocationCountSource) {
+			continue
+		}
+		if !cloned {
+			updated = cloneArrayState(state)
+			cloned = true
+		}
+		value.kind = arrayAllocated
+		value.knownArray = true
+		updated[name] = value
+	}
+	return updated
+}
+
+func arrayPositiveCaseValue(text string) bool {
+	line := strings.TrimSpace(strings.SplitN(text, "\n", 2)[0])
+	match := arrayPositiveCaseRe.FindStringSubmatch(line)
+	if len(match) != 2 {
+		return false
+	}
+	value, err := strconv.Atoi(match[1])
+	return err == nil && value > 0
+}
+
 func arrayCountComparison(text string) (lhs, operator, literal string, ok bool) {
 	text = strings.TrimSpace(text)
 	if strings.HasPrefix(strings.ToLower(text), "if ") {
@@ -457,7 +493,19 @@ func applyArrayForBoundState(state arrayFlowState, statement *procedureir.Statem
 	if statement == nil || edge.Kind != vbacfg.EdgeLoopBody {
 		return state
 	}
-	text := strings.TrimSpace(statement.Text)
+	return applyArrayForBoundHeaderState(state, statement.Text, variables)
+}
+
+// applyArrayForBoundHeaderState applies the same facts that are normally
+// attached to a CFG loop-body edge while a source-order block is being
+// scanned. A compound For block can contain its header and body in one
+// physical range, so waiting for the outgoing edge would let the body see the
+// pre-header state.
+func applyArrayForBoundHeaderState(state arrayFlowState, text string, variables map[string]arrayVariable) arrayFlowState {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(strings.ToLower(text), "for ") {
+		return state
+	}
 	if newline := strings.IndexAny(text, "\r\n"); newline >= 0 {
 		text = strings.TrimSpace(text[:newline])
 	}
@@ -1186,6 +1234,7 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 	out := arrayValue{
 		kind:                               left.kind,
 		knownArray:                         left.knownArray,
+		objectValue:                        left.objectValue,
 		mayBeEmpty:                         left.mayBeEmpty,
 		mayBeUnallocated:                   left.mayBeUnallocated,
 		resumeNextFailureFlagSource:        left.resumeNextFailureFlagSource,
@@ -1211,6 +1260,9 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 	}
 	if left.knownArray != right.knownArray {
 		out.knownArray = false
+	}
+	if left.objectValue != right.objectValue {
+		out.objectValue = false
 	}
 	if left.conditionalAllocationSource != right.conditionalAllocationSource {
 		if left.conditionalAllocationSource == "" {
@@ -1321,7 +1373,7 @@ func arrayStateEqual(left, right arrayFlowState) bool {
 	}
 	for key, l := range left {
 		r, ok := right[key]
-		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.mayBeUnallocated != r.mayBeUnallocated || l.resumeNextFailureFlagSource != r.resumeNextFailureFlagSource || l.resumeNextFailureFlagSuccessOnTrue != r.resumeNextFailureFlagSuccessOnTrue || l.resumeBoundsFailurePossible != r.resumeBoundsFailurePossible || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.allocationFlagSource != r.allocationFlagSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.returnDescriptorSourceParameter != r.returnDescriptorSourceParameter || l.returnDescriptorStartParameter != r.returnDescriptorStartParameter || l.returnDescriptorLengthParameter != r.returnDescriptorLengthParameter || l.returnDescriptorLowerParameter != r.returnDescriptorLowerParameter || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
+		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.objectValue != r.objectValue || l.mayBeEmpty != r.mayBeEmpty || l.mayBeUnallocated != r.mayBeUnallocated || l.resumeNextFailureFlagSource != r.resumeNextFailureFlagSource || l.resumeNextFailureFlagSuccessOnTrue != r.resumeNextFailureFlagSuccessOnTrue || l.resumeBoundsFailurePossible != r.resumeBoundsFailurePossible || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.allocationFlagSource != r.allocationFlagSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.returnDescriptorSourceParameter != r.returnDescriptorSourceParameter || l.returnDescriptorStartParameter != r.returnDescriptorStartParameter || l.returnDescriptorLengthParameter != r.returnDescriptorLengthParameter || l.returnDescriptorLowerParameter != r.returnDescriptorLowerParameter || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
 			return false
 		}
 	}

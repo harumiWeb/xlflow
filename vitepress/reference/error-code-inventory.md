@@ -168,6 +168,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `char_position`
 - `check_dialog`
 - `check_failed`
+- `class_terminate`
 - `classes_dir`
 - `clean_up`
 - `cleanup_confirmed`

@@ -7406,6 +7406,27 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227DoesNotTreatSetVariantObjectDefaultMemberAsArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  Set values = CreateObject("Scripting.Dictionary")
+  values("id") = 1
+  Debug.Print values("id")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an object default-member call on a Set Variant should not be treated as array access: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227TreatsInlineDimReDimAsAllocation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -11739,6 +11760,91 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesCoupledModuleArrayBoundsGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ParallelArrays.cls", `Attribute VB_Name = "ParallelArrays"
+Option Explicit
+Private keys() As Variant
+Private items() As Variant
+
+Public Sub Run(ByVal index As Long)
+    If index >= 0 And index <= UBound(keys) Then
+        items(index) = "updated"
+    End If
+End Sub
+
+Private Sub Initialize()
+    ReDim keys(0 To 1)
+    ReDim items(0 To 1)
+End Sub
+
+Private Sub Clear()
+    Erase keys
+    Erase items
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 7 || finding.Line == 8 {
+			t.Fatalf("a successful UBound on a source-owned parallel array must prove its coupled array allocated: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA227PropagatesObjectBackedModuleSetupToConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Renderer.cls", `Attribute VB_Name = "Renderer"
+Option Explicit
+Private hostForm As Object
+Private sceneReady As Boolean
+Private values() As Long
+
+Public Sub Attach(ByVal formInstance As Object)
+    Set hostForm = formInstance
+    ReDim values(0 To 1)
+End Sub
+
+Public Sub Build()
+    If hostForm Is Nothing Then
+        Exit Sub
+    End If
+    sceneReady = True
+End Sub
+
+Private Sub Render()
+    If Not sceneReady Then
+        Exit Sub
+    End If
+    ConsumeValues
+End Sub
+
+Private Sub ConsumeValues()
+    Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+    Build
+    Render
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze = analyzeConfigForRules("VBA227")
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an object-backed setup followed by a ready guard should prove the module array for its consumer: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227TracksDictionarySnapshotAfterAdds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -13356,6 +13462,77 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227KeepsAllocatedUDTArrayThroughPreserveHelpers(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Type tFindNode
+  initialised As Boolean
+End Type
+
+Private Sub stackPushV(ByRef stack() As tFindNode, ByRef index As Long)
+  Dim ub As Long: ub = UBound(stack)
+  If index > ub Then ReDim Preserve stack(0 To ub + 1)
+  stack(index).initialised = True
+  index = index + 1
+End Sub
+
+Private Function stackPopV(ByRef stack() As tFindNode, ByRef index As Long) As Boolean
+  Dim size As Long: size = UBound(stack) + 1
+  If index < size / 3 Then ReDim Preserve stack(0 To CLng(size / 2))
+  index = index - 1
+  stackPopV = stack(index).initialised
+End Function
+
+Public Sub Run()
+  Dim stack() As tFindNode
+  ReDim stack(0 To 0)
+  Dim length As Long: length = 1
+  Dim i As Long
+  For i = 1 To 2
+    Call stackPushV(stack, length)
+    If stackPopV(stack, length) Then Debug.Print "ok"
+  Next i
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an allocated UDT array must remain allocated through private ReDim Preserve helpers: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsAllocatedArrayThroughPotentialByRefReplacement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub Refill(ByRef items() As String, ByVal shouldRefill As Boolean)
+  If shouldRefill Then items() = Split("a,b", ",")
+  Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  Dim items() As String
+  ReDim items(0 To 0)
+  Refill items, False
+  Refill items, True
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an allocated array must remain allocated through a private helper that may replace it: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesClassModuleArrayThroughLoopPrivateByRefHelper(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -14497,6 +14674,9 @@ func TestArrayByRefParameterMayInvalidateDetectsErase(t *testing.T) {
 	}})
 	if arrayByRefParameterMayInvalidate(proc, 0, analysisContext{}, map[string]bool{}) {
 		t.Fatal("ReDim Preserve of a ByRef array parameter must preserve an allocated caller state")
+	}
+	if arrayByRefParameterMayProduceAllocated(proc, 0, analysisContext{}, map[string]bool{}) {
+		t.Fatal("ReDim Preserve of a ByRef array parameter must not turn an unallocated caller state into an allocated one")
 	}
 	proc.Statements = newReadOnlySpan([]procedureir.Statement{{
 		ID: 1, Kind: procedureir.StatementUnknown, Text: "If False Then Erase items",
@@ -15960,6 +16140,43 @@ End Sub`)
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("a module ready guard should prove a ByRef consumer argument: %+v", got)
 	}
+}
+
+func TestAnalyzerVBA249OwnsResumeNextAfterFailedModulePreserve(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Form_UpdateLinks.cls", `Attribute VB_Name = "Form_UpdateLinks"
+Option Explicit
+
+Private failed() As String
+
+Private Function UpdateLinks(ByVal shouldFail As Boolean) As Boolean
+  On Error GoTo ErrTrap
+  If shouldFail Then
+    ReDim Preserve failed(1)
+    failed(1) = "x"
+  End If
+  UpdateLinks = True
+  Exit Function
+ErrTrap:
+  Resume Next
+End Function
+
+Public Sub Run()
+  UpdateLinks True
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA249") {
+		if finding.Procedure == "UpdateLinks" && finding.Line == 10 {
+			return
+		}
+	}
+	t.Fatalf("a failed module-array ReDim Preserve followed by Resume Next must retain the deterministic indexed access: %+v", findingsByCode(findings, "VBA249"))
 }
 
 func TestAnalyzerVBA227DoesNotTrustExternallySetModuleReadyGuard(t *testing.T) {
@@ -17757,6 +17974,49 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("a module buffer guarded by its recorded capacity should be allocated: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsModuleCapacityWriteBeforeGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private tokens() As Long
+Private tokenCount As Long
+
+Private Sub Grow(ByVal required As Long)
+  ReDim tokens(0 To required - 1)
+  ReDim Preserve tokens(0 To required - 1)
+End Sub
+
+Private Function ReadToken(ByVal required As Long) As Long
+  Dim newCapacity As Long
+  If required <= tokenCount Then Exit Function
+  newCapacity = tokenCount
+  tokenCount = newCapacity
+  If newCapacity = 0 Then
+    newCapacity = 32
+    ReDim tokens(0 To newCapacity - 1)
+    tokenCount = newCapacity
+    Exit Function
+  End If
+  ReadToken = tokens(0)
+End Function
+
+Public Sub Run()
+  Debug.Print ReadToken(1)
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "ReadToken" || got[0].Line != 21 {
+		t.Fatalf("a capacity write before the zero guard must not prove the module array allocated: all findings=%+v", findings)
 	}
 }
 
@@ -21348,6 +21608,47 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("a positive-length array factory return should establish a non-empty array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesSingleTermLessThanOneModuleArrayGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "PositiveOnly.cls", `VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "PositiveOnly"
+Option Explicit
+Private values() As Long
+Private valueCount As Long
+
+Private Sub LoadValues()
+  Erase values
+  valueCount = 0
+  ReDim values(0 To 0)
+  valueCount = 1
+End Sub
+
+Private Function ValueAt(ByVal index As Long) As Long
+  If valueCount < 1 Then Exit Function
+  ValueAt = values(index)
+End Function
+
+Public Sub Run()
+  LoadValues
+  Debug.Print ValueAt(0)
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a single-term count < 1 guard should prove the module array allocated: %+v", got)
 	}
 }
 

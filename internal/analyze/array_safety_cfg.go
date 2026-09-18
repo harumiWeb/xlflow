@@ -9,14 +9,6 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
-// walkArrayCFG owns the common allocation-state worklist used by both the
-// procedure findings pass and the array-return summary pass. Exceptional and
-// uncertain edges retain the predecessor's input state because the statement
-// may not have completed before control leaves the block.
-func walkArrayCFG(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState) {
-	walkArrayCFGWorklist(graph, lines, initial, visit, nil, nil, false)
-}
-
 func walkArrayCFGWithEdgesStats(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stats *arrayInterproceduralStats) {
 	walkArrayCFGWithStopStats(graph, lines, initial, visit, edgeState, nil, stats)
 }
@@ -76,10 +68,6 @@ func arrayCFGBlockOwnsNestedStatements(block vbacfg.Block) bool {
 
 func walkArrayCFGWithSourceLinesReliableStatsAndBlock(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, visitBlock arrayCFGBlockVisit, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, reliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool, stats *arrayInterproceduralStats) {
 	walkArrayCFGWorklistStatsWithReliableAndBlock(graph, lines, initial, visit, visitBlock, edgeState, nil, true, stats, reliableExceptional)
-}
-
-func walkArrayCFGWorklist(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
-	walkArrayCFGWorklistStats(graph, lines, initial, visit, edgeState, stop, sourceLines, nil)
 }
 
 func walkArrayCFGWorklistStats(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool, stats *arrayInterproceduralStats) {
@@ -297,6 +285,10 @@ type arrayCFGWorklistLane struct {
 	// the state to propagate to outgoing edges.  In source-line mode it is
 	// called once for each physical line owned by the block.
 	Visit func(text string, line int, in arrayFlowState) arrayFlowState
+	// SourceLineVisit optionally specializes Visit for source-line mode. This
+	// keeps a lane's historical compound-statement behavior intact while a
+	// selected statement kind receives physical source-order handling.
+	SourceLineVisit func(text string, line int, in arrayFlowState) arrayFlowState
 
 	// EdgeState applies a lane-specific normal-edge refinement (guards,
 	// Select Case facts, module configuration, and so on). It is not called for
@@ -316,6 +308,10 @@ type arrayCFGWorklistLane struct {
 	// SourceLines restores physical source order inside a CFG block.  False
 	// retains the historical single-statement block semantics.
 	SourceLines bool
+	// SourceLinesFor selectively restores physical source order for compound
+	// blocks while retaining historical block semantics for other statement
+	// kinds whose edge-specific path model is intentionally conservative.
+	SourceLinesFor func(statement *procedureir.Statement) bool
 }
 
 // walkArrayCFGCombined advances multiple array policies with one deterministic
@@ -432,8 +428,16 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 			in = cloneArrayState(in)
 			out := cloneArrayState(in)
 			stopped := false
+			sourceLines := lane.SourceLines
+			if lane.SourceLinesFor != nil && block.Statement != nil {
+				sourceLines = lane.SourceLinesFor(block.Statement)
+			}
+			sourceVisit := lane.Visit
+			if sourceLines && lane.SourceLineVisit != nil {
+				sourceVisit = lane.SourceLineVisit
+			}
 			if block.Statement != nil {
-				if !lane.SourceLines {
+				if !sourceLines {
 					line := block.Statement.Range.StartLine
 					if line == 0 {
 						line = block.Range.StartLine
@@ -455,19 +459,22 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 					if end < start {
 						end = start
 					}
-					if (block.Statement.Kind == procedureir.StatementSelect || block.Statement.Kind == procedureir.StatementCase) && start >= 1 && start <= len(lines) {
-						// Select Case and Case own separate CFG blocks for each
-						// branch; do not scan all clause lines before applying the
-						// edge fact.
+					caseHeaderOnly := block.Statement.Kind == procedureir.StatementCase && (lane.SourceLinesFor == nil || !sourceLines)
+					if (block.Statement.Kind == procedureir.StatementSelect || caseHeaderOnly) && start >= 1 && start <= len(lines) {
+						// Select Case owns a separate CFG block. Historical source-line
+						// lanes also keep Case at its header so their edge-local branch
+						// facts are applied by the following CFG blocks. A lane that
+						// explicitly opts into SourceLinesFor (the runtime projection)
+						// may scan the Case body in source order.
 						text := normalizedCodeLine(lines[start-1])
-						out = lane.Visit(text, start, out)
+						out = sourceVisit(text, start, out)
 						stopped = lane.Stop != nil && lane.Stop(text, start)
 					} else if start == end && start >= 1 && start <= len(lines) {
 						text := block.Statement.Text
 						if strings.TrimSpace(text) == "" {
 							text = normalizedCodeLine(lines[start-1])
 						}
-						out = lane.Visit(text, start, out)
+						out = sourceVisit(text, start, out)
 						stopped = lane.Stop != nil && lane.Stop(text, start)
 					} else if start >= 1 && end <= len(lines) {
 						for line := start; line <= end; line++ {
@@ -480,7 +487,7 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 							if strings.TrimSpace(text) == "" {
 								continue
 							}
-							out = lane.Visit(text, line, out)
+							out = sourceVisit(text, line, out)
 							if lane.Stop != nil && lane.Stop(text, line) {
 								stopped = true
 								break
@@ -491,7 +498,7 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 						if strings.TrimSpace(text) == "" && start >= 1 && start <= len(lines) {
 							text = normalizedCodeLine(lines[start-1])
 						}
-						out = lane.Visit(text, start, out)
+						out = sourceVisit(text, start, out)
 						stopped = lane.Stop != nil && lane.Stop(text, start)
 					}
 				}
@@ -504,7 +511,7 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 				next := out
 				if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain {
 					next = in
-					if lane.SourceLines && edge.Class == vbacfg.EdgeExceptional && lane.ReliableExceptional != nil && lane.ReliableExceptional(block.Statement, in, out) {
+					if sourceLines && edge.Class == vbacfg.EdgeExceptional && lane.ReliableExceptional != nil && lane.ReliableExceptional(block.Statement, in, out) {
 						next = out
 					}
 				} else if lane.EdgeState != nil {

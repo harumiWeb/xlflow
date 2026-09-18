@@ -321,20 +321,213 @@ func applyArrayModuleCapacityGuardBranch(state arrayFlowState, statement *proced
 		return state
 	}
 	guard, ok := arrayModuleCapacityGuardFor(file, proc, ctx, statement, variables, moduleDecls)
+	if ok {
+		return arrayModuleCapacityAllocatedState(state, guard.target)
+	}
+	preserveGuard, ok := arrayModulePreserveCapacityGuardFor(file, proc, statement, variables, moduleDecls)
 	if !ok {
 		return state
 	}
-	value, known := state[guard.target]
-	variable, variableKnown := variables[guard.target]
-	if !known || !variableKnown || !variable.isArray {
+	return arrayModuleCapacityAllocatedState(state, preserveGuard.target)
+}
+
+func arrayModuleCapacityAllocatedState(state arrayFlowState, target string) arrayFlowState {
+	value, known := state[target]
+	if !known {
 		return state
 	}
 	updated := cloneArrayState(state)
 	value.kind = arrayAllocated
 	value.knownArray = true
 	value.mayBeEmpty = false
-	updated[guard.target] = value
+	updated[target] = value
 	return updated
+}
+
+type arrayModulePreserveCapacityGuard struct {
+	target string
+}
+
+// arrayModulePreserveCapacityGuardFor recognizes a growth helper whose
+// existing nonzero capacity is the source-owned proof that a module array is
+// already allocated. The direct ReDim in the zero branch and the paired
+// capacity writes are required so an arbitrary scalar check cannot suppress a
+// real unallocated-array failure.
+func arrayModulePreserveCapacityGuardFor(file parsedFile, proc sourceProcedure, statement *procedureir.Statement, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration) (arrayModulePreserveCapacityGuard, bool) {
+	if statement == nil || statement.Kind != procedureir.StatementIf && statement.Kind != procedureir.StatementElseIf || statement.Condition == nil {
+		return arrayModulePreserveCapacityGuard{}, false
+	}
+	local, operator, literal, ok := arrayCountComparison(statement.Condition.Text)
+	if !ok || operator != "=" || literal != "0" {
+		return arrayModulePreserveCapacityGuard{}, false
+	}
+	local = strings.ToLower(cleanIdentifier(local))
+	localVariable, localKnown := variables[local]
+	if !localKnown || localVariable.isArray || localVariable.isVariant || localVariable.isObject || localVariable.parameter || !localVariable.knownScalar {
+		return arrayModulePreserveCapacityGuard{}, false
+	}
+
+	guardLine := statement.Range.StartLine
+	capacity := ""
+	for index := guardLine - 2; index >= max(0, proc.StartLine-1); index-- {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[index]))
+		if text == "" {
+			continue
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(text)
+		if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), local) {
+			return arrayModulePreserveCapacityGuard{}, false
+		}
+		capacity = strings.ToLower(cleanIdentifier(rhs))
+		break
+	}
+	if capacity == "" {
+		return arrayModulePreserveCapacityGuard{}, false
+	}
+	capacityDeclaration, capacityDeclared := moduleDecls[capacity]
+	if !capacityDeclared || capacityDeclaration.Array || capacityDeclaration.Object || capacityDeclaration.Parameter || !arrayKnownScalarType(capacityDeclaration.Type) || !arrayModuleReadyGuardSourceOwned(file, capacityDeclaration) {
+		return arrayModulePreserveCapacityGuard{}, false
+	}
+
+	target := ""
+	hasInitialRedim := false
+	hasCapacityWrite := false
+	hasExit := false
+	for child := range proc.Statements.All() {
+		if child.ParentID != statement.ID {
+			continue
+		}
+		switch child.Kind {
+		case procedureir.StatementElse, procedureir.StatementElseIf:
+			return arrayModulePreserveCapacityGuard{}, false
+		case procedureir.StatementReDim:
+			match := arrayRedimRe.FindStringSubmatch(strings.TrimSpace(child.Text))
+			if len(match) == 0 || strings.TrimSpace(match[1]) != "" {
+				continue
+			}
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if !direct {
+					continue
+				}
+				name := strings.ToLower(cleanIdentifier(redim.name))
+				declaration, declared := moduleDecls[name]
+				if !declared || !declaration.Array || declaration.Fixed || declaration.Parameter {
+					continue
+				}
+				if target != "" && target != name {
+					return arrayModulePreserveCapacityGuard{}, false
+				}
+				target = name
+				hasInitialRedim = true
+			}
+		case procedureir.StatementAssignment:
+			lhs, rhs, indexed, assigned := arrayAssignment(strings.TrimSpace(child.Text))
+			if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), capacity) && strings.EqualFold(cleanIdentifier(rhs), local) {
+				hasCapacityWrite = true
+			}
+		case procedureir.StatementExit:
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(child.Text)), "exit ") {
+				hasExit = true
+			}
+		}
+	}
+	if target == "" || !hasInitialRedim || !hasCapacityWrite || !hasExit {
+		return arrayModulePreserveCapacityGuard{}, false
+	}
+
+	if !arrayModulePreserveCapacityLifecycleSafe(file, proc, target, capacity, local, guardLine, moduleDecls) {
+		return arrayModulePreserveCapacityGuard{}, false
+	}
+	return arrayModulePreserveCapacityGuard{target: target}, true
+}
+
+func arrayModulePreserveCapacityLifecycleSafe(file parsedFile, proc sourceProcedure, target, capacity, local string, guardLine int, moduleDecls map[string]sourceDeclaration) bool {
+	facts := file.moduleAnalysisFacts()
+	if facts == nil {
+		return false
+	}
+	plainRedim := false
+	preserveRedim := false
+	sameProcedure := func(owner sourceProcedure) bool {
+		return owner.StartByte == proc.StartByte && owner.StartLine == proc.StartLine && owner.EndLine == proc.EndLine
+	}
+	safe := true
+	facts.forEachArrayOperationFor(target, func(operation moduleArrayOperationFact) {
+		if !safe {
+			return
+		}
+		owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+		if !ok {
+			safe = false
+			return
+		}
+		switch operation.Kind {
+		case moduleArrayDirectRedim:
+			if operation.Preserve {
+				preserveRedim = true
+			} else {
+				plainRedim = true
+			}
+		case moduleArrayErase:
+			if !arrayModulePreserveCapacityEraseResets(file, owner, target, capacity) {
+				safe = false
+			}
+		default:
+			safe = false
+		}
+	})
+	if !safe || !plainRedim || !preserveRedim {
+		return false
+	}
+
+	capacityWrites := 0
+	facts.forEachArrayOperationFor(capacity, func(operation moduleArrayOperationFact) {
+		if !safe || operation.Kind != moduleArrayWholeAssignment {
+			return
+		}
+		capacityWrites++
+		owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+		if !ok {
+			safe = false
+			return
+		}
+		rhs := strings.TrimSpace(operation.RHS)
+		if rhs == "0" {
+			if !arrayModulePreserveCapacityEraseResets(file, owner, target, capacity) {
+				safe = false
+			}
+			return
+		}
+		// A positive capacity write is accepted only in this helper, only from
+		// the guarded local, and only after the guard line.
+		if !sameProcedure(owner) || !strings.EqualFold(cleanIdentifier(rhs), local) || operation.Line+1 <= guardLine {
+			safe = false
+		}
+	})
+	return safe && capacityWrites > 0
+}
+
+func arrayModulePreserveCapacityEraseResets(file parsedFile, proc sourceProcedure, target, capacity string) bool {
+	erased := false
+	reset := false
+	start := max(1, proc.StartLine)
+	end := min(len(file.Lines), proc.EndLine)
+	for line := start; line <= end; line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
+		if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
+			for _, name := range splitArgs(match[1]) {
+				if strings.EqualFold(cleanIdentifier(name), target) {
+					erased = true
+				}
+			}
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(text)
+		if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), capacity) && strings.TrimSpace(rhs) == "0" {
+			reset = true
+		}
+	}
+	return erased && reset
 }
 
 func arrayModuleCapacityGuardFor(file parsedFile, proc sourceProcedure, ctx analysisContext, statement *procedureir.Statement, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration) (arrayModuleCapacityGuard, bool) {

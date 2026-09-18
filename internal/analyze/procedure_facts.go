@@ -3,6 +3,7 @@ package analyze
 import (
 	"iter"
 	"sort"
+	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
@@ -90,11 +91,18 @@ type procedureAnalysisFacts struct {
 	callsByLineBuilt bool
 	accessesByStatement
 	memberExpressionsByStatement map[int][]int
+	runtimeErrorModeEvents       []runtimeErrorModeEvent
+	runtimeErrorModeEventsBuilt  bool
 	// memberExpressionFallback is true only for hand-built/recovered IR where
 	// at least one expression omits StatementID. Production IR assigns the ID
 	// consistently, so MemberExpressionsForStatement can return its compact
 	// grouped index without traversing expression trees in that common case.
 	memberExpressionFallback bool
+}
+
+type runtimeErrorModeEvent struct {
+	line int
+	mode string
 }
 
 // newProcedureAnalysisFacts constructs facts from already-owned procedure IR
@@ -160,6 +168,20 @@ func (facts *procedureAnalysisFacts) initialize(
 			facts.features.observeStatement(statement)
 			facts.statementIndex[statement.ID] = index
 		}
+		facts.runtimeErrorModeEvents = make([]runtimeErrorModeEvent, 0)
+		for _, statement := range statements {
+			for _, part := range splitRangeValueSourceStatements(statement.Text) {
+				normalized := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(part))), " ")
+				if !strings.HasPrefix(normalized, "on error ") {
+					continue
+				}
+				facts.runtimeErrorModeEvents = append(facts.runtimeErrorModeEvents, runtimeErrorModeEvent{
+					line: statement.Range.StartLine,
+					mode: strings.TrimSpace(strings.TrimPrefix(normalized, "on error ")),
+				})
+			}
+		}
+		facts.runtimeErrorModeEventsBuilt = true
 	}
 	if len(expressions) > 0 {
 		facts.expressionIndex = make(map[int]int, len(expressions))
@@ -633,14 +655,28 @@ func (facts callsByLine) forEach(calls readOnlySpan[procedureir.CallSite], line 
 	if visit == nil {
 		return
 	}
-	facts.groups.forEach(line, func(index int) {
+	// Calls are source ordered, so the common case is a contiguous span. Keep
+	// this hot path local: the generic indexGroups callback would add a closure
+	// and a second method boundary for every CFG line visited by array flow.
+	if span, ok := facts.groups.spans[line]; ok {
+		for index := span.start; index < span.end; index++ {
+			if index < 0 || index >= len(facts.callIndexes) {
+				continue
+			}
+			if call, ok := calls.At(facts.callIndexes[index]); ok {
+				visit(call)
+			}
+		}
+		return
+	}
+	for _, index := range facts.groups.sparse[line] {
 		if index < 0 || index >= len(facts.callIndexes) {
-			return
+			continue
 		}
 		if call, ok := calls.At(facts.callIndexes[index]); ok {
 			visit(call)
 		}
-	})
+	}
 }
 
 func (facts callsByStatement) values(calls readOnlySpan[procedureir.CallSite], statementID int) []procedureir.CallSite {
@@ -767,28 +803,6 @@ func (groups indexGroups) contiguousSpan(id int) (indexSpan, bool) {
 	}
 	span, ok := groups.spans[id]
 	return span, ok
-}
-
-// forEach visits indexes for one group without materializing the contiguous
-// span as a slice. Sparse groups already own their compact index slices; the
-// common contiguous case is represented by one span in the immutable index.
-func (groups indexGroups) forEach(id int, visit func(int)) {
-	if visit == nil {
-		return
-	}
-	if indexes, ok := groups.sparse[id]; ok {
-		for _, index := range indexes {
-			visit(index)
-		}
-		return
-	}
-	span, ok := groups.spans[id]
-	if !ok {
-		return
-	}
-	for index := span.start; index < span.end; index++ {
-		visit(index)
-	}
 }
 
 // analysisFacts returns the attached facts and provides a compatibility path
