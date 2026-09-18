@@ -1702,12 +1702,13 @@ End Sub
 
 	cfg := config.Default()
 	cfg.Analyze.DetectArrayLifecycleSafety = true
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
 	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) == 0 {
-		t.Fatal("an erase without resetting the count must not turn the count into an allocation proof")
+	if got := findingsByCode(findings, "VBA227"); len(got) == 0 {
+		t.Fatalf("an erase without resetting the count must not turn the count into an allocation proof: %+v", findings)
 	}
 }
 

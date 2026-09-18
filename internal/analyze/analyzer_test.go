@@ -11790,7 +11790,7 @@ End Sub
 		t.Fatal(err)
 	}
 	for _, finding := range findingsByCode(findings, "VBA227") {
-		if finding.Line == 7 {
+		if finding.Line == 7 || finding.Line == 8 {
 			t.Fatalf("a successful UBound on a source-owned parallel array must prove its coupled array allocated: %+v", finding)
 		}
 	}
@@ -17977,6 +17977,49 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RejectsModuleCapacityWriteBeforeGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private tokens() As Long
+Private tokenCount As Long
+
+Private Sub Grow(ByVal required As Long)
+  ReDim tokens(0 To required - 1)
+  ReDim Preserve tokens(0 To required - 1)
+End Sub
+
+Private Function ReadToken(ByVal required As Long) As Long
+  Dim newCapacity As Long
+  If required <= tokenCount Then Exit Function
+  newCapacity = tokenCount
+  tokenCount = newCapacity
+  If newCapacity = 0 Then
+    newCapacity = 32
+    ReDim tokens(0 To newCapacity - 1)
+    tokenCount = newCapacity
+    Exit Function
+  End If
+  ReadToken = tokens(0)
+End Function
+
+Public Sub Run()
+  Debug.Print ReadToken(1)
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "ReadToken" || got[0].Line != 21 {
+		t.Fatalf("a capacity write before the zero guard must not prove the module array allocated: all findings=%+v", findings)
+	}
+}
+
 func TestAnalyzerVBA227RejectsModuleCapacityReDimWithoutPositiveInputGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -21565,6 +21608,47 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("a positive-length array factory return should establish a non-empty array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesSingleTermLessThanOneModuleArrayGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "PositiveOnly.cls", `VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "PositiveOnly"
+Option Explicit
+Private values() As Long
+Private valueCount As Long
+
+Private Sub LoadValues()
+  Erase values
+  valueCount = 0
+  ReDim values(0 To 0)
+  valueCount = 1
+End Sub
+
+Private Function ValueAt(ByVal index As Long) As Long
+  If valueCount < 1 Then Exit Function
+  ValueAt = values(index)
+End Function
+
+Public Sub Run()
+  LoadValues
+  Debug.Print ValueAt(0)
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a single-term count < 1 guard should prove the module array allocated: %+v", got)
 	}
 }
 

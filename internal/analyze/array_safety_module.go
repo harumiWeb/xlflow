@@ -1321,16 +1321,16 @@ func arrayModulePositiveCountGuardName(condition string) (string, bool) {
 		return "", false
 	}
 	comparison, ok := parseArrayModuleCountGuardComparison(terms[0])
-	if !ok || comparison.rhsIsLiteral && comparison.rhs != 0 {
+	if !ok {
+		return "", false
+	}
+	if comparison.rhsIsLiteral && comparison.rhs != 0 && (comparison.operator != "<" || comparison.rhs != 1) {
 		return "", false
 	}
 	if comparison.operator != "=" && comparison.operator != "<=" && comparison.operator != "<" {
 		return "", false
 	}
 	if comparison.rhsIsLiteral {
-		if comparison.rhs != 0 && (comparison.operator != "<" || comparison.rhs != 1) {
-			return "", false
-		}
 		return comparison.lhs, true
 	}
 	return "", false

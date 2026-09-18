@@ -499,13 +499,10 @@ func arrayModulePreserveCapacityLifecycleSafe(file parsedFile, proc sourceProced
 			}
 			return
 		}
+		// A positive capacity write is accepted only in this helper, only from
+		// the guarded local, and only after the guard line.
 		if !sameProcedure(owner) || !strings.EqualFold(cleanIdentifier(rhs), local) || operation.Line+1 <= guardLine {
-			// Positive capacity writes are accepted only after the matching
-			// helper's array operation. The source scan below checks the exact
-			// operation ordering, while this condition rejects unrelated writes.
-			if !sameProcedure(owner) || !strings.EqualFold(cleanIdentifier(rhs), local) {
-				safe = false
-			}
+			safe = false
 		}
 	})
 	return safe && capacityWrites > 0
