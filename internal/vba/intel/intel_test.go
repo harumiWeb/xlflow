@@ -1981,6 +1981,40 @@ End Sub
 	}
 }
 
+func TestByRefArgumentDiagnosticsIgnoreUnqualifiedUnrelatedClassMembers(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "Split") {
+			return nil, nil
+		}
+		return []Symbol{{
+			Name:       "Split",
+			Kind:       "function",
+			Module:     "STD_Types_String",
+			ModuleKind: "class",
+			Visibility: "Public",
+			Parameters: []Parameter{
+				{Name: "Expression", Type: "String", Passing: "ByRef"},
+				{Name: "Delimiter", Type: "String", Passing: "ByRef"},
+			},
+		}}, nil
+	}
+
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source: `Option Explicit
+Public Sub Run()
+    Dim parts As Variant
+    parts = Split("a,b", ",")
+End Sub
+`,
+	}
+	if diagnostics := analyzer.ByRefArgumentDiagnostics(doc); len(diagnostics) != 0 {
+		t.Fatalf("an unrelated class member must not shadow the built-in Split for VBA206: %+v", diagnostics)
+	}
+}
+
 func TestByRefArgumentDiagnosticsFailClosedForConditionalLocalShadowOfExternalProcedure(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

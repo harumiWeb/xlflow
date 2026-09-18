@@ -146,7 +146,7 @@ func (a Analyzer) resolveProjectLocalCallSignature(doc Document, localSymbolsByN
 	if err != nil {
 		return Signature{}, false, err
 	}
-	matches := matchingProjectCallSymbols(a, doc, currentProcedure, syms, target, receiver, member, qualified)
+	matches := argumentProjectCallSymbols(a, doc, currentProcedure, syms, target, receiver, member, qualified)
 	if !qualified {
 		local := a.symbolsInCurrentModule(doc, matches)
 		if len(local) == 1 {
