@@ -3173,7 +3173,7 @@ func callsOnLine(line string) []parsedCall {
 	if isDeclarationCallPrefix(line) {
 		return nil
 	}
-	parenCalls := parenCallsOnLine(line)
+	parenCalls := filterAssignmentTargetCalls(line, parenCallsOnLine(line))
 	var out []parsedCall
 	if call, ok := parenlessCallOnLine(line); ok {
 		for _, parenCall := range parenCalls {
@@ -3187,6 +3187,30 @@ func callsOnLine(line string) []parsedCall {
 		out = append(out, parenCalls...)
 	}
 	return out
+}
+
+func filterAssignmentTargetCalls(line string, calls []parsedCall) []parsedCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	assignment := assignmentOperatorIndex(line)
+	out := make([]parsedCall, 0, len(calls))
+	for _, call := range calls {
+		if callIsAssignmentTarget(line, assignment, call) {
+			continue
+		}
+		out = append(out, call)
+	}
+	return out
+}
+
+func callIsAssignmentTarget(line string, assignment int, call parsedCall) bool {
+	if assignment >= 0 && call.Start < assignment && call.End <= assignment {
+		prefix := strings.Fields(strings.ToLower(strings.TrimSpace(line[:min(call.Start, len(line))])))
+		return len(prefix) == 0 || (len(prefix) == 1 && (prefix[0] == "let" || prefix[0] == "set"))
+	}
+	prefix := strings.Fields(strings.ToLower(strings.TrimSpace(line[:min(call.Start, len(line))])))
+	return (len(prefix) == 1 && prefix[0] == "redim") || (len(prefix) == 2 && prefix[0] == "redim" && prefix[1] == "preserve")
 }
 
 func parenthesizedArgumentPrefix(inner, outer parsedCall) bool {
