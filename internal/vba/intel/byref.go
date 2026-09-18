@@ -48,9 +48,24 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 	}
 	conditionalLines := conditionalCompilationLines(doc.Source)
 	var out []Diagnostic
+	inUserDefinedType := false
 	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
 		if i&0x3f == 0 && ctx.Err() != nil {
 			return nil
+		}
+		trimmed := strings.TrimSpace(stripLineComment(logicalLine.Text))
+		lower := strings.ToLower(trimmed)
+		if inUserDefinedType {
+			if strings.HasPrefix(lower, "end type") {
+				inUserDefinedType = false
+			}
+			continue
+		}
+		if isUserDefinedTypeDeclaration(lower) || byRefDeclarationLine(trimmed) {
+			if isUserDefinedTypeDeclaration(lower) {
+				inUserDefinedType = true
+			}
+			continue
 		}
 		calls := callsOnLine(logicalLine.Text)
 		for _, call := range calls {
@@ -234,6 +249,39 @@ func (a Analyzer) conditionallyCompiledCurrentModuleSymbol(doc Document, sym Sym
 
 func (a Analyzer) conditionallyCompiledCallSymbol(doc Document, sym Symbol, conditionalLines map[int]bool) bool {
 	return len(sym.ConditionalBranches) > 0 || a.conditionallyCompiledCurrentModuleSymbol(doc, sym, conditionalLines)
+}
+
+func byRefDeclarationLine(line string) bool {
+	line = strings.TrimSpace(line)
+	if isDeclarationCallPrefix(line) {
+		return true
+	}
+	lower := strings.ToLower(line)
+	for _, prefix := range []string{"dim ", "static ", "private ", "public ", "friend "} {
+		if strings.HasPrefix(lower, prefix) {
+			return !hasVBAStatementSeparator(line)
+		}
+	}
+	return false
+}
+
+func hasVBAStatementSeparator(line string) bool {
+	inString := false
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			if inString && i+1 < len(line) && line[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case ':':
+			if !inString {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func conditionalDirective(line string) string {

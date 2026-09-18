@@ -154,8 +154,8 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 7732 || metrics.TP != 5029 || metrics.FP != 2703 {
-		t.Fatalf("committed review metrics = %#v, want Reviewed=7732 TP=5029 FP=2703", metrics)
+	if metrics.Reviewed != 8033 || metrics.TP != 5329 || metrics.FP != 2704 {
+		t.Fatalf("committed review metrics = %#v, want Reviewed=8033 TP=5329 FP=2704", metrics)
 	}
 	// This review pass expanded the ledger with confirmed VB001, VB004, VB005, VB006, VB007, VB020, VB045, VBA202, VBA204, VBA206, VBA220, VBA225, VBA227, VBA237, VBA241, VBA244, VBA245, VBA249, and VBA250
 	// findings, so the observed precision remains close to the review floor.
