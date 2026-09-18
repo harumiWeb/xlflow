@@ -77,7 +77,11 @@ Do not update corpus snapshots merely to make a performance fix pass. Any diagno
 
 ## Review and report
 
-Before completion, use `final-review` with an explicit scope suitable for the current diff. Report:
+Before completion, use an independent final-review workflow with an explicit
+scope suitable for the current diff. On Orca-enabled machines, use the
+machine-global `orca-supervised-final-review` skill; if Orca is unavailable,
+report the final review as unverified rather than invoking the removed
+repository-local fallback. Report:
 
 - resolved base/head revisions and whether the head included uncommitted changes;
 - exact benchmark command and sample count;
