@@ -2208,6 +2208,20 @@ End Function
 	}
 }
 
+func TestByRefArgumentDiagnosticsIgnoreFunctionReturnArrayAssignments(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Function Split(Expression As String) As String()
+    ReDim Preserve Split(0 To 0)
+    Split(0) = Expression
+End Function
+`
+
+	if diagnostics := analyzer.ByRefArgumentDiagnostics(Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}); len(diagnostics) != 0 {
+		t.Fatalf("function return array assignments must not be treated as ByRef calls: %+v", diagnostics)
+	}
+}
+
 func TestByRefArgumentDiagnosticsCompareQualifiedTypesInDeclaringModule(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
@@ -2711,6 +2725,10 @@ func TestCallParserIgnoresBracketedMemberTextAndAssignments(t *testing.T) {
 		if strings.EqualFold(call.Target, "web_GetUrlEncodedKeyValue") {
 			t.Fatalf("assignment target was parsed as a parenless call: %+v", assignment)
 		}
+	}
+	comparison := callsOnLine("    Debug.Assert Foo(value) = 1")
+	if len(comparison) != 1 || !strings.EqualFold(comparison[0].Target, "Foo") {
+		t.Fatalf("comparison call before equality was filtered as an assignment target: %+v", comparison)
 	}
 }
 
