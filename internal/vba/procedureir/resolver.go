@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
 
 // Resolve returns a deep copy with project-dependent call and symbol
@@ -40,7 +42,52 @@ func isAssignmentTargetCall(call CallSite, procedure ProcedureIR) bool {
 	if statement.Target == nil {
 		return false
 	}
-	return strings.EqualFold(cleanIdentifier(statement.Target.Text), cleanIdentifier(call.Callee.BaseName))
+	if indexedName := indexedAssignmentTargetName(statement.Text); indexedName != "" {
+		if !strings.EqualFold(indexedName, cleanIdentifier(call.Callee.BaseName)) {
+			return false
+		}
+		return assignmentTargetCallMatches(call, statement.Target, procedure)
+	}
+	targetName := cleanIdentifier(statement.Target.Text)
+	if indexedName := indexedAssignmentTargetName(statement.Target.Text); indexedName != "" {
+		targetName = indexedName
+	}
+	return strings.EqualFold(targetName, cleanIdentifier(call.Callee.BaseName))
+}
+
+func assignmentTargetCallMatches(call CallSite, target *Expression, procedure ProcedureIR) bool {
+	if target == nil {
+		return false
+	}
+	if call.ExpressionID > 0 && call.ExpressionID <= len(procedure.Expressions) {
+		callExpression := procedure.Expressions[call.ExpressionID-1]
+		if callExpression.Kind == ExpressionCall &&
+			sameExpressionRange(callExpression.Range, call.Range) &&
+			(callExpression.ID == target.ID || callExpression.ID == target.ParentID) {
+			return true
+		}
+	}
+	// Recovered call-statement assignments may not carry an ExpressionID and
+	// may span the whole statement in CallSite.Range. The left-hand target is
+	// still the call-shaped expression at the statement start; a same-name RHS
+	// call starts later and remains an invocation edge.
+	return target.Range.EndByte > target.Range.StartByte &&
+		call.Range.EndByte > call.Range.StartByte &&
+		call.Range.StartByte == target.Range.StartByte &&
+		call.Range.EndByte >= target.Range.EndByte
+}
+
+func sameExpressionRange(left, right vbaast.Range) bool {
+	return left.EndByte > left.StartByte && right.EndByte > right.StartByte &&
+		left.StartByte == right.StartByte && left.EndByte == right.EndByte
+}
+
+// IsAssignmentTargetCall reports whether a syntactic call-shaped expression
+// writes a procedure return slot or an indexed assignment target instead of
+// invoking a procedure. Consumers building call graphs must exclude these
+// expressions from invocation edges.
+func IsAssignmentTargetCall(call CallSite, procedure ProcedureIR) bool {
+	return isAssignmentTargetCall(call, procedure)
 }
 
 func declarationNames(module, procedure []Declaration) []string {

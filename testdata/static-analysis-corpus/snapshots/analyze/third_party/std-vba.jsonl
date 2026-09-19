@@ -434,7 +434,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA219","severity":"warning","line":293,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA202","severity":"warning","line":300,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA227","severity":"warning","line":320,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA244","severity":"information","line":336,"column":6}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA219","severity":"warning","line":359,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA245","severity":"warning","line":418,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"analyze","code":"VBA245","severity":"warning","line":424,"column":0}
@@ -483,7 +482,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdShellMTP.cls","surface":"analyze","code":"VBA202","severity":"warning","line":27,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdShellMTP.cls","surface":"analyze","code":"VBA202","severity":"warning","line":58,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdString.cls","surface":"analyze","code":"VBA249","severity":"error","line":64,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdString.cls","surface":"analyze","code":"VBA244","severity":"information","line":68,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdString.cls","surface":"analyze","code":"VBA206","severity":"warning","line":87,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"analyze","code":"VBA202","severity":"warning","line":37,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"analyze","code":"VBA202","severity":"warning","line":51,"column":0}

@@ -10,6 +10,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/effects"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 // CallCycleNode is one declaration in a confirmed procedure cycle. Path is
@@ -72,6 +73,9 @@ func buildProcedureCallGraphSnapshot(files []parsedFile) callgraph.Snapshot {
 				Visibility: proc.Symbol.Visibility,
 			})
 			for _, site := range proc.Calls {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(site.Callee.Text)), "new ") || procedureir.IsAssignmentTargetCall(site, proc) {
+					continue
+				}
 				resolution := calls.Resolution{Status: string(site.Resolution.Status)}
 				for _, candidate := range site.Resolution.Candidates {
 					resolution.Candidates = append(resolution.Candidates, calls.Candidate{
