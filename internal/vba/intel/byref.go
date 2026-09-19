@@ -84,7 +84,7 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 				if arg.Name == "" {
 					positional = next
 				}
-				if !ok || param.ParamArray || !isByRefParameter(param) {
+				if !ok || param.ParamArray || !isByRefParameter(param) || (sig.declare && hasExplicitByValArgument(arg.Text)) {
 					continue
 				}
 				if diagnostic, found := a.byRefArgumentDiagnostic(doc, callRange.Start, callRange.Start.Line, call, arg.Text, param, sig.declaringModule, localUserDefinedTypes, workspaceUserDefinedTypes, workspaceUserDefinedTypesComplete); found && (diagnostic.Code != "VBA206" || a.Config.Analyze.DetectByRefArgumentMismatch) {
@@ -331,6 +331,11 @@ func conditionalCompilationLines(source string) map[int]bool {
 
 func isByRefParameter(param Parameter) bool {
 	return !strings.EqualFold(strings.TrimSpace(param.Passing), "ByVal")
+}
+
+func hasExplicitByValArgument(text string) bool {
+	fields := strings.Fields(text)
+	return len(fields) > 0 && strings.EqualFold(fields[0], "ByVal")
 }
 
 func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int, call parsedCall, text string, param Parameter, declaringModule string, localUserDefinedTypes map[string]struct{}, workspaceUserDefinedTypes *WorkspaceUserDefinedTypeIndex, workspaceUserDefinedTypesComplete bool) (Diagnostic, bool) {
