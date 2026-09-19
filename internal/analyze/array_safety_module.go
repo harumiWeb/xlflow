@@ -2945,7 +2945,10 @@ func arrayModuleReadyGuardAllocationProof(file parsedFile, proc sourceProcedure,
 // The proof is deliberately narrow: the object field is Private, every
 // non-Nothing assignment to it is a parameter assignment in one setup
 // procedure, that procedure directly allocates every dynamic candidate array,
-// and the object Nothing guard dominates the ready write.
+// and the object Nothing guard dominates the ready write. The setup proof
+// below additionally requires a CFG-dominating allocation with no other
+// operation on the candidate array, so a conditional allocation or a later
+// reset cannot be mistaken for a persistent object-backed invariant.
 func arrayModuleReadyGuardObjectSetupAllocationProof(file parsedFile, writer sourceProcedure, readyLine int, candidates map[string]bool, moduleDecls map[string]sourceDeclaration) map[string]bool {
 	if writer.Graph == nil || readyLine <= writer.StartLine || readyLine > len(file.Lines) {
 		return nil
@@ -2999,8 +3002,8 @@ func arrayModuleReadyGuardObjectSetupAllocationProof(file parsedFile, writer sou
 //
 // This is intentionally narrower than general call-order inference. It
 // requires a Private Object field, one unambiguous setup procedure that
-// directly allocates every dynamic module array, and CFG dominance from the
-// Nothing guard to every indexed use in the consumer.
+// directly allocates every dynamic module array on every normal path, and CFG
+// dominance from the Nothing guard to every indexed use in the consumer.
 func applyArrayModuleObjectSetupState(state arrayFlowState, file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration) arrayFlowState {
 	if proc.Graph == nil || proc.EndLine <= proc.StartLine {
 		return state
@@ -3183,15 +3186,34 @@ func arrayModuleObjectAssignmentsBelongToSetup(file parsedFile, objectName strin
 }
 
 func arrayModuleSetupDirectlyAllocates(file parsedFile, proc sourceProcedure, name string, facts *moduleAnalysisFacts) bool {
-	allocated := false
+	if facts == nil || proc.Graph == nil {
+		return false
+	}
+	var operations []moduleArrayOperationFact
 	facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
-		if allocated || operation.Kind != moduleArrayDirectRedim || operation.Preserve {
+		owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
+		if !ok || !arrayModuleStorageSameProcedure(owner, proc) {
 			return
 		}
-		owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
-		allocated = ok && owner.StartByte == proc.StartByte && owner.StartLine == proc.StartLine && owner.EndLine == proc.EndLine
+		operations = append(operations, operation)
 	})
-	return allocated
+	// A single direct operation is intentional here. Any conditional ReDim,
+	// Erase, whole-array assignment, Preserve resize, or later reconfiguration
+	// leaves the object-backed state unknown instead of treating one source-wide
+	// ReDim as proof for all normal paths.
+	if len(operations) != 1 || operations[0].Kind != moduleArrayDirectRedim || operations[0].Preserve {
+		return false
+	}
+	statement, ok := arrayModuleStatementAtLine(proc, operations[0].Line+1)
+	if !ok {
+		return false
+	}
+	block, ok := proc.Graph.BlockForStatement(statement.ID)
+	if !ok {
+		return false
+	}
+	normalGraph := proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true})
+	return normalGraph.IsReachable(block.ID) && normalGraph.Dominates(block.ID, normalGraph.NormalExit())
 }
 
 func arrayModuleReadyGuardLifecycleSafe(file parsedFile, guardName string, arrays map[string]bool, facts *moduleAnalysisFacts, moduleDecls map[string]sourceDeclaration, ctx analysisContext) bool {

@@ -108,6 +108,24 @@ End Sub
 	}
 }
 
+func TestVBA244KeepsSameNameRHSCallInIndexedReturnAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Split(ByVal expression As String) As String()
+  Split(0) = Split(1)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA244"); len(got) != 1 {
+		t.Fatalf("same-name RHS call must retain the self-cycle: %+v", got)
+	}
+}
+
 func TestVBA244BoundsFindingsAndAggregatesWholeSCCContext(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

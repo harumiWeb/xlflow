@@ -365,10 +365,14 @@ A two-stage object-backed initializer has one additional narrow proof. When a
 `Private Object` module field is the source-owned witness, a unique setup
 procedure receives that object, directly performs a non-`Preserve` `ReDim` for
 every candidate dynamic module array, and assigns the field, a consumer may
-use `If field Is Nothing Then Exit Sub` as the setup guard. The guard must
-dominate every later indexed use in the consumer's normal CFG. This models
-UserForm-style `AttachForm`/scene builders without inferring arbitrary call
-order; public, ambiguous, error-handling, resettable, or indirectly allocated
+use `If field Is Nothing Then Exit Sub` as the setup guard. The setup procedure
+must have exactly one direct non-`Preserve` operation for each candidate array,
+that operation must dominate the procedure's normal CFG exit, and no
+`Erase`, whole-array assignment, or later resize may touch the candidate. The
+guard must also dominate every later indexed use in the consumer's normal CFG.
+This models UserForm-style `AttachForm`/scene builders without inferring
+arbitrary call order; a source-owned `Public` setup is admitted under the same
+proof, while ambiguous, error-handling, resettable, or indirectly allocated
 setups remain unknown.
 
 A private `ByRef` output helper may establish a conditional allocation when it
