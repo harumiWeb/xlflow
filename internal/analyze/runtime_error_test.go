@@ -1449,11 +1449,53 @@ End Sub
 	}
 }
 
+func TestVBA249RejectsObjectSetupUseBeforeGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Renderer.bas", `Option Explicit
+Private mForm As Object
+Private mControls() As Object
+
+Public Sub AttachForm(ByVal formInstance As Object)
+  Set mForm = formInstance
+  ReDim mControls(1 To 2)
+End Sub
+
+Public Sub BuildScene()
+  Set mControls(1) = CreateObject("Scripting.Dictionary")
+  If mForm Is Nothing Then
+    Exit Sub
+  End If
+  Set mControls(1) = CreateObject("Scripting.Dictionary")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA249")
+	seenBeforeGuard := false
+	seenAfterGuard := false
+	for _, finding := range got {
+		switch finding.Line {
+		case 11:
+			seenBeforeGuard = true
+		case 15:
+			seenAfterGuard = true
+		}
+	}
+	if !seenBeforeGuard || seenAfterGuard {
+		t.Fatalf("only the indexed use before the object guard should remain unsafe: %+v", got)
+	}
+}
+
 func TestVBA249RejectsUnsafeObjectSetupArrayProof(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name  string
 		setup string
+		extra string
 	}{
 		{
 			name: "conditional redim",
@@ -1472,6 +1514,16 @@ End Sub`,
   Erase mControls
 End Sub`,
 		},
+		{
+			name: "erase in separate reset procedure",
+			setup: `Public Sub AttachForm(ByVal formInstance As Object)
+  Set mForm = formInstance
+  ReDim mControls(1 To 2)
+End Sub`,
+			extra: `Public Sub ResetControls()
+  Erase mControls
+End Sub`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1480,6 +1532,7 @@ End Sub`,
 				"Private mForm As Object\n"+
 				"Private mControls() As Object\n\n"+
 				tc.setup+"\n\n"+
+				tc.extra+"\n\n"+
 				`Public Sub BuildScene()
   If mForm Is Nothing Then
     Exit Sub

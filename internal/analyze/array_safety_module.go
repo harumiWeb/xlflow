@@ -3045,9 +3045,6 @@ func applyArrayModuleObjectSetupState(state arrayFlowState, file parsedFile, pro
 	}
 	normalGraph := proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true})
 	for statement := range proc.Statements.All() {
-		if statement.Range.StartLine <= guardLine {
-			continue
-		}
 		usesCandidate := false
 		for _, use := range arrayIndexedUses(statement.Text, variables) {
 			if candidates[strings.ToLower(cleanIdentifier(use.name))] {
@@ -3189,18 +3186,33 @@ func arrayModuleSetupDirectlyAllocates(file parsedFile, proc sourceProcedure, na
 	if facts == nil || proc.Graph == nil {
 		return false
 	}
+	moduleDecls := file.moduleDecls()
 	var operations []moduleArrayOperationFact
+	lifecycleSafe := true
 	facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
 		owner, ok := arrayModuleProcedureAtLine(file, operation.Line+1)
-		if !ok || !arrayModuleStorageSameProcedure(owner, proc) {
+		if !ok {
+			lifecycleSafe = false
+			return
+		}
+		declarations := newDeclarationScope(file, owner)
+		declarations.module = moduleDecls
+		if declarations.shadowsModule(name) {
+			return
+		}
+		if !arrayModuleStorageSameProcedure(owner, proc) {
+			lifecycleSafe = false
 			return
 		}
 		operations = append(operations, operation)
 	})
+	if !lifecycleSafe {
+		return false
+	}
 	// A single direct operation is intentional here. Any conditional ReDim,
 	// Erase, whole-array assignment, Preserve resize, or later reconfiguration
-	// leaves the object-backed state unknown instead of treating one source-wide
-	// ReDim as proof for all normal paths.
+	// leaves the object-backed state unknown instead of treating one setup-owned
+	// ReDim as proof for the complete module lifecycle.
 	if len(operations) != 1 || operations[0].Kind != moduleArrayDirectRedim || operations[0].Preserve {
 		return false
 	}
