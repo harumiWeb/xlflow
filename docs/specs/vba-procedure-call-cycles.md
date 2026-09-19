@@ -26,6 +26,12 @@ outgoing edge, and returns to the root through a deterministic path. Alternative
 simple cycles in the same SCC are intentionally not reported by normal
 `analyze`/`check`.
 
+Call-shaped syntax that is not an invocation is excluded from the graph. In
+particular, indexed assignments to an array-valued function return slot and
+VBA `New` constructor expressions do not create procedure edges, even when
+their source text resembles a call. This keeps SCC evidence tied to actual
+resolved invocation flow rather than assignment targets or object creation.
+
 The explicit graph-inspection surface remains available and retains exhaustive
 elementary-cycle enumeration where its contract requires all paths. That
 inspection behavior is separate from the bounded `VBA244` analyzer contract.

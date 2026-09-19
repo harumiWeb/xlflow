@@ -1418,6 +1418,37 @@ End Sub
 	}
 }
 
+func TestVBA249RecognizesObjectSetupGuardForModuleArrays(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Renderer.bas", `Option Explicit
+Private mForm As Object
+Private mControls() As Object
+Private mReady As Boolean
+
+Public Sub AttachForm(ByVal formInstance As Object)
+  Set mForm = formInstance
+  ReDim mControls(1 To 2)
+End Sub
+
+Public Sub BuildScene()
+  If mForm Is Nothing Then
+    Exit Sub
+  End If
+  Set mControls(1) = CreateObject("Scripting.Dictionary")
+  mReady = True
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA249"); len(got) != 0 {
+		t.Fatalf("an object setup guard should prove the module array allocation: %+v", got)
+	}
+}
+
 func TestVBA249TracksArrayStateInsideWithBlock(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

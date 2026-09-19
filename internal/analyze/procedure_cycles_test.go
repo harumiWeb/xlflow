@@ -71,6 +71,43 @@ End Sub
 	}
 }
 
+func TestVBA244IgnoresReturnSlotAssignmentsAndNewConstructors(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Split(ByVal expression As String) As String()
+  Split(0) = expression
+End Function
+
+Private Function Collection(ParamArray values() As Variant) As Collection
+  Dim result As Collection
+  Set result = New Collection
+  Set Collection = result
+End Function
+
+Private Function Dictionary(ParamArray values() As Variant) As Object
+  Dim result As Object
+  Set result = New Dictionary
+  Set Dictionary = result
+End Function
+
+Public Sub Run()
+  Dim coll As Collection
+  Dim dict As Object
+  Set coll = New Collection
+  Set dict = New Dictionary
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA244"); len(got) != 0 {
+		t.Fatalf("return-slot assignments and New constructors must not create procedure cycles: %+v", got)
+	}
+}
+
 func TestVBA244BoundsFindingsAndAggregatesWholeSCCContext(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

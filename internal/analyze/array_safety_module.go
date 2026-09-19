@@ -2991,6 +2991,106 @@ func arrayModuleReadyGuardObjectSetupAllocationProof(file parsedFile, writer sou
 	return result
 }
 
+// applyArrayModuleObjectSetupState recognizes the consumer half of the
+// two-stage object-backed module initializer. The object Nothing guard is a
+// source-owned witness that the matching setup procedure has run; on the
+// non-exiting path its direct ReDim operations therefore establish the
+// dynamic module arrays before their first indexed use.
+//
+// This is intentionally narrower than general call-order inference. It
+// requires a Private Object field, one unambiguous setup procedure that
+// directly allocates every dynamic module array, and CFG dominance from the
+// Nothing guard to every indexed use in the consumer.
+func applyArrayModuleObjectSetupState(state arrayFlowState, file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration) arrayFlowState {
+	if proc.Graph == nil || proc.EndLine <= proc.StartLine {
+		return state
+	}
+	objectName, guardLine, ok := arrayModuleObjectNothingExitGuard(file, proc, proc.EndLine+1)
+	if !ok {
+		return state
+	}
+	objectDeclaration, declared := moduleDecls[objectName]
+	if !declared || !objectDeclaration.Object || objectDeclaration.Array || objectDeclaration.Parameter || !arrayModuleReadyGuardSourceOwned(file, objectDeclaration) {
+		return state
+	}
+	candidates := make(map[string]bool)
+	for name, declaration := range moduleDecls {
+		name = strings.ToLower(cleanIdentifier(name))
+		variable, known := variables[name]
+		if name != "" && declaration.Array && !declaration.Fixed && !declaration.Parameter && known && variable.isArray && arrayModuleReadyGuardSourceOwned(file, declaration) {
+			candidates[name] = true
+		}
+	}
+	if len(candidates) == 0 {
+		return state
+	}
+	facts := file.moduleAnalysisFacts()
+	if facts == nil {
+		return state
+	}
+	setup, ok := arrayModuleObjectSetupProcedure(file, objectName, candidates, moduleDecls, facts)
+	if !ok {
+		return state
+	}
+	guardStatement, ok := arrayModuleStatementAtLine(proc, guardLine)
+	if !ok {
+		return state
+	}
+	guardBlock, ok := proc.Graph.BlockForStatement(guardStatement.ID)
+	if !ok {
+		return state
+	}
+	normalGraph := proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true})
+	for statement := range proc.Statements.All() {
+		if statement.Range.StartLine <= guardLine {
+			continue
+		}
+		usesCandidate := false
+		for _, use := range arrayIndexedUses(statement.Text, variables) {
+			if candidates[strings.ToLower(cleanIdentifier(use.name))] {
+				usesCandidate = true
+				break
+			}
+		}
+		if !usesCandidate {
+			continue
+		}
+		useBlock, blockOK := proc.Graph.BlockForStatement(statement.ID)
+		if !blockOK || !normalGraph.Dominates(guardBlock.ID, useBlock.ID) {
+			return state
+		}
+	}
+	result := make(map[string]bool)
+	for name := range candidates {
+		declaration, declared := moduleDecls[name]
+		if !declared || !declaration.Array || declaration.Fixed || !arrayModuleSetupDirectlyAllocates(file, setup, name, facts) {
+			return state
+		}
+		result[name] = true
+	}
+	if len(result) == 0 {
+		return state
+	}
+	updated := cloneArrayState(state)
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
+	for name := range result {
+		if declarations.shadowsModule(name) {
+			continue
+		}
+		value, known := updated[name]
+		variable, variableKnown := variables[name]
+		if !known || !variableKnown || !variable.isArray {
+			continue
+		}
+		value.kind = arrayAllocated
+		value.knownArray = true
+		value.mayBeUnallocated = false
+		updated[name] = value
+	}
+	return updated
+}
+
 func arrayModuleObjectNothingExitGuard(file parsedFile, proc sourceProcedure, readyLine int) (string, int, bool) {
 	for line := proc.StartLine + 1; line < readyLine && line <= proc.EndLine && line <= len(file.Lines); line++ {
 		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))

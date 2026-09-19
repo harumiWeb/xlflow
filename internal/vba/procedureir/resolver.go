@@ -40,7 +40,22 @@ func isAssignmentTargetCall(call CallSite, procedure ProcedureIR) bool {
 	if statement.Target == nil {
 		return false
 	}
-	return strings.EqualFold(cleanIdentifier(statement.Target.Text), cleanIdentifier(call.Callee.BaseName))
+	targetName := cleanIdentifier(statement.Target.Text)
+	if indexedName := indexedAssignmentTargetName(statement.Target.Text); indexedName != "" {
+		targetName = indexedName
+	}
+	if indexedName := indexedAssignmentTargetName(statement.Text); indexedName != "" {
+		targetName = indexedName
+	}
+	return strings.EqualFold(targetName, cleanIdentifier(call.Callee.BaseName))
+}
+
+// IsAssignmentTargetCall reports whether a syntactic call-shaped expression
+// writes a procedure return slot or an indexed assignment target instead of
+// invoking a procedure. Consumers building call graphs must exclude these
+// expressions from invocation edges.
+func IsAssignmentTargetCall(call CallSite, procedure ProcedureIR) bool {
+	return isAssignmentTargetCall(call, procedure)
 }
 
 func declarationNames(module, procedure []Declaration) []string {
