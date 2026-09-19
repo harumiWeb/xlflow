@@ -1936,6 +1936,22 @@ End Sub
 	}
 }
 
+func TestByRefArgumentDiagnosticsIgnoreExplicitByValDLLArguments(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Private Declare PtrSafe Function send Lib "wsock32.dll" (ByVal socket As Long, buffer As String, ByVal bufferLength As Long, ByVal flags As Long) As Long
+
+Public Function SendString(ByVal message As String) As Long
+    SendString = send(0, ByVal message, Len(message), 0)
+End Function
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "TcpClient.cls"), Source: source}
+	diagnostics := analyzer.ByRefArgumentDiagnostics(doc)
+	if len(diagnostics) != 0 {
+		t.Fatalf("explicit DLL ByVal argument must not produce VBA206: %+v", diagnostics)
+	}
+}
+
 func TestByRefArgumentDiagnosticsAvoidUncertainTypesAndExternalCalls(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
