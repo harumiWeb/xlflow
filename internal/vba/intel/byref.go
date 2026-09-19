@@ -334,7 +334,8 @@ func isByRefParameter(param Parameter) bool {
 }
 
 func hasExplicitByValArgument(text string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "byval ")
+	fields := strings.Fields(text)
+	return len(fields) > 0 && strings.EqualFold(fields[0], "ByVal")
 }
 
 func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int, call parsedCall, text string, param Parameter, declaringModule string, localUserDefinedTypes map[string]struct{}, workspaceUserDefinedTypes *WorkspaceUserDefinedTypeIndex, workspaceUserDefinedTypesComplete bool) (Diagnostic, bool) {

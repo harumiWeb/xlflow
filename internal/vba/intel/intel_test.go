@@ -1945,6 +1945,7 @@ Public Function SendString(ByVal message As String) As Long
     SendString = send(0, ByVal message, Len(message), 0)
 End Function
 `
+	source = strings.Replace(source, "ByVal message, Len", "ByVal\tmessage, Len", 1)
 	doc := Document{Path: filepath.Join(t.TempDir(), "TcpClient.cls"), Source: source}
 	diagnostics := analyzer.ByRefArgumentDiagnostics(doc)
 	if len(diagnostics) != 0 {
