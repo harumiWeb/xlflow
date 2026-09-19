@@ -2833,6 +2833,33 @@ End Sub
 	}
 }
 
+func TestByRefArgumentDiagnosticsIgnoreUserDefinedTypeArrayMemberDeclarations(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Private Const groupSize As Long = 4
+Private Type Group
+    Index(0 To groupSize - 1) As Long
+End Type
+
+Public Function Index(ByRef Key As Variant) As Long
+End Function
+
+Public Sub Run()
+    Dim value As Variant: value = Index(1)
+End Sub
+`
+	diagnostics := analyzer.ByRefArgumentDiagnostics(Document{
+		Path:   filepath.Join(t.TempDir(), "Main.bas"),
+		Source: source,
+	})
+	if len(diagnostics) != 1 {
+		t.Fatalf("VBA206 diagnostics = %+v, want only the real Index call", diagnostics)
+	}
+	if diagnostics[0].Code != "VBA206" || diagnostics[0].Range.Start.Line != lineIndex(source, "    Dim value As Variant: value = Index(1)") {
+		t.Fatalf("VBA206 diagnostic = %+v, want the call line", diagnostics[0])
+	}
+}
+
 func TestIDESmokeCoversCompletionHoverSignatureAndDiagnostics(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
