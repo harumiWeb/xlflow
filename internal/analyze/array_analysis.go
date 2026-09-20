@@ -346,6 +346,7 @@ func arrayEntryStateForProcedure(file parsedFile, proc sourceProcedure, ctx anal
 	state = applyArrayInternalStorageConfiguration(state, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 	state = applyArrayByRefEntryStates(state, proc, variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
 	state = applyArrayModuleReadyGuardState(state, file, proc, variables, moduleDecls, ctx.arrayModuleReadyGuards)
+	state = applyArrayModuleObjectSetupState(state, file, proc, variables, moduleDecls)
 	state = applyArrayModuleEntryState(state, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates, ctx.arrayParticipantKeys)
 	return state
 }

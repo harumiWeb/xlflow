@@ -1,8 +1,5 @@
 {"project":"self/maze-chase","file":"src/modules/MazeChaseGame.bas","surface":"analyze","code":"VBA206","severity":"warning","line":369,"column":13}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseGame.bas","surface":"analyze","code":"VBA206","severity":"warning","line":369,"column":13}
-{"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA249","severity":"error","line":63,"column":0}
-{"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA249","severity":"error","line":65,"column":0}
-{"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA249","severity":"error","line":67,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA202","severity":"warning","line":303,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA202","severity":"warning","line":313,"column":0}
 {"project":"self/maze-chase","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":186,"column":0}

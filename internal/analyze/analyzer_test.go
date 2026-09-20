@@ -4321,6 +4321,30 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA214AllowsCheckedCreateObjectCompatibilityProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub ProbeRegExpAvailability()
+  Dim regex As Object
+  On Error Resume Next
+  Set regex = CreateObject("VBScript.RegExp")
+  If Err.Number <> 0 Then
+    Err.Clear
+  End If
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("a checked CreateObject compatibility probe should not report VBA214: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA214AllowsCheckedMemberProbesAndSafeInitialization(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -11544,6 +11568,45 @@ End Sub
 	}
 	if !seenGuardedEmpty || !seenGuardedLoopErase || !seenZeroBranch || !seenErasedAfterGuard || !seenInlineElse {
 		t.Fatalf("the positive guard should retain the possible-empty warning and the = 0 branch must remain conservative: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227RecognizesNestedNotNotByteArrayGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub GuardedCopy(ByRef payload() As Byte, ByVal payloadLen As Long, ByVal masked As Boolean)
+  If payloadLen > 0 Then
+    If (Not Not payload) <> 0 Then
+      If masked Then
+        Debug.Print payload(LBound(payload))
+      End If
+    End If
+  End If
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenPossibleEmpty := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure != "GuardedCopy" {
+			continue
+		}
+		switch finding.arrayOperationKey {
+		case arrayIndexOperationKey("payload", "unallocated"),
+			arrayBoundOperationKey("lbound", "payload", "unallocated"):
+			t.Fatalf("a nested positive Not Not guard must remove unallocated evidence: %+v", finding)
+		case arrayIndexOperationKey("payload", "empty"):
+			seenPossibleEmpty = true
+		}
+	}
+	if !seenPossibleEmpty {
+		t.Fatalf("the nested positive guard must retain possible-empty evidence: %+v", findingsByCode(findings, "VBA227"))
 	}
 }
 

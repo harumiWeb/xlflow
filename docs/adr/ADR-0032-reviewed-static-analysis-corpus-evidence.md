@@ -32,7 +32,10 @@ containing canonical `code`, `severity`, `surface`, and the complete normalized
 also contain exactly one of `regression_test` or `regression_exception`. When
 other reviewed findings share a false-positive row's complete normalized
 identity, `allowed_occurrences` records their current ceiling without changing
-the false-positive evidence count.
+the false-positive evidence count. Such a row must also carry
+`allowed_occurrence_evidence`, whose reviewed count equals the ceiling and whose
+rationale records the legitimate colliding flows. This evidence is a separate
+reviewed category rather than an additional TP or FP.
 
 The complete four-coordinate range is part of identity. It uses the same
 normalized source positions as the production corpus result, including the
@@ -59,9 +62,10 @@ conflicting or ambiguous classifications for the same exact identity are
 invalid.
 
 Quality summaries are derived from the committed ledger and current corpus
-observations. They report reviewed, unreviewed, true-positive, and
-false-positive counts and per-rule precision, with optional project/profile
-coverage. `count` contributes diagnostic multiplicity. Precision is
+observations. They report reviewed, allowed-collision, unreviewed,
+true-positive, and false-positive counts and per-rule precision, with optional
+project/profile coverage. `count` contributes diagnostic multiplicity.
+Precision is
 `TP / (TP + FP)` and excludes unreviewed observations. Retaining remediated
 false-positive rows prevents a fix from erasing the historical evidence and
 artificially improving the metric.
@@ -92,9 +96,14 @@ Excel-specific warnings are false positives.
 - Exact ranges and multiplicity make matching deterministic, but source or
   diagnostic-range movement requires explicit evidence review.
 - `allowed_occurrences` detects an increase in a colliding normalized identity,
-  but cannot distinguish one allowed occurrence disappearing while one false
-  positive reappears. That distinction would require adding rule-specific
-  source/path context to the shared corpus identity.
+  while `allowed_occurrence_evidence` prevents the same known legitimate flows
+  from being repeatedly presented as unreviewed. Neither field can distinguish
+  one allowed occurrence disappearing while one false positive reappears. That
+  distinction would require adding rule-specific source/path context to the
+  shared corpus identity.
+- Collision evidence is reported separately in reviewed metrics and is omitted
+  from the next review-candidate batch; occurrences beyond the evidence ceiling
+  remain visible and fail the full contract.
 - Reviewers must maintain rationales and focused fixture references; justified
   exceptions remain visible rather than silently weakening regression
   coverage.

@@ -34,7 +34,7 @@ Keep one pull request centered on one rule or one analyzer root cause. A small b
 
 ## Review Current Diagnostics
 
-1. Select one rule and a manageable batch, normally 10-20 occurrences. Use `rtk task corpus:review-candidates -- <RULE> [LIMIT]` to list current unreviewed start-only snapshot rows without running the analyzer.
+1. Select one rule and a manageable batch, normally 10-20 occurrences. Use `rtk task corpus:review-candidates -- <RULE> [LIMIT]` to list current unreviewed start-only snapshot rows without running the analyzer. The output also reports `collision-reviewed` rows; those are already covered by explicit `allowed_occurrence_evidence` and are not unreviewed candidates.
 2. Locate every candidate in the snapshot and source. Preserve duplicate occurrences; do not deduplicate by eye.
 3. Read the rule contract and focused tests before deciding. Evaluate the source facts required by that rule, not whether the VBA merely compiles.
 4. Record a true positive only when the diagnostic matches the intended rule semantics at that exact source location.
@@ -80,6 +80,8 @@ Follow the exact schema and ordering rules in `docs/specs/static-analysis-corpus
 - `count` is explicit multiplicity for one exact identity. For TP rows it is the minimum expected count; extra matching emissions remain visible as unreviewed.
 - FP rows remain in the ledger after remediation and continue to contribute to reviewed-only metrics.
 - Use `allowed_occurrences` only when separately reviewed, legitimate diagnostics share the exact normalized identity with the remediated FP because the contract lacks rule-specific path/context detail.
+- Every `allowed_occurrences` row must also carry `allowed_occurrence_evidence` with `reviewed_count` equal to the ceiling, `scope` equal to `same-normalized-identity`, and a specific rationale that enumerates or identifies the legitimate colliding flows.
+- `allowed_occurrence_evidence` is a separate reviewed category. It removes the evidence-covered current occurrences from `unreviewed` and from the next candidate batch, but it does not add to TP/FP precision or the false-positive `count`.
 - Before setting `allowed_occurrences`, enumerate and explain the legitimate colliding occurrences. Use the smallest observed ceiling.
 - Remember its limitation: an allowed occurrence disappearing while the forbidden occurrence returns under the same identity cannot be distinguished.
 - Keep rationales factual and specific. Avoid conclusions based only on VBE compilation or general-language intuition.
@@ -103,7 +105,7 @@ A removed diagnostic is not automatically a fixed FP, and an added diagnostic is
 
 Match verification to the workflow:
 
-- **Read-only candidate scouting:** use `corpus:review-candidates`, then run the owning rule tests and `corpus:metrics`; do not update snapshots or run the full corpus unless needed to reproduce the candidate.
+- **Read-only candidate scouting:** use `corpus:review-candidates`, note both `unreviewed` and `collision-reviewed`, then run the owning rule tests and `corpus:metrics`; do not update snapshots or run the full corpus unless needed to reproduce the candidate.
 - **TP ledger change:** run the committed review/metrics tests and `corpus:test` so exact normalized ranges are checked against current output.
 - **FP remediation:** run focused and neighboring tests, static-analysis contracts, committed oracle contracts, verify-only corpus, the explicit snapshot update when justified, and a final verify-only corpus run.
 - **Documentation-only change:** run the relevant docs and format checks; do not run the corpus merely because this Skill was edited.
@@ -144,7 +146,7 @@ Report:
 - TP/FP decision and the concrete rationale
 - focused regression test and analyzer change for each remediated FP
 - snapshot delta and why it is accepted or left unchanged
-- reviewed, TP, FP, unreviewed, and precision metrics before/after when changed
+- reviewed, allowed-collision, TP, FP, unreviewed, and precision metrics before/after when changed
 - commands and results, including VBE case IDs when run
 - any unreviewed, ambiguous, or unverified items left in scope
 
