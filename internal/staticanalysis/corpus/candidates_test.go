@@ -37,11 +37,16 @@ func TestFindSnapshotReviewCandidatesReturnsOnlyUnreviewedRuleRows(t *testing.T)
 	}
 }
 
-func TestFindSnapshotReviewCandidatesPreservesFalsePositiveCollisionsAndLimit(t *testing.T) {
+func TestFindSnapshotReviewCandidatesHidesReviewedCollisionsAndRetainsExtras(t *testing.T) {
 	first := snapshotAt("self/sample", "src/Main.bas", SurfaceAnalyze, "VBA224", 3)
 	second := snapshotAt("self/sample", "src/Main.bas", SurfaceAnalyze, "VBA224", 7)
 	fp := reviewAt(ReviewFalsePositive, "VBA224", 3)
 	fp.Diagnostic.AllowedOccurrences = 1
+	fp.AllowedOccurrenceEvidence = &AllowedOccurrenceEvidence{
+		ReviewedCount: 1,
+		Scope:         AllowedOccurrenceEvidenceScope,
+		Rationale:     "The first shared-identity occurrence is a separately reviewed legitimate flow.",
+	}
 	fp.RegressionException = "Synthetic candidate test has no analyzer regression fixture."
 	snapshots := SnapshotSet{
 		{Project: "self/sample", Surface: SurfaceAnalyze}: {second, first},
@@ -51,7 +56,7 @@ func TestFindSnapshotReviewCandidatesPreservesFalsePositiveCollisionsAndLimit(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Total != 2 || len(report.Rows) != 1 || report.Rows[0] != first {
+	if report.Total != 1 || report.CollisionReviewed != 1 || len(report.Rows) != 1 || report.Rows[0] != second {
 		t.Fatalf("report = %#v", report)
 	}
 }
@@ -71,16 +76,17 @@ func TestFindSnapshotReviewCandidatesRejectsInvalidInputAndBrokenEvidence(t *tes
 
 func TestFormatSnapshotReviewCandidates(t *testing.T) {
 	report := SnapshotReviewCandidateReport{
-		Rule:  "VBA225",
-		Total: 2,
+		Rule:              "VBA225",
+		Total:             2,
+		CollisionReviewed: 4,
 		Rows: []SnapshotDiagnostic{
 			snapshotAt("self/alpha", "src/Alpha.bas", SurfaceLint, "VBA225", 9),
 		},
 	}
-	want := "corpus review candidates: rule=VBA225 unreviewed=2 showing=1\n" +
+	want := "corpus review candidates: rule=VBA225 unreviewed=2 collision-reviewed=4 showing=1\n" +
 		"project\tfile\tsurface\tseverity\tstart\n" +
 		"self/alpha\tsrc/Alpha.bas\tlint\twarning\t9:0\n" +
-		"note: snapshot positions are start-only; obtain the full normalized range before editing the review ledger, and use corpus:test for exact TP/FP contracts.\n"
+		"note: snapshot positions are start-only; obtain the full normalized range before editing the review ledger, and use corpus:test for exact TP/FP contracts. Collision-reviewed rows are covered by explicit allowed_occurrence_evidence and are not unreviewed candidates.\n"
 	if got := FormatSnapshotReviewCandidates(report); got != want {
 		t.Fatalf("format = %q, want %q", got, want)
 	}

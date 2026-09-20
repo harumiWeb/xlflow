@@ -36,6 +36,16 @@ type ReviewedDiagnostic struct {
 	AllowedOccurrences int            `json:"allowed_occurrences,omitempty"`
 }
 
+const AllowedOccurrenceEvidenceScope = "same-normalized-identity"
+
+// AllowedOccurrenceEvidence records the separately reviewed legitimate
+// occurrences that collide with a remediated false-positive identity.
+type AllowedOccurrenceEvidence struct {
+	ReviewedCount int    `json:"reviewed_count"`
+	Scope         string `json:"scope"`
+	Rationale     string `json:"rationale"`
+}
+
 type ReviewedRange struct {
 	StartLine   int `json:"start_line"`
 	StartColumn int `json:"start_column"`
@@ -46,19 +56,21 @@ type ReviewedRange struct {
 // DiagnosticReview records a human classification for one stable corpus
 // location. Diagnostics absent from this artifact remain unreviewed.
 type DiagnosticReview struct {
-	SchemaVersion       int                  `json:"schema_version"`
-	Project             string               `json:"project"`
-	File                string               `json:"file"`
-	Classification      ReviewClassification `json:"classification"`
-	Diagnostic          ReviewedDiagnostic   `json:"diagnostic"`
-	Rationale           string               `json:"rationale"`
-	RegressionTest      string               `json:"regression_test,omitempty"`
-	RegressionException string               `json:"regression_exception,omitempty"`
+	SchemaVersion             int                        `json:"schema_version"`
+	Project                   string                     `json:"project"`
+	File                      string                     `json:"file"`
+	Classification            ReviewClassification       `json:"classification"`
+	Diagnostic                ReviewedDiagnostic         `json:"diagnostic"`
+	Rationale                 string                     `json:"rationale"`
+	AllowedOccurrenceEvidence *AllowedOccurrenceEvidence `json:"allowed_occurrence_evidence,omitempty"`
+	RegressionTest            string                     `json:"regression_test,omitempty"`
+	RegressionException       string                     `json:"regression_exception,omitempty"`
 }
 
 type RuleReviewMetrics struct {
 	Rule         string
 	Reviewed     int
+	Allowed      int
 	Unreviewed   int
 	TP           int
 	FP           int
@@ -68,6 +80,7 @@ type RuleReviewMetrics struct {
 
 type ReviewMetrics struct {
 	Reviewed   int
+	Allowed    int
 	Unreviewed int
 	TP         int
 	FP         int
@@ -246,6 +259,28 @@ func validateDiagnosticReview(review DiagnosticReview) error {
 	if review.Classification == ReviewTruePositive && review.Diagnostic.AllowedOccurrences != 0 {
 		return errors.New("true-positive review must not declare allowed_occurrences")
 	}
+	if review.Diagnostic.AllowedOccurrences == 0 {
+		if review.AllowedOccurrenceEvidence != nil {
+			return errors.New("allowed_occurrence_evidence requires allowed_occurrences")
+		}
+	} else {
+		evidence := review.AllowedOccurrenceEvidence
+		if review.Classification != ReviewFalsePositive {
+			return errors.New("allowed_occurrence_evidence requires a false-positive review")
+		}
+		if evidence == nil {
+			return errors.New("allowed_occurrences requires allowed_occurrence_evidence")
+		}
+		if evidence.ReviewedCount != review.Diagnostic.AllowedOccurrences {
+			return fmt.Errorf("allowed occurrence evidence count %d must equal allowed_occurrences %d", evidence.ReviewedCount, review.Diagnostic.AllowedOccurrences)
+		}
+		if evidence.Scope != AllowedOccurrenceEvidenceScope {
+			return fmt.Errorf("unsupported allowed occurrence evidence scope %q", evidence.Scope)
+		}
+		if strings.TrimSpace(evidence.Rationale) == "" {
+			return errors.New("allowed occurrence evidence rationale is required")
+		}
+	}
 	return nil
 }
 
@@ -338,38 +373,25 @@ func contractDiagnostic(diagnostic Diagnostic) contract.Diagnostic {
 }
 
 func buildReviewMetrics(reviews []DiagnosticReview, diagnostics []Diagnostic) ReviewMetrics {
-	used := make([]bool, len(diagnostics))
-	for _, review := range reviews {
-		if review.Classification != ReviewTruePositive {
-			continue
-		}
-		for range review.Diagnostic.Count {
-			for index, diagnostic := range diagnostics {
-				if used[index] || review.Project != diagnostic.Project || review.File != diagnostic.File || !contract.Matches(review.expectation(), contractDiagnostic(diagnostic)) {
-					continue
-				}
-				used[index] = true
-				break
-			}
-		}
-	}
+	used, allowedByCode := consumeDiagnosticReviewMatches(reviews, diagnostics)
 	codes := make([]string, len(diagnostics))
 	for index := range diagnostics {
 		codes[index] = diagnostics[index].Code
 	}
-	return buildReviewMetricsFromMatches(reviews, codes, used)
+	return buildReviewMetricsFromMatches(reviews, codes, used, allowedByCode)
 }
 
 // EvaluateSnapshotReviews provides the fast committed-evidence view used by
 // corpus:metrics. Snapshot rows retain only start positions, so this verifies
-// true-positive multiplicity and computes coverage; the full real-world run
-// remains the authority for exact expected and forbidden end-range contracts.
+// true-positive multiplicity and consumes explicit collision evidence for
+// coverage; the full real-world run remains the authority for exact expected
+// and forbidden end-range contracts.
 func EvaluateSnapshotReviews(reviews []DiagnosticReview, snapshots SnapshotSet) (ReviewMetrics, error) {
 	rows := make([]SnapshotDiagnostic, 0)
 	for _, id := range snapshots.IDs() {
 		rows = append(rows, snapshots[id]...)
 	}
-	used, err := consumeSnapshotTruePositiveReviews(reviews, rows)
+	used, allowedByCode, err := consumeSnapshotReviewEvidence(reviews, rows)
 	if err != nil {
 		return ReviewMetrics{}, err
 	}
@@ -377,17 +399,27 @@ func EvaluateSnapshotReviews(reviews []DiagnosticReview, snapshots SnapshotSet) 
 	for index := range rows {
 		codes[index] = rows[index].Code
 	}
-	return buildReviewMetricsFromMatches(reviews, codes, used), nil
+	return buildReviewMetricsFromMatches(reviews, codes, used, allowedByCode), nil
 }
 
-func consumeSnapshotTruePositiveReviews(reviews []DiagnosticReview, rows []SnapshotDiagnostic) ([]bool, error) {
+func consumeSnapshotReviewEvidence(reviews []DiagnosticReview, rows []SnapshotDiagnostic) ([]bool, map[string]int, error) {
 	used := make([]bool, len(rows))
 	violations := make([]string, 0)
+	allowedConsumed := make(map[string]int)
 	for reviewIndex, review := range reviews {
 		if err := validateDiagnosticReview(review); err != nil {
-			return nil, fmt.Errorf("review %d: %w", reviewIndex+1, err)
+			return nil, nil, fmt.Errorf("review %d: %w", reviewIndex+1, err)
 		}
-		if review.Classification == ReviewFalsePositive {
+		count := 0
+		switch review.Classification {
+		case ReviewTruePositive:
+			count = review.Diagnostic.Count
+		case ReviewFalsePositive:
+			if review.AllowedOccurrenceEvidence != nil {
+				count = review.AllowedOccurrenceEvidence.ReviewedCount
+			}
+		}
+		if count == 0 {
 			continue
 		}
 		available := make([]int, 0)
@@ -396,18 +428,21 @@ func consumeSnapshotTruePositiveReviews(reviews []DiagnosticReview, rows []Snaps
 				available = append(available, index)
 			}
 		}
-		if len(available) < review.Diagnostic.Count {
+		if review.Classification == ReviewTruePositive && len(available) < count {
 			violations = append(violations, fmt.Sprintf("%s/%s: expected %d %s diagnostic(s), found %d", review.Project, review.File, review.Diagnostic.Count, review.Diagnostic.Code, len(available)))
 			continue
 		}
-		for _, index := range available[:review.Diagnostic.Count] {
+		for _, index := range available[:min(count, len(available))] {
 			used[index] = true
+		}
+		if review.Classification == ReviewFalsePositive {
+			allowedConsumed[review.Diagnostic.Code] += min(count, len(available))
 		}
 	}
 	if len(violations) > 0 {
-		return nil, fmt.Errorf("committed review contract violations: %s", strings.Join(violations, "; "))
+		return nil, nil, fmt.Errorf("committed review contract violations: %s", strings.Join(violations, "; "))
 	}
-	return used, nil
+	return used, allowedConsumed, nil
 }
 
 func snapshotReviewMatches(review DiagnosticReview, row SnapshotDiagnostic) bool {
@@ -417,8 +452,37 @@ func snapshotReviewMatches(review DiagnosticReview, row SnapshotDiagnostic) bool
 		rng.StartLine == row.Line && rng.StartColumn == row.Column
 }
 
-func buildReviewMetricsFromMatches(reviews []DiagnosticReview, codes []string, used []bool) ReviewMetrics {
-	type counts struct{ tp, fp int }
+func consumeDiagnosticReviewMatches(reviews []DiagnosticReview, diagnostics []Diagnostic) ([]bool, map[string]int) {
+	used := make([]bool, len(diagnostics))
+	allowedByCode := make(map[string]int)
+	for _, review := range reviews {
+		count := 0
+		switch review.Classification {
+		case ReviewTruePositive:
+			count = review.Diagnostic.Count
+		case ReviewFalsePositive:
+			if review.AllowedOccurrenceEvidence != nil {
+				count = review.AllowedOccurrenceEvidence.ReviewedCount
+			}
+		}
+		for range count {
+			for index, diagnostic := range diagnostics {
+				if used[index] || review.Project != diagnostic.Project || review.File != diagnostic.File || !contract.Matches(review.expectation(), contractDiagnostic(diagnostic)) {
+					continue
+				}
+				used[index] = true
+				if review.Classification == ReviewFalsePositive {
+					allowedByCode[review.Diagnostic.Code]++
+				}
+				break
+			}
+		}
+	}
+	return used, allowedByCode
+}
+
+func buildReviewMetricsFromMatches(reviews []DiagnosticReview, codes []string, used []bool, allowedByCode map[string]int) ReviewMetrics {
+	type counts struct{ tp, fp, allowed int }
 	perRule := make(map[string]counts)
 	metrics := ReviewMetrics{}
 	for _, review := range reviews {
@@ -431,6 +495,12 @@ func buildReviewMetricsFromMatches(reviews []DiagnosticReview, codes []string, u
 			count.fp += review.Diagnostic.Count
 		}
 		perRule[review.Diagnostic.Code] = count
+	}
+	for code, allowed := range allowedByCode {
+		metrics.Allowed += allowed
+		count := perRule[code]
+		count.allowed = allowed
+		perRule[code] = count
 	}
 	metrics.Reviewed = metrics.TP + metrics.FP
 	unreviewedByRule := make(map[string]int)
@@ -456,15 +526,15 @@ func buildReviewMetricsFromMatches(reviews []DiagnosticReview, codes []string, u
 		if reviewed > 0 {
 			precision = float64(count.tp) / float64(reviewed)
 		}
-		metrics.Rules = append(metrics.Rules, RuleReviewMetrics{Rule: code, Reviewed: reviewed, Unreviewed: unreviewedByRule[code], TP: count.tp, FP: count.fp, Precision: precision, HasPrecision: reviewed > 0})
+		metrics.Rules = append(metrics.Rules, RuleReviewMetrics{Rule: code, Reviewed: reviewed, Allowed: count.allowed, Unreviewed: unreviewedByRule[code], TP: count.tp, FP: count.fp, Precision: precision, HasPrecision: reviewed > 0})
 	}
 	return metrics
 }
 
 func FormatReviewMetrics(metrics ReviewMetrics) string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "corpus reviews: reviewed=%d tp=%d fp=%d unreviewed=%d\n", metrics.Reviewed, metrics.TP, metrics.FP, metrics.Unreviewed)
-	builder.WriteString("rule reviewed unreviewed tp fp precision\n")
+	fmt.Fprintf(&builder, "corpus reviews: reviewed=%d tp=%d fp=%d allowed=%d unreviewed=%d\n", metrics.Reviewed, metrics.TP, metrics.FP, metrics.Allowed, metrics.Unreviewed)
+	builder.WriteString("rule reviewed allowed unreviewed tp fp precision\n")
 	rules := append([]RuleReviewMetrics(nil), metrics.Rules...)
 	sort.SliceStable(rules, func(i, j int) bool { return rules[i].Rule < rules[j].Rule })
 	for _, rule := range rules {
@@ -472,7 +542,7 @@ func FormatReviewMetrics(metrics ReviewMetrics) string {
 		if rule.HasPrecision {
 			precision = fmt.Sprintf("%.1f%%", rule.Precision*100)
 		}
-		fmt.Fprintf(&builder, "%s %d %d %d %d %s\n", rule.Rule, rule.Reviewed, rule.Unreviewed, rule.TP, rule.FP, precision)
+		fmt.Fprintf(&builder, "%s %d %d %d %d %d %s\n", rule.Rule, rule.Reviewed, rule.Allowed, rule.Unreviewed, rule.TP, rule.FP, precision)
 	}
 	return builder.String()
 }

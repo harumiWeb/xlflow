@@ -154,8 +154,8 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 9086 || metrics.TP != 6238 || metrics.FP != 2848 {
-		t.Fatalf("committed review metrics = %#v, want Reviewed=9086 TP=6238 FP=2848", metrics)
+	if metrics.Reviewed != 9086 || metrics.TP != 6238 || metrics.FP != 2848 || metrics.Allowed != 90 || metrics.Unreviewed != 0 {
+		t.Fatalf("committed review metrics = %#v, want Reviewed=9086 TP=6238 FP=2848 Allowed=90 Unreviewed=0", metrics)
 	}
 	// This review pass expanded the ledger with confirmed VBA240, VBA244, and VBA249
 	// findings, so the observed precision remains close to the review floor.
@@ -192,18 +192,45 @@ func TestEvaluateDiagnosticReviewsEnforcesTrueAndFalsePositiveContracts(t *testi
 func TestEvaluateDiagnosticReviewsAllowsCollidingBaselineOccurrences(t *testing.T) {
 	fp := reviewAt(ReviewFalsePositive, "VBA224", 9)
 	fp.Diagnostic.AllowedOccurrences = 2
+	fp.AllowedOccurrenceEvidence = &AllowedOccurrenceEvidence{
+		ReviewedCount: 2,
+		Scope:         AllowedOccurrenceEvidenceScope,
+		Rationale:     "Two legitimate flows were reviewed at the shared normalized identity.",
+	}
 	fp.RegressionTest = "internal/vba/dataflow/analysis_test.go::TestAnalyzeProcedureFindingsDoNotDependOnWorklistRank"
 	baseline := Report{Diagnostics: []Diagnostic{diagnosticAt("VBA224", 9), diagnosticAt("VBA224", 9)}}
 	metrics, err := EvaluateDiagnosticReviews([]DiagnosticReview{fp}, baseline)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.FP != 1 || metrics.Unreviewed != 2 {
+	if metrics.FP != 1 || metrics.Allowed != 2 || metrics.Unreviewed != 0 {
 		t.Fatalf("metrics = %#v", metrics)
 	}
 	baseline.Diagnostics = append(baseline.Diagnostics, diagnosticAt("VBA224", 9))
 	if _, err := EvaluateDiagnosticReviews([]DiagnosticReview{fp}, baseline); err == nil || !strings.Contains(err.Error(), "exceeded allowed occurrences (3 > 2)") {
 		t.Fatalf("collision threshold error = %v", err)
+	}
+}
+
+func TestDiagnosticReviewRequiresCompleteAllowedOccurrenceEvidence(t *testing.T) {
+	review := reviewAt(ReviewFalsePositive, "VBA224", 9)
+	review.Diagnostic.AllowedOccurrences = 2
+	review.RegressionException = "Synthetic validation case has no focused fixture."
+	if err := validateDiagnosticReview(review); err == nil || !strings.Contains(err.Error(), "requires allowed_occurrence_evidence") {
+		t.Fatalf("missing collision evidence error = %v", err)
+	}
+	review.AllowedOccurrenceEvidence = &AllowedOccurrenceEvidence{
+		ReviewedCount: 1,
+		Scope:         AllowedOccurrenceEvidenceScope,
+		Rationale:     "One legitimate flow was reviewed at the shared normalized identity.",
+	}
+	if err := validateDiagnosticReview(review); err == nil || !strings.Contains(err.Error(), "must equal allowed_occurrences") {
+		t.Fatalf("mismatched collision evidence error = %v", err)
+	}
+	review.AllowedOccurrenceEvidence.ReviewedCount = 2
+	review.AllowedOccurrenceEvidence.Scope = "other-scope"
+	if err := validateDiagnosticReview(review); err == nil || !strings.Contains(err.Error(), "unsupported allowed occurrence evidence scope") {
+		t.Fatalf("unsupported collision evidence scope error = %v", err)
 	}
 }
 
@@ -244,16 +271,16 @@ func TestEvaluateSnapshotReviewsUsesCommittedStartIdentity(t *testing.T) {
 
 func TestFormatReviewMetricsIsDeterministicAndReviewedOnly(t *testing.T) {
 	metrics := ReviewMetrics{
-		Reviewed: 3, TP: 2, FP: 1, Unreviewed: 7,
+		Reviewed: 3, Allowed: 4, TP: 2, FP: 1, Unreviewed: 7,
 		Rules: []RuleReviewMetrics{
 			{Rule: "VBA225", Reviewed: 2, TP: 2, Precision: 1, HasPrecision: true},
-			{Rule: "VBA224", Reviewed: 1, FP: 1, HasPrecision: true},
+			{Rule: "VBA224", Reviewed: 1, Allowed: 4, FP: 1, HasPrecision: true},
 		},
 	}
-	want := "corpus reviews: reviewed=3 tp=2 fp=1 unreviewed=7\n" +
-		"rule reviewed unreviewed tp fp precision\n" +
-		"VBA224 1 0 0 1 0.0%\n" +
-		"VBA225 2 0 2 0 100.0%\n"
+	want := "corpus reviews: reviewed=3 tp=2 fp=1 allowed=4 unreviewed=7\n" +
+		"rule reviewed allowed unreviewed tp fp precision\n" +
+		"VBA224 1 4 0 0 1 0.0%\n" +
+		"VBA225 2 0 0 2 0 100.0%\n"
 	if got := FormatReviewMetrics(metrics); got != want {
 		t.Fatalf("metrics format = %q, want %q", got, want)
 	}

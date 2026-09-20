@@ -106,6 +106,8 @@ const excludedErrorInventoryLiterals = new Set([
   "binding_note",
   "dependency_edges_updated",
   "dependency_nodes_updated",
+  "allowed_occurrence_evidence",
+  "reviewed_count",
   "license_file",
   "regression_exception",
   "role_data_table",

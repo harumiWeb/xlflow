@@ -352,6 +352,11 @@ schema is:
     "allowed_occurrences": 2
   },
   "rationale": "The guarded value is initialized on every reachable path.",
+  "allowed_occurrence_evidence": {
+    "reviewed_count": 2,
+    "scope": "same-normalized-identity",
+    "rationale": "Two legitimate guarded flows share this normalized identity."
+  },
   "regression_test": "internal/analyze/qrcode_test.go::TestAnalyzeGuardedQrCodeValue"
 }
 ```
@@ -378,9 +383,13 @@ The fields have the following contract:
 - `allowed_occurrences` is optional and valid only for a false-positive row.
   It records how many separately reviewed diagnostics may continue to share
   the same normalized identity when source/sink detail is not part of the
-  corpus contract. Verification fails when the actual count exceeds this
-  ceiling. It does not change the false-positive evidence `count` used by
-  metrics.
+  corpus contract. A row with `allowed_occurrences` must also contain
+  `allowed_occurrence_evidence` with `reviewed_count` equal to the ceiling,
+  `scope` set to `same-normalized-identity`, and a non-empty rationale that
+  explains the legitimate colliding flows. Verification fails when the actual
+  count exceeds this ceiling. The evidence is a separate reviewed category:
+  it does not change the false-positive evidence `count` or the reviewed-only
+  precision denominator.
 
 - `rationale` is a non-empty human review explanation.
 - A `false-positive` row contains exactly one of `regression_test` or
@@ -389,11 +398,13 @@ The fields have the following contract:
   fixture is impractical. Neither field is valid for a `true-positive` row.
 
 Because the snapshot and shared contract intentionally exclude rule-specific
-prose and path witnesses, `allowed_occurrences` cannot distinguish an allowed
-occurrence disappearing while the reviewed false positive reappears under the
-identical normalized identity. It deterministically guards the observable
-multiplicity boundary; a future context-rich identity would be required to
-distinguish that swap.
+prose and path witnesses, `allowed_occurrences` and its evidence cannot
+distinguish an allowed occurrence disappearing while the reviewed false
+positive reappears under the identical normalized identity. The evidence makes
+the current legitimate collision review explicit so it is not repeatedly
+reported as unreviewed, while the ceiling still deterministically guards the
+observable multiplicity boundary. A future context-rich identity would be
+required to distinguish that swap.
 
 Ledger rows are sorted deterministically by `project`, `file`, diagnostic
 `surface`, `code`, `severity`, range coordinates, and `classification`.
@@ -412,8 +423,18 @@ not false positives share the same exact normalized identity,
 `allowed_occurrences` preserves that baseline and verification fails only when
 the count grows beyond it.
 
-Every current snapshot diagnostic not consumed by a matching true-positive
-row is unreviewed unless it violates a false-positive contract. Unreviewed
+`corpus:metrics` reports current evidence-covered collision occurrences in a
+separate `allowed` column and does not count them as unreviewed. The committed
+evidence ceiling remains in the ledger even when an allowed occurrence has
+disappeared from current output. The
+`corpus:review-candidates` output likewise reports the number of
+`collision-reviewed` occurrences and excludes them from the next review batch;
+new occurrences beyond the evidence ceiling remain visible as candidates and
+are rejected by the full contract check.
+
+Every current snapshot diagnostic not consumed by a matching true-positive or
+explicit allowed-occurrence evidence row is unreviewed unless it violates a
+false-positive contract. Unreviewed
 diagnostics remain permitted and visible in reports; they are never silently
 classified as correct. Snapshot verification still compares all observations,
 including unreviewed rows, so this review layer does not weaken the broad
