@@ -131,6 +131,12 @@ type Analyzer struct {
 	// analysisWorkerLimit is test-only tuning for the bounded file analysis
 	// pool. A zero value derives the limit from GOMAXPROCS and project size.
 	analysisWorkerLimit int
+	// workspaceDocuments and workspaceSymbolsSnapshot are populated only by the
+	// project-aware realtime path. They keep typed source diagnostics aligned
+	// with the caller's immutable project snapshot, including unsaved sibling
+	// documents that are not present on disk yet.
+	workspaceDocuments       []intel.Document
+	workspaceSymbolsSnapshot intel.WorkspaceSymbolsSnapshotFunc
 	// procedureAnalysisStartHook is test-only synchronization for cancellation
 	// coverage. Production callers leave it nil.
 	procedureAnalysisStartHook func()
@@ -1922,7 +1928,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 // the snapshot-aware form used by LSP and other project callers that already
 // own a value-bearing constant environment.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, nil, nil, 0)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, nil, nil, nil, nil, 0)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext is
@@ -1930,7 +1936,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 // and reads project-dependent call/access/event facts through resolution
 // views, avoiding a full resolved DocumentIR clone per file.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, nil, 0)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, nil, nil, nil, 0)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext
@@ -1938,7 +1944,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(c
 // immutable document index instead of reparsing the complete buffer for every
 // expression they resolve.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, &sourceDocument, procedureWorkerLimit)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, &sourceDocument, nil, nil, procedureWorkerLimit)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverContext
@@ -1954,7 +1960,16 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentR
 // carries the coherent workspace documents needed for interprocedural array
 // return summaries. The legacy resolver entry point remains document-local.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, projectDocuments, &sourceDocument, procedureWorkerLimit)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, projectDocuments, &sourceDocument, nil, nil, procedureWorkerLimit)
+}
+
+// SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContextWithWorkspaceSymbols
+// is the project-aware editor entry point with the caller's coherent workspace
+// symbol view. The LSP uses this form so typed call resolution sees unsaved
+// declarations from sibling project documents instead of falling back to the
+// saved filesystem view.
+func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContextWithWorkspaceSymbols(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument intel.Document, workspaceDocuments []intel.Document, workspaceSymbolsSnapshot intel.WorkspaceSymbolsSnapshotFunc, procedureWorkerLimit int) ([]Finding, error) {
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, projectDocuments, &sourceDocument, workspaceDocuments, workspaceSymbolsSnapshot, procedureWorkerLimit)
 }
 
 func realtimeProjectContextFiles(current parsedFile, documents []intel.ProjectAnalysisDocument, project effects.ProjectSummary, cfg config.AnalyzeConfig, projectResolver procedureir.Resolver) []parsedFile {
@@ -2207,7 +2222,7 @@ func realtimeProjectPathKey(path string) string {
 	return strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
 }
 
-func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument *intel.Document, procedureWorkerLimit int) ([]Finding, error) {
+func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument *intel.Document, workspaceDocuments []intel.Document, workspaceSymbolsSnapshot intel.WorkspaceSymbolsSnapshotFunc, procedureWorkerLimit int) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -2312,6 +2327,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		analyzer := Analyzer{
 			RootDir: rootDir, Config: cfg, typeDB: typeDB,
 			visibleConstantValues: projectConstants, excelRootBindings: excelRootBindings,
+			workspaceDocuments: workspaceDocuments, workspaceSymbolsSnapshot: workspaceSymbolsSnapshot,
 		}
 		prepareResumeNextScopeConstantValues(analyzer, &file)
 		if procedureWorkerLimit > 0 {

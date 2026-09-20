@@ -361,6 +361,8 @@ func New(opts Options) (*Server, func(), error) {
 			projectConstants = s.projectConstantsContext(ctx, project, resolutionComplete, typeDB.DB)
 		}
 		analyzer := s.analyzer
+		workspaceDocuments := projectWorkspaceDocuments(resolvedProjectDocuments, request.Document)
+		workspaceSymbolsSnapshot := analyzer.WorkspaceSymbolsSnapshotFunc
 		analyzer.VisibleConstants = projectConstants.visible
 		analyzer.ConstantValues = projectConstants.values
 		analyzer.RealtimeFindingsFunc = func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
@@ -371,7 +373,7 @@ func New(opts Options) (*Server, func(), error) {
 				resolution = &projectDocument.Resolution
 				controlFlow = projectDocument.CFG
 			}
-			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, projectConstants.values, resolution, resolutionResolver, resolvedProjectDocuments, request.Document, s.backgroundProcedureWorkerLimit())
+			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContextWithWorkspaceSymbols(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, projectConstants.values, resolution, resolutionResolver, resolvedProjectDocuments, request.Document, workspaceDocuments, workspaceSymbolsSnapshot, s.backgroundProcedureWorkerLimit())
 			if err != nil {
 				return nil, err
 			}
@@ -438,6 +440,35 @@ func New(opts Options) (*Server, func(), error) {
 		s.docs.closeAll()
 		cleanup()
 	}, nil
+}
+
+func projectWorkspaceDocuments(projectDocuments []intel.ProjectAnalysisDocument, current intel.Document) []intel.Document {
+	workspaceDocuments := make([]intel.Document, 0, len(projectDocuments)+1)
+	currentKey := symbolFileKey(current.Path)
+	currentIncluded := false
+	seen := make(map[string]int, len(projectDocuments))
+	for _, projectDocument := range projectDocuments {
+		path := strings.TrimSpace(projectDocument.IR.Path)
+		if path == "" {
+			continue
+		}
+		document := intel.Document{Path: path, Source: projectDocument.Source, ModuleKind: string(projectDocument.IR.ModuleKind)}
+		key := symbolFileKey(path)
+		if currentKey != "" && key == currentKey {
+			document = current
+			currentIncluded = true
+		}
+		if index, ok := seen[key]; ok {
+			workspaceDocuments[index] = document
+			continue
+		}
+		seen[key] = len(workspaceDocuments)
+		workspaceDocuments = append(workspaceDocuments, document)
+	}
+	if !currentIncluded && strings.TrimSpace(current.Path) != "" {
+		workspaceDocuments = append(workspaceDocuments, current)
+	}
+	return workspaceDocuments
 }
 
 func projectVisibleConstants(project intel.ProjectAnalysisSnapshot, typeDB *vbadb.DB) map[string]bool {

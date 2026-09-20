@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"context"
+	"sync"
 
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 )
@@ -10,7 +11,41 @@ func (a Analyzer) implicitApproximateLookupFindingsContext(ctx context.Context, 
 	if !a.Config.Analyze.DetectImplicitApproximateLookups || a.typeDB == nil {
 		return nil, nil
 	}
-	diagnostics, err := (intel.Analyzer{RootDir: a.intelRootDir(), Config: a.Config, DB: a.typeDB}).ImplicitApproximateLookupDiagnosticsContext(ctx, file.intelDocument())
+	intelAnalyzer := intel.Analyzer{RootDir: a.intelRootDir(), Config: a.Config, DB: a.typeDB}
+	openDocuments := []intel.Document{file.intelDocument()}
+	if len(a.workspaceDocuments) > 0 && a.workspaceSymbolsSnapshot != nil {
+		openDocuments = a.workspaceDocuments
+	}
+	// The project-aware LSP path supplies a coherent open-document set. Keep
+	// the callback and that set together so a same-name Public procedure in an
+	// unsaved sibling module can shadow the Excel fallback conservatively.
+	if a.workspaceSymbolsSnapshot != nil {
+		type workspaceResolutionSnapshot struct {
+			view *intel.WorkspaceResolutionView
+			err  error
+		}
+		loadWorkspace := sync.OnceValue(func() workspaceResolutionSnapshot {
+			if err := ctx.Err(); err != nil {
+				return workspaceResolutionSnapshot{err: err}
+			}
+			symbols, err := a.workspaceSymbolsSnapshot(openDocuments)
+			if err != nil {
+				return workspaceResolutionSnapshot{err: err}
+			}
+			if err := ctx.Err(); err != nil {
+				return workspaceResolutionSnapshot{err: err}
+			}
+			return workspaceResolutionSnapshot{view: intel.NewWorkspaceResolutionView(symbols)}
+		})
+		intelAnalyzer.WorkspaceSymbolQueryFunc = func(_ []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
+			workspace := loadWorkspace()
+			if workspace.err != nil {
+				return nil, workspace.err
+			}
+			return workspace.view.Query(query), nil
+		}
+	}
+	diagnostics, err := intelAnalyzer.ImplicitApproximateLookupDiagnosticsContext(ctx, file.intelDocument())
 	if err != nil {
 		return nil, err
 	}
