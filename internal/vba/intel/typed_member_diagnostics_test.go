@@ -67,6 +67,44 @@ End Sub
 	}
 }
 
+func TestUnavailableWorksheetFunctionMemberDiagnosticsCanonicalizesWorksheetFunctionAliases(t *testing.T) {
+	analyzer := newGeneratedWorksheetFunctionAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Local()
+    Dim result As Variant
+    Dim wf As WorksheetFunction
+    result = wf.Abs(1)
+End Sub
+
+Public Sub Parameter(wf As WorksheetFunction)
+    Dim result As Variant
+    result = wf.Concatenate("a", "b")
+End Sub
+`,
+	}
+
+	diagnostics := analyzer.UnavailableWorksheetFunctionMemberDiagnostics(doc)
+	if len(diagnostics) != 2 {
+		t.Fatalf("VBA252 diagnostics = %+v, want local and parameter findings", diagnostics)
+	}
+	want := map[int]string{4: "Abs", 9: "Concatenate"}
+	for _, diagnostic := range diagnostics {
+		member, ok := want[diagnostic.Range.Start.Line]
+		if !ok {
+			t.Fatalf("VBA252 diagnostic on unexpected line: %+v", diagnostic)
+		}
+		if !strings.Contains(diagnostic.Message, fmt.Sprintf("%q", member)) {
+			t.Fatalf("VBA252 diagnostic = %+v, want member %q", diagnostic, member)
+		}
+		delete(want, diagnostic.Range.Start.Line)
+	}
+	if len(want) != 0 {
+		t.Fatalf("VBA252 missed alias findings: %+v", want)
+	}
+}
+
 func TestUnavailableWorksheetFunctionMemberDiagnosticsFailOpenForShadowedAndUnknownTypes(t *testing.T) {
 	analyzer := newGeneratedWorksheetFunctionAnalyzer(t)
 	doc := Document{

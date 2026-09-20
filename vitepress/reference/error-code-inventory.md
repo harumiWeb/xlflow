@@ -545,8 +545,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generate_test_failed`
 - `generated_at`
 - `generated_files`
+- `generator_changed`
 - `generator_version`
 - `generator_version_changed`
+- `generator_version_missing`
 - `generic_dataflow_cfg_walks`
 - `generic_dataflow_kernel_runs`
 - `global_values`

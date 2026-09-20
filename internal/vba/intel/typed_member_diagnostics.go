@@ -121,6 +121,9 @@ func (a Analyzer) UnavailableWorksheetFunctionMemberDiagnosticsContext(ctx conte
 }
 
 func (a Analyzer) typedMemberReceiverType(doc Document, target string, pos Position, offset int, typeContext *documentTypeContext) (string, bool) {
+	canonical := func(typ string) string {
+		return canonicalDiagnosticType(a.DB, typ)
+	}
 	receiverExpr, _, qualified := splitCallTarget(target)
 	if strings.HasPrefix(strings.TrimSpace(target), ".") {
 		receiverType, ok := a.withBlockTypeAtContext(doc, pos, offset, typeContext)
@@ -128,14 +131,22 @@ func (a Analyzer) typedMemberReceiverType(doc Document, target string, pos Posit
 			return "", false
 		}
 		if !qualified || strings.TrimSpace(receiverExpr) == "" || strings.TrimSpace(receiverExpr) == "." {
-			return receiverType, true
+			return canonical(receiverType), true
 		}
-		return a.resolveRelativeMemberExpressionType(receiverType, receiverExpr)
+		resolvedType, ok := a.resolveRelativeMemberExpressionType(receiverType, receiverExpr)
+		if !ok {
+			return "", false
+		}
+		return canonical(resolvedType), true
 	}
 	if !qualified {
 		return "", false
 	}
-	return a.resolveDocumentExpressionTypeAtContext(doc, receiverExpr, offset, typeContext)
+	resolvedType, ok := a.resolveDocumentExpressionTypeAtContext(doc, receiverExpr, offset, typeContext)
+	if !ok {
+		return "", false
+	}
+	return canonical(resolvedType), true
 }
 
 func logicalCallMemberRange(line logicalCallAnalysisLine, call parsedCall, member string) Range {

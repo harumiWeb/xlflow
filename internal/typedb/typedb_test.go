@@ -1,10 +1,13 @@
 package typedb
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
 func TestStatusForMissingManifestReportsStale(t *testing.T) {
@@ -40,6 +43,90 @@ func TestLoadForRuntimeMarksMissingManifestIncomplete(t *testing.T) {
 	}
 	if _, ok := result.DB.ResolveType("Workbook"); !ok {
 		t.Fatal("embedded built-in types must remain available")
+	}
+}
+
+func TestLoadForRuntimeRejectsIncompatibleManifestMetadata(t *testing.T) {
+	tests := []struct {
+		name            string
+		manifest        Manifest
+		expectedVersion string
+		warning         string
+	}{
+		{
+			name: "schema",
+			manifest: Manifest{
+				SchemaVersion:    vbadb.SchemaVersion + 1,
+				Generator:        GeneratorName,
+				GeneratorVersion: "test",
+				Libraries:        []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+			},
+			warning: "schema version",
+		},
+		{
+			name: "generator",
+			manifest: Manifest{
+				SchemaVersion:    vbadb.SchemaVersion,
+				Generator:        "other-tool",
+				GeneratorVersion: "test",
+				Libraries:        []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+			},
+			warning: "generator ",
+		},
+		{
+			name: "missing generator version",
+			manifest: Manifest{
+				SchemaVersion: vbadb.SchemaVersion,
+				Generator:     GeneratorName,
+				Libraries:     []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+			},
+			warning: "generator version is missing",
+		},
+		{
+			name: "stale generator version",
+			manifest: Manifest{
+				SchemaVersion:    vbadb.SchemaVersion,
+				Generator:        GeneratorName,
+				GeneratorVersion: "old",
+				Libraries:        []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+			},
+			expectedVersion: "current",
+			warning:         "generator version \"old\" is stale",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "excel.generated.json"), []byte(`{"types":[]}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(test.manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(ManifestPath(dir), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := LoadForRuntimeWithGeneratorVersion(dir, test.expectedVersion)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Complete {
+				t.Fatalf("incompatible manifest should be incomplete: %+v", result)
+			}
+			found := false
+			for _, warning := range result.Warnings {
+				if strings.Contains(warning, test.warning) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("warnings = %+v, want %q", result.Warnings, test.warning)
+			}
+		})
 	}
 }
 

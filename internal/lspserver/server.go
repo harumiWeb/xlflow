@@ -196,7 +196,7 @@ type diagnosticState struct {
 }
 
 func Check(opts Options) error {
-	result, err := typedb.LoadForRuntime(opts.TypeDBDir)
+	result, err := typedb.LoadForRuntimeWithGeneratorVersion(opts.TypeDBDir, opts.Build.Version)
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func RunStdio(opts Options) error {
 }
 
 func New(opts Options) (*Server, func(), error) {
-	typeDB, err := typedb.LoadForRuntime(opts.TypeDBDir)
+	typeDB, err := typedb.LoadForRuntimeWithGeneratorVersion(opts.TypeDBDir, opts.Build.Version)
 	if err != nil {
 		return nil, nil, err
 	}

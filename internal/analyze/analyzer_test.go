@@ -3,6 +3,7 @@ package analyze
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -6161,6 +6162,60 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA252"); len(got) != 0 {
 		t.Fatalf("disabled realtime VBA252 should not report: %+v", got)
+	}
+}
+
+func TestVBA252FailsOpenForStaleTypeDBManifest(t *testing.T) {
+	dir := t.TempDir()
+	typeDBDir := t.TempDir()
+	generated := `{
+  "types": [{
+    "name": "Excel.WorksheetFunction",
+    "library": "Excel",
+    "kind": "interface",
+    "confidence": "generated",
+    "source": "typelib",
+    "methods": [{ "name": "Sum", "return_type": "Double" }]
+  }]
+}`
+	if err := os.WriteFile(filepath.Join(typeDBDir, "excel.generated.json"), []byte(generated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestBody, err := json.Marshal(typedb.Manifest{
+		SchemaVersion:    vbadb.SchemaVersion + 1,
+		Generator:        typedb.GeneratorName,
+		GeneratorVersion: "test",
+		Libraries:        []typedb.ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(typedb.ManifestPath(typeDBDir), manifestBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
+	path := filepath.Join(dir, "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+    Dim result As Variant
+    result = WorksheetFunction.Abs(1)
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", string(source))
+	cfg := config.Default()
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(batch, "VBA252"); len(got) != 0 {
+		t.Fatalf("stale TypeDB manifest must fail open in batch analysis: %+v", got)
+	}
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA252"); len(got) != 0 {
+		t.Fatalf("stale TypeDB manifest must fail open in realtime analysis: %+v", got)
 	}
 }
 
