@@ -6065,6 +6065,93 @@ End Sub
 	}
 }
 
+func TestSourceRealtimeVBA251UsesProjectWorkspaceSymbols(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "src", "modules", "Main.bas")
+	helperPath := filepath.Join(root, "src", "modules", "Helper.bas")
+	mainSource := `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Dim result As Variant
+    result = Match("key", rng)
+End Sub
+`
+	helperSource := `Attribute VB_Name = "Helper"
+Option Explicit
+Public Function Match(ByVal lookupValue As Variant, ByVal lookupRange As Range) As Variant
+    Match = lookupValue
+End Function
+`
+	type sourceDocument struct {
+		path   string
+		module string
+		source string
+	}
+	sources := []sourceDocument{
+		{path: mainPath, module: "Main", source: mainSource},
+		{path: helperPath, module: "Helper", source: helperSource},
+	}
+	documents := make([]intel.ProjectAnalysisDocument, 0, len(sources))
+	parsedDocuments := make([]*vbaast.ParsedDocument, 0, len(sources))
+	for _, source := range sources {
+		parsed, err := vbaast.ParseDocument(source.path, []byte(source.source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsedDocuments = append(parsedDocuments, parsed)
+		ir, err := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{
+			RootDir: root, Path: source.path, ModuleName: source.module, ModuleKind: "standard",
+		}, parsed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		controlFlow, err := vbacfg.BuildDocumentContext(ctx, ir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		documents = append(documents, intel.ProjectAnalysisDocument{IR: ir, CFG: controlFlow, Source: source.source})
+	}
+	defer func() {
+		for _, parsed := range parsedDocuments {
+			parsed.Close()
+		}
+	}()
+
+	main := documents[0]
+	mainDocument := intel.Document{Path: mainPath, Source: mainSource, ModuleKind: "standard"}
+	workspaceDocuments := []intel.Document{
+		mainDocument,
+		{Path: helperPath, Source: helperSource, ModuleKind: "standard"},
+	}
+	workspaceSnapshot := func(open []intel.Document) ([]intel.Symbol, error) {
+		for _, document := range open {
+			if strings.EqualFold(document.Path, helperPath) {
+				return []intel.Symbol{{
+					Name: "Match", Kind: "function", Module: "Helper", ModuleKind: "standard",
+					Visibility: "Public", File: helperPath,
+					Detail: "Public Function Match(ByVal lookupValue As Variant, ByVal lookupRange As Range) As Variant",
+				}}, nil
+			}
+		}
+		return nil, nil
+	}
+
+	cfg := config.Default()
+	findings, err := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContextWithWorkspaceSymbols(
+		ctx, root, cfg, parsedDocuments[0], main.IR, main.CFG, nil,
+		effects.ProjectSummary{}, nil, nil, nil, documents, mainDocument,
+		workspaceDocuments, workspaceSnapshot, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA251"); len(got) != 0 {
+		t.Fatalf("a visible Public procedure in an unsaved sibling module must shadow Excel.Match: %+v", got)
+	}
+}
+
 func TestBatchTypedExcelRulesReusePreparedAnalysisArtifacts(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
