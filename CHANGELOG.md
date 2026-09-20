@@ -16,6 +16,12 @@ All notable changes to xlflow will be documented in this file.
   realtime-capable, inline-suppressible, and configurable with
   `detect_unsafe_select_operations`.
 
+- Added default-enabled `VBA251` reliability warnings for typed Excel `Match`,
+  `VLookup`, and `HLookup` calls that omit their match-mode argument and rely on
+  Excel's approximate-match default. The rule is warning-level, non-blocking,
+  realtime-capable, inline-suppressible, high-precision, and configurable with
+  `detect_implicit_approximate_lookups`.
+
 ## v0.32.0
 
 - Added `xlflow encoding check` and explicit `xlflow encoding convert --from cp932` commands. Managed `.bas`, `.cls`, and `.frm` source is now validated as UTF-8 without BOM before parsing, linting, analysis, and Excel-backed preflight; invalid input returns a structured `source_encoding_invalid` error without implicit conversion.

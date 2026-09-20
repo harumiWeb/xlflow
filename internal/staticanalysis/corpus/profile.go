@@ -16,13 +16,14 @@ var nonExcelRuleIDs = map[string]struct{}{
 	"VBA218": {}, "VBA221": {}, "VBA225": {}, "VBA226": {}, "VBA238": {},
 	"VBA242": {},
 	"VBA243": {},
+	"VBA251": {},
 }
 
 var configurableNonExcelLintRuleIDs = []string{"VB002", "VB003", "VB027"}
 
 var configurableNonExcelAnalyzeRuleIDs = []string{
 	"VBA201", "VBA203", "VBA205", "VBA215", "VBA216", "VBA217",
-	"VBA218", "VBA221", "VBA225", "VBA226", "VBA238", "VBA242", "VBA243",
+	"VBA218", "VBA221", "VBA225", "VBA226", "VBA238", "VBA242", "VBA243", "VBA251",
 }
 
 func applyProfilePolicy(cfg *config.Config, profile string) {

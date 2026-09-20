@@ -296,6 +296,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_for_each_control_type`
 - `detect_function_return_path`
 - `detect_hardcoded_secrets`
+- `detect_implicit_approximate_lookups`
 - `detect_implicit_variant`
 - `detect_late_bound_dictionary_constants`
 - `detect_leaked_on_error_resume_next_scopes`

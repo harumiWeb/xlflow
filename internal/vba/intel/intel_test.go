@@ -6032,6 +6032,101 @@ End Sub
 	}
 }
 
+func TestImplicitApproximateLookupDiagnostics(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Private Function Match(ByVal key As Variant, ByVal values As Variant, Optional ByVal mode As Variant) As Variant
+End Function
+
+Public Sub Run()
+    Dim rng As Range
+    Dim result As Variant
+    Dim lateBound As Object
+    result = WorksheetFunction.Match("key", rng)
+    result = WorksheetFunction.VLookup("key", rng, 2)
+    result = WorksheetFunction.HLookup("key", rng, 2)
+    result = Application.Match("key", rng)
+    result = Application.VLookup("key", rng, 2)
+    result = Application.HLookup("key", rng, 2)
+    result = Application.WorksheetFunction.Match("key", rng)
+    result = WorksheetFunction.Match(Arg1:="key", Arg2:=rng)
+    result = WorksheetFunction.VLookup("key", rng, 2, Arg4:=False)
+    result = WorksheetFunction.HLookup("key", rng, 2, True)
+    result = WorksheetFunction.Match("key", rng, 0)
+    result = WorksheetFunction.VLookup("key", rng, 2, False)
+    result = WorksheetFunction.HLookup("key", rng, 2, True)
+    result = Lookup("key", rng)
+    result = WorksheetFunction.XLookup("key", rng, rng)
+    result = Match("key", rng)
+    result = lateBound.Match("key", rng)
+    Consume(WorksheetFunction.Match("nested", rng))
+End Sub
+`,
+	}
+	diagnostics := analyzer.ImplicitApproximateLookupDiagnostics(doc)
+	if len(diagnostics) != 9 {
+		t.Fatalf("VBA251 diagnostics = %+v, want nine", diagnostics)
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code != "VBA251" || diagnostic.Severity != "warning" || diagnostic.Rule != "VBA251" || !strings.Contains(diagnostic.Message, "approximate matching") || !strings.Contains(diagnostic.Message, "explicit") {
+			t.Fatalf("unexpected VBA251 diagnostic: %+v", diagnostic)
+		}
+	}
+	if diagnostics[len(diagnostics)-1].Range.Start.Line != 25 {
+		t.Fatalf("nested VBA251 range = %+v, want source line 26", diagnostics[len(diagnostics)-1].Range)
+	}
+}
+
+func TestImplicitApproximateLookupDiagnosticsSkipsUnrelatedCalls(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	workspaceQueries := 0
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, _ WorkspaceSymbolQuery) ([]Symbol, error) {
+		workspaceQueries++
+		return nil, nil
+	}
+	diagnostics := analyzer.ImplicitApproximateLookupDiagnostics(Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Other("key", Range("A1:A2"))
+End Sub
+`,
+	})
+	if len(diagnostics) != 0 {
+		t.Fatalf("unrelated calls produced VBA251 diagnostics: %+v", diagnostics)
+	}
+	if workspaceQueries != 0 {
+		t.Fatalf("workspace queries = %d, want none for non-candidate calls", workspaceQueries)
+	}
+}
+
+func TestImplicitApproximateLookupDiagnosticsSupportsMultilineAndMixedArguments(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Dim result As Variant
+    result = WorksheetFunction.VLookup( _
+        "key", _
+        rng, _
+        2)
+    result = WorksheetFunction.Match("key", Arg2:=rng)
+End Sub
+`,
+	}
+	diagnostics := analyzer.ImplicitApproximateLookupDiagnostics(doc)
+	if len(diagnostics) != 2 {
+		t.Fatalf("multiline/mixed VBA251 diagnostics = %+v, want two", diagnostics)
+	}
+	if diagnostics[0].Range.Start.Line != 4 || diagnostics[0].Range.End.Line != 7 {
+		t.Fatalf("multiline VBA251 range = %+v, want source lines 5-8", diagnostics[0].Range)
+	}
+}
+
 func withRealtimeFindings(analyzer Analyzer, findings []RealtimeFinding) Analyzer {
 	analyzer.RealtimeFindingsFunc = func(_ context.Context, _ string, _ config.Config, _ *vbaast.ParsedDocument, _ procedureir.DocumentIR, _ vbacfg.Document) ([]RealtimeFinding, error) {
 		return append([]RealtimeFinding(nil), findings...), nil

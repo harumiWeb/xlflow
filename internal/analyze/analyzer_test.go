@@ -5999,6 +5999,59 @@ End Sub
 	}
 }
 
+func TestVBA251MatchesBatchAndRealtimeAnalysisAndHonorsSuppression(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Dim result As Variant
+    result = WorksheetFunction.Match("key", rng)
+    result = WorksheetFunction.VLookup("key", rng, 2)
+    result = WorksheetFunction.HLookup("key", rng, 2)
+    result = Application.Match("key", rng)
+    result = Application.VLookup("key", rng, 2)
+    result = Application.HLookup("key", rng, 2)
+    result = WorksheetFunction.Match("key", rng, 0)
+    result = WorksheetFunction.VLookup("key", rng, 2, False)
+    result = WorksheetFunction.HLookup("key", rng, 2, True)
+    ' xlflow:disable-next-line VBA251
+    result = WorksheetFunction.Match("suppressed", rng)
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", string(source))
+	cfg := config.Default()
+	batch, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, findings := range map[string][]Finding{"batch": batch, "realtime": realtime} {
+		got := findingsByCode(findings, "VBA251")
+		if len(got) != 6 {
+			t.Fatalf("%s VBA251 findings = %+v, want six", name, got)
+		}
+		for _, finding := range got {
+			if !strings.Contains(finding.Message, "explicit") || !strings.Contains(finding.Message, "approximate") {
+				t.Fatalf("%s VBA251 message = %q, want explicit approximate-mode guidance", name, finding.Message)
+			}
+		}
+	}
+
+	cfg.Analyze.DetectImplicitApproximateLookups = false
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA251"); len(got) != 0 {
+		t.Fatalf("disabled VBA251 should not report: %+v", got)
+	}
+}
+
 func TestBatchTypedExcelRulesReusePreparedAnalysisArtifacts(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -6010,6 +6063,7 @@ Public Sub Run()
     rng.Find "missing"
     rng.SpecialCells xlCellTypeVisible
     result = Application.Match("missing", rng, 0)
+	result = WorksheetFunction.Match("implicit", rng)
     Debug.Print result
 End Sub
 `)
@@ -6042,8 +6096,11 @@ End Sub
 	if got := analysis.excelAPIFailureContractFindings(file); len(got) == 0 {
 		t.Fatal("VBA218 fixture should exercise the shared typed document index")
 	}
+	if got, err := analysis.implicitApproximateLookupFindingsContext(context.Background(), file); err != nil || len(got) == 0 {
+		t.Fatal("VBA251 fixture should exercise the shared typed document index")
+	}
 	if got := document.Snapshot.ParseCount(); got != 1 {
-		t.Fatalf("shared VBA215/VBA218 snapshot parse count = %d, want 1", got)
+		t.Fatalf("shared VBA215/VBA218/VBA251 snapshot parse count = %d, want 1", got)
 	}
 	if _, hit, err := document.Snapshot.ProcedureIR(func() (procedureir.DocumentIR, error) {
 		t.Fatal("seeded batch snapshot rebuilt procedure IR")

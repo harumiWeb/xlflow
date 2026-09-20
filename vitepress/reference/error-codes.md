@@ -60,7 +60,7 @@ Common examples:
 - `wsl_path_translation_failed`
 - `windows_xlflow_execution_failed`
 
-Lint codes include `VB001` through `VB015`, `VB018` through `VB023`, and `VB026` through `VB066`. `VB066` is a non-blocking style warning for VBE-accepted `Property Get` terminators; the other compile-dialog prevention range remains `VB065` and below. Analyzer codes include `VBA101` through `VBA106` and runtime-risk findings `VBA201` through `VBA250`; `VBA248` is a maintainability finding and `VBA250` is an active-state runtime-safety finding.
+Lint codes include `VB001` through `VB015`, `VB018` through `VB023`, and `VB026` through `VB066`. `VB066` is a non-blocking style warning for VBE-accepted `Property Get` terminators; the other compile-dialog prevention range remains `VB065` and below. Analyzer codes include `VBA101` through `VBA106` and runtime-risk findings `VBA201` through `VBA251`; `VBA248` is a maintainability finding, `VBA250` is an active-state runtime-safety finding, and `VBA251` is a reliability warning for implicit approximate lookup mode.
 
 ## Recovery map
 

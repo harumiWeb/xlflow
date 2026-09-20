@@ -99,6 +99,16 @@
           ]
         },
         {
+          "name": "HLookup",
+          "return_type": "Variant",
+          "parameters": [
+            { "name": "Arg1", "type": "Variant" },
+            { "name": "Arg2", "type": "Variant" },
+            { "name": "Arg3", "type": "Variant" },
+            { "name": "Arg4", "type": "Variant", "optional": true }
+          ]
+        },
+        {
           "name": "XLookup",
           "return_type": "Variant",
           "parameters": [

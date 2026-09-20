@@ -2374,6 +2374,94 @@ func (a Analyzer) StatefulExcelCallArgumentDiagnosticsContext(ctx context.Contex
 	return out, ctx.Err()
 }
 
+// ImplicitApproximateLookupDiagnostics reports resolved Excel lookup calls
+// whose optional match-mode argument is omitted. The rule makes the caller's
+// intent explicit without judging whether an intentional approximate lookup is
+// correct for the workbook's data.
+func (a Analyzer) ImplicitApproximateLookupDiagnostics(doc Document) []Diagnostic {
+	out, _ := a.ImplicitApproximateLookupDiagnosticsContext(context.Background(), doc)
+	return out
+}
+
+// ImplicitApproximateLookupDiagnosticsContext is the cancellable form used by
+// batch and realtime analysis.
+func (a Analyzer) ImplicitApproximateLookupDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
+	if !a.Config.Analyze.DetectImplicitApproximateLookups || a.DB == nil {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	index, ok := a.documentIndexFor(doc)
+	if !ok || index == nil {
+		return nil, nil
+	}
+	typeContext := newDocumentTypeContext(doc, documentLines(doc), nil, index)
+	var out []Diagnostic
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+		if i&0x3f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		for _, call := range callsOnLine(logicalLine.Text) {
+			parameter := implicitApproximateLookupParameter(call.Target)
+			if parameter == "" {
+				continue
+			}
+			callRange := logicalLine.callRange(call)
+			call.DiagnosticRange = &callRange
+			sig, resolved, err := a.resolveCallSignatureAtContext(doc, call.Target, callRange.Start, []Document{doc}, typeContext)
+			if err != nil || !resolved || !excelLookupReceiver(sig.receiverType) {
+				continue
+			}
+			if len(omittedCallParameters(sig.Parameters, call.Arguments, []string{parameter})) == 0 {
+				continue
+			}
+			api := excelLookupAPIName(sig)
+			out = append(out, Diagnostic{
+				Code:       "VBA251",
+				Severity:   "warning",
+				Source:     "xlflow",
+				Message:    api + " omits its match-mode argument; Excel defaults to approximate matching. Make the matching mode explicit.",
+				Range:      callRange,
+				Rule:       "VBA251",
+				Confidence: "high",
+			})
+		}
+	}
+	return out, ctx.Err()
+}
+
+func implicitApproximateLookupParameter(target string) string {
+	_, member, ok := splitCallTarget(target)
+	if !ok && strings.HasPrefix(strings.TrimSpace(target), ".") {
+		member = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "."))
+	}
+	switch strings.ToLower(strings.TrimSpace(member)) {
+	case "match":
+		return "Arg3"
+	case "vlookup", "hlookup":
+		return "Arg4"
+	default:
+		return ""
+	}
+}
+
+func excelLookupReceiver(receiver string) bool {
+	return strings.EqualFold(strings.TrimSpace(receiver), "Excel.Application") || strings.EqualFold(strings.TrimSpace(receiver), "Excel.WorksheetFunction")
+}
+
+func excelLookupAPIName(sig Signature) string {
+	switch {
+	case strings.EqualFold(strings.TrimSpace(sig.receiverType), "Excel.Application"):
+		return "Application." + sig.memberName
+	case strings.EqualFold(strings.TrimSpace(sig.receiverType), "Excel.WorksheetFunction"):
+		return "WorksheetFunction." + sig.memberName
+	}
+	return sigLabelName(sig.Label)
+}
+
 func statefulExcelCallMember(target string) string {
 	_, member, ok := splitCallTarget(target)
 	if !ok && strings.HasPrefix(strings.TrimSpace(target), ".") {

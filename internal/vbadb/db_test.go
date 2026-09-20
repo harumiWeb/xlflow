@@ -320,7 +320,7 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	if got, ok := db.ResolveMember("Excel.Application", "WorksheetFunction"); !ok || got.ReturnType != "Excel.WorksheetFunction" {
 		t.Fatalf("Application.WorksheetFunction = %+v, %v", got, ok)
 	}
-	for _, name := range []string{"Match", "VLookup", "XLookup"} {
+	for _, name := range []string{"Match", "VLookup", "HLookup", "XLookup"} {
 		got, ok := db.ResolveMember("Excel.Application", name)
 		if !ok || got.ReturnType != "Variant" {
 			t.Fatalf("Application.%s = %+v, %v", name, got, ok)
@@ -344,6 +344,9 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	}
 	if got, ok := db.ResolveMember("Excel.Application", "VLookup"); !ok || len(got.Parameters) != 4 || !got.Parameters[3].Optional {
 		t.Fatalf("Application.VLookup parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.Application", "HLookup"); !ok || len(got.Parameters) != 4 || !got.Parameters[3].Optional {
+		t.Fatalf("Application.HLookup parameters = %+v, %v", got, ok)
 	}
 	if got, ok := db.ResolveMember("Excel.Application", "XLookup"); !ok || len(got.Parameters) != 6 || !got.Parameters[3].Optional || !got.Parameters[4].Optional || !got.Parameters[5].Optional {
 		t.Fatalf("Application.XLookup parameters = %+v, %v", got, ok)
@@ -403,6 +406,9 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	}
 	if got, ok := db.ResolveMember("Excel.WorksheetFunction", "XLookup"); !ok || got.ReturnType != "Variant" || len(got.Parameters) != 6 || !got.Parameters[3].Optional || !got.Parameters[4].Optional || !got.Parameters[5].Optional {
 		t.Fatalf("WorksheetFunction.XLookup parameters = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("Excel.WorksheetFunction", "HLookup"); !ok || got.ReturnType != "Variant" || len(got.Parameters) != 4 || !got.Parameters[3].Optional {
+		t.Fatalf("WorksheetFunction.HLookup parameters = %+v, %v", got, ok)
 	}
 }
 

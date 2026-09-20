@@ -16,9 +16,14 @@ prove it, and how far the statement reaches.
 
 ## Approximate Lookup Over Unsorted Data
 
-**Trigger.** `Match`, `VLookup`, `HLookup` or `Lookup` with approximate matching
-— the default — against a range whose sort order you have not established in
-the same procedure.
+**Trigger.** A `Match`, `VLookup`, or `HLookup` call with explicit approximate
+mode, or a `Lookup` call (whose semantics are approximate), against a range
+whose sort order you have not established in the same procedure. For typed Excel
+`Match`, `VLookup`, and `HLookup` calls, an
+omitted match-mode argument is the separate source-visible `VBA251` diagnostic;
+this reference covers the data-dependent ordering risk after the mode choice is
+made explicit. `Lookup` has no equivalent match-mode argument and remains in
+this runtime reference.
 
 **Risk.** A key below every value in the range returns `#N/A` in a formula, and
 raises at the `WorksheetFunction` call — that case is at least loud. The
