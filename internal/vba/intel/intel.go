@@ -1948,12 +1948,32 @@ func (a Analyzer) resolveCallSignatureAtContextWithLocalPriority(doc Document, t
 		}
 		return Signature{}, false, nil
 	}
+	if preferLocal {
+		if sig, resolved, err := a.resolveVisibleProjectProcedureSignature(doc, target, pos, open); err != nil || resolved {
+			return sig, resolved, err
+		}
+	}
 	if member, found := a.DB.ResolveMember("Excel.Application", target); found {
 		return a.signatureFromMember("Excel.Application", member, a.memberKind("Excel.Application", target)), true, nil
 	}
 	if member, found := a.DB.ResolveMember("VBA.Global", target); found {
 		return a.signatureFromMember("VBA.Global", member, a.memberKind("VBA.Global", target)), true, nil
 	}
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: target, Mode: WorkspaceSymbolQueryExact})
+	if err != nil {
+		return Signature{}, false, err
+	}
+	currentProcedure := currentProcedureNameForDocument(doc, pos)
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Name, target) || !callableCompletionSymbol(sym) || !a.visibleCompletionSymbol(doc, currentProcedure, sym) {
+			continue
+		}
+		return signatureFromSymbol(sym), true, nil
+	}
+	return Signature{}, false, nil
+}
+
+func (a Analyzer) resolveVisibleProjectProcedureSignature(doc Document, target string, pos Position, open []Document) (Signature, bool, error) {
 	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: target, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return Signature{}, false, err
@@ -2372,6 +2392,99 @@ func (a Analyzer) StatefulExcelCallArgumentDiagnosticsContext(ctx context.Contex
 		}
 	}
 	return out, ctx.Err()
+}
+
+// ImplicitApproximateLookupDiagnostics reports resolved Excel lookup calls
+// whose optional match-mode argument is omitted. The rule makes the caller's
+// intent explicit without judging whether an intentional approximate lookup is
+// correct for the workbook's data.
+func (a Analyzer) ImplicitApproximateLookupDiagnostics(doc Document) []Diagnostic {
+	out, _ := a.ImplicitApproximateLookupDiagnosticsContext(context.Background(), doc)
+	return out
+}
+
+// ImplicitApproximateLookupDiagnosticsContext is the cancellable form used by
+// batch and realtime analysis.
+func (a Analyzer) ImplicitApproximateLookupDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
+	if !a.Config.Analyze.DetectImplicitApproximateLookups || a.DB == nil {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	index, ok := a.documentIndexFor(doc)
+	if !ok || index == nil {
+		return nil, nil
+	}
+	typeContext := newDocumentTypeContext(doc, documentLines(doc), nil, index)
+	var out []Diagnostic
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+		if i&0x3f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		for _, call := range callsOnLine(logicalLine.Text) {
+			parameter := implicitApproximateLookupParameter(call.Target)
+			if parameter == "" {
+				continue
+			}
+			callRange := logicalLine.callRange(call)
+			call.DiagnosticRange = &callRange
+			sig, resolved, err := a.resolveCallSignatureAtContextWithLocalPriority(doc, call.Target, callRange.Start, []Document{doc}, typeContext, true)
+			if err != nil || !resolved || !excelLookupReceiver(sig.receiverType) {
+				continue
+			}
+			if len(omittedCallParameters(sig.Parameters, call.Arguments, []string{parameter})) == 0 {
+				continue
+			}
+			api := excelLookupAPIName(sig)
+			out = append(out, Diagnostic{
+				Code:       "VBA251",
+				Severity:   "warning",
+				Source:     "xlflow",
+				Message:    api + " omits its match-mode argument; Excel defaults to approximate matching. Make the matching mode explicit.",
+				Range:      callRange,
+				Rule:       "VBA251",
+				Confidence: "high",
+			})
+		}
+	}
+	return out, ctx.Err()
+}
+
+func implicitApproximateLookupParameter(target string) string {
+	trimmed := strings.TrimSpace(target)
+	_, member, ok := splitCallTarget(trimmed)
+	if !ok {
+		if member, ok = strings.CutPrefix(trimmed, "."); ok {
+			member = strings.TrimSpace(member)
+		} else {
+			member = trimmed
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(member)) {
+	case "match":
+		return "Arg3"
+	case "vlookup", "hlookup":
+		return "Arg4"
+	default:
+		return ""
+	}
+}
+
+func excelLookupReceiver(receiver string) bool {
+	return strings.EqualFold(strings.TrimSpace(receiver), "Excel.Application") || strings.EqualFold(strings.TrimSpace(receiver), "Excel.WorksheetFunction")
+}
+
+func excelLookupAPIName(sig Signature) string {
+	switch {
+	case strings.EqualFold(strings.TrimSpace(sig.receiverType), "Excel.Application"):
+		return "Application." + sig.memberName
+	case strings.EqualFold(strings.TrimSpace(sig.receiverType), "Excel.WorksheetFunction"):
+		return "WorksheetFunction." + sig.memberName
+	}
+	return sigLabelName(sig.Label)
 }
 
 func statefulExcelCallMember(target string) string {

@@ -2596,6 +2596,28 @@
       "configuration_key": "detect_unsafe_select_operations",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA251",
+      "title": "Implicit approximate lookup mode",
+      "description": "A Match, VLookup, or HLookup call omits its match-mode argument and relies on Excel's approximate-match default.",
+      "family": "analyze",
+      "category": "reliability",
+      "evidence_class": "inference",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba251",
+      "configurable": true,
+      "configuration_key": "detect_implicit_approximate_lookups",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

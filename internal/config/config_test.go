@@ -518,6 +518,47 @@ disabled_rules = ["VBA250"]
 	}
 }
 
+func TestImplicitApproximateLookupsDefaultEnabledAndConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA251"); !ok || !enabled || !cfg.Analyze.DetectImplicitApproximateLookups {
+		t.Fatalf("VBA251 enabled = %v, known = %v, config = %v; want enabled configurable rule", enabled, ok, cfg.Analyze.DetectImplicitApproximateLookups)
+	}
+	cfg.Analyze.DetectImplicitApproximateLookups = false
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA251"); !ok || enabled {
+		t.Fatalf("disabled VBA251 enabled = %v, known = %v", enabled, ok)
+	}
+}
+
+func TestImplicitApproximateLookupsDisabledRulesTakePrecedence(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_implicit_approximate_lookups = true
+disabled_rules = ["VBA251"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA251"); !ok || enabled || cfg.Analyze.DetectImplicitApproximateLookups {
+		t.Fatalf("VBA251 enabled = %v, known = %v, config = %v; want disabled", enabled, ok, cfg.Analyze.DetectImplicitApproximateLookups)
+	}
+	if !hasConfigWarning(cfg.Warnings, "conflicting_analyze_rule_config", "VBA251") ||
+		!hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA251") {
+		t.Fatalf("expected disabled_rules precedence warnings for VBA251, got %+v", cfg.Warnings)
+	}
+}
+
 func TestProcedureCallCyclesDefaultEnabledAndConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()

@@ -126,6 +126,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA248`](#vba248) | analyze | warning     | procedure-local | no      | Opaque Boolean control arguments                   |
 | [`VBA249`](#vba249) | analyze | error       | procedure-local | yes     | Deterministic runtime error                        |
 | [`VBA250`](#vba250) | analyze | warning     | procedure-local | yes     | Unsafe Select operation                            |
+| [`VBA251`](#vba251) | analyze | warning     | procedure-local | yes     | Implicit approximate lookup mode                   |
 
 ## VB001
 
@@ -2722,3 +2723,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                |
 | Real-time editor diagnostic | yes                               |
 | Fix available               | no                                |
+
+## VBA251
+
+**Implicit approximate lookup mode.** A Match, VLookup, or HLookup call omits its match-mode argument and relies on Excel's approximate-match default.
+
+| Property                    | Value                                 |
+| --------------------------- | ------------------------------------- |
+| Family                      | `analyze`                             |
+| Category                    | `reliability`                         |
+| Evidence class              | `inference`                           |
+| Compile-equivalent          | no                                    |
+| Default severity            | `warning`                             |
+| Supported severities        | `warning`                             |
+| Surfaces                    | `analyze`, `lsp`                      |
+| Scope                       | `procedure-local`                     |
+| Precision                   | `high`                                |
+| Enabled by default          | yes                                   |
+| Configuration               | `detect_implicit_approximate_lookups` |
+| Inline suppression          | yes                                   |
+| Blocks source preflight     | no                                    |
+| Real-time editor diagnostic | yes                                   |
+| Fix available               | no                                    |
