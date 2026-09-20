@@ -1948,12 +1948,32 @@ func (a Analyzer) resolveCallSignatureAtContextWithLocalPriority(doc Document, t
 		}
 		return Signature{}, false, nil
 	}
+	if preferLocal {
+		if sig, resolved, err := a.resolveVisibleProjectProcedureSignature(doc, target, pos, open); err != nil || resolved {
+			return sig, resolved, err
+		}
+	}
 	if member, found := a.DB.ResolveMember("Excel.Application", target); found {
 		return a.signatureFromMember("Excel.Application", member, a.memberKind("Excel.Application", target)), true, nil
 	}
 	if member, found := a.DB.ResolveMember("VBA.Global", target); found {
 		return a.signatureFromMember("VBA.Global", member, a.memberKind("VBA.Global", target)), true, nil
 	}
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: target, Mode: WorkspaceSymbolQueryExact})
+	if err != nil {
+		return Signature{}, false, err
+	}
+	currentProcedure := currentProcedureNameForDocument(doc, pos)
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Name, target) || !callableCompletionSymbol(sym) || !a.visibleCompletionSymbol(doc, currentProcedure, sym) {
+			continue
+		}
+		return signatureFromSymbol(sym), true, nil
+	}
+	return Signature{}, false, nil
+}
+
+func (a Analyzer) resolveVisibleProjectProcedureSignature(doc Document, target string, pos Position, open []Document) (Signature, bool, error) {
 	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: target, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return Signature{}, false, err
@@ -2411,7 +2431,7 @@ func (a Analyzer) ImplicitApproximateLookupDiagnosticsContext(ctx context.Contex
 			}
 			callRange := logicalLine.callRange(call)
 			call.DiagnosticRange = &callRange
-			sig, resolved, err := a.resolveCallSignatureAtContext(doc, call.Target, callRange.Start, []Document{doc}, typeContext)
+			sig, resolved, err := a.resolveCallSignatureAtContextWithLocalPriority(doc, call.Target, callRange.Start, []Document{doc}, typeContext, true)
 			if err != nil || !resolved || !excelLookupReceiver(sig.receiverType) {
 				continue
 			}
@@ -2434,9 +2454,14 @@ func (a Analyzer) ImplicitApproximateLookupDiagnosticsContext(ctx context.Contex
 }
 
 func implicitApproximateLookupParameter(target string) string {
-	_, member, ok := splitCallTarget(target)
-	if !ok && strings.HasPrefix(strings.TrimSpace(target), ".") {
-		member = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "."))
+	trimmed := strings.TrimSpace(target)
+	_, member, ok := splitCallTarget(trimmed)
+	if !ok {
+		if member, ok = strings.CutPrefix(trimmed, "."); ok {
+			member = strings.TrimSpace(member)
+		} else {
+			member = trimmed
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(member)) {
 	case "match":

@@ -6035,9 +6035,22 @@ End Sub
 		if len(got) != 6 {
 			t.Fatalf("%s VBA251 findings = %+v, want six", name, got)
 		}
+		expectedLines := map[int]bool{5: true, 6: true, 7: true, 8: true, 9: true, 10: true}
 		for _, finding := range got {
+			if finding.Line == 15 {
+				t.Fatalf("%s VBA251 reported the suppressed call: %+v", name, finding)
+			}
+			if !expectedLines[finding.Line] {
+				t.Fatalf("%s VBA251 reported an unexpected line: %+v", name, finding)
+			}
+			expectedLines[finding.Line] = false
 			if !strings.Contains(finding.Message, "explicit") || !strings.Contains(finding.Message, "approximate") {
 				t.Fatalf("%s VBA251 message = %q, want explicit approximate-mode guidance", name, finding.Message)
+			}
+		}
+		for line, missing := range expectedLines {
+			if missing {
+				t.Fatalf("%s VBA251 missed expected line %d: %+v", name, line, got)
 			}
 		}
 	}

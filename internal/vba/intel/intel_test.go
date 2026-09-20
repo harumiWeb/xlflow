@@ -6070,12 +6070,54 @@ End Sub
 		t.Fatalf("VBA251 diagnostics = %+v, want nine", diagnostics)
 	}
 	for _, diagnostic := range diagnostics {
+		if diagnostic.Range.Start.Line == 23 {
+			t.Fatalf("project-local Match shadowing produced VBA251 diagnostic: %+v", diagnostic)
+		}
+	}
+	for _, diagnostic := range diagnostics {
 		if diagnostic.Code != "VBA251" || diagnostic.Severity != "warning" || diagnostic.Rule != "VBA251" || !strings.Contains(diagnostic.Message, "approximate matching") || !strings.Contains(diagnostic.Message, "explicit") {
 			t.Fatalf("unexpected VBA251 diagnostic: %+v", diagnostic)
 		}
 	}
 	if diagnostics[len(diagnostics)-1].Range.Start.Line != 25 {
 		t.Fatalf("nested VBA251 range = %+v, want source line 26", diagnostics[len(diagnostics)-1].Range)
+	}
+}
+
+func TestImplicitApproximateLookupDiagnosticsResolvesUnqualifiedExcelLookups(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, _ WorkspaceSymbolQuery) ([]Symbol, error) {
+		return nil, nil
+	}
+	diagnostics := analyzer.ImplicitApproximateLookupDiagnostics(Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Dim result As Variant
+    result = Match("key", rng)
+    result = VLookup("key", rng, 2)
+    result = HLookup("key", rng, 2)
+End Sub
+`,
+	})
+	if len(diagnostics) != 3 {
+		t.Fatalf("unqualified VBA251 diagnostics = %+v, want three", diagnostics)
+	}
+	wantLines := map[int]bool{4: true, 5: true, 6: true}
+	for _, diagnostic := range diagnostics {
+		if !strings.Contains(diagnostic.Message, "Application.") {
+			t.Fatalf("unqualified VBA251 diagnostic = %+v, want Application API", diagnostic)
+		}
+		if !wantLines[diagnostic.Range.Start.Line] {
+			t.Fatalf("unqualified VBA251 diagnostic on unexpected line = %+v", diagnostic)
+		}
+		wantLines[diagnostic.Range.Start.Line] = false
+	}
+	for line, missing := range wantLines {
+		if missing {
+			t.Fatalf("unqualified VBA251 missed line %d: %+v", line, diagnostics)
+		}
 	}
 }
 
