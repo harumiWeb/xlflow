@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added explicit TypeDB capability injection for in-memory analysis. Browser and
+  embedded callers can use the embedded built-in database without runtime
+  `~/.xlflow/typelib` discovery, while filesystem-backed CLI/LSP analysis keeps
+  generated TypeLib support and completeness-aware fail-open diagnostics.
+
 - Fixed false-positive `VBA202` findings for MSXML `DOMDocument.createElement`
   results that are assigned before accessing the created element.
 - Improved `VBA220` UserForm event classification to use complete designer and

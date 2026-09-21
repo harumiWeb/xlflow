@@ -252,15 +252,12 @@ func New(opts Options) (*Server, func(), error) {
 			DB:                         typeDB.DB,
 			TypeDBResolutionIncomplete: !typeDB.Complete,
 			RealtimeFindingsFunc: func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
-				findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB)
+				findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx, rootDir, cfg, doc, ir, controlFlow, &analyze.TypeDatabase{DB: typeDB.DB, Complete: typeDB.Complete})
 				if err != nil {
 					return nil, err
 				}
 				out := make([]intel.RealtimeFinding, 0, len(findings))
 				for _, finding := range findings {
-					if finding.Code == "VBA252" && !typeDB.Complete {
-						continue
-					}
 					out = append(out, intel.RealtimeFinding{Code: finding.Code, Severity: finding.Severity, Line: finding.Line, Column: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn, Message: finding.Message})
 				}
 				return out, nil
@@ -376,7 +373,7 @@ func New(opts Options) (*Server, func(), error) {
 				resolution = &projectDocument.Resolution
 				controlFlow = projectDocument.CFG
 			}
-			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContextWithWorkspaceSymbols(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, projectConstants.values, resolution, resolutionResolver, resolvedProjectDocuments, request.Document, workspaceDocuments, workspaceSymbolsSnapshot, s.backgroundProcedureWorkerLimit())
+			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContextWithWorkspaceSymbols(ctx, rootDir, cfg, doc, ir, controlFlow, &analyze.TypeDatabase{DB: typeDB.DB, Complete: typeDB.Complete}, projectEffects, projectConstants.values, resolution, resolutionResolver, resolvedProjectDocuments, request.Document, workspaceDocuments, workspaceSymbolsSnapshot, s.backgroundProcedureWorkerLimit())
 			if err != nil {
 				return nil, err
 			}

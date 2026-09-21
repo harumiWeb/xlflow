@@ -120,6 +120,29 @@ func (a Analyzer) AnalyzeProject(
 ) (Result, error)
 ```
 
+Type-aware analysis accepts an optional caller-owned capability:
+
+```go
+type TypeDatabase struct {
+    DB       *vbadb.DB
+    Complete bool
+}
+```
+
+`Analyzer.TypeDB` is authoritative when supplied. The analyzer does not merge
+it with a generated or embedded database, so callers that need the curated
+metadata should construct the capability with `vbadb.LoadBuiltin()` and merge
+their own overlays explicitly. `Complete` controls diagnostics that infer
+external type absence: incomplete databases retain positive type resolution
+but fail open for unresolved or unavailable-member conclusions.
+
+When `AnalyzeProject` has no injected capability, it loads only the embedded
+built-in database and treats it as incomplete. This path never consults
+`XLFLOW_TYPE_DB_DIR`, the user's home directory, or generated TypeLib files.
+`RunResultContext` keeps the native filesystem adapter behavior: without an
+injected capability it loads the generated TypeLib database and overlays the
+embedded database, preserving its warnings and completeness state.
+
 It treats the supplied files as the complete project and never performs source
 discovery or reads `SourceFile.Path`. The input is validated before parsing:
 module kinds must be one of the declared constants, paths must be non-empty,
@@ -146,8 +169,9 @@ Filesystem discovery and source loading remain adapter responsibilities. The
 existing `symbols.SourceFile` is a discovery descriptor containing a path and
 inferred kind; it is not a loaded source project. The filesystem adapter
 converts those descriptors into this model after reading source bytes. Issue
-#642 adds the common analysis entry point; issue #644 owns the remaining
-filesystem-free diagnostic and suppression capability policy.
+#642 adds the common analysis entry point, and issue #643 adds the explicit
+TypeDB capability boundary; issue #644 owns the remaining filesystem-free
+diagnostic and suppression capability policy.
 
 This contract does not introduce a virtual filesystem, change CLI or LSP wire
 formats, or provide browser/Wasm integration.
