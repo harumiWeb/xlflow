@@ -7387,7 +7387,7 @@ func (a *app) analyzeCommand() *cobra.Command {
 				recorder = analysisstats.NewRecorder()
 				runCtx = analysisstats.WithRecorder(runCtx, recorder)
 			}
-			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(runCtx)
+			analyzeResult, err := a.analyzer(cfg, nil).RunResultContext(runCtx)
 			if recorder != nil {
 				writeAnalyzePerformance(a.stderrWriter(), recorder)
 			}
@@ -7459,7 +7459,7 @@ func (a *app) checkCommand() *cobra.Command {
 			}
 			issues := lintResult.Issues
 			check["lint"] = map[string]any{"status": statusForBlocking(hasBlockingLintIssues(issues)), "count": len(issues)}
-			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
+			analyzeResult, err := a.analyzer(cfg, nil).RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("check", output.ExitEnvironment, "analyze_failed", err)
 			}
@@ -7645,7 +7645,7 @@ func (a *app) buildRunDiagnostic(ctx context.Context, cfg config.Config, env out
 			diag["suggestion"] = "Check object assignments near the reported line; use Set when assigning Workbook, Worksheet, Range, or other object references."
 		}
 	}
-	result, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(ctx)
+	result, err := a.analyzer(cfg, nil).RunResultContext(ctx)
 	findings := result.Findings
 	if err == nil && env.Error != nil && !sourceNewer {
 		for _, finding := range findings {
@@ -7713,7 +7713,7 @@ func (a *app) runSourcePreflightInternal(ctx context.Context, command string, cf
 		env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
 		return a.write(env, output.ExitValidation)
 	}
-	analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResultContext(ctx)
+	analyzeResult, err := a.analyzer(cfg, pathFilter).RunResultContext(ctx)
 	if err != nil {
 		exitCode := output.ExitEnvironment
 		if strings.HasPrefix(err.Error(), "parse ") {
@@ -8177,6 +8177,15 @@ func (a *app) loadConfig(command string) (config.Config, error) {
 		a.configWarnings = append(a.configWarnings, cfg.Warnings...)
 	}
 	return cfg, nil
+}
+
+func (a *app) analyzer(cfg config.Config, pathFilter func(string) bool) analyze.Analyzer {
+	return analyze.Analyzer{
+		RootDir:                a.cwd,
+		Config:                 cfg,
+		TypeDBGeneratorVersion: a.buildInfo.withDefaults().Version,
+		PathFilter:             pathFilter,
+	}
 }
 
 func (a *app) loadLSPConfig() (config.Config, error) {

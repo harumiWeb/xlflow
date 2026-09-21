@@ -8,6 +8,11 @@ All notable changes to xlflow will be documented in this file.
   embedded callers can use the embedded built-in database without runtime
   `~/.xlflow/typelib` discovery, while filesystem-backed CLI/LSP analysis keeps
   generated TypeLib support and completeness-aware fail-open diagnostics.
+- Fixed filesystem-backed batch and standalone realtime analysis to validate the
+  generated TypeLib manifest generator version when running build metadata is
+  available. Stale databases retain positive type resolution but fail open for
+  completeness-dependent absence diagnostics; callers without build metadata
+  retain the existing compatibility behavior.
 
 ## v0.32.1
 

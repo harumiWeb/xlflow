@@ -664,6 +664,15 @@ func TestVersionCommandUsesDefaultBuildInfo(t *testing.T) {
 	}
 }
 
+func TestAnalyzerCarriesBuildGeneratorVersion(t *testing.T) {
+	a := &app{cwd: t.TempDir(), buildInfo: BuildInfo{Version: "1.2.3"}}
+
+	got := a.analyzer(config.Default(), nil)
+	if got.TypeDBGeneratorVersion != "1.2.3" {
+		t.Fatalf("TypeDBGeneratorVersion = %q, want 1.2.3", got.TypeDBGeneratorVersion)
+	}
+}
+
 func TestLSPCheckUsesDefaultConfigWhenProjectConfigIsMissing(t *testing.T) {
 	var stdout bytes.Buffer
 	a := &app{
