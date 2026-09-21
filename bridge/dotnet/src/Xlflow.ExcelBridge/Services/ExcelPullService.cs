@@ -318,7 +318,7 @@ public sealed class ExcelPullService : IPullService
 
                     if (type == ComponentTypeDocument)
                     {
-                        content = VbaSourceHelper.NormalizeDocumentModuleContent(content);
+                        content = VbaSourceHelper.NormalizeDocumentModuleExport(content);
                         if (!string.IsNullOrWhiteSpace(workbookDir))
                         {
                             var desiredAnnotation = VbaSourceHelper.GetFolderAnnotationForPath(workbookDir, targetFile);

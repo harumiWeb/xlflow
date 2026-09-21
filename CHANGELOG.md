@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.32.1
+
+- Fixed `pull` -> `push` round-trips for worksheet and `ThisWorkbook` document
+  modules so Excel's synthetic trailing blank line is not accumulated in source.
 - Fixed false-positive `VBA202` findings for MSXML `DOMDocument.createElement`
   results that are assigned before accessing the created element.
 - Improved `VBA220` UserForm event classification to use complete designer and
