@@ -2,6 +2,7 @@ package procedureir
 
 import (
 	"context"
+	pathpkg "path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1069,7 +1070,12 @@ func moduleNameFromSource(path string, source []byte) string {
 			}
 		}
 	}
-	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	return moduleNameFromPath(path)
+}
+
+func moduleNameFromPath(path string) string {
+	logicalPath := strings.ReplaceAll(path, "\\", "/")
+	return strings.TrimSuffix(pathpkg.Base(logicalPath), pathpkg.Ext(logicalPath))
 }
 
 func moduleKindFromPath(path string) string {

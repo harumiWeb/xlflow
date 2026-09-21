@@ -46,7 +46,9 @@ treat test helpers and procedures as standard-module declarations.
 `Path` is a caller-provided logical identity used for diagnostics and as a
 module-name fallback. It can be relative, absolute, or virtual and does not
 need to name an existing file. The model does not clean, resolve, stat, read,
-or classify the path.
+or classify the path. Analyzer consumers treat both slash styles as logical
+separators when deriving a fallback module name, so a virtual `virtual\\Main.bas`
+path derives `Main` on every operating system.
 
 `Source` contains the exact source bytes supplied by the caller. The model does
 not read source from `Path` and does not make an implicit copy. Callers must not

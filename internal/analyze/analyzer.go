@@ -934,7 +934,7 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 		parsedFile := parsedFile{
 			Path:                      file,
 			Lines:                     lines,
-			Module:                    strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)),
+			Module:                    moduleNameFromPath(file),
 			ModuleKind:                moduleKind,
 			IsTest:                    sourceFile.IsTest,
 			sourceProject:             a.sourceProject,
@@ -3975,7 +3975,7 @@ func sourceProceduresFromProcedureSlice(document *procedureir.DocumentIR, proced
 	procedures := make([]sourceProcedure, 0, len(procedureValues))
 	module := strings.TrimSpace(document.ModuleName)
 	if module == "" {
-		module = strings.TrimSuffix(filepath.Base(document.Path), filepath.Ext(document.Path))
+		module = moduleNameFromPath(document.Path)
 	}
 	for procedureIndex := range procedureValues {
 		procedure := &procedureValues[procedureIndex]
@@ -8544,6 +8544,11 @@ func normalizedSourceLines(source string) []string {
 	source = strings.ReplaceAll(source, "\r\n", "\n")
 	source = strings.ReplaceAll(source, "\r", "\n")
 	return strings.Split(source, "\n")
+}
+
+func moduleNameFromPath(filePath string) string {
+	logicalPath := strings.ReplaceAll(filePath, "\\", "/")
+	return strings.TrimSuffix(pathpkg.Base(logicalPath), pathpkg.Ext(logicalPath))
 }
 
 func physicalSourceLineCount(lines []string) int {

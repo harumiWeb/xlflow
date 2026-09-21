@@ -38,6 +38,24 @@ func TestAnalyzerAnalyzeProjectUsesCallerSuppliedVirtualFiles(t *testing.T) {
 	}
 }
 
+func TestAnalyzerAnalyzeProjectDerivesModuleNameFromLogicalPathSeparators(t *testing.T) {
+	t.Setenv(typedb.EnvDir, t.TempDir())
+	project := sourceproject.SourceProject{Files: []sourceproject.SourceFile{{
+		Path:       `virtual\Main.bas`,
+		ModuleKind: sourceproject.ModuleKindStandard,
+		Source:     []byte("Option Explicit\nPublic Sub Run()\n  Range(\"A1\").Value = 1\nEnd Sub\n"),
+	}}}
+
+	result, err := (Analyzer{Config: config.Default()}).AnalyzeProject(t.Context(), project)
+	if err != nil {
+		t.Fatalf("AnalyzeProject: %v", err)
+	}
+	findings := findingsByCode(result.Findings, "VBA205")
+	if len(findings) != 1 || findings[0].Module != "Main" {
+		t.Fatalf("logical-path module = %+v, want one VBA205 finding for Main", findings)
+	}
+}
+
 func TestAnalyzerAnalyzeProjectAppliesSourceSuppressions(t *testing.T) {
 	t.Setenv(typedb.EnvDir, t.TempDir())
 	project := sourceproject.SourceProject{Files: []sourceproject.SourceFile{{
