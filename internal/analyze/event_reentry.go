@@ -3,6 +3,7 @@ package analyze
 import (
 	"errors"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -264,7 +265,20 @@ func (a Analyzer) userFormControlNames(file parsedFile) (map[string]struct{}, bo
 	var source string
 	var designerPath string
 	designerFound := false
-	if strings.EqualFold(filepath.Ext(file.Path), ".frm") {
+	if file.sourceProject {
+		logicalPath := strings.ReplaceAll(file.Path, "\\", "/")
+		source = file.UserFormDesignerSource
+		designerPath = file.UserFormDesignerSourcePath
+		designerFound = file.UserFormDesignerSourceFound
+		if strings.EqualFold(pathpkg.Ext(logicalPath), ".frm") {
+			source = string(file.Source)
+			designerPath = file.Path
+			designerFound = true
+		}
+		if !designerFound {
+			return nil, false
+		}
+	} else if strings.EqualFold(filepath.Ext(file.Path), ".frm") {
 		source = string(file.Source)
 		designerPath = file.Path
 		designerFound = true
@@ -284,6 +298,10 @@ func (a Analyzer) userFormControlNames(file parsedFile) (map[string]struct{}, bo
 
 	form := userforms.Parse(source)
 	expectedName := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+	if file.sourceProject {
+		logicalPath := strings.ReplaceAll(file.Path, "\\", "/")
+		expectedName = strings.TrimSuffix(pathpkg.Base(logicalPath), pathpkg.Ext(logicalPath))
+	}
 	if !form.Complete || strings.TrimSpace(form.Name) == "" || !strings.EqualFold(strings.TrimSpace(form.Name), expectedName) {
 		return nil, false
 	}
@@ -305,6 +323,15 @@ func (a Analyzer) userFormControlNames(file parsedFile) (map[string]struct{}, bo
 	}
 	if !designerFound {
 		return controls, false
+	}
+	if file.sourceProject {
+		// The .frm text is caller-supplied, but a referenced .frx is a separate
+		// external artifact. Keep the event classification conservative without
+		// resolving that reference against the host filesystem.
+		if _, referenced := userFormDesignerFRXReference(source); referenced {
+			return controls, false
+		}
+		return controls, true
 	}
 	frxPath, frxReferenced, err := userFormFRXPath(designerPath, source)
 	if err != nil {

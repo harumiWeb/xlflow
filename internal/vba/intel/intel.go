@@ -75,6 +75,11 @@ type Analyzer struct {
 	RootDir string
 	Config  config.Config
 	DB      *vbadb.DB
+	// SourceOnly restricts this analyzer to caller-supplied documents. In
+	// particular, form metadata and workspace symbols are resolved from the
+	// provided source documents only; no configured source directories or form
+	// sidecar files are read from the host filesystem.
+	SourceOnly bool
 	// VisibleConstants carries project-level Const/Enum names for callers that
 	// already own a coherent workspace snapshot. File-local callers may leave
 	// it nil; the shared checker then remains conservative.
@@ -906,14 +911,18 @@ func (a Analyzer) workspaceSymbolsContextWithCompleteness(ctx context.Context, o
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
-	result, err := symbols.InspectContext(ctx, symbols.Options{
-		RootDir:        a.RootDir,
-		Config:         a.Config,
-		IncludePrivate: true,
-		IncludeLabels:  false,
-	})
-	if err != nil {
-		return nil, false, err
+	var files []symbols.FileResult
+	if !a.SourceOnly {
+		result, err := symbols.InspectContext(ctx, symbols.Options{
+			RootDir:        a.RootDir,
+			Config:         a.Config,
+			IncludePrivate: true,
+			IncludeLabels:  false,
+		})
+		if err != nil {
+			return nil, false, err
+		}
+		files = result.Files
 	}
 	openKeys := make(map[string]bool, len(open))
 	for _, doc := range open {
@@ -926,7 +935,7 @@ func (a Analyzer) workspaceSymbolsContextWithCompleteness(ctx context.Context, o
 	}
 	var out []Symbol
 	complete := true
-	for _, file := range result.Files {
+	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
 		}
@@ -5570,6 +5579,9 @@ func (a Analyzer) formSource(doc Document) string {
 	if strings.EqualFold(filepath.Ext(doc.Path), ".frm") {
 		return doc.Source
 	}
+	if a.SourceOnly {
+		return ""
+	}
 	for _, path := range a.candidateFormPaths(doc) {
 		body, err := os.ReadFile(path)
 		if err == nil {
@@ -5580,6 +5592,9 @@ func (a Analyzer) formSource(doc Document) string {
 }
 
 func (a Analyzer) candidateFormPaths(doc Document) []string {
+	if a.SourceOnly {
+		return nil
+	}
 	name := strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
 	var paths []string
 	if a.RootDir != "" && a.Config.Src.Forms != "" {
@@ -5602,6 +5617,9 @@ func (a Analyzer) workspaceDocuments(open []Document) ([]Document, error) {
 		}
 		seen[key] = true
 		out = append(out, doc)
+	}
+	if a.SourceOnly {
+		return out, nil
 	}
 	dirs := []struct {
 		path string

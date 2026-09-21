@@ -14,6 +14,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `alternative_body`
 - `ambiguous_call_count`
 - `ambiguous_test_name`
+- `analysis_capability_unavailable`
 - `analysis_metrics`
 - `analysis_plans`
 - `analyze_disabled_rules_precedence`
@@ -1261,6 +1262,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `used_range`
 - `user_form`
 - `userform_code_sync_failed`
+- `userform_control_metadata`
 - `userform_count`
 - `userform_detection_unavailable`
 - `userform_image_export_experimental`

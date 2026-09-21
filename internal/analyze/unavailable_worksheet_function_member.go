@@ -20,6 +20,7 @@ func (a Analyzer) unavailableWorksheetFunctionMemberFindingsContext(ctx context.
 		RootDir:                    a.intelRootDir(),
 		Config:                     a.Config,
 		DB:                         a.typeDB,
+		SourceOnly:                 file.sourceProject,
 		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
 	}
 	openDocuments := []intel.Document{file.intelDocument()}

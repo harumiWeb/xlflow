@@ -11,7 +11,12 @@ func (a Analyzer) implicitApproximateLookupFindingsContext(ctx context.Context, 
 	if !a.Config.Analyze.DetectImplicitApproximateLookups || a.typeDB == nil {
 		return nil, nil
 	}
-	intelAnalyzer := intel.Analyzer{RootDir: a.intelRootDir(), Config: a.Config, DB: a.typeDB}
+	intelAnalyzer := intel.Analyzer{
+		RootDir:    a.intelRootDir(),
+		Config:     a.Config,
+		DB:         a.typeDB,
+		SourceOnly: file.sourceProject,
+	}
 	openDocuments := []intel.Document{file.intelDocument()}
 	if len(a.workspaceDocuments) > 0 && a.workspaceSymbolsSnapshot != nil {
 		openDocuments = a.workspaceDocuments

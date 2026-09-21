@@ -608,9 +608,16 @@ type parsedFile struct {
 	// ends in _Change or _Click.
 	UserFormControlNames  map[string]struct{}
 	UserFormControlsKnown bool
-	Root                  *tree_sitter.Node
-	IR                    procedureir.DocumentIR
-	CFG                   vbacfg.Document
+	// UserFormDesignerSource is the caller-supplied .frm source associated with
+	// this file. It is populated only for AnalyzeProject so event diagnostics do
+	// not resolve a logical path against the host filesystem.
+	UserFormDesignerSource      string
+	UserFormDesignerSourcePath  string
+	UserFormDesignerSourceFound bool
+	userFormControlsChecked     bool
+	Root                        *tree_sitter.Node
+	IR                          procedureir.DocumentIR
+	CFG                         vbacfg.Document
 	// Procedures owns the analyzer-facing projection of IR for this file
 	// revision. It is materialized once during batch/realtime file setup and
 	// reused by all rule stages. Callers must treat the sourceProcedure values
@@ -866,6 +873,90 @@ func sourceProjectPathIdentity(path string) string {
 	return strings.ToLower(pathpkg.Clean(strings.ReplaceAll(path, "\\", "/")))
 }
 
+// suppliedUserFormDesigner associates a caller-supplied form code file with
+// its caller-supplied .frm source. Logical paths are the only identities used
+// here; no fallback to the configured source root is permitted.
+func suppliedUserFormDesigner(files []sourceproject.SourceFile, codePath string) (source, designerPath string, found bool) {
+	if len(files) == 0 {
+		return "", "", false
+	}
+	codeIdentity := sourceProjectPathIdentity(codePath)
+	for _, file := range files {
+		if file.ModuleKind != sourceproject.ModuleKindForm || !strings.EqualFold(pathpkg.Ext(file.Path), ".frm") {
+			continue
+		}
+		if sourceProjectPathIdentity(file.Path) == codeIdentity {
+			return string(file.Source), file.Path, true
+		}
+	}
+
+	normalizedPath := strings.ReplaceAll(codePath, "\\", "/")
+	base := pathpkg.Base(normalizedPath)
+	name := strings.TrimSuffix(base, pathpkg.Ext(base))
+	dir := pathpkg.Dir(normalizedPath)
+	candidates := []string{pathpkg.Join(dir, name+".frm")}
+	if strings.EqualFold(pathpkg.Base(dir), "code") {
+		candidates = append(candidates, pathpkg.Join(pathpkg.Dir(dir), name+".frm"))
+	}
+	for _, candidatePath := range candidates {
+		candidateIdentity := sourceProjectPathIdentity(candidatePath)
+		for _, file := range files {
+			if file.ModuleKind != sourceproject.ModuleKindForm || !strings.EqualFold(pathpkg.Ext(file.Path), ".frm") {
+				continue
+			}
+			if sourceProjectPathIdentity(file.Path) == candidateIdentity {
+				return string(file.Source), file.Path, true
+			}
+		}
+	}
+
+	// A caller may use unrelated logical roots for code and designer files. A
+	// unique basename match is still source-only and keeps that valid project
+	// shape usable; ambiguity remains unknown rather than guessing.
+	var match *sourceproject.SourceFile
+	for index := range files {
+		file := &files[index]
+		if file.ModuleKind != sourceproject.ModuleKindForm || !strings.EqualFold(pathpkg.Ext(file.Path), ".frm") {
+			continue
+		}
+		formName := strings.TrimSuffix(pathpkg.Base(file.Path), pathpkg.Ext(file.Path))
+		if !strings.EqualFold(formName, name) {
+			continue
+		}
+		if match != nil {
+			return "", "", false
+		}
+		match = file
+	}
+	if match == nil {
+		return "", "", false
+	}
+	return string(match.Source), match.Path, true
+}
+
+func prepareUserFormMetadataWarnings(a Analyzer, files []parsedFile) []map[string]any {
+	var warnings []map[string]any
+	for index := range files {
+		file := &files[index]
+		if !hasUserFormEventCandidate(*file) {
+			continue
+		}
+		file.UserFormControlNames, file.UserFormControlsKnown = a.userFormControlNames(*file)
+		file.userFormControlsChecked = true
+		if file.UserFormControlsKnown {
+			continue
+		}
+		warnings = append(warnings, map[string]any{
+			"code":       "analysis_capability_unavailable",
+			"capability": "userform_control_metadata",
+			"file":       file.Path,
+			"rules":      []string{"VBA220"},
+			"message":    "UserForm control metadata was not supplied; VBA220 uses conservative event classification.",
+		})
+	}
+	return warnings
+}
+
 func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semanticquery.Context, project sourceproject.SourceProject) (result Result, err error) {
 	physicalRootDir := a.RootDir
 	if physicalRootDir == "" {
@@ -964,6 +1055,9 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 			RangeValueModuleConstants: rangeValueConstants,
 			ConstantValues:            constantValues,
 		}
+		if a.sourceProject {
+			parsedFile.UserFormDesignerSource, parsedFile.UserFormDesignerSourcePath, parsedFile.UserFormDesignerSourceFound = suppliedUserFormDesigner(project.Files, file)
+		}
 		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors {
 			parsedFile.ArrayOptionBase = optionBase(lines)
 			parsedFile.ArrayOptionBaseSet = true
@@ -1050,6 +1144,9 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 		parsedFiles[i].moduleFactsFingerprint = semanticModuleFactsFingerprint(parsedFiles[i])
 		materializeProcedureAnalysisPlans(&parsedFiles[i], projectEffects, analysis.Config.Analyze)
 		recordFactBuilds(ctx, len(procedures))
+	}
+	if analysis.sourceProject && analysis.Config.Analyze.DetectEventHandlerReentry {
+		warnings = append(warnings, prepareUserFormMetadataWarnings(analysis, parsedFiles)...)
 	}
 	capabilityPlan := buildProjectCapabilityPlan(analysis.Config.Analyze, parsedFiles)
 	if capabilityPlan.requires(projectCapabilityDataFlowInputs) {
@@ -1453,6 +1550,7 @@ func (a Analyzer) byRefArgumentDiagnosticsContext(ctx context.Context, file pars
 		RootDir:                           a.intelRootDir(),
 		Config:                            a.Config,
 		DB:                                a.typeDB,
+		SourceOnly:                        file.sourceProject,
 		TypeDBResolutionIncomplete:        a.typeDBResolutionIncomplete,
 		WorkspaceSymbolQueryFunc:          a.byRefWorkspaceSymbolQuery,
 		WorkspaceUserDefinedTypes:         a.byRefUserDefinedTypes,
@@ -1507,6 +1605,7 @@ func (a Analyzer) compileEquivalentFindingsContext(ctx context.Context, file par
 		RootDir:                           a.intelRootDir(),
 		Config:                            a.Config,
 		DB:                                a.typeDB,
+		SourceOnly:                        file.sourceProject,
 		TypeDBResolutionIncomplete:        a.typeDBResolutionIncomplete,
 		WorkspaceSymbolQueryFunc:          a.byRefWorkspaceSymbolQuery,
 		WorkspaceUserDefinedTypes:         a.byRefUserDefinedTypes,
@@ -1677,6 +1776,7 @@ func projectByRefSymbolIndex(ctx context.Context, rootDir string, cfg config.Con
 				continue
 			}
 			seen[key] = struct{}{}
+			symbolAnalyzer.SourceOnly = file.sourceProject
 			fileSymbols, err := symbolAnalyzer.DocumentSymbolsContext(ctx, file.intelDocument())
 			if err != nil {
 				return nil, len(projectSymbols), err
@@ -1741,7 +1841,7 @@ func (a Analyzer) statefulExcelCallArgumentFindingsContext(ctx context.Context, 
 	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.typeDB == nil {
 		return nil, nil
 	}
-	diagnostics, err := (intel.Analyzer{RootDir: a.intelRootDir(), Config: a.Config, DB: a.typeDB}).StatefulExcelCallArgumentDiagnosticsContext(ctx, file.intelDocument())
+	diagnostics, err := (intel.Analyzer{RootDir: a.intelRootDir(), Config: a.Config, DB: a.typeDB, SourceOnly: file.sourceProject}).StatefulExcelCallArgumentDiagnosticsContext(ctx, file.intelDocument())
 	if err != nil {
 		return nil, err
 	}
@@ -3290,7 +3390,7 @@ func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analys
 		return nil, err
 	}
 	file.ensureModuleAnalysisFacts()
-	if a.Config.Analyze.DetectEventHandlerReentry && hasUserFormEventCandidate(file) {
+	if a.Config.Analyze.DetectEventHandlerReentry && hasUserFormEventCandidate(file) && !file.userFormControlsChecked {
 		file.UserFormControlNames, file.UserFormControlsKnown = a.userFormControlNames(file)
 	}
 	var findings []Finding

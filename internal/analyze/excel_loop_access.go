@@ -690,7 +690,7 @@ func excelHelperSummaryKey(file parsedFile, call procedureir.CallSite) (string, 
 
 func buildRealtimeExcelRootBindingIndex(rootDir string, cfg config.Config, file parsedFile) excelRootBindingIndex {
 	doc := intel.Document{Path: file.Path, Source: string(file.Source), ModuleKind: file.ModuleKind}
-	projectSymbols, err := (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbols([]intel.Document{doc}, "")
+	projectSymbols, err := (intel.Analyzer{RootDir: rootDir, Config: cfg, SourceOnly: file.sourceProject}).WorkspaceSymbols([]intel.Document{doc}, "")
 	if err != nil {
 		return buildExcelRootBindingIndex([]parsedFile{file})
 	}
@@ -1253,7 +1253,7 @@ func resolveExcelExpressionType(file parsedFile, db *vbadb.DB, expression string
 	if file.ExpressionTypeResolver != nil {
 		return file.ExpressionTypeResolver.ResolveAt(expression, line)
 	}
-	return (intel.Analyzer{RootDir: rootDir, Config: cfg, DB: db}).ResolveDocumentExpressionTypeAt(file.intelDocument(), expression, line)
+	return (intel.Analyzer{RootDir: rootDir, Config: cfg, DB: db, SourceOnly: file.sourceProject}).ResolveDocumentExpressionTypeAt(file.intelDocument(), expression, line)
 }
 
 func isExcelRangeExpression(file parsedFile, db *vbadb.DB, expression string, line int, rootDir string, cfg config.Config) bool {

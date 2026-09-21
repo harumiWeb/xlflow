@@ -61,6 +61,19 @@ without build metadata keep the version-agnostic loader contract. Standalone
 realtime analysis exposes the same opt-in expected-version path; explicit
 `TypeDatabase` injection remains authoritative and bypasses runtime loading.
 
+Keep `AnalyzeProject` source-only after the common boundary is introduced.
+Source-local data comes only from the caller-supplied `SourceFile` values, and
+virtual-project metadata may be supplied by another logical file in the same
+`SourceProject`. The analyzer must not open a logical path or discover a
+sidecar artifact. In particular, a supplied `.frm` can provide UserForm
+control metadata for its code-behind module, while an unprovided or
+`.frx`-dependent Designer view is incomplete. `VBA220` then remains
+conservative and `Result.Warnings` reports the structured
+`analysis_capability_unavailable` / `userform_control_metadata` capability for
+the affected logical file. The warning is emitted in deterministic source
+order. Filesystem-backed `RunResultContext` keeps its existing sidecar and
+FRX behavior; LSP and realtime adapter contracts are outside this decision.
+
 ## Consequences
 
 Positive consequences:
@@ -69,6 +82,10 @@ Positive consequences:
 - Source acquisition and protocol lifecycle stay outside the analysis input.
 - Explicit component kinds avoid filesystem inspection and extension guesses.
 - Test modules retain both their test role and standard-module semantics.
+- `AnalyzeProject` cannot accidentally make a virtual path observable through
+  host-side Designer, FRX, or workspace-symbol reads.
+- External UserForm metadata has an explicit conservative diagnostic and
+  structured warning contract instead of a hidden filesystem fallback.
 
 Negative consequences:
 
@@ -76,6 +93,9 @@ Negative consequences:
   until the adapters in issues #641 and #642 adopt it.
 - Callers must preserve source byte immutability or make their own snapshot.
 - Validation cannot occur until a consumer applies its input requirements.
+- Callers that need complete UserForm control metadata must supply the relevant
+  `.frm` source (and any binary metadata through a future explicit capability);
+  `AnalyzeProject` does not infer it from `RootDir`.
 
 ## Alternatives Considered
 
@@ -100,6 +120,9 @@ Negative consequences:
 - Generator-version compatibility follow-up: issue #813,
   `internal/typedb/typedb.go`, `internal/analyze/analyzer.go`, and
   `internal/analyze/analyzer_test.go`.
+- Filesystem-free diagnostic capability policy: issue #644,
+  `internal/analyze/event_reentry.go`, `internal/vba/intel/intel.go`, and
+  `docs/specs/vba-source-project.md`.
 
 ## Supersedes
 
