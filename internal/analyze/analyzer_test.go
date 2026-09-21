@@ -3,6 +3,7 @@ package analyze
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -6062,6 +6063,159 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA251"); len(got) != 0 {
 		t.Fatalf("disabled VBA251 should not report: %+v", got)
+	}
+}
+
+func TestVBA252MatchesBatchAndRealtimeAnalysisAndHonorsSuppression(t *testing.T) {
+	dir := t.TempDir()
+	typeDBDir := t.TempDir()
+	generated := `{
+  "types": [{
+    "name": "Excel.WorksheetFunction",
+    "library": "Excel",
+    "kind": "interface",
+    "confidence": "generated",
+    "source": "typelib",
+    "methods": [{ "name": "Sum", "return_type": "Double" }]
+  }]
+}`
+	if err := os.WriteFile(filepath.Join(typeDBDir, "excel.generated.json"), []byte(generated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := typedb.WriteManifest(typeDBDir, typedb.Manifest{
+		GeneratorVersion: "test",
+		Libraries:        []typedb.ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
+	path := filepath.Join(dir, "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+    Dim value As Double
+    Dim result As Variant
+    result = WorksheetFunction.Abs(value)
+    result = WorksheetFunction.Concatenate("a", "b")
+    result = WorksheetFunction.Sum(value)
+    result = Application.WorksheetFunction.Abs(value)
+    ' xlflow:disable-next-line VBA252
+    result = WorksheetFunction.Concatenate("suppressed", "value")
+    result = WorksheetFunction.Abs(value) ' xlflow:disable-line VBA252
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", string(source))
+	cfg := config.Default()
+	if !cfg.Analyze.DetectUnavailableWorksheetFunctionMembers {
+		t.Fatal("default configuration must enable VBA252")
+	}
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, findings := range map[string][]Finding{"batch": batch, "realtime": realtime} {
+		got := findingsByCode(findings, "VBA252")
+		if len(got) != 3 {
+			t.Fatalf("%s VBA252 findings = %+v, want three", name, got)
+		}
+		wantLines := []int{5, 6, 8}
+		for index, finding := range got {
+			if finding.Line != wantLines[index] {
+				t.Fatalf("%s VBA252 finding[%d] = %+v, want line %d", name, index, finding, wantLines[index])
+			}
+			if finding.Severity != "warning" {
+				t.Fatalf("%s VBA252 severity = %q, want warning", name, finding.Severity)
+			}
+			if finding.Column <= 0 || finding.EndColumn <= finding.Column {
+				t.Fatalf("%s VBA252 range = %d:%d, want non-empty member range", name, finding.Column, finding.EndColumn)
+			}
+			if !strings.Contains(finding.Message, "WorksheetFunction") || !strings.Contains(finding.Reason, "TypeLib") || !strings.Contains(finding.Suggestion, "WorksheetFunction") {
+				t.Fatalf("%s VBA252 guidance = %+v", name, finding)
+			}
+		}
+	}
+	batchVBA252 := findingsByCode(batch, "VBA252")
+	realtimeVBA252 := findingsByCode(realtime, "VBA252")
+	if len(batchVBA252) != len(realtimeVBA252) {
+		t.Fatalf("batch/realtime VBA252 count = %d/%d", len(batchVBA252), len(realtimeVBA252))
+	}
+	for index := range batchVBA252 {
+		if batchVBA252[index].Line != realtimeVBA252[index].Line || batchVBA252[index].Column != realtimeVBA252[index].Column || batchVBA252[index].EndColumn != realtimeVBA252[index].EndColumn {
+			t.Fatalf("batch/realtime VBA252 ranges differ: batch=%+v realtime=%+v", batchVBA252[index], realtimeVBA252[index])
+		}
+	}
+
+	cfg.Analyze.DetectUnavailableWorksheetFunctionMembers = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA252"); len(got) != 0 {
+		t.Fatalf("disabled VBA252 should not report: %+v", got)
+	}
+	findings, err = SourceRealtimeFindings(dir, path, cfg, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA252"); len(got) != 0 {
+		t.Fatalf("disabled realtime VBA252 should not report: %+v", got)
+	}
+}
+
+func TestVBA252FailsOpenForStaleTypeDBManifest(t *testing.T) {
+	dir := t.TempDir()
+	typeDBDir := t.TempDir()
+	generated := `{
+  "types": [{
+    "name": "Excel.WorksheetFunction",
+    "library": "Excel",
+    "kind": "interface",
+    "confidence": "generated",
+    "source": "typelib",
+    "methods": [{ "name": "Sum", "return_type": "Double" }]
+  }]
+}`
+	if err := os.WriteFile(filepath.Join(typeDBDir, "excel.generated.json"), []byte(generated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestBody, err := json.Marshal(typedb.Manifest{
+		SchemaVersion:    vbadb.SchemaVersion + 1,
+		Generator:        typedb.GeneratorName,
+		GeneratorVersion: "test",
+		Libraries:        []typedb.ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(typedb.ManifestPath(typeDBDir), manifestBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
+	path := filepath.Join(dir, "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+    Dim result As Variant
+    result = WorksheetFunction.Abs(1)
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", string(source))
+	cfg := config.Default()
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(batch, "VBA252"); len(got) != 0 {
+		t.Fatalf("stale TypeDB manifest must fail open in batch analysis: %+v", got)
+	}
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA252"); len(got) != 0 {
+		t.Fatalf("stale TypeDB manifest must fail open in realtime analysis: %+v", got)
 	}
 }
 

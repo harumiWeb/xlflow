@@ -2618,6 +2618,28 @@
       "configuration_key": "detect_implicit_approximate_lookups",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA252",
+      "title": "Unavailable WorksheetFunction member",
+      "description": "A typed Excel.WorksheetFunction member is not present in the available generated TypeLib member set.",
+      "family": "analyze",
+      "category": "correctness",
+      "evidence_class": "inference",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba252",
+      "configurable": true,
+      "configuration_key": "detect_unavailable_worksheet_function_members",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

@@ -318,6 +318,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_risky_module_state`
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
+- `detect_unavailable_worksheet_function_members`
 - `detect_unsafe_command_construction`
 - `detect_unsafe_file_path`
 - `detect_unsafe_http_configuration`
@@ -544,8 +545,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generate_test_failed`
 - `generated_at`
 - `generated_files`
+- `generator_changed`
 - `generator_version`
 - `generator_version_changed`
+- `generator_version_missing`
 - `generic_dataflow_cfg_walks`
 - `generic_dataflow_kernel_runs`
 - `global_values`

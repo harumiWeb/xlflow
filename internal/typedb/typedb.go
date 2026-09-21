@@ -177,7 +177,19 @@ func StatusFor(opts Options) (Status, error) {
 		status.Stale = true
 		status.Reason = "schema_version_changed"
 	}
-	if opts.GeneratorVersion != "" && manifest.GeneratorVersion != "" && manifest.GeneratorVersion != opts.GeneratorVersion {
+	if strings.TrimSpace(manifest.Generator) != GeneratorName {
+		status.Stale = true
+		if status.Reason == "" {
+			status.Reason = "generator_changed"
+		}
+	}
+	if strings.TrimSpace(manifest.GeneratorVersion) == "" {
+		status.Stale = true
+		if status.Reason == "" {
+			status.Reason = "generator_version_missing"
+		}
+	}
+	if opts.GeneratorVersion != "" && strings.TrimSpace(manifest.GeneratorVersion) != opts.GeneratorVersion {
 		status.Stale = true
 		if status.Reason == "" {
 			status.Reason = "generator_version_changed"
@@ -245,6 +257,18 @@ func LoadGenerated(dir string) (*vbadb.DB, error) {
 }
 
 func LoadForRuntime(dir string) (LoadResult, error) {
+	return loadForRuntime(dir, "")
+}
+
+// LoadForRuntimeWithGeneratorVersion loads the generated TypeLib database and
+// marks it incomplete when its manifest was produced by a different xlflow
+// build. An empty expected version preserves the version-agnostic runtime
+// behavior used by callers that do not carry build metadata.
+func LoadForRuntimeWithGeneratorVersion(dir, generatorVersion string) (LoadResult, error) {
+	return loadForRuntime(dir, strings.TrimSpace(generatorVersion))
+}
+
+func loadForRuntime(dir, expectedGeneratorVersion string) (LoadResult, error) {
 	resolved, err := ResolveDir(dir)
 	if err != nil {
 		return LoadResult{}, err
@@ -256,9 +280,15 @@ func LoadForRuntime(dir string) (LoadResult, error) {
 	if errors.Is(readManifestErr, os.ErrNotExist) {
 		result.Complete = false
 		result.Warnings = append(result.Warnings, "generated TypeLib manifest is missing; unresolved type-name diagnostics are disabled")
-	} else if readManifestErr == nil && len(manifest.Libraries) == 0 {
-		result.Complete = false
-		result.Warnings = append(result.Warnings, "generated TypeLib manifest contains no libraries; unresolved type-name diagnostics are disabled")
+	} else if readManifestErr == nil {
+		if len(manifest.Libraries) == 0 {
+			result.Complete = false
+			result.Warnings = append(result.Warnings, "generated TypeLib manifest contains no libraries; unresolved type-name diagnostics are disabled")
+		}
+		for _, warning := range manifestCompatibilityWarnings(manifest, expectedGeneratorVersion) {
+			result.Complete = false
+			result.Warnings = append(result.Warnings, warning)
+		}
 	}
 	if manifestErr != nil {
 		result.Complete = false
@@ -284,6 +314,24 @@ func LoadForRuntime(dir string) (LoadResult, error) {
 	}
 	result.DB = db
 	return result, nil
+}
+
+func manifestCompatibilityWarnings(manifest Manifest, expectedGeneratorVersion string) []string {
+	const suffix = "; unresolved type-name diagnostics are disabled"
+	var warnings []string
+	if manifest.SchemaVersion != vbadb.SchemaVersion {
+		warnings = append(warnings, fmt.Sprintf("generated TypeLib manifest schema version %d is incompatible with schema version %d%s", manifest.SchemaVersion, vbadb.SchemaVersion, suffix))
+	}
+	if strings.TrimSpace(manifest.Generator) != GeneratorName {
+		warnings = append(warnings, fmt.Sprintf("generated TypeLib manifest generator %q is incompatible with %q%s", strings.TrimSpace(manifest.Generator), GeneratorName, suffix))
+	}
+	manifestVersion := strings.TrimSpace(manifest.GeneratorVersion)
+	if manifestVersion == "" {
+		warnings = append(warnings, "generated TypeLib manifest generator version is missing; unresolved type-name diagnostics are disabled")
+	} else if expectedGeneratorVersion != "" && manifestVersion != expectedGeneratorVersion {
+		warnings = append(warnings, fmt.Sprintf("generated TypeLib manifest generator version %q is stale; expected %q%s", manifestVersion, expectedGeneratorVersion, suffix))
+	}
+	return warnings
 }
 
 func generatedFiles(dir string) []string {

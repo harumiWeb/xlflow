@@ -127,6 +127,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA249`](#vba249) | analyze | error       | procedure-local | yes     | Deterministic runtime error                        |
 | [`VBA250`](#vba250) | analyze | warning     | procedure-local | yes     | Unsafe Select operation                            |
 | [`VBA251`](#vba251) | analyze | warning     | procedure-local | yes     | Implicit approximate lookup mode                   |
+| [`VBA252`](#vba252) | analyze | warning     | procedure-local | yes     | Unavailable WorksheetFunction member               |
 
 ## VB001
 
@@ -2745,3 +2746,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                    |
 | Real-time editor diagnostic | yes                                   |
 | Fix available               | no                                    |
+
+## VBA252
+
+**Unavailable WorksheetFunction member.** A typed Excel.WorksheetFunction member is not present in the available generated TypeLib member set.
+
+| Property                    | Value                                           |
+| --------------------------- | ----------------------------------------------- |
+| Family                      | `analyze`                                       |
+| Category                    | `correctness`                                   |
+| Evidence class              | `inference`                                     |
+| Compile-equivalent          | no                                              |
+| Default severity            | `warning`                                       |
+| Supported severities        | `warning`                                       |
+| Surfaces                    | `analyze`, `lsp`                                |
+| Scope                       | `procedure-local`                               |
+| Precision                   | `high`                                          |
+| Enabled by default          | yes                                             |
+| Configuration               | `detect_unavailable_worksheet_function_members` |
+| Inline suppression          | yes                                             |
+| Blocks source preflight     | no                                              |
+| Real-time editor diagnostic | yes                                             |
+| Fix available               | no                                              |

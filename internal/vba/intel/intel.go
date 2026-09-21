@@ -519,8 +519,39 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 		return nil
 	}
 	finishStage = analysisstats.Measure(ctx, "suppression")
+	out = preferUnavailableWorksheetFunctionDiagnostics(out)
 	out = applyDocumentInlineSuppressions(a.RootDir, doc, out)
 	finishStage(len(out), nil)
+	return out
+}
+
+// preferUnavailableWorksheetFunctionDiagnostics keeps the source-level
+// WorksheetFunction availability rule as the owner of a missing member when
+// the generic unknown-member checker observes the same call.  The generic
+// checker remains useful for every other receiver and for a different source
+// range; only an exact-range VB033 duplicate is removed.
+func preferUnavailableWorksheetFunctionDiagnostics(diagnostics []Diagnostic) []Diagnostic {
+	if len(diagnostics) == 0 {
+		return diagnostics
+	}
+	ownedRanges := make(map[Range]struct{})
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "VBA252" {
+			ownedRanges[diagnostic.Range] = struct{}{}
+		}
+	}
+	if len(ownedRanges) == 0 {
+		return diagnostics
+	}
+	out := make([]Diagnostic, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "VB033" {
+			if _, owned := ownedRanges[diagnostic.Range]; owned {
+				continue
+			}
+		}
+		out = append(out, diagnostic)
+	}
 	return out
 }
 
@@ -2886,7 +2917,7 @@ func lowConfidenceDiagnosticType(typ string) bool {
 }
 
 func (a Analyzer) completeMemberSetType(typ string) bool {
-	if a.DB == nil {
+	if a.DB == nil || a.TypeDBResolutionIncomplete {
 		return false
 	}
 	info, ok := a.DB.ResolveType(typ)

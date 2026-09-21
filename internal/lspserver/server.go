@@ -196,7 +196,7 @@ type diagnosticState struct {
 }
 
 func Check(opts Options) error {
-	result, err := typedb.LoadForRuntime(opts.TypeDBDir)
+	result, err := typedb.LoadForRuntimeWithGeneratorVersion(opts.TypeDBDir, opts.Build.Version)
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func RunStdio(opts Options) error {
 }
 
 func New(opts Options) (*Server, func(), error) {
-	typeDB, err := typedb.LoadForRuntime(opts.TypeDBDir)
+	typeDB, err := typedb.LoadForRuntimeWithGeneratorVersion(opts.TypeDBDir, opts.Build.Version)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -258,6 +258,9 @@ func New(opts Options) (*Server, func(), error) {
 				}
 				out := make([]intel.RealtimeFinding, 0, len(findings))
 				for _, finding := range findings {
+					if finding.Code == "VBA252" && !typeDB.Complete {
+						continue
+					}
 					out = append(out, intel.RealtimeFinding{Code: finding.Code, Severity: finding.Severity, Line: finding.Line, Column: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn, Message: finding.Message})
 				}
 				return out, nil
@@ -379,6 +382,9 @@ func New(opts Options) (*Server, func(), error) {
 			}
 			out := make([]intel.RealtimeFinding, 0, len(findings))
 			for _, finding := range findings {
+				if finding.Code == "VBA252" && !typeDB.Complete {
+					continue
+				}
 				out = append(out, intel.RealtimeFinding{Code: finding.Code, Severity: finding.Severity, Line: finding.Line, Column: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn, Message: finding.Message})
 			}
 			resolvedForDiagnostics, ok := resolvedDiagnosticViews[projectKey]
