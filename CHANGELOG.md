@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added explicit TypeDB capability injection for in-memory analysis. Browser and
+  embedded callers can use the embedded built-in database without runtime
+  `~/.xlflow/typelib` discovery, while filesystem-backed CLI/LSP analysis keeps
+  generated TypeLib support and completeness-aware fail-open diagnostics.
+
 ## v0.32.1
 
 - Fixed `pull` -> `push` round-trips for worksheet and `ThisWorkbook` document

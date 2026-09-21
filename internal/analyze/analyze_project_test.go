@@ -8,6 +8,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/sourceproject"
+	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
 func TestAnalyzerAnalyzeProjectUsesCallerSuppliedVirtualFiles(t *testing.T) {
@@ -35,6 +36,88 @@ func TestAnalyzerAnalyzeProjectUsesCallerSuppliedVirtualFiles(t *testing.T) {
 	}
 	if got := findingsByCode(result.Findings, "VBA228"); len(got) != 1 || got[0].File != "virtual/Main.bas" {
 		t.Fatalf("virtual cross-module ByRef finding = %+v", got)
+	}
+}
+
+func TestAnalyzerAnalyzeProjectUsesEmbeddedTypeDBWithoutRuntimeLookup(t *testing.T) {
+	t.Setenv(typedb.EnvDir, t.TempDir())
+	project := sourceproject.SourceProject{Files: []sourceproject.SourceFile{{
+		Path:       "virtual/Main.bas",
+		ModuleKind: sourceproject.ModuleKindStandard,
+		Source: []byte(`Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Dim result As Variant
+    result = WorksheetFunction.Match("key", rng)
+End Sub
+`),
+	}}}
+
+	result, err := (Analyzer{Config: config.Default()}).AnalyzeProject(t.Context(), project)
+	if err != nil {
+		t.Fatalf("AnalyzeProject: %v", err)
+	}
+	if got := findingsByCode(result.Findings, "VBA251"); len(got) != 1 {
+		t.Fatalf("embedded TypeDB VBA251 findings = %+v, want one finding", got)
+	}
+	for _, warning := range result.Warnings {
+		if warning["code"] == "type_db_load_warning" {
+			t.Fatalf("in-memory analysis unexpectedly loaded the runtime TypeDB: %+v", warning)
+		}
+	}
+}
+
+func TestAnalyzerAnalyzeProjectUsesSuppliedTypeDBAndCompleteness(t *testing.T) {
+	t.Setenv(typedb.EnvDir, t.TempDir())
+	newDatabase := func() *vbadb.DB {
+		db := vbadb.New()
+		if err := db.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Excel.WorksheetFunction",
+    "library": "Excel",
+    "kind": "interface",
+    "confidence": "generated",
+    "source": "typelib",
+    "methods": [{ "name": "CustomFunction", "return_type": "Double" }]
+  }],
+  "global_values": {"WorksheetFunction": "Excel.WorksheetFunction"}
+}`)); err != nil {
+			t.Fatalf("MergeJSON: %v", err)
+		}
+		return db
+	}
+	project := func(member string) sourceproject.SourceProject {
+		return sourceproject.SourceProject{Files: []sourceproject.SourceFile{{
+			Path:       "virtual/Main.bas",
+			ModuleKind: sourceproject.ModuleKindStandard,
+			Source:     []byte("Option Explicit\nPublic Sub Run()\n    Dim result As Variant\n    result = WorksheetFunction." + member + "(1)\nEnd Sub\n"),
+		}}}
+	}
+
+	complete := &TypeDatabase{DB: newDatabase(), Complete: true}
+	result, err := (Analyzer{Config: config.Default(), TypeDB: complete}).AnalyzeProject(t.Context(), project("CustomFunction"))
+	if err != nil {
+		t.Fatalf("AnalyzeProject with supplied TypeDB: %v", err)
+	}
+	if got := findingsByCode(result.Findings, "VBA252"); len(got) != 0 {
+		t.Fatalf("supplied TypeDB member was not authoritative: %+v", got)
+	}
+
+	incomplete := &TypeDatabase{DB: newDatabase(), Complete: false}
+	result, err = (Analyzer{Config: config.Default(), TypeDB: incomplete}).AnalyzeProject(t.Context(), project("MissingFunction"))
+	if err != nil {
+		t.Fatalf("AnalyzeProject with incomplete supplied TypeDB: %v", err)
+	}
+	if got := findingsByCode(result.Findings, "VBA252"); len(got) != 0 {
+		t.Fatalf("incomplete supplied TypeDB must fail open for absent members: %+v", got)
+	}
+
+	result, err = (Analyzer{Config: config.Default(), TypeDB: complete}).AnalyzeProject(t.Context(), project("MissingFunction"))
+	if err != nil {
+		t.Fatalf("AnalyzeProject with complete supplied TypeDB: %v", err)
+	}
+	if got := findingsByCode(result.Findings, "VBA252"); len(got) != 1 {
+		t.Fatalf("complete supplied TypeDB must report absent members: %+v", got)
 	}
 }
 

@@ -87,7 +87,7 @@ End Sub
 	readErr := parsed.ReadContext(context.Background(), func(vbaast.ParsedView) error {
 		go func() {
 			_, analysisErr := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(
-				analysisCtx, root, config.Default(), parsed, ir, controlFlow, typeDB,
+				analysisCtx, root, config.Default(), parsed, ir, controlFlow, &TypeDatabase{DB: typeDB, Complete: true},
 				effects.ProjectSummary{}, nil, nil, snapshot.Document(), 1,
 			)
 			result <- analysisErr
@@ -910,7 +910,7 @@ End Sub
 		{Name: "Outer", Module: "Realtime", ModuleKind: "class", Kind: "sub", Visibility: "Private", File: ir.Path, Line: 6},
 	}))
 	findings, err := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(
-		context.Background(), root, config.Default(), parsed, ir, controlFlow, typeDB,
+		context.Background(), root, config.Default(), parsed, ir, controlFlow, &TypeDatabase{DB: typeDB, Complete: true},
 		effects.ProjectSummary{}, nil, &resolution,
 	)
 	if err != nil {

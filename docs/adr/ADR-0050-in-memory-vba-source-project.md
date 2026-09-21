@@ -44,6 +44,14 @@ Future filesystem and editor adapters construct this model. The future common
 analysis entry point validates and consumes it through the existing parser,
 procedure IR, CFG, and semantic implementations.
 
+Type-aware analysis receives its type metadata through an explicit capability
+that carries both the caller-owned `vbadb.DB` and whether the view is complete.
+`AnalyzeProject` uses only the embedded built-in database when no capability is
+provided and marks that view incomplete; the filesystem-backed adapter may
+instead load and overlay the generated TypeLib database. The common semantic
+implementation is shared in both cases, while incomplete views fail open for
+diagnostics that would otherwise infer external type absence.
+
 ## Consequences
 
 Positive consequences:
@@ -93,4 +101,4 @@ Negative consequences:
 
 - `docs/adr/ADR-0014-reusable-vba-lsp-server.md`
 - `docs/adr/ADR-0021-procedure-analysis-ir.md`
-- xlflow issues #641, #642, #644, and #645
+- xlflow issues #641, #642, #643, #644, and #645
