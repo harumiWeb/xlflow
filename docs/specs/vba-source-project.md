@@ -175,17 +175,59 @@ candidates, remains adapter behavior and is not applied by `AnalyzeProject`.
 
 Inline suppressions in the common core are parsed from each supplied
 `SourceFile.Source`, so a virtual path does not trigger a second filesystem
-read. The broader classification of diagnostics that need external data (for
-example UserForm Designer/FRX metadata) remains the responsibility of issue
-#644.
+read.
+
+### Filesystem-free diagnostic capability policy
+
+`AnalyzeProject` is a source-only boundary. Its authoritative inputs are the
+supplied `SourceFile` values and capabilities explicitly injected by the
+caller; the logical `Path` is never opened, stat'ed, or used to discover
+sidecar data. The inputs are classified as follows:
+
+- **Source-local**: source text, module kind, logical path, and inline
+  suppressions. These are always available for the supplied files.
+- **Virtual-project**: metadata represented by another supplied file in the
+  same `SourceProject`. For example, a supplied `.frm` source can provide the
+  Designer control names for a form code-behind module. This association uses
+  logical paths and a unique form basename only; it never falls back to the
+  host filesystem.
+- **External**: artifacts that are not present in the project, such as a
+  referenced `.frx` companion or host-discovered sidecar/designer files. These
+  are unavailable to `AnalyzeProject`.
+
+When UserForm control metadata is unavailable or incomplete, `VBA220` uses
+the conservative event classification and `Result.Warnings` contains one
+deterministic warning for each affected source file:
+
+```json
+{
+  "code": "analysis_capability_unavailable",
+  "capability": "userform_control_metadata",
+  "file": "<logical source path>",
+  "rules": ["VBA220"],
+  "message": "UserForm control metadata was not supplied; VBA220 uses conservative event classification."
+}
+```
+
+An in-memory `.frm` with an external `.frx` reference is treated as
+incomplete; the `.frx` is not read and the same warning is emitted. Warnings
+are ordered by the analyzer's deterministic logical source order. Other
+diagnostics that depend on unavailable external metadata must likewise fail
+closed or expose a structured capability warning rather than inspecting the
+host filesystem.
+
+`RunResultContext` retains the filesystem adapter contract, including its
+sidecar and `.frx` reads. This policy is limited to `AnalyzeProject`; LSP and
+realtime adapters are not changed by this boundary and continue to provide
+their own workspace capabilities.
 
 Filesystem discovery and source loading remain adapter responsibilities. The
 existing `symbols.SourceFile` is a discovery descriptor containing a path and
 inferred kind; it is not a loaded source project. The filesystem adapter
 converts those descriptors into this model after reading source bytes. Issue
 #642 adds the common analysis entry point, and issue #643 adds the explicit
-TypeDB capability boundary; issue #644 owns the remaining filesystem-free
-diagnostic and suppression capability policy.
+TypeDB capability boundary; issue #644 owns the filesystem-free diagnostic and
+suppression capability policy described above.
 
 This contract does not introduce a virtual filesystem, change CLI or LSP wire
 formats, or provide browser/Wasm integration.

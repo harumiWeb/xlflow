@@ -27,7 +27,12 @@ func (a Analyzer) excelAPIFailureContractFindingsContext(ctx context.Context, fi
 	if !a.Config.Analyze.DetectExcelAPIFailureContracts || a.typeDB == nil {
 		return nil, nil
 	}
-	diagnostics, err := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).ExcelAPIFailureContractDiagnosticsContext(ctx, file.intelDocument())
+	diagnostics, err := (intel.Analyzer{
+		RootDir:    a.RootDir,
+		Config:     a.Config,
+		DB:         a.typeDB,
+		SourceOnly: file.sourceProject,
+	}).ExcelAPIFailureContractDiagnosticsContext(ctx, file.intelDocument())
 	if err != nil {
 		return nil, err
 	}

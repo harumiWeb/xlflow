@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Defined the filesystem-free `AnalyzeProject` diagnostic boundary. In-memory
+  analysis now uses only caller-supplied source and virtual-project metadata,
+  ignores host UserForm/FRX/workspace artifacts, and emits structured
+  `analysis_capability_unavailable` warnings when `VBA220` lacks complete
+  UserForm control metadata. Filesystem-backed CLI analysis retains its
+  existing sidecar and FRX behavior.
 - Added explicit TypeDB capability injection for in-memory analysis. Browser and
   embedded callers can use the embedded built-in database without runtime
   `~/.xlflow/typelib` discovery, while filesystem-backed CLI/LSP analysis keeps
