@@ -108,12 +108,44 @@ The model is a passive value contract and performs no construction-time
 validation. The analysis entry point that consumes it is responsible for
 reporting unsupported kinds, duplicate identities, or other invalid inputs.
 
+`internal/analyze.Analyzer.AnalyzeProject` is the common batch-analysis entry
+point:
+
+```go
+func (a Analyzer) AnalyzeProject(
+    ctx context.Context,
+    project sourceproject.SourceProject,
+) (Result, error)
+```
+
+It treats the supplied files as the complete project and never performs source
+discovery or reads `SourceFile.Path`. The input is validated before parsing:
+module kinds must be one of the declared constants, paths must be non-empty,
+normalized logical identities must be unique, and `IsTest` is valid only for
+standard modules. The caller-owned file order and source bytes are not mutated;
+the analyzer uses a deterministic internal ordering while retaining each
+caller-supplied logical path for diagnostics and errors. An empty project is a
+successful analysis with zero analyzed files.
+
+`Analyzer.RunResultContext` remains the filesystem adapter. It loads a
+`SourceProject` through `sourceprojectfs.LoadContext` and delegates parsing,
+IR/CFG construction, project resolution/effects, diagnostics, and finalization
+to the same analysis core. Its existing `PathFilter` behavior, including the
+filesystem-only supplemental symbol lookup needed for excluded project
+candidates, remains adapter behavior and is not applied by `AnalyzeProject`.
+
+Inline suppressions in the common core are parsed from each supplied
+`SourceFile.Source`, so a virtual path does not trigger a second filesystem
+read. The broader classification of diagnostics that need external data (for
+example UserForm Designer/FRX metadata) remains the responsibility of issue
+#644.
+
 Filesystem discovery and source loading remain adapter responsibilities. The
 existing `symbols.SourceFile` is a discovery descriptor containing a path and
 inferred kind; it is not a loaded source project. The filesystem adapter
-converts those descriptors into this model after reading source bytes. Issue #642
-will add the common analysis entry point, while issue #644 owns
-filesystem-free diagnostic and suppression behavior.
+converts those descriptors into this model after reading source bytes. Issue
+#642 adds the common analysis entry point; issue #644 owns the remaining
+filesystem-free diagnostic and suppression capability policy.
 
 This contract does not introduce a virtual filesystem, change CLI or LSP wire
-formats, refactor the analyzer, or provide browser/Wasm integration.
+formats, or provide browser/Wasm integration.
