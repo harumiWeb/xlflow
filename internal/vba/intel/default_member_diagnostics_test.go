@@ -130,6 +130,90 @@ End Sub
 	}
 }
 
+func TestDefaultMemberDiagnosticsTreatNamedEnumResultAsValue(t *testing.T) {
+	db := defaultMemberTestDB(t)
+	cfg := config.Default()
+	cfg.Analyze.DetectImplicitDefaultMemberAccess = true
+	analyzer := Analyzer{Config: cfg, DB: db}
+	doc := Document{Path: "Main.bas", Source: `Public Sub Run()
+	Dim result As Variant
+	Dim choice As EnumChoice
+	Set choice = New EnumChoice
+	result = choice
+End Sub
+`}
+
+	diagnostics, err := analyzer.DefaultMemberDiagnosticsContext(t.Context(), doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) != 1 || diagnostics[0].Code != "VBA253" || diagnostics[0].DefaultMember == nil || diagnostics[0].DefaultMember.Member != "Value" {
+		t.Fatalf("named enum result diagnostics = %+v", diagnostics)
+	}
+}
+
+func TestDefaultMemberDiagnosticsValidateIndexedDefaultMemberArity(t *testing.T) {
+	db := defaultMemberTestDB(t)
+	cfg := config.Default()
+	cfg.Analyze.DetectImplicitDefaultMemberAccess = true
+	analyzer := Analyzer{Config: cfg, DB: db}
+	doc := Document{Path: "Main.bas", Source: `Public Sub Run()
+	Dim result As Variant
+	Dim bag As Bag
+	Set bag = New Bag
+	result = bag
+	result = bag()
+	result = bag("key")
+	result = bag("key", "extra")
+End Sub
+`}
+
+	diagnostics, err := analyzer.DefaultMemberDiagnosticsContext(t.Context(), doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int]string{6: "VBA253"}
+	for _, diagnostic := range diagnostics {
+		line := diagnostic.Range.Start.Line
+		if code, ok := want[line]; !ok || code != diagnostic.Code {
+			t.Fatalf("unexpected arity diagnostic = %+v; want=%v", diagnostic, want)
+		}
+		delete(want, line)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing arity diagnostics: %v; got=%+v", want, diagnostics)
+	}
+}
+
+func TestDefaultMemberArgumentCompatibility(t *testing.T) {
+	tests := []struct {
+		name           string
+		parameters     []vbadb.ParamInfo
+		argumentCounts map[int]bool
+	}{
+		{
+			name:           "required and optional",
+			parameters:     []vbadb.ParamInfo{{Name: "Key"}, {Name: "Fallback", Optional: true}},
+			argumentCounts: map[int]bool{0: false, 1: true, 2: true, 3: false},
+		},
+		{
+			name:           "param array",
+			parameters:     []vbadb.ParamInfo{{Name: "Keys", ParamArray: true}},
+			argumentCounts: map[int]bool{0: true, 1: true, 3: true},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			member := vbadb.MemberInfo{Name: "Item", Parameters: test.parameters}
+			for argumentCount, want := range test.argumentCounts {
+				if got := defaultMemberAcceptsArguments(member, argumentCount); got != want {
+					t.Fatalf("defaultMemberAcceptsArguments(%d) = %t, want %t", argumentCount, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestDefaultMemberDiagnosticsReportInitializedObjectUsedAsCallableWithoutDefault(t *testing.T) {
 	db := defaultMemberTestDB(t)
 	cfg := config.Default()
@@ -162,6 +246,8 @@ func defaultMemberTestDB(t *testing.T) *vbadb.DB {
     {"name":"DynamicBag","kind":"class","source":"typelib","confidence":"generated","default_member":"Item","default_member_type":"Variant","properties":[{"name":"Item","return_type":"Variant","default":true,"parameters":[{"name":"Key","type":"Variant"}]}]},
     {"name":"Broken","kind":"class","source":"typelib","confidence":"generated"},
     {"name":"Cycle","kind":"class","source":"typelib","confidence":"generated","default_member":"Self","default_member_type":"Cycle","properties":[{"name":"Self","return_type":"Cycle","default":true}]},
+    {"name":"EnumChoice","kind":"class","source":"typelib","confidence":"generated","default_member":"Value","default_member_type":"Example.Choice","properties":[{"name":"Value","return_type":"Example.Choice","default":true}]},
+    {"name":"Example.Choice","kind":"enum","source":"typelib","confidence":"generated"},
     {"name":"Excel.Range","kind":"class","source":"xlflow","confidence":"curated"}
   ],
   "global_values": {"Range":"Excel.Range"}

@@ -114,6 +114,14 @@ attributes, annotations, and naming conventions are not semantic evidence.
 Missing, curated-only, or incomplete metadata does not prove that an external
 type has no default member.
 
+A known default-member chain is valid only when each hop accepts the arguments
+available at that hop. The first indexed hop uses the source argument count;
+an implicit first hop and every recursive hop use zero arguments. Required,
+optional, and `ParamArray` metadata define the accepted arity. A named TypeLib
+enum returned by a valid hop is a terminal value rather than evidence that the
+enum itself lacks a default member. An incompatible arity does not establish a
+known `VBA253` chain and does not widen the runtime-error contract by itself.
+
 Uncertain facts never produce `VBA253` or a default-member-owned `VBA249`.
 When `VBA254` is enabled, they may instead produce its explicitly unbound
 advisory classification. Relevant uncertainty includes:

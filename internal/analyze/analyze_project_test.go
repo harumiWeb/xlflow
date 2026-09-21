@@ -159,7 +159,7 @@ func TestAnalyzerAnalyzeProjectReportsDefaultMemberDiagnostics(t *testing.T) {
       "source": "typelib",
       "default_member": "Item",
       "default_member_type": "String",
-      "properties": [{"name": "Item", "return_type": "String", "default": true}]
+      "properties": [{"name": "Item", "return_type": "String", "default": true, "parameters": [{"name": "Index", "type": "Long"}]}]
     }
   ]
 }`)); err != nil {

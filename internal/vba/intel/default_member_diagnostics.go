@@ -101,7 +101,7 @@ func (a Analyzer) DefaultMemberDiagnosticsContext(ctx context.Context, doc Docum
 				continue
 			}
 			initialized := a.defaultMemberReceiverInitialized(doc, target, offset, resolver.typeContext)
-			if diagnostic, ok := a.defaultMemberDiagnostic(receiverType, "indexed", "value", callRange, target, initialized); ok {
+			if diagnostic, ok := a.defaultMemberDiagnostic(receiverType, "indexed", "value", callRange, target, len(call.Arguments), initialized); ok {
 				appendDiagnostic(diagnostic)
 			}
 		}
@@ -134,7 +134,7 @@ func (a Analyzer) DefaultMemberDiagnosticsContext(ctx context.Context, doc Docum
 		if diagnostic, ok := a.defaultMemberDiagnostic(typ, "implicit", "value", Range{
 			Start: Position{Line: startLine, Character: startColumn},
 			End:   Position{Line: endLine, Character: endColumn},
-		}, rhs, initialized); ok {
+		}, rhs, 0, initialized); ok {
 			appendDiagnostic(diagnostic)
 		}
 	}
@@ -172,7 +172,7 @@ func defaultMemberDeclarationLine(line string) bool {
 	return false
 }
 
-func (a Analyzer) defaultMemberDiagnostic(receiverType, kind, expected string, diagnosticRange Range, expression string, receiverInitialized bool) (Diagnostic, bool) {
+func (a Analyzer) defaultMemberDiagnostic(receiverType, kind, expected string, diagnosticRange Range, expression string, argumentCount int, receiverInitialized bool) (Diagnostic, bool) {
 	receiverType = canonicalDiagnosticType(a.DB, receiverType)
 	if lowConfidenceDiagnosticType(receiverType) {
 		if !a.Config.Analyze.DetectUnboundDefaultMemberAccess {
@@ -186,7 +186,7 @@ func (a Analyzer) defaultMemberDiagnostic(receiverType, kind, expected string, d
 		}, true
 	}
 
-	member, depth, resultType, status := a.resolveDefaultMemberValueChain(receiverType)
+	member, depth, resultType, status := a.resolveDefaultMemberValueChain(receiverType, argumentCount)
 	switch status {
 	case defaultMemberKnown:
 		if !a.Config.Analyze.DetectImplicitDefaultMemberAccess {
@@ -270,7 +270,7 @@ const (
 	defaultMemberCycle
 )
 
-func (a Analyzer) resolveDefaultMemberValueChain(typeName string) (member string, depth int, resultType string, status defaultMemberStatus) {
+func (a Analyzer) resolveDefaultMemberValueChain(typeName string, initialArgumentCount int) (member string, depth int, resultType string, status defaultMemberStatus) {
 	seen := make(map[string]struct{})
 	current := canonicalDiagnosticType(a.DB, typeName)
 	for current != "" {
@@ -296,6 +296,13 @@ func (a Analyzer) resolveDefaultMemberValueChain(typeName string) (member string
 			if !ok {
 				return member, depth, current, defaultMemberInvalid
 			}
+			argumentCount := 0
+			if depth == 0 {
+				argumentCount = initialArgumentCount
+			}
+			if !defaultMemberAcceptsArguments(candidate, argumentCount) {
+				return member, depth, current, defaultMemberUnknown
+			}
 			if depth == 0 {
 				member = candidate.Name
 			}
@@ -310,11 +317,24 @@ func (a Analyzer) resolveDefaultMemberValueChain(typeName string) (member string
 		if !ok {
 			return member, depth, current, defaultMemberUnbound
 		}
+		if valueDefaultMemberKind(typ.Kind) {
+			if depth == 0 {
+				return "", 0, current, defaultMemberUnknown
+			}
+			return member, depth, current, defaultMemberKnown
+		}
 		candidate, ok := uniqueDefaultMember(typ)
 		if !ok {
 			if strings.EqualFold(typ.Source, "typelib") && strings.EqualFold(typ.Confidence, "generated") && !a.TypeDBResolutionIncomplete {
 				return member, depth, current, defaultMemberInvalid
 			}
+			return member, depth, current, defaultMemberUnknown
+		}
+		argumentCount := 0
+		if depth == 0 {
+			argumentCount = initialArgumentCount
+		}
+		if !defaultMemberAcceptsArguments(candidate, argumentCount) {
 			return member, depth, current, defaultMemberUnknown
 		}
 		if depth == 0 {
@@ -327,6 +347,21 @@ func (a Analyzer) resolveDefaultMemberValueChain(typeName string) (member string
 		current = canonicalDiagnosticType(a.DB, candidate.ReturnType)
 	}
 	return member, depth, current, defaultMemberUnbound
+}
+
+func defaultMemberAcceptsArguments(member vbadb.MemberInfo, argumentCount int) bool {
+	minimum := 0
+	maximum := len(member.Parameters)
+	for _, parameter := range member.Parameters {
+		if parameter.ParamArray {
+			maximum = -1
+			continue
+		}
+		if !parameter.Optional {
+			minimum++
+		}
+	}
+	return argumentCount >= minimum && (maximum < 0 || argumentCount <= maximum)
 }
 
 func uniqueDefaultMember(typ vbadb.TypeInfo) (vbadb.MemberInfo, bool) {
@@ -352,6 +387,10 @@ func valueDefaultMemberType(typeName string) bool {
 	default:
 		return false
 	}
+}
+
+func valueDefaultMemberKind(kind string) bool {
+	return strings.EqualFold(strings.TrimSpace(kind), "enum")
 }
 
 func implicitValueCandidate(expression string) bool {
