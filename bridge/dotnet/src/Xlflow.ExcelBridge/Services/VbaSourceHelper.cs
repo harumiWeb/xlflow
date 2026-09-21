@@ -229,6 +229,24 @@ internal static partial class VbaSourceHelper
         return string.Join(Environment.NewLine, filtered);
     }
 
+    public static string NormalizeDocumentModuleExport(string text)
+    {
+        var normalized = NormalizeDocumentModuleContent(text);
+        var lines = new List<string>(SplitLines(normalized));
+
+        // Excel's document-module export includes one synthetic empty line
+        // after the source's final line. Keep the source's own terminal line
+        // break, but discard that extra line so pull -> push remains stable.
+        if (lines.Count > 1
+            && string.IsNullOrWhiteSpace(lines[^1])
+            && string.IsNullOrWhiteSpace(lines[^2]))
+        {
+            lines.RemoveAt(lines.Count - 1);
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
     public static string GetCodeModuleText(object codeModule)
     {
         var lineCount = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(codeModule, "CountOfLines"));

@@ -100,6 +100,27 @@ public sealed class VbaSourceHelperTests
     }
 
     [Fact]
+    public void NormalizeDocumentModuleExport_RemovesOneVbeTrailingBlankLine()
+    {
+        var source = string.Join(Environment.NewLine, new[]
+        {
+            "Option Explicit",
+            "",
+            "Private Sub Worksheet_Activate()",
+            "End Sub",
+            "",
+        });
+
+        Assert.Equal(source, VbaSourceHelper.NormalizeDocumentModuleContent(source));
+
+        var exportedWithVbeBlankLine = source + Environment.NewLine;
+        Assert.Equal(exportedWithVbeBlankLine, VbaSourceHelper.NormalizeDocumentModuleContent(exportedWithVbeBlankLine));
+        Assert.Equal(source, VbaSourceHelper.NormalizeDocumentModuleExport(exportedWithVbeBlankLine));
+        Assert.Equal(source, VbaSourceHelper.NormalizeDocumentModuleExport(
+            VbaSourceHelper.NormalizeDocumentModuleExport(exportedWithVbeBlankLine)));
+    }
+
+    [Fact]
     public void FindDuplicateModuleNames_IgnoresUserFormCodeSidecars()
     {
         var files = new List<DiscoveredSourceFile>
