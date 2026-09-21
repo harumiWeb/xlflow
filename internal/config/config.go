@@ -230,6 +230,9 @@ type AnalyzeConfig struct {
 	DetectDeterministicRuntimeErrors          bool     `toml:"detect_deterministic_runtime_errors"`
 	DetectUnsafeSelectOperations              bool     `toml:"detect_unsafe_select_operations"`
 	DetectUnavailableWorksheetFunctionMembers bool     `toml:"detect_unavailable_worksheet_function_members"`
+	DetectImplicitDefaultMemberAccess         bool     `toml:"detect_implicit_default_member_access"`
+	DetectUnboundDefaultMemberAccess          bool     `toml:"detect_unbound_default_member_access"`
+	DetectBangNotation                        bool     `toml:"detect_bang_notation"`
 	DevelopmentHTTPOrigins                    []string `toml:"development_http_origins"`
 }
 
@@ -330,6 +333,9 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA249": {Get: func(c AnalyzeConfig) bool { return c.DetectDeterministicRuntimeErrors }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDeterministicRuntimeErrors = v }},
 	"VBA250": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeSelectOperations }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeSelectOperations = v }},
 	"VBA252": {Get: func(c AnalyzeConfig) bool { return c.DetectUnavailableWorksheetFunctionMembers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnavailableWorksheetFunctionMembers = v }},
+	"VBA253": {Get: func(c AnalyzeConfig) bool { return c.DetectImplicitDefaultMemberAccess }, Set: func(c *AnalyzeConfig, v bool) { c.DetectImplicitDefaultMemberAccess = v }},
+	"VBA254": {Get: func(c AnalyzeConfig) bool { return c.DetectUnboundDefaultMemberAccess }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnboundDefaultMemberAccess = v }},
+	"VBA255": {Get: func(c AnalyzeConfig) bool { return c.DetectBangNotation }, Set: func(c *AnalyzeConfig, v bool) { c.DetectBangNotation = v }},
 }
 
 var (

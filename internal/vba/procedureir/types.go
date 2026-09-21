@@ -292,16 +292,27 @@ const (
 	ExpressionUnknown     ExpressionKind = "unknown"
 )
 
+// MemberOperator records the source operator used by a qualified member
+// expression. It is syntax-local metadata for analyzers and is intentionally
+// excluded from the serialized IR.
+type MemberOperator string
+
+const (
+	MemberOperatorDot  MemberOperator = "."
+	MemberOperatorBang MemberOperator = "!"
+)
+
 type Expression struct {
-	ID          int            `json:"id"`
-	ParentID    int            `json:"parentId,omitempty"`
-	StatementID int            `json:"statementId,omitempty"`
-	Kind        ExpressionKind `json:"kind"`
-	SyntaxKind  string         `json:"syntaxKind"`
-	Text        string         `json:"text"`
-	Range       vbaast.Range   `json:"range"`
-	Children    []int          `json:"children,omitempty"`
-	Recovered   bool           `json:"recovered,omitempty"`
+	ID             int            `json:"id"`
+	ParentID       int            `json:"parentId,omitempty"`
+	StatementID    int            `json:"statementId,omitempty"`
+	Kind           ExpressionKind `json:"kind"`
+	SyntaxKind     string         `json:"syntaxKind"`
+	Text           string         `json:"text"`
+	Range          vbaast.Range   `json:"range"`
+	Children       []int          `json:"children,omitempty"`
+	Recovered      bool           `json:"recovered,omitempty"`
+	MemberOperator MemberOperator `json:"-"`
 }
 
 type AccessMode string
@@ -356,17 +367,18 @@ type NamedArgument struct {
 }
 
 type CallSite struct {
-	ID           int            `json:"id"`
-	File         string         `json:"file"`
-	Module       string         `json:"module"`
-	Caller       ProcedureRef   `json:"caller"`
-	Callee       Callee         `json:"callee"`
-	Arguments    Arguments      `json:"arguments"`
-	Range        vbaast.Range   `json:"range"`
-	StatementID  int            `json:"statementId,omitempty"`
-	ExpressionID int            `json:"expressionId,omitempty"`
-	IsRaiseEvent bool           `json:"isRaiseEvent,omitempty"`
-	Resolution   CallResolution `json:"resolution"`
+	ID             int            `json:"id"`
+	File           string         `json:"file"`
+	Module         string         `json:"module"`
+	Caller         ProcedureRef   `json:"caller"`
+	Callee         Callee         `json:"callee"`
+	Arguments      Arguments      `json:"arguments"`
+	Range          vbaast.Range   `json:"range"`
+	StatementID    int            `json:"statementId,omitempty"`
+	ExpressionID   int            `json:"expressionId,omitempty"`
+	IsRaiseEvent   bool           `json:"isRaiseEvent,omitempty"`
+	Resolution     CallResolution `json:"resolution"`
+	MemberOperator MemberOperator `json:"-"`
 	// NonCallableNames carries lexical declarations that shadow project
 	// procedures (for example `Dim Run` followed by `Run()`). It is an
 	// internal resolver fact and never changes wire/inspect output.

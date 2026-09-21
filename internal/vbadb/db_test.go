@@ -163,6 +163,126 @@ func TestCuratedOverlayPreservesGeneratedTypeLibProvenance(t *testing.T) {
 	}
 }
 
+func TestDefaultMemberMetadataNormalizesFromDefaultMemberMetadata(t *testing.T) {
+	db := New()
+	if err := db.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Test.Dictionary",
+    "methods": [{
+      "name": " Item ",
+      "return_type": " Variant ",
+      "default": true
+    }]
+  }]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	typ, ok := db.ResolveType("Test.Dictionary")
+	if !ok {
+		t.Fatal("Test.Dictionary missing")
+	}
+	if typ.DefaultMember != "Item" || typ.DefaultMemberType != "Variant" {
+		t.Fatalf("normalized default member metadata = %+v", typ)
+	}
+}
+
+func TestDefaultMemberMetadataDoesNotChooseAmbiguousCandidates(t *testing.T) {
+	tests := []struct {
+		name    string
+		members string
+	}{
+		{
+			name: "candidate names",
+			members: `[
+        {"name":"Item","return_type":"Variant","default":true},
+        {"name":"Value","return_type":"Variant","default":true}
+      ]`,
+		},
+		{
+			name: "candidate return types",
+			members: `[
+        {"name":"Item","return_type":"Variant","default":true},
+        {"name":"Item","return_type":"Object","default":true}
+      ]`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := New()
+			body := []byte(`{"types":[{"name":"Test.Ambiguous","methods":` + test.members + `}]}`)
+			if err := db.MergeJSON(body); err != nil {
+				t.Fatal(err)
+			}
+			typ, ok := db.ResolveType("Test.Ambiguous")
+			if !ok {
+				t.Fatal("Test.Ambiguous missing")
+			}
+			if typ.DefaultMember != "" || typ.DefaultMemberType != "" {
+				t.Fatalf("ambiguous default member metadata = %+v", typ)
+			}
+		})
+	}
+}
+
+func TestExplicitDefaultMemberTypeWinsAndIsUsedByFallback(t *testing.T) {
+	db := New()
+	if err := db.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Test.Collection",
+    "element_type": "Object",
+    "default_member": "Item",
+    "default_member_type": "Test.Entry"
+  }]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	typ, ok := db.ResolveType("Test.Collection")
+	if !ok || typ.DefaultMemberType != "Test.Entry" {
+		t.Fatalf("explicit default member type = %+v, %v", typ, ok)
+	}
+	member, ok := db.ResolveMember("Test.Collection", "Item")
+	if !ok || member.ReturnType != "Test.Entry" {
+		t.Fatalf("default member fallback = %+v, %v", member, ok)
+	}
+}
+
+func TestCuratedOverlayKeepsGeneratedDefaultMemberMetadata(t *testing.T) {
+	db := New()
+	if err := db.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Test.Dictionary",
+    "source": "typelib",
+    "confidence": "generated",
+    "default_member": "Item",
+    "default_member_type": "Variant",
+    "methods": [{"name":"Item","return_type":"Variant","default":true}]
+  }]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Test.Dictionary",
+    "source": "xlflow",
+    "confidence": "curated",
+    "summary": "curated",
+    "methods": [{"name":"Count","return_type":"Long"}]
+  }]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	typ, ok := db.ResolveType("Test.Dictionary")
+	if !ok || typ.DefaultMember != "Item" || typ.DefaultMemberType != "Variant" {
+		t.Fatalf("generated default member metadata was lost: %+v, %v", typ, ok)
+	}
+	if typ.Summary != "curated" {
+		t.Fatalf("curated summary was lost: %+v", typ)
+	}
+}
+
 func TestCuratedOverlayPreservesGeneratedMemberSignature(t *testing.T) {
 	db := New()
 	if err := db.MergeJSON([]byte(`{

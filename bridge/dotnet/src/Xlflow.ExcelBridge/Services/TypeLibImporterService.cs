@@ -262,6 +262,11 @@ public sealed class TypeLibImporterService
                     ["source"] = "typelib",
                 };
                 var members = ImportMembers(typeInfo, attr, target.Name);
+                if (members.DefaultMember is not null)
+                {
+                    type["default_member"] = members.DefaultMember.Name;
+                    type["default_member_type"] = members.DefaultMember.ReturnType;
+                }
                 if (members.Properties.Count > 0)
                 {
                     type["properties"] = members.Properties;
@@ -380,6 +385,7 @@ public sealed class TypeLibImporterService
         var properties = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
         var propertiesWithGetter = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var methods = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
+        var defaultMemberCandidates = new List<DefaultMemberCandidate>();
         for (var i = 0; i < attr.cFuncs; i++)
         {
             typeInfo.GetFuncDesc(i, out var funcDescPtr);
@@ -405,6 +411,10 @@ public sealed class TypeLibImporterService
                 if (desc.memid == DispIDValue)
                 {
                     member["default"] = true;
+                    if (desc.invkind is INVOKEKIND.INVOKE_FUNC or INVOKEKIND.INVOKE_PROPERTYGET)
+                    {
+                        defaultMemberCandidates.Add(new DefaultMemberCandidate(memberName, (string)member["return_type"]!));
+                    }
                 }
                 if (desc.invkind is INVOKEKIND.INVOKE_PROPERTYGET or INVOKEKIND.INVOKE_PROPERTYPUT or INVOKEKIND.INVOKE_PROPERTYPUTREF)
                 {
@@ -440,7 +450,40 @@ public sealed class TypeLibImporterService
                 typeInfo.ReleaseFuncDesc(funcDescPtr);
             }
         }
-        return new ImportedMembers(properties.Values.ToList(), methods.Values.ToList());
+        return new ImportedMembers(
+            properties.Values.ToList(),
+            methods.Values.ToList(),
+            ResolveDefaultMember(defaultMemberCandidates));
+    }
+
+    internal static DefaultMemberMetadata? ResolveDefaultMember(IEnumerable<DefaultMemberCandidate> candidates)
+    {
+        var normalized = candidates
+            .Select(candidate => new DefaultMemberCandidate(
+                candidate.Name.Trim(),
+                candidate.ReturnType.Trim()))
+            .Where(candidate => candidate.Name.Length > 0 && candidate.ReturnType.Length > 0)
+            .GroupBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new
+            {
+                Name = group
+                    .Select(candidate => candidate.Name)
+                    .OrderBy(value => value, StringComparer.Ordinal)
+                    .First(),
+                ReturnTypes = group
+                    .Select(candidate => candidate.ReturnType)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(value => value, StringComparer.Ordinal)
+                    .ToArray(),
+            })
+            .OrderBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(candidate => candidate.Name, StringComparer.Ordinal)
+            .ToArray();
+        if (normalized.Length != 1 || normalized[0].ReturnTypes.Length != 1)
+        {
+            return null;
+        }
+        return new DefaultMemberMetadata(normalized[0].Name, normalized[0].ReturnTypes[0]);
     }
 
     private static List<Dictionary<string, object?>> ImportConstants(ITypeInfo typeInfo, TYPEATTR attr, string library, string enumName)
@@ -617,7 +660,14 @@ public sealed class TypeLibImporterService
 
     private sealed record TypeLibRegistration(string LibID, int Major, int Minor, int LCID);
 
-    private sealed record ImportedMembers(List<Dictionary<string, object?>> Properties, List<Dictionary<string, object?>> Methods);
+    internal sealed record DefaultMemberCandidate(string Name, string ReturnType);
+
+    internal sealed record DefaultMemberMetadata(string Name, string ReturnType);
+
+    private sealed record ImportedMembers(
+        List<Dictionary<string, object?>> Properties,
+        List<Dictionary<string, object?>> Methods,
+        DefaultMemberMetadata? DefaultMember);
 }
 
 public sealed record TypeDbImportArguments(string OutputDir, string GeneratorVersion, string Libraries);

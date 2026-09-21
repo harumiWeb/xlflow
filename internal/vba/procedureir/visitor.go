@@ -416,6 +416,7 @@ func (v *singleVisitor) addExpression(procedure *ProcedureIR, node *tree_sitter.
 		ID: id, ParentID: ctx.parentExprID, StatementID: ctx.statementID,
 		Kind: expressionKind(node.Kind()), SyntaxKind: node.Kind(), Text: nodeText(node, v.builder.source),
 		Range: vbaast.NodeRange(node), Recovered: recovered(node),
+		MemberOperator: memberOperatorFromNode(node, v.builder.source),
 	}
 	procedure.Expressions = append(procedure.Expressions, expression)
 	if ctx.parentExprID > 0 {
@@ -463,7 +464,7 @@ func (v *singleVisitor) addCall(procedure *ProcedureIR, node *tree_sitter.Node, 
 		}
 		callee := calleeFromNode(target, v.builder.source)
 		callee.Text = "New " + callee.Text
-		return v.appendCall(procedure, node, callee, ctx)
+		return v.appendCall(procedure, node, callee, ctx, memberOperatorFromNode(target, v.builder.source))
 	default:
 		return ctx.callIndex
 	}
@@ -488,7 +489,7 @@ func (v *singleVisitor) addCall(procedure *ProcedureIR, node *tree_sitter.Node, 
 	if callee.Text == "" {
 		return ctx.callIndex
 	}
-	return v.appendCall(procedure, node, callee, ctx)
+	return v.appendCall(procedure, node, callee, ctx, memberOperatorFromNode(target, v.builder.source))
 }
 
 func (v *singleVisitor) appendRecoveredCall(procedure *ProcedureIR, node *tree_sitter.Node, recovered recoveredCallSyntax, ctx visitContext) int {
@@ -924,7 +925,7 @@ func (v *singleVisitor) addRaiseEvent(procedure *ProcedureIR, node *tree_sitter.
 	})
 }
 
-func (v *singleVisitor) appendCall(procedure *ProcedureIR, node *tree_sitter.Node, callee Callee, ctx visitContext) int {
+func (v *singleVisitor) appendCall(procedure *ProcedureIR, node *tree_sitter.Node, callee Callee, ctx visitContext, operator MemberOperator) int {
 	expressionID := 0
 	if node.Kind() == "call_expression" || node.Kind() == "new_expression" {
 		expressionID = ctx.parentExprID
@@ -935,8 +936,9 @@ func (v *singleVisitor) appendCall(procedure *ProcedureIR, node *tree_sitter.Nod
 		Caller: ProcedureRef{Name: procedure.Symbol.Name, Kind: procedure.Symbol.Kind, QualifiedName: procedure.Symbol.QualifiedName},
 		Callee: callee, Arguments: arguments,
 		Range: vbaast.NodeRange(node), StatementID: ctx.statementID, ExpressionID: expressionID,
-		IsRaiseEvent: node.Kind() == "raise_event_statement",
-		Resolution:   CallResolution{Status: ResolutionNotAttempted},
+		IsRaiseEvent:   node.Kind() == "raise_event_statement",
+		MemberOperator: operator,
+		Resolution:     CallResolution{Status: ResolutionNotAttempted},
 	})
 	procedureIndex := len(v.document.Procedures) - 1
 	v.callFacts[procedureIndex] = append(v.callFacts[procedureIndex], callFact{arguments: facts})

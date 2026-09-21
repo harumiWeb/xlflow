@@ -261,6 +261,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `default_component_folders`
 - `default_entry`
 - `default_member`
+- `default_member_cycle`
+- `default_member_required`
+- `default_member_type`
 - `default_value`
 - `default_wait_policy`
 - `deferred_full`
@@ -275,6 +278,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_application_state_call_effects`
 - `detect_application_state_restore`
 - `detect_array_lifecycle_safety`
+- `detect_bang_notation`
 - `detect_byref_argument_mismatch`
 - `detect_collection_index_origin`
 - `detect_collection_iteration_mutation`
@@ -297,6 +301,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_function_return_path`
 - `detect_hardcoded_secrets`
 - `detect_implicit_approximate_lookups`
+- `detect_implicit_default_member_access`
 - `detect_implicit_variant`
 - `detect_late_bound_dictionary_constants`
 - `detect_leaked_on_error_resume_next_scopes`
@@ -319,6 +324,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
 - `detect_unavailable_worksheet_function_members`
+- `detect_unbound_default_member_access`
 - `detect_unsafe_command_construction`
 - `detect_unsafe_file_path`
 - `detect_unsafe_http_configuration`
@@ -382,6 +388,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `effect_summary_max_propagated_facts_per_procedure`
 - `effect_summary_total_propagated_facts`
 - `effect_summary_worklist_evaluations`
+- `element_type`
 - `else_clause`
 - `else_fragment`
 - `else_if`
@@ -458,6 +465,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `expanded_formula`
 - `expectation_mismatch`
 - `expected_closer`
+- `expected_context`
 - `expected_error`
 - `explicit_call_requires_parentheses`
 - `export_image_args_invalid`

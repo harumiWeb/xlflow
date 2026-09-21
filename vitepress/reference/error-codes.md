@@ -60,7 +60,13 @@ Common examples:
 - `wsl_path_translation_failed`
 - `windows_xlflow_execution_failed`
 
-Lint codes include `VB001` through `VB015`, `VB018` through `VB023`, and `VB026` through `VB066`. `VB066` is a non-blocking style warning for VBE-accepted `Property Get` terminators; the other compile-dialog prevention range remains `VB065` and below. Analyzer codes include `VBA101` through `VBA106` and runtime-risk findings `VBA201` through `VBA252`; `VBA248` is a maintainability finding, `VBA250` is an active-state runtime-safety finding, `VBA251` is a reliability warning for implicit approximate lookup mode, and `VBA252` is a correctness warning for unavailable typed `WorksheetFunction` members.
+Lint codes include `VB001` through `VB015`, `VB018` through `VB023`, and `VB026` through `VB066`. `VB066` is a non-blocking style warning for VBE-accepted `Property Get` terminators; the other compile-dialog prevention range remains `VB065` and below. Analyzer codes include `VBA101` through `VBA106` and runtime-risk findings `VBA201` through `VBA255`; `VBA248` is a maintainability finding, `VBA250` is an active-state runtime-safety finding, `VBA251` is a reliability warning for implicit approximate lookup mode, `VBA252` is a correctness warning for unavailable typed `WorksheetFunction` members, and `VBA253` through `VBA255` cover implicit, unbound, and bang default-member access.
+
+`VBA249` may use the runtime-error kinds `default_member_required` and
+`default_member_cycle` when complete type and default-member facts prove a
+deterministic failure. These findings are
+non-blocking. `VBA202` remains the owner of proven error-91 object-use-before-
+`Set`/`Nothing` failures.
 
 ## Recovery map
 

@@ -13,6 +13,18 @@ All notable changes to xlflow will be documented in this file.
   available. Stale databases retain positive type resolution but fail open for
   completeness-dependent absence diagnostics; callers without build metadata
   retain the existing compatibility behavior.
+- Added opt-in high-precision `VBA253` warnings for known implicit,
+  indexed, and recursive VBA default-member access in batch, realtime, and LSP
+  analysis. The rule is configurable with
+  `detect_implicit_default_member_access`.
+- Added opt-in `VBA254` and `VBA255` information diagnostics for unresolved or
+  late-bound default-member access and bang notation. They use
+  `detect_unbound_default_member_access` and `detect_bang_notation`, and expose
+  additive `default_member` JSON context without changing existing finding
+  fields.
+- Extended `VBA249` deterministic runtime-error diagnostics to cover complete
+  default-member failures and cycles, while retaining `VBA202` ownership of
+  proven object-use-before-`Set`/`Nothing` cases.
 
 ## v0.32.1
 

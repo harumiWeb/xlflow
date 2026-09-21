@@ -257,6 +257,9 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA250` | warning               | A `Worksheet.Select` or `Range.Select` operation lacks a proven active workbook or worksheet precondition.                                                           |
 | `VBA251` | warning               | A typed Excel `Match`, `VLookup`, or `HLookup` call omits its match-mode argument and relies on approximate matching.                                                |
 | `VBA252` | warning               | A typed `Excel.WorksheetFunction` member is absent from the complete generated TypeLib member set.                                                                   |
+| `VBA253` | warning               | Known implicit, indexed, or recursive default-member access is used where the member can be made explicit.                                                           |
+| `VBA254` | information / warning | Default-member access is unbound, late-bound, or incomplete and should be reviewed when the project opts in.                                                         |
+| `VBA255` | information / warning | Bang notation (`receiver!name`) relies on stringly typed/default-member semantics.                                                                                   |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -283,6 +286,13 @@ Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-block
 `VBA210` checks every reachable path to a `Function` or `Property Get` normal exit, including `Exit Function`, `Exit Property`, error-handler paths that return normally, and shared cleanup labels. A dominating return assignment satisfies all paths; VBA's default-initialized return value does not. Known non-returning `Err.Raise` statements are treated as exceptional exits rather than normal fallthrough. Object returns require `Set`, known value returns require ordinary assignment or `Let`, and the diagnostic reason identifies a representative uncovered exit when practical. The rule is opt-in through `detect_function_return_path` and remains batch-only.
 
 Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, `VBA244` through `VBA247`, and `VBA249` through `VBA252` are enabled by default. `VBA230` through `VBA239`, `VBA241`, and `VBA245` through `VBA248` and `VBA250` through `VBA252` are warning-level, non-blocking, and inline-suppressible. `VBA249` is an error-level, non-blocking, procedure-local rule available in realtime diagnostics; it reports only runtime failures proven by shared constant, type, control-flow, and dataflow facts and remains silent for unknown values, Variants, and late-bound cases. `VBA250` is a warning-level, non-blocking, procedure-local rule available in realtime diagnostics; it reports a `Worksheet.Select` or `Range.Select` call only when the required active workbook or worksheet cannot be proven on every reachable path. `VBA251` is a warning-level, non-blocking, high-precision, procedure-local rule available in realtime diagnostics; it reports typed Excel lookup calls that omit their match-mode argument and remains silent for explicit, unresolved, late-bound, and user-defined calls. `VBA252` is a warning-level, non-blocking, high-precision, procedure-local rule available in realtime diagnostics; it reports typed `Excel.WorksheetFunction` member calls absent from the complete generated TypeLib member set and remains silent when the type database is incomplete or the receiver is unresolved, late-bound, or user-defined. `VBA241` is non-blocking and inline-suppressible; it may use `information` for a single non-nested loop with loop-invariant dimensions and `warning` for loop-variable growth or nested loops. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, `VBA241`, and `VBA245` through `VBA252` are procedure-local and available in realtime diagnostics. `VBA244` is project-wide, batch-only, non-blocking, and inline-suppressible; it reports one deterministic representative witness per cyclic strongly connected component (SCC), retaining the closed path in JSON rather than enumerating every simple cycle. `VBA222` is a batch-only warning that checks public function/property return types, all public parameters, and custom event parameters against project visibility and the available TypeLib database. Standard modules and `VB_Exposed=True` classes/interfaces are public API surfaces; private or unexposed project types, ambiguous names, and unresolved external types are reported conservatively. Host-required event handlers are excluded. Suppress an intentional case with `xlflow:disable-line VBA222` or `xlflow:disable-next-line VBA222`, or add `VBA222` to `[analyze].disabled_rules`. `VBA248` is an opt-in warning-level, non-blocking, procedure-local rule available in realtime diagnostics; declaration-level Boolean-control metrics remain part of `xlflow metrics` rather than a declaration diagnostic.
+`VBA253`, `VBA254`, and `VBA255` are opt-in typed default-member rules through
+`detect_implicit_default_member_access`,
+`detect_unbound_default_member_access`, and `detect_bang_notation`.
+Complete default-member runtime failures are reported by `VBA249`, while
+`VBA202` retains ownership of proven error-91 object-use-before-`Set`/`Nothing`
+cases.
+
 `VBA223` is a default-enabled, non-blocking, file-local, realtime warning. It uses structural credential patterns, ignores obvious placeholders where possible, and redacts source snippets with `[REDACTED]`.
 
 `VBA224` is a conservative, procedure-local warning: it reports source, sink, and propagation path context, treats unsupported transformations as unknown, does not propagate taint across procedures, and does not block preflight. Literals and explicit constant/allowlist branches are accepted; `EncodeURL` is accepted only for HTTP URLs, while generic `Trim`, `CStr`, `Replace`, `IsNumeric`, and `Len` do not remove taint. Use `xlflow:disable-line VBA224`, `xlflow:disable-next-line VBA224`, or `[analyze].disabled_rules = ["VBA224"]` for an intentional flow. `VBA206` remains a configurable warning for literal temporaries, parenthesized, property/member, array-element, indirect, and otherwise uncertain ByRef forms. Literal arguments do not produce blocking `VBA228` errors because the VBE evaluates them as temporary values. `VBA228` owns only explicit statically incompatible bare value/object/array variables and `Long`/`LongPtr`/`LongLong` mismatches, including named arguments; it is always enabled, cannot be suppressed by `VBA206` settings or inline comments, and blocks source preflight. Array-valued Function return slots retain their array shape, local values shadow same-named procedures, and callee-module-qualified project types match the callee's unqualified type declaration; a different module qualification remains incompatible. `Object`, `Variant`, `Any`, unresolved, and late-bound types remain uncertain and do not produce `VBA228`. The legacy `detect_byref_argument_mismatch` key remains supported for `VBA206`. Rules `VBA207`, `VBA210`, and `VBA213` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. `VBA207` uses `warning` when absence is definite and `information` when existence is unknown. `VBA213` applies only when a known `Scripting.Dictionary` is iterated directly and the key variable is used as an object or value; ordinary key iteration remains valid. `VBA214` is warning-only and allows one compatibility probe followed by `On Error GoTo 0` (with optional `Err.Number` inspection and `Err.Clear`); scopes containing wider control flow, calls, or un-restored exits are reported without severity escalation or preflight blocking. `VBA215` requires explicit `Find` `LookIn`, `LookAt`, `SearchOrder`, and `MatchByte`, or `Replace` `LookAt`, `SearchOrder`, `MatchCase`, and `MatchByte`, because Excel can reuse saved Find/Replace dialog or macro settings when they are omitted. `VBA216` blocks preflight only when xlflow can prove that explicit range roots refer to different worksheets. `VBA217` guides last-row calculations that rely on the active sheet, `End(xlDown)`, unadjusted `UsedRange.Rows.Count`, or `CurrentRegion`; it does not block preflight. `VBA218` accepts `On Error GoTo <label>` for exception-raising APIs, or only a narrow `On Error Resume Next` probe that checks `Err` and immediately restores `On Error GoTo 0`; an unbounded `Resume Next` scope is not sufficient. `Variant/Error` APIs require `IsError` before consumption. `VBA219` tracks only captured local `Workbooks.Open` results and VBA `Open ... As #handle` calls. It accepts direct local aliases, error-handler cleanup labels, pre-Open file-number aliases, and ownership transfer only at an object-returning Function's normal exit; it intentionally does not assume that parameters, helper calls, or other COM resources are owned. Diagnostics `VBA101` through `VBA106` are always enabled.
@@ -449,6 +459,31 @@ intentional exception.
 [analyze]
 detect_unavailable_worksheet_function_members = false
 ```
+
+`VBA253` is disabled by default and reports known implicit, indexed, or
+recursive default-member access. It is a high-precision, warning-level,
+non-blocking, inline-suppressible procedure-local rule available in batch and
+realtime/LSP analysis. Its additive `default_member` JSON context includes the
+access `kind`, `binding`, `expected_context`, resolved `member`, and chain
+`depth`. Enable it with `detect_implicit_default_member_access = true`; use
+`[analyze].disabled_rules = ["VBA253"]`, or an inline suppression for an
+intentional implicit access.
+
+`VBA254` is disabled by default. Enable it with
+`detect_unbound_default_member_access` to report unbound, late-bound, or
+incomplete default-member access at `information` (or configured `warning`)
+severity. `VBA255` is also disabled by default; enable `detect_bang_notation`
+to report `receiver!name` bang notation at `information` (or configured
+`warning`) severity. Both are non-blocking, inline-suppressible,
+procedure-local rules available in batch and realtime/LSP analysis. Ambiguous,
+stale, curated-only, `Object`, `Variant`, and dynamic type information never
+supports `VBA253` or `VBA249`; opt-in `VBA254` may report that uncertainty as
+advisory evidence.
+
+Complete default-member failures are owned by `VBA249` with runtime-error
+kinds `default_member_required` and `default_member_cycle`; `VBA202` retains
+ownership of proven object-use-before-
+`Set`/`Nothing` (error 91) cases.
 
 Projects may configure exact development origins:
 

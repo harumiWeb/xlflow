@@ -1200,6 +1200,33 @@ func calleeFromNode(node *tree_sitter.Node, source []byte) Callee {
 	return callee
 }
 
+// memberOperatorFromNode preserves the separator of a qualified member
+// expression. The grammar exposes receiver and member nodes, but not the
+// punctuation between them; reading only that source gap keeps a bang member
+// distinct from the bang suffix used by a typed identifier (bang_identifier).
+func memberOperatorFromNode(node *tree_sitter.Node, source []byte) MemberOperator {
+	if node == nil || node.Kind() != "qualified_member_expression" {
+		return ""
+	}
+	receiver := childByFieldNameAny(node, "receiver", "object")
+	member := childByFieldNameAny(node, "member", "property")
+	if receiver == nil || member == nil {
+		return ""
+	}
+	start, end := int(receiver.EndByte()), int(member.StartByte())
+	if start < 0 || end <= start || end > len(source) {
+		return ""
+	}
+	separator := strings.TrimSpace(string(source[start:end]))
+	if strings.HasSuffix(separator, string(MemberOperatorBang)) {
+		return MemberOperatorBang
+	}
+	if strings.HasSuffix(separator, string(MemberOperatorDot)) {
+		return MemberOperatorDot
+	}
+	return ""
+}
+
 func argumentsFromCallNode(callNode, target *tree_sitter.Node, source []byte) Arguments {
 	if callNode.Kind() == "call_expression" {
 		return argumentsFromCallExpression(callNode, source)

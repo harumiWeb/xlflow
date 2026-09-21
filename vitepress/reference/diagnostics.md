@@ -128,6 +128,9 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA250`](#vba250) | analyze | warning     | procedure-local | yes     | Unsafe Select operation                            |
 | [`VBA251`](#vba251) | analyze | warning     | procedure-local | yes     | Implicit approximate lookup mode                   |
 | [`VBA252`](#vba252) | analyze | warning     | procedure-local | yes     | Unavailable WorksheetFunction member               |
+| [`VBA253`](#vba253) | analyze | warning     | procedure-local | no      | Implicit default-member access                     |
+| [`VBA254`](#vba254) | analyze | information | procedure-local | no      | Unbound default-member access                      |
+| [`VBA255`](#vba255) | analyze | information | procedure-local | no      | Bang notation                                      |
 
 ## VB001
 
@@ -2768,3 +2771,69 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                              |
 | Real-time editor diagnostic | yes                                             |
 | Fix available               | no                                              |
+
+## VBA253
+
+**Implicit default-member access.** An expression implicitly invokes a statically resolvable default member instead of using an explicit member access.
+
+| Property                    | Value                                   |
+| --------------------------- | --------------------------------------- |
+| Family                      | `analyze`                               |
+| Category                    | `reliability`                           |
+| Evidence class              | `inference`                             |
+| Compile-equivalent          | no                                      |
+| Default severity            | `warning`                               |
+| Supported severities        | `warning`                               |
+| Surfaces                    | `analyze`, `lsp`                        |
+| Scope                       | `procedure-local`                       |
+| Precision                   | `high`                                  |
+| Enabled by default          | no                                      |
+| Configuration               | `detect_implicit_default_member_access` |
+| Inline suppression          | yes                                     |
+| Blocks source preflight     | no                                      |
+| Real-time editor diagnostic | yes                                     |
+| Fix available               | no                                      |
+
+## VBA254
+
+**Unbound default-member access.** A default-member access depends on an unresolved or late-bound type and cannot be statically resolved.
+
+| Property                    | Value                                  |
+| --------------------------- | -------------------------------------- |
+| Family                      | `analyze`                              |
+| Category                    | `reliability`                          |
+| Evidence class              | `inference`                            |
+| Compile-equivalent          | no                                     |
+| Default severity            | `information`                          |
+| Supported severities        | `information`, `warning`               |
+| Surfaces                    | `analyze`, `lsp`                       |
+| Scope                       | `procedure-local`                      |
+| Precision                   | `medium`                               |
+| Enabled by default          | no                                     |
+| Configuration               | `detect_unbound_default_member_access` |
+| Inline suppression          | yes                                    |
+| Blocks source preflight     | no                                     |
+| Real-time editor diagnostic | yes                                    |
+| Fix available               | no                                     |
+
+## VBA255
+
+**Bang notation.** Bang notation performs stringly typed member access through a default member and may obscure the resolved member.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `analyze`                |
+| Category                    | `maintainability`        |
+| Evidence class              | `maintainability`        |
+| Compile-equivalent          | no                       |
+| Default severity            | `information`            |
+| Supported severities        | `information`, `warning` |
+| Surfaces                    | `analyze`, `lsp`         |
+| Scope                       | `procedure-local`        |
+| Precision                   | `high`                   |
+| Enabled by default          | no                       |
+| Configuration               | `detect_bang_notation`   |
+| Inline suppression          | yes                      |
+| Blocks source preflight     | no                       |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |

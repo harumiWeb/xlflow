@@ -223,6 +223,7 @@ func (db *DB) MergeData(data fileData) {
 }
 
 func (db *DB) addType(typ TypeInfo) {
+	typ = normalizeTypeInfo(typ)
 	if typ.Name == "" {
 		return
 	}
@@ -245,6 +246,82 @@ func (db *DB) addType(typ TypeInfo) {
 	db.Types[key] = typ
 }
 
+type defaultMemberCandidate struct {
+	name       string
+	returnType string
+}
+
+func normalizeTypeInfo(typ TypeInfo) TypeInfo {
+	typ.Name = strings.TrimSpace(typ.Name)
+	typ.DefaultMember = strings.TrimSpace(typ.DefaultMember)
+	typ.DefaultMemberType = strings.TrimSpace(typ.DefaultMemberType)
+	if typ.DefaultMember == "" {
+		if name, returnType, ok := uniqueDefaultMemberCandidate(typ, true, ""); ok {
+			typ.DefaultMember = name
+			typ.DefaultMemberType = returnType
+		}
+	} else if typ.DefaultMemberType == "" {
+		if _, returnType, ok := uniqueDefaultMemberCandidate(typ, false, typ.DefaultMember); ok {
+			typ.DefaultMemberType = returnType
+		}
+	}
+	return typ
+}
+
+func uniqueDefaultMemberCandidate(typ TypeInfo, requireDefault bool, memberName string) (string, string, bool) {
+	var candidates []defaultMemberCandidate
+	add := func(member MemberInfo) {
+		if requireDefault && !member.Default {
+			return
+		}
+		name := strings.TrimSpace(member.Name)
+		returnType := strings.TrimSpace(member.ReturnType)
+		if name == "" || returnType == "" || (memberName != "" && !strings.EqualFold(name, memberName)) {
+			return
+		}
+		candidates = append(candidates, defaultMemberCandidate{name: name, returnType: returnType})
+	}
+	for _, member := range typ.Properties {
+		add(member)
+	}
+	for _, member := range typ.Methods {
+		add(member)
+	}
+	if len(candidates) == 0 {
+		return "", "", false
+	}
+
+	names := map[string][]string{}
+	returnTypes := map[string][]string{}
+	for _, candidate := range candidates {
+		nameKey := fold(candidate.name)
+		if !containsFold(names[nameKey], candidate.name) {
+			names[nameKey] = append(names[nameKey], candidate.name)
+		}
+		returnTypeKey := fold(candidate.returnType)
+		if !containsFold(returnTypes[returnTypeKey], candidate.returnType) {
+			returnTypes[returnTypeKey] = append(returnTypes[returnTypeKey], candidate.returnType)
+		}
+	}
+	if len(names) != 1 || len(returnTypes) != 1 {
+		return "", "", false
+	}
+	nameVariants := names[fold(candidates[0].name)]
+	returnTypeVariants := returnTypes[fold(candidates[0].returnType)]
+	sort.Strings(nameVariants)
+	sort.Strings(returnTypeVariants)
+	return nameVariants[0], returnTypeVariants[0], true
+}
+
+func containsFold(values []string, want string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, want) {
+			return true
+		}
+	}
+	return false
+}
+
 func mergeType(base, overlay TypeInfo) TypeInfo {
 	out := base
 	preserveGenerated := preserveGeneratedProvenance(base, overlay)
@@ -265,6 +342,9 @@ func mergeType(base, overlay TypeInfo) TypeInfo {
 	}
 	if overlay.DefaultMember != "" {
 		out.DefaultMember = overlay.DefaultMember
+		if overlay.DefaultMemberType == "" && !strings.EqualFold(strings.TrimSpace(base.DefaultMember), strings.TrimSpace(overlay.DefaultMember)) {
+			out.DefaultMemberType = ""
+		}
 	}
 	if overlay.DefaultMemberType != "" {
 		out.DefaultMemberType = overlay.DefaultMemberType
@@ -283,7 +363,7 @@ func mergeType(base, overlay TypeInfo) TypeInfo {
 	out.Properties = mergeMembers(out.Properties, overlay.Properties, preserveGenerated)
 	out.Methods = mergeMembers(out.Methods, overlay.Methods, preserveGenerated)
 	out.Events = mergeMembers(out.Events, overlay.Events, preserveGenerated)
-	return out
+	return normalizeTypeInfo(out)
 }
 
 // preserveGeneratedProvenance keeps a generated TypeLib type authoritative
@@ -452,7 +532,7 @@ func (db *DB) ResolveMember(receiverType, member string) (MemberInfo, bool) {
 		}
 	}
 	if typ.DefaultMember != "" && strings.EqualFold(member, typ.DefaultMember) {
-		return MemberInfo{Name: typ.DefaultMember, ReturnType: typ.ElementType, Default: true}, true
+		return MemberInfo{Name: typ.DefaultMember, ReturnType: defaultMemberReturnType(typ), Default: true}, true
 	}
 	return MemberInfo{}, false
 }
@@ -485,10 +565,17 @@ func (db *DB) Members(receiverType string) []MemberInfo {
 		add(m)
 	}
 	if typ.DefaultMember != "" {
-		add(MemberInfo{Name: typ.DefaultMember, ReturnType: typ.ElementType, Default: true})
+		add(MemberInfo{Name: typ.DefaultMember, ReturnType: defaultMemberReturnType(typ), Default: true})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+func defaultMemberReturnType(typ TypeInfo) string {
+	if typ.DefaultMemberType != "" {
+		return typ.DefaultMemberType
+	}
+	return typ.ElementType
 }
 
 func (db *DB) IsAssignable(targetType, sourceType string) (assignable bool, known bool) {
