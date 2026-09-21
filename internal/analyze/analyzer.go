@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +31,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/effects"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+	"github.com/harumiWeb/xlflow/internal/vba/sourceproject"
 	"github.com/harumiWeb/xlflow/internal/vba/sourceprojectfs"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
@@ -137,6 +140,9 @@ type Analyzer struct {
 	// documents that are not present on disk yet.
 	workspaceDocuments       []intel.Document
 	workspaceSymbolsSnapshot intel.WorkspaceSymbolsSnapshotFunc
+	// sourceProject is set only by AnalyzeProject. It marks parsed files as
+	// authoritative caller input for filesystem-independent symbol indexing.
+	sourceProject bool
 	// procedureAnalysisStartHook is test-only synchronization for cancellation
 	// coverage. Production callers leave it nil.
 	procedureAnalysisStartHook func()
@@ -573,7 +579,11 @@ type parsedFile struct {
 	Lines      []string
 	Module     string
 	ModuleKind string
-	Source     []byte
+	IsTest     bool
+	// sourceProject marks files supplied by AnalyzeProject. These files are
+	// authoritative even when their logical paths do not exist on disk.
+	sourceProject bool
+	Source        []byte
 	// UserFormControlNames is populated for form analysis when the matching
 	// designer artifact provides a complete control set. VBA220 uses it to
 	// distinguish a real control event procedure from a helper whose name merely
@@ -779,6 +789,66 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	if err != nil {
 		return Result{}, err
 	}
+	return a.analyzeProjectContext(ctx, queryContext, project)
+}
+
+// AnalyzeProject analyzes the caller-supplied source project without reading
+// or classifying any of its paths. The project is the complete authoritative
+// set of modules for this analysis revision.
+func (a Analyzer) AnalyzeProject(ctx context.Context, project sourceproject.SourceProject) (result Result, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, queryContext := withSemanticQueryContext(ctx)
+	finishTotal := analysisstats.Measure(ctx, "analyze_total")
+	defer func() { finishTotal(len(result.Findings), err) }()
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	project, err = normalizeSourceProject(project)
+	if err != nil {
+		return Result{}, err
+	}
+	// PathFilter is a filesystem-adapter concern. In-memory callers have
+	// already selected the authoritative module set they want analyzed.
+	a.PathFilter = nil
+	a.sourceProject = true
+	return a.analyzeProjectContext(ctx, queryContext, project)
+}
+
+func normalizeSourceProject(project sourceproject.SourceProject) (sourceproject.SourceProject, error) {
+	files := append([]sourceproject.SourceFile(nil), project.Files...)
+	seen := make(map[string]int, len(files))
+	for index := range files {
+		file := &files[index]
+		if strings.TrimSpace(file.Path) == "" {
+			return sourceproject.SourceProject{}, fmt.Errorf("source project file %d: path is empty", index)
+		}
+		switch file.ModuleKind {
+		case sourceproject.ModuleKindStandard, sourceproject.ModuleKindClass, sourceproject.ModuleKindForm, sourceproject.ModuleKindDocument:
+		default:
+			return sourceproject.SourceProject{}, fmt.Errorf("source project file %d (%s): unsupported VBA module kind %q", index, file.Path, file.ModuleKind)
+		}
+		if file.IsTest && file.ModuleKind != sourceproject.ModuleKindStandard {
+			return sourceproject.SourceProject{}, fmt.Errorf("source project file %d (%s): IsTest is valid only for standard modules", index, file.Path)
+		}
+		identity := sourceProjectPathIdentity(file.Path)
+		if previous, ok := seen[identity]; ok {
+			return sourceproject.SourceProject{}, fmt.Errorf("source project files %d and %d have duplicate path identity %q", previous, index, identity)
+		}
+		seen[identity] = index
+	}
+	slices.SortStableFunc(files, func(left, right sourceproject.SourceFile) int {
+		return strings.Compare(sourceProjectPathIdentity(left.Path), sourceProjectPathIdentity(right.Path))
+	})
+	return sourceproject.SourceProject{Files: files}, nil
+}
+
+func sourceProjectPathIdentity(path string) string {
+	return strings.ToLower(pathpkg.Clean(strings.ReplaceAll(path, "\\", "/")))
+}
+
+func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semanticquery.Context, project sourceproject.SourceProject) (result Result, err error) {
 	physicalRootDir := a.RootDir
 	if physicalRootDir == "" {
 		physicalRootDir = "."
@@ -864,8 +934,10 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		parsedFile := parsedFile{
 			Path:                      file,
 			Lines:                     lines,
-			Module:                    strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)),
+			Module:                    moduleNameFromPath(file),
 			ModuleKind:                moduleKind,
+			IsTest:                    sourceFile.IsTest,
+			sourceProject:             a.sourceProject,
 			Source:                    source,
 			IR:                        ir,
 			CFG:                       controlFlow,
@@ -1130,12 +1202,26 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	}
 	finishStage = analysisstats.Measure(ctx, "suppression_and_finalize")
 	sortFindings(findings)
-	directives, directiveWarnings, err := suppression.DirectivesForFiles(a.RootDir, files)
-	if err != nil {
-		finishStage(0, err)
-		return Result{}, err
+	var directives []suppression.Directive
+	if a.sourceProject {
+		for _, sourceFile := range project.Files {
+			if err := ctx.Err(); err != nil {
+				finishStage(0, err)
+				return Result{}, err
+			}
+			fileDirectives, fileWarnings := suppression.DirectivesForSource(a.RootDir, sourceFile.Path, string(sourceFile.Source))
+			directives = append(directives, fileDirectives...)
+			warnings = append(warnings, fileWarnings...)
+		}
+	} else {
+		var directiveWarnings []map[string]any
+		directives, directiveWarnings, err = suppression.DirectivesForFiles(a.RootDir, files)
+		if err != nil {
+			finishStage(0, err)
+			return Result{}, err
+		}
+		warnings = append(warnings, directiveWarnings...)
 	}
-	warnings = append(warnings, directiveWarnings...)
 	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
 	warnings = append(warnings, suppressionWarnings...)
 	finishStage(len(findings), nil)
@@ -1526,16 +1612,24 @@ func projectByRefSymbolIndex(ctx context.Context, rootDir string, cfg config.Con
 			if err := ctx.Err(); err != nil {
 				return nil, len(projectSymbols), err
 			}
-			classificationPath, err := filepath.Abs(file.Path)
-			if err != nil {
-				return nil, len(projectSymbols), err
-			}
-			_, included, err := symbols.SourceFileForPath(rootDir, cfg, classificationPath)
-			if err != nil {
-				return nil, len(projectSymbols), err
-			}
-			if !included {
+			// Test helpers remain standard VBA modules, but they are not
+			// production ByRef candidates. The filesystem loader marks these
+			// files explicitly, and AnalyzeProject carries the same metadata.
+			if file.IsTest {
 				continue
+			}
+			if !file.sourceProject {
+				classificationPath, err := filepath.Abs(file.Path)
+				if err != nil {
+					return nil, len(projectSymbols), err
+				}
+				_, included, err := symbols.SourceFileForPath(rootDir, cfg, classificationPath)
+				if err != nil {
+					return nil, len(projectSymbols), err
+				}
+				if !included {
+					continue
+				}
 			}
 			key, err := projectByRefSourcePathKey(file.Path)
 			if err != nil {
@@ -3881,7 +3975,7 @@ func sourceProceduresFromProcedureSlice(document *procedureir.DocumentIR, proced
 	procedures := make([]sourceProcedure, 0, len(procedureValues))
 	module := strings.TrimSpace(document.ModuleName)
 	if module == "" {
-		module = strings.TrimSuffix(filepath.Base(document.Path), filepath.Ext(document.Path))
+		module = moduleNameFromPath(document.Path)
 	}
 	for procedureIndex := range procedureValues {
 		procedure := &procedureValues[procedureIndex]
@@ -8450,6 +8544,11 @@ func normalizedSourceLines(source string) []string {
 	source = strings.ReplaceAll(source, "\r\n", "\n")
 	source = strings.ReplaceAll(source, "\r", "\n")
 	return strings.Split(source, "\n")
+}
+
+func moduleNameFromPath(filePath string) string {
+	logicalPath := strings.ReplaceAll(filePath, "\\", "/")
+	return strings.TrimSuffix(pathpkg.Base(logicalPath), pathpkg.Ext(logicalPath))
 }
 
 func physicalSourceLineCount(lines []string) int {

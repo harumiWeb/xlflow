@@ -126,6 +126,17 @@ End Function
 	}
 }
 
+func TestBuildSourceDerivesModuleNameFromLogicalPathSeparators(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: `virtual\Main.bas`}, []byte("Public Sub Run()\nEnd Sub\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.ModuleName != "Main" {
+		t.Fatalf("module name = %q, want Main", doc.ModuleName)
+	}
+}
+
 func TestProcedureSignatureRetainsArrayDefaultsAndRecoveryFacts(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Signature(ByRef dynamic() As Long, ByVal bounded(1 To 2, 0 To 3) As String, Optional label As String = "x", ParamArray rest() As Variant)
