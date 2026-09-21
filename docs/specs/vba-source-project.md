@@ -141,7 +141,21 @@ built-in database and treats it as incomplete. This path never consults
 `XLFLOW_TYPE_DB_DIR`, the user's home directory, or generated TypeLib files.
 `RunResultContext` keeps the native filesystem adapter behavior: without an
 injected capability it loads the generated TypeLib database and overlays the
-embedded database, preserving its warnings and completeness state.
+embedded database, preserving its warnings and completeness state. A
+filesystem-backed caller that has build metadata should set
+`Analyzer.TypeDBGeneratorVersion`; the loader then compares the manifest's
+`generator_version` with that value. A mismatch keeps generated members
+available for positive type resolution, but marks the capability incomplete
+and emits the existing TypeDB load warning so absence-dependent diagnostics
+fail open. An empty value is intentional compatibility behavior for callers
+that do not have build metadata and keeps the version comparison disabled.
+
+Standalone realtime callers with build metadata use
+`SourceRealtimeFindingsWithGeneratorVersion` (or its cancellable variant) so
+the same compatibility check applies. The existing realtime entry points keep
+the version-agnostic behavior. Explicit `Analyzer.TypeDB` injection remains
+authoritative in both filesystem and in-memory analysis; its completeness is
+not replaced or merged by an implicit runtime load.
 
 It treats the supplied files as the complete project and never performs source
 discovery or reads `SourceFile.Path`. The input is validated before parsing:

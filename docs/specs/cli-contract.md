@@ -1638,6 +1638,12 @@ non-blocking. It reports a member call resolved against a complete generated
 the normal typed member resolver rather than a hand-written worksheet-function
 allowlist; missing, partial, or ambiguous TypeLib data, unresolved/late-bound
 receivers, user-defined shadowing, and `Object`/`Variant` values remain silent.
+For filesystem-backed CLI batch analysis, a generated manifest is complete for
+this purpose only when its `generator_version` matches the running xlflow build
+version when that metadata is available. A mismatch emits the existing TypeDB
+load warning and leaves positive type resolution available while making member
+absence unknown. Direct callers without build metadata retain the
+version-agnostic compatibility behavior.
 Use `detect_unavailable_worksheet_function_members`,
 `[analyze].disabled_rules = ["VBA252"]`, or an inline suppression for an
 intentional exception.

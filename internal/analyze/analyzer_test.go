@@ -6219,6 +6219,107 @@ End Sub
 	}
 }
 
+func TestVBA252UsesGeneratorVersionForBatchAndStandaloneRealtime(t *testing.T) {
+	const expectedVersion = "current"
+	source := []byte(`Option Explicit
+Public Sub Run()
+    Dim value As Double
+    Dim result As Variant
+    result = WorksheetFunction.Abs(value)
+    result = WorksheetFunction.Sum(value)
+End Sub
+`)
+
+	for _, test := range []struct {
+		name            string
+		manifestVersion string
+		wantVBA252      int
+		wantWarning     bool
+	}{
+		{name: "matching", manifestVersion: expectedVersion, wantVBA252: 1},
+		{name: "stale", manifestVersion: "old", wantWarning: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			typeDBDir := t.TempDir()
+			generated := `{
+  "types": [{
+    "name": "Excel.WorksheetFunction",
+    "library": "Excel",
+    "kind": "interface",
+    "confidence": "generated",
+    "source": "typelib",
+    "methods": [{ "name": "Sum", "return_type": "Double" }]
+  }]
+}`
+			if err := os.WriteFile(filepath.Join(typeDBDir, "excel.generated.json"), []byte(generated), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := typedb.WriteManifest(typeDBDir, typedb.Manifest{
+				GeneratorVersion: test.manifestVersion,
+				Libraries:        []typedb.ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := typedb.LoadForRuntimeWithGeneratorVersion(typeDBDir, expectedVersion)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := loaded.DB.ResolveMember("Excel.WorksheetFunction", "Sum"); !ok {
+				t.Fatalf("generated positive member resolution was lost: %+v", loaded)
+			}
+			if loaded.Complete != !test.wantWarning {
+				t.Fatalf("TypeDB completeness = %v, want %v", loaded.Complete, !test.wantWarning)
+			}
+			warningFound := false
+			for _, warning := range loaded.Warnings {
+				if strings.Contains(warning, "generator version") && strings.Contains(warning, "stale") {
+					warningFound = true
+					break
+				}
+			}
+			if warningFound != test.wantWarning {
+				t.Fatalf("loader stale warning = %v, warnings = %+v", warningFound, loaded.Warnings)
+			}
+
+			t.Setenv(typedb.EnvDir, typeDBDir)
+			path := filepath.Join(dir, "Main.bas")
+			writeModule(t, dir, "Main.bas", string(source))
+			cfg := config.Default()
+			batchResult, err := (Analyzer{
+				RootDir:                dir,
+				Config:                 cfg,
+				TypeDBGeneratorVersion: expectedVersion,
+			}).RunResultContext(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			realtime, err := SourceRealtimeFindingsWithGeneratorVersion(dir, path, cfg, source, expectedVersion)
+			if err != nil {
+				t.Fatal(err)
+			}
+			batchVBA252 := findingsByCode(batchResult.Findings, "VBA252")
+			realtimeVBA252 := findingsByCode(realtime, "VBA252")
+			if len(batchVBA252) != test.wantVBA252 || len(realtimeVBA252) != test.wantVBA252 {
+				t.Fatalf("VBA252 findings = batch=%+v realtime=%+v, want %d each", batchVBA252, realtimeVBA252, test.wantVBA252)
+			}
+			if len(batchVBA252) == 1 && (batchVBA252[0].Line != realtimeVBA252[0].Line || batchVBA252[0].Column != realtimeVBA252[0].Column || batchVBA252[0].EndColumn != realtimeVBA252[0].EndColumn) {
+				t.Fatalf("matching batch/realtime ranges differ: batch=%+v realtime=%+v", batchVBA252, realtimeVBA252)
+			}
+			batchWarningFound := false
+			for _, warning := range batchResult.Warnings {
+				if warning["code"] == "type_db_load_warning" && strings.Contains(fmt.Sprint(warning["message"]), "generator version") {
+					batchWarningFound = true
+					break
+				}
+			}
+			if batchWarningFound != test.wantWarning {
+				t.Fatalf("batch TypeDB warning = %v, warnings = %+v", batchWarningFound, batchResult.Warnings)
+			}
+		})
+	}
+}
+
 func TestSourceRealtimeVBA251UsesProjectWorkspaceSymbols(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

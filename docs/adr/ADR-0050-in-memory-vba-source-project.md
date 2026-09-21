@@ -52,6 +52,15 @@ instead load and overlay the generated TypeLib database. The common semantic
 implementation is shared in both cases, while incomplete views fail open for
 diagnostics that would otherwise infer external type absence.
 
+The filesystem-backed adapter treats generated metadata as complete only when a
+caller that has build metadata supplies the expected TypeLib generator version
+and the manifest matches it. A mismatch does not discard generated members:
+positive type resolution remains available, but completeness-dependent absence
+diagnostics fail open and the existing TypeDB load warning is retained. Callers
+without build metadata keep the version-agnostic loader contract. Standalone
+realtime analysis exposes the same opt-in expected-version path; explicit
+`TypeDatabase` injection remains authoritative and bypasses runtime loading.
+
 ## Consequences
 
 Positive consequences:
@@ -88,6 +97,9 @@ Negative consequences:
 - Existing analysis input construction: `internal/analyze/analyzer.go`.
 - Model contract and tests: `docs/specs/vba-source-project.md` and
   `internal/vba/sourceproject`.
+- Generator-version compatibility follow-up: issue #813,
+  `internal/typedb/typedb.go`, `internal/analyze/analyzer.go`, and
+  `internal/analyze/analyzer_test.go`.
 
 ## Supersedes
 
@@ -101,4 +113,4 @@ Negative consequences:
 
 - `docs/adr/ADR-0014-reusable-vba-lsp-server.md`
 - `docs/adr/ADR-0021-procedure-analysis-ir.md`
-- xlflow issues #641, #642, #643, #644, and #645
+- xlflow issues #641, #642, #643, #644, #645, and #813

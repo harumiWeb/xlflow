@@ -117,6 +117,10 @@ type Analyzer struct {
 	// controls fail-open diagnostics whose negative conclusion requires a
 	// complete generated TypeLib view.
 	TypeDB *TypeDatabase
+	// TypeDBGeneratorVersion is the expected generator version for the
+	// filesystem-backed runtime TypeDB. An empty value preserves the
+	// version-agnostic behavior for callers without build metadata.
+	TypeDBGeneratorVersion string
 	// arrayStrategy is intentionally private and test/benchmark-only.  The
 	// zero value selects the production auto compatibility decision; tests may
 	// force the indexed or legacy oracle without changing public configuration.
@@ -1001,7 +1005,7 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 			analysis.typeDBResolutionIncomplete = true
 		default:
 			var loaded typedb.LoadResult
-			loaded, loadErr = typedb.LoadForRuntime("")
+			loaded, loadErr = typedb.LoadForRuntimeWithGeneratorVersion("", a.TypeDBGeneratorVersion)
 			if loadErr == nil {
 				analysis.typeDB = loaded.DB
 				analysis.typeDBResolutionIncomplete = !loaded.Complete
@@ -1976,6 +1980,36 @@ func SourceRealtimeFindings(rootDir, path string, cfg config.Config, source []by
 	return SourceRealtimeFindingsContext(context.Background(), rootDir, path, cfg, source)
 }
 
+// SourceRealtimeFindingsWithGeneratorVersion runs standalone real-time source
+// analysis with an expected generator version for the filesystem-backed
+// runtime TypeDB. Callers without build metadata should use
+// SourceRealtimeFindings, which preserves version-agnostic loading.
+func SourceRealtimeFindingsWithGeneratorVersion(rootDir, path string, cfg config.Config, source []byte, generatorVersion string) ([]Finding, error) {
+	return SourceRealtimeFindingsWithGeneratorVersionContext(context.Background(), rootDir, path, cfg, source, generatorVersion)
+}
+
+// SourceRealtimeFindingsWithGeneratorVersionContext is the cancellable variant
+// of SourceRealtimeFindingsWithGeneratorVersion.
+func SourceRealtimeFindingsWithGeneratorVersionContext(ctx context.Context, rootDir, path string, cfg config.Config, source []byte, generatorVersion string) ([]Finding, error) {
+	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
+		return nil, nil
+	}
+	doc, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		return nil, err
+	}
+	defer doc.Close()
+	ir, err := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{RootDir: rootDir}, doc)
+	if err != nil {
+		return nil, err
+	}
+	controlFlow, err := vbacfg.BuildDocumentContext(ctx, ir)
+	if err != nil {
+		return nil, err
+	}
+	return SourceRealtimeFindingsParsedIRCFGWithGeneratorVersionContext(ctx, rootDir, cfg, doc, ir, controlFlow, generatorVersion)
+}
+
 // SourceRealtimeFindingsContext is the cancellable variant of
 // SourceRealtimeFindings.
 func SourceRealtimeFindingsContext(ctx context.Context, rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
@@ -2036,6 +2070,19 @@ func SourceRealtimeFindingsParsedIRCFGContext(ctx context.Context, rootDir strin
 	return SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx, rootDir, cfg, doc, ir, controlFlow, nil)
 }
 
+// SourceRealtimeFindingsParsedIRCFGWithGeneratorVersion runs standalone
+// real-time analysis with caller-supplied IR/CFG and an expected generator
+// version for the filesystem-backed runtime TypeDB.
+func SourceRealtimeFindingsParsedIRCFGWithGeneratorVersion(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, generatorVersion string) ([]Finding, error) {
+	return SourceRealtimeFindingsParsedIRCFGWithGeneratorVersionContext(context.Background(), rootDir, cfg, doc, ir, controlFlow, generatorVersion)
+}
+
+// SourceRealtimeFindingsParsedIRCFGWithGeneratorVersionContext is the
+// cancellable variant of SourceRealtimeFindingsParsedIRCFGWithGeneratorVersion.
+func SourceRealtimeFindingsParsedIRCFGWithGeneratorVersionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, generatorVersion string) ([]Finding, error) {
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, nil, effects.ProjectSummary{}, nil, nil, nil, nil, nil, nil, nil, 0, generatorVersion)
+}
+
 // SourceRealtimeFindingsParsedIRCFGWithTypeDB runs real-time source analysis
 // with an optional caller-owned type database capability. LSP callers pass
 // their loaded database and completeness state; standalone callers load the
@@ -2062,7 +2109,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 // the snapshot-aware form used by LSP and other project callers that already
 // own a value-bearing constant environment.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *TypeDatabase, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, nil, nil, nil, nil, 0)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, nil, nil, nil, nil, 0, "")
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext is
@@ -2070,7 +2117,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 // and reads project-dependent call/access/event facts through resolution
 // views, avoiding a full resolved DocumentIR clone per file.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *TypeDatabase, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, nil, nil, nil, 0)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, nil, nil, nil, 0, "")
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext
@@ -2078,7 +2125,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(c
 // immutable document index instead of reparsing the complete buffer for every
 // expression they resolve.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *TypeDatabase, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, &sourceDocument, nil, nil, procedureWorkerLimit)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, nil, &sourceDocument, nil, nil, procedureWorkerLimit, "")
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverContext
@@ -2094,7 +2141,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentR
 // carries the coherent workspace documents needed for interprocedural array
 // return summaries. The legacy resolver entry point remains document-local.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *TypeDatabase, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, projectDocuments, &sourceDocument, nil, nil, procedureWorkerLimit)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, projectDocuments, &sourceDocument, nil, nil, procedureWorkerLimit, "")
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContextWithWorkspaceSymbols
@@ -2103,7 +2150,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentR
 // declarations from sibling project documents instead of falling back to the
 // saved filesystem view.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContextWithWorkspaceSymbols(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *TypeDatabase, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument intel.Document, workspaceDocuments []intel.Document, workspaceSymbolsSnapshot intel.WorkspaceSymbolsSnapshotFunc, procedureWorkerLimit int) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, projectDocuments, &sourceDocument, workspaceDocuments, workspaceSymbolsSnapshot, procedureWorkerLimit)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, projectResolver, projectDocuments, &sourceDocument, workspaceDocuments, workspaceSymbolsSnapshot, procedureWorkerLimit, "")
 }
 
 func realtimeProjectContextFiles(current parsedFile, documents []intel.ProjectAnalysisDocument, project effects.ProjectSummary, cfg config.AnalyzeConfig, projectResolver procedureir.Resolver) []parsedFile {
@@ -2356,7 +2403,7 @@ func realtimeProjectPathKey(path string) string {
 	return strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
 }
 
-func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *TypeDatabase, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument *intel.Document, workspaceDocuments []intel.Document, workspaceSymbolsSnapshot intel.WorkspaceSymbolsSnapshotFunc, procedureWorkerLimit int) ([]Finding, error) {
+func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *TypeDatabase, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, projectResolver procedureir.Resolver, projectDocuments []intel.ProjectAnalysisDocument, sourceDocument *intel.Document, workspaceDocuments []intel.Document, workspaceSymbolsSnapshot intel.WorkspaceSymbolsSnapshotFunc, procedureWorkerLimit int, expectedGeneratorVersion string) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -2374,7 +2421,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		typeDBResolutionIncomplete = !typeDB.Complete
 	}
 	if (cfg.Analyze.DetectRangeFindNothingCheck || cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectImplicitApproximateLookups || cfg.Analyze.DetectUnavailableWorksheetFunctionMembers || cfg.Analyze.DetectUnsafeSelectOperations || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction || cfg.Analyze.DetectUnsafeFilePath) && db == nil {
-		loaded, err := typedb.LoadForRuntime("")
+		loaded, err := typedb.LoadForRuntimeWithGeneratorVersion("", expectedGeneratorVersion)
 		if err != nil {
 			return nil, err
 		}

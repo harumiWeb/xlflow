@@ -53,7 +53,10 @@ End Sub
 `),
 	}}}
 
-	result, err := (Analyzer{Config: config.Default()}).AnalyzeProject(t.Context(), project)
+	result, err := (Analyzer{
+		Config:                 config.Default(),
+		TypeDBGeneratorVersion: "stale-build",
+	}).AnalyzeProject(t.Context(), project)
 	if err != nil {
 		t.Fatalf("AnalyzeProject: %v", err)
 	}
@@ -95,7 +98,11 @@ func TestAnalyzerAnalyzeProjectUsesSuppliedTypeDBAndCompleteness(t *testing.T) {
 	}
 
 	complete := &TypeDatabase{DB: newDatabase(), Complete: true}
-	result, err := (Analyzer{Config: config.Default(), TypeDB: complete}).AnalyzeProject(t.Context(), project("CustomFunction"))
+	result, err := (Analyzer{
+		Config:                 config.Default(),
+		TypeDB:                 complete,
+		TypeDBGeneratorVersion: "stale-build",
+	}).AnalyzeProject(t.Context(), project("CustomFunction"))
 	if err != nil {
 		t.Fatalf("AnalyzeProject with supplied TypeDB: %v", err)
 	}
@@ -104,7 +111,11 @@ func TestAnalyzerAnalyzeProjectUsesSuppliedTypeDBAndCompleteness(t *testing.T) {
 	}
 
 	incomplete := &TypeDatabase{DB: newDatabase(), Complete: false}
-	result, err = (Analyzer{Config: config.Default(), TypeDB: incomplete}).AnalyzeProject(t.Context(), project("MissingFunction"))
+	result, err = (Analyzer{
+		Config:                 config.Default(),
+		TypeDB:                 incomplete,
+		TypeDBGeneratorVersion: "stale-build",
+	}).AnalyzeProject(t.Context(), project("MissingFunction"))
 	if err != nil {
 		t.Fatalf("AnalyzeProject with incomplete supplied TypeDB: %v", err)
 	}
@@ -112,7 +123,11 @@ func TestAnalyzerAnalyzeProjectUsesSuppliedTypeDBAndCompleteness(t *testing.T) {
 		t.Fatalf("incomplete supplied TypeDB must fail open for absent members: %+v", got)
 	}
 
-	result, err = (Analyzer{Config: config.Default(), TypeDB: complete}).AnalyzeProject(t.Context(), project("MissingFunction"))
+	result, err = (Analyzer{
+		Config:                 config.Default(),
+		TypeDB:                 complete,
+		TypeDBGeneratorVersion: "stale-build",
+	}).AnalyzeProject(t.Context(), project("MissingFunction"))
 	if err != nil {
 		t.Fatalf("AnalyzeProject with complete supplied TypeDB: %v", err)
 	}
