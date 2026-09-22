@@ -28,7 +28,7 @@ func (a Analyzer) deadStoreFindings(file parsedFile, proc sourceProcedure) []Fin
 		finding := a.simpleFinding(file, proc, line, "VBA256", "warning",
 			"Assignment to "+candidate.Name+" is never read before the value is overwritten or the procedure exits.",
 			"The assigned scalar value is not observed on any completed control-flow path.",
-			"Remove the assignment or use the value before assigning it again.")
+			"Use the value before assigning it again, or remove the unused write while preserving any required right-hand-side effects.")
 		finding.Column = candidate.Range.StartColumn + 1
 		finding.EndLine = candidate.Range.EndLine
 		finding.EndColumn = candidate.Range.EndColumn + 1
@@ -66,6 +66,14 @@ func deadStoreCandidates(proc sourceProcedure) []deadStoreCandidate {
 	// for the whole procedure rather than report a potentially false dead store.
 	for _, source := range proc.Graph.UnknownFlowSources {
 		if reachable[source] {
+			return nil
+		}
+	}
+	for _, edge := range proc.Graph.Edges {
+		if !reachable[edge.From] || edge.Class != vbacfg.EdgeNormal {
+			continue
+		}
+		if edge.Uncertain || edge.Kind == vbacfg.EdgeUnknown {
 			return nil
 		}
 	}

@@ -159,6 +159,19 @@ func TestDeadStoreCandidatesFailsOpenForUnknownAndUncertainFlow(t *testing.T) {
 	if got := deadStoreCandidates(uncertain); len(got) != 0 {
 		t.Fatalf("uncertain-flow candidates = %+v, want none", got)
 	}
+
+	downstreamUncertain := deadStoreTestProcedure(
+		declaration, []procedureir.Statement{statements[0], deadStoreCall(2, 3)}, access,
+		[]vbacfg.Edge{
+			{From: 1, To: 10, Class: vbacfg.EdgeNormal},
+			{From: 10, To: 20, Class: vbacfg.EdgeNormal},
+			{From: 20, To: 90, Class: vbacfg.EdgeNormal, Uncertain: true},
+		},
+		nil,
+	)
+	if got := deadStoreCandidates(downstreamUncertain); len(got) != 0 {
+		t.Fatalf("downstream uncertain-flow candidates = %+v, want none", got)
+	}
 }
 
 func TestDeadStoreCandidatesTreatsReadWriteAsObservation(t *testing.T) {
