@@ -13,6 +13,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
+	"github.com/harumiWeb/xlflow/internal/vbafmt"
 )
 
 func TestInitScaffold(t *testing.T) {
@@ -871,6 +872,53 @@ func TestNewScaffoldLintsWithoutIssuesOrWarnings(t *testing.T) {
 	}
 	if len(result.Warnings) != 0 {
 		t.Fatalf("new scaffold should have no lint warnings: %+v", result.Warnings)
+	}
+}
+
+func TestNewScaffoldFormattedSourcesLintAndAnalyzeCleanly(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	// Issue #829: a misparse dropped the outer Next of a For loop nested
+	// directly inside a multiline If branch, so fmt under-indented the loop
+	// closers and lint then reported a false VB014 at line 1.
+	fmtResult, err := vbafmt.Run(vbafmt.FmtOptions{
+		Root:  dir,
+		Write: true,
+		Cfg:   config.Default(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmtResult.Changed == 0 {
+		t.Fatal("fmt should rewrite the scaffold's two-space indentation")
+	}
+	lintResult, err := lint.Linter{
+		RootDir: dir,
+		Config:  config.Default(),
+	}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lintResult.Issues) != 0 {
+		t.Fatalf("formatted scaffold should have no lint issues: %+v", lintResult.Issues)
+	}
+	if len(lintResult.Warnings) != 0 {
+		t.Fatalf("formatted scaffold should have no lint warnings: %+v", lintResult.Warnings)
+	}
+	analyzeResult, err := (analyze.Analyzer{
+		RootDir: dir,
+		Config:  config.Default(),
+	}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(analyzeResult.Findings) != 0 {
+		t.Fatalf("formatted scaffold should analyze cleanly (diagnostic code/file details): %+v", analyzeResult.Findings)
+	}
+	if hasWarningCode(analyzeResult.Warnings, "unused_inline_suppression") {
+		t.Fatalf("formatted scaffold should not emit unused suppression warnings: %+v", analyzeResult.Warnings)
 	}
 }
 
