@@ -95,6 +95,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdErrorWIP.cls","surface":"lint","code":"VB007","severity":"warning","line":63,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorksheet.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorksheet.cls","surface":"lint","code":"VB058","severity":"error","line":34,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorksheet.cls","surface":"lint","code":"VB019","severity":"warning","line":43,"column":3}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorksheet.cls","surface":"lint","code":"VB005","severity":"warning","line":43,"column":7}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorksheet.cls","surface":"lint","code":"VB019","severity":"warning","line":50,"column":3}

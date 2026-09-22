@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.32.2
+
+- Fixed `xlflow fmt` producing wrong `Next` indentation for `For`/`For Each`
+  loops nested directly inside multiline `If` branches, which made a following
+  `xlflow push` fail preflight with a false `VB014` at line 1. The bundled
+  tree-sitter-vba parser (v0.14.2) now assigns each loop's own `Next`
+  terminator to the correct `for_statement`, so formatted source keeps its
+  valid nesting and `lint`/`push` no longer report the spurious parse error.
 - Defined the filesystem-free `AnalyzeProject` diagnostic boundary. In-memory
   analysis now uses only caller-supplied source and virtual-project metadata,
   ignores host UserForm/FRX/workspace artifacts, and emits structured
