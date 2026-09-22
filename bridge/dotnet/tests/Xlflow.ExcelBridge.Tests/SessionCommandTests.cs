@@ -359,6 +359,114 @@ public sealed class SessionCommandTests
         Assert.True(json.RootElement.GetProperty("workbook").GetProperty("unsafe_changes_not_discarded").GetBoolean());
     }
 
+    [Fact]
+    public void WriteSessionMetadataIssuesSessionId()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "xlflow-session-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "session.json");
+
+            ExcelBridgeSupport.WriteSessionMetadata(path, new object(), @"C:\work\Book.xlsm");
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(path);
+
+            Assert.NotNull(metadata);
+            Assert.False(string.IsNullOrWhiteSpace(metadata!.SessionId));
+            Assert.True(Guid.TryParse(metadata.SessionId, out _));
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void WriteSessionMetadataPreservesExplicitSessionId()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "xlflow-session-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "session.json");
+
+            ExcelBridgeSupport.WriteSessionMetadata(path, new object(), @"C:\work\Book.xlsm");
+            var first = ExcelBridgeSupport.ReadSessionMetadata(path)!;
+
+            // A continuing session (session save) rewrites metadata with the
+            // existing id so push-state bindings survive.
+            ExcelBridgeSupport.WriteSessionMetadata(path, new object(), @"C:\work\Book.xlsm", "managed", first.SessionId);
+            var second = ExcelBridgeSupport.ReadSessionMetadata(path)!;
+            Assert.Equal(first.SessionId, second.SessionId);
+
+            // A session-establishing write without an id issues a fresh one.
+            ExcelBridgeSupport.WriteSessionMetadata(path, new object(), @"C:\work\Book.xlsm");
+            var third = ExcelBridgeSupport.ReadSessionMetadata(path)!;
+            Assert.NotEqual(first.SessionId, third.SessionId);
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MarkSessionPoisonedPreservesSessionId()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "xlflow-session-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "session.json");
+            var workbook = Path.Combine(dir, "Book.xlsm");
+            File.WriteAllText(path, $$"""{"hwnd":123,"pid":456,"workbook_path":"{{workbook.Replace("\\", "\\\\", StringComparison.Ordinal)}}","session_id":"session-xyz"}""");
+
+            ExcelBridgeSupport.MarkSessionPoisoned(path, workbook, "RPC failed", "0x800706BE", "push");
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(path);
+
+            Assert.NotNull(metadata);
+            Assert.True(metadata!.Poisoned);
+            Assert.Equal("session-xyz", metadata.SessionId);
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReadSessionMetadataDefaultsMissingSessionId()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "xlflow-session-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "session.json");
+            File.WriteAllText(path, """{"hwnd":123,"pid":456,"workbook_path":"C:\\work\\Book.xlsm"}""");
+
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(path);
+
+            Assert.NotNull(metadata);
+            Assert.Equal("", metadata!.SessionId);
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
     private sealed class FakeSessionService(Func<BridgeRequest, SessionCommandArguments, BridgeResponse> handler) : ISessionService
     {
         public BridgeResponse Execute(BridgeRequest request, SessionCommandArguments args, CancellationToken cancellationToken) => handler(request, args);

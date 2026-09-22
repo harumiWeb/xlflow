@@ -100,21 +100,29 @@ public sealed class ExcelPushService : IPushService
                     Source: "xlflow"));
             }
 
-            if (args.ChangedOnly && VbaSourceHelper.FingerprintMatchesState(fingerprint, args.StatePath))
+            if (args.ChangedOnly && TrySkipUnchangedImport(fingerprint, args, workbookPath, out var skipDecision))
             {
                 var noopSourceUserFormNames = GetSourceUserFormNames(sourceFiles);
                 var noopWarnings = new List<Dictionary<string, string>>();
                 var noopHints = new List<Dictionary<string, string>>();
                 AddUserFormDiscoveryMessages(noopWarnings, noopHints, noopSourceUserFormNames);
 
-                var noopExtensions = new Dictionary<string, object?>
+                var sessionTarget = skipDecision.SessionTarget;
+                var skipSessionMode = skipDecision.SessionMode;
+                Dictionary<string, object?> sessionPayload;
+                if (sessionTarget)
                 {
-                    ["target"] = new Dictionary<string, object?>
-                    {
-                        ["kind"] = "file",
-                        ["path"] = workbookPath,
-                    },
-                    ["session"] = new Dictionary<string, object?>
+                    // The live session workbook is the verified target. Dirty
+                    // and save state are unknown without attaching, so report
+                    // null rather than claiming a clean workbook.
+                    sessionPayload = ExcelBridgeSupport.BuildSessionPayload(workbookPath, true, skipSessionMode, null, false);
+                    sessionPayload["save_required"] = null;
+                    sessionPayload["live_newer_than_disk"] = null;
+                    sessionPayload["source_of_truth"] = skipDecision.ViaSavedFile ? "saved_workbook" : "live_workbook";
+                }
+                else
+                {
+                    sessionPayload = new Dictionary<string, object?>
                     {
                         ["active"] = false,
                         ["workbook_path"] = workbookPath,
@@ -123,17 +131,27 @@ public sealed class ExcelPushService : IPushService
                         ["live_newer_than_disk"] = false,
                         ["mode"] = "none",
                         ["source_of_truth"] = "saved_workbook",
+                    };
+                }
+
+                var noopExtensions = new Dictionary<string, object?>
+                {
+                    ["target"] = new Dictionary<string, object?>
+                    {
+                        ["kind"] = sessionTarget ? "live_session" : "file",
+                        ["path"] = workbookPath,
                     },
+                    ["session"] = sessionPayload,
                     ["workbook"] = new Dictionary<string, object?>
                     {
                         ["path"] = workbookPath,
-                        ["session"] = false,
-                        ["session_mode"] = "none",
-                        ["session_requested"] = false,
-                        ["auto_session"] = false,
+                        ["session"] = sessionTarget,
+                        ["session_mode"] = skipSessionMode,
+                        ["session_requested"] = sessionTarget && args.UseSession,
+                        ["auto_session"] = sessionTarget && !args.UseSession,
                         ["saved"] = false,
-                        ["dirty"] = false,
-                        ["needs_save"] = false,
+                        ["dirty"] = sessionTarget ? null : false,
+                        ["needs_save"] = sessionTarget ? null : false,
                     },
                     ["source"] = new Dictionary<string, object?>
                     {
@@ -233,7 +251,10 @@ public sealed class ExcelPushService : IPushService
                 saved = true;
             }
 
-            VbaSourceHelper.WriteFingerprintState(fingerprint, args.StatePath);
+            VbaSourceHelper.WritePushState(
+                fingerprint,
+                BuildAppliedTo(args, sessionAttached, saved, workbookPath),
+                args.StatePath);
 
             var needsSave = sessionAttached && !saved;
             var logs = new List<string>
@@ -445,6 +466,186 @@ public sealed class ExcelPushService : IPushService
             var attachment = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, visible);
             return (attachment, false);
         }
+    }
+
+    // Result of the changed-only coverage check: whether the recorded push
+    // state still covers the workbook this push would target.
+    internal sealed record PushSkipDecision(bool Allowed, bool SessionTarget, string SessionMode, bool ViaSavedFile)
+    {
+        public static readonly PushSkipDecision Deny = new(false, false, "none", false);
+    }
+
+    private static bool TrySkipUnchangedImport(
+        SourceFingerprint fingerprint,
+        PushCommandArguments args,
+        string workbookPath,
+        out PushSkipDecision decision)
+    {
+        decision = PushSkipDecision.Deny;
+        if (!VbaSourceHelper.TryReadPushState(args.StatePath, out var state)
+            || state?.AppliedTo is null
+            || !VbaSourceHelper.FingerprintEquals(fingerprint, state.Fingerprint))
+        {
+            return false;
+        }
+
+        var metadata = ExcelBridgeSupport.ReadSessionMetadata(args.MetadataPath);
+        var matchingSession = metadata is not null
+            && !string.IsNullOrWhiteSpace(metadata.WorkbookPath)
+            && ExcelBridgeSupport.PathsEqual(metadata.WorkbookPath, workbookPath)
+            ? metadata
+            : null;
+        // Resolve the workbook through the same order attach uses, so a live
+        // pid alone cannot justify a skip when the session's workbook was
+        // closed, and a foreign Excel holding the workbook is detected even
+        // while the recorded process is still running.
+        var workbookTarget = matchingSession is not null && !matchingSession.Poisoned
+            ? ExcelBridgeSupport.ResolveSessionWorkbookTarget(matchingSession, workbookPath)
+            : ExcelBridgeSupport.SessionWorkbookTarget.None;
+        var sessionAlive = workbookTarget == ExcelBridgeSupport.SessionWorkbookTarget.RecordedSession;
+        var otherLiveWorkbook = workbookTarget == ExcelBridgeSupport.SessionWorkbookTarget.OtherLiveWorkbook;
+        var savedFileMatches = SavedFileStampMatches(state.AppliedTo.SavedFile, workbookPath);
+
+        decision = EvaluatePushStateCoverage(
+            state.AppliedTo,
+            matchingSession,
+            sessionAlive,
+            otherLiveWorkbook,
+            args.UseSession,
+            savedFileMatches);
+        return decision.Allowed;
+    }
+
+    // Pure decision over already-resolved inputs so the coverage matrix can be
+    // unit-tested without Excel.
+    internal static PushSkipDecision EvaluatePushStateCoverage(
+        PushAppliedTo appliedTo,
+        SessionMetadata? matchingSession,
+        bool sessionWorkbookOpen,
+        bool otherLiveWorkbook,
+        bool useSession,
+        bool savedFileMatches)
+    {
+        if (matchingSession?.Poisoned == true)
+        {
+            // Never skip over a poisoned session; the attach path must surface
+            // the poisoned-session error instead.
+            return PushSkipDecision.Deny;
+        }
+
+        if (matchingSession is not null && sessionWorkbookOpen)
+        {
+            var viaSavedFile = false;
+            if (!SessionIdentityMatches(appliedTo, matchingSession))
+            {
+                // A different session can still skip when it opened a disk file
+                // that already carried the recorded source state.
+                if (!savedFileMatches)
+                {
+                    return PushSkipDecision.Deny;
+                }
+                viaSavedFile = true;
+            }
+            var owner = matchingSession.Owner;
+            var mode = string.Equals(owner, "external", StringComparison.OrdinalIgnoreCase)
+                ? "external"
+                : useSession ? "explicit" : "auto";
+            return new PushSkipDecision(true, true, mode, viaSavedFile);
+        }
+
+        if (otherLiveWorkbook)
+        {
+            return PushSkipDecision.Deny;
+        }
+
+        if (useSession)
+        {
+            // No live session: let the attach path produce session_required.
+            return PushSkipDecision.Deny;
+        }
+
+        return savedFileMatches ? new PushSkipDecision(true, false, "none", true) : PushSkipDecision.Deny;
+    }
+
+    private static bool SessionIdentityMatches(PushAppliedTo appliedTo, SessionMetadata metadata)
+    {
+        if (!string.IsNullOrWhiteSpace(appliedTo.SessionId) && !string.IsNullOrWhiteSpace(metadata.SessionId))
+        {
+            return string.Equals(appliedTo.SessionId, metadata.SessionId, StringComparison.Ordinal);
+        }
+        return appliedTo.SessionPid > 0
+            && appliedTo.SessionPid == metadata.Pid
+            && appliedTo.SessionHwnd != 0
+            && appliedTo.SessionHwnd == metadata.Hwnd;
+    }
+
+    internal static bool SavedFileStampMatches(PushSavedFile? savedFile, string workbookPath)
+    {
+        if (savedFile is null
+            || string.IsNullOrWhiteSpace(savedFile.Path)
+            || !ExcelBridgeSupport.PathsEqual(savedFile.Path, workbookPath))
+        {
+            return false;
+        }
+        try
+        {
+            var info = new FileInfo(workbookPath);
+            return info.Exists
+                && info.LastWriteTimeUtc.Ticks == savedFile.LastWriteTimeUtcTicks
+                && info.Length == savedFile.Length;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static PushAppliedTo BuildAppliedTo(
+        PushCommandArguments args,
+        bool sessionAttached,
+        bool saved,
+        string workbookPath)
+    {
+        var appliedTo = new PushAppliedTo();
+        if (sessionAttached)
+        {
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(args.MetadataPath);
+            if (metadata is not null
+                && (string.IsNullOrWhiteSpace(metadata.WorkbookPath)
+                    || ExcelBridgeSupport.PathsEqual(metadata.WorkbookPath, workbookPath)))
+            {
+                appliedTo = appliedTo with
+                {
+                    SessionId = metadata.SessionId,
+                    SessionPid = metadata.Pid,
+                    SessionHwnd = metadata.Hwnd,
+                };
+            }
+        }
+        if (saved)
+        {
+            try
+            {
+                var info = new FileInfo(workbookPath);
+                if (info.Exists)
+                {
+                    appliedTo = appliedTo with
+                    {
+                        SavedFile = new PushSavedFile
+                        {
+                            Path = ExcelBridgeSupport.NormalizePath(workbookPath),
+                            LastWriteTimeUtcTicks = info.LastWriteTimeUtc.Ticks,
+                            Length = info.Length,
+                        },
+                    };
+                }
+            }
+            catch
+            {
+                // Best-effort: a missing stamp only disables the skip.
+            }
+        }
+        return appliedTo;
     }
 
     private static int ReplaceNonDocumentComponents(
