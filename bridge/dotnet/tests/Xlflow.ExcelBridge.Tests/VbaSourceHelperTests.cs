@@ -300,6 +300,81 @@ public sealed class VbaSourceHelperTests
             }
         }
     }
+
+    [Fact]
+    public void PushState_RoundTripsFingerprintAndAppliedTo()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-pushstate-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var modules = Path.Combine(root, "modules");
+            Directory.CreateDirectory(modules);
+            File.WriteAllText(Path.Combine(modules, "Main.bas"), "Attribute VB_Name = \"Main\"\r\n");
+
+            var fingerprint = VbaSourceHelper.ComputeFingerprint("Book.xlsm", modules, "", "", "", "");
+            var appliedTo = new PushAppliedTo
+            {
+                SessionId = "session-a",
+                SessionPid = 123,
+                SessionHwnd = 456,
+                SavedFile = new PushSavedFile
+                {
+                    Path = "C:\\work\\Book.xlsm",
+                    LastWriteTimeUtcTicks = 637000000000000000,
+                    Length = 12345,
+                },
+            };
+            var statePath = Path.Combine(root, "state", "push.json");
+            VbaSourceHelper.WritePushState(fingerprint, appliedTo, statePath);
+
+            Assert.True(VbaSourceHelper.TryReadPushState(statePath, out var state));
+            Assert.NotNull(state);
+            Assert.True(VbaSourceHelper.FingerprintEquals(fingerprint, state!.Fingerprint));
+            Assert.NotNull(state.AppliedTo);
+            Assert.Equal("session-a", state.AppliedTo!.SessionId);
+            Assert.Equal(123, state.AppliedTo.SessionPid);
+            Assert.Equal(456, state.AppliedTo.SessionHwnd);
+            Assert.NotNull(state.AppliedTo.SavedFile);
+            Assert.Equal(637000000000000000, state.AppliedTo.SavedFile!.LastWriteTimeUtcTicks);
+            Assert.Equal(12345, state.AppliedTo.SavedFile.Length);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void PushState_ReadsLegacyBareFingerprintWithoutAppliedTo()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-pushstate-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var modules = Path.Combine(root, "modules");
+            Directory.CreateDirectory(modules);
+            File.WriteAllText(Path.Combine(modules, "Main.bas"), "Attribute VB_Name = \"Main\"\r\n");
+
+            var fingerprint = VbaSourceHelper.ComputeFingerprint("Book.xlsm", modules, "", "", "", "");
+            var statePath = Path.Combine(root, "state", "push.json");
+            VbaSourceHelper.WriteFingerprintState(fingerprint, statePath);
+
+            Assert.True(VbaSourceHelper.TryReadPushState(statePath, out var state));
+            Assert.NotNull(state);
+            Assert.True(VbaSourceHelper.FingerprintEquals(fingerprint, state!.Fingerprint));
+            Assert.Null(state.AppliedTo);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
     public sealed class FakeCodeModule(string text)
     {
         public string Text { get; private set; } = text;

@@ -16,7 +16,21 @@ All notable changes to xlflow will be documented in this file.
   `VBA220` false positives caused by a comparison operand overwriting the
   assignment target. Corpus review materialization now explicitly enables
   the rule without changing production defaults.
+- Fixed `push --fast`/`push --changed-only` skipping the workbook import in a
+  fresh managed session. The push state cache in `.xlflow/state/push.json` now
+  records where the source was delivered (the managed-session identity, or the
+  saved workbook file stamp), and the fast-path skip only applies when the
+  current push target matches that delivery record. A newly started session no
+  longer inherits a stale skip decision from a previous session's unsaved push.
 
+## v0.32.2
+
+- Fixed `xlflow fmt` producing wrong `Next` indentation for `For`/`For Each`
+  loops nested directly inside multiline `If` branches, which made a following
+  `xlflow push` fail preflight with a false `VB014` at line 1. The bundled
+  tree-sitter-vba parser (v0.14.2) now assigns each loop's own `Next`
+  terminator to the correct `for_statement`, so formatted source keeps its
+  valid nesting and `lint`/`push` no longer report the spurious parse error.
 - Defined the filesystem-free `AnalyzeProject` diagnostic boundary. In-memory
   analysis now uses only caller-supplied source and virtual-project metadata,
   ignores host UserForm/FRX/workspace artifacts, and emits structured
