@@ -32,18 +32,34 @@ type analysisParityExpectation struct {
 	module    string
 	procedure string
 	line      int
+	callCycle bool
 }
 
 type analysisParityDiagnostic struct {
-	Code      string
-	Severity  string
-	File      string
-	Module    string
-	Procedure string
-	Line      int
-	Column    int
-	Message   string
-	Reason    string
+	Code             string
+	Severity         string
+	File             string
+	Module           string
+	Procedure        string
+	Line             int
+	Column           int
+	EndLine          int
+	EndColumn        int
+	ScopeEndLine     int
+	Message          string
+	Reason           string
+	Suggestion       string
+	NearbyCode       []string
+	CallCycle        *CallCycleContext
+	DataFlow         *DataFlowContext
+	CommandExecution *CommandExecutionContext
+	SQLExecution     *SQLExecutionContext
+	FileOperation    *FileOperationContext
+	HTTPSecurity     *HTTPSecurityContext
+	HTTPReliability  *HTTPReliabilityContext
+	OpaqueBoolean    *OpaqueBooleanContext
+	RuntimeError     *RuntimeErrorContext
+	DefaultMember    *DefaultMemberContext
 }
 
 func TestAnalyzerFilesystemAndInMemoryParity(t *testing.T) {
@@ -85,7 +101,7 @@ func TestAnalyzerFilesystemAndInMemoryParity(t *testing.T) {
 			required: []analysisParityExpectation{
 				{code: "VBA228", file: "src/modules/Main.bas", module: "Main", procedure: "Validate", line: 7},
 				{code: "VBA251", file: "src/modules/Main.bas", module: "Main", procedure: "Lookup", line: 12},
-				{code: "VBA244", file: "src/modules/Helpers.bas", module: "Helpers", procedure: "Beta", line: 3},
+				{code: "VBA244", file: "src/modules/Helpers.bas", module: "Helpers", procedure: "Beta", line: 3, callCycle: true},
 			},
 		},
 	}
@@ -162,6 +178,7 @@ func loadAnalysisParityProject(t *testing.T, fixtureRoot string, files []analysi
 			t.Fatalf("resolve parity fixture %s: %v", file.path, err)
 		}
 		virtualPath := filepath.ToSlash(filepath.Join("virtual", filepath.FromSlash(file.path)))
+		aliases[analysisParityPathKey(physicalPath)] = file.path
 		aliases[analysisParityPathKey(absolutePath)] = file.path
 		aliases[analysisParityPathKey(virtualPath)] = file.path
 		project.Files = append(project.Files, sourceproject.SourceFile{
@@ -176,20 +193,31 @@ func loadAnalysisParityProject(t *testing.T, fixtureRoot string, files []analysi
 func normalizeAnalysisParityDiagnostics(findings []Finding, aliases map[string]string) []analysisParityDiagnostic {
 	normalized := make([]analysisParityDiagnostic, 0, len(findings))
 	for _, finding := range findings {
-		file := aliases[analysisParityPathKey(finding.File)]
-		if file == "" {
-			file = filepath.ToSlash(finding.File)
-		}
 		normalized = append(normalized, analysisParityDiagnostic{
-			Code:      finding.Code,
-			Severity:  finding.Severity,
-			File:      file,
-			Module:    finding.Module,
-			Procedure: finding.Procedure,
-			Line:      finding.Line,
-			Column:    finding.Column,
-			Message:   finding.Message,
-			Reason:    finding.Reason,
+			Code:             finding.Code,
+			Severity:         finding.Severity,
+			File:             normalizeAnalysisParityFile(finding.File, aliases),
+			Module:           finding.Module,
+			Procedure:        finding.Procedure,
+			Line:             finding.Line,
+			Column:           finding.Column,
+			EndLine:          finding.EndLine,
+			EndColumn:        finding.EndColumn,
+			ScopeEndLine:     finding.ScopeEndLine,
+			Message:          finding.Message,
+			Reason:           finding.Reason,
+			Suggestion:       finding.Suggestion,
+			NearbyCode:       slices.Clone(finding.NearbyCode),
+			CallCycle:        normalizeAnalysisParityCallCycle(finding.CallCycle, aliases),
+			DataFlow:         finding.DataFlow,
+			CommandExecution: finding.CommandExecution,
+			SQLExecution:     finding.SQLExecution,
+			FileOperation:    finding.FileOperation,
+			HTTPSecurity:     finding.HTTPSecurity,
+			HTTPReliability:  finding.HTTPReliability,
+			OpaqueBoolean:    finding.OpaqueBoolean,
+			RuntimeError:     finding.RuntimeError,
+			DefaultMember:    finding.DefaultMember,
 		})
 	}
 	slices.SortFunc(normalized, func(a, b analysisParityDiagnostic) int {
@@ -207,6 +235,38 @@ func normalizeAnalysisParityDiagnostics(findings []Finding, aliases map[string]s
 	return normalized
 }
 
+func normalizeAnalysisParityFile(file string, aliases map[string]string) string {
+	if normalized := aliases[analysisParityPathKey(file)]; normalized != "" {
+		return normalized
+	}
+	return filepath.ToSlash(file)
+}
+
+func normalizeAnalysisParityCallCycle(callCycle *CallCycleContext, aliases map[string]string) *CallCycleContext {
+	if callCycle == nil {
+		return nil
+	}
+	normalized := *callCycle
+	normalized.Path = slices.Clone(callCycle.Path)
+	for index := range normalized.Path {
+		normalized.Path[index].File = normalizeAnalysisParityFile(normalized.Path[index].File, aliases)
+	}
+	normalized.Edges = slices.Clone(callCycle.Edges)
+	for index := range normalized.Edges {
+		normalized.Edges[index].File = normalizeAnalysisParityFile(normalized.Edges[index].File, aliases)
+	}
+	normalized.EventHandlers = slices.Clone(callCycle.EventHandlers)
+	normalized.DangerousEffects = slices.Clone(callCycle.DangerousEffects)
+	for index := range normalized.DangerousEffects {
+		normalized.DangerousEffects[index].File = normalizeAnalysisParityFile(normalized.DangerousEffects[index].File, aliases)
+	}
+	normalized.Uncertainty = slices.Clone(callCycle.Uncertainty)
+	for index := range normalized.Uncertainty {
+		normalized.Uncertainty[index].File = normalizeAnalysisParityFile(normalized.Uncertainty[index].File, aliases)
+	}
+	return &normalized
+}
+
 func analysisParityPathKey(path string) string {
 	key := filepath.ToSlash(filepath.Clean(path))
 	if filepath.Separator == '\\' {
@@ -221,6 +281,9 @@ func assertAnalysisParityFinding(t *testing.T, findings []analysisParityDiagnost
 		if finding.Code == want.code && finding.File == want.file && finding.Module == want.module && finding.Procedure == want.procedure && finding.Line == want.line {
 			if !present {
 				t.Fatalf("unexpected diagnostic %+v found in %#v", want, findings)
+			}
+			if want.callCycle && finding.CallCycle == nil {
+				t.Fatalf("required diagnostic %+v has no call-cycle payload: %#v", want, finding)
 			}
 			return
 		}
