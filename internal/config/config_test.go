@@ -600,6 +600,64 @@ disabled_rules = ["VBA252"]
 	}
 }
 
+func TestDefaultMemberRulesDefaultsAndConfig(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	tests := []struct {
+		id           string
+		name         string
+		defaultValue bool
+		get          func(AnalyzeConfig) bool
+		set          func(*AnalyzeConfig, bool)
+	}{
+		{id: "VBA253", name: "implicit default-member access", defaultValue: false, get: func(c AnalyzeConfig) bool { return c.DetectImplicitDefaultMemberAccess }, set: func(c *AnalyzeConfig, v bool) { c.DetectImplicitDefaultMemberAccess = v }},
+		{id: "VBA254", name: "unbound default-member access", defaultValue: false, get: func(c AnalyzeConfig) bool { return c.DetectUnboundDefaultMemberAccess }, set: func(c *AnalyzeConfig, v bool) { c.DetectUnboundDefaultMemberAccess = v }},
+		{id: "VBA255", name: "bang notation", defaultValue: false, get: func(c AnalyzeConfig) bool { return c.DetectBangNotation }, set: func(c *AnalyzeConfig, v bool) { c.DetectBangNotation = v }},
+	}
+	for _, test := range tests {
+		t.Run(test.id, func(t *testing.T) {
+			if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, test.id); !ok || enabled != test.defaultValue || test.get(cfg.Analyze) != test.defaultValue {
+				t.Fatalf("%s (%s) enabled = %v, known = %v, field = %v; want %v", test.id, test.name, enabled, ok, test.get(cfg.Analyze), test.defaultValue)
+			}
+			test.set(&cfg.Analyze, !test.defaultValue)
+			if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, test.id); !ok || enabled != !test.defaultValue {
+				t.Fatalf("%s after toggle enabled = %v, known = %v; want %v", test.id, enabled, ok, !test.defaultValue)
+			}
+		})
+	}
+}
+
+func TestLoadDefaultMemberRuleConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_implicit_default_member_access = true
+detect_unbound_default_member_access = true
+detect_bang_notation = true
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Analyze.DetectImplicitDefaultMemberAccess {
+		t.Fatal("expected VBA253/detect_implicit_default_member_access to be enabled")
+	}
+	if !cfg.Analyze.DetectUnboundDefaultMemberAccess {
+		t.Fatal("expected VBA254/detect_unbound_default_member_access to be enabled")
+	}
+	if !cfg.Analyze.DetectBangNotation {
+		t.Fatal("expected VBA255/detect_bang_notation to be enabled")
+	}
+}
+
 func TestProcedureCallCyclesDefaultEnabledAndConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()

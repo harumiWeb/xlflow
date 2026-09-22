@@ -6165,6 +6165,65 @@ End Sub
 	}
 }
 
+func TestVBA253MatchesBatchAndRealtimeAnalysisAndHonorsSuppression(t *testing.T) {
+	dir := t.TempDir()
+	typeDBDir := t.TempDir()
+	generated := `{
+  "types": [{
+    "name": "Demo.Widget",
+    "library": "Demo",
+    "kind": "interface",
+    "confidence": "generated",
+    "source": "typelib",
+    "default_member": "Value",
+    "default_member_type": "String",
+    "properties": [{ "name": "Value", "return_type": "String", "default": true }]
+  }]
+}`
+	if err := os.WriteFile(filepath.Join(typeDBDir, "demo.generated.json"), []byte(generated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := typedb.WriteManifest(typeDBDir, typedb.Manifest{
+		GeneratorVersion: "test",
+		Libraries:        []typedb.ManifestLibrary{{Name: "Demo", Output: "demo.generated.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
+	path := filepath.Join(dir, "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+    Dim widget As Demo.Widget
+    Dim result As Variant
+    Set widget = New Demo.Widget
+    result = widget
+    ' xlflow:disable-next-line VBA253
+    result = widget
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", string(source))
+	cfg := config.Default()
+	cfg.Analyze.DetectImplicitDefaultMemberAccess = true
+
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, findings := range map[string][]Finding{"batch": batch, "realtime": realtime} {
+		got := findingsByCode(findings, "VBA253")
+		if len(got) != 1 || got[0].Line != 6 || got[0].Severity != "warning" {
+			t.Fatalf("%s VBA253 findings = %+v, want one warning on line 6", name, got)
+		}
+		if got[0].DefaultMember == nil || got[0].DefaultMember.Kind != "implicit" || got[0].DefaultMember.Binding != "known" || got[0].DefaultMember.Member != "Value" {
+			t.Fatalf("%s VBA253 context = %+v", name, got[0].DefaultMember)
+		}
+	}
+}
+
 func TestVBA252FailsOpenForStaleTypeDBManifest(t *testing.T) {
 	dir := t.TempDir()
 	typeDBDir := t.TempDir()

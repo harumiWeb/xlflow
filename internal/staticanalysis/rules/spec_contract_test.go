@@ -25,6 +25,9 @@ var requiredSpecContracts = map[string]string{
 	"VBA249": "vba-runtime-error-diagnostics.md",
 	"VBA251": "vba-implicit-approximate-lookup-diagnostics.md",
 	"VBA252": "vba-unavailable-worksheetfunction-member-diagnostics.md",
+	"VBA253": "vba-default-member-diagnostics.md",
+	"VBA254": "vba-default-member-diagnostics.md",
+	"VBA255": "vba-default-member-diagnostics.md",
 }
 
 type specRuleContract struct {

@@ -258,7 +258,7 @@ func New(opts Options) (*Server, func(), error) {
 				}
 				out := make([]intel.RealtimeFinding, 0, len(findings))
 				for _, finding := range findings {
-					out = append(out, intel.RealtimeFinding{Code: finding.Code, Severity: finding.Severity, Line: finding.Line, Column: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn, Message: finding.Message})
+					out = append(out, realtimeFinding(finding))
 				}
 				return out, nil
 			},
@@ -382,7 +382,7 @@ func New(opts Options) (*Server, func(), error) {
 				if finding.Code == "VBA252" && !typeDB.Complete {
 					continue
 				}
-				out = append(out, intel.RealtimeFinding{Code: finding.Code, Severity: finding.Severity, Line: finding.Line, Column: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn, Message: finding.Message})
+				out = append(out, realtimeFinding(finding))
 			}
 			resolvedForDiagnostics, ok := resolvedDiagnosticViews[projectKey]
 			if !ok {
@@ -443,6 +443,23 @@ func New(opts Options) (*Server, func(), error) {
 		s.docs.closeAll()
 		cleanup()
 	}, nil
+}
+
+func realtimeFinding(finding analyze.Finding) intel.RealtimeFinding {
+	out := intel.RealtimeFinding{
+		Code: finding.Code, Severity: finding.Severity,
+		Line: finding.Line, Column: finding.Column,
+		EndLine: finding.EndLine, EndColumn: finding.EndColumn,
+		Message: finding.Message,
+	}
+	if finding.DefaultMember != nil {
+		out.DefaultMember = &intel.DefaultMemberDiagnosticContext{
+			Kind: finding.DefaultMember.Kind, Binding: finding.DefaultMember.Binding,
+			ExpectedContext: finding.DefaultMember.ExpectedContext,
+			Member:          finding.DefaultMember.Member, Depth: finding.DefaultMember.Depth,
+		}
+	}
+	return out
 }
 
 func projectWorkspaceDocuments(projectDocuments []intel.ProjectAnalysisDocument, current intel.Document) []intel.Document {

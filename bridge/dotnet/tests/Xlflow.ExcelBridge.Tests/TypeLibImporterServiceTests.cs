@@ -55,4 +55,52 @@ public sealed class TypeLibImporterServiceTests
         Assert.False(progIDs.ContainsKey("Excel.Workbook"));
         Assert.False(progIDs.ContainsKey("Scripting.Dictionary"));
     }
+
+    [Fact]
+    public void ResolveDefaultMemberSelectsOneNormalizedCandidate()
+    {
+        var resolved = TypeLibImporterService.ResolveDefaultMember(
+        [
+            new(" Item ", " Variant "),
+            new("item", "variant"),
+        ]);
+
+        Assert.Equal(new("Item", "Variant"), resolved);
+    }
+
+    [Fact]
+    public void ResolveDefaultMemberDoesNotChooseBetweenCandidateNames()
+    {
+        var resolved = TypeLibImporterService.ResolveDefaultMember(
+        [
+            new("Item", "Variant"),
+            new("Value", "Variant"),
+        ]);
+
+        Assert.Null(resolved);
+    }
+
+    [Fact]
+    public void ResolveDefaultMemberDoesNotChooseBetweenReturnTypes()
+    {
+        var resolved = TypeLibImporterService.ResolveDefaultMember(
+        [
+            new("Item", "Variant"),
+            new("Item", "Object"),
+        ]);
+
+        Assert.Null(resolved);
+    }
+
+    [Fact]
+    public void ResolveDefaultMemberIgnoresIncompleteCandidates()
+    {
+        var resolved = TypeLibImporterService.ResolveDefaultMember(
+        [
+            new("Item", ""),
+            new(" Item ", "Variant"),
+        ]);
+
+        Assert.Equal(new("Item", "Variant"), resolved);
+    }
 }

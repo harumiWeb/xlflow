@@ -75,7 +75,10 @@ type Finding struct {
 	// It is deliberately additive so existing finding consumers can continue
 	// to consume the common envelope without inferring runtime semantics from
 	// severity alone.
-	RuntimeError          *RuntimeErrorContext `json:"runtime_error,omitempty"`
+	RuntimeError *RuntimeErrorContext `json:"runtime_error,omitempty"`
+	// DefaultMember describes the implicit/default/bang access classified by
+	// VBA253-VBA255 or by a default-member-owned VBA249 runtime failure.
+	DefaultMember         *DefaultMemberContext `json:"default_member,omitempty"`
 	arrayLifecycleFinding bool
 	arrayOperationKey     string
 	httpOwnedSinks        map[int]bool
@@ -149,6 +152,8 @@ type Analyzer struct {
 	// documents that are not present on disk yet.
 	workspaceDocuments       []intel.Document
 	workspaceSymbolsSnapshot intel.WorkspaceSymbolsSnapshotFunc
+	projectDefaultMembers    map[string]vbadb.MemberInfo
+	projectDefaultTypes      map[string]bool
 	// sourceProject is set only by AnalyzeProject. It marks parsed files as
 	// authoritative caller input for filesystem-independent symbol indexing.
 	sourceProject bool
@@ -972,7 +977,7 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 	// always enabled because they represent VBE compile rejections and cannot
 	// be disabled by the legacy VBA206 runtime-safety setting.
 	needsByRefAnalysis := true
-	needsTypedExcelAnalysis := a.Config.Analyze.DetectRangeFindNothingCheck || a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || a.Config.Analyze.DetectImplicitApproximateLookups || a.Config.Analyze.DetectUnavailableWorksheetFunctionMembers || a.Config.Analyze.DetectUnsafeSelectOperations || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops || a.Config.Analyze.DetectLoopInvariantExcelObjectResolution || a.Config.Analyze.DetectExpensiveFullRangeOperations || a.Config.Analyze.DetectValue2PerformanceOpportunities
+	needsTypedExcelAnalysis := a.Config.Analyze.DetectRangeFindNothingCheck || a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || a.Config.Analyze.DetectImplicitApproximateLookups || a.Config.Analyze.DetectUnavailableWorksheetFunctionMembers || a.Config.Analyze.DetectImplicitDefaultMemberAccess || a.Config.Analyze.DetectUnboundDefaultMemberAccess || a.Config.Analyze.DetectBangNotation || a.Config.Analyze.DetectUnsafeSelectOperations || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops || a.Config.Analyze.DetectLoopInvariantExcelObjectResolution || a.Config.Analyze.DetectExpensiveFullRangeOperations || a.Config.Analyze.DetectValue2PerformanceOpportunities
 	needsDataFlowInputs := dataFlowInputsEnabled(a.Config.Analyze)
 	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety || needsDataFlowInputs
 	parsedFiles := make([]parsedFile, 0, len(project.Files))
@@ -1078,6 +1083,9 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 	recordBatchWorkload(ctx, parsedFiles)
 	initializeProjectCapabilityTelemetry(ctx)
 	analysis := a
+	if defaultMemberAnalysisEnabled(analysis.Config.Analyze) {
+		analysis.projectDefaultMembers, analysis.projectDefaultTypes = projectDefaultMemberIndex(parsedFiles)
+	}
 	var warnings []map[string]any
 	if needsTypeDB {
 		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityTypeDB)
@@ -1524,7 +1532,13 @@ func (a Analyzer) analyzeParsedFileBounded(ctx context.Context, file parsedFile,
 		return nil, nil, err
 	}
 	findings = append(findings, worksheetFunctionFindings...)
-	finishStage(len(statefulFindings)+len(contractFindings)+len(lookupFindings)+len(worksheetFunctionFindings), nil)
+	defaultMemberFindings, err := a.defaultMemberFindingsContext(ctx, file)
+	if err != nil {
+		finishStage(0, err)
+		return nil, nil, err
+	}
+	findings = append(findings, defaultMemberFindings...)
+	finishStage(len(statefulFindings)+len(contractFindings)+len(lookupFindings)+len(worksheetFunctionFindings)+len(defaultMemberFindings), nil)
 
 	finishStage = analysisstats.Measure(ctx, "byref_diagnostics")
 	byRefDiagnostics := a.byRefArgumentDiagnosticsContext(ctx, file)
@@ -2520,7 +2534,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		db = typeDB.DB
 		typeDBResolutionIncomplete = !typeDB.Complete
 	}
-	if (cfg.Analyze.DetectRangeFindNothingCheck || cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectImplicitApproximateLookups || cfg.Analyze.DetectUnavailableWorksheetFunctionMembers || cfg.Analyze.DetectUnsafeSelectOperations || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction || cfg.Analyze.DetectUnsafeFilePath) && db == nil {
+	if (cfg.Analyze.DetectRangeFindNothingCheck || cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectImplicitApproximateLookups || cfg.Analyze.DetectUnavailableWorksheetFunctionMembers || cfg.Analyze.DetectImplicitDefaultMemberAccess || cfg.Analyze.DetectUnboundDefaultMemberAccess || cfg.Analyze.DetectBangNotation || cfg.Analyze.DetectUnsafeSelectOperations || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction || cfg.Analyze.DetectUnsafeFilePath) && db == nil {
 		loaded, err := typedb.LoadForRuntimeWithGeneratorVersion("", expectedGeneratorVersion)
 		if err != nil {
 			return nil, err
@@ -2650,6 +2664,9 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			projectResolver = buildResolutionResolver(realtimeProjectResolverFiles(file, projectDocuments), !typeDBResolutionIncomplete, db)
 		}
 		contextFiles := realtimeProjectContextFiles(file, projectDocuments, projectEffects, cfg.Analyze, projectResolver)
+		if defaultMemberAnalysisEnabled(cfg.Analyze) {
+			analyzer.projectDefaultMembers, analyzer.projectDefaultTypes = projectDefaultMemberIndex(contextFiles)
+		}
 		if queryContext.Store != nil && queryRevision == nil {
 			revisionID := queryContext.Revision
 			if revisionID == "" {
@@ -2722,6 +2739,11 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			return err
 		}
 		findings = append(findings, worksheetFunctionFindings...)
+		defaultMemberFindings, err := analyzer.defaultMemberFindingsContext(ctx, file)
+		if err != nil {
+			return err
+		}
+		findings = append(findings, defaultMemberFindings...)
 		wrapperFindings, err := analyzer.errorValueWrapperFindingsContext(ctx, file)
 		if err != nil {
 			return err
@@ -2817,7 +2839,7 @@ sendJobs:
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {

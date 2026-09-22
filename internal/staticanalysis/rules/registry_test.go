@@ -14,7 +14,7 @@ VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB
 VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045 VB046 VB047 VB048 VB049 VB050 VB051 VB052 VB053 VB054 VB055 VB056 VB057 VB058 VB059 VB060 VB061 VB062 VB063 VB064 VB065 VB066
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
 VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228 VBA229
-VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241 VBA242 VBA243 VBA244 VBA245 VBA246 VBA247 VBA248 VBA249 VBA250 VBA251 VBA252`)
+VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241 VBA242 VBA243 VBA244 VBA245 VBA246 VBA247 VBA248 VBA249 VBA250 VBA251 VBA252 VBA253 VBA254 VBA255`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -241,6 +241,18 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	worksheetFunctionMember, ok := Lookup("VBA252")
 	if !ok || worksheetFunctionMember.Family != FamilyAnalyze || worksheetFunctionMember.Category != CategoryCorrectness || worksheetFunctionMember.EvidenceClass != EvidenceInference || worksheetFunctionMember.CompileEquivalent || worksheetFunctionMember.DefaultSeverity != SeverityWarning || !reflect.DeepEqual(worksheetFunctionMember.SupportedSeverities, []RuleSeverity{SeverityWarning}) || !worksheetFunctionMember.DefaultEnabled || !worksheetFunctionMember.Configurable || worksheetFunctionMember.ConfigurationKey != "detect_unavailable_worksheet_function_members" || worksheetFunctionMember.PreflightBlocking || !worksheetFunctionMember.InlineSuppressible || !worksheetFunctionMember.Realtime || worksheetFunctionMember.Scope != ScopeProcedureLocal || worksheetFunctionMember.Precision != PrecisionHigh || !reflect.DeepEqual(worksheetFunctionMember.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) {
 		t.Fatalf("unexpected VBA252 metadata: %+v, %v", worksheetFunctionMember, ok)
+	}
+	implicitDefaultMember, ok := Lookup("VBA253")
+	if !ok || implicitDefaultMember.Family != FamilyAnalyze || implicitDefaultMember.Category != CategoryReliability || implicitDefaultMember.EvidenceClass != EvidenceInference || implicitDefaultMember.CompileEquivalent || implicitDefaultMember.DefaultSeverity != SeverityWarning || !reflect.DeepEqual(implicitDefaultMember.SupportedSeverities, []RuleSeverity{SeverityWarning}) || implicitDefaultMember.DefaultEnabled || !implicitDefaultMember.Configurable || implicitDefaultMember.ConfigurationKey != "detect_implicit_default_member_access" || implicitDefaultMember.PreflightBlocking || !implicitDefaultMember.InlineSuppressible || !implicitDefaultMember.Realtime || implicitDefaultMember.Scope != ScopeProcedureLocal || implicitDefaultMember.Precision != PrecisionHigh || !reflect.DeepEqual(implicitDefaultMember.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) {
+		t.Fatalf("unexpected VBA253 metadata: %+v, %v", implicitDefaultMember, ok)
+	}
+	unboundDefaultMember, ok := Lookup("VBA254")
+	if !ok || unboundDefaultMember.Family != FamilyAnalyze || unboundDefaultMember.Category != CategoryReliability || unboundDefaultMember.EvidenceClass != EvidenceInference || unboundDefaultMember.CompileEquivalent || unboundDefaultMember.DefaultSeverity != SeverityInformation || !reflect.DeepEqual(unboundDefaultMember.SupportedSeverities, []RuleSeverity{SeverityInformation, SeverityWarning}) || unboundDefaultMember.DefaultEnabled || !unboundDefaultMember.Configurable || unboundDefaultMember.ConfigurationKey != "detect_unbound_default_member_access" || unboundDefaultMember.PreflightBlocking || !unboundDefaultMember.InlineSuppressible || !unboundDefaultMember.Realtime || unboundDefaultMember.Scope != ScopeProcedureLocal || unboundDefaultMember.Precision != PrecisionMedium || !reflect.DeepEqual(unboundDefaultMember.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) {
+		t.Fatalf("unexpected VBA254 metadata: %+v, %v", unboundDefaultMember, ok)
+	}
+	bangNotation, ok := Lookup("VBA255")
+	if !ok || bangNotation.Family != FamilyAnalyze || bangNotation.Category != CategoryMaintainability || bangNotation.EvidenceClass != EvidenceMaintainability || bangNotation.CompileEquivalent || bangNotation.DefaultSeverity != SeverityInformation || !reflect.DeepEqual(bangNotation.SupportedSeverities, []RuleSeverity{SeverityInformation, SeverityWarning}) || bangNotation.DefaultEnabled || !bangNotation.Configurable || bangNotation.ConfigurationKey != "detect_bang_notation" || bangNotation.PreflightBlocking || !bangNotation.InlineSuppressible || !bangNotation.Realtime || bangNotation.Scope != ScopeProcedureLocal || bangNotation.Precision != PrecisionHigh || !reflect.DeepEqual(bangNotation.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) {
+		t.Fatalf("unexpected VBA255 metadata: %+v, %v", bangNotation, ok)
 	}
 	for _, rule := range ByFamily(FamilyLint) {
 		if rule.Family != FamilyLint {

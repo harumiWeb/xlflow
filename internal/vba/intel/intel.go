@@ -104,22 +104,29 @@ type Analyzer struct {
 	// request snapshot; incomplete indexes cannot prove a type mismatch.
 	WorkspaceUserDefinedTypes         *WorkspaceUserDefinedTypeIndex
 	WorkspaceUserDefinedTypesComplete bool
-	RealtimeFindingsFunc              RealtimeFindingsFunc
-	visibleDeclarations               map[string]bool
-	typeDeclarations                  map[string]int
-	objectTypeDeclarations            map[string]int
+	// ProjectDefaultMembers contains source-authored VB_UserMemId=0 members
+	// keyed by the folded project type name. ProjectDefaultTypes distinguishes
+	// a known project class without a usable value-producing default member
+	// from an unresolved external type.
+	ProjectDefaultMembers  map[string]vbadb.MemberInfo
+	ProjectDefaultTypes    map[string]bool
+	RealtimeFindingsFunc   RealtimeFindingsFunc
+	visibleDeclarations    map[string]bool
+	typeDeclarations       map[string]int
+	objectTypeDeclarations map[string]int
 }
 
 // RealtimeFinding is a protocol-neutral analyzer result that can be adapted by
 // callers without making the VBA intelligence package depend on analyze.
 type RealtimeFinding struct {
-	Code      string
-	Severity  string
-	Line      int
-	Column    int
-	EndLine   int
-	EndColumn int
-	Message   string
+	Code          string
+	Severity      string
+	Line          int
+	Column        int
+	EndLine       int
+	EndColumn     int
+	Message       string
+	DefaultMember *DefaultMemberDiagnosticContext
 }
 
 // RealtimeFindingsFunc supplies analyzer-family findings for an already parsed
@@ -154,6 +161,9 @@ type Diagnostic struct {
 	Range      Range
 	Rule       string
 	Confidence string
+	// DefaultMember classifies VBA253-VBA255 and default-member-owned VBA249
+	// findings without exposing parser implementation details to adapters.
+	DefaultMember *DefaultMemberDiagnosticContext
 }
 
 type Symbol struct {
@@ -462,11 +472,12 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 					}}
 				}
 				out = append(out, Diagnostic{
-					Code:     finding.Code,
-					Severity: finding.Severity,
-					Source:   "xlflow",
-					Message:  finding.Message,
-					Range:    diagnosticRange,
+					Code:          finding.Code,
+					Severity:      finding.Severity,
+					Source:        "xlflow",
+					Message:       finding.Message,
+					Range:         diagnosticRange,
+					DefaultMember: finding.DefaultMember,
 				})
 			}
 		}
@@ -2843,12 +2854,13 @@ func (a Analyzer) unknownMemberDiagnosticForExpression(doc Document, lineNo int,
 		if lowConfidenceDiagnosticType(current) {
 			return Diagnostic{}, false
 		}
-		if info, found := a.DB.ResolveMember(current, member); found {
+		receiverType := current
+		if info, found := a.DB.ResolveMember(receiverType, member); found {
 			if info.ReturnType == "" {
 				return Diagnostic{}, false
 			}
 			current = info.ReturnType
-			if called {
+			if called && a.memberCallUsesReturnedDefault(receiverType, member) {
 				if typ, ok := a.indexedMemberResultType(current); ok {
 					current = typ
 				}
@@ -2873,6 +2885,7 @@ func (a Analyzer) typeDiagnosticBaseType(doc Document, raw string, offset int) (
 		return "", false
 	}
 	var current string
+	baseUsesDefaultIndex := false
 	switch {
 	case strings.EqualFold(base, "Me"):
 		instance, ok := a.currentInstanceType(doc)
@@ -2883,11 +2896,13 @@ func (a Analyzer) typeDiagnosticBaseType(doc Document, raw string, offset int) (
 	case a.DB != nil:
 		if typ, ok := a.DB.ResolveGlobal(base); ok {
 			current = typ.Name
+			baseUsesDefaultIndex = typ.Collection || strings.EqualFold(typ.Kind, "collection")
 		}
 	}
 	if current == "" {
 		if inferred, ok := a.inferWordTypeInfoAt(doc, base, offset); ok {
 			current = inferred.Type
+			baseUsesDefaultIndex = true
 		}
 	}
 	if current == "" {
@@ -2898,7 +2913,7 @@ func (a Analyzer) typeDiagnosticBaseType(doc Document, raw string, offset int) (
 	if current == "" {
 		return "", false
 	}
-	if called {
+	if called && baseUsesDefaultIndex {
 		if typ, ok := a.indexedMemberResultType(current); ok {
 			current = typ
 		}
@@ -5211,6 +5226,7 @@ func (a Analyzer) resolveExpressionTypeAtContextWithState(doc Document, expr str
 	}
 	var current string
 	formMode := false
+	baseUsesDefaultIndex := false
 	if useDocument && strings.EqualFold(base, "Me") {
 		instance, ok := a.currentInstanceType(doc)
 		if !ok {
@@ -5221,8 +5237,15 @@ func (a Analyzer) resolveExpressionTypeAtContextWithState(doc Document, expr str
 	} else if useDocument {
 		if inferred, ok := a.inferWordTypeInfoAtContextWithState(doc, base, offset, ctx, state); ok {
 			current = inferred.Type
+			_, baseUsesDefaultIndex = a.visibleSymbolTypeInfoAtContext(doc, base, offset, ctx)
+			if !baseUsesDefaultIndex {
+				if typ, resolved := a.DB.ResolveType(current); resolved {
+					baseUsesDefaultIndex = typ.Collection || strings.EqualFold(typ.Kind, "collection")
+				}
+			}
 		} else if typ, ok := a.DB.ResolveGlobal(base); ok {
 			current = typ.Name
+			baseUsesDefaultIndex = typ.Collection || strings.EqualFold(typ.Kind, "collection")
 		} else if typ, ok := a.DB.ResolveType(base); ok {
 			current = typ.Name
 		} else {
@@ -5230,12 +5253,13 @@ func (a Analyzer) resolveExpressionTypeAtContextWithState(doc Document, expr str
 		}
 	} else if typ, ok := a.DB.ResolveGlobal(base); ok {
 		current = typ.Name
+		baseUsesDefaultIndex = typ.Collection || strings.EqualFold(typ.Kind, "collection")
 	} else if typ, ok := a.DB.ResolveType(base); ok {
 		current = typ.Name
 	} else {
 		return "", false
 	}
-	if strings.Contains(parts[0], "(") {
+	if strings.Contains(parts[0], "(") && baseUsesDefaultIndex {
 		if typ, ok := a.indexedMemberResultType(current); ok {
 			current = typ
 		}
@@ -5276,12 +5300,13 @@ func (a Analyzer) resolveExpressionTypeAtContextWithState(doc Document, expr str
 				current = "Excel.Worksheet"
 			}
 		}
-		if info, ok := a.DB.ResolveMember(current, member); ok && info.ReturnType != "" {
+		receiverType := current
+		if info, ok := a.DB.ResolveMember(receiverType, member); ok && info.ReturnType != "" {
 			current = info.ReturnType
 		} else {
 			return "", false
 		}
-		if called {
+		if called && a.memberCallUsesReturnedDefault(receiverType, member) {
 			if typ, ok := a.indexedMemberResultType(current); ok {
 				current = typ
 			}
@@ -5292,6 +5317,23 @@ func (a Analyzer) resolveExpressionTypeAtContextWithState(doc Document, expr str
 		pendingSheetsDefault = called && strings.EqualFold(current, "Object") && strings.EqualFold(member, "Sheets")
 	}
 	return current, true
+}
+
+// memberCallUsesReturnedDefault distinguishes a parameterized property or
+// method call from VBA's shorthand indexing of the returned collection. Only
+// a zero-argument property can leave the source parentheses for the returned
+// object's default member to consume.
+func (a Analyzer) memberCallUsesReturnedDefault(receiverType, member string) bool {
+	typ, ok := a.DB.ResolveType(receiverType)
+	if !ok {
+		return false
+	}
+	for _, property := range typ.Properties {
+		if strings.EqualFold(property.Name, member) {
+			return len(property.Parameters) == 0
+		}
+	}
+	return false
 }
 
 func sheetsDefaultExpression(expr string) bool {
@@ -5374,12 +5416,13 @@ func (a Analyzer) resolveMemberChainFromType(baseType, expr string) (string, boo
 		if member == "" {
 			continue
 		}
-		info, ok := a.DB.ResolveMember(current, member)
+		receiverType := current
+		info, ok := a.DB.ResolveMember(receiverType, member)
 		if !ok || info.ReturnType == "" {
 			return "", false
 		}
 		current = info.ReturnType
-		if called {
+		if called && a.memberCallUsesReturnedDefault(receiverType, member) {
 			if typ, ok := a.indexedMemberResultType(current); ok {
 				current = typ
 			}
@@ -5822,12 +5865,13 @@ func (a Analyzer) resolveRelativeMemberExpressionType(receiverType, expr string)
 		if member == "" {
 			continue
 		}
-		info, ok := a.DB.ResolveMember(current, member)
+		memberReceiverType := current
+		info, ok := a.DB.ResolveMember(memberReceiverType, member)
 		if !ok || info.ReturnType == "" {
 			return "", false
 		}
 		current = info.ReturnType
-		if called {
+		if called && a.memberCallUsesReturnedDefault(memberReceiverType, member) {
 			if typ, ok := a.indexedMemberResultType(current); ok {
 				current = typ
 			}
