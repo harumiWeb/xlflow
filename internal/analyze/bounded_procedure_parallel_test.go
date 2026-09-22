@@ -196,7 +196,7 @@ func TestAnalyzeFilesBoundedCapsConcurrentAnalyses(t *testing.T) {
 
 func TestAnalyzerSingleModuleProcedureCancellationReturnsNoResult(t *testing.T) {
 	root := t.TempDir()
-	fixture := writeSingleModuleBenchmarkProject(t, root, singleModuleBenchmarkWorkload{shape: "independent", size: 2000})
+	fixture := writeSingleModuleBenchmarkProject(t, root, singleModuleBenchmarkWorkload{shape: "independent", size: procedureParallelThreshold})
 	if fixture.procedures < procedureParallelThreshold {
 		t.Fatalf("cancellation fixture has %d procedures, want at least %d", fixture.procedures, procedureParallelThreshold)
 	}
