@@ -40,6 +40,7 @@ const (
 	featureByRefCalls
 	featureMemberAccess
 	featureUIState
+	featureScalarAssignment
 	procedureFeatureLimit
 )
 
@@ -92,6 +93,8 @@ func (features *procedureFeatureSet) observeStatement(statement procedureir.Stat
 		return
 	}
 	switch statement.Kind {
+	case procedureir.StatementAssignment:
+		features.add(featureScalarAssignment)
 	case procedureir.StatementReDim:
 		features.add(featureArray | featureReDim)
 	case procedureir.StatementFor, procedureir.StatementForEach, procedureir.StatementDo, procedureir.StatementWhile:
@@ -349,6 +352,7 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA242", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
 	{id: "VBA243", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
 	{id: "VBA250", domain: analysisstats.DomainExcel, any: featureUIState, capabilities: projectCapabilityTypeDB | projectCapabilityResolution},
+	{id: "VBA256", domain: analysisstats.DomainOther, any: featureScalarAssignment},
 	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
 	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureApplicationState, capabilities: projectCapabilityEventReentry},
 	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
@@ -472,6 +476,7 @@ const (
 	procedureProjectionApplicationRestore
 	procedureProjectionApplicationEffects
 	procedureProjectionApplicationReentry
+	procedureProjectionDeadStore
 	procedureProjectionLimit
 )
 
@@ -580,6 +585,8 @@ func procedureProjectionForRequirement(requirement procedureRuleRequirement) pro
 		return procedureProjectionApplicationEffects
 	case "VBA220":
 		return procedureProjectionApplicationReentry
+	case "VBA256":
+		return procedureProjectionDeadStore
 	}
 	// A future requirement must still be represented in a plan. Falling back
 	// to the first projection in its domain is conservative and keeps unknown

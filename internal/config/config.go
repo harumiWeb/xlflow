@@ -233,6 +233,7 @@ type AnalyzeConfig struct {
 	DetectImplicitDefaultMemberAccess         bool     `toml:"detect_implicit_default_member_access"`
 	DetectUnboundDefaultMemberAccess          bool     `toml:"detect_unbound_default_member_access"`
 	DetectBangNotation                        bool     `toml:"detect_bang_notation"`
+	DetectDeadStores                          bool     `toml:"detect_dead_stores"`
 	DevelopmentHTTPOrigins                    []string `toml:"development_http_origins"`
 }
 
@@ -336,6 +337,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA253": {Get: func(c AnalyzeConfig) bool { return c.DetectImplicitDefaultMemberAccess }, Set: func(c *AnalyzeConfig, v bool) { c.DetectImplicitDefaultMemberAccess = v }},
 	"VBA254": {Get: func(c AnalyzeConfig) bool { return c.DetectUnboundDefaultMemberAccess }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnboundDefaultMemberAccess = v }},
 	"VBA255": {Get: func(c AnalyzeConfig) bool { return c.DetectBangNotation }, Set: func(c *AnalyzeConfig, v bool) { c.DetectBangNotation = v }},
+	"VBA256": {Get: func(c AnalyzeConfig) bool { return c.DetectDeadStores }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDeadStores = v }},
 }
 
 var (

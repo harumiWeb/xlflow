@@ -260,6 +260,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA253` | warning               | Known implicit, indexed, or recursive default-member access is used where the member can be made explicit.                                                           |
 | `VBA254` | information / warning | Default-member access is unbound, late-bound, or incomplete and should be reviewed when the project opts in.                                                         |
 | `VBA255` | information / warning | Bang notation (`receiver!name`) relies on stringly typed/default-member semantics.                                                                                   |
+| `VBA256` | warning               | A procedure-local scalar assignment is never read before the value is overwritten or the procedure exits.                                                            |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -289,6 +290,9 @@ Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214
 `VBA253`, `VBA254`, and `VBA255` are opt-in typed default-member rules through
 `detect_implicit_default_member_access`,
 `detect_unbound_default_member_access`, and `detect_bang_notation`.
+
+`VBA256` is opt-in and reports high-confidence dead stores for procedure-local
+scalar assignments. Enable it with `detect_dead_stores = true`.
 Complete default-member runtime failures are reported by `VBA249`, while
 `VBA202` retains ownership of proven error-91 object-use-before-`Set`/`Nothing`
 cases.

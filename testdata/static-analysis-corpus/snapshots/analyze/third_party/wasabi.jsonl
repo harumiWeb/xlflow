@@ -1,4 +1,5 @@
 {"project":"third_party/wasabi","file":"examples/Example_Binance_Stream.bas","surface":"analyze","code":"VBA206","severity":"warning","line":26,"column":12}
+{"project":"third_party/wasabi","file":"examples/Example_MQTT_KeepAlive.bas","surface":"analyze","code":"VBA256","severity":"warning","line":29,"column":18}
 {"project":"third_party/wasabi","file":"examples/Example_WebSocket_Binary.bas","surface":"analyze","code":"VBA227","severity":"warning","line":34,"column":0}
 {"project":"third_party/wasabi","file":"examples/Example_WebSocket_Broadcast.bas","surface":"analyze","code":"VBA206","severity":"warning","line":14,"column":12}
 {"project":"third_party/wasabi","file":"extensions/zlib/ExtWasabiZlib.cls","surface":"analyze","code":"VBA240","severity":"warning","line":187,"column":0}
@@ -39,11 +40,16 @@
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":1961,"column":9}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2178,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2182,"column":0}
+{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA256","severity":"warning","line":2548,"column":18}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2777,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2778,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2805,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2885,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2885,"column":0}
+{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA256","severity":"warning","line":2900,"column":10}
+{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA256","severity":"warning","line":2911,"column":10}
+{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA256","severity":"warning","line":2947,"column":6}
+{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA256","severity":"warning","line":2948,"column":6}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA219","severity":"warning","line":2956,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA241","severity":"information","line":3157,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":3306,"column":25}
@@ -56,6 +62,8 @@
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":3645,"column":25}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":3671,"column":26}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":3853,"column":33}
+{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA256","severity":"warning","line":3945,"column":18}
+{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA256","severity":"warning","line":3947,"column":18}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":4170,"column":33}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":4179,"column":33}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":4191,"column":33}
@@ -70,6 +78,7 @@
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":4763,"column":21}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":4836,"column":13}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":5150,"column":0}
+{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA256","severity":"warning","line":5517,"column":18}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":5691,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":5728,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":5728,"column":0}
@@ -88,3 +97,4 @@
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":8146,"column":0}
 {"project":"third_party/wasabi","file":"tests/Test_Runner.bas","surface":"analyze","code":"VBA240","severity":"warning","line":9,"column":0}
 {"project":"third_party/wasabi","file":"tests/Test_Runner.bas","surface":"analyze","code":"VBA240","severity":"warning","line":10,"column":0}
+{"project":"third_party/wasabi","file":"tests/Test_Utils.bas","surface":"analyze","code":"VBA256","severity":"warning","line":19,"column":29}

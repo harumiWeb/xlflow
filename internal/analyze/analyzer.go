@@ -307,7 +307,7 @@ var (
 var objectTypes = map[string]bool{
 	"application": true, "workbook": true, "worksheet": true, "range": true,
 	"chart": true, "chartobject": true, "series": true, "pivot table": true, "pivottable": true, "listobject": true,
-	"dictionary": true, "collection": true, "object": true, "window": true,
+	"dictionary": true, "collection": true, "object": true, "window": true, "group": true,
 }
 
 type invalidMemberRule struct {
@@ -2839,7 +2839,7 @@ sendJobs:
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255", "VBA256"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -2918,6 +2918,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		}
 	}
 	findings = append(findings, a.opaqueBooleanArgumentFindings(file, proc, analysisCtx.procedures)...)
+	if a.Config.Analyze.DetectDeadStores && plan.runsProjection(procedureProjectionDeadStore) {
+		findings = append(findings, a.deadStoreFindings(file, proc)...)
+	}
 	if plan.runsProjection(procedureProjectionRuntime) {
 		findings = append(findings, a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, analysisCtx, moduleDecls, resultStore.arrayProjection(profile))...)
 	}
@@ -3620,6 +3623,12 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	}
 	otherMeasurement.finish(len(opaqueFindings))
 	findings = append(findings, opaqueFindings...)
+	if a.Config.Analyze.DetectDeadStores && plan.runsProjection(procedureProjectionDeadStore) {
+		deadStoreMeasurement := profile.begin(procedureDomainOther)
+		deadStoreFindings := a.deadStoreFindings(file, proc)
+		deadStoreMeasurement.finish(len(deadStoreFindings))
+		findings = append(findings, deadStoreFindings...)
+	}
 	if plan.runsProjection(procedureProjectionRuntime) {
 		runtimeMeasurement := profile.begin(procedureDomainRuntime)
 		runtimeFindings := a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, ctx, moduleDecls, resultStore.arrayProjection(profile))

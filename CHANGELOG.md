@@ -4,6 +4,18 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `VBA256` warning diagnostics for procedure-local scalar
+  assignments whose values are overwritten or never observed before procedure
+  exit. The rule is configurable with `detect_dead_stores` and is available in
+  batch, realtime, and LSP analysis.
+- Fixed `VBA256` false positives for Access object locals, function-return
+  assignments in compound expressions, local values used across
+  conditional-compilation branches, comparison operands inside assignment
+  values, and locals passed to recovered parenthesis-free calls (for example
+  a `With`-member first argument); the procedure-IR fix also removes
+  `VBA220` false positives caused by a comparison operand overwriting the
+  assignment target. Corpus review materialization now explicitly enables
+  the rule without changing production defaults.
 - Fixed `push --fast`/`push --changed-only` skipping the workbook import in a
   fresh managed session. The push state cache in `.xlflow/state/push.json` now
   records where the source was delivered (the managed-session identity, or the

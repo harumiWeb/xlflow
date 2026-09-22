@@ -1822,7 +1822,9 @@ Public Sub Run()
 End Sub
 `)
 
-	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	cfg := config.Default()
+	cfg.Analyze.DetectDeadStores = false
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22282,4 +22284,35 @@ func useCompleteTestTypeDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(typedb.EnvDir, typeDBDir)
+}
+func TestVBA220IgnoresComparisonOperandControlValueRead(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub CheckBox1_Click()
+  TextBox1.Enabled = CheckBox1.Value = True
+End Sub
+`)
+	designer := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+   Begin MSForms.TextBox TextBox1
+   End
+   Begin MSForms.CheckBox CheckBox1
+   End
+End
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "Dialog.frm"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// iguana-tex LatexForm.frm regression: the assignment target is
+	// TextBox1.Enabled, which is not a change-triggering control property.
+	// The comparison operand "CheckBox1.Value = True" is only a read, so no
+	// control-change evidence exists and the handler must not be flagged.
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA220"); len(got) != 0 {
+		t.Fatalf("comparison-operand control read produced VBA220: %+v", got)
+	}
 }
