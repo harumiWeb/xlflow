@@ -222,6 +222,20 @@ func TestDeadStoreCandidatesExcludesNonScalarAndNonLocalDeclarations(t *testing.
 	}
 }
 
+func TestDeadStoreCandidatesExcludesFunctionReturnSlot(t *testing.T) {
+	statement := deadStoreAssignment(1, "Compute", 2)
+	proc := deadStoreTestProcedure(
+		[]procedureir.Declaration{{Name: "Compute", Type: "Long", Scope: procedureir.ScopeLocal, Kind: "return_slot"}},
+		[]procedureir.Statement{statement},
+		[]procedureir.VariableAccess{deadStoreAccess(1, "Compute", procedureir.AccessWrite)},
+		[]vbacfg.Edge{{From: 1, To: 10, Class: vbacfg.EdgeNormal}, {From: 10, To: 90, Class: vbacfg.EdgeNormal}},
+		nil,
+	)
+	if got := deadStoreCandidates(proc); len(got) != 0 {
+		t.Fatalf("deadStoreCandidates = %+v, want no return-slot finding", got)
+	}
+}
+
 func deadStoreTestProcedure(declarations []procedureir.Declaration, statements []procedureir.Statement, accesses []procedureir.VariableAccess, edges []vbacfg.Edge, unknown []vbacfg.BlockID) sourceProcedure {
 	blocks := []vbacfg.Block{{ID: 1, Kind: vbacfg.BlockEntry}}
 	for index := range statements {

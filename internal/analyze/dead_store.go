@@ -229,7 +229,7 @@ func deadStoreCandidates(proc sourceProcedure) []deadStoreCandidate {
 func deadStoreEligibleDeclarations(declarations readOnlySpan[procedureir.Declaration]) map[string]bool {
 	eligible := make(map[string]bool)
 	for declaration := range declarations.All() {
-		if declaration.Scope != procedureir.ScopeLocal || declaration.IsStatic || declaration.IsArray ||
+		if declaration.Scope != procedureir.ScopeLocal || declaration.Kind == "return_slot" || declaration.IsStatic || declaration.IsArray ||
 			declaration.IsObject || declaration.IsNew || declaration.IsConst {
 			continue
 		}
