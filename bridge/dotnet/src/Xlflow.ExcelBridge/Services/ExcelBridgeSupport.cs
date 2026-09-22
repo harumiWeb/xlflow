@@ -544,7 +544,11 @@ internal static class ExcelBridgeSupport
 
     public static object? GetExcelFromSessionMetadata(string metadataPath)
     {
-        var metadata = ReadSessionMetadata(metadataPath);
+        return GetExcelFromSessionMetadata(ReadSessionMetadata(metadataPath));
+    }
+
+    private static object? GetExcelFromSessionMetadata(SessionMetadata? metadata)
+    {
         if (metadata is null)
         {
             return null;
@@ -1971,33 +1975,61 @@ internal static class ExcelBridgeSupport
         }
     }
 
-    // Whether a running Excel application already has the workbook open. Used
-    // by the changed-only push skip check: when a recorded session's process is
-    // gone but another Excel still holds the workbook, attach would land on
-    // that live workbook rather than the disk file.
-    public static bool RunningExcelHasOpenWorkbook(string workbookPath)
+    // Which workbook the session attach path would land on for a recorded
+    // session. The changed-only push skip uses this to avoid claiming delivery
+    // to a session whose workbook was closed while its Excel stayed open, and
+    // to avoid skipping an import that attach would actually aim at a foreign
+    // Excel instance holding the workbook.
+    public enum SessionWorkbookTarget
     {
-        var running = TryGetRunningExcelApplication();
-        if (running is null)
+        // Attach finds no live Excel holding the workbook: the push falls back
+        // to the disk file (or fails with session_required for --session).
+        None,
+
+        // Attach lands on the recorded session's own Excel instance, which
+        // still has the workbook open.
+        RecordedSession,
+
+        // Attach lands on a different running Excel that holds the workbook;
+        // its content cannot be verified from the session record.
+        OtherLiveWorkbook,
+    }
+
+    public static SessionWorkbookTarget ResolveSessionWorkbookTarget(SessionMetadata metadata, string workbookPath)
+    {
+        if (metadata.Poisoned)
         {
-            return false;
+            return SessionWorkbookTarget.None;
         }
+
+        // Resolve through the same order the attach path uses (running object
+        // table, then recorded hwnd, then recorded pid), then verify the
+        // resolved Excel still has the workbook open.
+        var excel = GetExcelFromSessionMetadata(metadata);
+        if (excel is null)
+        {
+            return SessionWorkbookTarget.None;
+        }
+
         try
         {
-            if (TryGetMatchingOpenWorkbook(running, workbookPath, out var workbook))
-            {
-                ReleaseComObject(workbook);
-                return true;
-            }
-            return false;
+            var workbook = GetOpenWorkbook(excel, workbookPath);
+            ReleaseComObject(workbook);
+
+            // A window handle identifies the recorded session's Excel instance
+            // more reliably than a process id, which Windows can reuse.
+            var isRecorded = metadata.Hwnd != 0
+                ? GetExcelMainHwnd(excel) == metadata.Hwnd
+                : metadata.Pid > 0 && GetExcelProcessId(excel) == metadata.Pid;
+            return isRecorded ? SessionWorkbookTarget.RecordedSession : SessionWorkbookTarget.OtherLiveWorkbook;
         }
         catch
         {
-            return false;
+            return SessionWorkbookTarget.None;
         }
         finally
         {
-            ReleaseComObject(running);
+            ReleaseComObject(excel);
         }
     }
 

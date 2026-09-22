@@ -962,7 +962,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             AppliedToSession("session-a"),
             SessionMeta("session-a", pid: 42, hwnd: 99),
-            sessionProcessAlive: true,
+            sessionWorkbookOpen: true,
             otherLiveWorkbook: false,
             useSession: true,
             savedFileMatches: false);
@@ -979,7 +979,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             AppliedToSession("session-a"),
             SessionMeta("session-a", pid: 42, hwnd: 99),
-            sessionProcessAlive: true,
+            sessionWorkbookOpen: true,
             otherLiveWorkbook: false,
             useSession: false,
             savedFileMatches: false);
@@ -994,7 +994,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             AppliedToSession("session-a"),
             SessionMeta("session-a", pid: 42, hwnd: 99, owner: "external"),
-            sessionProcessAlive: true,
+            sessionWorkbookOpen: true,
             otherLiveWorkbook: false,
             useSession: true,
             savedFileMatches: false);
@@ -1009,7 +1009,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             AppliedToSession("session-a"),
             SessionMeta("session-b", pid: 43, hwnd: 100),
-            sessionProcessAlive: true,
+            sessionWorkbookOpen: true,
             otherLiveWorkbook: false,
             useSession: true,
             savedFileMatches: false);
@@ -1023,7 +1023,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             AppliedToSession("session-a"),
             SessionMeta("session-b", pid: 43, hwnd: 100),
-            sessionProcessAlive: true,
+            sessionWorkbookOpen: true,
             otherLiveWorkbook: false,
             useSession: true,
             savedFileMatches: true);
@@ -1039,7 +1039,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             AppliedToSession("session-a"),
             SessionMeta("session-a", pid: 42, hwnd: 99, poisoned: true),
-            sessionProcessAlive: true,
+            sessionWorkbookOpen: true,
             otherLiveWorkbook: false,
             useSession: true,
             savedFileMatches: true);
@@ -1053,7 +1053,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             AppliedToSession("session-a"),
             SessionMeta("session-a"),
-            sessionProcessAlive: false,
+            sessionWorkbookOpen: false,
             otherLiveWorkbook: false,
             useSession: true,
             savedFileMatches: false);
@@ -1071,7 +1071,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             AppliedToSession("session-a"),
             SessionMeta("session-a"),
-            sessionProcessAlive: false,
+            sessionWorkbookOpen: false,
             otherLiveWorkbook: true,
             useSession: false,
             savedFileMatches: true);
@@ -1085,7 +1085,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             new PushAppliedTo(),
             matchingSession: null,
-            sessionProcessAlive: false,
+            sessionWorkbookOpen: false,
             otherLiveWorkbook: false,
             useSession: false,
             savedFileMatches: true);
@@ -1102,7 +1102,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             AppliedToSession("session-a"),
             matchingSession: null,
-            sessionProcessAlive: false,
+            sessionWorkbookOpen: false,
             otherLiveWorkbook: false,
             useSession: false,
             savedFileMatches: false);
@@ -1116,7 +1116,7 @@ public sealed class ExcelPushServiceTests
         var decision = ExcelPushService.EvaluatePushStateCoverage(
             AppliedToSession("", pid: 42, hwnd: 99),
             SessionMeta("", pid: 42, hwnd: 99),
-            sessionProcessAlive: true,
+            sessionWorkbookOpen: true,
             otherLiveWorkbook: false,
             useSession: true,
             savedFileMatches: false);

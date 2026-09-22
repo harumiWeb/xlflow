@@ -34,9 +34,35 @@ push.json を {fingerprint, applied_to} に拡張し、スキップは
 
 ## 判定ルール
 
-- metadata が workbook 一致 && !poisoned && pid 生存 → session target
+- metadata が workbook 一致 && !poisoned && attach 解決で記録セッションの Excel が
+  workbook を保持 → session target
   - session_id (or pid+hwnd fallback) 一致 → skip
   - saved_file スタンプ一致 → skip
+- attach 解決が別 Excel の live workbook に着く → スキップしない
 - session target でなく UseSession → スキップしない (attach で session_required)
 - それ以外 → file target → saved_file スタンプ一致のみ skip
 - poisoned metadata が workbook 一致 → 常にスキップしない (poisoned error を優先)
+
+## レビュー対応 (PR #836 Devin/CodeRabbit)
+
+- [x] BUG1: pid 生存だけでは「session の workbook がまだ開いている」ことを示せない。
+      attach 解決 (GetExcelFromSessionMetadata: ROT→hwnd→pid) と同じ経路で Excel を解決し、
+      その Excel が workbook を保持し、かつ記録セッション本人 (hwnd 優先/pid fallback) かを検証する
+      ResolveSessionWorkbookTarget を追加。RunningExcelHasOpenWorkbook は置き換え。
+- [x] BUG2/CodeRabbit: session target スキップ応答の workbook.dirty/needs_save と
+      session.save_required/live_newer_than_disk を確定値 false ではなく null (unknown) にする。
+
+## E2E 証跡 (release-gate 記録)
+
+- workspace: C:\Users\HARUMI\orca\workspaces\xlflow\trumpetfish\tmp_workspaces\issue-830-e2e
+- 実行コマンド (xlflow は task install 済みの本 worktree ビルド):
+  - session A: `xlflow session start --json` → `xlflow push --fast --session --no-save --json`
+    (Extra.bas 追加済みソースを import、push.json が session A の session_id にバインド)
+  - `xlflow session stop --discard --json` → `xlflow session start --json` (新 session_id)
+  - `xlflow push --fast --session --no-save --json` → `changed:true` (import 実行、誤スキップ無し)
+  - `xlflow run Extra.Ping --session --json` → ok、B2 = "issue830 ok"
+  - 同一セッション再 `push --fast --session --no-save --json` → `changed:false` skip
+    (session.active:true, mode:explicit, dirty:null)
+  - save あり push → `session stop`/`session start` → `push --fast` → saved_file スタンプ一致で skip
+    (source_of_truth: saved_workbook)
+- 未検証項目: poisoned session の実機再現、複数 Excel インスタンスでの同一 workbook 同時オープン

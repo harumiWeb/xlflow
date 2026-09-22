@@ -113,9 +113,11 @@ public sealed class ExcelPushService : IPushService
                 if (sessionTarget)
                 {
                     // The live session workbook is the verified target. Dirty
-                    // state is unknown without attaching, so report null rather
-                    // than claiming a clean workbook.
+                    // and save state are unknown without attaching, so report
+                    // null rather than claiming a clean workbook.
                     sessionPayload = ExcelBridgeSupport.BuildSessionPayload(workbookPath, true, skipSessionMode, null, false);
+                    sessionPayload["save_required"] = null;
+                    sessionPayload["live_newer_than_disk"] = null;
                     sessionPayload["source_of_truth"] = skipDecision.ViaSavedFile ? "saved_workbook" : "live_workbook";
                 }
                 else
@@ -148,8 +150,8 @@ public sealed class ExcelPushService : IPushService
                         ["session_requested"] = sessionTarget && args.UseSession,
                         ["auto_session"] = sessionTarget && !args.UseSession,
                         ["saved"] = false,
-                        ["dirty"] = false,
-                        ["needs_save"] = false,
+                        ["dirty"] = sessionTarget ? null : false,
+                        ["needs_save"] = sessionTarget ? null : false,
                     },
                     ["source"] = new Dictionary<string, object?>
                     {
@@ -493,16 +495,15 @@ public sealed class ExcelPushService : IPushService
             && ExcelBridgeSupport.PathsEqual(metadata.WorkbookPath, workbookPath)
             ? metadata
             : null;
-        var sessionAlive = matchingSession is not null
-            && !matchingSession.Poisoned
-            && ExcelBridgeSupport.IsExcelProcessRunning(matchingSession.Pid);
-        // When the recorded session's process is gone but another Excel still
-        // holds the workbook open, attach would land on that live workbook —
-        // whose content cannot be verified — instead of the disk file.
-        var otherLiveWorkbook = matchingSession is not null
-            && !matchingSession.Poisoned
-            && !sessionAlive
-            && ExcelBridgeSupport.RunningExcelHasOpenWorkbook(workbookPath);
+        // Resolve the workbook through the same order attach uses, so a live
+        // pid alone cannot justify a skip when the session's workbook was
+        // closed, and a foreign Excel holding the workbook is detected even
+        // while the recorded process is still running.
+        var workbookTarget = matchingSession is not null && !matchingSession.Poisoned
+            ? ExcelBridgeSupport.ResolveSessionWorkbookTarget(matchingSession, workbookPath)
+            : ExcelBridgeSupport.SessionWorkbookTarget.None;
+        var sessionAlive = workbookTarget == ExcelBridgeSupport.SessionWorkbookTarget.RecordedSession;
+        var otherLiveWorkbook = workbookTarget == ExcelBridgeSupport.SessionWorkbookTarget.OtherLiveWorkbook;
         var savedFileMatches = SavedFileStampMatches(state.AppliedTo.SavedFile, workbookPath);
 
         decision = EvaluatePushStateCoverage(
@@ -520,7 +521,7 @@ public sealed class ExcelPushService : IPushService
     internal static PushSkipDecision EvaluatePushStateCoverage(
         PushAppliedTo appliedTo,
         SessionMetadata? matchingSession,
-        bool sessionProcessAlive,
+        bool sessionWorkbookOpen,
         bool otherLiveWorkbook,
         bool useSession,
         bool savedFileMatches)
@@ -532,7 +533,7 @@ public sealed class ExcelPushService : IPushService
             return PushSkipDecision.Deny;
         }
 
-        if (matchingSession is not null && sessionProcessAlive)
+        if (matchingSession is not null && sessionWorkbookOpen)
         {
             var viaSavedFile = false;
             if (!SessionIdentityMatches(appliedTo, matchingSession))
