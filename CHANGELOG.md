@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `VBA256` warning diagnostics for procedure-local scalar
+  assignments whose values are overwritten or never observed before procedure
+  exit. The rule is configurable with `detect_dead_stores` and is available in
+  batch, realtime, and LSP analysis.
+
 - Defined the filesystem-free `AnalyzeProject` diagnostic boundary. In-memory
   analysis now uses only caller-supplied source and virtual-project metadata,
   ignores host UserForm/FRX/workspace artifacts, and emits structured

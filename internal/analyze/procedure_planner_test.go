@@ -68,7 +68,7 @@ func TestProcedureFeatureSetClassifiesOwnedIRInOneProjection(t *testing.T) {
 	}
 }
 
-func TestProcedureFeatureSetProvesScalarProcedureAbsent(t *testing.T) {
+func TestProcedureFeatureSetRecognizesScalarAssignment(t *testing.T) {
 	facts := newProcedureAnalysisFactsWithDeclarations(
 		nil,
 		[]procedureir.Statement{{ID: 1, Kind: procedureir.StatementAssignment, Text: "value = 1"}},
@@ -76,8 +76,8 @@ func TestProcedureFeatureSetProvesScalarProcedureAbsent(t *testing.T) {
 		nil,
 		nil,
 	)
-	if facts.features.present != 0 || facts.features.unknown != 0 {
-		t.Fatalf("scalar feature set = %#v, want no present or unknown features", facts.features)
+	if facts.features.present != featureScalarAssignment || facts.features.unknown != 0 {
+		t.Fatalf("scalar feature set = %#v, want only scalar-assignment evidence", facts.features)
 	}
 	for _, feature := range []procedureFeature{
 		featureArray, featureReDim, featureLoop, featureDataflow,
@@ -672,6 +672,7 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		"VBA219/resource": true,
 		"VBA225/excel":    true, "VBA238/excel": true, "VBA242/excel": true, "VBA243/excel": true, "VBA250/excel": true,
 		"VBA203/application_state": true, "VBA220/application_state": true, "VBA221/application_state": true,
+		"VBA256/other": true,
 	}
 	seen := map[string]bool{}
 	always := map[string]bool{}

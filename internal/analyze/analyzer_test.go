@@ -1822,7 +1822,9 @@ Public Sub Run()
 End Sub
 `)
 
-	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	cfg := config.Default()
+	cfg.Analyze.DetectDeadStores = false
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
