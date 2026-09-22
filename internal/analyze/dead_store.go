@@ -15,7 +15,8 @@ import (
 // it into batch, realtime, or LSP diagnostics.
 type deadStoreCandidate struct {
 	StatementID int
-	Name        string
+	Name        string // canonical name used for liveness matching
+	DisplayName string // original casing used in the diagnostic message
 	Range       vbaast.Range
 }
 
@@ -27,7 +28,7 @@ func (a Analyzer) deadStoreFindings(file parsedFile, proc sourceProcedure) []Fin
 			continue
 		}
 		finding := a.simpleFinding(file, proc, line, "VBA256", "warning",
-			"Assignment to "+candidate.Name+" is never read before the value is overwritten or the procedure exits.",
+			"Assignment to "+candidate.DisplayName+" is never read before the value is overwritten or the procedure exits.",
 			"The assigned scalar value is not observed on any completed control-flow path.",
 			"Use the value before assigning it again, or remove the unused write while preserving any required right-hand-side effects.")
 		finding.Column = candidate.Range.StartColumn + 1
@@ -129,7 +130,7 @@ func deadStoreCandidates(proc sourceProcedure) []deadStoreCandidate {
 	for statementID, accesses := range accessesByStatement {
 		assignmentTarget := ""
 		if statement, ok := statementsByID[statementID]; ok && statement.Kind == procedureir.StatementAssignment {
-			assignmentTarget = deadStoreAssignmentTarget(accesses)
+			assignmentTarget, _ = deadStoreAssignmentTarget(accesses)
 		}
 		for _, access := range accesses {
 			name := deadStoreCanonicalName(access.Name)
@@ -161,7 +162,7 @@ func deadStoreCandidates(proc sourceProcedure) []deadStoreCandidate {
 			statement.Target.Kind != procedureir.ExpressionIdentifier {
 			continue
 		}
-		name := deadStoreAssignmentTarget(accessesByStatement[statement.ID])
+		name, displayName := deadStoreAssignmentTarget(accessesByStatement[statement.ID])
 		if name == "" || !eligible[name] {
 			continue
 		}
@@ -169,6 +170,7 @@ func deadStoreCandidates(proc sourceProcedure) []deadStoreCandidate {
 			writes[block.ID] = deadStoreCandidate{
 				StatementID: statement.ID,
 				Name:        name,
+				DisplayName: displayName,
 				Range:       statement.Range,
 			}
 		}
@@ -279,7 +281,7 @@ func deadStoreCandidates(proc sourceProcedure) []deadStoreCandidate {
 	return candidates
 }
 
-func deadStoreAssignmentTarget(accesses []procedureir.VariableAccess) string {
+func deadStoreAssignmentTarget(accesses []procedureir.VariableAccess) (canonical, display string) {
 	var target procedureir.VariableAccess
 	found := false
 	for _, access := range accesses {
@@ -296,9 +298,9 @@ func deadStoreAssignmentTarget(accesses []procedureir.VariableAccess) string {
 		}
 	}
 	if !found {
-		return ""
+		return "", ""
 	}
-	return deadStoreCanonicalName(target.Name)
+	return deadStoreCanonicalName(target.Name), cleanIdentifier(target.Name)
 }
 
 func deadStoreEligibleDeclarations(declarations readOnlySpan[procedureir.Declaration]) map[string]bool {

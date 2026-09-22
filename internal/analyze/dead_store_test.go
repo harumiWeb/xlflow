@@ -3,6 +3,7 @@ package analyze
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -15,8 +16,8 @@ func TestAnalyzerReportsDeadStoreWhenOptedIn(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
-  Dim value As Long
-  value = 1
+  Dim deadValue As Long
+  deadValue = 1
   Debug.Print "done"
 End Sub
 `)
@@ -27,8 +28,8 @@ End Sub
 		t.Fatal(err)
 	}
 	dead := findingsByCode(findings, "VBA256")
-	if len(dead) != 1 || dead[0].Line != 4 {
-		t.Fatalf("VBA256 findings = %+v, want one finding at assignment line", dead)
+	if len(dead) != 1 || dead[0].Line != 4 || !strings.Contains(dead[0].Message, "deadValue") {
+		t.Fatalf("VBA256 findings = %+v, want one finding at assignment line naming the written identifier", dead)
 	}
 }
 
@@ -260,8 +261,8 @@ func TestDeadStoreCandidatesUsesEarliestWriteAsAssignmentTarget(t *testing.T) {
 		nil,
 	)
 	got := deadStoreCandidates(proc)
-	if len(got) != 1 || got[0].Name != "returnvalue" {
-		t.Fatalf("deadStoreCandidates = %+v, want earliest write as target", got)
+	if len(got) != 1 || got[0].Name != "returnvalue" || got[0].DisplayName != "returnValue" {
+		t.Fatalf("deadStoreCandidates = %+v, want earliest write as target with original casing", got)
 	}
 }
 
@@ -290,7 +291,7 @@ func TestDeadStoreCandidatesTreatsNonTargetAssignmentAccessAsRHSRead(t *testing.
 	)
 
 	got := deadStoreCandidates(proc)
-	if len(got) != 1 || got[0].Name != "scalarresult" {
+	if len(got) != 1 || got[0].Name != "scalarresult" || got[0].DisplayName != "scalarResult" {
 		t.Fatalf("deadStoreCandidates = %+v, want only final scalarResult write", got)
 	}
 }
