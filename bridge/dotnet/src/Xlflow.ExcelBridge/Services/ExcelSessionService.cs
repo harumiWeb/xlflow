@@ -384,7 +384,7 @@ public sealed class ExcelSessionService : ISessionService
             ExcelBridgeSupport.InvokeViaDynamic(workbook, "Save");
             var metadata = ExcelBridgeSupport.ReadSessionMetadata(args.MetadataPath);
             var owner = metadata?.Owner ?? "managed";
-            ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath, owner);
+            ExcelBridgeSupport.WriteSessionMetadata(args.MetadataPath, excel, workbookPath, owner, metadata?.SessionId);
 
             var sessionLog = ExcelBridgeSupport.GetSessionUsageLog(attached.SessionMode);
             var logs = new List<string>();

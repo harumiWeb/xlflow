@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `push --fast`/`push --changed-only` skipping the workbook import in a
+  fresh managed session. The push state cache in `.xlflow/state/push.json` now
+  records where the source was delivered (the managed-session identity, or the
+  saved workbook file stamp), and the fast-path skip only applies when the
+  current push target matches that delivery record. A newly started session no
+  longer inherits a stale skip decision from a previous session's unsaved push.
+
 ## v0.32.2
 
 - Fixed `xlflow fmt` producing wrong `Next` indentation for `For`/`For Each`

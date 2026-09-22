@@ -313,17 +313,61 @@ internal static partial class VbaSourceHelper
 
     public static bool FingerprintMatchesState(SourceFingerprint fingerprint, string statePath)
     {
+        return TryReadPushState(statePath, out var state)
+            && state is not null
+            && FingerprintEquals(fingerprint, state.Fingerprint);
+    }
+
+    public static bool FingerprintEquals(SourceFingerprint left, SourceFingerprint right)
+    {
+        var leftNorm = NormalizeFingerprintJson(JsonSerializer.Serialize(left, FingerprintJsonOptions));
+        var rightNorm = NormalizeFingerprintJson(JsonSerializer.Serialize(right, FingerprintJsonOptions));
+        return leftNorm == rightNorm;
+    }
+
+    public static bool TryReadPushState(string statePath, out PushState? state)
+    {
+        state = null;
         if (string.IsNullOrWhiteSpace(statePath) || !File.Exists(statePath))
         {
             return false;
         }
         try
         {
-            var existingJson = File.ReadAllText(statePath);
-            var currentJson = JsonSerializer.Serialize(fingerprint, FingerprintJsonOptions);
-            var existingNorm = NormalizeFingerprintJson(existingJson);
-            var currentNorm = NormalizeFingerprintJson(currentJson);
-            return existingNorm == currentNorm;
+            using var doc = JsonDocument.Parse(File.ReadAllText(statePath));
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            JsonElement fingerprintElement;
+            PushAppliedTo? appliedTo = null;
+            if (root.TryGetProperty("fingerprint", out var fingerprintProperty)
+                && fingerprintProperty.ValueKind == JsonValueKind.Object)
+            {
+                fingerprintElement = fingerprintProperty;
+                if (root.TryGetProperty("applied_to", out var appliedToProperty)
+                    && appliedToProperty.ValueKind == JsonValueKind.Object)
+                {
+                    appliedTo = appliedToProperty.Deserialize<PushAppliedTo>(FingerprintJsonOptions);
+                }
+            }
+            else
+            {
+                // Legacy state files hold a bare SourceFingerprint with no
+                // delivery evidence; they can never justify a changed-only skip.
+                fingerprintElement = root;
+            }
+
+            var fingerprint = fingerprintElement.Deserialize<SourceFingerprint>(FingerprintJsonOptions);
+            if (fingerprint is null)
+            {
+                return false;
+            }
+
+            state = new PushState { Fingerprint = fingerprint, AppliedTo = appliedTo };
+            return true;
         }
         catch
         {
@@ -343,6 +387,22 @@ internal static partial class VbaSourceHelper
             Directory.CreateDirectory(parent);
         }
         var json = JsonSerializer.Serialize(fingerprint, FingerprintJsonOptions);
+        File.WriteAllText(statePath, json, new UTF8Encoding(false));
+    }
+
+    public static void WritePushState(SourceFingerprint fingerprint, PushAppliedTo? appliedTo, string statePath)
+    {
+        if (string.IsNullOrWhiteSpace(statePath))
+        {
+            return;
+        }
+        var parent = Path.GetDirectoryName(statePath);
+        if (!string.IsNullOrWhiteSpace(parent))
+        {
+            Directory.CreateDirectory(parent);
+        }
+        var state = new PushState { Fingerprint = fingerprint, AppliedTo = appliedTo };
+        var json = JsonSerializer.Serialize(state, FingerprintJsonOptions);
         File.WriteAllText(statePath, json, new UTF8Encoding(false));
     }
 
@@ -742,6 +802,33 @@ internal sealed record SourceFingerprint
     public string WorkbookPath { get; init; } = "";
     public SourceFileEntry[] Files { get; init; } = [];
     public bool LineNumbersEnabled { get; init; }
+}
+
+internal sealed record PushState
+{
+    public SourceFingerprint Fingerprint { get; init; } = new();
+
+    public PushAppliedTo? AppliedTo { get; init; }
+}
+
+internal sealed record PushAppliedTo
+{
+    public string SessionId { get; init; } = "";
+
+    public int SessionPid { get; init; }
+
+    public long SessionHwnd { get; init; }
+
+    public PushSavedFile? SavedFile { get; init; }
+}
+
+internal sealed record PushSavedFile
+{
+    public string Path { get; init; } = "";
+
+    public long LastWriteTimeUtcTicks { get; init; }
+
+    public long Length { get; init; }
 }
 
 internal sealed record SourceFileEntry
