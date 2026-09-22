@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"sort"
 	"strings"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -47,6 +48,31 @@ func deadStoreCandidates(proc sourceProcedure) []deadStoreCandidate {
 		return nil
 	}
 
+	statementsByID := make(map[int]procedureir.Statement, proc.Statements.Len())
+	siblingsByParent := make(map[int][]procedureir.Statement)
+	for statement := range proc.Statements.All() {
+		statementsByID[statement.ID] = statement
+		siblingsByParent[statement.ParentID] = append(siblingsByParent[statement.ParentID], statement)
+	}
+	// A single-line If owns every statement after Then on its logical line, so a
+	// correct parse never leaves a same-line sibling behind it.  When one exists
+	// (for example a call argument re-parsed as a label and an Exit Sub that
+	// escapes the branch), the CFG topology is wrong for the whole procedure, so
+	// fail open instead of trusting liveness.
+	for _, siblings := range siblingsByParent {
+		sort.Slice(siblings, func(i, j int) bool {
+			return siblings[i].Range.StartByte < siblings[j].Range.StartByte
+		})
+		for i, statement := range siblings {
+			if statement.SyntaxKind != "single_line_if_statement" || i+1 >= len(siblings) {
+				continue
+			}
+			if siblings[i+1].Range.StartLine == statement.Range.EndLine {
+				return nil
+			}
+		}
+	}
+
 	eligible := deadStoreEligibleDeclarations(proc.Declarations)
 	if len(eligible) == 0 {
 		return nil
@@ -86,18 +112,34 @@ func deadStoreCandidates(proc sourceProcedure) []deadStoreCandidate {
 			// treating only the named variable as isolated.
 			return nil
 		}
+		if statement, ok := statementsByID[access.StatementID]; ok && len(statement.ConditionalBranches) > 0 {
+			// The CFG does not model compile-time branch selection. If a local is
+			// accessed inside #If/#Else, its liveness across that boundary cannot
+			// be proven from ordinary runtime edges, so exclude that local.
+			delete(eligible, deadStoreCanonicalName(access.Name))
+		}
 		accessesByStatement[access.StatementID] = append(accessesByStatement[access.StatementID], access)
+	}
+	if len(eligible) == 0 {
+		return nil
 	}
 
 	writes := make(map[vbacfg.BlockID]deadStoreCandidate)
 	readsByStatement := make(map[int]map[string]bool)
 	for statementID, accesses := range accessesByStatement {
+		assignmentTarget := ""
+		if statement, ok := statementsByID[statementID]; ok && statement.Kind == procedureir.StatementAssignment {
+			assignmentTarget = deadStoreAssignmentTarget(accesses)
+		}
 		for _, access := range accesses {
 			name := deadStoreCanonicalName(access.Name)
 			if name == "" || !eligible[name] || !deadStoreLocalAccess(access.Scope) {
 				continue
 			}
-			if access.Mode != procedureir.AccessWrite {
+			if access.Mode != procedureir.AccessWrite || (assignmentTarget != "" && name != assignmentTarget) {
+				// Ordinary VBA assignments have one target. Any other local
+				// access in the same statement belongs to the right-hand side,
+				// even when an ambiguous comparison node inherited write mode.
 				if readsByStatement[statementID] == nil {
 					readsByStatement[statementID] = make(map[string]bool)
 				}
@@ -110,13 +152,16 @@ func deadStoreCandidates(proc sourceProcedure) []deadStoreCandidate {
 		if !reachable[block.ID] || block.Kind != vbacfg.BlockStatement || block.Statement == nil {
 			continue
 		}
-		statement := block.Statement
+		statement, ok := statementsByID[block.StatementID]
+		if !ok {
+			continue
+		}
 		if statement.Recovered || statement.Kind != procedureir.StatementAssignment ||
 			statement.Target == nil || statement.Target.Recovered ||
 			statement.Target.Kind != procedureir.ExpressionIdentifier {
 			continue
 		}
-		name := deadStoreCanonicalName(statement.Target.Text)
+		name := deadStoreAssignmentTarget(accessesByStatement[statement.ID])
 		if name == "" || !eligible[name] {
 			continue
 		}
@@ -234,11 +279,33 @@ func deadStoreCandidates(proc sourceProcedure) []deadStoreCandidate {
 	return candidates
 }
 
+func deadStoreAssignmentTarget(accesses []procedureir.VariableAccess) string {
+	var target procedureir.VariableAccess
+	found := false
+	for _, access := range accesses {
+		if access.Scope != procedureir.ScopeLocal || access.Mode != procedureir.AccessWrite {
+			continue
+		}
+		name := deadStoreCanonicalName(access.Name)
+		if name == "" {
+			continue
+		}
+		if !found || access.Range.StartByte < target.Range.StartByte {
+			target = access
+			found = true
+		}
+	}
+	if !found {
+		return ""
+	}
+	return deadStoreCanonicalName(target.Name)
+}
+
 func deadStoreEligibleDeclarations(declarations readOnlySpan[procedureir.Declaration]) map[string]bool {
 	eligible := make(map[string]bool)
 	for declaration := range declarations.All() {
 		if declaration.Scope != procedureir.ScopeLocal || declaration.Kind == "return_slot" || declaration.IsStatic || declaration.IsArray ||
-			declaration.IsObject || declaration.IsNew || declaration.IsConst {
+			declaration.IsObject || declaration.IsNew || declaration.IsConst || len(declaration.ConditionalBranches) > 0 {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(declaration.Type), "") ||

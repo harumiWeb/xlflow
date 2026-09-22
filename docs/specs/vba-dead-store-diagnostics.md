@@ -34,6 +34,25 @@ that statement completed and therefore cannot by itself observe the new
 value. Uncertain normal flow, recovered control flow, or a reachable unknown
 destination prevents a dead-store proof for affected values.
 
+The procedure CFG does not choose an active conditional-compilation branch.
+If a local declaration or any access to that local appears inside
+`#If`/`#ElseIf`/`#Else`, the rule excludes that local from dead-store analysis
+rather than infer liveness across mutually exclusive build configurations.
+
+A comparison expression nested in an assignment's value contributes only
+reads. Its operands are never the assignment target, even when the target is
+a member expression rather than a local identifier.
+
+Arguments of a statement-level call that the parser could only recover as a
+leaf `call_statement` — for example a parenthesis-free call whose first
+argument is an implicit `With` member — still record identifier reads, so a
+local passed to such a call is observed.
+
+A single-line `If` owns every statement after `Then` on its logical line. If a
+same-line sibling still follows it, the parser could not represent the line's
+control flow and the procedure's CFG is untrustworthy, so the rule reports no
+findings for that procedure.
+
 Calls observe direct scalar argument values. A local passed through a form
 that may be `ByRef`, or through an unresolved, ambiguous, external, or dynamic
 call whose argument contract cannot be proven, remains live at that call. The

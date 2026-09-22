@@ -1244,6 +1244,80 @@ func TestRecoveredCallArgumentsPreservesEmptyPositionalSegments(t *testing.T) {
 	}
 }
 
+func TestRecoveredUnparenthesizedCallRecordsArgumentReads(t *testing.T) {
+	t.Parallel()
+	// A leading implicit With member makes the call_statement a leaf recovery
+	// node, so argument identifiers must be recorded lexically.  Without these
+	// reads, Wasabi.bas "SetSockOpt .Socket, ..., optVal, 4" dropped every
+	// optVal read and the dead-store rule reported the live store.
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+    Dim optVal As Long
+    Dim bounds As Long
+    With m_Connections(0)
+        optVal = 4096
+        SetSockOpt .Socket, 1, 2, optVal, 4
+        SetSockOpt .Socket, SOL_SOCKET, 3, optVal, Size:=bounds
+    End With
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 1 || len(doc.Procedures[0].Calls) != 3 {
+		t.Fatalf("recovered calls were not captured: %+v", doc.Procedures)
+	}
+	assertAccess(t, doc.Procedures[0].Accesses, "optVal", ScopeLocal, AccessRead)
+	assertAccess(t, doc.Procedures[0].Accesses, "bounds", ScopeLocal, AccessRead)
+	for _, access := range doc.Procedures[0].Accesses {
+		if strings.EqualFold(access.Name, "socket") || strings.EqualFold(access.Name, "SetSockOpt") ||
+			strings.EqualFold(access.Name, "size") {
+			t.Fatalf("member/callee/named-argument label became a variable access: %+v", access)
+		}
+	}
+}
+
+func TestComparisonOperandsAreNotAssignmentTargetOrValue(t *testing.T) {
+	t.Parallel()
+	// stdWebView.cls ScriptSyncBridge_TryConsumeMessage regression: assigning a
+	// comparison to a member must not reclassify the left operand as a write
+	// nor overwrite statement.Target/Value with the comparison operands.
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+    Dim m As Object
+    Dim okFlag As String
+    okFlag = "x"
+    m.Flag = (okFlag = "1")
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	procedure := doc.Procedures[0]
+	assertAccess(t, procedure.Accesses, "okFlag", ScopeLocal, AccessRead)
+	assertAccess(t, procedure.Accesses, "m", ScopeLocal, AccessRead)
+	for _, access := range procedure.Accesses {
+		if strings.EqualFold(access.Name, "okflag") && access.Mode == AccessWrite &&
+			access.Range.StartLine == 5 {
+			t.Fatalf("comparison operand recorded as a write: %+v", access)
+		}
+	}
+	var assignment *Statement
+	for i := range procedure.Statements {
+		if procedure.Statements[i].Range.StartLine == 5 {
+			assignment = &procedure.Statements[i]
+			break
+		}
+	}
+	if assignment == nil || assignment.Target == nil || assignment.Value == nil {
+		t.Fatalf("comparison assignment statement = %+v, want target and value", assignment)
+	}
+	if !strings.EqualFold(assignment.Target.Text, "m.Flag") {
+		t.Fatalf("assignment target = %q, want m.Flag", assignment.Target.Text)
+	}
+	if !strings.EqualFold(assignment.Value.Text, "(okFlag = \"1\")") {
+		t.Fatalf("assignment value = %q, want the comparison expression", assignment.Value.Text)
+	}
+}
+
 func TestPrintOutputListPositionsAreNotArguments(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
