@@ -131,7 +131,8 @@ internal sealed record SessionMetadata(
     string PoisonReason = "",
     string HResult = "",
     string LastCommand = "",
-    bool DiscardUnsavedChanges = false);
+    bool DiscardUnsavedChanges = false,
+    string SessionId = "");
 
 internal sealed record ExcelSessionAttachment(object Excel, object Workbook, string SessionMode);
 
@@ -219,15 +220,23 @@ internal static class ExcelBridgeSupport
         var hResult = BridgePayload.GetString(root, "h_result") ?? "";
         var lastCommand = BridgePayload.GetString(root, "last_command") ?? "";
         var discardUnsavedChanges = TryGetBool(root, "discard_unsaved_changes");
-        return new SessionMetadata(hwnd, pid, workbookPath, owner, poisoned, poisonedAt, poisonReason, hResult, lastCommand, discardUnsavedChanges);
+        var sessionId = BridgePayload.GetString(root, "session_id") ?? "";
+        return new SessionMetadata(hwnd, pid, workbookPath, owner, poisoned, poisonedAt, poisonReason, hResult, lastCommand, discardUnsavedChanges, sessionId);
     }
 
-    public static void WriteSessionMetadata(string metadataPath, object excel, string workbookPath, string owner = "managed")
+    public static void WriteSessionMetadata(string metadataPath, object excel, string workbookPath, string owner = "managed", string? sessionId = null)
     {
         if (string.IsNullOrWhiteSpace(metadataPath))
         {
             return;
         }
+
+        // Callers that rewrite metadata for a continuing session (session save)
+        // pass the existing session id; session-establishing paths (start,
+        // attach) leave it null so a fresh identity is issued.
+        sessionId = string.IsNullOrWhiteSpace(sessionId)
+            ? Guid.NewGuid().ToString("N")
+            : sessionId;
 
         var parent = Path.GetDirectoryName(metadataPath);
         if (!string.IsNullOrWhiteSpace(parent))
@@ -241,6 +250,7 @@ internal static class ExcelBridgeSupport
             ["pid"] = GetExcelProcessId(excel),
             ["workbook_path"] = NormalizePath(workbookPath),
             ["owner"] = string.IsNullOrWhiteSpace(owner) ? "managed" : owner,
+            ["session_id"] = sessionId,
         };
 
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(payload));
@@ -289,6 +299,7 @@ internal static class ExcelBridgeSupport
             ["h_result"] = hResult,
             ["last_command"] = lastCommand,
             ["discard_unsaved_changes"] = discardUnsavedChanges,
+            ["session_id"] = metadata.SessionId,
         };
 
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(payload));
@@ -533,7 +544,11 @@ internal static class ExcelBridgeSupport
 
     public static object? GetExcelFromSessionMetadata(string metadataPath)
     {
-        var metadata = ReadSessionMetadata(metadataPath);
+        return GetExcelFromSessionMetadata(ReadSessionMetadata(metadataPath));
+    }
+
+    private static object? GetExcelFromSessionMetadata(SessionMetadata? metadata)
+    {
         if (metadata is null)
         {
             return null;
@@ -1957,6 +1972,64 @@ internal static class ExcelBridgeSupport
         catch
         {
             return true;
+        }
+    }
+
+    // Which workbook the session attach path would land on for a recorded
+    // session. The changed-only push skip uses this to avoid claiming delivery
+    // to a session whose workbook was closed while its Excel stayed open, and
+    // to avoid skipping an import that attach would actually aim at a foreign
+    // Excel instance holding the workbook.
+    public enum SessionWorkbookTarget
+    {
+        // Attach finds no live Excel holding the workbook: the push falls back
+        // to the disk file (or fails with session_required for --session).
+        None,
+
+        // Attach lands on the recorded session's own Excel instance, which
+        // still has the workbook open.
+        RecordedSession,
+
+        // Attach lands on a different running Excel that holds the workbook;
+        // its content cannot be verified from the session record.
+        OtherLiveWorkbook,
+    }
+
+    public static SessionWorkbookTarget ResolveSessionWorkbookTarget(SessionMetadata metadata, string workbookPath)
+    {
+        if (metadata.Poisoned)
+        {
+            return SessionWorkbookTarget.None;
+        }
+
+        // Resolve through the same order the attach path uses (running object
+        // table, then recorded hwnd, then recorded pid), then verify the
+        // resolved Excel still has the workbook open.
+        var excel = GetExcelFromSessionMetadata(metadata);
+        if (excel is null)
+        {
+            return SessionWorkbookTarget.None;
+        }
+
+        try
+        {
+            var workbook = GetOpenWorkbook(excel, workbookPath);
+            ReleaseComObject(workbook);
+
+            // A window handle identifies the recorded session's Excel instance
+            // more reliably than a process id, which Windows can reuse.
+            var isRecorded = metadata.Hwnd != 0
+                ? GetExcelMainHwnd(excel) == metadata.Hwnd
+                : metadata.Pid > 0 && GetExcelProcessId(excel) == metadata.Pid;
+            return isRecorded ? SessionWorkbookTarget.RecordedSession : SessionWorkbookTarget.OtherLiveWorkbook;
+        }
+        catch
+        {
+            return SessionWorkbookTarget.None;
+        }
+        finally
+        {
+            ReleaseComObject(excel);
         }
     }
 

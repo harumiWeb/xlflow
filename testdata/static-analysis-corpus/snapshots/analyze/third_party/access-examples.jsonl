@@ -99,10 +99,13 @@
 {"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":81,"column":0}
 {"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":121,"column":0}
 {"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA237","severity":"warning","line":175,"column":0}
+{"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA256","severity":"warning","line":201,"column":10}
 {"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":205,"column":0}
 {"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":238,"column":0}
 {"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":264,"column":0}
 {"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":299,"column":0}
+{"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA256","severity":"warning","line":343,"column":5}
+{"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA256","severity":"warning","line":348,"column":5}
 {"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":376,"column":0}
 {"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":404,"column":0}
 {"project":"third_party/access-examples","file":"Form_005_Access_Security_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":421,"column":0}
@@ -350,6 +353,7 @@
 {"project":"third_party/access-examples","file":"Report_099_Object_Listing_Report_rpt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":368,"column":18}
 {"project":"third_party/access-examples","file":"Report_099_Object_Listing_Report_rpt.cls","surface":"analyze","code":"VBA214","severity":"warning","line":390,"column":0}
 {"project":"third_party/access-examples","file":"Report_803_Object_Calendar_List_rpt.cls","surface":"analyze","code":"VBA214","severity":"warning","line":51,"column":0}
+{"project":"third_party/access-examples","file":"Report_803_Object_Calendar_List_rpt.cls","surface":"analyze","code":"VBA256","severity":"warning","line":89,"column":6}
 {"project":"third_party/access-examples","file":"Report_803_Object_Calendar_List_rpt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":147,"column":15}
 {"project":"third_party/access-examples","file":"Report_803_Object_Calendar_List_rpt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":147,"column":15}
 {"project":"third_party/access-examples","file":"Report_803_Object_Calendar_List_rpt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":147,"column":15}
@@ -403,11 +407,15 @@
 {"project":"third_party/access-examples","file":"Report_980_Data_Dictionary_rpt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":129,"column":18}
 {"project":"third_party/access-examples","file":"Report_980_Data_Dictionary_rpt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":129,"column":18}
 {"project":"third_party/access-examples","file":"Report_980_Data_Dictionary_rpt.cls","surface":"analyze","code":"VBA214","severity":"warning","line":150,"column":0}
+{"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA256","severity":"warning","line":647,"column":2}
+{"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA256","severity":"warning","line":648,"column":2}
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1156,"column":10}
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1174,"column":21}
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1191,"column":19}
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1212,"column":10}
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA214","severity":"warning","line":1563,"column":0}
+{"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA256","severity":"warning","line":1676,"column":6}
+{"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA256","severity":"warning","line":1805,"column":2}
 {"project":"third_party/access-examples","file":"modCalendar.bas","surface":"analyze","code":"VBA222","severity":"warning","line":711,"column":0}
 {"project":"third_party/access-examples","file":"modCalendar.bas","surface":"analyze","code":"VBA214","severity":"warning","line":753,"column":0}
 {"project":"third_party/access-examples","file":"modCalendar.bas","surface":"analyze","code":"VBA214","severity":"warning","line":753,"column":0}
@@ -510,6 +518,7 @@
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA204","severity":"warning","line":416,"column":0}
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":419,"column":18}
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":419,"column":18}
+{"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA256","severity":"warning","line":447,"column":6}
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA214","severity":"warning","line":482,"column":0}
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":488,"column":18}
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":488,"column":18}

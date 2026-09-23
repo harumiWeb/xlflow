@@ -658,6 +658,18 @@ detect_bang_notation = true
 	}
 }
 
+func TestDeadStoresOptInAndConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA256"); !ok || enabled || cfg.Analyze.DetectDeadStores {
+		t.Fatalf("VBA256 enabled = %v, known = %v, config = %v; want disabled configurable rule", enabled, ok, cfg.Analyze.DetectDeadStores)
+	}
+	cfg.Analyze.DetectDeadStores = true
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA256"); !ok || !enabled {
+		t.Fatalf("enabled VBA256 enabled = %v, known = %v", enabled, ok)
+	}
+}
+
 func TestProcedureCallCyclesDefaultEnabledAndConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()

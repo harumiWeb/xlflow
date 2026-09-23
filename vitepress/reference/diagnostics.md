@@ -131,6 +131,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA253`](#vba253) | analyze | warning     | procedure-local | no      | Implicit default-member access                     |
 | [`VBA254`](#vba254) | analyze | information | procedure-local | no      | Unbound default-member access                      |
 | [`VBA255`](#vba255) | analyze | information | procedure-local | no      | Bang notation                                      |
+| [`VBA256`](#vba256) | analyze | warning     | procedure-local | no      | Dead store                                         |
 | [`VBA257`](#vba257) | analyze | warning     | procedure-local | no      | Discarded Function return value                    |
 | [`VBA258`](#vba258) | analyze | information | project-wide    | no      | Function return value always discarded             |
 
@@ -2839,6 +2840,28 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                       |
 | Real-time editor diagnostic | yes                      |
 | Fix available               | no                       |
+
+## VBA256
+
+**Dead store.** A procedure-local scalar assignment produces a value that is never read before it is overwritten or the procedure exits.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `analyze`            |
+| Category                    | `reliability`        |
+| Evidence class              | `inference`          |
+| Compile-equivalent          | no                   |
+| Default severity            | `warning`            |
+| Supported severities        | `warning`            |
+| Surfaces                    | `analyze`, `lsp`     |
+| Scope                       | `procedure-local`    |
+| Precision                   | `high`               |
+| Enabled by default          | no                   |
+| Configuration               | `detect_dead_stores` |
+| Inline suppression          | yes                  |
+| Blocks source preflight     | no                   |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VBA257
 

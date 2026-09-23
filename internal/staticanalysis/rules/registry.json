@@ -2708,6 +2708,28 @@
       "preflight_blocking": false
     },
     {
+      "id": "VBA256",
+      "title": "Dead store",
+      "description": "A procedure-local scalar assignment produces a value that is never read before it is overwritten or the procedure exits.",
+      "family": "analyze",
+      "category": "reliability",
+      "evidence_class": "inference",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": false,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba256",
+      "configurable": true,
+      "configuration_key": "detect_dead_stores",
+      "inline_suppressible": true,
+      "preflight_blocking": false
+    },
+    {
       "id": "VBA257",
       "title": "Discarded Function return value",
       "description": "A standalone call statement invokes a resolved Function or Property Get and discards the returned value.",

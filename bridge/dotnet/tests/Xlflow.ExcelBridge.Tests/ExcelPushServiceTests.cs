@@ -32,6 +32,8 @@ public sealed class ExcelPushServiceTests
                 "Attribute VB_Name = \"Module1\"\r\nOption Explicit\r\nPublic Sub Main()\r\nEnd Sub\r\n");
 
             var workbookPath = Path.Combine(root, "Book.txt");
+            File.WriteAllText(workbookPath, "saved workbook bytes");
+            var workbookInfo = new FileInfo(workbookPath);
             var statePath = Path.Combine(root, ".xlflow", "state", "push.json");
             var fingerprint = VbaSourceHelper.ComputeFingerprint(
                 workbookPath,
@@ -40,7 +42,18 @@ public sealed class ExcelPushServiceTests
                 formsDir,
                 workbookDir,
                 "");
-            VbaSourceHelper.WriteFingerprintState(fingerprint, statePath);
+            VbaSourceHelper.WritePushState(
+                fingerprint,
+                new PushAppliedTo
+                {
+                    SavedFile = new PushSavedFile
+                    {
+                        Path = workbookPath,
+                        LastWriteTimeUtcTicks = workbookInfo.LastWriteTimeUtc.Ticks,
+                        Length = workbookInfo.Length,
+                    },
+                },
+                statePath);
 
             var service = new ExcelPushService();
             var request = new BridgeRequest
@@ -921,6 +934,443 @@ public sealed class ExcelPushServiceTests
     public sealed class EmptyComponents
     {
         public int Count => 0;
+    }
+
+    // Issue #830: changed-only push state must be bound to the session/workbook
+    // it was applied to, so a fresh session cannot skip the import.
+
+    private static SessionMetadata SessionMeta(
+        string sessionId,
+        int pid = 0,
+        long hwnd = 0,
+        string owner = "managed",
+        bool poisoned = false)
+        => new(
+            Hwnd: hwnd,
+            Pid: pid,
+            WorkbookPath: @"C:\work\Book.xlsm",
+            Owner: owner,
+            Poisoned: poisoned,
+            SessionId: sessionId);
+
+    private static PushAppliedTo AppliedToSession(string sessionId, int pid = 0, long hwnd = 0)
+        => new() { SessionId = sessionId, SessionPid = pid, SessionHwnd = hwnd };
+
+    [Fact]
+    public void EvaluatePushStateCoverage_AllowsSkipForSameSession()
+    {
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            AppliedToSession("session-a"),
+            SessionMeta("session-a", pid: 42, hwnd: 99),
+            sessionWorkbookOpen: true,
+            otherLiveWorkbook: false,
+            useSession: true,
+            savedFileMatches: false);
+
+        Assert.True(decision.Allowed);
+        Assert.True(decision.SessionTarget);
+        Assert.Equal("explicit", decision.SessionMode);
+        Assert.False(decision.ViaSavedFile);
+    }
+
+    [Fact]
+    public void EvaluatePushStateCoverage_UsesAutoModeForImplicitSessionReuse()
+    {
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            AppliedToSession("session-a"),
+            SessionMeta("session-a", pid: 42, hwnd: 99),
+            sessionWorkbookOpen: true,
+            otherLiveWorkbook: false,
+            useSession: false,
+            savedFileMatches: false);
+
+        Assert.True(decision.Allowed);
+        Assert.Equal("auto", decision.SessionMode);
+    }
+
+    [Fact]
+    public void EvaluatePushStateCoverage_UsesExternalModeForExternalOwner()
+    {
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            AppliedToSession("session-a"),
+            SessionMeta("session-a", pid: 42, hwnd: 99, owner: "external"),
+            sessionWorkbookOpen: true,
+            otherLiveWorkbook: false,
+            useSession: true,
+            savedFileMatches: false);
+
+        Assert.True(decision.Allowed);
+        Assert.Equal("external", decision.SessionMode);
+    }
+
+    [Fact]
+    public void EvaluatePushStateCoverage_DeniesSkipForDifferentSession()
+    {
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            AppliedToSession("session-a"),
+            SessionMeta("session-b", pid: 43, hwnd: 100),
+            sessionWorkbookOpen: true,
+            otherLiveWorkbook: false,
+            useSession: true,
+            savedFileMatches: false);
+
+        Assert.False(decision.Allowed);
+    }
+
+    [Fact]
+    public void EvaluatePushStateCoverage_AllowsDifferentSessionViaSavedFile()
+    {
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            AppliedToSession("session-a"),
+            SessionMeta("session-b", pid: 43, hwnd: 100),
+            sessionWorkbookOpen: true,
+            otherLiveWorkbook: false,
+            useSession: true,
+            savedFileMatches: true);
+
+        Assert.True(decision.Allowed);
+        Assert.True(decision.SessionTarget);
+        Assert.True(decision.ViaSavedFile);
+    }
+
+    [Fact]
+    public void EvaluatePushStateCoverage_DeniesSkipForPoisonedSession()
+    {
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            AppliedToSession("session-a"),
+            SessionMeta("session-a", pid: 42, hwnd: 99, poisoned: true),
+            sessionWorkbookOpen: true,
+            otherLiveWorkbook: false,
+            useSession: true,
+            savedFileMatches: true);
+
+        Assert.False(decision.Allowed);
+    }
+
+    [Fact]
+    public void EvaluatePushStateCoverage_DeniesSessionSkipWhenProcessIsDead()
+    {
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            AppliedToSession("session-a"),
+            SessionMeta("session-a"),
+            sessionWorkbookOpen: false,
+            otherLiveWorkbook: false,
+            useSession: true,
+            savedFileMatches: false);
+
+        Assert.False(decision.Allowed);
+    }
+
+    [Fact]
+    public void EvaluatePushStateCoverage_DeniesWhenOtherExcelHoldsWorkbook()
+    {
+        // The recorded session's process is gone but another running Excel has
+        // the workbook open: attach would land on that unverifiable live
+        // workbook rather than the disk file, so even a matching file stamp
+        // must not skip.
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            AppliedToSession("session-a"),
+            SessionMeta("session-a"),
+            sessionWorkbookOpen: false,
+            otherLiveWorkbook: true,
+            useSession: false,
+            savedFileMatches: true);
+
+        Assert.False(decision.Allowed);
+    }
+
+    [Fact]
+    public void EvaluatePushStateCoverage_AllowsFileTargetViaSavedFile()
+    {
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            new PushAppliedTo(),
+            matchingSession: null,
+            sessionWorkbookOpen: false,
+            otherLiveWorkbook: false,
+            useSession: false,
+            savedFileMatches: true);
+
+        Assert.True(decision.Allowed);
+        Assert.False(decision.SessionTarget);
+        Assert.Equal("none", decision.SessionMode);
+        Assert.True(decision.ViaSavedFile);
+    }
+
+    [Fact]
+    public void EvaluatePushStateCoverage_DeniesFileTargetWithoutSavedFile()
+    {
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            AppliedToSession("session-a"),
+            matchingSession: null,
+            sessionWorkbookOpen: false,
+            otherLiveWorkbook: false,
+            useSession: false,
+            savedFileMatches: false);
+
+        Assert.False(decision.Allowed);
+    }
+
+    [Fact]
+    public void EvaluatePushStateCoverage_FallsBackToPidHwndIdentity()
+    {
+        var decision = ExcelPushService.EvaluatePushStateCoverage(
+            AppliedToSession("", pid: 42, hwnd: 99),
+            SessionMeta("", pid: 42, hwnd: 99),
+            sessionWorkbookOpen: true,
+            otherLiveWorkbook: false,
+            useSession: true,
+            savedFileMatches: false);
+
+        Assert.True(decision.Allowed);
+    }
+
+    [Fact]
+    public void SavedFileStampMatchesRequiresSamePathAndStamp()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-push-stamp-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var workbookPath = Path.Combine(root, "Book.xlsm");
+            File.WriteAllText(workbookPath, "workbook-bytes");
+            var info = new FileInfo(workbookPath);
+            var stamp = new PushSavedFile
+            {
+                Path = workbookPath,
+                LastWriteTimeUtcTicks = info.LastWriteTimeUtc.Ticks,
+                Length = info.Length,
+            };
+
+            Assert.True(ExcelPushService.SavedFileStampMatches(stamp, workbookPath));
+
+            File.AppendAllText(workbookPath, "changed");
+            Assert.False(ExcelPushService.SavedFileStampMatches(stamp, workbookPath));
+
+            Assert.False(ExcelPushService.SavedFileStampMatches(stamp, Path.Combine(root, "Other.xlsm")));
+            Assert.False(ExcelPushService.SavedFileStampMatches(null, workbookPath));
+            Assert.False(ExcelPushService.SavedFileStampMatches(
+                new PushSavedFile { Path = "", LastWriteTimeUtcTicks = 1, Length = 1 },
+                workbookPath));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void Execute_ChangedOnlySkipsWhenSavedFileStampMatches()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-push-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var modulesDir = Path.Combine(root, "src", "modules");
+            Directory.CreateDirectory(modulesDir);
+            File.WriteAllText(
+                Path.Combine(modulesDir, "Module1.bas"),
+                "Attribute VB_Name = \"Module1\"\r\nOption Explicit\r\n");
+
+            var workbookPath = Path.Combine(root, "Book.txt");
+            File.WriteAllText(workbookPath, "saved workbook bytes");
+            var workbookInfo = new FileInfo(workbookPath);
+
+            var statePath = Path.Combine(root, ".xlflow", "state", "push.json");
+            var fingerprint = VbaSourceHelper.ComputeFingerprint(
+                workbookPath, modulesDir, "", "", "", "");
+            VbaSourceHelper.WritePushState(
+                fingerprint,
+                new PushAppliedTo
+                {
+                    SavedFile = new PushSavedFile
+                    {
+                        Path = workbookPath,
+                        LastWriteTimeUtcTicks = workbookInfo.LastWriteTimeUtc.Ticks,
+                        Length = workbookInfo.Length,
+                    },
+                },
+                statePath);
+
+            var service = new ExcelPushService();
+            var request = new BridgeRequest
+            {
+                ProtocolVersion = ProtocolVersion.Current,
+                RequestId = "req-push-skip-saved-file",
+                Command = "push",
+            };
+            var args = new PushCommandArguments(
+                WorkbookPath: workbookPath,
+                ModulesDir: modulesDir,
+                ClassesDir: "",
+                FormsDir: "",
+                WorkbookDir: "",
+                CodeSource: "",
+                BackupRoot: Path.Combine(root, ".xlflow", "backups"),
+                Folders: false,
+                FolderAnnotation: "ignore",
+                DefaultComponentFolders: false,
+                StatePath: statePath,
+                Visible: false,
+                BackupMode: "never",
+                ChangedOnly: true,
+                UseSession: false,
+                NoSave: false,
+                MetadataPath: Path.Combine(root, ".xlflow", "session.json"));
+
+            var response = service.Execute(request, args, CancellationToken.None);
+
+            Assert.Equal("ok", response.Status);
+            var source = Assert.IsType<Dictionary<string, object?>>(response.Extensions["source"]);
+            Assert.Equal(false, source["changed"]);
+            var target = Assert.IsType<Dictionary<string, object?>>(response.Extensions["target"]);
+            Assert.Equal("file", target["kind"]);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void Execute_ChangedOnlyDoesNotSkipWhenSessionIdentityDiffers()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-push-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var modulesDir = Path.Combine(root, "src", "modules");
+            Directory.CreateDirectory(modulesDir);
+            File.WriteAllText(
+                Path.Combine(modulesDir, "Module1.bas"),
+                "Attribute VB_Name = \"Module1\"\r\nOption Explicit\r\n");
+
+            // A fresh session (session-b) replaced the session that received the
+            // recorded push (session-a). The dead pid keeps attach deterministic.
+            var workbookPath = Path.Combine(root, "Book.txt");
+            var metadataPath = Path.Combine(root, ".xlflow", "session.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(metadataPath)!);
+            File.WriteAllText(
+                metadataPath,
+                $$"""{"hwnd":0,"pid":0,"workbook_path":"{{workbookPath.Replace("\\", "\\\\", StringComparison.Ordinal)}}","owner":"managed","session_id":"session-b"}""");
+
+            var statePath = Path.Combine(root, ".xlflow", "state", "push.json");
+            var fingerprint = VbaSourceHelper.ComputeFingerprint(
+                workbookPath, modulesDir, "", "", "", "");
+            VbaSourceHelper.WritePushState(
+                fingerprint,
+                AppliedToSession("session-a"),
+                statePath);
+
+            var service = new ExcelPushService();
+            var request = new BridgeRequest
+            {
+                ProtocolVersion = ProtocolVersion.Current,
+                RequestId = "req-push-fresh-session",
+                Command = "push",
+            };
+            var args = new PushCommandArguments(
+                WorkbookPath: workbookPath,
+                ModulesDir: modulesDir,
+                ClassesDir: "",
+                FormsDir: "",
+                WorkbookDir: "",
+                CodeSource: "",
+                BackupRoot: Path.Combine(root, ".xlflow", "backups"),
+                Folders: false,
+                FolderAnnotation: "ignore",
+                DefaultComponentFolders: false,
+                StatePath: statePath,
+                Visible: false,
+                BackupMode: "never",
+                ChangedOnly: true,
+                UseSession: true,
+                NoSave: true,
+                MetadataPath: metadataPath);
+
+            var response = service.Execute(request, args, CancellationToken.None);
+
+            // The fresh session must not skip: attach is attempted and fails
+            // with session_required instead of reporting a no-op skip.
+            Assert.Equal("failed", response.Status);
+            Assert.Equal("session_required", response.Error?.Code);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void Execute_ChangedOnlyDoesNotSkipForLegacyStateWithoutAppliedTo()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-push-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var modulesDir = Path.Combine(root, "src", "modules");
+            Directory.CreateDirectory(modulesDir);
+            File.WriteAllText(
+                Path.Combine(modulesDir, "Module1.bas"),
+                "Attribute VB_Name = \"Module1\"\r\nOption Explicit\r\n");
+
+            var workbookPath = Path.Combine(root, "Book.txt");
+            var statePath = Path.Combine(root, ".xlflow", "state", "push.json");
+            var fingerprint = VbaSourceHelper.ComputeFingerprint(
+                workbookPath, modulesDir, "", "", "", "");
+            VbaSourceHelper.WriteFingerprintState(fingerprint, statePath);
+
+            var service = new ExcelPushService();
+            var request = new BridgeRequest
+            {
+                ProtocolVersion = ProtocolVersion.Current,
+                RequestId = "req-push-legacy-state",
+                Command = "push",
+            };
+            var args = new PushCommandArguments(
+                WorkbookPath: workbookPath,
+                ModulesDir: modulesDir,
+                ClassesDir: "",
+                FormsDir: "",
+                WorkbookDir: "",
+                CodeSource: "",
+                BackupRoot: Path.Combine(root, ".xlflow", "backups"),
+                Folders: false,
+                FolderAnnotation: "ignore",
+                DefaultComponentFolders: false,
+                StatePath: statePath,
+                Visible: false,
+                BackupMode: "never",
+                ChangedOnly: true,
+                UseSession: false,
+                NoSave: false,
+                MetadataPath: Path.Combine(root, ".xlflow", "session.json"));
+
+            var response = service.Execute(request, args, CancellationToken.None);
+
+            // Legacy state carries no delivery evidence, so the push falls back
+            // to the normal import path instead of skipping.
+            Assert.Equal("failed", response.Status);
+            Assert.Equal("bridge_file_not_openable", response.Error?.Code);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
     }
 
     private static PushCommandArguments PushArgs(string backupMode)

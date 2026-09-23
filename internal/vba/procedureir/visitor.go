@@ -45,8 +45,9 @@ type recoveredArgumentSegment struct {
 }
 
 type recoveredCallSyntax struct {
-	callee    Callee
-	arguments []recoveredCallArgument
+	callee      Callee
+	calleeRange vbaast.Range
+	arguments   []recoveredCallArgument
 }
 
 type callFact struct {
@@ -512,6 +513,12 @@ func (v *singleVisitor) appendRecoveredCall(procedure *ProcedureIR, node *tree_s
 		}
 		fact := argumentFact{rng: argument.rng, name: argument.name, valueText: argument.valueText, valueRange: argument.valueRange}
 		facts = append(facts, fact)
+		v.addRecoveredExpressionAccesses(procedure, argument.valueRange.StartByte, argument.valueRange.EndByte, ctx, id)
+	}
+	if recovered.callee.Receiver != nil {
+		if dot := strings.LastIndex(recovered.callee.Text, "."); dot > 0 {
+			v.addRecoveredExpressionAccesses(procedure, recovered.calleeRange.StartByte, recovered.calleeRange.StartByte+dot, ctx, 0)
+		}
 	}
 	procedure.Calls = append(procedure.Calls, CallSite{
 		ID: len(procedure.Calls) + 1, File: v.builder.file, Module: v.builder.moduleName,
@@ -563,6 +570,7 @@ func recoveredCallFromNode(node *tree_sitter.Node, source []byte) (recoveredCall
 		return recoveredCallSyntax{}, false
 	}
 	recovered := recoveredCallSyntax{callee: calleeFromRecoveredText(calleeText)}
+	recovered.calleeRange = recoveredSourceRange(source, start+calleeStart, start+position)
 	argumentStart := recoveredSkipSpace(text, position)
 	if argumentStart >= len(text) {
 		return recovered, true
@@ -696,6 +704,128 @@ func parseRecoveredCallArgument(text string, start, end, absoluteStart int, sour
 
 func recoveredArgumentOmitted(argument recoveredCallArgument) bool {
 	return argument.text == "" && argument.name == "" && argument.valueText == "" && argument.rng.EndByte <= argument.rng.StartByte
+}
+
+// recoveredExpressionKeywords are tokens that never denote a variable
+// reference inside an expression.  The recovered call path scans argument
+// text lexically, so literal and operator keywords must be filtered the same
+// way parser node kinds filter them in the parsed path.
+var recoveredExpressionKeywords = map[string]bool{
+	"addressof": true, "and": true, "as": true, "byval": true, "byref": true,
+	"call": true, "empty": true, "eqv": true, "false": true, "get": true,
+	"imp": true, "in": true, "is": true, "let": true, "like": true, "me": true,
+	"mod": true, "new": true, "not": true, "nothing": true, "null": true,
+	"or": true, "set": true, "to": true, "true": true, "typeof": true,
+	"with": true, "xor": true,
+}
+
+// addRecoveredExpressionAccesses records read accesses for identifiers inside
+// a source span that tree-sitter could not parse (for example a call argument
+// list that begins with an implicit With member).  The scan mirrors the
+// parsed path: member names after '.' or '!', call or index targets followed
+// by '(', keywords, and literal text produce no access.
+func (v *singleVisitor) addRecoveredExpressionAccesses(procedure *ProcedureIR, start, end int, ctx visitContext, expressionID int) {
+	source := v.builder.source
+	if start < 0 {
+		start = 0
+	}
+	if end > len(source) {
+		end = len(source)
+	}
+	if start >= end {
+		return
+	}
+	text := string(source[start:end])
+	position := 0
+	for position < len(text) {
+		character := text[position]
+		switch {
+		case character == '"':
+			position++
+			for position < len(text) {
+				if text[position] == '"' {
+					if position+1 < len(text) && text[position+1] == '"' {
+						position += 2
+						continue
+					}
+					position++
+					break
+				}
+				position++
+			}
+		case character == '\'':
+			for position < len(text) && text[position] != '\n' {
+				position++
+			}
+		case character == '#':
+			// A '#' directly after an identifier or digit is a type suffix;
+			// anywhere else it opens a date literal that runs to the next '#'.
+			if position > 0 && recoveredIdentifierPart(text[position-1]) {
+				position++
+				continue
+			}
+			position++
+			for position < len(text) && text[position] != '#' {
+				position++
+			}
+			if position < len(text) {
+				position++
+			}
+		case character == '[':
+			close := strings.IndexByte(text[position:], ']')
+			if close < 0 {
+				position++
+				continue
+			}
+			name := cleanIdentifier(text[position : position+close+1])
+			if name != "" && !recoveredExpressionKeywords[strings.ToLower(name)] {
+				procedure.Accesses = append(procedure.Accesses,
+					v.recoveredReadAccess(name, start+position, start+position+close+1, ctx, expressionID))
+			}
+			position += close + 1
+		case recoveredIdentifierStart(character):
+			tokenEnd, _ := recoveredIdentifierAt(text, position)
+			name := cleanIdentifier(text[position:tokenEnd])
+			previous := position - 1
+			for previous >= 0 && (text[previous] == ' ' || text[previous] == '\t') {
+				previous--
+			}
+			next := tokenEnd
+			for next < len(text) && strings.IndexByte("$%&#@^!", text[next]) >= 0 {
+				next++
+			}
+			next = recoveredSkipSpace(text, next)
+			member := previous >= 0 && (text[previous] == '.' || text[previous] == '!')
+			hexLiteral := position > 0 && text[position-1] == '&' &&
+				(position-1 == 0 || !recoveredIdentifierPart(text[position-2]))
+			callTarget := next < len(text) && text[next] == '('
+			switch {
+			case name == "" || name == "_" || member || hexLiteral || callTarget:
+			case recoveredExpressionKeywords[strings.ToLower(name)]:
+			default:
+				procedure.Accesses = append(procedure.Accesses,
+					v.recoveredReadAccess(name, start+position, start+tokenEnd, ctx, expressionID))
+			}
+			position = tokenEnd
+		default:
+			position++
+		}
+	}
+}
+
+func (v *singleVisitor) recoveredReadAccess(name string, start, end int, ctx visitContext, expressionID int) VariableAccess {
+	access := VariableAccess{
+		Name: name, Mode: AccessRead, Scope: ScopeUnresolved,
+		Range:       recoveredSourceRange(v.builder.source, start, end),
+		StatementID: ctx.statementID, ExpressionID: expressionID,
+		Resolution: SymbolResolution{Scope: ScopeUnresolved},
+	}
+	if access.ExpressionID == 0 {
+		if procedure := v.procedure(ctx.procedure); procedure != nil {
+			access.ExpressionID = containingExpressionID(procedure.Expressions, access.Range)
+		}
+	}
+	return access
 }
 
 func recoveredNamedArgumentSeparator(text string) int {
@@ -1262,13 +1392,18 @@ func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitC
 		target := childByFieldNameAny(parent, "target", "left", "variable")
 		value := childByFieldNameAny(parent, "value", "right")
 		condition := childByFieldNameAny(parent, "condition", "test")
-		indexedAssignmentComparison := parent.Kind() == "comparison_expression" &&
-			statement.SyntaxKind == "call_statement" && statement.Kind == StatementAssignment
+		// A comparison_expression's left/right fields are operands, never an
+		// assignment target or value.  The dedicated comparison_expression case
+		// above already assigns modes and Target/Value for the recovered
+		// call_statement assignment shape, so the generic matching must skip
+		// comparison children entirely; otherwise "x = (ok = 1)" would mark the
+		// left operand as a write and corrupt statement.Target/Value.
+		comparisonOperand := parent.Kind() == "comparison_expression"
 		switch {
-		case sameNode(child, target) && !indexedAssignmentComparison:
+		case sameNode(child, target) && !comparisonOperand:
 			childCtx.accessMode = targetAccessMode(*statement)
 			statement.Target = expressionStub(child, ctx.statementID, v.builder.source)
-		case sameNode(child, value):
+		case sameNode(child, value) && !comparisonOperand:
 			childCtx.accessMode = AccessRead
 			statement.Value = expressionStub(child, ctx.statementID, v.builder.source)
 		case sameNode(child, condition):

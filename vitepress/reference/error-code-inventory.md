@@ -285,6 +285,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_collection_iteration_mutation`
 - `detect_confusing_call_syntax`
 - `detect_dangerous_resume`
+- `detect_dead_stores`
 - `detect_deterministic_runtime_errors`
 - `detect_dictionary_collection_guard`
 - `detect_dictionary_compare_mode_order`
