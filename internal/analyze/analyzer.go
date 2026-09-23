@@ -78,7 +78,10 @@ type Finding struct {
 	RuntimeError *RuntimeErrorContext `json:"runtime_error,omitempty"`
 	// DefaultMember describes the implicit/default/bang access classified by
 	// VBA253-VBA255 or by a default-member-owned VBA249 runtime failure.
-	DefaultMember         *DefaultMemberContext `json:"default_member,omitempty"`
+	DefaultMember *DefaultMemberContext `json:"default_member,omitempty"`
+	// SelectCaseUnreachable carries the VBA259 unreachable Case item / Case
+	// Else classification so consumers do not have to parse the message text.
+	SelectCaseUnreachable *SelectCaseUnreachableContext `json:"select_case_unreachable,omitempty"`
 	arrayLifecycleFinding bool
 	arrayOperationKey     string
 	httpOwnedSinks        map[int]bool
@@ -652,8 +655,13 @@ type parsedFile struct {
 	ArrayIntegerModuleConstants map[string]int
 	ArrayOptionBase             int
 	ArrayOptionBaseSet          bool
-	ConstantValues              map[string]constexpr.Value
-	RuntimeConstantBase         constexpr.Values
+	// OptionCompare is the module's Option Compare mode ("binary"/"text"/
+	// "database"); OptionCompareSet distinguishes a scanned value from a lazy
+	// fallback computed by fileOptionCompare.
+	OptionCompare       string
+	OptionCompareSet    bool
+	ConstantValues      map[string]constexpr.Value
+	RuntimeConstantBase constexpr.Values
 	// ResumeNextConstantValues is the immutable file-level environment used by
 	// VBA214 scalar probe inspection. Production batch and realtime setup build
 	// it once so procedure workers do not rescan a giant module independently.
@@ -1053,7 +1061,7 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var constantValues map[string]constexpr.Value
-		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors {
+		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors || a.Config.Analyze.DetectUnreachableSelectCase {
 			constantValues = lint.ConstantValuesFromSource(string(source), &ir, nil)
 		}
 		parsedFile := parsedFile{
@@ -1078,6 +1086,10 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 			parsedFile.ArrayOptionBase = optionBase(lines)
 			parsedFile.ArrayOptionBaseSet = true
 			parsedFile.ArrayIntegerModuleConstants = arrayIntegerModuleConstants(parsedFile)
+		}
+		if a.Config.Analyze.DetectUnreachableSelectCase {
+			parsedFile.OptionCompare = optionCompare(lines)
+			parsedFile.OptionCompareSet = true
 		}
 		parsedFiles = append(parsedFiles, parsedFile)
 	}
@@ -1267,6 +1279,7 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 	analysis.visibleConstantValues = projectConstantValues(parsedFiles, analysis.typeDB)
 	for index := range parsedFiles {
 		prepareResumeNextScopeConstantValues(analysis, &parsedFiles[index])
+		prepareRuntimeConstantBase(analysis, &parsedFiles[index])
 	}
 	finishProjectConstants(nil)
 	finishStage = analysisstats.Measure(ctx, "project_context")
@@ -2610,7 +2623,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var constantValues map[string]constexpr.Value
-		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors {
+		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors || cfg.Analyze.DetectUnreachableSelectCase {
 			constantValues = lint.ConstantValuesFromSource(string(view.Source), &ir, projectConstants)
 		}
 		var dataFlowModuleBindings map[string]bool
@@ -2636,6 +2649,10 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		}
 		if constantValues != nil {
 			file.RuntimeConstantBase = constexpr.NewValues(constantValues)
+		}
+		if cfg.Analyze.DetectUnreachableSelectCase {
+			file.OptionCompare = optionCompare(lines)
+			file.OptionCompareSet = true
 		}
 		if expressionDocument != nil && expressionDocument.Path == view.Path && expressionDocument.Source == string(view.Source) {
 			file.IntelDocument = *expressionDocument
@@ -2873,7 +2890,7 @@ sendJobs:
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255", "VBA256", "VBA257", "VBA261", "VBA262"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255", "VBA256", "VBA257", "VBA259", "VBA261", "VBA262"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -3095,6 +3112,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	}
 	if plan.runsProjection(procedureProjectionExcelUIState) && a.Config.Analyze.DetectUnsafeSelectOperations {
 		findings = append(findings, a.activeUIStateFindings(file, proc)...)
+	}
+	if a.Config.Analyze.DetectUnreachableSelectCase && plan.runsProjection(procedureProjectionSelectCase) {
+		findings = append(findings, a.unreachableSelectCaseFindings(file, proc, moduleDecls)...)
 	}
 	return findings, ctx.Err()
 }
@@ -4112,6 +4132,12 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	otherMeasurement.finish(len(functionFindings))
 	findings = append(findings, functionFindings...)
 	findings = append(findings, a.discardedReturnFindings(file, proc, ctx.projectResolver)...)
+	if a.Config.Analyze.DetectUnreachableSelectCase && plan.runsProjection(procedureProjectionSelectCase) {
+		selectCaseMeasurement := profile.begin(procedureDomainOther)
+		selectCaseFindings := a.unreachableSelectCaseFindings(file, proc, moduleDecls)
+		selectCaseMeasurement.finish(len(selectCaseFindings))
+		findings = append(findings, selectCaseFindings...)
+	}
 	findings = suppressDictionaryGuardsForUninitializedObjects(findings)
 	return findings, cancelCtx.Err()
 }
@@ -5942,6 +5968,29 @@ func prepareResumeNextScopeConstantValues(a Analyzer, file *parsedFile) {
 		values = map[string]constexpr.Value{}
 	}
 	file.ResumeNextConstantValues = values
+}
+
+// prepareRuntimeConstantBase normalizes the merged project/file constant
+// environment once per file. Procedure workers then wrap it in a
+// runtimeConstantScope that hides local names instead of re-merging the
+// project constants for every procedure. The base is built only when a rule
+// that consumes procedureConstantEnvironment is enabled; a nil
+// file.ConstantValues keeps the lazy fallback for helper callers.
+func prepareRuntimeConstantBase(a Analyzer, file *parsedFile) {
+	if file == nil || file.RuntimeConstantBase != nil || file.ConstantValues == nil {
+		return
+	}
+	if !a.Config.Analyze.DetectDeterministicRuntimeErrors && !a.Config.Analyze.DetectUnreachableSelectCase {
+		return
+	}
+	values := make(map[string]constexpr.Value, len(a.visibleConstantValues)+len(file.ConstantValues))
+	for name, value := range a.visibleConstantValues {
+		values[name] = value
+	}
+	for name, value := range file.ConstantValues {
+		values[name] = value
+	}
+	file.RuntimeConstantBase = constexpr.NewValues(values)
 }
 
 func resumeNextScopePreparedConstantValues(a Analyzer, file parsedFile) map[string]constexpr.Value {

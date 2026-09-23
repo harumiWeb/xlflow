@@ -31,6 +31,7 @@ var requiredSpecContracts = map[string]string{
 	"VBA256": "vba-dead-store-diagnostics.md",
 	"VBA257": "vba-discarded-function-return-diagnostics.md",
 	"VBA258": "vba-discarded-function-return-diagnostics.md",
+	"VBA259": "vba-select-case-reachability.md",
 	"VBA260": "excel-semantic-inspections.md",
 	"VBA261": "excel-semantic-inspections.md",
 	"VBA262": "excel-semantic-inspections.md",
