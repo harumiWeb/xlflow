@@ -333,6 +333,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_stateful_excel_call_arguments`
 - `detect_unavailable_worksheet_function_members`
 - `detect_unbound_default_member_access`
+- `detect_unreachable_select_case`
 - `detect_unsafe_command_construction`
 - `detect_unsafe_file_path`
 - `detect_unsafe_http_configuration`
@@ -399,6 +400,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `effect_summary_worklist_evaluations`
 - `element_type`
 - `else_clause`
+- `else_covered`
 - `else_fragment`
 - `else_if`
 - `else_without_if`
@@ -408,6 +410,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `elseif_without_if`
 - `empty_parentheses`
 - `empty_path`
+- `empty_range`
 - `enable_events_after`
 - `enable_events_before`
 - `enable_vba_object_model_access`

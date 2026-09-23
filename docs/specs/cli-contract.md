@@ -1598,7 +1598,8 @@ Configurable analyzer rule IDs map to legacy keys as follows: `VBA201` = `detect
 `detect_unavailable_worksheet_function_members`; `VBA253` maps to
 `detect_implicit_default_member_access`; `VBA254` maps to
 `detect_unbound_default_member_access`; and `VBA255` maps to
-`detect_bang_notation`; `VBA256` maps to `detect_dead_stores`; `VBA260` maps to
+`detect_bang_notation`; `VBA256` maps to `detect_dead_stores`; `VBA259` maps
+to `detect_unreachable_select_case`; `VBA260` maps to
 `detect_worksheet_string_access`; `VBA261` maps to
 `detect_application_worksheet_function_dispatch`; and `VBA262` maps to
 `detect_host_bracket_expressions`.
@@ -1626,6 +1627,16 @@ Their detailed contracts are defined in
 procedure-local rule available in batch and realtime analysis. It reports only
 high-confidence writes to local scalar values that are not observed before an
 overwrite or procedure exit. Enable it with `detect_dead_stores = true`.
+
+`VBA259` is an opt-in, warning-level, non-blocking, inline-suppressible
+procedure-local rule available in batch and realtime analysis. It reports a
+`Case` item or `Case Else` branch that can never execute because earlier items
+already cover every matching selector value: duplicates, items fully covered
+by earlier ranges, empty `To` ranges, items a declared selector type cannot
+satisfy, and `Case Else` branches on exhaustively covered finite domains.
+`Option Compare` semantics are honored, and recovered syntax, cross-type
+items, unknown operands, and `Date`/object selectors stay silent. Enable it
+with `detect_unreachable_select_case = true`.
 
 `VBA249` is default-enabled, `error`-level, high-precision, procedure-local,
 available in batch and real-time analysis, inline-suppressible, and

@@ -134,6 +134,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA256`](#vba256) | analyze | warning     | procedure-local | no      | Dead store                                         |
 | [`VBA257`](#vba257) | analyze | warning     | procedure-local | no      | Discarded Function return value                    |
 | [`VBA258`](#vba258) | analyze | information | project-wide    | no      | Function return value always discarded             |
+| [`VBA259`](#vba259) | analyze | warning     | procedure-local | no      | Unreachable Select Case branch                     |
 | [`VBA260`](#vba260) | analyze | warning     | procedure-local | no      | Worksheet string access                            |
 | [`VBA261`](#vba261) | analyze | information | procedure-local | no      | Application worksheet-function dispatch            |
 | [`VBA262`](#vba262) | analyze | warning     | procedure-local | no      | Excel host bracket expression                      |
@@ -2909,6 +2910,28 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                        |
 | Real-time editor diagnostic | no                                        |
 | Fix available               | no                                        |
+
+## VBA259
+
+**Unreachable Select Case branch.** A Select Case item or Case Else branch can never run because earlier Case items already cover every matching selector value.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `maintainability`                |
+| Evidence class              | `inference`                      |
+| Compile-equivalent          | no                               |
+| Default severity            | `warning`                        |
+| Supported severities        | `warning`, `information`         |
+| Surfaces                    | `analyze`, `lsp`                 |
+| Scope                       | `procedure-local`                |
+| Precision                   | `high`                           |
+| Enabled by default          | no                               |
+| Configuration               | `detect_unreachable_select_case` |
+| Inline suppression          | yes                              |
+| Blocks source preflight     | no                               |
+| Real-time editor diagnostic | yes                              |
+| Fix available               | no                               |
 
 ## VBA260
 

@@ -2774,6 +2774,28 @@
       "preflight_blocking": false
     },
     {
+      "id": "VBA259",
+      "title": "Unreachable Select Case branch",
+      "description": "A Select Case item or Case Else branch can never run because earlier Case items already cover every matching selector value.",
+      "family": "analyze",
+      "category": "maintainability",
+      "evidence_class": "inference",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning", "information"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": false,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba259",
+      "configurable": true,
+      "configuration_key": "detect_unreachable_select_case",
+      "inline_suppressible": true,
+      "preflight_blocking": false
+    },
+    {
       "id": "VBA260",
       "title": "Worksheet string access",
       "description": "A ThisWorkbook worksheet is accessed by its visible name even though its stable VBA CodeName is known.",

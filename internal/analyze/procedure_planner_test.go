@@ -587,6 +587,30 @@ func TestProcedureAnalysisPlanSchedulesVBA209ForObjectComparison(t *testing.T) {
 	}
 }
 
+func TestProcedureAnalysisPlanGatesVBA259OnSelectCaseFeature(t *testing.T) {
+	cfg := analyzeConfigForRules("VBA259")
+	withSelect := sourceProcedureWithFeatureSet(procedureFeatureSet{present: featureSelectCase})
+	plan := buildProcedureAnalysisPlan(cfg, withSelect, nil)
+	if !plan.enabledProjection(procedureProjectionSelectCase) || !plan.runsProjection(procedureProjectionSelectCase) {
+		t.Fatalf("select-case plan = %#v, want VBA259 projection planned", plan)
+	}
+
+	withoutSelect := sourceProcedureWithFeatureSet(procedureFeatureSet{present: featureLoop})
+	plan = buildProcedureAnalysisPlan(cfg, withoutSelect, nil)
+	if !plan.enabledProjection(procedureProjectionSelectCase) {
+		t.Fatalf("no-select plan = %#v, enabled projection should still reflect the opt-in config", plan)
+	}
+	if plan.runsProjection(procedureProjectionSelectCase) {
+		t.Fatalf("no-select plan = %#v, VBA259 must not run without Select Case evidence", plan)
+	}
+
+	unknown := sourceProcedureWithFeatureSet(procedureFeatureSet{unknown: allProcedureFeatures})
+	plan = buildProcedureAnalysisPlan(cfg, unknown, nil)
+	if !plan.runsProjection(procedureProjectionSelectCase) {
+		t.Fatalf("unknown-feature plan = %#v, VBA259 must fail open", plan)
+	}
+}
+
 func TestProcedureDomainProfilePlanAndResultReuseTelemetry(t *testing.T) {
 	recorder := analysisstats.NewRecorder()
 	profile := newProcedureDomainProfile(analysisstats.WithRecorder(context.Background(), recorder))
@@ -674,6 +698,7 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		"VBA225/excel":    true, "VBA238/excel": true, "VBA242/excel": true, "VBA243/excel": true, "VBA250/excel": true, "VBA262/excel": true,
 		"VBA203/application_state": true, "VBA220/application_state": true, "VBA221/application_state": true,
 		"VBA256/other": true,
+		"VBA259/other": true,
 	}
 	seen := map[string]bool{}
 	always := map[string]bool{}
@@ -840,6 +865,8 @@ func analyzeConfigForRules(ids ...string) config.AnalyzeConfig {
 			cfg.DetectMissingHTTPTimeout = true
 		case "VBA249":
 			cfg.DetectDeterministicRuntimeErrors = true
+		case "VBA259":
+			cfg.DetectUnreachableSelectCase = true
 		default:
 			panic("test helper has no field for " + id)
 		}

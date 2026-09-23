@@ -189,6 +189,7 @@ func MaterializeThirdPartyProject(corpusRoot string, project Project, opts Mater
 	cfg.Analyze.DetectDeadStores = true
 	cfg.Analyze.DetectDiscardedFunctionReturn = true
 	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
+	cfg.Analyze.DetectUnreachableSelectCase = true
 	if err := config.Write(filepath.Join(workspace.Root, config.FileName), cfg); err != nil {
 		return workspace, fmt.Errorf("write materialized project config: %w", err)
 	}

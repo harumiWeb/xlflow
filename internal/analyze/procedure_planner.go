@@ -42,6 +42,7 @@ const (
 	featureUIState
 	featureScalarAssignment
 	featureHostBracket
+	featureSelectCase
 	procedureFeatureLimit
 )
 
@@ -109,6 +110,8 @@ func (features *procedureFeatureSet) observeStatement(statement procedureir.Stat
 		features.add(featureOnError)
 	case procedureir.StatementCall:
 		features.add(featureCalls | featureByRefCalls)
+	case procedureir.StatementSelect:
+		features.add(featureSelectCase)
 	}
 	features.observeText(statement.Text)
 }
@@ -261,6 +264,9 @@ func (features *procedureFeatureSet) observeText(text string) {
 	) {
 		features.add(featureApplicationState)
 	}
+	if strings.Contains(lower, "select case") {
+		features.add(featureSelectCase)
+	}
 }
 
 func containsAny(value string, needles ...string) bool {
@@ -371,6 +377,7 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA222", domain: analysisstats.DomainOther, capabilities: projectCapabilityPublicAPITypeIndex, projectOnly: true},
 	{id: "VBA240", domain: analysisstats.DomainOther, capabilities: projectCapabilityModuleState, projectOnly: true},
 	{id: "VBA244", domain: analysisstats.DomainOther, any: featureCalls, capabilities: projectCapabilityEffects, projectOnly: true},
+	{id: "VBA259", domain: analysisstats.DomainOther, any: featureSelectCase},
 }
 
 type procedureAnalysisPlan struct {
@@ -489,6 +496,7 @@ const (
 	procedureProjectionApplicationEffects
 	procedureProjectionApplicationReentry
 	procedureProjectionDeadStore
+	procedureProjectionSelectCase
 	procedureProjectionLimit
 )
 
@@ -601,6 +609,8 @@ func procedureProjectionForRequirement(requirement procedureRuleRequirement) pro
 		return procedureProjectionApplicationReentry
 	case "VBA256":
 		return procedureProjectionDeadStore
+	case "VBA259":
+		return procedureProjectionSelectCase
 	}
 	// A future requirement must still be represented in a plan. Falling back
 	// to the first projection in its domain is conservative and keeps unknown

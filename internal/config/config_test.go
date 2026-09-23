@@ -670,6 +670,18 @@ func TestDeadStoresOptInAndConfigurable(t *testing.T) {
 	}
 }
 
+func TestUnreachableSelectCaseOptInAndConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA259"); !ok || enabled || cfg.Analyze.DetectUnreachableSelectCase {
+		t.Fatalf("VBA259 enabled = %v, known = %v, config = %v; want disabled configurable rule", enabled, ok, cfg.Analyze.DetectUnreachableSelectCase)
+	}
+	cfg.Analyze.DetectUnreachableSelectCase = true
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA259"); !ok || !enabled {
+		t.Fatalf("enabled VBA259 enabled = %v, known = %v", enabled, ok)
+	}
+}
+
 func TestProcedureCallCyclesDefaultEnabledAndConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
