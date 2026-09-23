@@ -3050,6 +3050,105 @@ End Sub
 	}
 }
 
+func TestLinterVB021ReportsUnreachableFriendProcedures(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Friend Sub FriendOrphan()
+End Sub
+
+Friend Sub FriendUsed()
+End Sub
+
+Public Sub Run()
+  FriendUsed
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	if len(got) != 1 || got[0].Symbol != "FriendOrphan" {
+		t.Fatalf("VB021 friend reachability = %+v, want FriendOrphan only", got)
+	}
+}
+
+func TestLinterVB021ReportsPublicProceduresHiddenByOptionPrivateModule(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Hidden.bas", `Attribute VB_Name = "Hidden"
+Option Explicit
+Option Private Module
+Public Sub HiddenPublic()
+End Sub
+
+Private Sub HiddenPrivate()
+End Sub
+`)
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Project.Entry = "Missing.Run"
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	symbols := map[string]bool{}
+	for _, issue := range got {
+		symbols[issue.Symbol] = true
+	}
+	if !symbols["HiddenPublic"] || !symbols["HiddenPrivate"] {
+		t.Fatalf("VB021 host-hidden module findings = %+v, want HiddenPublic and HiddenPrivate", got)
+	}
+}
+
+func TestLinterVB021KeepsExposedModulePublicSurfaceAsRoots(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Exposed.bas", `Attribute VB_Name = "Exposed"
+Attribute VB_Exposed = True
+Option Explicit
+Option Private Module
+Public Sub ExposedApi()
+End Sub
+
+Private Sub ExposedOrphan()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Project.Entry = "Missing.Run"
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	for _, issue := range got {
+		if issue.Symbol == "ExposedApi" {
+			t.Fatalf("VB_Exposed public procedure was reported: %+v", issue)
+		}
+	}
+	found := false
+	for _, issue := range got {
+		if issue.Symbol == "ExposedOrphan" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("private orphan in exposed module was not reported: %+v", got)
+	}
+}
+
 func TestLinterUnusedLocalVariableUsesProcedureBounds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -673,6 +673,7 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		"VBA225/excel":    true, "VBA238/excel": true, "VBA242/excel": true, "VBA243/excel": true, "VBA250/excel": true,
 		"VBA203/application_state": true, "VBA220/application_state": true, "VBA221/application_state": true,
 		"VBA256/other": true,
+		"VBA260/other": true, "VBA263/other": true, "VBA264/other": true,
 	}
 	seen := map[string]bool{}
 	always := map[string]bool{}

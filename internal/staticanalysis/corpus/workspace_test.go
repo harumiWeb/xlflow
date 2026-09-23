@@ -45,6 +45,17 @@ func TestMaterializeThirdPartyProjectsPreservesSourcesAndClassifications(t *test
 		if !loaded.Analyze.DetectDeadStores {
 			t.Fatalf("generated config did not enable VBA256 for corpus review for %s", project.ID)
 		}
+		for code, enabled := range map[string]bool{
+			"VBA260": loaded.Analyze.DetectUnusedParameters,
+			"VBA261": loaded.Analyze.DetectUnusedPrivateConstants,
+			"VBA262": loaded.Analyze.DetectUnusedUDTMembers,
+			"VBA263": loaded.Analyze.DetectNeverAssignedVariables,
+			"VBA264": loaded.Analyze.DetectUnassignedVariableUsage,
+		} {
+			if !enabled {
+				t.Fatalf("generated config did not enable %s for corpus review for %s", code, project.ID)
+			}
+		}
 		if project.Profile == ProfileExcel && !loaded.Analyze.DetectExpensiveFullRangeOperations {
 			t.Fatalf("generated config did not opt in VBA242 for %s", project.ID)
 		}

@@ -189,6 +189,11 @@ func MaterializeThirdPartyProject(corpusRoot string, project Project, opts Mater
 	cfg.Analyze.DetectDeadStores = true
 	cfg.Analyze.DetectDiscardedFunctionReturn = true
 	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
+	cfg.Analyze.DetectUnusedParameters = true
+	cfg.Analyze.DetectUnusedPrivateConstants = true
+	cfg.Analyze.DetectUnusedUDTMembers = true
+	cfg.Analyze.DetectNeverAssignedVariables = true
+	cfg.Analyze.DetectUnassignedVariableUsage = true
 	if err := config.Write(filepath.Join(workspace.Root, config.FileName), cfg); err != nil {
 		return workspace, fmt.Errorf("write materialized project config: %w", err)
 	}

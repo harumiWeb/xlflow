@@ -236,6 +236,11 @@ type AnalyzeConfig struct {
 	DetectDeadStores                          bool     `toml:"detect_dead_stores"`
 	DetectDiscardedFunctionReturn             bool     `toml:"detect_discarded_function_return"`
 	DetectFunctionReturnAlwaysDiscarded       bool     `toml:"detect_function_return_always_discarded"`
+	DetectUnusedParameters                    bool     `toml:"detect_unused_parameters"`
+	DetectUnusedPrivateConstants              bool     `toml:"detect_unused_private_constants"`
+	DetectUnusedUDTMembers                    bool     `toml:"detect_unused_udt_members"`
+	DetectNeverAssignedVariables              bool     `toml:"detect_never_assigned_variables"`
+	DetectUnassignedVariableUsage             bool     `toml:"detect_unassigned_variable_usage"`
 	DevelopmentHTTPOrigins                    []string `toml:"development_http_origins"`
 }
 
@@ -342,6 +347,11 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA256": {Get: func(c AnalyzeConfig) bool { return c.DetectDeadStores }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDeadStores = v }},
 	"VBA257": {Get: func(c AnalyzeConfig) bool { return c.DetectDiscardedFunctionReturn }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDiscardedFunctionReturn = v }},
 	"VBA258": {Get: func(c AnalyzeConfig) bool { return c.DetectFunctionReturnAlwaysDiscarded }, Set: func(c *AnalyzeConfig, v bool) { c.DetectFunctionReturnAlwaysDiscarded = v }},
+	"VBA260": {Get: func(c AnalyzeConfig) bool { return c.DetectUnusedParameters }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnusedParameters = v }},
+	"VBA261": {Get: func(c AnalyzeConfig) bool { return c.DetectUnusedPrivateConstants }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnusedPrivateConstants = v }},
+	"VBA262": {Get: func(c AnalyzeConfig) bool { return c.DetectUnusedUDTMembers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnusedUDTMembers = v }},
+	"VBA263": {Get: func(c AnalyzeConfig) bool { return c.DetectNeverAssignedVariables }, Set: func(c *AnalyzeConfig, v bool) { c.DetectNeverAssignedVariables = v }},
+	"VBA264": {Get: func(c AnalyzeConfig) bool { return c.DetectUnassignedVariableUsage }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnassignedVariableUsage = v }},
 }
 
 var (

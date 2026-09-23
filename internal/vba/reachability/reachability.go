@@ -5,6 +5,7 @@ package reachability
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -26,6 +27,11 @@ type Options struct {
 type Result struct {
 	Roots []callgraph.Root
 	callgraph.ReachabilityResult
+	// Reportable marks call-graph nodes that VB021 may surface. Private and
+	// Friend procedures are always candidates; Public procedures qualify only
+	// when Option Private Module hides them from the host and the module is
+	// not VB_Exposed.
+	Reportable map[string]bool
 }
 
 func Analyze(opts Options) (Result, error) {
@@ -36,8 +42,91 @@ func Analyze(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	result := callgraph.AnalyzeReachability(callgraph.SnapshotFromResult(opts.Calls), callgraph.ReachabilityRequest{Roots: roots})
-	return Result{Roots: roots, ReachabilityResult: result}, nil
+	reportable := buildReportable(opts)
+	result := callgraph.AnalyzeReachability(callgraph.SnapshotFromResult(opts.Calls), callgraph.ReachabilityRequest{Roots: roots, Reportable: reportable})
+	return Result{Roots: roots, ReachabilityResult: result, Reportable: reportable}, nil
+}
+
+// buildReportable computes which procedures are internal enough to report
+// when unreachable. Friend members are project-internal by visibility, and
+// Public procedures in an Option Private Module lose the host-facing surface
+// unless the module is VB_Exposed.
+func buildReportable(opts Options) map[string]bool {
+	reportable := make(map[string]bool)
+	if opts.Symbols == nil {
+		return reportable
+	}
+	for _, file := range opts.Symbols.Files {
+		privacy := modulePrivacyFacts(opts.RootDir, file)
+		for _, sym := range file.Symbols {
+			if !procedureSymbolKind(sym.Kind) || strings.TrimSpace(sym.Name) == "" {
+				continue
+			}
+			key := callgraph.ID{
+				Module: sym.Module, QualifiedName: sym.Module + "." + sym.Name,
+				Kind: sym.Kind, File: sym.File, Line: sym.StartLine, Column: sym.StartColumn,
+			}.String()
+			switch strings.ToLower(strings.TrimSpace(sym.Visibility)) {
+			case "private", "friend":
+				reportable[key] = true
+			default:
+				if privacy.hostHidden {
+					reportable[key] = true
+				}
+			}
+		}
+	}
+	return reportable
+}
+
+// modulePrivacy describes how a module's public surface interacts with host
+// visibility. hostHidden is true when `Option Private Module` applies and the
+// module is not re-exposed through the VB_Exposed attribute.
+type modulePrivacy struct {
+	optionPrivate bool
+	exposed       bool
+	hostHidden    bool
+}
+
+func modulePrivacyFacts(rootDir string, file symbols.FileResult) modulePrivacy {
+	var privacy modulePrivacy
+	// Option Private Module only narrows standard and class modules; document
+	// and form modules keep their host-driven surface.
+	if !strings.EqualFold(file.ModuleKind, "standard") && !strings.EqualFold(file.ModuleKind, "class") {
+		return privacy
+	}
+	for _, sym := range file.Symbols {
+		if sym.Kind != "module" {
+			continue
+		}
+		for _, attribute := range sym.Attributes {
+			if strings.EqualFold(attribute.Name, "VB_Exposed") && strings.EqualFold(strings.TrimSpace(attribute.Value), "True") {
+				privacy.exposed = true
+			}
+		}
+	}
+	privacy.optionPrivate = moduleDeclaresOptionPrivate(rootDir, file)
+	privacy.hostHidden = privacy.optionPrivate && !privacy.exposed
+	return privacy
+}
+
+var optionPrivateModuleRE = regexp.MustCompile(`(?i)^\s*option\s+private\s+module\b`)
+
+func moduleDeclaresOptionPrivate(rootDir string, file symbols.FileResult) bool {
+	path := file.Path
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(rootDir, filepath.FromSlash(path))
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		if optionPrivateModuleRE.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 func buildRoots(opts Options) ([]callgraph.Root, error) {
@@ -63,15 +152,21 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 	}
 
 	for _, file := range opts.Symbols.Files {
+		privacy := modulePrivacyFacts(opts.RootDir, file)
 		for _, sym := range file.Symbols {
 			if !procedureSymbolKind(sym.Kind) || strings.TrimSpace(sym.Name) == "" {
 				continue
 			}
 			target := sym.Module + "." + sym.Name
 			lowerName := strings.ToLower(sym.Name)
-			public := !strings.EqualFold(sym.Visibility, "Private")
+			visibility := strings.ToLower(strings.TrimSpace(sym.Visibility))
+			public := visibility != "private" && visibility != "friend"
+			// Friend members and host-hidden public procedures have no
+			// host-facing surface; they are reachable only from inside the
+			// project or through statically discoverable dynamic references.
+			external := public && !privacy.hostHidden
 			standard := strings.EqualFold(file.ModuleKind, "standard")
-			publicMacro := standard && public && sym.Kind == "sub" && len(sym.Parameters) == 0
+			publicMacro := standard && external && sym.Kind == "sub" && len(sym.Parameters) == 0
 			testProcedure := standard && public && testdiscover.IsTestProcedure(sym)
 
 			if publicMacro {
@@ -80,7 +175,7 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 			if testProcedure {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootConfirmed, Reason: "test procedure"})
 			}
-			if standard && public && !publicMacro && !testProcedure {
+			if standard && external && !publicMacro && !testProcedure {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootPossible, Reason: "public standard-module API"})
 			}
 			if event, kind := procedureir.ClassifyEvent(file.ModuleKind, sym.Name); event {
