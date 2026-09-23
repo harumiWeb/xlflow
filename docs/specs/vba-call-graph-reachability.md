@@ -22,7 +22,11 @@ The root set is built before internal procedures are classified. It includes:
   Excel, worksheet formulas, or external VBA are not present in the project
   call graph;
 
-- test procedures in standard modules;
+- test procedures in standard modules, only while the module remains
+  host-visible — a `Test*` procedure inside a host-hidden module is reportable
+  like any other host-hidden public procedure;
+- public members of `VB_Exposed = True` class modules as possible roots,
+  because external clients can invoke them without a project caller;
 - `Auto_Open` and `Auto_Close`;
 - recognized `Workbook_*` and `Worksheet_*` host-event procedures in document
   modules; the prefix alone does not make an arbitrary helper an event;

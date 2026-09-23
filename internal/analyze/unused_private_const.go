@@ -69,9 +69,9 @@ func (a Analyzer) unusedPrivateConstFindings(file parsedFile) []Finding {
 			"Private Const "+cleanIdentifier(declaration.Name)+" is never referenced.",
 			"No procedure access, declaration initializer, or conditional-compilation directive in this module uses the constant.",
 			"Remove the declaration, or reference it where the value is needed.")
-		finding.Column = declaration.Range.StartColumn + 1
+		finding.Column = declaration.Range.StartColumn
 		finding.EndLine = declaration.Range.EndLine
-		finding.EndColumn = declaration.Range.EndColumn + 1
+		finding.EndColumn = declaration.Range.EndColumn
 		findings = append(findings, finding)
 	}
 	sort.Slice(findings, func(i, j int) bool {

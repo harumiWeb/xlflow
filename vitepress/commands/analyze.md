@@ -261,6 +261,11 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA254` | information / warning | Default-member access is unbound, late-bound, or incomplete and should be reviewed when the project opts in.                                                         |
 | `VBA255` | information / warning | Bang notation (`receiver!name`) relies on stringly typed/default-member semantics.                                                                                   |
 | `VBA256` | warning               | A procedure-local scalar assignment is never read before the value is overwritten or the procedure exits.                                                            |
+| `VBA260` | warning               | A private-procedure parameter is never referenced in the procedure body.                                                                                             |
+| `VBA261` | warning               | A module-level `Private Const` declaration is never referenced in the module.                                                                                        |
+| `VBA262` | information           | A `Private Type` member is never accessed through a resolvable member expression.                                                                                    |
+| `VBA263` | warning               | A procedure-local scalar variable is read but never assigned.                                                                                                        |
+| `VBA264` | warning               | A procedure-local variable is read on a path where no assignment is guaranteed to have executed.                                                                     |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -293,6 +298,12 @@ Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214
 
 `VBA256` is opt-in and reports high-confidence dead stores for procedure-local
 scalar assignments. Enable it with `detect_dead_stores = true`.
+`VBA260` through `VBA264` are opt-in unused-declaration rules; enable them with
+`detect_unused_parameters`, `detect_unused_private_constants`,
+`detect_unused_udt_members`, `detect_never_assigned_variables`, and
+`detect_unassigned_variable_usage`. They exclude externally fixed signatures —
+event handlers, `Implements` members, `WithEvents` callbacks, and dynamically
+invoked procedures — and fail open on unresolved or ambiguous shapes.
 Complete default-member runtime failures are reported by `VBA249`, while
 `VBA202` retains ownership of proven error-91 object-use-before-`Set`/`Nothing`
 cases.

@@ -25,9 +25,9 @@ func (a Analyzer) variableAssignmentFindings(file parsedFile, proc sourceProcedu
 				"Local variable "+candidate.displayName+" is read but never assigned.",
 				"No statement, ReDim, or resolvable ByRef call assigns a value to this variable, so every read observes the implicit default.",
 				"Initialize the variable before use, or remove the declaration when the read was unintended.")
-			finding.Column = candidate.decl.StartColumn + 1
+			finding.Column = candidate.decl.StartColumn
 			finding.EndLine = candidate.decl.EndLine
-			finding.EndColumn = candidate.decl.EndColumn + 1
+			finding.EndColumn = candidate.decl.EndColumn
 			findings = append(findings, finding)
 		}
 	}
@@ -37,9 +37,9 @@ func (a Analyzer) variableAssignmentFindings(file parsedFile, proc sourceProcedu
 				"Variable "+candidate.displayName+" is read before any assignment is guaranteed to have executed.",
 				"A reachable control-flow path enters this statement without a completed assignment to "+candidate.displayName+".",
 				"Assign the variable on every path that reaches this read, or check the earlier assignment condition.")
-			finding.Column = candidate.read.StartColumn + 1
+			finding.Column = candidate.read.StartColumn
 			finding.EndLine = candidate.read.EndLine
-			finding.EndColumn = candidate.read.EndColumn + 1
+			finding.EndColumn = candidate.read.EndColumn
 			findings = append(findings, finding)
 		}
 	}
@@ -183,6 +183,13 @@ func assignmentFacts(proc sourceProcedure, signatures map[string]procedureSignat
 			continue
 		}
 		if assignmentAmbiguousStatement(statement) {
+			delete(candidates, name)
+			continue
+		}
+		if target, shaped := assignmentAmbiguousTarget(statement); shaped && (target == "" || target == name) {
+			// LSet/RSet/Mid$ statements write a target the IR records only as
+			// a read. Only the target variable is ambiguous; the remaining
+			// accesses on the statement are ordinary reads.
 			delete(candidates, name)
 			continue
 		}
@@ -342,26 +349,56 @@ func isScalarAssignmentType(typeName string) bool {
 
 // assignmentAmbiguousStatement reports statements whose assignment semantics
 // the IR does not model precisely enough to classify reads and writes. Input
-// #/Line Input #/Get # parse as unknown statements but assign their targets;
-// LSet/RSet and Mid$() assignment parse as calls/assignments that write a
-// variable recorded only as a read.
+// #/Line Input #/Get # parse as unknown statements but assign their targets.
+// LSet/RSet/Mid$ statements are handled per variable by
+// assignmentAmbiguousTarget instead.
 func assignmentAmbiguousStatement(statement procedureir.Statement) bool {
-	if statement.Kind == procedureir.StatementUnknown || statement.Kind == procedureir.StatementRecovered || statement.Recovered {
-		return true
-	}
+	return statement.Kind == procedureir.StatementUnknown || statement.Kind == procedureir.StatementRecovered || statement.Recovered
+}
+
+// assignmentAmbiguousTarget isolates the write target of an LSet/RSet/Mid$
+// assignment statement. These shapes parse as calls or assignments whose
+// target is recorded only as a read, so the target variable cannot be
+// classified. shaped reports whether the statement follows one of those
+// forms; an empty target with shaped=true means the form was recognized but
+// the target could not be isolated, so every candidate touched by the
+// statement is ambiguous.
+func assignmentAmbiguousTarget(statement procedureir.Statement) (target string, shaped bool) {
 	if statement.Kind != procedureir.StatementCall && statement.Kind != procedureir.StatementAssignment {
-		return false
+		return "", false
 	}
-	fields := strings.Fields(strings.ToLower(strings.TrimSpace(statement.Text)))
-	if len(fields) == 0 {
-		return false
+	text := strings.TrimSpace(statement.Text)
+	keyword := strings.ToLower(text)
+	// The keyword may attach directly to the target's argument list
+	// (`Mid$(target, ...) = rhs`), so it ends at the first `(` or whitespace
+	// rather than at a whitespace boundary alone.
+	if index := strings.IndexAny(keyword, " (\t"); index >= 0 {
+		keyword = keyword[:index]
 	}
-	switch strings.TrimRight(fields[0], "$") {
-	case "lset", "rset", "mid":
-		return true
+	rest := strings.TrimSpace(text[len(keyword):])
+	switch strings.TrimRight(keyword, "$") {
+	case "lset", "rset":
+		return assignmentCanonicalName(leadingIdentifier(rest)), true
+	case "mid":
+		if !strings.HasPrefix(rest, "(") {
+			return "", true
+		}
+		return assignmentCanonicalName(leadingIdentifier(strings.TrimSpace(rest[1:]))), true
 	default:
-		return false
+		return "", false
 	}
+}
+
+// leadingIdentifier returns the identifier at the start of text, stopping at
+// the first character that cannot appear inside a VBA identifier. A bracketed
+// or qualified target yields an empty result, which callers treat as an
+// unresolvable ambiguous statement.
+func leadingIdentifier(text string) string {
+	end := 0
+	for end < len(text) && isIdentifierByte(text[end]) {
+		end++
+	}
+	return text[:end]
 }
 
 // nextVariableAccess reports whether an access is a For/For Each statement's

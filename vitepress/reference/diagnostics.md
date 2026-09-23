@@ -26,7 +26,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB018`](#vb018)   | lint    | warning     | project-wide    | no      | Scope shadowing                                    |
 | [`VB019`](#vb019)   | lint    | warning     | file-local      | yes     | Mixed declarator typing                            |
 | [`VB020`](#vb020)   | lint    | warning     | procedure-local | yes     | Unused local variable                              |
-| [`VB021`](#vb021)   | lint    | warning     | project-wide    | no      | Unused private procedure                           |
+| [`VB021`](#vb021)   | lint    | warning     | project-wide    | no      | Unreachable internal procedure                     |
 | [`VB022`](#vb022)   | lint    | warning     | procedure-local | yes     | Confusing call syntax                              |
 | [`VB023`](#vb023)   | lint    | warning     | procedure-local | yes     | Invalid For Each control type                      |
 | [`VB026`](#vb026)   | lint    | warning     | procedure-local | yes     | Dangerous Resume                                   |
@@ -538,7 +538,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VB021
 
-**Unused private procedure.** A Private or Friend procedure, or a Public procedure in a host-hidden (Option Private Module, non-exposed) module, is unreachable from known project roots.
+**Unreachable internal procedure.** A Private or Friend procedure, or a Public procedure in a host-hidden (Option Private Module, non-exposed) module, is unreachable from known project roots.
 
 | Property                    | Value                              |
 | --------------------------- | ---------------------------------- |

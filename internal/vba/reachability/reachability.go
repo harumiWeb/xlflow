@@ -167,7 +167,7 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 			external := public && !privacy.hostHidden
 			standard := strings.EqualFold(file.ModuleKind, "standard")
 			publicMacro := standard && external && sym.Kind == "sub" && len(sym.Parameters) == 0
-			testProcedure := standard && public && testdiscover.IsTestProcedure(sym)
+			testProcedure := standard && external && testdiscover.IsTestProcedure(sym)
 
 			if publicMacro {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootConfirmed, Reason: "public macro"})
@@ -177,6 +177,12 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 			}
 			if standard && external && !publicMacro && !testProcedure {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootPossible, Reason: "public standard-module API"})
+			}
+			// A VB_Exposed class publishes its public members to external
+			// clients, so they are possible roots even without a project
+			// caller. hostHidden is already false for an exposed module.
+			if strings.EqualFold(file.ModuleKind, "class") && public && privacy.exposed {
+				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootPossible, Reason: "exposed class member"})
 			}
 			if event, kind := procedureir.ClassifyEvent(file.ModuleKind, sym.Name); event {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootConfirmed, Reason: kind + " event"})

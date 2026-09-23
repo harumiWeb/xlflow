@@ -6,6 +6,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/typedb"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/sourceproject"
 )
 
@@ -100,6 +101,36 @@ End Sub
 `})
 	if got := findingsByCode(findings, "VBA260"); len(got) != 0 {
 		t.Fatalf("VBA260 findings = %+v, want none for a WithEvents callback", got)
+	}
+}
+
+func TestUnusedParameterSkipsTestPrefixedWithEventsCallback(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Handler.cls": `Option Explicit
+Private WithEvents TestApp As Application
+Private Sub TestApp_WindowBeforeDoubleClick(ByVal Sel As Selection, ByRef Cancel As Boolean)
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA260"); len(got) != 0 {
+		t.Fatalf("VBA260 findings = %+v, want none for a Test-prefixed WithEvents callback", got)
+	}
+}
+
+func TestUnusedParameterReportsOneBasedParameterRange(t *testing.T) {
+	source := `Option Explicit
+Private Sub Helper(ByVal extra As Long)
+End Sub
+`
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": source})
+	got := findingsByCode(findings, "VBA260")
+	if len(got) != 1 {
+		t.Fatalf("VBA260 findings = %+v, want one", got)
+	}
+	line := strings.Split(source, "\n")[got[0].Line-1]
+	if got[0].Column < 1 || got[0].EndColumn > len(line)+1 {
+		t.Fatalf("VBA260 range %d-%d outside line %q", got[0].Column, got[0].EndColumn, line)
+	}
+	if fragment := line[got[0].Column-1 : got[0].EndColumn-1]; fragment != "ByVal extra As Long" {
+		t.Fatalf("VBA260 range %d-%d covers %q, want the parameter declarator", got[0].Column, got[0].EndColumn, fragment)
 	}
 }
 
@@ -352,6 +383,74 @@ End Sub
 `})
 	if got := findingsByCode(findings, "VBA264"); len(got) != 0 {
 		t.Fatalf("VBA264 findings = %+v, want none (Next-variable bookkeeping and On Error flow must not flood)", got)
+	}
+}
+
+func TestAssignmentAmbiguousTargetIsolation(t *testing.T) {
+	cases := []struct {
+		text   string
+		target string
+		shaped bool
+	}{
+		{`Mid$(s, i, 1) = "x"`, "s", true},
+		{`Mid(s, 1) = "x"`, "s", true},
+		{`LSet lval = "pad"`, "lval", true},
+		{`RSet rval = "pad"`, "rval", true},
+		// Mid$ as a function call on the right-hand side is not ambiguous.
+		{`x = Mid$(s, 1, 1)`, "", false},
+		{`Debug.Print Mid$(s, 1, 1)`, "", false},
+		// Ordinary assignments keep normal read/write modeling.
+		{`total = 1`, "", false},
+		{`Midpoint = 1`, "", false},
+	}
+	for _, tc := range cases {
+		statement := procedureir.Statement{Kind: procedureir.StatementAssignment, Text: tc.text}
+		target, shaped := assignmentAmbiguousTarget(statement)
+		if shaped != tc.shaped || target != tc.target {
+			t.Fatalf("assignmentAmbiguousTarget(%q) = (%q, %v), want (%q, %v)", tc.text, target, shaped, tc.target, tc.shaped)
+		}
+	}
+}
+
+func TestAssignmentAnalysisSuppressesMidStatementTarget(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Public Sub Run()
+  Dim s As String
+  Dim i As Long
+  Dim t As String
+  Mid$(s, i, 1) = "x"
+  t = s
+End Sub
+`})
+	for _, f := range findingsByCode(findings, "VBA263") {
+		if strings.Contains(f.Message, " s ") {
+			t.Fatalf("VBA263 reported Mid$ write target: %+v", f)
+		}
+	}
+	for _, f := range findingsByCode(findings, "VBA264") {
+		if strings.Contains(f.Message, " s ") {
+			t.Fatalf("VBA264 reported Mid$ write target: %+v", f)
+		}
+	}
+}
+
+func TestAssignmentAnalysisSuppressesLSetAndRSetTargets(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Public Sub Run()
+  Dim lval As String
+  Dim rval As String
+  Dim t As String
+  LSet lval = "pad"
+  RSet rval = "pad"
+  t = lval
+  t = rval
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA263"); len(got) != 0 {
+		t.Fatalf("VBA263 findings = %+v, want none for LSet/RSet write targets", got)
+	}
+	if got := findingsByCode(findings, "VBA264"); len(got) != 0 {
+		t.Fatalf("VBA264 findings = %+v, want none for LSet/RSet write targets", got)
 	}
 }
 

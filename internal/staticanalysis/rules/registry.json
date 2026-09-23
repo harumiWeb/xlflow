@@ -399,7 +399,7 @@
     },
     {
       "id": "VB021",
-      "title": "Unused private procedure",
+      "title": "Unreachable internal procedure",
       "description": "A Private or Friend procedure, or a Public procedure in a host-hidden (Option Private Module, non-exposed) module, is unreachable from known project roots.",
       "family": "lint",
       "category": "maintainability",

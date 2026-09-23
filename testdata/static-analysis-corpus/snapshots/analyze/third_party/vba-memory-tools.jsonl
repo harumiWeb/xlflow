@@ -47,14 +47,14 @@
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"analyze","code":"VBA206","severity":"warning","line":388,"column":21}
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"analyze","code":"VBA206","severity":"warning","line":389,"column":21}
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"analyze","code":"VBA206","severity":"warning","line":390,"column":21}
-{"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA264","severity":"warning","line":631,"column":9}
+{"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA264","severity":"warning","line":631,"column":8}
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA237","severity":"warning","line":1149,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA237","severity":"warning","line":370,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA249","severity":"error","line":371,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA237","severity":"warning","line":378,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA249","severity":"error","line":379,"column":0}
-{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA264","severity":"warning","line":393,"column":25}
-{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA264","severity":"warning","line":396,"column":25}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA264","severity":"warning","line":393,"column":24}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA264","severity":"warning","line":396,"column":24}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA202","severity":"warning","line":836,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA249","severity":"error","line":837,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA249","severity":"error","line":837,"column":0}

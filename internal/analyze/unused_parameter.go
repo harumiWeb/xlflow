@@ -44,9 +44,9 @@ func (a Analyzer) unusedParameterFindings(file parsedFile, proc sourceProcedure)
 			"Parameter "+name+" is never used inside the procedure body.",
 			"No statement reads or writes this parameter; callers pass a value the implementation ignores.",
 			"Remove the parameter and update call sites, or use it where the signature requires it.")
-		finding.Column = parameter.Range.StartColumn + 1
+		finding.Column = parameter.Range.StartColumn
 		finding.EndLine = parameter.Range.EndLine
-		finding.EndColumn = parameter.Range.EndColumn + 1
+		finding.EndColumn = parameter.Range.EndColumn
 		findings = append(findings, finding)
 	}
 	return findings
@@ -94,8 +94,7 @@ func unusedParameterEligibleProcedure(file parsedFile, proc sourceProcedure) boo
 func signatureConstrainedEvent(file parsedFile, proc sourceProcedure) bool {
 	name := strings.ToLower(cleanIdentifier(proc.IR.Symbol.Name))
 	index := strings.LastIndex(name, "_")
-	if index <= 0 || index == len(name)-1 ||
-		strings.HasPrefix(name, "test") || strings.HasSuffix(name, "_test") {
+	if index <= 0 || index == len(name)-1 {
 		return false
 	}
 	fields, complete := userFormWithEventsFieldNames(string(file.Source))
@@ -105,9 +104,15 @@ func signatureConstrainedEvent(file parsedFile, proc sourceProcedure) bool {
 		return true
 	}
 	for field := range fields {
+		// A WithEvents field may itself begin with Test (for example
+		// TestApp_WindowBeforeDoubleClick), so field matching must run before
+		// the test-name exemption below.
 		if strings.HasPrefix(name, field+"_") {
 			return true
 		}
+	}
+	if strings.HasPrefix(name, "test") || strings.HasSuffix(name, "_test") {
+		return false
 	}
 	return strings.EqualFold(file.ModuleKind, "document")
 }

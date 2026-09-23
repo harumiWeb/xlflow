@@ -2939,6 +2939,62 @@ End Sub
 	}
 }
 
+func TestLinterVB021ReportsHostHiddenTestProcedure(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Hidden.bas", `Option Private Module
+Public Sub TestWorkflow()
+  Helper
+End Sub
+
+Private Sub Helper()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	symbols := map[string]bool{}
+	for _, issue := range got {
+		symbols[issue.Symbol] = true
+	}
+	if !symbols["TestWorkflow"] || !symbols["Helper"] {
+		t.Fatalf("host-hidden test procedure and its private callee should both be unreachable: %+v", got)
+	}
+}
+
+func TestLinterVB021RootsExposedClassPublicMembers(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Service.cls", `Attribute VB_Name = "Service"
+Attribute VB_Exposed = True
+Option Explicit
+Public Function Serve(ByVal value As String) As String
+  Serve = Helper(value)
+End Function
+
+Private Function Helper(ByVal value As String) As String
+  Helper = value
+End Function
+
+Private Sub Orphan()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	if len(got) != 1 || got[0].Symbol != "Orphan" {
+		t.Fatalf("exposed class member reachability = %+v", got)
+	}
+}
+
 func TestLinterVB021RecognizesEventsAndWithEventsHandlers(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

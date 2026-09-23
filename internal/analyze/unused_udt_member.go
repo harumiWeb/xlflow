@@ -52,9 +52,9 @@ func (a Analyzer) unusedUDTMemberFindings(file parsedFile, signatures map[string
 				"Member "+member.display+" of Private Type "+typ.display+" is never accessed.",
 				"No resolvable member expression in this module reads or writes the member.",
 				"Remove the member, or access it where the structure requires it.")
-			finding.Column = member.rng.StartColumn + 1
+			finding.Column = member.rng.StartColumn
 			finding.EndLine = member.rng.EndLine
-			finding.EndColumn = member.rng.EndColumn + 1
+			finding.EndColumn = member.rng.EndColumn
 			findings = append(findings, finding)
 		}
 	}
@@ -144,8 +144,8 @@ func parsePrivateUDTs(file parsedFile) map[string]*udtTypeInfo {
 			typ.members[memberName] = &udtMemberInfo{
 				name: memberName, display: line[match[2]:match[3]], typeName: typeName,
 				rng: vbaast.Range{
-					StartLine: i + 1, StartColumn: match[2], StartByte: -1,
-					EndLine: i + 1, EndColumn: match[3], EndByte: -1,
+					StartLine: i + 1, StartColumn: match[2] + 1, StartByte: -1,
+					EndLine: i + 1, EndColumn: match[3] + 1, EndByte: -1,
 				},
 			}
 			typ.order = append(typ.order, memberName)
