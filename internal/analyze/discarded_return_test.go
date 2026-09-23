@@ -614,6 +614,43 @@ End Sub
 	}
 }
 
+func TestVBA258StaysSilentOnUnderscoredInterfaceImplementation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	classes := filepath.Join(dir, "src", "classes")
+	if err := os.MkdirAll(classes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Interface names may contain underscores: Implements I_Worker names the
+	// DoWork implementation I_Worker_DoWork. Matching only the segment before
+	// the first underscore would miss the prefix and keep the implementation
+	// eligible even though interface-typed callers can consume its result.
+	if err := os.WriteFile(filepath.Join(classes, "Impl.cls"), []byte(`Option Explicit
+Implements I_Worker
+
+Private Function I_Worker_DoWork() As Boolean
+  I_Worker_DoWork = True
+End Function
+
+Public Sub Drive()
+  I_Worker_DoWork
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA258") {
+		if finding.Procedure == "I_Worker_DoWork" {
+			t.Fatalf("interface implementations are invoked through the interface: %+v", finding)
+		}
+	}
+}
+
 func TestVBA258StaysSilentOnParseError(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

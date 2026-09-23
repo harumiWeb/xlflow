@@ -30,3 +30,19 @@ dump and resolver source; all six are valid. Plan:
 
 Non-actionable: CodeRabbit docstring-coverage warning (bot threshold, repo
 convention does not doc-comment every function).
+
+# PR #837 review follow-up 2 (post-merge)
+
+Second-round comments verified against merged HEAD (bfa7e23a). Devin's three
+comments and CodeRabbit's two actionable comments are stale: they target the
+pre-fix head and are already covered by 92cfacb3 (parse-error bail-out,
+calleeTokenRange, implementedInterfaceNames, projectViewComplete gate,
+implicitApplicationAPIName) - CodeRabbit marks both as addressed.
+
+One valid finding remains:
+
+1. [CodeRabbit] Interface names containing underscores: `Implements I_Foo`
+   makes the implementation `I_Foo_Bar`, but strings.Cut splits at the first
+   underscore so qualifier `i` never matches `i_foo`. Fix: prefix-match the
+   lowered symbol name against each complete interface name + `_`. Add a
+   regression test with an underscored interface name.

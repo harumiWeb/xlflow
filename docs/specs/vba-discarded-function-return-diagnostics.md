@@ -56,7 +56,9 @@ procedures declared under `#If` conditional branches, and
 `<Interface>_<Member>` procedures in a module that declares `<Interface>`
 with `Implements` are excluded because their callers are not statically
 enumerable; an unrelated underscored helper such as `Parse_Name` in the same
-module keeps coverage.
+module keeps coverage. The prefix match uses the complete declared interface
+name because interface names may contain underscores: `Implements I_Foo`
+makes the `Bar` implementation `I_Foo_Bar`.
 
 The all-discard claim requires a complete project view. `VBA258` stays
 silent for the whole run when a `PathFilter` excludes modules or any file

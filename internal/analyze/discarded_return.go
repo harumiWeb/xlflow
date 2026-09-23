@@ -361,7 +361,9 @@ func (a Analyzer) functionAlwaysDiscardedFindings(ctx context.Context, files []p
 // kind, so only explicit Private/Friend members qualify. Interface
 // implementations (Interface_Member in a module declaring that interface with
 // Implements) are invoked through the interface and are never referenced by
-// name; unrelated underscored helpers in the same module keep coverage.
+// name; unrelated underscored helpers in the same module keep coverage. The
+// match uses the complete interface name because interface names may contain
+// underscores: Implements I_Foo makes the Bar implementation I_Foo_Bar.
 func alwaysDiscardedEligible(proc *procedureir.ProcedureIR, interfaces map[string]struct{}) bool {
 	if proc == nil {
 		return false
@@ -376,8 +378,9 @@ func alwaysDiscardedEligible(proc *procedureir.ProcedureIR, interfaces map[strin
 	if symbol.IsEventHandler || symbol.Recovered || len(symbol.ConditionalBranches) > 0 {
 		return false
 	}
-	if qualifier, _, ok := strings.Cut(symbol.Name, "_"); ok {
-		if _, implemented := interfaces[strings.ToLower(qualifier)]; implemented {
+	name := strings.ToLower(cleanIdentifier(symbol.Name))
+	for iface := range interfaces {
+		if strings.HasPrefix(name, iface+"_") {
 			return false
 		}
 	}
