@@ -134,6 +134,12 @@ Typed `Excel.WorksheetFunction` member availability is reported by
 `VBA252` when a complete generated TypeLib member set proves the member is
 absent; incomplete or unresolved type information remains silent.
 
+Optional Excel semantic inspections complement those runtime checks: `VBA260`
+uses authoritative workbook metadata to recommend stable worksheet CodeNames,
+`VBA261` identifies worksheet-function dispatch through `Excel.Application`,
+and `VBA262` identifies bare host bracket expressions such as `[A1]`. They are
+advisory and do not claim compile-equivalent or deterministic runtime failure.
+
 Default-member access is classified by `VBA253` when a known typed receiver
 uses an implicit, indexed, or recursive default member. `VBA254` is an opt-in
 information/warning diagnostic for unbound, late-bound, or incomplete access,

@@ -257,6 +257,9 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA250` | warning               | A `Worksheet.Select` or `Range.Select` operation lacks a proven active workbook or worksheet precondition.                                                           |
 | `VBA251` | warning               | A typed Excel `Match`, `VLookup`, or `HLookup` call omits its match-mode argument and relies on approximate matching.                                                |
 | `VBA252` | warning               | A typed `Excel.WorksheetFunction` member is absent from the complete generated TypeLib member set.                                                                   |
+| `VBA260` | warning               | A resolved `ThisWorkbook.Worksheets("name")` access can use the worksheet's stable CodeName.                                                                         |
+| `VBA261` | information           | A worksheet function is dispatched through `Excel.Application` instead of the explicit `WorksheetFunction` object.                                                   |
+| `VBA262` | warning               | A bare Excel host bracket expression such as `[A1]` hides its object-model binding.                                                                                  |
 | `VBA253` | warning               | Known implicit, indexed, or recursive default-member access is used where the member can be made explicit.                                                           |
 | `VBA254` | information / warning | Default-member access is unbound, late-bound, or incomplete and should be reviewed when the project opts in.                                                         |
 | `VBA255` | information / warning | Bang notation (`receiver!name`) relies on stringly typed/default-member semantics.                                                                                   |
@@ -463,6 +466,14 @@ intentional exception.
 [analyze]
 detect_unavailable_worksheet_function_members = false
 ```
+
+`VBA260`, `VBA261`, and `VBA262` are opt-in Excel semantic inspections.
+Enable them with `detect_worksheet_string_access`,
+`detect_application_worksheet_function_dispatch`, and
+`detect_host_bracket_expressions`. `VBA260` is batch-only and requires the
+configured OOXML workbook or an explicitly supplied worksheet CodeName
+catalog. `VBA261` requires a complete generated Excel TypeLib. `VBA261` and
+`VBA262` are available in realtime/LSP analysis.
 
 `VBA253` is disabled by default and reports known implicit, indexed, or
 recursive default-member access. It is a high-precision, warning-level,

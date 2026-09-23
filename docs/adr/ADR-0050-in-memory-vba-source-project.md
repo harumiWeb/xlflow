@@ -74,6 +74,16 @@ the affected logical file. The warning is emitted in deterministic source
 order. Filesystem-backed `RunResultContext` keeps its existing sidecar and
 FRX behavior; LSP and realtime adapter contracts are outside this decision.
 
+Workbook metadata follows the same explicit-capability boundary. A caller may
+provide an immutable worksheet visible-name to CodeName catalog to the
+analyzer. The filesystem-backed adapter may populate that catalog from the
+configured saved OOXML workbook, but `AnalyzeProject` never opens a workbook
+or interprets a logical source path to obtain it. A missing, malformed, or
+ambiguous catalog fails open for `VBA260` and is reported as the structured
+`analysis_capability_unavailable` / `worksheet_codename_catalog` warning when
+the rule is enabled. TypeLib metadata remains separate because worksheet names
+and CodeNames are workbook-instance facts, not Excel object-model type facts.
+
 ## Consequences
 
 Positive consequences:
@@ -86,6 +96,8 @@ Positive consequences:
   host-side Designer, FRX, or workspace-symbol reads.
 - External UserForm metadata has an explicit conservative diagnostic and
   structured warning contract instead of a hidden filesystem fallback.
+- Workbook-instance worksheet identity is injected explicitly and cannot make
+  virtual source paths observable through an implicit workbook read.
 
 Negative consequences:
 
@@ -123,6 +135,9 @@ Negative consequences:
 - Filesystem-free diagnostic capability policy: issue #644,
   `internal/analyze/event_reentry.go`, `internal/vba/intel/intel.go`, and
   `docs/specs/vba-source-project.md`.
+- Excel semantic inspections and worksheet identity capability: issue #827,
+  `internal/ooxml/workbook.go`, `internal/analyze/worksheet_codename.go`, and
+  `docs/specs/excel-semantic-inspections.md`.
 
 ## Supersedes
 
@@ -136,4 +151,4 @@ Negative consequences:
 
 - `docs/adr/ADR-0014-reusable-vba-lsp-server.md`
 - `docs/adr/ADR-0021-procedure-analysis-ir.md`
-- xlflow issues #641, #642, #643, #644, #645, and #813
+- xlflow issues #641, #642, #643, #644, #645, #813, and #827

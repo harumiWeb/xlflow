@@ -236,6 +236,9 @@ type AnalyzeConfig struct {
 	DetectDeadStores                          bool     `toml:"detect_dead_stores"`
 	DetectDiscardedFunctionReturn             bool     `toml:"detect_discarded_function_return"`
 	DetectFunctionReturnAlwaysDiscarded       bool     `toml:"detect_function_return_always_discarded"`
+	DetectWorksheetStringAccess               bool     `toml:"detect_worksheet_string_access"`
+	DetectApplicationWorksheetFunction        bool     `toml:"detect_application_worksheet_function_dispatch"`
+	DetectHostBracketExpressions              bool     `toml:"detect_host_bracket_expressions"`
 	DevelopmentHTTPOrigins                    []string `toml:"development_http_origins"`
 }
 
@@ -342,6 +345,9 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA256": {Get: func(c AnalyzeConfig) bool { return c.DetectDeadStores }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDeadStores = v }},
 	"VBA257": {Get: func(c AnalyzeConfig) bool { return c.DetectDiscardedFunctionReturn }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDiscardedFunctionReturn = v }},
 	"VBA258": {Get: func(c AnalyzeConfig) bool { return c.DetectFunctionReturnAlwaysDiscarded }, Set: func(c *AnalyzeConfig, v bool) { c.DetectFunctionReturnAlwaysDiscarded = v }},
+	"VBA260": {Get: func(c AnalyzeConfig) bool { return c.DetectWorksheetStringAccess }, Set: func(c *AnalyzeConfig, v bool) { c.DetectWorksheetStringAccess = v }},
+	"VBA261": {Get: func(c AnalyzeConfig) bool { return c.DetectApplicationWorksheetFunction }, Set: func(c *AnalyzeConfig, v bool) { c.DetectApplicationWorksheetFunction = v }},
+	"VBA262": {Get: func(c AnalyzeConfig) bool { return c.DetectHostBracketExpressions }, Set: func(c *AnalyzeConfig, v bool) { c.DetectHostBracketExpressions = v }},
 }
 
 var (
