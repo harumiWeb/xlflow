@@ -95,7 +95,8 @@ func (a Analyzer) unreachableSelectCaseFindings(file parsedFile, proc sourceProc
 		return nil
 	}
 	facts := proc.analysisFacts()
-	env := a.procedureConstantEnvironment(file, proc)
+	base := a.procedureConstantEnvironment(file, proc)
+	localConsts := selectCaseLocalConstDecls(file, proc)
 	compare := fileOptionCompare(file)
 
 	children := make(map[int][]procedureir.Statement)
@@ -115,6 +116,12 @@ func (a Analyzer) unreachableSelectCaseFindings(file parsedFile, proc sourceProc
 
 	var findings []Finding
 	for _, sel := range selects {
+		env := base
+		if len(localConsts) > 0 {
+			if local := selectCaseLocalConstantState(file, base, localConsts, sel.Range.StartByte); len(local) > 0 {
+				env = runtimeConstantEnvironment(base, local)
+			}
+		}
 		findings = append(findings, a.selectCaseStatementFindings(file, proc, sel, children, facts, env, compare, moduleDecls)...)
 	}
 	return findings
@@ -832,6 +839,98 @@ func selectCaseConstantDomain(value constexpr.Value, compare string) selectCaseD
 	default:
 		return selectCaseDomain{opaque: true}
 	}
+}
+
+// selectCaseLocalConstDecls collects the procedure's Const declarations in
+// source order. The procedure IR supplies the declaration list, so recovered
+// and conditional-compilation constants are excluded rather than silently
+// applied.
+func selectCaseLocalConstDecls(file parsedFile, proc sourceProcedure) []procedureir.Declaration {
+	conditional := selectCaseConditionalSpans(file, proc)
+	var decls []procedureir.Declaration
+	for decl := range proc.Declarations.All() {
+		if !decl.IsConst || decl.Recovered || len(decl.ConditionalBranches) > 0 {
+			continue
+		}
+		line := decl.Range.StartLine
+		if line < 1 || line > len(file.Lines) || selectCaseLineInSpans(line, conditional) {
+			continue
+		}
+		decls = append(decls, decl)
+	}
+	slices.SortStableFunc(decls, func(x, y procedureir.Declaration) int {
+		return cmp.Compare(x.Range.StartByte, y.Range.StartByte)
+	})
+	return decls
+}
+
+// selectCaseLocalConstantState resolves procedure-local constants that are
+// declared before the given source position. VBE rejects a forward reference
+// to a later Const, so coverage proofs may only use declarations that precede
+// the Select Case. Source-order evaluation also keeps a constant initializer
+// from seeing a later declaration.
+func selectCaseLocalConstantState(file parsedFile, base constexpr.Environment, decls []procedureir.Declaration, beforeByte int) runtimeConstantState {
+	state := runtimeConstantState{}
+	for _, decl := range decls {
+		if decl.Range.StartByte >= beforeByte {
+			break
+		}
+		match := runtimeConstAssignmentRe.FindStringSubmatch(normalizedCodeLine(file.Lines[decl.Range.StartLine-1]))
+		if len(match) == 0 {
+			continue
+		}
+		name := runtimeSimpleIdentifier(match[1])
+		if name == "" || !strings.EqualFold(name, decl.Name) {
+			continue
+		}
+		if result := constexpr.Evaluate(strings.TrimSpace(match[2]), runtimeConstantEnvironment(base, state)); result.Kind == constexpr.Known {
+			state[name] = result.Typed
+		}
+	}
+	return state
+}
+
+// selectCaseConditionalSpans returns the #If ... #End If line regions inside
+// the procedure. Procedure declarations do not carry ConditionalBranches
+// metadata, so constants inside conditional compilation are excluded here to
+// keep the fail-open contract. An unclosed #If conservatively spans the rest
+// of the procedure.
+func selectCaseConditionalSpans(file parsedFile, proc sourceProcedure) [][2]int {
+	start, end := proc.StartLine, proc.EndLine
+	if start < 1 {
+		start = 1
+	}
+	if end > len(file.Lines) {
+		end = len(file.Lines)
+	}
+	var spans [][2]int
+	var opens []int
+	for line := start; line <= end; line++ {
+		lower := strings.ToLower(strings.TrimSpace(normalizedCodeLine(file.Lines[line-1])))
+		switch {
+		case strings.HasPrefix(lower, "#if "):
+			opens = append(opens, line)
+		case strings.HasPrefix(lower, "#end if"):
+			if len(opens) > 0 {
+				top := opens[len(opens)-1]
+				opens = opens[:len(opens)-1]
+				spans = append(spans, [2]int{top, line})
+			}
+		}
+	}
+	for _, top := range opens {
+		spans = append(spans, [2]int{top, end})
+	}
+	return spans
+}
+
+func selectCaseLineInSpans(line int, spans [][2]int) bool {
+	for _, span := range spans {
+		if line >= span[0] && line <= span[1] {
+			return true
+		}
+	}
+	return false
 }
 
 func selectCaseKindTypeName(kind constexpr.ValueKind) string {

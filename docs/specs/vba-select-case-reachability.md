@@ -19,6 +19,14 @@ Each `case_expression` item in a clause is classified independently:
 Items are evaluated through the shared constant-expression evaluator and the
 procedure's constant environment, so module-level `Const` values participate
 in coverage while procedure-local names hide same-named module constants.
+Procedure-local `Const` declarations resolve in source order on top of that
+environment — a procedure constant shadows a module constant of the same
+name — but only declarations that precede the `Select Case` are visible: VBE
+rejects a forward reference to a later procedure `Const`
+(`vba259-local-const-after-statements`, compile error "variable not
+defined"), so the overlay cuts off at the Select statement's position. A
+recovered or conditional-compilation declaration stays unresolved, and a
+constant initializer cannot see a later declaration.
 
 ## Finding kinds
 

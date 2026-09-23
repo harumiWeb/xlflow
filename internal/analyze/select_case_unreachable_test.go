@@ -477,6 +477,100 @@ Public Sub Run(ByVal x As Long)
 End Sub
 `,
 		},
+		{
+			name: "procedure local constant resolves duplicate",
+			source: `Option Explicit
+Public Sub Run(ByVal x As Long)
+  Const Limit As Long = 5
+  Select Case x
+    Case Limit
+      x = 1
+    Case 5
+      x = 2
+  End Select
+End Sub
+`,
+			want: []selectCaseUnreachableExpectation{{kind: "duplicate", line: 7, item: "5"}},
+		},
+		{
+			name: "procedure local constant selector covers else",
+			source: `Option Explicit
+Public Sub Run(ByVal x As Long)
+  Const Mode As Long = 2
+  Select Case Mode
+    Case 2
+      x = 1
+    Case Else
+      x = 0
+  End Select
+End Sub
+`,
+			want: []selectCaseUnreachableExpectation{{kind: "else_covered", line: 7}},
+		},
+		{
+			name: "procedure local constant shadows module constant",
+			source: `Option Explicit
+Private Const Limit As Long = 10
+Public Sub Run(ByVal x As Long)
+  Const Limit As Long = 5
+  Select Case x
+    Case Limit
+      x = 1
+    Case 5
+      x = 2
+  End Select
+End Sub
+`,
+			want: []selectCaseUnreachableExpectation{{kind: "duplicate", line: 8, item: "5"}},
+		},
+		{
+			// VBE evidence (vba259-local-const-after-statements): a forward
+			// reference to a procedure-local Const is a compile error, so the
+			// overlay must not resolve it either.
+			name: "constant declared after select stays unresolved",
+			source: `Option Explicit
+Public Sub Run(ByVal x As Long)
+  Select Case x
+    Case Limit
+      x = 1
+    Case 5
+      x = 2
+  End Select
+  Const Limit As Long = 5
+End Sub
+`,
+		},
+		{
+			name: "forward referenced constant initializer fails open",
+			source: `Option Explicit
+Public Sub Run(ByVal x As Long)
+  Const A As Long = B
+  Const B As Long = 5
+  Select Case x
+    Case A
+      x = 1
+    Case 5
+      x = 2
+  End Select
+End Sub
+`,
+		},
+		{
+			name: "conditional compilation constant fails open",
+			source: `Option Explicit
+Public Sub Run(ByVal x As Long)
+#If DebugBuild Then
+  Const Limit As Long = 5
+#End If
+  Select Case x
+    Case Limit
+      x = 1
+    Case 5
+      x = 2
+  End Select
+End Sub
+`,
+		},
 	}
 
 	for _, test := range tests {
