@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -151,15 +152,28 @@ type alwaysDiscardedCandidate struct {
 // functionAlwaysDiscardedFindings implements VBA258, the opt-in project-wide
 // declaration-level diagnostic reported when every statically resolved call
 // site of a Private/Friend Function or Property Get discards the result.
-func (a Analyzer) functionAlwaysDiscardedFindings(ctx context.Context, files []parsedFile) ([]Finding, error) {
+func (a Analyzer) functionAlwaysDiscardedFindings(ctx context.Context, files []parsedFile, projectViewComplete bool) ([]Finding, error) {
+	// VBA258 claims every caller discards the result. Hidden source can
+	// conceal a consuming caller or a dynamic-dispatch reference: modules
+	// removed by PathFilter are invisible, and a parse error can swallow a
+	// call anywhere (dynamic dispatch reaches Private procedures too). The
+	// claim therefore requires a complete, cleanly parsed project view.
+	if !projectViewComplete {
+		return nil, nil
+	}
+	for i := range files {
+		if files[i].IR.Parse.HasError || files[i].IR.Parse.HasMissing {
+			return nil, nil
+		}
+	}
 	byQualified := map[string]*alwaysDiscardedCandidate{}
 	byName := map[string][]*alwaysDiscardedCandidate{}
 	for fileIndex := range files {
 		file := &files[fileIndex]
-		implements := moduleImplementsInterface(file.IR)
+		interfaces := implementedInterfaceNames(file.IR)
 		for procIndex := range file.IR.Procedures {
 			proc := &file.IR.Procedures[procIndex]
-			if !alwaysDiscardedEligible(proc, implements) {
+			if !alwaysDiscardedEligible(proc, interfaces) {
 				continue
 			}
 			candidate := &alwaysDiscardedCandidate{fileIndex: fileIndex, procIndex: procIndex}
@@ -190,7 +204,9 @@ func (a Analyzer) functionAlwaysDiscardedFindings(ctx context.Context, files []p
 				if name == "" {
 					name = strings.ToLower(call.Callee.BaseName)
 				}
-				calleeSpans = append(calleeSpans, calleeSpan{rng: call.Range, name: name})
+				if tokenRange, ok := calleeTokenRange(call, file.Source); ok {
+					calleeSpans = append(calleeSpans, calleeSpan{rng: tokenRange, name: name})
+				}
 				if call.IsRaiseEvent {
 					continue
 				}
@@ -229,8 +245,9 @@ func (a Analyzer) functionAlwaysDiscardedFindings(ctx context.Context, files []p
 			// Callee identifiers appear in Expressions but never in Accesses,
 			// so an access is always a genuine value reference (argument,
 			// receiver, or bare read) even inside a call-site range. For
-			// expressions, only the callee's own name inside the call range
-			// marks syntax rather than a reference.
+			// expressions, only the callee's own name inside the callee token
+			// range marks syntax rather than a reference; a same-named
+			// argument such as the second Foo in "Foo Foo" stays a reference.
 			isCalleePart := func(r vbaast.Range, name string) bool {
 				for _, span := range calleeSpans {
 					if r.StartByte >= span.rng.StartByte && r.EndByte <= span.rng.EndByte && name == span.name {
@@ -342,9 +359,10 @@ func (a Analyzer) functionAlwaysDiscardedFindings(ctx context.Context, files []p
 // alwaysDiscardedEligible limits VBA258 to procedures whose callers are
 // provably inside the project. Implicit visibility is Public in every module
 // kind, so only explicit Private/Friend members qualify. Interface
-// implementations (Interface_Member inside a module with Implements) are
-// invoked through the interface and are never referenced by name.
-func alwaysDiscardedEligible(proc *procedureir.ProcedureIR, moduleImplements bool) bool {
+// implementations (Interface_Member in a module declaring that interface with
+// Implements) are invoked through the interface and are never referenced by
+// name; unrelated underscored helpers in the same module keep coverage.
+func alwaysDiscardedEligible(proc *procedureir.ProcedureIR, interfaces map[string]struct{}) bool {
 	if proc == nil {
 		return false
 	}
@@ -358,19 +376,44 @@ func alwaysDiscardedEligible(proc *procedureir.ProcedureIR, moduleImplements boo
 	if symbol.IsEventHandler || symbol.Recovered || len(symbol.ConditionalBranches) > 0 {
 		return false
 	}
-	if moduleImplements && strings.Contains(symbol.Name, "_") {
-		return false
+	if qualifier, _, ok := strings.Cut(symbol.Name, "_"); ok {
+		if _, implemented := interfaces[strings.ToLower(qualifier)]; implemented {
+			return false
+		}
 	}
 	return true
 }
 
-func moduleImplementsInterface(document procedureir.DocumentIR) bool {
+// implementedInterfaceNames returns the lowered names a module declares with
+// Implements statements.
+func implementedInterfaceNames(document procedureir.DocumentIR) map[string]struct{} {
+	names := map[string]struct{}{}
 	for _, reference := range document.TypeReferences {
-		if strings.EqualFold(strings.TrimSpace(reference.Kind), "implements") {
-			return true
+		if !strings.EqualFold(strings.TrimSpace(reference.Kind), "implements") {
+			continue
+		}
+		if name := strings.ToLower(cleanIdentifier(discardedLastNamePart(reference.Target))); name != "" {
+			names[name] = struct{}{}
 		}
 	}
-	return false
+	return names
+}
+
+// calleeTokenRange locates the callee's own source range inside the call's
+// range. The call range also covers arguments, so a same-named argument like
+// the second Foo in "Foo Foo" must remain a genuine reference; only the
+// callee token itself is call syntax.
+func calleeTokenRange(call procedureir.CallSite, source []byte) (vbaast.Range, bool) {
+	text := call.Callee.Text
+	if text == "" || call.Range.StartByte < 0 || call.Range.EndByte > len(source) || call.Range.StartByte > call.Range.EndByte {
+		return vbaast.Range{}, false
+	}
+	offset := bytes.Index(source[call.Range.StartByte:call.Range.EndByte], []byte(text))
+	if offset < 0 {
+		return vbaast.Range{}, false
+	}
+	start := call.Range.StartByte + offset
+	return vbaast.Range{StartByte: start, EndByte: start + len(text)}, true
 }
 
 func expressionIsWriteTarget(proc *procedureir.ProcedureIR, expression procedureir.Expression) bool {

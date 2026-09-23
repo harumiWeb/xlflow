@@ -1211,7 +1211,7 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 	var alwaysDiscardedFindings []Finding
 	if analysisEnabled, known := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA258"); known && analysisEnabled {
 		finishStage = analysisstats.Measure(ctx, "project_wide_diagnostics")
-		alwaysDiscardedFindings, err = a.functionAlwaysDiscardedFindings(ctx, parsedFiles)
+		alwaysDiscardedFindings, err = a.functionAlwaysDiscardedFindings(ctx, parsedFiles, analysis.PathFilter == nil)
 		finishStage(len(alwaysDiscardedFindings), err)
 		if err != nil {
 			return Result{}, err

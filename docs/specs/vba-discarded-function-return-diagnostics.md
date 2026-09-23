@@ -52,9 +52,17 @@ discard finding.
 `Private` or `Friend` `Function`/`Property Get`: implicit visibility is
 `Public` in every module kind, and `Public` members remain externally
 callable, so they are never reported. Event handlers, recovered procedures,
-procedures declared under `#If` conditional branches, and `Interface_Member`
-procedures in a module with `Implements` are excluded because their callers
-are not statically enumerable.
+procedures declared under `#If` conditional branches, and
+`<Interface>_<Member>` procedures in a module that declares `<Interface>`
+with `Implements` are excluded because their callers are not statically
+enumerable; an unrelated underscored helper such as `Parse_Name` in the same
+module keeps coverage.
+
+The all-discard claim requires a complete project view. `VBA258` stays
+silent for the whole run when a `PathFilter` excludes modules or any file
+carries a parser error or missing-node flag, because hidden source can
+conceal a consuming caller or a dynamic-dispatch reference (dynamic
+dispatch reaches `Private` procedures too).
 
 A candidate is reported only when it has at least one resolved call site and
 every resolved call site discards the result. Any of the following suppresses
@@ -67,11 +75,14 @@ the finding:
   such as `x = Foo`, `AddressOf Foo`, a late-bound `o.Foo` read, or a
   by-reference argument like `RedirectInstance Init, VarPtr(Init), Me, c`.
   The reference still suppresses when it sits inside another call's range as
-  an argument or receiver; only the callee identifier of a call-site itself
-  is exempt (write-only accesses and assignment targets, including the
-  function's own return-slot writes, are excluded);
+  an argument or receiver; only the callee token of a call-site itself is
+  exempt, so a same-named argument such as the second `Foo` in `Foo Foo`
+  still suppresses (write-only accesses and assignment targets, including
+  the function's own return-slot writes, are excluded);
 - a statically known dynamic-dispatch target naming the candidate through
-  `Application.Run`/`OnTime`/`OnKey` or `CallByName`;
+  `Application.Run`/`OnTime`/`OnKey` or `CallByName`, including the
+  receiverless `Run "name"` and With-block `.Run` forms once resolution
+  has ruled out a same-named project procedure or non-callable local;
 - any dynamic-dispatch argument that cannot be folded to a static string,
   which suppresses all VBA258 findings for the run.
 

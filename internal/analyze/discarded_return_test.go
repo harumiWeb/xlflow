@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -500,5 +501,186 @@ End Function
 	}
 	if got := findingsByCode(findings, "VBA257"); len(got) != 0 {
 		t.Fatalf("mis-split argument calls must not report VBA257: %+v", got)
+	}
+}
+
+func TestVBA258StaysSilentOnSameNameArgument(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Foo(ByRef slot As Variant) As Boolean
+  Foo = True
+End Function
+
+Public Sub Run()
+  Foo Foo
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The argument Foo is a value reference to the function, not callee
+	// syntax, so the all-discard claim must stay silent.
+	if got := findingsByCode(findings, "VBA258"); len(got) != 0 {
+		t.Fatalf("same-named argument reference must suppress VBA258: %+v", got)
+	}
+}
+
+func TestVBA258StaysSilentOnImplicitApplicationDispatch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function LoadConfig() As Boolean
+  LoadConfig = True
+End Function
+
+Private Function OtherTask() As Boolean
+  OtherTask = True
+End Function
+
+Private Function ThirdTask() As Boolean
+  ThirdTask = True
+End Function
+
+Public Sub Driver()
+  LoadConfig
+  OtherTask
+  ThirdTask
+  Run "LoadConfig"
+  Dim result As Variant
+  result = Run("OtherTask")
+  With Application
+    .Run "ThirdTask"
+  End With
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Receiverless Run and With-block .Run are implicit Application dispatch:
+	// their string arguments name procedures the static call set cannot see.
+	if got := findingsByCode(findings, "VBA258"); len(got) != 0 {
+		t.Fatalf("implicit Application dispatch targets must suppress VBA258: %+v", got)
+	}
+}
+
+func TestVBA258StaysSilentOnInterfaceImplementation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	classes := filepath.Join(dir, "src", "classes")
+	if err := os.MkdirAll(classes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(classes, "Impl.cls"), []byte(`Option Explicit
+Implements IWorker
+
+Private Function IWorker_DoWork() As Boolean
+  IWorker_DoWork = True
+End Function
+
+Private Function Parse_Name() As Boolean
+  Parse_Name = True
+End Function
+
+Public Sub Drive()
+  IWorker_DoWork
+  Parse_Name
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA258")
+	for _, finding := range got {
+		if finding.Procedure == "IWorker_DoWork" {
+			t.Fatalf("interface implementations are invoked through the interface: %+v", finding)
+		}
+	}
+	// Parse_Name is an unrelated underscored helper, not an interface
+	// implementation, so its all-discard call set still reports.
+	if len(got) != 1 || got[0].Procedure != "Parse_Name" {
+		t.Fatalf("unrelated underscored helper keeps VBA258 coverage: %+v", got)
+	}
+}
+
+func TestVBA258StaysSilentOnParseError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function LoadConfig() As Boolean
+  LoadConfig = True
+End Function
+
+Public Sub Run()
+  LoadConfig
+End Sub
+`)
+	// A second Dim keyword after a declaration comma is a recovery-accepted
+	// parse error: the file still reaches analysis with HasError set.
+	writeModule(t, dir, "Broken.bas", `Option Explicit
+Public Sub Helper()
+  Dim x As Long, Dim y As Long
+  y = x
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A parse error anywhere can hide a consuming call or a dynamic-dispatch
+	// reference, so no all-discard claim survives.
+	if got := findingsByCode(findings, "VBA258"); len(got) != 0 {
+		t.Fatalf("parse errors must fail open: %+v", got)
+	}
+}
+
+func TestVBA258StaysSilentWhenPathFilterHidesModules(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Friend Function LoadConfig() As Boolean
+  LoadConfig = True
+End Function
+
+Public Sub Run()
+  LoadConfig
+End Sub
+`)
+	writeModule(t, dir, "Hidden.bas", `Option Explicit
+Public Sub Consume()
+  Dim value As Boolean
+  value = LoadConfig()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
+	findings, err := (Analyzer{
+		RootDir: dir,
+		Config:  cfg,
+		PathFilter: func(path string) bool {
+			return strings.EqualFold(filepath.Base(path), "Main.bas")
+		},
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hidden.bas consumes the result, but PathFilter removes it from the
+	// project view; filtered-out modules can also hide dynamic references,
+	// so the all-discard claim must stay silent.
+	if got := findingsByCode(findings, "VBA258"); len(got) != 0 {
+		t.Fatalf("filtered project view must suppress VBA258: %+v", got)
 	}
 }
