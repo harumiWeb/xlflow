@@ -81,7 +81,7 @@
 {"project":"third_party/vba-cryptography","file":"BDemo.bas","surface":"analyze","code":"VBA206","severity":"warning","line":163,"column":8}
 {"project":"third_party/vba-cryptography","file":"BDemo.bas","surface":"analyze","code":"VBA264","severity":"warning","line":167,"column":27}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA264","severity":"warning","line":188,"column":12}
-{"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA256","severity":"warning","line":189,"column":14}
+{"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA256","severity":"warning","line":189,"column":13}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA239","severity":"warning","line":243,"column":0}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA239","severity":"warning","line":243,"column":0}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA239","severity":"warning","line":243,"column":0}
@@ -102,9 +102,9 @@
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA264","severity":"warning","line":426,"column":21}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA206","severity":"warning","line":500,"column":9}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA206","severity":"warning","line":500,"column":9}
-{"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA257","severity":"warning","line":500,"column":10}
+{"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA257","severity":"warning","line":500,"column":9}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA206","severity":"warning","line":601,"column":12}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA206","severity":"warning","line":601,"column":12}
-{"project":"third_party/vba-cryptography","file":"BTest.bas","surface":"analyze","code":"VBA257","severity":"warning","line":39,"column":10}
+{"project":"third_party/vba-cryptography","file":"BTest.bas","surface":"analyze","code":"VBA257","severity":"warning","line":39,"column":9}
 {"project":"third_party/vba-cryptography","file":"BTest.bas","surface":"analyze","code":"VBA227","severity":"warning","line":41,"column":0}
 {"project":"third_party/vba-cryptography","file":"BTest.bas","surface":"analyze","code":"VBA264","severity":"warning","line":46,"column":12}

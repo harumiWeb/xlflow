@@ -153,7 +153,7 @@ func (a Analyzer) value2PerformanceFindings(file parsedFile, proc sourceProcedur
 			reason += " The access repeats inside a reachable non-trivial loop."
 		}
 		finding := a.simpleFinding(file, proc, candidate.MemberRange.StartLine, "VBA243", severity, message, reason, "Use .Value2 only after confirming that Date or Currency subtypes are not required; keep .Value when those Excel coercions are intentional.")
-		finding.Column = candidate.MemberRange.StartColumn + 1
+		finding.Column = candidate.MemberRange.StartColumn
 		finding.EndLine = candidate.MemberRange.EndLine
 		finding.EndColumn = candidate.MemberRange.EndColumn
 		findings = append(findings, finding)

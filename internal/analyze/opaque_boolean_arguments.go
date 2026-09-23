@@ -110,9 +110,9 @@ func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProc
 			}
 		}
 		finding := a.simpleFinding(file, proc, call.Range.StartLine, "VBA248", "warning", message, reason, suggestion)
-		finding.Column = call.Range.StartColumn + 1
+		finding.Column = call.Range.StartColumn
 		finding.EndLine = call.Range.EndLine
-		finding.EndColumn = call.Range.EndColumn + 1
+		finding.EndColumn = call.Range.EndColumn
 		finding.OpaqueBoolean = &OpaqueBooleanContext{
 			PositionalLiteralCount:        positionalLiteralCount,
 			NamedArgumentCount:            len(call.Arguments.Named),

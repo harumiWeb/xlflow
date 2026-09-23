@@ -40,6 +40,9 @@ Module`, non-`VB_Exposed`) modules.
   saved workbook file stamp), and the fast-path skip only applies when the
   current push target matches that delivery record. A newly started session no
   longer inherits a stale skip decision from a previous session's unsaved push.
+- Fixed a one-column offset in `VBA243`, `VBA244`, `VBA248`, `VBA256`, and
+  `VBA257` diagnostics (and the `VBA244` call-cycle context positions) so
+  findings point at the start of the reported statement or call expression.
 
 ## v0.32.2
 
