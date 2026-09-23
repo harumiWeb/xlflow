@@ -973,14 +973,23 @@ var dynamicArgumentSpecs = map[string][]dynamicArgumentSpec{
 func dynamicReferencesForIR(site procedureir.CallSite, expressions []procedureir.Expression, parse symbols.ParseSummary) []DynamicReference {
 	call := Call{CallSite: callSiteFromIR(site, parse)}
 	api := dynamicAPIName(call)
+	if api == "" {
+		api = implicitApplicationAPIName(site)
+	}
 	if call.Caller == nil || len(dynamicArgumentSpecs[api]) == 0 {
 		return nil
 	}
-	return dynamicReferencesForCall(call, argumentTexts(site.Arguments.ExpressionIDs, expressions))
+	return dynamicReferencesForCall(call, api, argumentTexts(site.Arguments.ExpressionIDs, expressions))
 }
 
-func dynamicReferencesForCall(call Call, texts []string) []DynamicReference {
-	api := dynamicAPIName(call)
+// DynamicReferencesForIR exposes the dynamic-dispatch references of a single
+// IR call site so project-wide analyzer passes can reason about callback
+// targets (Application.Run/OnTime/OnKey, CallByName) without reparsing source.
+func DynamicReferencesForIR(site procedureir.CallSite, expressions []procedureir.Expression, parse symbols.ParseSummary) []DynamicReference {
+	return dynamicReferencesForIR(site, expressions, parse)
+}
+
+func dynamicReferencesForCall(call Call, api string, texts []string) []DynamicReference {
 	specs := dynamicArgumentSpecs[api]
 	if api == "" || len(specs) == 0 || call.Caller == nil {
 		return nil
@@ -1020,6 +1029,35 @@ func dynamicAPIName(call Call) string {
 	default:
 		return ""
 	}
+}
+
+// implicitApplicationAPIName maps a receiverless Run/OnTime/OnKey call or a
+// With-block .Run/.OnTime/.OnKey member call to its implicit Application API.
+// It applies only when project resolution ran and did not bind the callee to
+// a project procedure: a user-defined procedure shadows the Application
+// member, and a non-callable local (Dim Run) is not a dispatch at all. Call
+// sites extracted before resolution keep ResolutionNotAttempted, so syntax-only
+// consumers such as inspect are unchanged.
+func implicitApplicationAPIName(site procedureir.CallSite) string {
+	switch site.Resolution.Status {
+	case "", procedureir.ResolutionNotAttempted, procedureir.ResolutionMatched, procedureir.ResolutionNonCallable:
+		return ""
+	}
+	member := strings.ToLower(cleanIdentifier(site.Callee.Member))
+	if member == "" {
+		member = strings.ToLower(cleanIdentifier(site.Callee.BaseName))
+	}
+	switch member {
+	case "run", "ontime", "onkey":
+	default:
+		return ""
+	}
+	if site.Callee.Receiver != nil {
+		if receiver := strings.TrimSpace(*site.Callee.Receiver); receiver != "" && receiver != "." {
+			return ""
+		}
+	}
+	return "application." + member
 }
 
 func dynamicArgument(call Call, spec dynamicArgumentSpec, texts []string) (int, string, string, bool) {

@@ -3,7 +3,9 @@
 {"project":"third_party/json","file":"examples/StringifyValues.bas","surface":"analyze","code":"VBA206","severity":"warning","line":37,"column":15}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA240","severity":"warning","line":126,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1356,"column":24}
+{"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA257","severity":"warning","line":1573,"column":10}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA244","severity":"information","line":1603,"column":10}
+{"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA257","severity":"warning","line":1603,"column":10}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1621,"column":5}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1621,"column":5}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA202","severity":"warning","line":1707,"column":0}

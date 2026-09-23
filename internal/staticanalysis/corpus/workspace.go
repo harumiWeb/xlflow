@@ -187,6 +187,8 @@ func MaterializeThirdPartyProject(corpusRoot string, project Project, opts Mater
 	// deliberately omits a rule.
 	cfg.Analyze.DetectRiskyModuleState = true
 	cfg.Analyze.DetectDeadStores = true
+	cfg.Analyze.DetectDiscardedFunctionReturn = true
+	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
 	if err := config.Write(filepath.Join(workspace.Root, config.FileName), cfg); err != nil {
 		return workspace, fmt.Errorf("write materialized project config: %w", err)
 	}

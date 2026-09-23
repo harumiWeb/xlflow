@@ -234,6 +234,8 @@ type AnalyzeConfig struct {
 	DetectUnboundDefaultMemberAccess          bool     `toml:"detect_unbound_default_member_access"`
 	DetectBangNotation                        bool     `toml:"detect_bang_notation"`
 	DetectDeadStores                          bool     `toml:"detect_dead_stores"`
+	DetectDiscardedFunctionReturn             bool     `toml:"detect_discarded_function_return"`
+	DetectFunctionReturnAlwaysDiscarded       bool     `toml:"detect_function_return_always_discarded"`
 	DevelopmentHTTPOrigins                    []string `toml:"development_http_origins"`
 }
 
@@ -338,6 +340,8 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA254": {Get: func(c AnalyzeConfig) bool { return c.DetectUnboundDefaultMemberAccess }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnboundDefaultMemberAccess = v }},
 	"VBA255": {Get: func(c AnalyzeConfig) bool { return c.DetectBangNotation }, Set: func(c *AnalyzeConfig, v bool) { c.DetectBangNotation = v }},
 	"VBA256": {Get: func(c AnalyzeConfig) bool { return c.DetectDeadStores }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDeadStores = v }},
+	"VBA257": {Get: func(c AnalyzeConfig) bool { return c.DetectDiscardedFunctionReturn }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDiscardedFunctionReturn = v }},
+	"VBA258": {Get: func(c AnalyzeConfig) bool { return c.DetectFunctionReturnAlwaysDiscarded }, Set: func(c *AnalyzeConfig, v bool) { c.DetectFunctionReturnAlwaysDiscarded = v }},
 }
 
 var (

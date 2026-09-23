@@ -292,6 +292,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_dictionary_iteration_value_usage`
 - `detect_dictionary_key_normalization`
 - `detect_dictionary_loop_materialization`
+- `detect_discarded_function_return`
 - `detect_error_handler_fallthrough`
 - `detect_error_suppression_propagation`
 - `detect_event_handler_reentry`
@@ -300,6 +301,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_excel_object_member_mismatch`
 - `detect_expensive_full_range_operations`
 - `detect_for_each_control_type`
+- `detect_function_return_always_discarded`
 - `detect_function_return_path`
 - `detect_hardcoded_secrets`
 - `detect_implicit_approximate_lookups`

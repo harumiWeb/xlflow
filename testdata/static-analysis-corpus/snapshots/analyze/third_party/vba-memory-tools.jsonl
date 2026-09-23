@@ -1,3 +1,5 @@
+{"project":"third_party/vba-memory-tools","file":"src/Demo/DemoClass.cls","surface":"analyze","code":"VBA257","severity":"warning","line":17,"column":6}
+{"project":"third_party/vba-memory-tools","file":"src/Demo/DemoClass.cls","surface":"analyze","code":"VBA258","severity":"information","line":21,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"analyze","code":"VBA206","severity":"warning","line":27,"column":17}
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"analyze","code":"VBA206","severity":"warning","line":27,"column":43}
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"analyze","code":"VBA206","severity":"warning","line":27,"column":70}
