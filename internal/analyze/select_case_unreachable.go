@@ -70,9 +70,13 @@ type selectCaseDomain struct {
 
 // selectCoverage is the normalized disjoint union of earlier Case item sets,
 // kept sorted so containment checks only ever test a single union member.
+// integral mirrors the selector domain: on integral domains every filtered
+// bound is an exact integer, so members separated by less than one whole step
+// still merge, while non-integral domains fall back to float64-ulp adjacency.
 type selectCoverage struct {
-	num []selectNumInterval
-	str []selectStrInterval
+	num      []selectNumInterval
+	str      []selectStrInterval
+	integral bool
 }
 
 var (
@@ -169,7 +173,7 @@ func (a Analyzer) selectCaseStatementFindings(file parsedFile, proc sourceProced
 		return nil
 	}
 
-	var coverage selectCoverage
+	coverage := selectCoverage{integral: domain.integral}
 	earlier := make([]selectItemSet, 0, 4)
 	var findings []Finding
 	for _, clause := range clauses {
@@ -622,7 +626,7 @@ func (coverage selectCoverage) contains(eff selectItemSet) (int, bool) {
 
 func (coverage *selectCoverage) add(eff selectItemSet) {
 	for _, iv := range eff.num {
-		coverage.num = selectNumUnionInsert(coverage.num, iv)
+		coverage.num = selectNumUnionInsert(coverage.num, iv, coverage.integral)
 	}
 	for _, iv := range eff.str {
 		coverage.str = selectStrUnionInsert(coverage.str, iv)
@@ -661,15 +665,21 @@ func selectNumContainingLine(union []selectNumInterval, iv selectNumInterval) (i
 // selectNumUnionInsert merges iv into the sorted disjoint union. An existing
 // member merges when it overlaps or is adjacent to iv — `u.hi` one float64 ulp
 // below `iv.lo` still leaves no representable gap, so the closed-interval union
-// remains contiguous.
-func selectNumUnionInsert(union []selectNumInterval, iv selectNumInterval) []selectNumInterval {
+// remains contiguous. On integral domains adjacency is one whole step instead:
+// filtered bounds are exact integers, so [0,127] and [128,255] merge while a
+// real gap like [0,127] + [129,255] stays disjoint.
+func selectNumUnionInsert(union []selectNumInterval, iv selectNumInterval, integral bool) []selectNumInterval {
+	loAdj, hiAdj := math.Nextafter(iv.lo, math.Inf(-1)), math.Nextafter(iv.hi, math.Inf(1))
+	if integral {
+		loAdj, hiAdj = iv.lo-1, iv.hi+1
+	}
 	out := make([]selectNumInterval, 0, len(union)+1)
 	i := 0
-	for i < len(union) && union[i].hi < math.Nextafter(iv.lo, math.Inf(-1)) {
+	for i < len(union) && union[i].hi < loAdj {
 		out = append(out, union[i])
 		i++
 	}
-	for i < len(union) && union[i].lo <= math.Nextafter(iv.hi, math.Inf(1)) {
+	for i < len(union) && union[i].lo <= hiAdj {
 		iv.lo = min(iv.lo, union[i].lo)
 		iv.hi = max(iv.hi, union[i].hi)
 		iv.line = min(iv.line, union[i].line)
@@ -799,7 +809,14 @@ func selectCaseConstantDomain(value constexpr.Value, compare string) selectCaseD
 			// would risk a wrong impossible/else_covered claim.
 			return selectCaseDomain{opaque: true}
 		}
-		if compare == "text" && selectStrFoldable(s) {
+		if compare == "text" {
+			if !selectStrFoldable(s) {
+				// Non-ASCII text still case-folds under Option Compare Text
+				// with mappings this model cannot reproduce (U+212A compares
+				// equal to "k"), so a raw singleton universe would disagree
+				// with the folded item intervals.
+				return selectCaseDomain{opaque: true}
+			}
 			s = strings.ToLower(s)
 		}
 		return selectCaseDomain{

@@ -135,6 +135,68 @@ End Sub
 			want: []selectCaseUnreachableExpectation{{kind: "else_covered", line: 6}},
 		},
 		{
+			name: "else covered by split byte ranges",
+			source: `Option Explicit
+Public Sub Run(ByVal x As Byte)
+  Select Case x
+    Case 0 To 127
+      x = 1
+    Case 128 To 255
+      x = 2
+    Case Else
+      x = 3
+  End Select
+End Sub
+`,
+			want: []selectCaseUnreachableExpectation{{kind: "else_covered", line: 8}},
+		},
+		{
+			name: "byte ranges with a gap leave else reachable",
+			source: `Option Explicit
+Public Sub Run(ByVal x As Byte)
+  Select Case x
+    Case 0 To 127
+      x = 1
+    Case 129 To 255
+      x = 2
+    Case Else
+      x = 3
+  End Select
+End Sub
+`,
+		},
+		{
+			name: "integer points merge to cover range",
+			source: `Option Explicit
+Public Sub Run(ByVal x As Long)
+  Select Case x
+    Case 1
+      x = 1
+    Case 2
+      x = 2
+    Case 1 To 2
+      x = 3
+  End Select
+End Sub
+`,
+			want: []selectCaseUnreachableExpectation{{kind: "covered", line: 8, item: "1 To 2"}},
+		},
+		{
+			name: "variant points do not merge across real gap",
+			source: `Option Explicit
+Public Sub Run(ByVal x As Variant)
+  Select Case x
+    Case 1
+      x = 1
+    Case 2
+      x = 2
+    Case 1 To 2
+      x = 3
+  End Select
+End Sub
+`,
+		},
+		{
 			name: "multiple items in one clause",
 			source: `Option Explicit
 Public Sub Run(ByVal x As Long)
@@ -215,6 +277,29 @@ Public Sub Run(ByVal s As String)
   End Select
 End Sub
 `,
+		},
+		{
+			name: "option compare text non-ascii constant selector fails open",
+			// The selector literal is U+212A KELVIN SIGN: real Option Compare
+			// Text folds it to "k", but the model cannot reproduce that mapping,
+			// so the constant selector domain must stay opaque.
+			source: "Option Explicit\nOption Compare Text\nPublic Sub Run()\n" +
+				"  Select Case \"K\"\n    Case \"k\"\n      Debug.Print 1\n  End Select\nEnd Sub\n",
+		},
+		{
+			name: "option compare text ascii constant selector still folds",
+			source: `Option Explicit
+Option Compare Text
+Public Sub Run()
+  Select Case "ABC"
+    Case "abc"
+      Debug.Print 1
+    Case Else
+      Debug.Print 2
+  End Select
+End Sub
+`,
+			want: []selectCaseUnreachableExpectation{{kind: "else_covered", line: 7}},
 		},
 		{
 			name: "byte domain impossibility",

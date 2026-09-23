@@ -47,6 +47,10 @@ The selector's value domain comes from a statically known constant value
 `Option Compare` is honored for string items: `Binary` uses code-unit order,
 `Text` folds ASCII-only literals, and `Database` ordering cannot be
 reproduced deterministically, so string analysis under it stays silent.
+Under `Text`, a constant string selector that is not ASCII-foldable also
+stays silent, because real text comparison applies non-ASCII case mappings
+(for example U+212A equals "k") that would disagree with the folded item
+intervals.
 
 ## Fail-open contract
 
@@ -64,6 +68,8 @@ that follow `Case Else`.
 rule available in batch and realtime/LSP analysis. Enable it with
 `detect_unreachable_select_case = true`, disable it per project with
 `[analyze].disabled_rules`, or suppress a single item inline with
-`xlflow:disable-line VBA259` / `xlflow:disable-next-line VBA259`. Findings
-point at the unreachable `case_expression` item (or the `Case Else` keyword)
-with the coverage witness line recorded in the context.
+`xlflow:disable-line VBA259` / `xlflow:disable-next-line VBA259`. Item
+findings point at the unreachable `case_expression` item and record the
+earliest covering item's line as `covered_by_line` in the context. `Case
+Else` findings point at the `Case Else` keyword; because the proof usually
+spans several earlier items they carry no single witness line.
