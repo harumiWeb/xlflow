@@ -702,6 +702,42 @@ detect_risky_module_state = true
 	}
 }
 
+func TestDiscardedReturnRulesDefaultDisabledAndAreConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA257"); !ok || enabled || cfg.Analyze.DetectDiscardedFunctionReturn {
+		t.Fatalf("VBA257 enabled = %v, known = %v, config = %v; want disabled configurable rule", enabled, ok, cfg.Analyze.DetectDiscardedFunctionReturn)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA258"); !ok || enabled || cfg.Analyze.DetectFunctionReturnAlwaysDiscarded {
+		t.Fatalf("VBA258 enabled = %v, known = %v, config = %v; want disabled configurable rule", enabled, ok, cfg.Analyze.DetectFunctionReturnAlwaysDiscarded)
+	}
+
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_discarded_function_return = true
+detect_function_return_always_discarded = true
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA257"); !ok || !enabled || !loaded.Analyze.DetectDiscardedFunctionReturn {
+		t.Fatalf("loaded VBA257 enabled = %v, known = %v, config = %v; want enabled", enabled, ok, loaded.Analyze.DetectDiscardedFunctionReturn)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA258"); !ok || !enabled || !loaded.Analyze.DetectFunctionReturnAlwaysDiscarded {
+		t.Fatalf("loaded VBA258 enabled = %v, known = %v, config = %v; want enabled", enabled, ok, loaded.Analyze.DetectFunctionReturnAlwaysDiscarded)
+	}
+}
+
 func TestLoadUnsafeSQLConstructionCompatibilityKeyAndDisabledRule(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte(`[project]

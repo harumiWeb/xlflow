@@ -23,6 +23,7 @@
 {"project":"third_party/iguana-tex","file":"ErrorForm.frm","surface":"analyze","code":"VBA220","severity":"warning","line":82,"column":0}
 {"project":"third_party/iguana-tex","file":"ErrorForm.frm","surface":"analyze","code":"VBA220","severity":"warning","line":86,"column":0}
 {"project":"third_party/iguana-tex","file":"ErrorForm.frm","surface":"analyze","code":"VBA206","severity":"warning","line":86,"column":5}
+{"project":"third_party/iguana-tex","file":"ErrorForm.frm","surface":"analyze","code":"VBA257","severity":"warning","line":86,"column":6}
 {"project":"third_party/iguana-tex","file":"ExportVBA.bas","surface":"analyze","code":"VBA214","severity":"warning","line":48,"column":0}
 {"project":"third_party/iguana-tex","file":"ExternalEditorForm.frm","surface":"analyze","code":"VBA206","severity":"warning","line":22,"column":5}
 {"project":"third_party/iguana-tex","file":"ExternalEditorForm.frm","surface":"analyze","code":"VBA206","severity":"warning","line":23,"column":5}
@@ -515,6 +516,8 @@
 {"project":"third_party/iguana-tex","file":"Macros.bas","surface":"analyze","code":"VBA241","severity":"information","line":327,"column":0}
 {"project":"third_party/iguana-tex","file":"Macros.bas","surface":"analyze","code":"VBA249","severity":"error","line":327,"column":0}
 {"project":"third_party/iguana-tex","file":"Macros.bas","surface":"analyze","code":"VBA206","severity":"warning","line":397,"column":16}
+{"project":"third_party/iguana-tex","file":"Macros.bas","surface":"analyze","code":"VBA257","severity":"warning","line":438,"column":18}
+{"project":"third_party/iguana-tex","file":"Macros.bas","surface":"analyze","code":"VBA257","severity":"warning","line":472,"column":18}
 {"project":"third_party/iguana-tex","file":"Macros.bas","surface":"analyze","code":"VBA245","severity":"warning","line":474,"column":3}
 {"project":"third_party/iguana-tex","file":"Macros.bas","surface":"analyze","code":"VBA245","severity":"warning","line":474,"column":3}
 {"project":"third_party/iguana-tex","file":"Macros.bas","surface":"analyze","code":"VBA245","severity":"warning","line":475,"column":3}

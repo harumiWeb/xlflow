@@ -1208,6 +1208,15 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 			return Result{}, err
 		}
 	}
+	var alwaysDiscardedFindings []Finding
+	if analysisEnabled, known := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA258"); known && analysisEnabled {
+		finishStage = analysisstats.Measure(ctx, "project_wide_diagnostics")
+		alwaysDiscardedFindings, err = a.functionAlwaysDiscardedFindings(ctx, parsedFiles)
+		finishStage(len(alwaysDiscardedFindings), err)
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	finishStage = analysisstats.Measure(ctx, "object_procedure_summaries")
 	var objectAnalysis *objectAnalysisContext
 	var finishObjectCapability func(error)
@@ -1297,7 +1306,7 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 			recorder.AddSum("project_symbol_count", uint64(symbolCount))
 		}
 	}
-	findings := cycleFindings
+	findings := append(cycleFindings, alwaysDiscardedFindings...)
 	var resolutionPreflight []Finding
 	finishStage = analysisstats.Measure(ctx, "project_wide_diagnostics")
 	for i := range parsedFiles {
@@ -2839,7 +2848,7 @@ sendJobs:
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255", "VBA257"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -2918,6 +2927,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		}
 	}
 	findings = append(findings, a.opaqueBooleanArgumentFindings(file, proc, analysisCtx.procedures)...)
+	findings = append(findings, a.discardedReturnFindings(file, proc, analysisCtx.projectResolver)...)
 	if plan.runsProjection(procedureProjectionRuntime) {
 		findings = append(findings, a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, analysisCtx, moduleDecls, resultStore.arrayProjection(profile))...)
 	}
@@ -4031,6 +4041,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	}
 	otherMeasurement.finish(len(functionFindings))
 	findings = append(findings, functionFindings...)
+	findings = append(findings, a.discardedReturnFindings(file, proc, ctx.projectResolver)...)
 	findings = suppressDictionaryGuardsForUninitializedObjects(findings)
 	return findings, cancelCtx.Err()
 }

@@ -979,6 +979,13 @@ func dynamicReferencesForIR(site procedureir.CallSite, expressions []procedureir
 	return dynamicReferencesForCall(call, argumentTexts(site.Arguments.ExpressionIDs, expressions))
 }
 
+// DynamicReferencesForIR exposes the dynamic-dispatch references of a single
+// IR call site so project-wide analyzer passes can reason about callback
+// targets (Application.Run/OnTime/OnKey, CallByName) without reparsing source.
+func DynamicReferencesForIR(site procedureir.CallSite, expressions []procedureir.Expression, parse symbols.ParseSummary) []DynamicReference {
+	return dynamicReferencesForIR(site, expressions, parse)
+}
+
 func dynamicReferencesForCall(call Call, texts []string) []DynamicReference {
 	api := dynamicAPIName(call)
 	specs := dynamicArgumentSpecs[api]

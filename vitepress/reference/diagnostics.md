@@ -131,6 +131,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA253`](#vba253) | analyze | warning     | procedure-local | no      | Implicit default-member access                     |
 | [`VBA254`](#vba254) | analyze | information | procedure-local | no      | Unbound default-member access                      |
 | [`VBA255`](#vba255) | analyze | information | procedure-local | no      | Bang notation                                      |
+| [`VBA257`](#vba257) | analyze | warning     | procedure-local | no      | Discarded Function return value                    |
+| [`VBA258`](#vba258) | analyze | information | project-wide    | no      | Function return value always discarded             |
 
 ## VB001
 
@@ -2837,3 +2839,47 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                       |
 | Real-time editor diagnostic | yes                      |
 | Fix available               | no                       |
+
+## VBA257
+
+**Discarded Function return value.** A standalone call statement invokes a resolved Function or Property Get and discards the returned value.
+
+| Property                    | Value                              |
+| --------------------------- | ---------------------------------- |
+| Family                      | `analyze`                          |
+| Category                    | `correctness`                      |
+| Evidence class              | `inference`                        |
+| Compile-equivalent          | no                                 |
+| Default severity            | `warning`                          |
+| Supported severities        | `warning`, `information`           |
+| Surfaces                    | `analyze`, `lsp`                   |
+| Scope                       | `procedure-local`                  |
+| Precision                   | `high`                             |
+| Enabled by default          | no                                 |
+| Configuration               | `detect_discarded_function_return` |
+| Inline suppression          | yes                                |
+| Blocks source preflight     | no                                 |
+| Real-time editor diagnostic | yes                                |
+| Fix available               | no                                 |
+
+## VBA258
+
+**Function return value always discarded.** Every statically resolved call site of a Private or Friend Function/Property Get discards the returned value, so the procedure effectively behaves like a Sub.
+
+| Property                    | Value                                     |
+| --------------------------- | ----------------------------------------- |
+| Family                      | `analyze`                                 |
+| Category                    | `maintainability`                         |
+| Evidence class              | `maintainability`                         |
+| Compile-equivalent          | no                                        |
+| Default severity            | `information`                             |
+| Supported severities        | `information`, `warning`                  |
+| Surfaces                    | `analyze`                                 |
+| Scope                       | `project-wide`                            |
+| Precision                   | `medium`                                  |
+| Enabled by default          | no                                        |
+| Configuration               | `detect_function_return_always_discarded` |
+| Inline suppression          | yes                                       |
+| Blocks source preflight     | no                                        |
+| Real-time editor diagnostic | no                                        |
+| Fix available               | no                                        |

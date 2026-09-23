@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `VBA257` warning and `VBA258` information diagnostics for
+  discarded `Function`/`Property Get` return values. `VBA257` reports
+  standalone call statements that drop a resolved return value in batch,
+  realtime, and LSP analysis; `VBA258` reports `Private`/`Friend` procedures
+  whose every resolved call site discards the result in batch analysis. They
+  use `detect_discarded_function_return` and
+  `detect_function_return_always_discarded`.
+
 ## v0.32.2
 
 - Fixed `xlflow fmt` producing wrong `Next` indentation for `For`/`For Each`

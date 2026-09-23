@@ -28,6 +28,8 @@ var requiredSpecContracts = map[string]string{
 	"VBA253": "vba-default-member-diagnostics.md",
 	"VBA254": "vba-default-member-diagnostics.md",
 	"VBA255": "vba-default-member-diagnostics.md",
+	"VBA257": "vba-discarded-function-return-diagnostics.md",
+	"VBA258": "vba-discarded-function-return-diagnostics.md",
 }
 
 type specRuleContract struct {
