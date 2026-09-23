@@ -670,7 +670,11 @@ func selectNumContainingLine(union []selectNumInterval, iv selectNumInterval) (i
 // real gap like [0,127] + [129,255] stays disjoint.
 func selectNumUnionInsert(union []selectNumInterval, iv selectNumInterval, integral bool) []selectNumInterval {
 	loAdj, hiAdj := math.Nextafter(iv.lo, math.Inf(-1)), math.Nextafter(iv.hi, math.Inf(1))
-	if integral {
+	if integral && iv.lo > -(1<<53) && iv.hi < 1<<53 {
+		// Whole-step adjacency is only exact while every bound stays inside
+		// float64's exact integer range; beyond ±2^53 (reachable only through
+		// uncapped Double literals on unbounded integral domains such as
+		// LongLong) the ±1 step is not representable, so ulp adjacency applies.
 		loAdj, hiAdj = iv.lo-1, iv.hi+1
 	}
 	out := make([]selectNumInterval, 0, len(union)+1)

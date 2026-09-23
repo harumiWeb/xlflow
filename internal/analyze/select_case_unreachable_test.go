@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	"github.com/harumiWeb/xlflow/internal/vba/sourceproject"
 )
 
@@ -284,7 +285,7 @@ End Sub
 			// Text folds it to "k", but the model cannot reproduce that mapping,
 			// so the constant selector domain must stay opaque.
 			source: "Option Explicit\nOption Compare Text\nPublic Sub Run()\n" +
-				"  Select Case \"K\"\n    Case \"k\"\n      Debug.Print 1\n  End Select\nEnd Sub\n",
+				"  Select Case \"\u212a\"\n    Case \"k\"\n      Debug.Print 1\n  End Select\nEnd Sub\n",
 		},
 		{
 			name: "option compare text ascii constant selector still folds",
@@ -619,5 +620,25 @@ End Sub
 	}
 	if finding.Severity != "warning" || !strings.Contains(finding.Message, `"1"`) {
 		t.Fatalf("unexpected finding payload: %+v", finding)
+	}
+}
+
+// TestSelectCaseConstantDomainNonASCIIFold pins the P2 fix directly: a constant
+// selector whose text is not ASCII-foldable must go opaque under Option Compare
+// Text while the identical literal stays a supported string domain under
+// Binary. The end-to-end case in the table above would not prove the guard
+// fires if the literal were accidentally ASCII.
+func TestSelectCaseConstantDomainNonASCIIFold(t *testing.T) {
+	kelvin := "\u212a"
+	if selectStrFoldable(kelvin) {
+		t.Fatal("test premise broken: U+212A must be non-foldable")
+	}
+	textDomain := selectCaseConstantDomain(constexpr.Value{Kind: constexpr.ValueString, String: kelvin}, "text")
+	if !textDomain.opaque {
+		t.Fatalf("U+212A under Option Compare Text must be opaque, got %+v", textDomain)
+	}
+	binaryDomain := selectCaseConstantDomain(constexpr.Value{Kind: constexpr.ValueString, String: kelvin}, "binary")
+	if binaryDomain.opaque || !binaryDomain.str {
+		t.Fatalf("U+212A under Option Compare Binary must stay a string domain, got %+v", binaryDomain)
 	}
 }

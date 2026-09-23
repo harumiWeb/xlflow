@@ -69,7 +69,8 @@ rule available in batch and realtime/LSP analysis. Enable it with
 `detect_unreachable_select_case = true`, disable it per project with
 `[analyze].disabled_rules`, or suppress a single item inline with
 `xlflow:disable-line VBA259` / `xlflow:disable-next-line VBA259`. Item
-findings point at the unreachable `case_expression` item and record the
-earliest covering item's line as `covered_by_line` in the context. `Case
-Else` findings point at the `Case Else` keyword; because the proof usually
-spans several earlier items they carry no single witness line.
+findings point at the unreachable `case_expression` item; `duplicate` and
+`covered` findings also record the earliest covering item's line as
+`covered_by_line` in the context. `Case Else` findings point at the `Case
+Else` keyword; because the proof usually spans several earlier items they
+carry no single witness line.
