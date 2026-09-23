@@ -3,6 +3,7 @@ package analyze
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/vba/sourceproject"
@@ -39,7 +40,7 @@ func sourceProjectHasWorksheetCodeNameCandidate(project sourceproject.SourceProj
 
 func worksheetCodeNameLiteralCandidate(statement string) bool {
 	masked := maskVBAStringsAndComments(statement)
-	for _, match := range thisWorkbookWorksheetsLiteralRe.FindAllStringIndex(masked, -1) {
+	for _, match := range worksheetCodeNameMatches(masked) {
 		open := match[1] - 1
 		close := balancedCallEnd(statement, open)
 		if close <= open {
@@ -57,7 +58,7 @@ func worksheetCodeNameFindings(statement string, catalog WorksheetCodeNameCatalo
 		return nil
 	}
 	masked := maskVBAStringsAndComments(statement)
-	matches := thisWorkbookWorksheetsLiteralRe.FindAllStringIndex(masked, -1)
+	matches := worksheetCodeNameMatches(masked)
 	findings := make([]worksheetCodeNameFinding, 0, len(matches))
 	for _, match := range matches {
 		open := match[1] - 1
@@ -73,6 +74,10 @@ func worksheetCodeNameFindings(statement string, catalog WorksheetCodeNameCatalo
 		if !ok || !worksheetCodeNameDocumentModuleExists(codeName, documentModules) {
 			continue
 		}
+		start := match[0]
+		if memberOffset := strings.Index(strings.ToLower(masked[match[0]:match[1]]), "worksheets"); memberOffset >= 0 {
+			start += memberOffset
+		}
 		findings = append(findings, worksheetCodeNameFinding{
 			Finding: Finding{
 				Code:       "VBA260",
@@ -83,21 +88,49 @@ func worksheetCodeNameFindings(statement string, catalog WorksheetCodeNameCatalo
 			},
 			SheetName: sheetName,
 			CodeName:  codeName,
-			Start:     match[0],
+			Start:     start,
 			End:       close + 1,
 		})
 	}
 	return findings
 }
 
-func (a Analyzer) worksheetCodeNameStatementFindings(file parsedFile, proc sourceProcedure, line int, statement string, documentModules map[string]string) []Finding {
+func worksheetCodeNameMatches(masked string) [][]int {
+	matches := thisWorkbookWorksheetsLiteralRe.FindAllStringIndex(masked, -1)
+	return slices.DeleteFunc(matches, func(match []int) bool {
+		for index := match[0] - 1; index >= 0; index-- {
+			switch masked[index] {
+			case ' ', '\t':
+				continue
+			case '.', '!':
+				return true
+			default:
+				return false
+			}
+		}
+		return false
+	})
+}
+
+func (a Analyzer) worksheetCodeNameStatementFindings(file parsedFile, proc sourceProcedure, line int, statement string, positions []worksheetLogicalSourcePosition, thisWorkbookShadowed bool, documentModules map[string]string) []Finding {
+	if thisWorkbookShadowed {
+		return nil
+	}
 	candidates := worksheetCodeNameFindings(statement, a.WorksheetCodeNames, documentModules)
 	out := make([]Finding, 0, len(candidates))
 	for _, candidate := range candidates {
-		finding := a.simpleFinding(file, proc, line, candidate.Code, candidate.Severity, candidate.Message, candidate.Reason, candidate.Suggestion)
-		finding.Column = candidate.Start + 1
-		finding.EndLine = line
-		finding.EndColumn = candidate.End + 1
+		startLine, startColumn := line, candidate.Start+1
+		endLine, endColumn := line, candidate.End+1
+		if candidate.Start >= 0 && candidate.Start < len(positions) && positions[candidate.Start].Line > 0 {
+			startLine, startColumn = positions[candidate.Start].Line, positions[candidate.Start].Column
+		}
+		if endIndex := candidate.End - 1; endIndex >= 0 && endIndex < len(positions) && positions[endIndex].Line > 0 {
+			endLine, endColumn = positions[endIndex].Line, positions[endIndex].Column+1
+		}
+		finding := a.simpleFinding(file, proc, startLine, candidate.Code, candidate.Severity, candidate.Message, candidate.Reason, candidate.Suggestion)
+		finding.Column = startColumn
+		finding.EndLine = endLine
+		finding.EndColumn = endColumn
 		out = append(out, finding)
 	}
 	return out

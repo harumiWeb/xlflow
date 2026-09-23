@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -96,6 +97,44 @@ func TestAnalyzeProjectWorksheetCatalogMissingDoesNotWarnWithoutCandidate(t *tes
 	}
 }
 
+func TestAnalyzeProjectWorksheetCodeNameRejectsShadowingAndUsesContinuationSuppression(t *testing.T) {
+	cfg := config.Default()
+	cfg.Analyze.DetectWorksheetStringAccess = true
+	project := sourceproject.SourceProject{Files: []sourceproject.SourceFile{
+		{
+			Path:       "virtual/Main.bas",
+			ModuleKind: sourceproject.ModuleKindStandard,
+			Source: []byte("Attribute VB_Name = \"Main\"\nPublic Sub Run()\n" +
+				"  Dim ThisWorkbook As Workbook\n" +
+				"  Debug.Print ThisWorkbook.Worksheets(\"Report\").Name\n" +
+				"End Sub\n"),
+		},
+		{
+			Path:       "virtual/Suppressed.bas",
+			ModuleKind: sourceproject.ModuleKindStandard,
+			Source: []byte("Attribute VB_Name = \"Suppressed\"\nPublic Sub Run()\n" +
+				"  Debug.Print ThisWorkbook _\n" +
+				"    .Worksheets(\"Report\").Name ' xlflow:disable-line VBA260\n" +
+				"End Sub\n"),
+		},
+		{
+			Path:       "virtual/SheetReport.cls",
+			ModuleKind: sourceproject.ModuleKindDocument,
+			Source:     []byte("Attribute VB_Name = \"SheetReport\"\nOption Explicit\n"),
+		},
+	}}
+	result, err := (Analyzer{
+		Config:             cfg,
+		WorksheetCodeNames: testWorksheetCodeNameCatalog{"Report": "SheetReport"},
+	}).AnalyzeProject(t.Context(), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := findingsByCode(result.Findings, "VBA260"); len(findings) != 0 {
+		t.Fatalf("VBA260 findings = %+v, want shadowed and line-suppressed accesses excluded", findings)
+	}
+}
+
 func TestLoadWorksheetCodeNameCatalogWarnsWhenEntriesAreExcluded(t *testing.T) {
 	workbookPath := writeWorksheetCatalogFixture(t, map[string]string{
 		"xl/workbook.xml":            `<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Report" sheetId="1" r:id="missing"/></sheets></workbook>`,
@@ -107,6 +146,10 @@ func TestLoadWorksheetCodeNameCatalogWarnsWhenEntriesAreExcluded(t *testing.T) {
 	}
 	if warning == nil || warning["code"] != "analysis_capability_unavailable" || warning["capability"] != "worksheet_codename_catalog" {
 		t.Fatalf("warning = %+v, want worksheet catalog capability warning", warning)
+	}
+	message, _ := warning["message"].(string)
+	if !strings.Contains(message, "metadata is incomplete") || strings.Contains(message, "metadata is unavailable") || strings.Contains(message, "VBA260 was skipped") {
+		t.Fatalf("warning message = %q, want partial-catalog semantics", message)
 	}
 }
 

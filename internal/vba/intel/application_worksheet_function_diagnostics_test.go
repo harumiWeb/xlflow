@@ -41,8 +41,11 @@ End Sub
 		if !ok {
 			t.Fatalf("VBA261 diagnostic on unexpected line: %+v", diagnostic)
 		}
-		if !strings.Contains(diagnostic.Message, fmt.Sprintf("Application.WorksheetFunction.%s", want)) || !strings.Contains(diagnostic.Message, "Double") {
-			t.Fatalf("VBA261 diagnostic = %+v, want WorksheetFunction type explanation", diagnostic)
+		if !strings.Contains(diagnostic.Message, fmt.Sprintf("Application.WorksheetFunction.%s", want)) ||
+			!strings.Contains(diagnostic.Message, "Double") ||
+			!strings.Contains(diagnostic.Message, "worksheet error values") ||
+			!strings.Contains(diagnostic.Message, "runtime error") {
+			t.Fatalf("VBA261 diagnostic = %+v, want binding, type, and error-behavior explanation", diagnostic)
 		}
 		if diagnostic.Code != "VBA261" || diagnostic.Rule != "VBA261" || diagnostic.Severity != "information" || diagnostic.Confidence != "high" {
 			t.Fatalf("VBA261 diagnostic metadata = %+v", diagnostic)

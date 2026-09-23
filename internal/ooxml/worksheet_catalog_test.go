@@ -142,3 +142,38 @@ func TestReadWorksheetCodeNameCatalogRejectsAmbiguousNamesAndCodeNames(t *testin
 		t.Fatalf("ambiguous issue counts = visible %d, CodeName %d; issues = %#v", visible, codeName, catalog.Issues())
 	}
 }
+
+func TestReadWorksheetCodeNameCatalogValidatesSkippedSheetDataAndLaterMetadata(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		worksheet string
+	}{
+		{name: "malformed sheet data", worksheet: `<worksheet><sheetPr codeName="SheetReport"/><sheetData><row>`},
+		{name: "conflicting later metadata", worksheet: `<worksheet><sheetPr codeName="SheetReport"/><sheetData><row/></sheetData><sheetPr codeName="SheetOther"/></worksheet>`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := writeZipFixture(t, map[string]string{
+				"xl/workbook.xml":            `<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Report" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+				"xl/_rels/workbook.xml.rels": `<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/report.xml"/></Relationships>`,
+				"xl/worksheets/report.xml":   test.worksheet,
+			})
+			pkg, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = pkg.Close() }()
+
+			catalog, err := pkg.ReadWorksheetCodeNameCatalog()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := catalog.Lookup("Report"); ok {
+				t.Fatalf("catalog = %#v, want malformed worksheet mapping excluded", catalog.Mappings())
+			}
+			issues := catalog.Issues()
+			if len(issues) != 1 || issues[0].Kind != WorksheetCodeNameMalformedSheetPart {
+				t.Fatalf("issues = %#v, want one malformed sheet part", issues)
+			}
+		})
+	}
+}

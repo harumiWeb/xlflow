@@ -46,3 +46,33 @@ One valid finding remains:
    underscore so qualifier `i` never matches `i_foo`. Fix: prefix-match the
    lowered symbol name against each complete interface name + `_`. Add a
    regression test with an underscored interface name.
+
+# PR #838 review follow-up (Issue #827, VBA260/VBA261/VBA262)
+
+Verified against commit `2ebcf3f6`; actionable plan:
+
+1. [Devin] Exclude bracket-escaped identifiers that bind to procedure, module,
+   or project declarations from VBA262. Add declared enum/local/module and
+   undeclared host-expression regressions.
+2. [Devin] Require VBA260's `ThisWorkbook` token to be an unqualified,
+   unshadowed project-global receiver. Reject member-qualified and locally
+   shadowed forms with focused tests.
+3. [Devin/CodeRabbit] Preserve logical-to-physical source positions for VBA260
+   continuation statements so ranges and line suppressions bind to the actual
+   physical line. Cover indentation and a match beginning on a continued line.
+4. [CodeRabbit] Distinguish partial worksheet catalogs from unavailable
+   catalogs in structured warning text while retaining valid mappings.
+5. [CodeRabbit] Skip `sheetData` subtrees through `xml.Decoder.Skip` to reduce
+   token handling while still validating XML through EOF and rejecting later
+   conflicting `sheetPr` metadata.
+6. [CodeRabbit acceptance check] Extend VBA261 diagnostics and tests to explain
+   the error-behavior difference as well as binding and return-type semantics.
+7. Run focused tests, full affected packages, corpus snapshots, lint/docs, and
+   push the review-fix commit. Re-read PR comments and remote checks.
+
+Non-actionable/follow-up: repository style does not require doc comments on all
+private helpers. The security job reports GO-2026-6452 in the pre-existing
+excelize v2.11.0 dependency with no fixed version, so it is tracked separately
+from this review fix. VBE-oracle need will be reassessed after checking existing
+bracket fixtures; VBA262 is not compile-equivalent and will not be promoted as
+compile evidence.

@@ -16,11 +16,11 @@ type bracketExpressionCandidate struct {
 // bracketExpressionFindings reports Excel host-evaluated bracket expressions
 // from the procedure IR. It has no analyzer or configuration dependency so
 // batch and realtime callers can use the same source fact.
-func bracketExpressionFindings(rootDir string, file parsedFile, proc sourceProcedure) []Finding {
+func bracketExpressionFindings(rootDir string, file parsedFile, proc sourceProcedure, projectResolver procedureir.Resolver) []Finding {
 	if proc.IR == nil {
 		return nil
 	}
-	candidates := bracketExpressionCandidates(proc.IR)
+	candidates := bracketExpressionCandidates(file, proc, projectResolver)
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -55,18 +55,64 @@ func bracketExpressionFindings(rootDir string, file parsedFile, proc sourceProce
 	return findings
 }
 
-func bracketExpressionCandidates(proc *procedureir.ProcedureIR) []bracketExpressionCandidate {
-	if proc == nil {
+func bracketExpressionCandidates(file parsedFile, proc sourceProcedure, projectResolver procedureir.Resolver) []bracketExpressionCandidate {
+	if proc.IR == nil {
 		return nil
 	}
 	candidates := make([]bracketExpressionCandidate, 0)
-	for _, expression := range proc.Expressions {
-		if !isBareBracketExpression(proc, expression) {
+	for _, expression := range proc.IR.Expressions {
+		if !isBareBracketExpression(proc.IR, expression) || bracketExpressionBindsDeclaration(file, proc, expression, projectResolver) {
 			continue
 		}
 		candidates = append(candidates, bracketExpressionCandidate{Text: strings.TrimSpace(expression.Text), Range: expression.Range})
 	}
 	return candidates
+}
+
+func bracketExpressionBindsDeclaration(file parsedFile, proc sourceProcedure, expression procedureir.Expression, projectResolver procedureir.Resolver) bool {
+	name := cleanIdentifier(expression.Text)
+	if name == "" {
+		return false
+	}
+	for access := range proc.Accesses.All() {
+		if access.ExpressionID != expression.ID && access.Range != expression.Range {
+			continue
+		}
+		if access.Scope != procedureir.ScopeUnresolved || len(access.Resolution.Candidates) > 0 {
+			return true
+		}
+	}
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(cleanIdentifier(declaration.Name), name) {
+			return true
+		}
+	}
+	for parameter := range proc.Params.All() {
+		if strings.EqualFold(cleanIdentifier(parameter.Name), name) {
+			return true
+		}
+	}
+	if _, ok := file.moduleDecls()[strings.ToLower(name)]; ok {
+		return true
+	}
+	if strings.EqualFold(name, proc.Name) || projectResolver == nil {
+		return strings.EqualFold(name, proc.Name)
+	}
+	caller := procedureir.ProcedureRef{Name: proc.Name, Kind: proc.ProcedureKind}
+	if proc.IR != nil {
+		caller.QualifiedName = proc.IR.Symbol.QualifiedName
+	}
+	resolved := projectResolver.ResolveSymbol(procedureir.SymbolReference{
+		Name: name, Module: proc.Module, Caller: caller, Range: expression.Range,
+	})
+	if len(resolved.Candidates) > 0 {
+		return true
+	}
+	call := projectResolver.ResolveCall(procedureir.CallSite{
+		File: file.Path, Module: proc.Module, Caller: caller, Range: expression.Range,
+		Callee: procedureir.Callee{Text: name, BaseName: name},
+	})
+	return call.Status == procedureir.ResolutionMatched || call.Status == procedureir.ResolutionAmbiguous
 }
 
 func isBareBracketExpression(proc *procedureir.ProcedureIR, expression procedureir.Expression) bool {

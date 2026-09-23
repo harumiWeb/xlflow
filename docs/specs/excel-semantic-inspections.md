@@ -12,7 +12,8 @@ VBA260 reports an explicit `ThisWorkbook.Worksheets("name")` or
 metadata maps the visible worksheet name to one document-module CodeName and
 that module exists in the analyzed project. Dynamic selectors, external or
 unknown workbooks, `Sheets` entries that are not proven worksheets, missing or
-ambiguous metadata, and callers that do not supply workbook metadata fail open.
+ambiguous metadata, member-qualified or shadowed `ThisWorkbook` identifiers,
+and callers that do not supply workbook metadata fail open.
 The filesystem-backed analyzer may derive the metadata from the configured
 saved OOXML workbook. `AnalyzeProject` never reads a workbook implicitly.
 
@@ -37,6 +38,7 @@ signature or replace existing VBA218/VBA251 ownership.
 VBA262 reports a bare Excel host bracket expression such as `[A1]` from the raw
 procedure expression projection and recommends an explicit object-model access.
 The rule does not treat array indexing, array bounds, bracketed declarations,
+bracketed identifiers that resolve to procedure, module, or project symbols,
 strings, comments, or qualified members such as `Me.[Member]` as host bracket
-expressions. Because xlflow analyzes Excel VBA projects, the rule is an explicit
-Excel-host policy and remains disabled unless configured.
+expressions. Because xlflow analyzes Excel VBA projects, the rule is an
+explicit Excel-host policy and remains disabled unless configured.

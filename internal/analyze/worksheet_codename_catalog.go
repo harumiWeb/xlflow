@@ -26,9 +26,19 @@ func loadWorksheetCodeNameCatalog(rootDir, workbookPath string) (WorksheetCodeNa
 		return nil, worksheetCodeNameCapabilityWarning(workbookPath, err.Error())
 	}
 	if issues := catalog.Issues(); len(issues) > 0 {
-		return catalog, worksheetCodeNameCapabilityWarning(workbookPath, fmt.Sprintf("the workbook catalog excluded %d malformed or ambiguous worksheet entries", len(issues)))
+		return catalog, worksheetCodeNamePartialWarning(workbookPath, len(issues))
 	}
 	return catalog, nil
+}
+
+func worksheetCodeNamePartialWarning(workbookPath string, excluded int) map[string]any {
+	return map[string]any{
+		"code":       "analysis_capability_unavailable",
+		"capability": "worksheet_codename_catalog",
+		"file":       workbookPath,
+		"rules":      []string{"VBA260"},
+		"message":    fmt.Sprintf("Worksheet CodeName metadata is incomplete; VBA260 skipped %d malformed or ambiguous worksheet entries.", excluded),
+	}
 }
 
 func worksheetCodeNameCapabilityWarning(workbookPath, detail string) map[string]any {

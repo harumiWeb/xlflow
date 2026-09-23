@@ -235,6 +235,11 @@ func (p *Package) readWorksheetCodeName(partPath string) (codeName string, err e
 				continue
 			}
 			if token.Name.Local != "sheetPr" {
+				if token.Name.Local == "sheetData" {
+					if err := decoder.Skip(); err != nil {
+						return "", err
+					}
+				}
 				continue
 			}
 			value := ""

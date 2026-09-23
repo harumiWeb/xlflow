@@ -123,5 +123,5 @@ func (a Analyzer) ApplicationWorksheetFunctionDispatchDiagnosticsContext(ctx con
 }
 
 func applicationWorksheetFunctionDispatchMessage(member, returnType string) string {
-	return fmt.Sprintf("Application.%s uses late-bound worksheet-function dispatch; Application.WorksheetFunction.%s is strongly typed as %s by the generated Excel TypeLib.", member, member, firstNonEmpty(strings.TrimSpace(returnType), "Variant"))
+	return fmt.Sprintf("Application.%s uses late-bound worksheet-function dispatch, which can return worksheet error values with Variant semantics; Application.WorksheetFunction.%s is strongly typed as %s by the generated Excel TypeLib and can raise a runtime error for worksheet errors.", member, member, firstNonEmpty(strings.TrimSpace(returnType), "Variant"))
 }

@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -27,6 +28,8 @@ func TestWorksheetCodeNameFindingsResolveOnlyThisWorkbookLiteralAccess(t *testin
 		{name: "worksheets item", statement: `Set target = ThisWorkbook.Worksheets("Report").Range("A1")`, want: 1},
 		{name: "explicit item member", statement: `Set target = ThisWorkbook.Worksheets.Item("Report").Range("A1")`, want: 1},
 		{name: "case insensitive lookup", statement: `Set target = ThisWorkbook.Worksheets("report").Range("A1")`, want: 1},
+		{name: "member qualified thisworkbook", statement: `Set target = provider.ThisWorkbook.Worksheets("Report").Range("A1")`, want: 0},
+		{name: "spaced member qualified thisworkbook", statement: `Set target = provider . ThisWorkbook.Worksheets("Report").Range("A1")`, want: 0},
 		{name: "external workbook", statement: `Set target = Workbooks("Book.xlsx").Worksheets("Report").Range("A1")`, want: 0},
 		{name: "sheets collection", statement: `Set target = ThisWorkbook.Sheets("Report").Range("A1")`, want: 0},
 		{name: "dynamic selector", statement: `Set target = ThisWorkbook.Worksheets(sheetName).Range("A1")`, want: 0},
@@ -42,6 +45,37 @@ func TestWorksheetCodeNameFindingsResolveOnlyThisWorkbookLiteralAccess(t *testin
 				t.Fatalf("finding = %#v", got[0])
 			}
 		})
+	}
+}
+
+func TestWorksheetCodeNameStatementFindingsUsePhysicalContinuationRange(t *testing.T) {
+	root := t.TempDir()
+	lines := []string{
+		"Public Sub Run()",
+		"    Set target = ThisWorkbook _",
+		"        .Worksheets(\"Report\").Range(\"A1\")",
+		"End Sub",
+	}
+	statement, positions, ok := worksheetLogicalStatementWithPositions(lines, 1, 2)
+	if !ok {
+		t.Fatal("logical worksheet statement was not built")
+	}
+	file := parsedFile{Path: filepath.Join(root, "Main.bas"), Lines: lines, Module: "Main"}
+	proc := sourceProcedure{Name: "Run", StartLine: 1, EndLine: 4}
+	analyzer := Analyzer{RootDir: root, WorksheetCodeNames: worksheetCodeNameCatalogFixture{"Report": "SheetReport"}}
+	findings := analyzer.worksheetCodeNameStatementFindings(file, proc, 2, statement, positions, false, map[string]string{"sheetreport": "SheetReport"})
+	if len(findings) != 1 {
+		t.Fatalf("VBA260 findings = %+v, want one", findings)
+	}
+	finding := findings[0]
+	wantStart := strings.Index(lines[2], "Worksheets") + 1
+	wantEnd := strings.Index(lines[2], ")") + 2
+	if finding.Line != 3 || finding.Column != wantStart || finding.EndLine != 3 || finding.EndColumn != wantEnd {
+		t.Fatalf("VBA260 range = %d:%d-%d:%d, want 3:%d-3:%d", finding.Line, finding.Column, finding.EndLine, finding.EndColumn, wantStart, wantEnd)
+	}
+
+	if shadowed := analyzer.worksheetCodeNameStatementFindings(file, proc, 2, statement, positions, true, map[string]string{"sheetreport": "SheetReport"}); len(shadowed) != 0 {
+		t.Fatalf("shadowed ThisWorkbook findings = %+v, want none", shadowed)
 	}
 }
 

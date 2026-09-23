@@ -2957,7 +2957,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	}
 	findings = append(findings, a.discardedReturnFindings(file, proc, analysisCtx.projectResolver)...)
 	if a.Config.Analyze.DetectHostBracketExpressions && plan.runsProjection(procedureProjectionExcelBracket) {
-		findings = append(findings, bracketExpressionFindings(a.RootDir, file, proc)...)
+		findings = append(findings, bracketExpressionFindings(a.RootDir, file, proc, analysisCtx.projectResolver)...)
 	}
 	if plan.runsProjection(procedureProjectionRuntime) {
 		findings = append(findings, a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, analysisCtx, moduleDecls, resultStore.arrayProjection(profile))...)
@@ -3743,6 +3743,10 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		lineNo := i + 1
 		stmt := normalizedCodeLine(file.Lines[i])
 		worksheetStmt, worksheetStatementStart := worksheetLogicalStatement(file.Lines, i, proc.EndLine-1)
+		var worksheetPositions []worksheetLogicalSourcePosition
+		if worksheetStatementStart && a.Config.Analyze.DetectWorksheetStringAccess && a.WorksheetCodeNames != nil {
+			worksheetStmt, worksheetPositions, worksheetStatementStart = worksheetLogicalStatementWithPositions(file.Lines, i, proc.EndLine-1)
+		}
 		if stmt == "" {
 			continue
 		}
@@ -3766,7 +3770,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 			if worksheetStatementStart {
 				if a.Config.Analyze.DetectWorksheetStringAccess && a.WorksheetCodeNames != nil {
 					excelMeasurement := profile.begin(procedureDomainExcel)
-					excelFindings := a.worksheetCodeNameStatementFindings(file, proc, lineNo, worksheetStmt, ctx.worksheetCodenames)
+					excelFindings := a.worksheetCodeNameStatementFindings(file, proc, lineNo, worksheetStmt, worksheetPositions, shadowedVBA205.contains("ThisWorkbook"), ctx.worksheetCodenames)
 					profile.kernel()
 					profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
 					excelMeasurement.finish(len(excelFindings))
@@ -3791,7 +3795,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		if worksheetStatementStart {
 			if a.Config.Analyze.DetectWorksheetStringAccess && a.WorksheetCodeNames != nil {
 				excelMeasurement := profile.begin(procedureDomainExcel)
-				excelFindings := a.worksheetCodeNameStatementFindings(file, proc, lineNo, worksheetStmt, ctx.worksheetCodenames)
+				excelFindings := a.worksheetCodeNameStatementFindings(file, proc, lineNo, worksheetStmt, worksheetPositions, shadowedVBA205.contains("ThisWorkbook"), ctx.worksheetCodenames)
 				profile.kernel()
 				profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
 				excelMeasurement.finish(len(excelFindings))
@@ -4005,7 +4009,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	}
 	if plan.runsProjection(procedureProjectionExcelBracket) && a.Config.Analyze.DetectHostBracketExpressions {
 		excelMeasurement := profile.begin(procedureDomainExcel)
-		excelFindings := bracketExpressionFindings(a.RootDir, file, proc)
+		excelFindings := bracketExpressionFindings(a.RootDir, file, proc, ctx.projectResolver)
 		profile.kernel()
 		profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
 		excelMeasurement.finish(len(excelFindings))
@@ -8851,28 +8855,50 @@ func physicalSourceLineCount(lines []string) int {
 // worksheet-root rules. Other rules keep their established physical-line or
 // AST handling, while these rules need the complete member chain to compare
 // roots accurately. The caller reports on the first physical line.
+type worksheetLogicalSourcePosition struct {
+	Line   int
+	Column int
+}
+
 func worksheetLogicalStatement(lines []string, index, last int) (string, bool) {
+	statement, _, ok := worksheetLogicalStatementWithPositions(lines, index, last)
+	return statement, ok
+}
+
+func worksheetLogicalStatementWithPositions(lines []string, index, last int) (string, []worksheetLogicalSourcePosition, bool) {
 	if index < 0 || index >= len(lines) || (index > 0 && vbaLineContinues(lines[index-1])) {
-		return "", false
+		return "", nil, false
 	}
 	if last >= len(lines) {
 		last = len(lines) - 1
 	}
 	parts := make([]string, 0, 1)
+	positions := make([]worksheetLogicalSourcePosition, 0)
 	for current := index; current <= last; current++ {
-		line := rawWorksheetCodeLine(lines[current])
+		raw := gui.StripComment(lines[current])
+		line := strings.TrimSpace(raw)
 		continues := vbaLineContinues(lines[current])
 		if continues {
 			line = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), "_"))
 		}
 		if line != "" {
+			if len(parts) > 0 {
+				positions = append(positions, worksheetLogicalSourcePosition{})
+			}
+			start := strings.Index(raw, line)
+			if start < 0 {
+				start = 0
+			}
 			parts = append(parts, line)
+			for offset := range len(line) {
+				positions = append(positions, worksheetLogicalSourcePosition{Line: current + 1, Column: start + offset + 1})
+			}
 		}
 		if !continues {
-			return strings.Join(parts, " "), true
+			return strings.Join(parts, " "), positions, true
 		}
 	}
-	return strings.Join(parts, " "), true
+	return strings.Join(parts, " "), positions, true
 }
 
 func rawWorksheetCodeLine(line string) string {
