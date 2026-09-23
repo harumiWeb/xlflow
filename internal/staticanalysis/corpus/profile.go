@@ -18,13 +18,15 @@ var nonExcelRuleIDs = map[string]struct{}{
 	"VBA243": {},
 	"VBA251": {},
 	"VBA252": {},
+	"VBA261": {},
+	"VBA262": {},
 }
 
 var configurableNonExcelLintRuleIDs = []string{"VB002", "VB003", "VB027"}
 
 var configurableNonExcelAnalyzeRuleIDs = []string{
 	"VBA201", "VBA203", "VBA205", "VBA215", "VBA216", "VBA217",
-	"VBA218", "VBA221", "VBA225", "VBA226", "VBA238", "VBA242", "VBA243", "VBA251", "VBA252",
+	"VBA218", "VBA221", "VBA225", "VBA226", "VBA238", "VBA242", "VBA243", "VBA251", "VBA252", "VBA261", "VBA262",
 }
 
 func applyProfilePolicy(cfg *config.Config, profile string) {
@@ -33,6 +35,8 @@ func applyProfilePolicy(cfg *config.Config, profile string) {
 		// production defaults remain unchanged.
 		cfg.Analyze.DetectExpensiveFullRangeOperations = true
 		cfg.Analyze.DetectValue2PerformanceOpportunities = true
+		cfg.Analyze.DetectApplicationWorksheetFunction = true
+		cfg.Analyze.DetectHostBracketExpressions = true
 		return
 	}
 	cfg.Lint.DisabledRules = append([]string(nil), configurableNonExcelLintRuleIDs...)

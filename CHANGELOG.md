@@ -4,6 +4,15 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in Excel semantic inspections: batch-only `VBA260` warns when an
+  authoritative workbook catalog can replace `ThisWorkbook.Worksheets("name")`
+  with a stable worksheet CodeName; `VBA261` reports generated-TypeLib
+  worksheet-function members dispatched through `Excel.Application`; and
+  `VBA262` warns on bare Excel host bracket expressions such as `[A1]` in
+  batch, realtime, and LSP analysis. The rules use
+  `detect_worksheet_string_access`,
+  `detect_application_worksheet_function_dispatch`, and
+  `detect_host_bracket_expressions`.
 - Added opt-in `VBA257` warning and `VBA258` information diagnostics for
   discarded `Function`/`Property Get` return values. `VBA257` reports
   standalone call statements that drop a resolved return value in batch,

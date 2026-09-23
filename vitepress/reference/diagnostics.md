@@ -134,6 +134,9 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA256`](#vba256) | analyze | warning     | procedure-local | no      | Dead store                                         |
 | [`VBA257`](#vba257) | analyze | warning     | procedure-local | no      | Discarded Function return value                    |
 | [`VBA258`](#vba258) | analyze | information | project-wide    | no      | Function return value always discarded             |
+| [`VBA260`](#vba260) | analyze | warning     | procedure-local | no      | Worksheet string access                            |
+| [`VBA261`](#vba261) | analyze | information | procedure-local | no      | Application worksheet-function dispatch            |
+| [`VBA262`](#vba262) | analyze | warning     | procedure-local | no      | Excel host bracket expression                      |
 
 ## VB001
 
@@ -2906,3 +2909,69 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                        |
 | Real-time editor diagnostic | no                                        |
 | Fix available               | no                                        |
+
+## VBA260
+
+**Worksheet string access.** A ThisWorkbook worksheet is accessed by its visible name even though its stable VBA CodeName is known.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `maintainability`                |
+| Evidence class              | `maintainability`                |
+| Compile-equivalent          | no                               |
+| Default severity            | `warning`                        |
+| Supported severities        | `warning`                        |
+| Surfaces                    | `analyze`                        |
+| Scope                       | `procedure-local`                |
+| Precision                   | `high`                           |
+| Enabled by default          | no                               |
+| Configuration               | `detect_worksheet_string_access` |
+| Inline suppression          | yes                              |
+| Blocks source preflight     | no                               |
+| Real-time editor diagnostic | no                               |
+| Fix available               | no                               |
+
+## VBA261
+
+**Application worksheet-function dispatch.** A worksheet function is dispatched through Excel.Application instead of the explicit WorksheetFunction object.
+
+| Property                    | Value                                            |
+| --------------------------- | ------------------------------------------------ |
+| Family                      | `analyze`                                        |
+| Category                    | `reliability`                                    |
+| Evidence class              | `inference`                                      |
+| Compile-equivalent          | no                                               |
+| Default severity            | `information`                                    |
+| Supported severities        | `information`                                    |
+| Surfaces                    | `analyze`, `lsp`                                 |
+| Scope                       | `procedure-local`                                |
+| Precision                   | `high`                                           |
+| Enabled by default          | no                                               |
+| Configuration               | `detect_application_worksheet_function_dispatch` |
+| Inline suppression          | yes                                              |
+| Blocks source preflight     | no                                               |
+| Real-time editor diagnostic | yes                                              |
+| Fix available               | no                                               |
+
+## VBA262
+
+**Excel host bracket expression.** An Excel host bracket expression hides the workbook and object-model binding behind shorthand syntax.
+
+| Property                    | Value                             |
+| --------------------------- | --------------------------------- |
+| Family                      | `analyze`                         |
+| Category                    | `maintainability`                 |
+| Evidence class              | `maintainability`                 |
+| Compile-equivalent          | no                                |
+| Default severity            | `warning`                         |
+| Supported severities        | `warning`                         |
+| Surfaces                    | `analyze`, `lsp`                  |
+| Scope                       | `procedure-local`                 |
+| Precision                   | `high`                            |
+| Enabled by default          | no                                |
+| Configuration               | `detect_host_bracket_expressions` |
+| Inline suppression          | yes                               |
+| Blocks source preflight     | no                                |
+| Real-time editor diagnostic | yes                               |
+| Fix available               | no                                |

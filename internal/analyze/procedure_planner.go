@@ -41,10 +41,16 @@ const (
 	featureMemberAccess
 	featureUIState
 	featureScalarAssignment
+	featureHostBracket
 	procedureFeatureLimit
 )
 
 const allProcedureFeatures = procedureFeatureLimit - 1
+
+// Host bracket expressions are explicit owned syntax. Recovery or unresolved
+// call targets cannot manufacture them, so their absence remains provable even
+// when semantic features must otherwise fail open.
+const uncertainProcedureFeatures = allProcedureFeatures &^ featureHostBracket
 
 // procedureFeatureSet is a compact three-state summary. A bit absent from both
 // masks is proven absent; present wins over unknown when both are supplied by
@@ -73,7 +79,7 @@ func (features procedureFeatureSet) mayHaveAll(required procedureFeature) bool {
 
 func (features *procedureFeatureSet) observeDeclaration(declaration procedureir.Declaration) {
 	if declaration.Recovered || len(declaration.ConditionalBranches) > 0 {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 		return
 	}
 	if declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray {
@@ -89,7 +95,7 @@ func (features *procedureFeatureSet) observeDeclaration(declaration procedureir.
 
 func (features *procedureFeatureSet) observeStatement(statement procedureir.Statement) {
 	if statement.Recovered || statement.Kind == procedureir.StatementRecovered || statement.Kind == procedureir.StatementUnknown || len(statement.ConditionalBranches) > 0 {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 		return
 	}
 	switch statement.Kind {
@@ -109,7 +115,7 @@ func (features *procedureFeatureSet) observeStatement(statement procedureir.Stat
 
 func (features *procedureFeatureSet) observeExpression(expression procedureir.Expression) {
 	if expression.Recovered {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 		return
 	}
 	// The IR includes declaration type expressions in the expression index so
@@ -123,8 +129,12 @@ func (features *procedureFeatureSet) observeExpression(expression procedureir.Ex
 		return
 	}
 	if expression.Kind == procedureir.ExpressionUnknown {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 		return
+	}
+	text := strings.TrimSpace(expression.Text)
+	if expression.Kind == procedureir.ExpressionIdentifier && expression.SyntaxKind == "identifier" && len(text) >= 2 && text[0] == '[' && text[len(text)-1] == ']' {
+		features.add(featureHostBracket)
 	}
 	switch expression.Kind {
 	case procedureir.ExpressionBinary, procedureir.ExpressionUnary:
@@ -164,9 +174,9 @@ func (features *procedureFeatureSet) observeCall(call procedureir.CallSite) {
 	case procedureir.ResolutionExternal, procedureir.ResolutionMemberCall:
 		// The syntax is owned and can classify known APIs, but the external
 		// implementation can still supply values or mutations to flow domains.
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 	default:
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 	}
 }
 
@@ -274,7 +284,7 @@ func dictionaryCollectionType(typeName string) bool {
 
 func finalizeProcedureFeatures(features procedureFeatureSet, document procedureir.DocumentIR, procedure procedureir.ProcedureIR, graphPresent bool, graphUnknown bool) procedureFeatureSet {
 	if document.Parse.HasError || document.Parse.HasMissing || procedure.Symbol.Recovered || len(procedure.Symbol.ConditionalBranches) > 0 {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 	}
 	if procedure.Symbol.IsEventHandler {
 		features.add(featureEventHandler)
@@ -287,7 +297,7 @@ func finalizeProcedureFeatures(features procedureFeatureSet, document procedurei
 	}
 	for _, parameter := range procedure.Symbol.Parameters {
 		if parameter.Recovered {
-			features.addUnknown(allProcedureFeatures)
+			features.addUnknown(uncertainProcedureFeatures)
 			continue
 		}
 		if parameter.IsArray || parameter.ParamArray || parameter.ValueShape == procedureir.ValueShapeFixedArray || parameter.ValueShape == procedureir.ValueShapeDynamicArray {
@@ -301,7 +311,7 @@ func finalizeProcedureFeatures(features procedureFeatureSet, document procedurei
 		}
 	}
 	if !graphPresent || graphUnknown {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 	}
 	return features
 }
@@ -352,6 +362,7 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA242", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
 	{id: "VBA243", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
 	{id: "VBA250", domain: analysisstats.DomainExcel, any: featureUIState, capabilities: projectCapabilityTypeDB | projectCapabilityResolution},
+	{id: "VBA262", domain: analysisstats.DomainExcel, any: featureHostBracket},
 	{id: "VBA256", domain: analysisstats.DomainOther, any: featureScalarAssignment},
 	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
 	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureApplicationState, capabilities: projectCapabilityEventReentry},
@@ -473,6 +484,7 @@ const (
 	procedureProjectionExcelRange
 	procedureProjectionExcelValue2
 	procedureProjectionExcelUIState
+	procedureProjectionExcelBracket
 	procedureProjectionApplicationRestore
 	procedureProjectionApplicationEffects
 	procedureProjectionApplicationReentry
@@ -579,6 +591,8 @@ func procedureProjectionForRequirement(requirement procedureRuleRequirement) pro
 		return procedureProjectionExcelValue2
 	case "VBA250":
 		return procedureProjectionExcelUIState
+	case "VBA262":
+		return procedureProjectionExcelBracket
 	case "VBA203":
 		return procedureProjectionApplicationRestore
 	case "VBA221":
@@ -865,13 +879,13 @@ func httpProcedureHasSensitiveLogging(proc sourceProcedure) bool {
 func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc sourceProcedure, moduleFeatures procedureFeatureSet) procedureAnalysisPlan {
 	features := proc.Features
 	if proc.Facts == nil {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 	}
 	features.addUnknown(moduleFeatures.unknown)
 	features.add(moduleFeatures.present)
 	if proc.Effects != nil {
 		if len(proc.Effects.DirectUncertainty) > 0 || len(proc.Effects.PropagatedUncertainty) > 0 {
-			features.addUnknown(allProcedureFeatures)
+			features.addUnknown(uncertainProcedureFeatures)
 		}
 		if proc.Effects.Error.HasErrorHandler || proc.Effects.Error.UsesResumeNext || proc.Effects.Error.SuppressesErrors || proc.Effects.Error.MayRaise || len(proc.Effects.Error.Direct) > 0 || len(proc.Effects.Error.Propagated) > 0 {
 			features.add(featureOnError)

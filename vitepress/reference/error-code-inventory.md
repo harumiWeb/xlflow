@@ -13,7 +13,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `allowed_diagnostics`
 - `alternative_body`
 - `ambiguous_call_count`
+- `ambiguous_code_name`
 - `ambiguous_test_name`
+- `ambiguous_visible_name`
 - `analysis_capability_unavailable`
 - `analysis_metrics`
 - `analysis_plans`
@@ -278,6 +280,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `destructive_file_operation`
 - `detect_application_state_call_effects`
 - `detect_application_state_restore`
+- `detect_application_worksheet_function_dispatch`
 - `detect_array_lifecycle_safety`
 - `detect_bang_notation`
 - `detect_byref_argument_mismatch`
@@ -304,6 +307,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_function_return_always_discarded`
 - `detect_function_return_path`
 - `detect_hardcoded_secrets`
+- `detect_host_bracket_expressions`
 - `detect_implicit_approximate_lookups`
 - `detect_implicit_default_member_access`
 - `detect_implicit_variant`
@@ -340,6 +344,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_unused_private_procedures`
 - `detect_value2_performance_opportunities`
 - `detect_worksheet_root_mismatch`
+- `detect_worksheet_string_access`
 - `development_http_origins`
 - `diagnostic_meaning`
 - `diagnostic_runs`
@@ -699,6 +704,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `macro_timeout`
 - `macros_empty_before_push`
 - `macros_read_from_workbook`
+- `malformed_relationship`
+- `malformed_sheet_part`
 - `malformed_string`
 - `managed_session_discarded`
 - `manifest_exists`
@@ -734,9 +741,11 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `metrics_thresholds_invalid`
 - `min_keep`
 - `missing_backup_file`
+- `missing_code_name`
 - `missing_http_timeout`
 - `missing_mode`
 - `missing_module_attribute`
+- `missing_relationship`
 - `missing_required_field`
 - `missing_test_case`
 - `missing_then`
@@ -1352,6 +1361,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `worksheet_calculate`
 - `worksheet_cell`
 - `worksheet_change`
+- `worksheet_codename_catalog`
 - `worksheet_selectionchange`
 - `workspace_declaration_ready_ms`
 - `workspace_failure`

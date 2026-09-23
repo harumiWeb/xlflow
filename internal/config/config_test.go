@@ -750,6 +750,28 @@ detect_function_return_always_discarded = true
 	}
 }
 
+func TestExcelSemanticInspectionRulesDefaultDisabledAndAreConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	tests := []struct {
+		id     string
+		enable func(*AnalyzeConfig)
+	}{
+		{id: "VBA260", enable: func(config *AnalyzeConfig) { config.DetectWorksheetStringAccess = true }},
+		{id: "VBA261", enable: func(config *AnalyzeConfig) { config.DetectApplicationWorksheetFunction = true }},
+		{id: "VBA262", enable: func(config *AnalyzeConfig) { config.DetectHostBracketExpressions = true }},
+	}
+	for _, test := range tests {
+		if enabled, known := AnalyzeRuleEnabled(cfg.Analyze, test.id); !known || enabled {
+			t.Errorf("%s enabled = %v, known = %v; want disabled configurable rule", test.id, enabled, known)
+		}
+		test.enable(&cfg.Analyze)
+		if enabled, known := AnalyzeRuleEnabled(cfg.Analyze, test.id); !known || !enabled {
+			t.Errorf("%s enabled = %v, known = %v; want enabled after opt-in", test.id, enabled, known)
+		}
+	}
+}
+
 func TestLoadUnsafeSQLConstructionCompatibilityKeyAndDisabledRule(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte(`[project]

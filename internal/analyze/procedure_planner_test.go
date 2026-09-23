@@ -117,8 +117,8 @@ func TestProcedureFeatureSetTreatsRecoveredStructuralExpressionsAsUnknown(t *tes
 			nil,
 			nil,
 		)
-		if facts.features.unknown != allProcedureFeatures {
-			t.Fatalf("recovered expression %q certainty = %#v, want all features unknown", syntaxKind, facts.features)
+		if facts.features.unknown != uncertainProcedureFeatures {
+			t.Fatalf("recovered expression %q certainty = %#v, want semantic features unknown and host bracket absent", syntaxKind, facts.features)
 		}
 	}
 }
@@ -179,8 +179,8 @@ func TestProcedureFeatureSetFailsOpenForRecoveredAndDynamicIR(t *testing.T) {
 		nil,
 		nil,
 	)
-	if recovered.features.unknown != allProcedureFeatures {
-		t.Fatalf("recovered features = %#v, want all features unknown", recovered.features)
+	if recovered.features.unknown != uncertainProcedureFeatures {
+		t.Fatalf("recovered features = %#v, want semantic features unknown and host bracket absent", recovered.features)
 	}
 
 	dynamic := newProcedureAnalysisFactsWithDeclarations(
@@ -194,16 +194,16 @@ func TestProcedureFeatureSetFailsOpenForRecoveredAndDynamicIR(t *testing.T) {
 		}},
 		nil,
 	)
-	if dynamic.features.present|dynamic.features.unknown != allProcedureFeatures {
-		t.Fatalf("dynamic-call features = %#v, want every feature present or unknown", dynamic.features)
+	if dynamic.features.present|dynamic.features.unknown != uncertainProcedureFeatures {
+		t.Fatalf("dynamic-call features = %#v, want semantic features present or unknown and host bracket absent", dynamic.features)
 	}
 
 	missingDocument := procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{{
 		Symbol: procedureir.ProcedureSymbol{Name: "Recovered", Kind: procedureir.ProcedureSub},
 	}}}
 	missingGraph := sourceProceduresFromIRRef(&missingDocument)
-	if len(missingGraph) != 1 || missingGraph[0].Features.present|missingGraph[0].Features.unknown != allProcedureFeatures {
-		t.Fatalf("missing-graph features = %#v, want every feature potentially applicable", missingGraph)
+	if len(missingGraph) != 1 || missingGraph[0].Features.present|missingGraph[0].Features.unknown != uncertainProcedureFeatures {
+		t.Fatalf("missing-graph features = %#v, want semantic features potentially applicable and host bracket absent", missingGraph)
 	}
 }
 
@@ -222,8 +222,8 @@ func TestFinalizeProcedureFeaturesIncludesProcedureAndProjectUncertainty(t *test
 
 	document.Parse.HasMissing = true
 	features = finalizeProcedureFeatures(procedureFeatureSet{}, document, procedure, true, false)
-	if features.present|features.unknown != allProcedureFeatures {
-		t.Fatalf("missing-node features = %#v, want every feature present or unknown", features)
+	if features.present|features.unknown != uncertainProcedureFeatures {
+		t.Fatalf("missing-node features = %#v, want semantic features present or unknown and host bracket absent", features)
 	}
 }
 
@@ -647,6 +647,7 @@ func TestProcedureProjectionRequirementMappingsAreDistinct(t *testing.T) {
 		{id: "VBA227", want: procedureProjectionArrayLifecycle},
 		{id: "VBA225", want: procedureProjectionExcelLoop},
 		{id: "VBA238", want: procedureProjectionExcelInvariant},
+		{id: "VBA262", want: procedureProjectionExcelBracket},
 	} {
 		got := procedureProjectionForRequirement(procedureRuleRequirement{id: test.id})
 		if got != test.want {
@@ -670,7 +671,7 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		"VBA224/dataflow": true, "VBA236/dataflow": true, "VBA239/dataflow": true,
 		"VBA245/dataflow": true, "VBA246/dataflow": true, "VBA247/dataflow": true,
 		"VBA219/resource": true,
-		"VBA225/excel":    true, "VBA238/excel": true, "VBA242/excel": true, "VBA243/excel": true, "VBA250/excel": true,
+		"VBA225/excel":    true, "VBA238/excel": true, "VBA242/excel": true, "VBA243/excel": true, "VBA250/excel": true, "VBA262/excel": true,
 		"VBA203/application_state": true, "VBA220/application_state": true, "VBA221/application_state": true,
 		"VBA256/other": true,
 	}
