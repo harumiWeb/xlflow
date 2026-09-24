@@ -78,7 +78,10 @@ type Finding struct {
 	RuntimeError *RuntimeErrorContext `json:"runtime_error,omitempty"`
 	// DefaultMember describes the implicit/default/bang access classified by
 	// VBA253-VBA255 or by a default-member-owned VBA249 runtime failure.
-	DefaultMember         *DefaultMemberContext `json:"default_member,omitempty"`
+	DefaultMember *DefaultMemberContext `json:"default_member,omitempty"`
+	// SelectCaseUnreachable carries the VBA259 unreachable Case item / Case
+	// Else classification so consumers do not have to parse the message text.
+	SelectCaseUnreachable *SelectCaseUnreachableContext `json:"select_case_unreachable,omitempty"`
 	arrayLifecycleFinding bool
 	arrayOperationKey     string
 	httpOwnedSinks        map[int]bool
@@ -115,6 +118,9 @@ type Result struct {
 type Analyzer struct {
 	RootDir string
 	Config  config.Config
+	// WorksheetCodeNames is an optional caller-owned workbook metadata
+	// capability. AnalyzeProject never derives it from logical source paths.
+	WorksheetCodeNames WorksheetCodeNameCatalog
 	// TypeDB is an optional caller-owned type database capability. When it is
 	// supplied, the analyzer never loads or merges another database. Complete
 	// controls fail-open diagnostics whose negative conclusion requires a
@@ -654,8 +660,13 @@ type parsedFile struct {
 	ArrayIntegerModuleConstants map[string]int
 	ArrayOptionBase             int
 	ArrayOptionBaseSet          bool
-	ConstantValues              map[string]constexpr.Value
-	RuntimeConstantBase         constexpr.Values
+	// OptionCompare is the module's Option Compare mode ("binary"/"text"/
+	// "database"); OptionCompareSet distinguishes a scanned value from a lazy
+	// fallback computed by fileOptionCompare.
+	OptionCompare       string
+	OptionCompareSet    bool
+	ConstantValues      map[string]constexpr.Value
+	RuntimeConstantBase constexpr.Values
 	// ResumeNextConstantValues is the immutable file-level environment used by
 	// VBA214 scalar probe inspection. Production batch and realtime setup build
 	// it once so procedure workers do not rescan a giant module independently.
@@ -824,7 +835,15 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	if err != nil {
 		return Result{}, err
 	}
-	return a.analyzeProjectContext(ctx, queryContext, project)
+	var worksheetCodeNameWarning map[string]any
+	if a.Config.Analyze.DetectWorksheetStringAccess && a.WorksheetCodeNames == nil && sourceProjectHasWorksheetCodeNameCandidate(project) {
+		a.WorksheetCodeNames, worksheetCodeNameWarning = loadWorksheetCodeNameCatalog(a.RootDir, a.Config.Excel.Path)
+	}
+	result, err = a.analyzeProjectContext(ctx, queryContext, project)
+	if worksheetCodeNameWarning != nil {
+		result.Warnings = append(result.Warnings, worksheetCodeNameWarning)
+	}
+	return result, err
 }
 
 // AnalyzeProject analyzes the caller-supplied source project without reading
@@ -982,7 +1001,7 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 	// always enabled because they represent VBE compile rejections and cannot
 	// be disabled by the legacy VBA206 runtime-safety setting.
 	needsByRefAnalysis := true
-	needsTypedExcelAnalysis := a.Config.Analyze.DetectRangeFindNothingCheck || a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || a.Config.Analyze.DetectImplicitApproximateLookups || a.Config.Analyze.DetectUnavailableWorksheetFunctionMembers || a.Config.Analyze.DetectImplicitDefaultMemberAccess || a.Config.Analyze.DetectUnboundDefaultMemberAccess || a.Config.Analyze.DetectBangNotation || a.Config.Analyze.DetectUnsafeSelectOperations || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops || a.Config.Analyze.DetectLoopInvariantExcelObjectResolution || a.Config.Analyze.DetectExpensiveFullRangeOperations || a.Config.Analyze.DetectValue2PerformanceOpportunities
+	needsTypedExcelAnalysis := a.Config.Analyze.DetectRangeFindNothingCheck || a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || a.Config.Analyze.DetectImplicitApproximateLookups || a.Config.Analyze.DetectUnavailableWorksheetFunctionMembers || a.Config.Analyze.DetectApplicationWorksheetFunction || a.Config.Analyze.DetectImplicitDefaultMemberAccess || a.Config.Analyze.DetectUnboundDefaultMemberAccess || a.Config.Analyze.DetectBangNotation || a.Config.Analyze.DetectUnsafeSelectOperations || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops || a.Config.Analyze.DetectLoopInvariantExcelObjectResolution || a.Config.Analyze.DetectExpensiveFullRangeOperations || a.Config.Analyze.DetectValue2PerformanceOpportunities
 	needsDataFlowInputs := dataFlowInputsEnabled(a.Config.Analyze)
 	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety || needsDataFlowInputs
 	parsedFiles := make([]parsedFile, 0, len(project.Files))
@@ -1047,7 +1066,7 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var constantValues map[string]constexpr.Value
-		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors {
+		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors || a.Config.Analyze.DetectUnreachableSelectCase {
 			constantValues = lint.ConstantValuesFromSource(string(source), &ir, nil)
 		}
 		parsedFile := parsedFile{
@@ -1072,6 +1091,10 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 			parsedFile.ArrayOptionBase = optionBase(lines)
 			parsedFile.ArrayOptionBaseSet = true
 			parsedFile.ArrayIntegerModuleConstants = arrayIntegerModuleConstants(parsedFile)
+		}
+		if a.Config.Analyze.DetectUnreachableSelectCase {
+			parsedFile.OptionCompare = optionCompare(lines)
+			parsedFile.OptionCompareSet = true
 		}
 		parsedFiles = append(parsedFiles, parsedFile)
 	}
@@ -1160,6 +1183,9 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 	}
 	if analysis.sourceProject && analysis.Config.Analyze.DetectEventHandlerReentry {
 		warnings = append(warnings, prepareUserFormMetadataWarnings(analysis, parsedFiles)...)
+	}
+	if analysis.sourceProject && analysis.Config.Analyze.DetectWorksheetStringAccess && analysis.WorksheetCodeNames == nil && sourceProjectHasWorksheetCodeNameCandidate(project) {
+		warnings = append(warnings, worksheetCodeNameCapabilityWarning("", "caller-supplied worksheet metadata was not provided"))
 	}
 	capabilityPlan := buildProjectCapabilityPlan(analysis.Config.Analyze, parsedFiles)
 	if capabilityPlan.requires(projectCapabilityDataFlowInputs) {
@@ -1258,6 +1284,7 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 	analysis.visibleConstantValues = projectConstantValues(parsedFiles, analysis.typeDB)
 	for index := range parsedFiles {
 		prepareResumeNextScopeConstantValues(analysis, &parsedFiles[index])
+		prepareRuntimeConstantBase(analysis, &parsedFiles[index])
 	}
 	finishProjectConstants(nil)
 	finishStage = analysisstats.Measure(ctx, "project_context")
@@ -1552,13 +1579,19 @@ func (a Analyzer) analyzeParsedFileBounded(ctx context.Context, file parsedFile,
 		return nil, nil, err
 	}
 	findings = append(findings, worksheetFunctionFindings...)
+	applicationWorksheetFunctionFindings, err := a.applicationWorksheetFunctionDispatchFindingsContext(ctx, file)
+	if err != nil {
+		finishStage(0, err)
+		return nil, nil, err
+	}
+	findings = append(findings, applicationWorksheetFunctionFindings...)
 	defaultMemberFindings, err := a.defaultMemberFindingsContext(ctx, file)
 	if err != nil {
 		finishStage(0, err)
 		return nil, nil, err
 	}
 	findings = append(findings, defaultMemberFindings...)
-	finishStage(len(statefulFindings)+len(contractFindings)+len(lookupFindings)+len(worksheetFunctionFindings)+len(defaultMemberFindings), nil)
+	finishStage(len(statefulFindings)+len(contractFindings)+len(lookupFindings)+len(worksheetFunctionFindings)+len(applicationWorksheetFunctionFindings)+len(defaultMemberFindings), nil)
 
 	finishStage = analysisstats.Measure(ctx, "byref_diagnostics")
 	byRefDiagnostics := a.byRefArgumentDiagnosticsContext(ctx, file)
@@ -2554,7 +2587,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		db = typeDB.DB
 		typeDBResolutionIncomplete = !typeDB.Complete
 	}
-	if (cfg.Analyze.DetectRangeFindNothingCheck || cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectImplicitApproximateLookups || cfg.Analyze.DetectUnavailableWorksheetFunctionMembers || cfg.Analyze.DetectImplicitDefaultMemberAccess || cfg.Analyze.DetectUnboundDefaultMemberAccess || cfg.Analyze.DetectBangNotation || cfg.Analyze.DetectUnsafeSelectOperations || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction || cfg.Analyze.DetectUnsafeFilePath) && db == nil {
+	if (cfg.Analyze.DetectRangeFindNothingCheck || cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectImplicitApproximateLookups || cfg.Analyze.DetectUnavailableWorksheetFunctionMembers || cfg.Analyze.DetectApplicationWorksheetFunction || cfg.Analyze.DetectImplicitDefaultMemberAccess || cfg.Analyze.DetectUnboundDefaultMemberAccess || cfg.Analyze.DetectBangNotation || cfg.Analyze.DetectUnsafeSelectOperations || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction || cfg.Analyze.DetectUnsafeFilePath) && db == nil {
 		loaded, err := typedb.LoadForRuntimeWithGeneratorVersion("", expectedGeneratorVersion)
 		if err != nil {
 			return nil, err
@@ -2601,7 +2634,7 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var constantValues map[string]constexpr.Value
-		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors {
+		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors || cfg.Analyze.DetectUnreachableSelectCase {
 			constantValues = lint.ConstantValuesFromSource(string(view.Source), &ir, projectConstants)
 		}
 		var dataFlowModuleBindings map[string]bool
@@ -2627,6 +2660,10 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		}
 		if constantValues != nil {
 			file.RuntimeConstantBase = constexpr.NewValues(constantValues)
+		}
+		if cfg.Analyze.DetectUnreachableSelectCase {
+			file.OptionCompare = optionCompare(lines)
+			file.OptionCompareSet = true
 		}
 		if expressionDocument != nil && expressionDocument.Path == view.Path && expressionDocument.Source == string(view.Source) {
 			file.IntelDocument = *expressionDocument
@@ -2780,6 +2817,11 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			return err
 		}
 		findings = append(findings, worksheetFunctionFindings...)
+		applicationWorksheetFunctionFindings, err := analyzer.applicationWorksheetFunctionDispatchFindingsContext(ctx, file)
+		if err != nil {
+			return err
+		}
+		findings = append(findings, applicationWorksheetFunctionFindings...)
 		defaultMemberFindings, err := analyzer.defaultMemberFindingsContext(ctx, file)
 		if err != nil {
 			return err
@@ -2880,7 +2922,7 @@ sendJobs:
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255", "VBA256", "VBA257", "VBA260", "VBA261", "VBA262", "VBA263", "VBA264"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255", "VBA256", "VBA257", "VBA259", "VBA261", "VBA262", "VBA265", "VBA266", "VBA267", "VBA268", "VBA269"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -2970,6 +3012,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		findings = append(findings, a.variableAssignmentFindings(file, proc, analysisCtx.procedures)...)
 	}
 	findings = append(findings, a.discardedReturnFindings(file, proc, analysisCtx.projectResolver)...)
+	if a.Config.Analyze.DetectHostBracketExpressions && plan.runsProjection(procedureProjectionExcelBracket) {
+		findings = append(findings, bracketExpressionFindings(a.RootDir, file, proc, analysisCtx.projectResolver)...)
+	}
 	if plan.runsProjection(procedureProjectionRuntime) {
 		findings = append(findings, a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, analysisCtx, moduleDecls, resultStore.arrayProjection(profile))...)
 	}
@@ -3107,6 +3152,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	if plan.runsProjection(procedureProjectionExcelUIState) && a.Config.Analyze.DetectUnsafeSelectOperations {
 		findings = append(findings, a.activeUIStateFindings(file, proc)...)
 	}
+	if a.Config.Analyze.DetectUnreachableSelectCase && plan.runsProjection(procedureProjectionSelectCase) {
+		findings = append(findings, a.unreachableSelectCaseFindings(file, proc, moduleDecls)...)
+	}
 	return findings, ctx.Err()
 }
 
@@ -3232,12 +3280,17 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	}
 	workbookRoot := filepath.Clean(filepath.Join(a.RootDir, a.Config.Src.Workbook))
 	for _, file := range files {
-		if rel, err := filepath.Rel(workbookRoot, file.Path); err == nil && rel != "" && !strings.HasPrefix(rel, "..") && !strings.EqualFold(file.Module, "ThisWorkbook") {
-			ctx.worksheetCodenames[strings.ToLower(file.Module)] = file.Module
-		}
 		module := strings.TrimSpace(file.IR.ModuleName)
 		if module == "" {
 			module = file.Module
+		}
+		isWorkbookDocument := strings.EqualFold(file.ModuleKind, string(sourceproject.ModuleKindDocument))
+		if !isWorkbookDocument {
+			rel, relErr := filepath.Rel(workbookRoot, file.Path)
+			isWorkbookDocument = relErr == nil && rel != "" && !strings.HasPrefix(rel, "..")
+		}
+		if isWorkbookDocument && !strings.EqualFold(module, "ThisWorkbook") {
+			ctx.worksheetCodenames[strings.ToLower(module)] = module
 		}
 		if projectResolver == nil {
 			for _, procedure := range file.IR.Procedures {
@@ -3772,6 +3825,10 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		lineNo := i + 1
 		stmt := normalizedCodeLine(file.Lines[i])
 		worksheetStmt, worksheetStatementStart := worksheetLogicalStatement(file.Lines, i, proc.EndLine-1)
+		var worksheetPositions []worksheetLogicalSourcePosition
+		if worksheetStatementStart && a.Config.Analyze.DetectWorksheetStringAccess && a.WorksheetCodeNames != nil {
+			worksheetStmt, worksheetPositions, worksheetStatementStart = worksheetLogicalStatementWithPositions(file.Lines, i, proc.EndLine-1)
+		}
 		if stmt == "" {
 			continue
 		}
@@ -3793,6 +3850,14 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		if m := withRe.FindStringSubmatch(stmt); len(m) > 0 {
 			withStack = append(withStack, resolveWithInfo(m[1], decls))
 			if worksheetStatementStart {
+				if a.Config.Analyze.DetectWorksheetStringAccess && a.WorksheetCodeNames != nil {
+					excelMeasurement := profile.begin(procedureDomainExcel)
+					excelFindings := a.worksheetCodeNameStatementFindings(file, proc, lineNo, worksheetStmt, worksheetPositions, shadowedVBA205.contains("ThisWorkbook"), ctx.worksheetCodenames)
+					profile.kernel()
+					profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+					excelMeasurement.finish(len(excelFindings))
+					findings = append(findings, excelFindings...)
+				}
 				if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
 					excelMeasurement := profile.begin(procedureDomainExcel)
 					excelFindings := a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)
@@ -3810,6 +3875,14 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 			continue
 		}
 		if worksheetStatementStart {
+			if a.Config.Analyze.DetectWorksheetStringAccess && a.WorksheetCodeNames != nil {
+				excelMeasurement := profile.begin(procedureDomainExcel)
+				excelFindings := a.worksheetCodeNameStatementFindings(file, proc, lineNo, worksheetStmt, worksheetPositions, shadowedVBA205.contains("ThisWorkbook"), ctx.worksheetCodenames)
+				profile.kernel()
+				profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+				excelMeasurement.finish(len(excelFindings))
+				findings = append(findings, excelFindings...)
+			}
 			if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
 				excelMeasurement := profile.begin(procedureDomainExcel)
 				excelFindings := a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)
@@ -4016,6 +4089,14 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		excelMeasurement.finish(len(excelFindings))
 		findings = append(findings, excelFindings...)
 	}
+	if plan.runsProjection(procedureProjectionExcelBracket) && a.Config.Analyze.DetectHostBracketExpressions {
+		excelMeasurement := profile.begin(procedureDomainExcel)
+		excelFindings := bracketExpressionFindings(a.RootDir, file, proc, ctx.projectResolver)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+		excelMeasurement.finish(len(excelFindings))
+		findings = append(findings, excelFindings...)
+	}
 	if plan.runsProjection(procedureProjectionExcelInvariant) && a.Config.Analyze.DetectLoopInvariantExcelObjectResolution {
 		excelMeasurement := profile.begin(procedureDomainExcel)
 		excelFindings := a.excelLoopInvariantFindings(file, proc)
@@ -4113,6 +4194,12 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	otherMeasurement.finish(len(functionFindings))
 	findings = append(findings, functionFindings...)
 	findings = append(findings, a.discardedReturnFindings(file, proc, ctx.projectResolver)...)
+	if a.Config.Analyze.DetectUnreachableSelectCase && plan.runsProjection(procedureProjectionSelectCase) {
+		selectCaseMeasurement := profile.begin(procedureDomainOther)
+		selectCaseFindings := a.unreachableSelectCaseFindings(file, proc, moduleDecls)
+		selectCaseMeasurement.finish(len(selectCaseFindings))
+		findings = append(findings, selectCaseFindings...)
+	}
 	findings = suppressDictionaryGuardsForUninitializedObjects(findings)
 	return findings, cancelCtx.Err()
 }
@@ -5943,6 +6030,29 @@ func prepareResumeNextScopeConstantValues(a Analyzer, file *parsedFile) {
 		values = map[string]constexpr.Value{}
 	}
 	file.ResumeNextConstantValues = values
+}
+
+// prepareRuntimeConstantBase normalizes the merged project/file constant
+// environment once per file. Procedure workers then wrap it in a
+// runtimeConstantScope that hides local names instead of re-merging the
+// project constants for every procedure. The base is built only when a rule
+// that consumes procedureConstantEnvironment is enabled; a nil
+// file.ConstantValues keeps the lazy fallback for helper callers.
+func prepareRuntimeConstantBase(a Analyzer, file *parsedFile) {
+	if file == nil || file.RuntimeConstantBase != nil || file.ConstantValues == nil {
+		return
+	}
+	if !a.Config.Analyze.DetectDeterministicRuntimeErrors && !a.Config.Analyze.DetectUnreachableSelectCase {
+		return
+	}
+	values := make(map[string]constexpr.Value, len(a.visibleConstantValues)+len(file.ConstantValues))
+	for name, value := range a.visibleConstantValues {
+		values[name] = value
+	}
+	for name, value := range file.ConstantValues {
+		values[name] = value
+	}
+	file.RuntimeConstantBase = constexpr.NewValues(values)
 }
 
 func resumeNextScopePreparedConstantValues(a Analyzer, file parsedFile) map[string]constexpr.Value {
@@ -8856,28 +8966,50 @@ func physicalSourceLineCount(lines []string) int {
 // worksheet-root rules. Other rules keep their established physical-line or
 // AST handling, while these rules need the complete member chain to compare
 // roots accurately. The caller reports on the first physical line.
+type worksheetLogicalSourcePosition struct {
+	Line   int
+	Column int
+}
+
 func worksheetLogicalStatement(lines []string, index, last int) (string, bool) {
+	statement, _, ok := worksheetLogicalStatementWithPositions(lines, index, last)
+	return statement, ok
+}
+
+func worksheetLogicalStatementWithPositions(lines []string, index, last int) (string, []worksheetLogicalSourcePosition, bool) {
 	if index < 0 || index >= len(lines) || (index > 0 && vbaLineContinues(lines[index-1])) {
-		return "", false
+		return "", nil, false
 	}
 	if last >= len(lines) {
 		last = len(lines) - 1
 	}
 	parts := make([]string, 0, 1)
+	positions := make([]worksheetLogicalSourcePosition, 0)
 	for current := index; current <= last; current++ {
-		line := rawWorksheetCodeLine(lines[current])
+		raw := gui.StripComment(lines[current])
+		line := strings.TrimSpace(raw)
 		continues := vbaLineContinues(lines[current])
 		if continues {
 			line = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), "_"))
 		}
 		if line != "" {
+			if len(parts) > 0 {
+				positions = append(positions, worksheetLogicalSourcePosition{})
+			}
+			start := strings.Index(raw, line)
+			if start < 0 {
+				start = 0
+			}
 			parts = append(parts, line)
+			for offset := range len(line) {
+				positions = append(positions, worksheetLogicalSourcePosition{Line: current + 1, Column: start + offset + 1})
+			}
 		}
 		if !continues {
-			return strings.Join(parts, " "), true
+			return strings.Join(parts, " "), positions, true
 		}
 	}
-	return strings.Join(parts, " "), true
+	return strings.Join(parts, " "), positions, true
 }
 
 func rawWorksheetCodeLine(line string) string {

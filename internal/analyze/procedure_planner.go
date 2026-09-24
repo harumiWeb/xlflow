@@ -41,6 +41,8 @@ const (
 	featureMemberAccess
 	featureUIState
 	featureScalarAssignment
+	featureHostBracket
+	featureSelectCase
 	// featureLocalVariable records that the procedure declares a non-const
 	// local variable, which is the candidate population for assignment
 	// analysis.
@@ -51,6 +53,11 @@ const (
 )
 
 const allProcedureFeatures = procedureFeatureLimit - 1
+
+// Host bracket expressions are explicit owned syntax. Recovery or unresolved
+// call targets cannot manufacture them, so their absence remains provable even
+// when semantic features must otherwise fail open.
+const uncertainProcedureFeatures = allProcedureFeatures &^ featureHostBracket
 
 // procedureFeatureSet is a compact three-state summary. A bit absent from both
 // masks is proven absent; present wins over unknown when both are supplied by
@@ -79,7 +86,7 @@ func (features procedureFeatureSet) mayHaveAll(required procedureFeature) bool {
 
 func (features *procedureFeatureSet) observeDeclaration(declaration procedureir.Declaration) {
 	if declaration.Recovered || len(declaration.ConditionalBranches) > 0 {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 		return
 	}
 	if declaration.Scope == procedureir.ScopeParameter {
@@ -101,7 +108,7 @@ func (features *procedureFeatureSet) observeDeclaration(declaration procedureir.
 
 func (features *procedureFeatureSet) observeStatement(statement procedureir.Statement) {
 	if statement.Recovered || statement.Kind == procedureir.StatementRecovered || statement.Kind == procedureir.StatementUnknown || len(statement.ConditionalBranches) > 0 {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 		return
 	}
 	switch statement.Kind {
@@ -115,13 +122,15 @@ func (features *procedureFeatureSet) observeStatement(statement procedureir.Stat
 		features.add(featureOnError)
 	case procedureir.StatementCall:
 		features.add(featureCalls | featureByRefCalls)
+	case procedureir.StatementSelect:
+		features.add(featureSelectCase)
 	}
 	features.observeText(statement.Text)
 }
 
 func (features *procedureFeatureSet) observeExpression(expression procedureir.Expression) {
 	if expression.Recovered {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 		return
 	}
 	// The IR includes declaration type expressions in the expression index so
@@ -135,8 +144,12 @@ func (features *procedureFeatureSet) observeExpression(expression procedureir.Ex
 		return
 	}
 	if expression.Kind == procedureir.ExpressionUnknown {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 		return
+	}
+	text := strings.TrimSpace(expression.Text)
+	if expression.Kind == procedureir.ExpressionIdentifier && expression.SyntaxKind == "identifier" && len(text) >= 2 && text[0] == '[' && text[len(text)-1] == ']' {
+		features.add(featureHostBracket)
 	}
 	switch expression.Kind {
 	case procedureir.ExpressionBinary, procedureir.ExpressionUnary:
@@ -176,9 +189,9 @@ func (features *procedureFeatureSet) observeCall(call procedureir.CallSite) {
 	case procedureir.ResolutionExternal, procedureir.ResolutionMemberCall:
 		// The syntax is owned and can classify known APIs, but the external
 		// implementation can still supply values or mutations to flow domains.
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 	default:
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 	}
 }
 
@@ -263,6 +276,9 @@ func (features *procedureFeatureSet) observeText(text string) {
 	) {
 		features.add(featureApplicationState)
 	}
+	if strings.Contains(lower, "select case") {
+		features.add(featureSelectCase)
+	}
 }
 
 func containsAny(value string, needles ...string) bool {
@@ -286,7 +302,7 @@ func dictionaryCollectionType(typeName string) bool {
 
 func finalizeProcedureFeatures(features procedureFeatureSet, document procedureir.DocumentIR, procedure procedureir.ProcedureIR, graphPresent bool, graphUnknown bool) procedureFeatureSet {
 	if document.Parse.HasError || document.Parse.HasMissing || procedure.Symbol.Recovered || len(procedure.Symbol.ConditionalBranches) > 0 {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 	}
 	if procedure.Symbol.IsEventHandler {
 		features.add(featureEventHandler)
@@ -299,7 +315,7 @@ func finalizeProcedureFeatures(features procedureFeatureSet, document procedurei
 	}
 	for _, parameter := range procedure.Symbol.Parameters {
 		if parameter.Recovered {
-			features.addUnknown(allProcedureFeatures)
+			features.addUnknown(uncertainProcedureFeatures)
 			continue
 		}
 		if parameter.IsArray || parameter.ParamArray || parameter.ValueShape == procedureir.ValueShapeFixedArray || parameter.ValueShape == procedureir.ValueShapeDynamicArray {
@@ -313,7 +329,7 @@ func finalizeProcedureFeatures(features procedureFeatureSet, document procedurei
 		}
 	}
 	if !graphPresent || graphUnknown {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 	}
 	return features
 }
@@ -364,10 +380,11 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA242", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
 	{id: "VBA243", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
 	{id: "VBA250", domain: analysisstats.DomainExcel, any: featureUIState, capabilities: projectCapabilityTypeDB | projectCapabilityResolution},
+	{id: "VBA262", domain: analysisstats.DomainExcel, any: featureHostBracket},
 	{id: "VBA256", domain: analysisstats.DomainOther, any: featureScalarAssignment},
-	{id: "VBA260", domain: analysisstats.DomainOther, any: featureParameter},
-	{id: "VBA263", domain: analysisstats.DomainOther, any: featureLocalVariable},
-	{id: "VBA264", domain: analysisstats.DomainOther, any: featureLocalVariable},
+	{id: "VBA265", domain: analysisstats.DomainOther, any: featureParameter},
+	{id: "VBA268", domain: analysisstats.DomainOther, any: featureLocalVariable},
+	{id: "VBA269", domain: analysisstats.DomainOther, any: featureLocalVariable},
 	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
 	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureApplicationState, capabilities: projectCapabilityEventReentry},
 	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
@@ -375,6 +392,7 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA222", domain: analysisstats.DomainOther, capabilities: projectCapabilityPublicAPITypeIndex, projectOnly: true},
 	{id: "VBA240", domain: analysisstats.DomainOther, capabilities: projectCapabilityModuleState, projectOnly: true},
 	{id: "VBA244", domain: analysisstats.DomainOther, any: featureCalls, capabilities: projectCapabilityEffects, projectOnly: true},
+	{id: "VBA259", domain: analysisstats.DomainOther, any: featureSelectCase},
 }
 
 type procedureAnalysisPlan struct {
@@ -488,10 +506,12 @@ const (
 	procedureProjectionExcelRange
 	procedureProjectionExcelValue2
 	procedureProjectionExcelUIState
+	procedureProjectionExcelBracket
 	procedureProjectionApplicationRestore
 	procedureProjectionApplicationEffects
 	procedureProjectionApplicationReentry
 	procedureProjectionDeadStore
+	procedureProjectionSelectCase
 	procedureProjectionUnusedParameter
 	procedureProjectionNeverAssigned
 	procedureProjectionUnassignedRead
@@ -597,6 +617,8 @@ func procedureProjectionForRequirement(requirement procedureRuleRequirement) pro
 		return procedureProjectionExcelValue2
 	case "VBA250":
 		return procedureProjectionExcelUIState
+	case "VBA262":
+		return procedureProjectionExcelBracket
 	case "VBA203":
 		return procedureProjectionApplicationRestore
 	case "VBA221":
@@ -605,11 +627,13 @@ func procedureProjectionForRequirement(requirement procedureRuleRequirement) pro
 		return procedureProjectionApplicationReentry
 	case "VBA256":
 		return procedureProjectionDeadStore
-	case "VBA260":
+	case "VBA259":
+		return procedureProjectionSelectCase
+	case "VBA265":
 		return procedureProjectionUnusedParameter
-	case "VBA263":
+	case "VBA268":
 		return procedureProjectionNeverAssigned
-	case "VBA264":
+	case "VBA269":
 		return procedureProjectionUnassignedRead
 	}
 	// A future requirement must still be represented in a plan. Falling back
@@ -889,13 +913,13 @@ func httpProcedureHasSensitiveLogging(proc sourceProcedure) bool {
 func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc sourceProcedure, moduleFeatures procedureFeatureSet) procedureAnalysisPlan {
 	features := proc.Features
 	if proc.Facts == nil {
-		features.addUnknown(allProcedureFeatures)
+		features.addUnknown(uncertainProcedureFeatures)
 	}
 	features.addUnknown(moduleFeatures.unknown)
 	features.add(moduleFeatures.present)
 	if proc.Effects != nil {
 		if len(proc.Effects.DirectUncertainty) > 0 || len(proc.Effects.PropagatedUncertainty) > 0 {
-			features.addUnknown(allProcedureFeatures)
+			features.addUnknown(uncertainProcedureFeatures)
 		}
 		if proc.Effects.Error.HasErrorHandler || proc.Effects.Error.UsesResumeNext || proc.Effects.Error.SuppressesErrors || proc.Effects.Error.MayRaise || len(proc.Effects.Error.Direct) > 0 || len(proc.Effects.Error.Propagated) > 0 {
 			features.add(featureOnError)

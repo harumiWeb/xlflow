@@ -189,6 +189,7 @@ func MaterializeThirdPartyProject(corpusRoot string, project Project, opts Mater
 	cfg.Analyze.DetectDeadStores = true
 	cfg.Analyze.DetectDiscardedFunctionReturn = true
 	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
+	cfg.Analyze.DetectUnreachableSelectCase = true
 	cfg.Analyze.DetectUnusedParameters = true
 	cfg.Analyze.DetectUnusedPrivateConstants = true
 	cfg.Analyze.DetectUnusedUDTMembers = true

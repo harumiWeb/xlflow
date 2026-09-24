@@ -257,15 +257,19 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA250` | warning               | A `Worksheet.Select` or `Range.Select` operation lacks a proven active workbook or worksheet precondition.                                                           |
 | `VBA251` | warning               | A typed Excel `Match`, `VLookup`, or `HLookup` call omits its match-mode argument and relies on approximate matching.                                                |
 | `VBA252` | warning               | A typed `Excel.WorksheetFunction` member is absent from the complete generated TypeLib member set.                                                                   |
+| `VBA260` | warning               | A resolved `ThisWorkbook.Worksheets("name")` access can use the worksheet's stable CodeName.                                                                         |
+| `VBA261` | information           | A worksheet function is dispatched through `Excel.Application` instead of the explicit `WorksheetFunction` object.                                                   |
+| `VBA262` | warning               | A bare Excel host bracket expression such as `[A1]` hides its object-model binding.                                                                                  |
 | `VBA253` | warning               | Known implicit, indexed, or recursive default-member access is used where the member can be made explicit.                                                           |
 | `VBA254` | information / warning | Default-member access is unbound, late-bound, or incomplete and should be reviewed when the project opts in.                                                         |
 | `VBA255` | information / warning | Bang notation (`receiver!name`) relies on stringly typed/default-member semantics.                                                                                   |
 | `VBA256` | warning               | A procedure-local scalar assignment is never read before the value is overwritten or the procedure exits.                                                            |
-| `VBA260` | warning               | A private-procedure parameter is never referenced in the procedure body.                                                                                             |
-| `VBA261` | warning               | A module-level `Private Const` declaration is never referenced in the module.                                                                                        |
-| `VBA262` | information           | A `Private Type` member is never accessed through a resolvable member expression.                                                                                    |
-| `VBA263` | warning               | A procedure-local scalar variable is read but never assigned.                                                                                                        |
-| `VBA264` | warning               | A procedure-local variable is read on a path where no assignment is guaranteed to have executed.                                                                     |
+| `VBA259` | warning               | A `Select Case` item or `Case Else` branch can never execute because earlier `Case` items already cover every matching selector value.                               |
+| `VBA265` | warning               | A private-procedure parameter is never referenced in the procedure body.                                                                                             |
+| `VBA266` | warning               | A module-level `Private Const` declaration is never referenced in the module.                                                                                        |
+| `VBA267` | information           | A `Private Type` member is never accessed through a resolvable member expression.                                                                                    |
+| `VBA268` | warning               | A procedure-local scalar variable is read but never assigned.                                                                                                        |
+| `VBA269` | warning               | A procedure-local variable is read on a path where no assignment is guaranteed to have executed.                                                                     |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -298,7 +302,12 @@ Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214
 
 `VBA256` is opt-in and reports high-confidence dead stores for procedure-local
 scalar assignments. Enable it with `detect_dead_stores = true`.
-`VBA260` through `VBA264` are opt-in unused-declaration rules; enable them with
+
+`VBA259` is opt-in and reports `Select Case` items or `Case Else` branches
+that can never execute because earlier items already cover every matching
+selector value. Enable it with `detect_unreachable_select_case = true`.
+
+`VBA265` through `VBA269` are opt-in unused-declaration rules; enable them with
 `detect_unused_parameters`, `detect_unused_private_constants`,
 `detect_unused_udt_members`, `detect_never_assigned_variables`, and
 `detect_unassigned_variable_usage`. They exclude externally fixed signatures —
@@ -474,6 +483,14 @@ intentional exception.
 [analyze]
 detect_unavailable_worksheet_function_members = false
 ```
+
+`VBA260`, `VBA261`, and `VBA262` are opt-in Excel semantic inspections.
+Enable them with `detect_worksheet_string_access`,
+`detect_application_worksheet_function_dispatch`, and
+`detect_host_bracket_expressions`. `VBA260` is batch-only and requires the
+configured OOXML workbook or an explicitly supplied worksheet CodeName
+catalog. `VBA261` requires a complete generated Excel TypeLib. `VBA261` and
+`VBA262` are available in realtime/LSP analysis.
 
 `VBA253` is disabled by default and reports known implicit, indexed, or
 recursive default-member access. It is a high-precision, warning-level,

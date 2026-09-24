@@ -44,7 +44,7 @@ func (a Analyzer) unusedParameterFindings(file parsedFile, proc sourceProcedure,
 		if line < 1 {
 			line = proc.IR.Symbol.DeclarationRange.StartLine
 		}
-		finding := a.simpleFinding(file, proc, line, "VBA260", "warning",
+		finding := a.simpleFinding(file, proc, line, "VBA265", "warning",
 			"Parameter "+name+" is never used inside the procedure body.",
 			"No statement reads or writes this parameter; callers pass a value the implementation ignores.",
 			"Remove the parameter and update call sites, or use it where the signature requires it.")

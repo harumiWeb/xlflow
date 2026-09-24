@@ -47,7 +47,7 @@ type moduleAnalysisFacts struct {
 	lineFacts             []moduleSourceLineFact
 
 	// unusedDecl caches the per-file scans shared by every procedure's
-	// unused-declaration eligibility checks (VBA260). The scans depend only on
+	// unused-declaration eligibility checks (VBA265). The scans depend only on
 	// the file revision, so computing them per procedure would rescale the
 	// rule by procedure count.
 	unusedDeclOnce sync.Once
@@ -605,7 +605,7 @@ func (facts *moduleAnalysisFacts) unusedDeclarationFacts(lines []string) *unused
 	return facts.unusedDecl
 }
 
-// buildUnusedDeclFileFacts performs the three source scans VBA260 eligibility
+// buildUnusedDeclFileFacts performs the three source scans VBA265 eligibility
 // needs for a whole file: WithEvents fields, Implements targets, and the
 // identifier tokens inside string literals.
 func buildUnusedDeclFileFacts(lines []string) *unusedDeclFileFacts {

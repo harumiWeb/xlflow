@@ -36,30 +36,31 @@ type analysisParityExpectation struct {
 }
 
 type analysisParityDiagnostic struct {
-	Code             string
-	Severity         string
-	File             string
-	Module           string
-	Procedure        string
-	Line             int
-	Column           int
-	EndLine          int
-	EndColumn        int
-	ScopeEndLine     int
-	Message          string
-	Reason           string
-	Suggestion       string
-	NearbyCode       []string
-	CallCycle        *CallCycleContext
-	DataFlow         *DataFlowContext
-	CommandExecution *CommandExecutionContext
-	SQLExecution     *SQLExecutionContext
-	FileOperation    *FileOperationContext
-	HTTPSecurity     *HTTPSecurityContext
-	HTTPReliability  *HTTPReliabilityContext
-	OpaqueBoolean    *OpaqueBooleanContext
-	RuntimeError     *RuntimeErrorContext
-	DefaultMember    *DefaultMemberContext
+	Code                  string
+	Severity              string
+	File                  string
+	Module                string
+	Procedure             string
+	Line                  int
+	Column                int
+	EndLine               int
+	EndColumn             int
+	ScopeEndLine          int
+	Message               string
+	Reason                string
+	Suggestion            string
+	NearbyCode            []string
+	CallCycle             *CallCycleContext
+	DataFlow              *DataFlowContext
+	CommandExecution      *CommandExecutionContext
+	SQLExecution          *SQLExecutionContext
+	FileOperation         *FileOperationContext
+	HTTPSecurity          *HTTPSecurityContext
+	HTTPReliability       *HTTPReliabilityContext
+	OpaqueBoolean         *OpaqueBooleanContext
+	RuntimeError          *RuntimeErrorContext
+	DefaultMember         *DefaultMemberContext
+	SelectCaseUnreachable *SelectCaseUnreachableContext
 }
 
 func TestAnalyzerFilesystemAndInMemoryParity(t *testing.T) {
@@ -194,30 +195,31 @@ func normalizeAnalysisParityDiagnostics(findings []Finding, aliases map[string]s
 	normalized := make([]analysisParityDiagnostic, 0, len(findings))
 	for _, finding := range findings {
 		normalized = append(normalized, analysisParityDiagnostic{
-			Code:             finding.Code,
-			Severity:         finding.Severity,
-			File:             normalizeAnalysisParityFile(finding.File, aliases),
-			Module:           finding.Module,
-			Procedure:        finding.Procedure,
-			Line:             finding.Line,
-			Column:           finding.Column,
-			EndLine:          finding.EndLine,
-			EndColumn:        finding.EndColumn,
-			ScopeEndLine:     finding.ScopeEndLine,
-			Message:          finding.Message,
-			Reason:           finding.Reason,
-			Suggestion:       finding.Suggestion,
-			NearbyCode:       slices.Clone(finding.NearbyCode),
-			CallCycle:        normalizeAnalysisParityCallCycle(finding.CallCycle, aliases),
-			DataFlow:         finding.DataFlow,
-			CommandExecution: finding.CommandExecution,
-			SQLExecution:     finding.SQLExecution,
-			FileOperation:    finding.FileOperation,
-			HTTPSecurity:     finding.HTTPSecurity,
-			HTTPReliability:  finding.HTTPReliability,
-			OpaqueBoolean:    finding.OpaqueBoolean,
-			RuntimeError:     finding.RuntimeError,
-			DefaultMember:    finding.DefaultMember,
+			Code:                  finding.Code,
+			Severity:              finding.Severity,
+			File:                  normalizeAnalysisParityFile(finding.File, aliases),
+			Module:                finding.Module,
+			Procedure:             finding.Procedure,
+			Line:                  finding.Line,
+			Column:                finding.Column,
+			EndLine:               finding.EndLine,
+			EndColumn:             finding.EndColumn,
+			ScopeEndLine:          finding.ScopeEndLine,
+			Message:               finding.Message,
+			Reason:                finding.Reason,
+			Suggestion:            finding.Suggestion,
+			NearbyCode:            slices.Clone(finding.NearbyCode),
+			CallCycle:             normalizeAnalysisParityCallCycle(finding.CallCycle, aliases),
+			DataFlow:              finding.DataFlow,
+			CommandExecution:      finding.CommandExecution,
+			SQLExecution:          finding.SQLExecution,
+			FileOperation:         finding.FileOperation,
+			HTTPSecurity:          finding.HTTPSecurity,
+			HTTPReliability:       finding.HTTPReliability,
+			OpaqueBoolean:         finding.OpaqueBoolean,
+			RuntimeError:          finding.RuntimeError,
+			DefaultMember:         finding.DefaultMember,
+			SelectCaseUnreachable: finding.SelectCaseUnreachable,
 		})
 	}
 	slices.SortFunc(normalized, func(a, b analysisParityDiagnostic) int {

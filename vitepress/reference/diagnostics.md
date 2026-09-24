@@ -134,11 +134,15 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA256`](#vba256) | analyze | warning     | procedure-local | no      | Dead store                                         |
 | [`VBA257`](#vba257) | analyze | warning     | procedure-local | no      | Discarded Function return value                    |
 | [`VBA258`](#vba258) | analyze | information | project-wide    | no      | Function return value always discarded             |
-| [`VBA260`](#vba260) | analyze | warning     | procedure-local | no      | Unused procedure parameter                         |
-| [`VBA261`](#vba261) | analyze | warning     | file-local      | no      | Unused private constant                            |
-| [`VBA262`](#vba262) | analyze | information | file-local      | no      | Unused user-defined type member                    |
-| [`VBA263`](#vba263) | analyze | warning     | procedure-local | no      | Variable never assigned                            |
-| [`VBA264`](#vba264) | analyze | warning     | procedure-local | no      | Variable read before assignment                    |
+| [`VBA259`](#vba259) | analyze | warning     | procedure-local | no      | Unreachable Select Case branch                     |
+| [`VBA260`](#vba260) | analyze | warning     | procedure-local | no      | Worksheet string access                            |
+| [`VBA261`](#vba261) | analyze | information | procedure-local | no      | Application worksheet-function dispatch            |
+| [`VBA262`](#vba262) | analyze | warning     | procedure-local | no      | Excel host bracket expression                      |
+| [`VBA265`](#vba265) | analyze | warning     | procedure-local | no      | Unused procedure parameter                         |
+| [`VBA266`](#vba266) | analyze | warning     | file-local      | no      | Unused private constant                            |
+| [`VBA267`](#vba267) | analyze | information | file-local      | no      | Unused user-defined type member                    |
+| [`VBA268`](#vba268) | analyze | warning     | procedure-local | no      | Variable never assigned                            |
+| [`VBA269`](#vba269) | analyze | warning     | procedure-local | no      | Variable read before assignment                    |
 
 ## VB001
 
@@ -2912,7 +2916,95 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | no                                        |
 | Fix available               | no                                        |
 
+## VBA259
+
+**Unreachable Select Case branch.** A Select Case item or Case Else branch can never run because earlier Case items already cover every matching selector value.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `maintainability`                |
+| Evidence class              | `inference`                      |
+| Compile-equivalent          | no                               |
+| Default severity            | `warning`                        |
+| Supported severities        | `warning`, `information`         |
+| Surfaces                    | `analyze`, `lsp`                 |
+| Scope                       | `procedure-local`                |
+| Precision                   | `high`                           |
+| Enabled by default          | no                               |
+| Configuration               | `detect_unreachable_select_case` |
+| Inline suppression          | yes                              |
+| Blocks source preflight     | no                               |
+| Real-time editor diagnostic | yes                              |
+| Fix available               | no                               |
+
 ## VBA260
+
+**Worksheet string access.** A ThisWorkbook worksheet is accessed by its visible name even though its stable VBA CodeName is known.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `maintainability`                |
+| Evidence class              | `maintainability`                |
+| Compile-equivalent          | no                               |
+| Default severity            | `warning`                        |
+| Supported severities        | `warning`                        |
+| Surfaces                    | `analyze`                        |
+| Scope                       | `procedure-local`                |
+| Precision                   | `high`                           |
+| Enabled by default          | no                               |
+| Configuration               | `detect_worksheet_string_access` |
+| Inline suppression          | yes                              |
+| Blocks source preflight     | no                               |
+| Real-time editor diagnostic | no                               |
+| Fix available               | no                               |
+
+## VBA261
+
+**Application worksheet-function dispatch.** A worksheet function is dispatched through Excel.Application instead of the explicit WorksheetFunction object.
+
+| Property                    | Value                                            |
+| --------------------------- | ------------------------------------------------ |
+| Family                      | `analyze`                                        |
+| Category                    | `reliability`                                    |
+| Evidence class              | `inference`                                      |
+| Compile-equivalent          | no                                               |
+| Default severity            | `information`                                    |
+| Supported severities        | `information`                                    |
+| Surfaces                    | `analyze`, `lsp`                                 |
+| Scope                       | `procedure-local`                                |
+| Precision                   | `high`                                           |
+| Enabled by default          | no                                               |
+| Configuration               | `detect_application_worksheet_function_dispatch` |
+| Inline suppression          | yes                                              |
+| Blocks source preflight     | no                                               |
+| Real-time editor diagnostic | yes                                              |
+| Fix available               | no                                               |
+
+## VBA262
+
+**Excel host bracket expression.** An Excel host bracket expression hides the workbook and object-model binding behind shorthand syntax.
+
+| Property                    | Value                             |
+| --------------------------- | --------------------------------- |
+| Family                      | `analyze`                         |
+| Category                    | `maintainability`                 |
+| Evidence class              | `maintainability`                 |
+| Compile-equivalent          | no                                |
+| Default severity            | `warning`                         |
+| Supported severities        | `warning`                         |
+| Surfaces                    | `analyze`, `lsp`                  |
+| Scope                       | `procedure-local`                 |
+| Precision                   | `high`                            |
+| Enabled by default          | no                                |
+| Configuration               | `detect_host_bracket_expressions` |
+| Inline suppression          | yes                               |
+| Blocks source preflight     | no                                |
+| Real-time editor diagnostic | yes                               |
+| Fix available               | no                                |
+
+## VBA265
 
 **Unused procedure parameter.** A parameter of a Private procedure is never read or written inside the procedure body.
 
@@ -2934,7 +3026,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | yes                        |
 | Fix available               | no                         |
 
-## VBA261
+## VBA266
 
 **Unused private constant.** A module-level Private Const declaration is never referenced by any expression, declaration, or conditional-compilation directive in the module.
 
@@ -2956,7 +3048,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | yes                               |
 | Fix available               | no                                |
 
-## VBA262
+## VBA267
 
 **Unused user-defined type member.** A member of a Private Type declaration is never accessed through a resolvable member expression in the module.
 
@@ -2978,7 +3070,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | yes                         |
 | Fix available               | no                          |
 
-## VBA263
+## VBA268
 
 **Variable never assigned.** A procedure-local scalar variable is read but no statement, ReDim, or resolvable ByRef call ever assigns a value to it.
 
@@ -3000,7 +3092,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | yes                               |
 | Fix available               | no                                |
 
-## VBA264
+## VBA269
 
 **Variable read before assignment.** A procedure-local scalar variable is read on a control-flow path where no assignment is guaranteed to have executed.
 

@@ -48,7 +48,7 @@ func (a Analyzer) unusedUDTMemberFindings(file parsedFile, signatures map[string
 			if member.used {
 				continue
 			}
-			finding := a.simpleFinding(file, sourceProcedure{}, member.rng.StartLine, "VBA262", "information",
+			finding := a.simpleFinding(file, sourceProcedure{}, member.rng.StartLine, "VBA267", "information",
 				"Member "+member.display+" of Private Type "+typ.display+" is never accessed.",
 				"No resolvable member expression in this module reads or writes the member.",
 				"Remove the member, or access it where the structure requires it.")

@@ -69,7 +69,7 @@ func (a Analyzer) unusedPrivateConstFindings(file parsedFile) []Finding {
 		if privateConstReferenced(file, moduleName, name, declaration.Range, procedureRanges, shadowed[name]) {
 			continue
 		}
-		finding := a.simpleFinding(file, sourceProcedure{}, declaration.Range.StartLine, "VBA261", "warning",
+		finding := a.simpleFinding(file, sourceProcedure{}, declaration.Range.StartLine, "VBA266", "warning",
 			"Private Const "+cleanIdentifier(declaration.Name)+" is never referenced.",
 			"No procedure access, declaration initializer, or conditional-compilation directive in this module uses the constant.",
 			"Remove the declaration, or reference it where the value is needed.")
