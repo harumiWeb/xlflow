@@ -49,6 +49,55 @@ End Function
 	}
 }
 
+func TestUdfCellReferenceHighlightsOnlyTheNameToken(t *testing.T) {
+	findings := runUdfCellReferenceAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Public Function ABC123() As Double
+  Dim counter As Long
+  counter = 1
+  ABC123 = counter
+End Function
+`})
+	got := findingsByCode(findings, "VBA270")
+	if len(got) != 1 {
+		t.Fatalf("VBA270 findings = %+v, want one finding", got)
+	}
+	finding := got[0]
+	if finding.Line != 2 || finding.Column != 17 || finding.EndLine != 2 || finding.EndColumn != 23 {
+		t.Fatalf("VBA270 range = %d:%d-%d:%d, want the ABC123 name token span 2:17-2:23", finding.Line, finding.Column, finding.EndLine, finding.EndColumn)
+	}
+}
+
+func TestUdfCellReferenceReportsZeroPaddedRowNames(t *testing.T) {
+	findings := runUdfCellReferenceAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Public Function A00000000000000000001() As Double
+  A00000000000000000001 = 1
+End Function
+Public Function A0001048576() As Double
+  A0001048576 = 1
+End Function
+`})
+	if got := findingsByCode(findings, "VBA270"); len(got) != 2 {
+		t.Fatalf("VBA270 findings = %+v, want two findings for zero-padded row names", got)
+	}
+}
+
+func TestUdfCellReferenceScansIntactFunctionsBesideParseErrors(t *testing.T) {
+	// An Optional default using a radix literal is an accepted parser-recovery
+	// shape: the file still carries parse errors, but analysis continues and
+	// unrelated intact declarations must still be scanned.
+	findings := runUdfCellReferenceAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Public Function TakesDefault(Optional p As Long = &HFF) As Double
+  TakesDefault = p
+End Function
+Public Function A1() As Double
+  A1 = 1
+End Function
+`})
+	if got := findingsByCode(findings, "VBA270"); len(got) != 1 {
+		t.Fatalf("VBA270 findings = %+v, want the intact Function flagged despite the unrelated parse error", got)
+	}
+}
+
 func TestUdfCellReferenceReportsImplicitPublicFunction(t *testing.T) {
 	findings := runUdfCellReferenceAnalysis(t, map[string]string{"Main.bas": `Option Explicit
 Function A1() As Double

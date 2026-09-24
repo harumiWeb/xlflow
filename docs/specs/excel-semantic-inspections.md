@@ -63,8 +63,14 @@ The A1 check requires one to three ASCII column letters within `XFD` (16384)
 followed by a row number in `1..1048576`; matching is case-insensitive and
 accepts leading zeros because `=A01` resolves to `A1`. The R1C1 check is a
 deliberate extension beyond the equivalent Rubberduck inspection and covers
-absolute `R<row>C<column>` references within the same worksheet limits. Bare
-`RC` and row-only or column-only forms such as `R5`/`C3` interpreted under
-R1C1 notation are range references rather than cell references and are not
-reported; note that `R5`/`C3` still collide as ordinary A1 references and are
-reported on that basis.
+absolute `R<row>C<column>` references within the same worksheet limits. The
+single-cell `RC`, `R<n>C`, and `RC<n>` forms and the row-only/column-only
+`R5`/`C3` shapes are deliberately out of scope for this pass; note that names
+of those shapes still collide as ordinary A1 references (such as `R5`, `C3`,
+or `RC3`) and are reported on that basis.
+
+The diagnostic range covers only the colliding identifier token inside the
+declaration header, not the entire procedure body. Declarations recovered by
+the parser or carrying multi-branch conditional-compilation signatures fail
+open and stay silent; unrelated parse recovery elsewhere in the file does not
+suppress intact declarations.

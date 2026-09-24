@@ -24,9 +24,6 @@ const (
 // procedures, Option Private Module files, and non-standard module kinds that
 // can never produce a worksheet UDF.
 func (a Analyzer) udfCellReferenceFindings(file parsedFile) []Finding {
-	if file.IR.Parse.HasError || file.IR.Parse.HasMissing {
-		return nil
-	}
 	if !strings.EqualFold(file.ModuleKind, "standard") {
 		return nil
 	}
@@ -47,13 +44,14 @@ func (a Analyzer) udfCellReferenceFindings(file parsedFile) []Finding {
 		if !ok {
 			continue
 		}
-		finding := a.simpleFinding(file, sourceProcedure{Name: symbol.Name}, symbol.DeclarationRange.StartLine, "VBA270", "warning",
+		startLine, startColumn, endLine, endColumn := udfNameTokenRange(file.Lines, symbol)
+		finding := a.simpleFinding(file, sourceProcedure{Name: symbol.Name}, startLine, "VBA270", "warning",
 			"Public Function "+name+" is exposed to Excel worksheets as a UDF, but its name is a valid "+style+" cell reference.",
 			"Worksheet formulas resolve the cell reference instead of calling the function, so the UDF cannot be invoked from a cell.",
 			"Rename the function so it cannot be parsed as a cell reference, or hide it from worksheets by declaring it Private or adding Option Private Module.")
-		finding.Column = symbol.DeclarationRange.StartColumn
-		finding.EndLine = symbol.DeclarationRange.EndLine
-		finding.EndColumn = symbol.DeclarationRange.EndColumn
+		finding.Column = startColumn
+		finding.EndLine = endLine
+		finding.EndColumn = endColumn
 		findings = append(findings, finding)
 	}
 	slices.SortFunc(findings, func(x, y Finding) int {
@@ -66,9 +64,10 @@ func (a Analyzer) udfCellReferenceFindings(file parsedFile) []Finding {
 // in A1 or R1C1 notation, returning the matched style label for diagnostics.
 // A1 references use the current worksheet limits (columns through XFD, rows
 // through 1048576). R1C1 coverage is restricted to absolute R<row>C<column>
-// cell references; bare RC and row-only/column-only R1C1 forms such as R5 or
-// C3 are range references rather than cell references, though names of that
-// shape still collide as ordinary A1 references and are reported there.
+// cell references; the single-cell RC, R<n>C, and RC<n> forms plus the
+// row-only/column-only R5/C3 shapes are deliberately out of scope, though
+// names that also parse as ordinary A1 references (such as R5 or RC3) are
+// still reported on that basis.
 func udfCellReferenceStyle(name string) (string, bool) {
 	if a1CellReference(name) {
 		return "A1-style", true
@@ -134,7 +133,8 @@ func excelColumnIndex(letters string) (int, bool) {
 
 // excelReferenceNumber parses a nonempty ASCII digit run into a positive
 // integer. Leading zeros are accepted because Excel resolves forms such as
-// =A01 to the same cell.
+// =A01 to the same cell; they are stripped before conversion so that long
+// zero-padded runs cannot overflow the integer parse.
 func excelReferenceNumber(digits string) (int, bool) {
 	if digits == "" {
 		return 0, false
@@ -144,11 +144,50 @@ func excelReferenceNumber(digits string) (int, bool) {
 			return 0, false
 		}
 	}
-	value, err := strconv.Atoi(digits)
+	value, err := strconv.Atoi(strings.TrimLeft(digits, "0"))
 	if err != nil {
 		return 0, false
 	}
 	return value, true
+}
+
+// udfNameTokenRange locates the procedure name token inside its declaration
+// header so the diagnostic highlights only the colliding identifier instead of
+// the entire procedure body. Line continuations can push the identifier off
+// the header's first line, so a bounded window is scanned for a word-bounded
+// match; unresolvable headers fall back to the declaration start.
+func udfNameTokenRange(lines []string, symbol procedureir.ProcedureSymbol) (startLine, startColumn, endLine, endColumn int) {
+	rng := symbol.DeclarationRange
+	name := cleanIdentifier(symbol.Name)
+	last := min(rng.StartLine+8, rng.EndLine, len(lines))
+	for lineNo := rng.StartLine; lineNo <= last; lineNo++ {
+		if start, end := identifierTokenSpan(lines[lineNo-1], name); start > 0 {
+			return lineNo, start, lineNo, end
+		}
+	}
+	return rng.StartLine, rng.StartColumn, rng.StartLine, rng.StartColumn + len(name)
+}
+
+// identifierTokenSpan returns the 1-based byte span of the first word-bounded
+// occurrence of name in line, including the brackets of a [name] spelling.
+// It reports 0,0 when the identifier is absent.
+func identifierTokenSpan(line, name string) (int, int) {
+	if i := strings.Index(line, "["+name+"]"); i >= 0 {
+		return i + 1, i + len(name) + 3
+	}
+	offset := 0
+	for {
+		i := strings.Index(line[offset:], name)
+		if i < 0 {
+			return 0, 0
+		}
+		i += offset
+		end := i + len(name)
+		if (i == 0 || !isIdentifierByte(line[i-1])) && (end >= len(line) || !isIdentifierByte(line[end])) {
+			return i + 1, end + 1
+		}
+		offset = i + 1
+	}
 }
 
 func isASCIILetter(c byte) bool {
