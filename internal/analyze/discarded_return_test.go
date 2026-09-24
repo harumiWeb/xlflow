@@ -721,3 +721,34 @@ End Sub
 		t.Fatalf("filtered project view must suppress VBA258: %+v", got)
 	}
 }
+
+func TestVBA257ReportsOneBasedCallRange(t *testing.T) {
+	source := `Option Explicit
+Public Function LoadConfig() As Boolean
+  LoadConfig = True
+End Function
+
+Public Sub Run()
+  LoadConfig
+End Sub
+`
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", source)
+	cfg := config.Default()
+	cfg.Analyze.DetectDiscardedFunctionReturn = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA257")
+	if len(got) != 1 {
+		t.Fatalf("VBA257 findings = %+v, want one", got)
+	}
+	line := strings.Split(source, "\n")[got[0].Line-1]
+	if got[0].Column < 1 || got[0].EndColumn > len(line)+1 {
+		t.Fatalf("VBA257 range %d-%d outside line %q", got[0].Column, got[0].EndColumn, line)
+	}
+	if fragment := line[got[0].Column-1 : got[0].EndColumn-1]; fragment != "LoadConfig" {
+		t.Fatalf("VBA257 range %d-%d covers %q, want the call expression", got[0].Column, got[0].EndColumn, fragment)
+	}
+}

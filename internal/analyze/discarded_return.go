@@ -130,9 +130,9 @@ func (a Analyzer) discardedReturnFindings(file parsedFile, proc sourceProcedure,
 			"The invocation is a standalone call statement, so the returned value is produced and then dropped.",
 			"Consume the return value, convert the callee to a Sub, or suppress VBA257 when the discard is intentional.",
 		)
-		finding.Column = call.Range.StartColumn + 1
+		finding.Column = call.Range.StartColumn
 		finding.EndLine = call.Range.EndLine
-		finding.EndColumn = call.Range.EndColumn + 1
+		finding.EndColumn = call.Range.EndColumn
 		finding.ScopeEndLine = proc.EndLine
 		findings = append(findings, finding)
 	}

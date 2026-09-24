@@ -6,7 +6,7 @@
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":284,"column":21}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA269","severity":"warning","line":284,"column":52}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":290,"column":29}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA244","severity":"warning","line":293,"column":43}
+{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA244","severity":"warning","line":293,"column":42}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA269","severity":"warning","line":304,"column":58}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":314,"column":21}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":349,"column":9}
@@ -20,7 +20,7 @@
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA237","severity":"warning","line":451,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":468,"column":43}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":498,"column":43}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA244","severity":"information","line":512,"column":34}
+{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA244","severity":"information","line":512,"column":33}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":539,"column":47}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":590,"column":17}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA269","severity":"warning","line":594,"column":65}

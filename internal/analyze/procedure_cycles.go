@@ -178,9 +178,9 @@ func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsed
 			reason += fmt.Sprintf(" %d unresolved or dynamically bound call(s) remain uncertain.", len(cycleContext.Uncertainty))
 		}
 		finding := a.simpleFinding(file, proc, anchor.StartLine, "VBA244", severity, message, reason, "Break the cycle, add an explicit termination guard, or isolate the dangerous effect behind a non-recursive boundary.")
-		finding.Column = anchor.StartColumn + 1
+		finding.Column = anchor.StartColumn
 		finding.EndLine = anchor.EndLine
-		finding.EndColumn = anchor.EndColumn + 1
+		finding.EndColumn = anchor.EndColumn
 		finding.ScopeEndLine = proc.EndLine
 		finding.CallCycle = &cycleContext
 		out = append(out, finding)
@@ -249,7 +249,7 @@ func buildCallCycleContext(cycle callgraph.Cycle, componentNodes []callgraph.ID,
 					continue
 				}
 				uncertaintySeen[key] = true
-				ctx.Uncertainty = append(ctx.Uncertainty, CallCycleUncertainty{Kind: string(uncertainty.Kind), Origin: uncertainty.Origin.QualifiedName, Callee: uncertainty.Callee, File: uncertainty.Origin.File, Line: uncertainty.Range.StartLine, Column: uncertainty.Range.StartColumn + 1})
+				ctx.Uncertainty = append(ctx.Uncertainty, CallCycleUncertainty{Kind: string(uncertainty.Kind), Origin: uncertainty.Origin.QualifiedName, Callee: uncertainty.Callee, File: uncertainty.Origin.File, Line: uncertainty.Range.StartLine, Column: uncertainty.Range.StartColumn})
 			}
 		}
 		processUncertainty(summary.DirectUncertainty)
@@ -260,7 +260,7 @@ func buildCallCycleContext(cycle callgraph.Cycle, componentNodes []callgraph.ID,
 		ctx.Path = append(ctx.Path, ctx.Path[0])
 	}
 	for _, edge := range cycle.Edges {
-		ctx.Edges = append(ctx.Edges, CallCycleEdge{Caller: edge.Caller.QualifiedName, Callee: edge.Callee.QualifiedName, File: edge.Location.File, Line: edge.Location.StartLine, Column: edge.Location.StartColumn + 1, EndLine: edge.Location.EndLine, EndColumn: edge.Location.EndColumn + 1})
+		ctx.Edges = append(ctx.Edges, CallCycleEdge{Caller: edge.Caller.QualifiedName, Callee: edge.Callee.QualifiedName, File: edge.Location.File, Line: edge.Location.StartLine, Column: edge.Location.StartColumn, EndLine: edge.Location.EndLine, EndColumn: edge.Location.EndColumn})
 	}
 	sort.Slice(ctx.EventHandlers, func(i, j int) bool {
 		return strings.ToLower(ctx.EventHandlers[i]) < strings.ToLower(ctx.EventHandlers[j])

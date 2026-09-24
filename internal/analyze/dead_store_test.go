@@ -33,6 +33,35 @@ End Sub
 	}
 }
 
+func TestDeadStoreReportsOneBasedStatementRange(t *testing.T) {
+	source := `Option Explicit
+Public Sub Run()
+  Dim deadValue As Long
+  deadValue = 1
+  Debug.Print "done"
+End Sub
+`
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", source)
+	cfg := config.Default()
+	cfg.Analyze.DetectDeadStores = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := findingsByCode(findings, "VBA256")
+	if len(dead) != 1 {
+		t.Fatalf("VBA256 findings = %+v, want one", dead)
+	}
+	line := strings.Split(source, "\n")[dead[0].Line-1]
+	if dead[0].Column < 1 || dead[0].EndColumn > len(line)+1 {
+		t.Fatalf("VBA256 range %d-%d outside line %q", dead[0].Column, dead[0].EndColumn, line)
+	}
+	if fragment := line[dead[0].Column-1 : dead[0].EndColumn-1]; fragment != "deadValue = 1" {
+		t.Fatalf("VBA256 range %d-%d covers %q, want the assignment statement", dead[0].Column, dead[0].EndColumn, fragment)
+	}
+}
+
 func TestAnalyzerDoesNotReportAccessObjectDeadStoreWhenOptedIn(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

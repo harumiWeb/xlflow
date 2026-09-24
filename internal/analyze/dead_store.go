@@ -31,9 +31,9 @@ func (a Analyzer) deadStoreFindings(file parsedFile, proc sourceProcedure) []Fin
 			"Assignment to "+candidate.DisplayName+" is never read before the value is overwritten or the procedure exits.",
 			"The assigned scalar value is not observed on any completed control-flow path.",
 			"Use the value before assigning it again, or remove the unused write while preserving any required right-hand-side effects.")
-		finding.Column = candidate.Range.StartColumn + 1
+		finding.Column = candidate.Range.StartColumn
 		finding.EndLine = candidate.Range.EndLine
-		finding.EndColumn = candidate.Range.EndColumn + 1
+		finding.EndColumn = candidate.Range.EndColumn
 		findings = append(findings, finding)
 	}
 	return findings
