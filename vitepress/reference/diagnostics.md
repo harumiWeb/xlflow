@@ -143,6 +143,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA267`](#vba267) | analyze | information | file-local      | no      | Unused user-defined type member                    |
 | [`VBA268`](#vba268) | analyze | warning     | procedure-local | no      | Variable never assigned                            |
 | [`VBA269`](#vba269) | analyze | warning     | procedure-local | no      | Variable read before assignment                    |
+| [`VBA270`](#vba270) | analyze | warning     | file-local      | no      | UDF name collides with Excel cell reference        |
 
 ## VB001
 
@@ -3113,3 +3114,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                 |
 | Real-time editor diagnostic | yes                                |
 | Fix available               | no                                 |
+
+## VBA270
+
+**UDF name collides with Excel cell reference.** A worksheet-visible Function in a standard module is named after a valid A1 or R1C1 cell reference, so worksheet formulas resolve the cell instead of calling the function.
+
+| Property                    | Value                             |
+| --------------------------- | --------------------------------- |
+| Family                      | `analyze`                         |
+| Category                    | `correctness`                     |
+| Evidence class              | `inference`                       |
+| Compile-equivalent          | no                                |
+| Default severity            | `warning`                         |
+| Supported severities        | `warning`, `information`          |
+| Surfaces                    | `analyze`, `lsp`                  |
+| Scope                       | `file-local`                      |
+| Precision                   | `high`                            |
+| Enabled by default          | no                                |
+| Configuration               | `detect_udf_cell_reference_names` |
+| Inline suppression          | yes                               |
+| Blocks source preflight     | no                                |
+| Real-time editor diagnostic | yes                               |
+| Fix available               | no                                |
