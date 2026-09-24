@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `VBA270` and `VBA271` `Option Base` consistency diagnostics.
+  `VBA270` warns on `Array(...)` calls that resolve to the VBA intrinsic
+  (including explicit `VBA.Array(...)`) inside a module declaring
+  `Option Base 1`, and `VBA271` warns on `ParamArray` parameters in the
+  same modules; both constructs stay zero-based regardless of `Option
+Base`. The rules use `detect_option_base_array_inconsistency` and
+  `detect_option_base_paramarray_inconsistency` and run in batch, realtime,
+  and LSP analysis.
 - Added opt-in Excel semantic inspections: batch-only `VBA260` warns when an
   authoritative workbook catalog can replace `ThisWorkbook.Worksheets("name")`
   with a stable worksheet CodeName; `VBA261` reports generated-TypeLib

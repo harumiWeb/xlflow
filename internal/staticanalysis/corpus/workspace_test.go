@@ -51,6 +51,8 @@ func TestMaterializeThirdPartyProjectsPreservesSourcesAndClassifications(t *test
 			"VBA267": loaded.Analyze.DetectUnusedUDTMembers,
 			"VBA268": loaded.Analyze.DetectNeverAssignedVariables,
 			"VBA269": loaded.Analyze.DetectUnassignedVariableUsage,
+			"VBA270": loaded.Analyze.DetectOptionBaseArrayInconsistency,
+			"VBA271": loaded.Analyze.DetectOptionBaseParamArrayInconsistency,
 		} {
 			if !enabled {
 				t.Fatalf("generated config did not enable %s for corpus review for %s", code, project.ID)

@@ -270,6 +270,8 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA267` | information           | A `Private Type` member is never accessed through a resolvable member expression.                                                                                    |
 | `VBA268` | warning               | A procedure-local scalar variable is read but never assigned.                                                                                                        |
 | `VBA269` | warning               | A procedure-local variable is read on a path where no assignment is guaranteed to have executed.                                                                     |
+| `VBA270` | warning               | An `Array(...)` call resolved to the VBA intrinsic returns a zero-based array despite `Option Base 1`.                                                               |
+| `VBA271` | warning               | A `ParamArray` parameter is always passed as a zero-based `Variant` array despite `Option Base 1`.                                                                   |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -306,6 +308,12 @@ scalar assignments. Enable it with `detect_dead_stores = true`.
 `VBA259` is opt-in and reports `Select Case` items or `Case Else` branches
 that can never execute because earlier items already cover every matching
 selector value. Enable it with `detect_unreachable_select_case = true`.
+
+`VBA270` and `VBA271` are opt-in `Option Base` consistency rules; enable them
+with `detect_option_base_array_inconsistency` and
+`detect_option_base_paramarray_inconsistency`. They report only inside modules
+declaring `Option Base 1`, require the `Array` call to resolve to the VBA
+intrinsic, and stay silent for user-defined or shadowed `Array` names.
 
 `VBA265` through `VBA269` are opt-in unused-declaration rules; enable them with
 `detect_unused_parameters`, `detect_unused_private_constants`,
