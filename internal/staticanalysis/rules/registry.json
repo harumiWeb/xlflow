@@ -2970,6 +2970,28 @@
       "configuration_key": "detect_unassigned_variable_usage",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA270",
+      "title": "UDF name collides with Excel cell reference",
+      "description": "A worksheet-visible Function in a standard module is named after a valid A1 or R1C1 cell reference, so worksheet formulas resolve the cell instead of calling the function.",
+      "family": "analyze",
+      "category": "correctness",
+      "evidence_class": "inference",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning", "information"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": false,
+      "scope": "file-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba270",
+      "configurable": true,
+      "configuration_key": "detect_udf_cell_reference_names",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

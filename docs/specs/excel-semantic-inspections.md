@@ -42,3 +42,29 @@ bracketed identifiers that resolve to procedure, module, or project symbols,
 strings, comments, or qualified members such as `Me.[Member]` as host bracket
 expressions. Because xlflow analyzes Excel VBA projects, the rule is an
 explicit Excel-host policy and remains disabled unless configured.
+
+<!-- xlflow-rule-contract: {"id":"VBA270","family":"analyze","category":"correctness","default_severity":"warning","scope":"file-local","realtime":true,"configuration_key":"detect_udf_cell_reference_names","inline_suppressible":true,"preflight_blocking":false} -->
+
+## VBA270: UDF name collides with Excel cell reference
+
+VBA270 reports a `Function` in a `standard` module whose name parses as a
+valid Excel cell reference. A public Function in a standard module is exposed
+to worksheets as a UDF; when the name collides with a cell reference, a
+worksheet formula resolves the cell and the function is never invoked.
+
+Eligible declarations are `Function` procedures with `Public` or implicit
+visibility. `Private` and `Friend` members, `Sub`/`Property` procedures,
+declared external functions, `Option Private Module` files, and
+`class`/`form`/`document` modules are excluded because they cannot produce a
+worksheet UDF. Recovered or multi-branch conditional-compilation signatures
+fail open and stay silent.
+
+The A1 check requires one to three ASCII column letters within `XFD` (16384)
+followed by a row number in `1..1048576`; matching is case-insensitive and
+accepts leading zeros because `=A01` resolves to `A1`. The R1C1 check is a
+deliberate extension beyond the equivalent Rubberduck inspection and covers
+absolute `R<row>C<column>` references within the same worksheet limits. Bare
+`RC` and row-only or column-only forms such as `R5`/`C3` interpreted under
+R1C1 notation are range references rather than cell references and are not
+reported; note that `R5`/`C3` still collide as ordinary A1 references and are
+reported on that basis.

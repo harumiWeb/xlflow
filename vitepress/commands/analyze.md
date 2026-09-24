@@ -270,6 +270,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA267` | information           | A `Private Type` member is never accessed through a resolvable member expression.                                                                                    |
 | `VBA268` | warning               | A procedure-local scalar variable is read but never assigned.                                                                                                        |
 | `VBA269` | warning               | A procedure-local variable is read on a path where no assignment is guaranteed to have executed.                                                                     |
+| `VBA270` | warning               | A worksheet-visible `Function` in a standard module is named after a valid A1 or R1C1 cell reference, so worksheet formulas resolve the cell instead.                |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -313,6 +314,12 @@ selector value. Enable it with `detect_unreachable_select_case = true`.
 `detect_unassigned_variable_usage`. They exclude externally fixed signatures —
 event handlers, `Implements` members, `WithEvents` callbacks, and dynamically
 invoked procedures — and fail open on unresolved or ambiguous shapes.
+`VBA270` is an opt-in file-local rule enabled with
+`detect_udf_cell_reference_names`; it reports worksheet-visible `Function`
+declarations in standard modules whose names parse as valid A1 or absolute
+R1C1 cell references within the current worksheet limits, and skips `Private`,
+`Friend`, non-`Function`, `Option Private Module`, and non-standard-module
+declarations that cannot produce a UDF.
 Complete default-member runtime failures are reported by `VBA249`, while
 `VBA202` retains ownership of proven error-91 object-use-before-`Set`/`Nothing`
 cases.
