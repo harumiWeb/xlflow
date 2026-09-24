@@ -672,6 +672,7 @@ func TestProcedureProjectionRequirementMappingsAreDistinct(t *testing.T) {
 		{id: "VBA225", want: procedureProjectionExcelLoop},
 		{id: "VBA238", want: procedureProjectionExcelInvariant},
 		{id: "VBA262", want: procedureProjectionExcelBracket},
+		{id: "VBA272", want: procedureProjectionParameterPassing},
 	} {
 		got := procedureProjectionForRequirement(procedureRuleRequirement{id: test.id})
 		if got != test.want {
@@ -700,6 +701,7 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		"VBA256/other": true,
 		"VBA259/other": true,
 		"VBA265/other": true, "VBA268/other": true, "VBA269/other": true,
+		"VBA270/other": true, "VBA271/other": true, "VBA272/other": true, "VBA273/other": true, "VBA274/other": true,
 	}
 	seen := map[string]bool{}
 	always := map[string]bool{}

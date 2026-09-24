@@ -20,10 +20,35 @@ func TestParameterJSONOmitsUnsetOptionalRanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded := string(data)
-	for _, field := range []string{"defaultRange", "boundsRange"} {
+	for _, field := range []string{"passingRange", "defaultRange", "boundsRange"} {
 		if strings.Contains(encoded, field) {
 			t.Fatalf("unset %s should be omitted: %s", field, encoded)
 		}
+	}
+}
+
+func TestProcedureSignatureRetainsPassingModifierRanges(t *testing.T) {
+	t.Parallel()
+	source := []byte("Public Sub Run(ByVal inputValue As Long, ByRef outputValue As Long, implicitValue As Long)\nEnd Sub\n")
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parameters := doc.Procedures[0].Symbol.Parameters
+	if len(parameters) != 3 {
+		t.Fatalf("parameters = %#v", parameters)
+	}
+	for index, keyword := range []string{"ByVal", "ByRef"} {
+		rng := parameters[index].PassingRange
+		if !parameters[index].PassingExplicit || rng == nil || rng.StartByte >= rng.EndByte {
+			t.Fatalf("parameter %d passing range = %#v", index, parameters[index])
+		}
+		if got := string(source[rng.StartByte:rng.EndByte]); got != keyword {
+			t.Fatalf("parameter %d passing text = %q, want %q", index, got, keyword)
+		}
+	}
+	if parameters[2].PassingExplicit || parameters[2].PassingRange != nil {
+		t.Fatalf("implicit parameter passing facts = %#v", parameters[2])
 	}
 }
 

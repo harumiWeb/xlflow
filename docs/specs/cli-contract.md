@@ -1573,6 +1573,11 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA267`: a `Private Type` member is never accessed through a resolvable member expression (opt-in)
 - `VBA268`: a procedure-local scalar variable is read but never assigned (opt-in)
 - `VBA269`: a procedure-local variable is read on a path where no assignment is guaranteed (opt-in)
+- `VBA270`: an ordinary parameter implicitly defaults to `ByRef` (opt-in)
+- `VBA271`: a parameter with effective `ByVal` semantics is reassigned (opt-in)
+- `VBA272`: a `ByRef` parameter is provably never used to replace the caller's argument and can be `ByVal` (opt-in)
+- `VBA273`: a Property Let/Set final value parameter explicitly says `ByRef` although VBA passes it `ByVal` (opt-in)
+- `VBA274`: explicit `ByRef` repeats VBA's default under the project's selected style policy (opt-in)
 
 `VBA203` correlates each changed `Application` property with its saved prior
 value across control-flow joins. A path on which the property was never changed
@@ -1613,6 +1618,11 @@ to `detect_unreachable_select_case`; `VBA260` maps to
 `detect_unused_udt_members`; `VBA268` maps to
 `detect_never_assigned_variables`; and `VBA269` maps to
 `detect_unassigned_variable_usage`.
+`VBA270` maps to `detect_implicit_byref_parameters`; `VBA271` maps to
+`detect_assigned_byval_parameters`; `VBA272` maps to
+`detect_byref_parameters_can_be_byval`; `VBA273` maps to
+`detect_misleading_property_value_byref`; and `VBA274` maps to
+`detect_redundant_byref_modifiers`.
 
 Analyzer rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, `VBA244`, and `VBA249` through `VBA252` are enabled by default. `VBA230` through `VBA239`, `VBA241`, and `VBA250` through `VBA252` are warning-level, non-blocking, and inline-suppressible; `VBA241` may emit `information` for a single non-nested loop with loop-invariant dimensions. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, `VBA241`, and `VBA249` through `VBA252` are procedure-local and available in realtime diagnostics. `VBA222` is a batch-only, warning-level, non-blocking rule; it checks public function/property return types, all public parameters, and custom event parameters. Intrinsic types and types resolved from the project or available TypeLib database are allowed. Private/unexposed project types and ambiguous names remain conservative warnings that include the type name. Unresolved external types are warned about only when the project and TypeLib resolution view is complete; missing, empty, malformed, or partial generated TypeLib data makes their absence unknown and the rule fails open for that branch. Host-required event handlers are excluded. It can be suppressed inline or with `[analyze].disabled_rules = ["VBA222"]`. `VBA240` is disabled by default, warning-level, non-blocking, inline-suppressible, and batch-only; enable it with `detect_risky_module_state` and disable it with `[analyze].disabled_rules = ["VBA240"]` for project-specific policy. `VBA242` and `VBA243` are disabled by default, information-level, procedure-local, non-blocking, inline-suppressible, and available in realtime diagnostics; enable them with `detect_expensive_full_range_operations` and `detect_value2_performance_opportunities`, respectively, or disable them explicitly with `[analyze].disabled_rules = ["VBA242"]` and `[analyze].disabled_rules = ["VBA243"]`. When enabled, full-range and Value2 opportunities outside loops use `information` and reachable loop operations use `warning`. `VBA244` is default-enabled, information-level for ordinary cycles, warning-level when dangerous effects are present, project-wide, non-blocking, inline-suppressible, and batch-only; disable it with `detect_procedure_call_cycles = false` or `[analyze].disabled_rules = ["VBA244"]`.
 
@@ -1657,6 +1667,19 @@ available in batch and realtime analysis. `VBA265`, `VBA266`, `VBA268`, and
 conservative: event handlers, `Implements` members, dynamically invoked
 procedures, and host-facing signatures are excluded, and unresolved or
 ambiguous shapes fail open rather than report.
+
+`VBA270` through `VBA274` are opt-in, non-blocking, inline-suppressible,
+procedure-local rules available in batch and realtime analysis. `VBA270`,
+`VBA272`, and `VBA274` are information-level; `VBA271` and `VBA273` are
+warning-level. `VBA272` propagates direct parameter writes through uniquely
+resolved project-local positional and named `ByRef` calls; ambiguous,
+external, unresolved, recovered, and conditional boundaries suppress the
+finding. Event and `Implements` signatures are excluded from style and
+can-be-ByVal recommendations, and arrays/`ParamArray` are excluded from
+`VBA272`. Configuration rejects enabling
+`detect_implicit_byref_parameters` and
+`detect_redundant_byref_modifiers` together. The complete contract is in
+[VBA Parameter-Passing Diagnostics](vba-parameter-passing-diagnostics.md).
 
 `VBA249` is default-enabled, `error`-level, high-precision, procedure-local,
 available in batch and real-time analysis, inline-suppressible, and

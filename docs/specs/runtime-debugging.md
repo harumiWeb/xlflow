@@ -160,7 +160,11 @@ expansion extends it through `VBA269`: `VBA265` reports unread
 private-procedure parameters, `VBA266` unreferenced module-level
 `Private Const` declarations, `VBA267` unaccessed `Private Type` members,
 `VBA268` scalar locals read but never assigned, and `VBA269` locals read on a
-path where no assignment is guaranteed. `VBA253`, `VBA254`, and `VBA255` are
+path where no assignment is guaranteed. The parameter-passing expansion
+extends the stable range through `VBA274`: `VBA270` reports implicit `ByRef`,
+`VBA271` assignments to effective `ByVal` parameters, `VBA272` parameters
+proved safe to change to `ByVal`, `VBA273` misleading Property value
+`ByRef`, and `VBA274` redundant explicit `ByRef`. `VBA253`, `VBA254`, and `VBA255` are
 opt-in and remain fail-open for incomplete negative evidence or dynamically
 dispatched type information; `VBA259` and `VBA265` through `VBA269` follow the
 same opt-in, fail-open posture.

@@ -282,8 +282,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_application_state_restore`
 - `detect_application_worksheet_function_dispatch`
 - `detect_array_lifecycle_safety`
+- `detect_assigned_byval_parameters`
 - `detect_bang_notation`
 - `detect_byref_argument_mismatch`
+- `detect_byref_parameters_can_be_byval`
 - `detect_collection_index_origin`
 - `detect_collection_iteration_mutation`
 - `detect_confusing_call_syntax`
@@ -309,11 +311,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_hardcoded_secrets`
 - `detect_host_bracket_expressions`
 - `detect_implicit_approximate_lookups`
+- `detect_implicit_byref_parameters`
 - `detect_implicit_default_member_access`
 - `detect_implicit_variant`
 - `detect_late_bound_dictionary_constants`
 - `detect_leaked_on_error_resume_next_scopes`
 - `detect_loop_invariant_excel_object_resolution`
+- `detect_misleading_property_value_byref`
 - `detect_missing_http_timeout`
 - `detect_multiple_declarator_clarity`
 - `detect_nested_with_ambiguity`
@@ -328,6 +332,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_range_value_array_shape`
 - `detect_redim_preserve_dimension`
 - `detect_redim_preserve_in_loops`
+- `detect_redundant_byref_modifiers`
 - `detect_resource_leaks`
 - `detect_risky_module_state`
 - `detect_scope_shadowing`

@@ -1425,6 +1425,27 @@ detect_byref_argument_mismatch = true
 	}
 }
 
+func TestLoadRejectsConflictingByRefStyleRules(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_implicit_byref_parameters = true
+detect_redundant_byref_modifiers = true
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "cannot both be enabled") {
+		t.Fatalf("Load error = %v, want conflicting ByRef style rule error", err)
+	}
+}
+
 func TestLoadSupportsDisabledLintRules(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte(`[project]

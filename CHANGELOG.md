@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `VBA270`-`VBA274` parameter-passing diagnostics for implicit
+  `ByRef`, assignments to effective `ByVal` parameters, `ByRef` parameters
+  that can be `ByVal`, misleading `ByRef` on Property Let/Set value
+  parameters, and redundant explicit `ByRef`. The mutation analysis
+  propagates project-local positional and named `ByRef` calls conservatively,
+  and configuration rejects enabling the mutually exclusive `VBA270` and
+  `VBA274` style policies together. All five rules are available in batch,
+  realtime, and LSP analysis and remain disabled by default.
 - Added opt-in Excel semantic inspections: batch-only `VBA260` warns when an
   authoritative workbook catalog can replace `ThisWorkbook.Worksheets("name")`
   with a stable worksheet CodeName; `VBA261` reports generated-TypeLib

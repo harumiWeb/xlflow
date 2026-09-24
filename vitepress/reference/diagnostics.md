@@ -143,6 +143,11 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA267`](#vba267) | analyze | information | file-local      | no      | Unused user-defined type member                    |
 | [`VBA268`](#vba268) | analyze | warning     | procedure-local | no      | Variable never assigned                            |
 | [`VBA269`](#vba269) | analyze | warning     | procedure-local | no      | Variable read before assignment                    |
+| [`VBA270`](#vba270) | analyze | information | procedure-local | no      | Implicit ByRef parameter                           |
+| [`VBA271`](#vba271) | analyze | warning     | procedure-local | no      | Assigned ByVal parameter                           |
+| [`VBA272`](#vba272) | analyze | information | procedure-local | no      | ByRef parameter can be ByVal                       |
+| [`VBA273`](#vba273) | analyze | warning     | procedure-local | no      | Misleading Property value ByRef                    |
+| [`VBA274`](#vba274) | analyze | information | procedure-local | no      | Redundant explicit ByRef modifier                  |
 
 ## VB001
 
@@ -3109,6 +3114,116 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Precision                   | `high`                             |
 | Enabled by default          | no                                 |
 | Configuration               | `detect_unassigned_variable_usage` |
+| Inline suppression          | yes                                |
+| Blocks source preflight     | no                                 |
+| Real-time editor diagnostic | yes                                |
+| Fix available               | no                                 |
+
+## VBA270
+
+**Implicit ByRef parameter.** An ordinary procedure parameter omits its passing modifier and therefore defaults to ByRef.
+
+| Property                    | Value                              |
+| --------------------------- | ---------------------------------- |
+| Family                      | `analyze`                          |
+| Category                    | `maintainability`                  |
+| Evidence class              | `maintainability`                  |
+| Compile-equivalent          | no                                 |
+| Default severity            | `information`                      |
+| Supported severities        | `information`, `warning`           |
+| Surfaces                    | `analyze`, `lsp`                   |
+| Scope                       | `procedure-local`                  |
+| Precision                   | `high`                             |
+| Enabled by default          | no                                 |
+| Configuration               | `detect_implicit_byref_parameters` |
+| Inline suppression          | yes                                |
+| Blocks source preflight     | no                                 |
+| Real-time editor diagnostic | yes                                |
+| Fix available               | no                                 |
+
+## VBA271
+
+**Assigned ByVal parameter.** A ByVal parameter is reassigned even though the new value cannot be observed by the caller.
+
+| Property                    | Value                              |
+| --------------------------- | ---------------------------------- |
+| Family                      | `analyze`                          |
+| Category                    | `reliability`                      |
+| Evidence class              | `inference`                        |
+| Compile-equivalent          | no                                 |
+| Default severity            | `warning`                          |
+| Supported severities        | `warning`, `information`           |
+| Surfaces                    | `analyze`, `lsp`                   |
+| Scope                       | `procedure-local`                  |
+| Precision                   | `high`                             |
+| Enabled by default          | no                                 |
+| Configuration               | `detect_assigned_byval_parameters` |
+| Inline suppression          | yes                                |
+| Blocks source preflight     | no                                 |
+| Real-time editor diagnostic | yes                                |
+| Fix available               | no                                 |
+
+## VBA272
+
+**ByRef parameter can be ByVal.** A ByRef parameter is never written or passed through an uncertain writable boundary and can be declared ByVal.
+
+| Property                    | Value                                  |
+| --------------------------- | -------------------------------------- |
+| Family                      | `analyze`                              |
+| Category                    | `maintainability`                      |
+| Evidence class              | `maintainability`                      |
+| Compile-equivalent          | no                                     |
+| Default severity            | `information`                          |
+| Supported severities        | `information`, `warning`               |
+| Surfaces                    | `analyze`, `lsp`                       |
+| Scope                       | `procedure-local`                      |
+| Precision                   | `high`                                 |
+| Enabled by default          | no                                     |
+| Configuration               | `detect_byref_parameters_can_be_byval` |
+| Inline suppression          | yes                                    |
+| Blocks source preflight     | no                                     |
+| Real-time editor diagnostic | yes                                    |
+| Fix available               | no                                     |
+
+## VBA273
+
+**Misleading Property value ByRef.** A Property Let or Property Set value parameter is declared ByRef even though VBA always applies ByVal semantics to that final parameter.
+
+| Property                    | Value                                    |
+| --------------------------- | ---------------------------------------- |
+| Family                      | `analyze`                                |
+| Category                    | `correctness`                            |
+| Evidence class              | `inference`                              |
+| Compile-equivalent          | no                                       |
+| Default severity            | `warning`                                |
+| Supported severities        | `warning`, `information`                 |
+| Surfaces                    | `analyze`, `lsp`                         |
+| Scope                       | `procedure-local`                        |
+| Precision                   | `high`                                   |
+| Enabled by default          | no                                       |
+| Configuration               | `detect_misleading_property_value_byref` |
+| Inline suppression          | yes                                      |
+| Blocks source preflight     | no                                       |
+| Real-time editor diagnostic | yes                                      |
+| Fix available               | no                                       |
+
+## VBA274
+
+**Redundant explicit ByRef modifier.** An ordinary procedure parameter explicitly declares ByRef even though ByRef is the VBA default.
+
+| Property                    | Value                              |
+| --------------------------- | ---------------------------------- |
+| Family                      | `analyze`                          |
+| Category                    | `maintainability`                  |
+| Evidence class              | `maintainability`                  |
+| Compile-equivalent          | no                                 |
+| Default severity            | `information`                      |
+| Supported severities        | `information`, `warning`           |
+| Surfaces                    | `analyze`, `lsp`                   |
+| Scope                       | `procedure-local`                  |
+| Precision                   | `high`                             |
+| Enabled by default          | no                                 |
+| Configuration               | `detect_redundant_byref_modifiers` |
 | Inline suppression          | yes                                |
 | Blocks source preflight     | no                                 |
 | Real-time editor diagnostic | yes                                |
