@@ -167,7 +167,14 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 			external := public && !privacy.hostHidden
 			standard := strings.EqualFold(file.ModuleKind, "standard")
 			publicMacro := standard && external && sym.Kind == "sub" && len(sym.Parameters) == 0
-			testProcedure := standard && external && testdiscover.IsTestProcedure(sym)
+			// The generated xlflow test runner is a standard module injected
+			// into the same VBA project and invokes Module.TestName and the
+			// BeforeAll/AfterAll/BeforeEach/AfterEach hooks with qualified
+			// calls. Option Private Module only hides members from other
+			// projects and the host macro UI, so a public test or hook stays
+			// reachable even in a host-hidden module.
+			testProcedure := standard && public && testdiscover.IsTestProcedure(sym)
+			testHook := standard && public && sym.Kind == "sub" && testHookName(lowerName)
 
 			if publicMacro {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootConfirmed, Reason: "public macro"})
@@ -175,7 +182,10 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 			if testProcedure {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootConfirmed, Reason: "test procedure"})
 			}
-			if standard && external && !publicMacro && !testProcedure {
+			if testHook {
+				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootPossible, Reason: "test runner hook"})
+			}
+			if standard && external && !publicMacro && !testProcedure && !testHook {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootPossible, Reason: "public standard-module API"})
 			}
 			// A VB_Exposed class publishes its public members to external
@@ -246,6 +256,19 @@ func controlNames(rootDir string, file symbols.FileResult) ([]string, error) {
 		}
 	}
 	return controls, nil
+}
+
+// testHookName reports whether name is one of the fixed per-module hook
+// procedures the generated test runner calls (BeforeAll, AfterAll,
+// BeforeEach, AfterEach). Hook procedures must be public Subs for the runner
+// to bind them.
+func testHookName(lowerName string) bool {
+	switch lowerName {
+	case "beforeall", "afterall", "beforeeach", "aftereach":
+		return true
+	default:
+		return false
+	}
 }
 
 func procedureSymbolKind(kind string) bool {

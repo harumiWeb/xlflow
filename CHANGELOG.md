@@ -4,7 +4,16 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added opt-in `VBA260`–`VBA264` diagnostics for broader unused-declaration
+- Added opt-in Excel semantic inspections: batch-only `VBA260` warns when an
+  authoritative workbook catalog can replace `ThisWorkbook.Worksheets("name")`
+  with a stable worksheet CodeName; `VBA261` reports generated-TypeLib
+  worksheet-function members dispatched through `Excel.Application`; and
+  `VBA262` warns on bare Excel host bracket expressions such as `[A1]` in
+  batch, realtime, and LSP analysis. The rules use
+  `detect_worksheet_string_access`,
+  `detect_application_worksheet_function_dispatch`, and
+  `detect_host_bracket_expressions`.
+- Added opt-in `VBA265`–`VBA269` diagnostics for broader unused-declaration
   analysis: unused private-procedure parameters (`detect_unused_parameters`),
   unreferenced `Private Const` declarations
   (`detect_unused_private_constants`), never-accessed `Private Type` members
@@ -22,6 +31,11 @@ Module`, non-`VB_Exposed`) modules.
   whose every resolved call site discards the result in batch analysis. They
   use `detect_discarded_function_return` and
   `detect_function_return_always_discarded`.
+- Added opt-in `VBA259` warning diagnostics for `Select Case` items and
+  `Case Else` branches that can never execute because earlier `Case` items
+  already cover every matching selector value. The rule is configurable with
+  `detect_unreachable_select_case` and is available in batch, realtime, and
+  LSP analysis.
 - Added opt-in `VBA256` warning diagnostics for procedure-local scalar
   assignments whose values are overwritten or never observed before procedure
   exit. The rule is configurable with `detect_dead_stores` and is available in

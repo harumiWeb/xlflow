@@ -46,15 +46,18 @@ func TestMaterializeThirdPartyProjectsPreservesSourcesAndClassifications(t *test
 			t.Fatalf("generated config did not enable VBA256 for corpus review for %s", project.ID)
 		}
 		for code, enabled := range map[string]bool{
-			"VBA260": loaded.Analyze.DetectUnusedParameters,
-			"VBA261": loaded.Analyze.DetectUnusedPrivateConstants,
-			"VBA262": loaded.Analyze.DetectUnusedUDTMembers,
-			"VBA263": loaded.Analyze.DetectNeverAssignedVariables,
-			"VBA264": loaded.Analyze.DetectUnassignedVariableUsage,
+			"VBA265": loaded.Analyze.DetectUnusedParameters,
+			"VBA266": loaded.Analyze.DetectUnusedPrivateConstants,
+			"VBA267": loaded.Analyze.DetectUnusedUDTMembers,
+			"VBA268": loaded.Analyze.DetectNeverAssignedVariables,
+			"VBA269": loaded.Analyze.DetectUnassignedVariableUsage,
 		} {
 			if !enabled {
 				t.Fatalf("generated config did not enable %s for corpus review for %s", code, project.ID)
 			}
+		}
+		if !loaded.Analyze.DetectUnreachableSelectCase {
+			t.Fatalf("generated config did not enable VBA259 for corpus review for %s", project.ID)
 		}
 		if project.Profile == ProfileExcel && !loaded.Analyze.DetectExpensiveFullRangeOperations {
 			t.Fatalf("generated config did not opt in VBA242 for %s", project.ID)
@@ -62,11 +65,17 @@ func TestMaterializeThirdPartyProjectsPreservesSourcesAndClassifications(t *test
 		if project.Profile == ProfileExcel && !loaded.Analyze.DetectValue2PerformanceOpportunities {
 			t.Fatalf("generated config did not opt in VBA243 for %s", project.ID)
 		}
+		if project.Profile == ProfileExcel && (!loaded.Analyze.DetectApplicationWorksheetFunction || !loaded.Analyze.DetectHostBracketExpressions) {
+			t.Fatalf("generated config did not opt in VBA261/VBA262 for %s", project.ID)
+		}
 		if project.Profile != ProfileExcel && loaded.Analyze.DetectExpensiveFullRangeOperations {
 			t.Fatalf("generated config unexpectedly enabled VBA242 for non-Excel profile %s", project.ID)
 		}
 		if project.Profile != ProfileExcel && loaded.Analyze.DetectValue2PerformanceOpportunities {
 			t.Fatalf("generated config unexpectedly enabled VBA243 for non-Excel profile %s", project.ID)
+		}
+		if project.Profile != ProfileExcel && (loaded.Analyze.DetectApplicationWorksheetFunction || loaded.Analyze.DetectHostBracketExpressions) {
+			t.Fatalf("generated config unexpectedly enabled VBA261/VBA262 for non-Excel profile %s", project.ID)
 		}
 		if project.Profile == ProfileExcel && len(loaded.Analyze.DisabledRules) != 0 {
 			t.Fatalf("excel profile unexpectedly disabled rules: %v", loaded.Analyze.DisabledRules)

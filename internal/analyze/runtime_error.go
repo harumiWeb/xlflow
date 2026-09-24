@@ -41,32 +41,7 @@ func (a Analyzer) deterministicRuntimeErrorFindingsWithArrayResult(file parsedFi
 	}
 
 	facts := proc.analysisFacts()
-	localNames := runtimeLocalNames(proc)
-	var base constexpr.Environment
-	if file.RuntimeConstantBase != nil {
-		base = runtimeConstantScope{base: file.RuntimeConstantBase, hidden: localNames}
-	} else {
-		// Focused helper callers may omit the revision-scoped cache. Preserve the
-		// compatibility path while production batch/realtime analysis normalizes
-		// the large project environment only once per file.
-		values := make(map[string]constexpr.Value, len(a.visibleConstantValues)+len(file.ConstantValues)+8)
-		for name, value := range a.visibleConstantValues {
-			values[name] = value
-		}
-		if file.ConstantValues == nil {
-			for name, value := range lint.ConstantValuesFromSource(string(file.Source), &file.IR, values) {
-				values[name] = value
-			}
-		} else {
-			for name, value := range file.ConstantValues {
-				values[name] = value
-			}
-		}
-		for name := range localNames {
-			delete(values, name)
-		}
-		base = constexpr.NewValues(values)
-	}
+	base := a.procedureConstantEnvironment(file, proc)
 	initial := runtimeLocalConstantState(file, proc, base)
 	findings := make([]Finding, 0)
 	seen := make(map[string]bool)
@@ -104,6 +79,37 @@ func (a Analyzer) deterministicRuntimeErrorFindingsWithArrayResult(file parsedFi
 		return append(findings, arrayResult.runtime()...)
 	}
 	return append(findings, a.deterministicArrayRuntimeFindings(file, proc, ctx, moduleDecls)...)
+}
+
+// procedureConstantEnvironment builds the immutable base constant environment
+// for one procedure: the revision-scoped cache when present, otherwise the
+// merged project/file constants. Procedure-local names hide same-named module
+// constants so selectors and Case items never resolve a shadowed value.
+func (a Analyzer) procedureConstantEnvironment(file parsedFile, proc sourceProcedure) constexpr.Environment {
+	localNames := runtimeLocalNames(proc)
+	if file.RuntimeConstantBase != nil {
+		return runtimeConstantScope{base: file.RuntimeConstantBase, hidden: localNames}
+	}
+	// Focused helper callers may omit the revision-scoped cache. Preserve the
+	// compatibility path while production batch/realtime analysis normalizes
+	// the large project environment only once per file.
+	values := make(map[string]constexpr.Value, len(a.visibleConstantValues)+len(file.ConstantValues)+8)
+	for name, value := range a.visibleConstantValues {
+		values[name] = value
+	}
+	if file.ConstantValues == nil {
+		for name, value := range lint.ConstantValuesFromSource(string(file.Source), &file.IR, values) {
+			values[name] = value
+		}
+	} else {
+		for name, value := range file.ConstantValues {
+			values[name] = value
+		}
+	}
+	for name := range localNames {
+		delete(values, name)
+	}
+	return constexpr.NewValues(values)
 }
 
 func runtimeLocalNames(proc sourceProcedure) map[string]bool {

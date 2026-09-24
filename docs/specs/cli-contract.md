@@ -1565,11 +1565,14 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA254`: a default-member access is unbound, late-bound, or incomplete (opt-in)
 - `VBA255`: bang notation (`receiver!name`) uses stringly typed/default-member semantics (opt-in)
 - `VBA256`: procedure-local scalar assignment value is never observed before overwrite or exit
-- `VBA260`: a private-procedure parameter is never referenced in the procedure body (opt-in)
-- `VBA261`: a module-level `Private Const` is never referenced in the module (opt-in)
-- `VBA262`: a `Private Type` member is never accessed through a resolvable member expression (opt-in)
-- `VBA263`: a procedure-local scalar variable is read but never assigned (opt-in)
-- `VBA264`: a procedure-local variable is read on a path where no assignment is guaranteed (opt-in)
+- `VBA260`: a `ThisWorkbook.Worksheets("name")` access uses a visible sheet name when an authoritative workbook catalog resolves a stable CodeName (opt-in, batch-only)
+- `VBA261`: a generated-TypeLib worksheet-function member is dispatched through `Excel.Application` instead of the explicit `WorksheetFunction` object (opt-in)
+- `VBA262`: a bare Excel host bracket expression such as `[A1]` hides its object-model binding (opt-in)
+- `VBA265`: a private-procedure parameter is never referenced in the procedure body (opt-in)
+- `VBA266`: a module-level `Private Const` is never referenced in the module (opt-in)
+- `VBA267`: a `Private Type` member is never accessed through a resolvable member expression (opt-in)
+- `VBA268`: a procedure-local scalar variable is read but never assigned (opt-in)
+- `VBA269`: a procedure-local variable is read on a path where no assignment is guaranteed (opt-in)
 
 `VBA203` correlates each changed `Application` property with its saved prior
 value across control-flow joins. A path on which the property was never changed
@@ -1600,11 +1603,15 @@ Configurable analyzer rule IDs map to legacy keys as follows: `VBA201` = `detect
 `detect_unavailable_worksheet_function_members`; `VBA253` maps to
 `detect_implicit_default_member_access`; `VBA254` maps to
 `detect_unbound_default_member_access`; and `VBA255` maps to
-`detect_bang_notation`; `VBA256` maps to `detect_dead_stores`.
-`VBA260` maps to `detect_unused_parameters`; `VBA261` maps to
-`detect_unused_private_constants`; `VBA262` maps to
-`detect_unused_udt_members`; `VBA263` maps to
-`detect_never_assigned_variables`; and `VBA264` maps to
+`detect_bang_notation`; `VBA256` maps to `detect_dead_stores`; `VBA259` maps
+to `detect_unreachable_select_case`; `VBA260` maps to
+`detect_worksheet_string_access`; `VBA261` maps to
+`detect_application_worksheet_function_dispatch`; and `VBA262` maps to
+`detect_host_bracket_expressions`.
+`VBA265` maps to `detect_unused_parameters`; `VBA266` maps to
+`detect_unused_private_constants`; `VBA267` maps to
+`detect_unused_udt_members`; `VBA268` maps to
+`detect_never_assigned_variables`; and `VBA269` maps to
 `detect_unassigned_variable_usage`.
 
 Analyzer rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, `VBA244`, and `VBA249` through `VBA252` are enabled by default. `VBA230` through `VBA239`, `VBA241`, and `VBA250` through `VBA252` are warning-level, non-blocking, and inline-suppressible; `VBA241` may emit `information` for a single non-nested loop with loop-invariant dimensions. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, `VBA241`, and `VBA249` through `VBA252` are procedure-local and available in realtime diagnostics. `VBA222` is a batch-only, warning-level, non-blocking rule; it checks public function/property return types, all public parameters, and custom event parameters. Intrinsic types and types resolved from the project or available TypeLib database are allowed. Private/unexposed project types and ambiguous names remain conservative warnings that include the type name. Unresolved external types are warned about only when the project and TypeLib resolution view is complete; missing, empty, malformed, or partial generated TypeLib data makes their absence unknown and the rule fails open for that branch. Host-required event handlers are excluded. It can be suppressed inline or with `[analyze].disabled_rules = ["VBA222"]`. `VBA240` is disabled by default, warning-level, non-blocking, inline-suppressible, and batch-only; enable it with `detect_risky_module_state` and disable it with `[analyze].disabled_rules = ["VBA240"]` for project-specific policy. `VBA242` and `VBA243` are disabled by default, information-level, procedure-local, non-blocking, inline-suppressible, and available in realtime diagnostics; enable them with `detect_expensive_full_range_operations` and `detect_value2_performance_opportunities`, respectively, or disable them explicitly with `[analyze].disabled_rules = ["VBA242"]` and `[analyze].disabled_rules = ["VBA243"]`. When enabled, full-range and Value2 opportunities outside loops use `information` and reachable loop operations use `warning`. `VBA244` is default-enabled, information-level for ordinary cycles, warning-level when dangerous effects are present, project-wide, non-blocking, inline-suppressible, and batch-only; disable it with `detect_procedure_call_cycles = false` or `[analyze].disabled_rules = ["VBA244"]`.
@@ -1612,14 +1619,38 @@ Analyzer rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`
 `VBA253`, `VBA254`, and `VBA255` are opt-in through their dedicated
 configuration keys.
 
+`VBA260`, `VBA261`, and `VBA262` are opt-in, high-precision, non-blocking,
+inline-suppressible procedure-local inspections. `VBA260` is a warning-level,
+batch-only rule because it requires authoritative workbook-instance metadata;
+filesystem analysis derives that metadata from the configured saved OOXML
+workbook, while `AnalyzeProject` requires explicit capability injection and
+otherwise fails open with a structured warning. `VBA261` is information-level
+and available in batch, realtime, and LSP analysis only with a complete
+generated `Excel.WorksheetFunction` member set and a receiver resolved exactly
+to `Excel.Application`. `VBA262` is warning-level and available in batch,
+realtime, and LSP analysis; it uses raw procedure IR to distinguish host
+bracket expressions from array/index syntax and qualified bracketed members.
+Their detailed contracts are defined in
+[Excel semantic inspections](excel-semantic-inspections.md).
+
 `VBA256` is an opt-in, warning-level, non-blocking, inline-suppressible
 procedure-local rule available in batch and realtime analysis. It reports only
 high-confidence writes to local scalar values that are not observed before an
 overwrite or procedure exit. Enable it with `detect_dead_stores = true`.
 
-`VBA260` through `VBA264` are opt-in, non-blocking, inline-suppressible rules
-available in batch and realtime analysis. `VBA260`, `VBA261`, `VBA263`, and
-`VBA264` are warning-level; `VBA262` is information-level. Enable them with
+`VBA259` is an opt-in, warning-level, non-blocking, inline-suppressible
+procedure-local rule available in batch and realtime analysis. It reports a
+`Case` item or `Case Else` branch that can never execute because earlier items
+already cover every matching selector value: duplicates, items fully covered
+by earlier ranges, empty `To` ranges, items a declared selector type cannot
+satisfy, and `Case Else` branches on exhaustively covered finite domains.
+`Option Compare` semantics are honored, and recovered syntax, cross-type
+items, unknown operands, and `Date`/object selectors stay silent. Enable it
+with `detect_unreachable_select_case = true`.
+
+`VBA265` through `VBA269` are opt-in, non-blocking, inline-suppressible rules
+available in batch and realtime analysis. `VBA265`, `VBA266`, `VBA268`, and
+`VBA269` are warning-level; `VBA267` is information-level. Enable them with
 `detect_unused_parameters`, `detect_unused_private_constants`,
 `detect_unused_udt_members`, `detect_never_assigned_variables`, and
 `detect_unassigned_variable_usage` respectively. They are deliberately

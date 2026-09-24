@@ -670,6 +670,18 @@ func TestDeadStoresOptInAndConfigurable(t *testing.T) {
 	}
 }
 
+func TestUnreachableSelectCaseOptInAndConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA259"); !ok || enabled || cfg.Analyze.DetectUnreachableSelectCase {
+		t.Fatalf("VBA259 enabled = %v, known = %v, config = %v; want disabled configurable rule", enabled, ok, cfg.Analyze.DetectUnreachableSelectCase)
+	}
+	cfg.Analyze.DetectUnreachableSelectCase = true
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA259"); !ok || !enabled {
+		t.Fatalf("enabled VBA259 enabled = %v, known = %v", enabled, ok)
+	}
+}
+
 func TestProcedureCallCyclesDefaultEnabledAndConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
@@ -747,6 +759,28 @@ detect_function_return_always_discarded = true
 	}
 	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA258"); !ok || !enabled || !loaded.Analyze.DetectFunctionReturnAlwaysDiscarded {
 		t.Fatalf("loaded VBA258 enabled = %v, known = %v, config = %v; want enabled", enabled, ok, loaded.Analyze.DetectFunctionReturnAlwaysDiscarded)
+	}
+}
+
+func TestExcelSemanticInspectionRulesDefaultDisabledAndAreConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	tests := []struct {
+		id     string
+		enable func(*AnalyzeConfig)
+	}{
+		{id: "VBA260", enable: func(config *AnalyzeConfig) { config.DetectWorksheetStringAccess = true }},
+		{id: "VBA261", enable: func(config *AnalyzeConfig) { config.DetectApplicationWorksheetFunction = true }},
+		{id: "VBA262", enable: func(config *AnalyzeConfig) { config.DetectHostBracketExpressions = true }},
+	}
+	for _, test := range tests {
+		if enabled, known := AnalyzeRuleEnabled(cfg.Analyze, test.id); !known || enabled {
+			t.Errorf("%s enabled = %v, known = %v; want disabled configurable rule", test.id, enabled, known)
+		}
+		test.enable(&cfg.Analyze)
+		if enabled, known := AnalyzeRuleEnabled(cfg.Analyze, test.id); !known || !enabled {
+			t.Errorf("%s enabled = %v, known = %v; want enabled after opt-in", test.id, enabled, known)
+		}
 	}
 }
 

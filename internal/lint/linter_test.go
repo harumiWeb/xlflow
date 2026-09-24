@@ -2939,15 +2939,24 @@ End Sub
 	}
 }
 
-func TestLinterVB021ReportsHostHiddenTestProcedure(t *testing.T) {
+func TestLinterVB021RootsHostHiddenTestProceduresAndHooks(t *testing.T) {
+	// Option Private Module hides members from the host and other projects,
+	// but the generated test runner is injected into the same VBA project and
+	// calls Module.TestName plus the BeforeAll/AfterAll hooks directly.
 	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Hidden.bas", `Option Private Module
+Public Sub BeforeAll()
+End Sub
+
 Public Sub TestWorkflow()
   Helper
 End Sub
 
 Private Sub Helper()
+End Sub
+
+Public Sub HiddenPublic()
 End Sub
 `)
 	cfg := config.Default()
@@ -2957,12 +2966,8 @@ End Sub
 		t.Fatal(err)
 	}
 	got := issuesByCode(issues, "VB021")
-	symbols := map[string]bool{}
-	for _, issue := range got {
-		symbols[issue.Symbol] = true
-	}
-	if !symbols["TestWorkflow"] || !symbols["Helper"] {
-		t.Fatalf("host-hidden test procedure and its private callee should both be unreachable: %+v", got)
+	if len(got) != 1 || got[0].Symbol != "HiddenPublic" {
+		t.Fatalf("host-hidden test procedure, hook, and private callee should stay reachable; only HiddenPublic reports: %+v", got)
 	}
 }
 

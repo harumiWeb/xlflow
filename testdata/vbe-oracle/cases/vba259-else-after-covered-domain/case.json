@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "vba259-else-after-covered-domain",
+  "description": "Observe whether VBE accepts Case Else after Case items that already cover the selector's whole Byte domain.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "maintainability"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "maintainability-observation",
+    "binding_note": "VBA259 is a non-compile-equivalent maintainability rule; the fixture only records whether VBE accepts a provably unreachable Case Else."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-09-23T14:10:11Z"
+      }
+    ]
+  }
+}

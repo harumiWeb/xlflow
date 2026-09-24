@@ -545,6 +545,26 @@
     {
       "id": "vb012-terminator-sub-end-sub-standard",
       "path": "cases/vb012-terminator-sub-end-sub-standard/case.json"
+    },
+    {
+      "id": "vba259-unreachable-case-items",
+      "path": "cases/vba259-unreachable-case-items/case.json"
+    },
+    {
+      "id": "vba259-else-after-covered-domain",
+      "path": "cases/vba259-else-after-covered-domain/case.json"
+    },
+    {
+      "id": "vba259-local-const-shadows-module",
+      "path": "cases/vba259-local-const-shadows-module/case.json"
+    },
+    {
+      "id": "vba259-local-const-after-statements",
+      "path": "cases/vba259-local-const-after-statements/case.json"
+    },
+    {
+      "id": "vba259-local-const-tail-declaration",
+      "path": "cases/vba259-local-const-tail-declaration/case.json"
     }
   ]
 }

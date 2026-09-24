@@ -59,13 +59,17 @@ func (a Analyzer) unusedPrivateConstFindings(file parsedFile) []Finding {
 		}
 	}
 
+	moduleName := strings.TrimSpace(file.IR.ModuleName)
+	if moduleName == "" {
+		moduleName = file.Module
+	}
 	var findings []Finding
 	for _, declaration := range consts {
 		name := assignmentCanonicalName(declaration.Name)
-		if privateConstReferenced(file, name, declaration.Range, procedureRanges, shadowed[name]) {
+		if privateConstReferenced(file, moduleName, name, declaration.Range, procedureRanges, shadowed[name]) {
 			continue
 		}
-		finding := a.simpleFinding(file, sourceProcedure{}, declaration.Range.StartLine, "VBA261", "warning",
+		finding := a.simpleFinding(file, sourceProcedure{}, declaration.Range.StartLine, "VBA266", "warning",
 			"Private Const "+cleanIdentifier(declaration.Name)+" is never referenced.",
 			"No procedure access, declaration initializer, or conditional-compilation directive in this module uses the constant.",
 			"Remove the declaration, or reference it where the value is needed.")
@@ -85,8 +89,10 @@ func (a Analyzer) unusedPrivateConstFindings(file parsedFile) []Finding {
 
 // privateConstReferenced reports whether a whole-word occurrence of the
 // constant name exists outside its own declarator and outside procedure
-// bodies where a local declaration shadows it.
-func privateConstReferenced(file parsedFile, name string, declarator vbaast.Range, procedureRanges []vbaast.Range, shadowed map[int]bool) bool {
+// bodies where a local declaration shadows it. A local shadows only
+// unqualified references: `Module.Const` still binds to the module constant,
+// so a qualified occurrence inside a shadowing procedure remains a use.
+func privateConstReferenced(file parsedFile, moduleName, name string, declarator vbaast.Range, procedureRanges []vbaast.Range, shadowed map[int]bool) bool {
 	matcher := unusedNameMatcher(name)
 	for i, line := range file.Lines {
 		lineNo := i + 1
@@ -108,11 +114,37 @@ func privateConstReferenced(file parsedFile, name string, declarator vbaast.Rang
 				}
 				break
 			}
-			if shadowedHere {
+			if shadowedHere && !qualifiedModuleReference(line[:begin], moduleName) {
 				continue
 			}
 			return true
 		}
 	}
 	return false
+}
+
+// qualifiedModuleReference reports whether the text immediately before a name
+// occurrence is `<module>.`, which binds to the module-level member even when
+// a same-named local shadows unqualified references.
+func qualifiedModuleReference(prefix, moduleName string) bool {
+	moduleName = strings.TrimSpace(moduleName)
+	if moduleName == "" {
+		return false
+	}
+	dot := strings.LastIndexByte(prefix, '.')
+	if dot < 0 {
+		return false
+	}
+	qualifier := strings.TrimSpace(prefix[:dot])
+	end := len(qualifier)
+	start := end
+	for start > 0 && isIdentifierByte(qualifier[start-1]) {
+		start--
+	}
+	if !strings.EqualFold(qualifier[start:end], moduleName) {
+		return false
+	}
+	// The qualifier itself must be a complete token: `XModule.` or `A.B.`
+	// before the name does not denote this module's member.
+	return start == 0 || (!isIdentifierByte(qualifier[start-1]) && qualifier[start-1] != '.')
 }

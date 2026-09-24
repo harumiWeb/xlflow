@@ -1,8 +1,8 @@
-{"project":"third_party/better-access-charts","file":"Modules/BAC_Chart.cls","surface":"analyze","code":"VBA264","severity":"warning","line":379,"column":18}
-{"project":"third_party/better-access-charts","file":"Modules/BAC_ChartGenerator.cls","surface":"analyze","code":"VBA264","severity":"warning","line":171,"column":40}
-{"project":"third_party/better-access-charts","file":"Modules/BAC_ChartJS.cls","surface":"analyze","code":"VBA264","severity":"warning","line":87,"column":19}
-{"project":"third_party/better-access-charts","file":"Modules/BAC_ChartJS_Plugin_AutoColors.cls","surface":"analyze","code":"VBA264","severity":"warning","line":87,"column":28}
-{"project":"third_party/better-access-charts","file":"Modules/BAC_ChartJS_Plugin_Datalabels.cls","surface":"analyze","code":"VBA264","severity":"warning","line":87,"column":28}
+{"project":"third_party/better-access-charts","file":"Modules/BAC_Chart.cls","surface":"analyze","code":"VBA269","severity":"warning","line":379,"column":18}
+{"project":"third_party/better-access-charts","file":"Modules/BAC_ChartGenerator.cls","surface":"analyze","code":"VBA269","severity":"warning","line":171,"column":40}
+{"project":"third_party/better-access-charts","file":"Modules/BAC_ChartJS.cls","surface":"analyze","code":"VBA269","severity":"warning","line":87,"column":19}
+{"project":"third_party/better-access-charts","file":"Modules/BAC_ChartJS_Plugin_AutoColors.cls","surface":"analyze","code":"VBA269","severity":"warning","line":87,"column":28}
+{"project":"third_party/better-access-charts","file":"Modules/BAC_ChartJS_Plugin_Datalabels.cls","surface":"analyze","code":"VBA269","severity":"warning","line":87,"column":28}
 {"project":"third_party/better-access-charts","file":"Modules/BAC_Data.cls","surface":"analyze","code":"VBA249","severity":"error","line":37,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/BAC_Data.cls","surface":"analyze","code":"VBA249","severity":"error","line":46,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/BAC_Data.cls","surface":"analyze","code":"VBA249","severity":"error","line":49,"column":0}
@@ -17,7 +17,7 @@
 {"project":"third_party/better-access-charts","file":"Modules/BAC_Helper.cls","surface":"analyze","code":"VBA239","severity":"warning","line":132,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/BAC_Helper.cls","surface":"analyze","code":"VBA214","severity":"warning","line":149,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/BAC_Helper.cls","surface":"analyze","code":"VBA236","severity":"warning","line":184,"column":0}
-{"project":"third_party/better-access-charts","file":"Modules/BAC_Tooltip.cls","surface":"analyze","code":"VBA264","severity":"warning","line":184,"column":25}
+{"project":"third_party/better-access-charts","file":"Modules/BAC_Tooltip.cls","surface":"analyze","code":"VBA269","severity":"warning","line":184,"column":25}
 {"project":"third_party/better-access-charts","file":"Modules/BAC__Namespace.bas","surface":"analyze","code":"VBA222","severity":"warning","line":19,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/BAC__Namespace.bas","surface":"analyze","code":"VBA222","severity":"warning","line":24,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/mdl_Helpers.bas","surface":"analyze","code":"VBA239","severity":"warning","line":53,"column":0}

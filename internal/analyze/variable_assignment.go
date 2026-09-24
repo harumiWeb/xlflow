@@ -10,7 +10,7 @@ import (
 )
 
 // variableAssignmentFindings projects procedure-local definite-assignment
-// facts into VBA263 (read but never assigned) and VBA264 (read before a
+// facts into VBA268 (read but never assigned) and VBA269 (read before a
 // guaranteed assignment) findings. Both rules share one candidate pass so the
 // conservative eligibility and fail-open decisions stay identical.
 func (a Analyzer) variableAssignmentFindings(file parsedFile, proc sourceProcedure, signatures map[string]procedureSignature) []Finding {
@@ -21,7 +21,7 @@ func (a Analyzer) variableAssignmentFindings(file parsedFile, proc sourceProcedu
 	var findings []Finding
 	if a.Config.Analyze.DetectNeverAssignedVariables {
 		for _, candidate := range result.neverAssigned {
-			finding := a.simpleFinding(file, proc, candidate.decl.StartLine, "VBA263", "warning",
+			finding := a.simpleFinding(file, proc, candidate.decl.StartLine, "VBA268", "warning",
 				"Local variable "+candidate.displayName+" is read but never assigned.",
 				"No statement, ReDim, or resolvable ByRef call assigns a value to this variable, so every read observes the implicit default.",
 				"Initialize the variable before use, or remove the declaration when the read was unintended.")
@@ -33,7 +33,7 @@ func (a Analyzer) variableAssignmentFindings(file parsedFile, proc sourceProcedu
 	}
 	if a.Config.Analyze.DetectUnassignedVariableUsage {
 		for _, candidate := range result.unassignedReads {
-			finding := a.simpleFinding(file, proc, candidate.read.StartLine, "VBA264", "warning",
+			finding := a.simpleFinding(file, proc, candidate.read.StartLine, "VBA269", "warning",
 				"Variable "+candidate.displayName+" is read before any assignment is guaranteed to have executed.",
 				"A reachable control-flow path enters this statement without a completed assignment to "+candidate.displayName+".",
 				"Assign the variable on every path that reaches this read, or check the earlier assignment condition.")
@@ -98,7 +98,7 @@ func assignmentFacts(proc sourceProcedure, signatures map[string]procedureSignat
 		return nil
 	}
 
-	// VBA264 measures definite assignment over normal flow only. Exceptional
+	// VBA269 measures definite assignment over normal flow only. Exceptional
 	// edges (On Error Resume Next resume paths, error-handler jumps) model
 	// writes that may be interrupted, and treating them as ordinary
 	// predecessors would empty the must-assignment sets for any procedure
@@ -203,7 +203,7 @@ func assignmentFacts(proc sourceProcedure, signatures map[string]procedureSignat
 			// as a potential definition so the variable is never provably
 			// "never assigned", but do not treat the argument position itself
 			// as a proven read: initializer calls only write their target.
-			// Reads on statements before the call still feed VBA264.
+			// Reads on statements before the call still feed VBA269.
 			hasWrite[name] = true
 			continue
 		}

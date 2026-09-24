@@ -48,7 +48,7 @@ func (a Analyzer) unusedUDTMemberFindings(file parsedFile, signatures map[string
 			if member.used {
 				continue
 			}
-			finding := a.simpleFinding(file, sourceProcedure{}, member.rng.StartLine, "VBA262", "information",
+			finding := a.simpleFinding(file, sourceProcedure{}, member.rng.StartLine, "VBA267", "information",
 				"Member "+member.display+" of Private Type "+typ.display+" is never accessed.",
 				"No resolvable member expression in this module reads or writes the member.",
 				"Remove the member, or access it where the structure requires it.")
@@ -182,22 +182,27 @@ func (u *udtMemberUsage) observeProcedure(procedure procedureir.ProcedureIR) {
 	for name, typeName := range u.moduleVars {
 		env[name] = typeName
 	}
+	// A local declaration, parameter, or the function return slot shadows a
+	// same-named module variable for every access in this procedure. Removing
+	// the inherited entry keeps member expressions on a non-UDT local from
+	// resolving against the hidden module variable's type.
+	shadow := func(name, typeName string) {
+		name = assignmentCanonicalName(name)
+		delete(env, name)
+		if resolved := u.udtTypeName(typeName); resolved != "" {
+			env[name] = resolved
+		}
+	}
 	for _, declaration := range procedure.Declarations {
 		if declaration.Scope != procedureir.ScopeLocal {
 			continue
 		}
-		if typeName := u.udtTypeName(declaration.Type); typeName != "" {
-			env[assignmentCanonicalName(declaration.Name)] = typeName
-		}
+		shadow(declaration.Name, declaration.Type)
 	}
 	for _, parameter := range procedure.Symbol.Parameters {
-		if typeName := u.udtTypeName(parameter.Type); typeName != "" {
-			env[assignmentCanonicalName(parameter.Name)] = typeName
-		}
+		shadow(parameter.Name, parameter.Type)
 	}
-	if typeName := u.udtTypeName(procedure.Symbol.ReturnType); typeName != "" {
-		env[assignmentCanonicalName(procedure.Symbol.Name)] = typeName
-	}
+	shadow(procedure.Symbol.Name, procedure.Symbol.ReturnType)
 	// Even with no UDT-typed variable in scope, unresolved member expressions
 	// (late-bound Variant/Object receivers) must still mark matching member
 	// names used — that is the fail-open direction for dynamic access.
@@ -241,7 +246,11 @@ func (u *udtMemberUsage) observeProcedure(procedure procedureir.ProcedureIR) {
 	}
 	for _, call := range procedure.Calls {
 		for id := range callWritableArgumentExpressions(call, u.signatures) {
+			// A variable access nested anywhere inside a writable argument —
+			// parenthesized, qualified, or part of a larger expression — still
+			// passes its value across the unmodeled call boundary.
 			writeExpr[id] = true
+			collectExpressionDescendants(expressionByID, id, writeExpr)
 		}
 	}
 	for _, access := range procedure.Accesses {
@@ -269,6 +278,23 @@ func (u *udtMemberUsage) observeProcedure(procedure procedureir.ProcedureIR) {
 			continue
 		}
 		u.observeMemberExpression(procedure, expression, expressionByID, statements, withReceiver, env)
+	}
+}
+
+// collectExpressionDescendants marks root and every expression reachable
+// through Children, so a variable access attached to a nested expression
+// inside a call argument is still attributed to that argument.
+func collectExpressionDescendants(expressionByID map[int]procedureir.Expression, root int, into map[int]bool) {
+	stack := []int{root}
+	for len(stack) > 0 {
+		id := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		expression, ok := expressionByID[id]
+		if !ok {
+			continue
+		}
+		into[id] = true
+		stack = append(stack, expression.Children...)
 	}
 }
 

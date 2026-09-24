@@ -32,7 +32,7 @@ func runUnusedDeclarationAnalysis(t *testing.T, modules map[string]string) []Fin
 	return findings
 }
 
-// ---------- VBA260: unused procedure parameter ----------
+// ---------- VBA265: unused procedure parameter ----------
 
 func TestUnusedParameterReportsUnreadParameter(t *testing.T) {
 	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
@@ -40,9 +40,9 @@ Private Sub Helper(ByVal used As Long, ByVal extra As Long)
   Debug.Print used
 End Sub
 `})
-	got := findingsByCode(findings, "VBA260")
+	got := findingsByCode(findings, "VBA265")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "extra") {
-		t.Fatalf("VBA260 findings = %+v, want one finding naming extra", got)
+		t.Fatalf("VBA265 findings = %+v, want one finding naming extra", got)
 	}
 }
 
@@ -52,8 +52,8 @@ Private Sub Helper(ByVal used As Long, ByVal unusedParam As Long)
   Debug.Print used
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA260"); len(got) != 0 {
-		t.Fatalf("VBA260 findings = %+v, want none", got)
+	if got := findingsByCode(findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want none", got)
 	}
 }
 
@@ -69,8 +69,8 @@ Public Sub Runner()
   Application.Run "Main.DynamicHelper", 1
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA260"); len(got) != 0 {
-		t.Fatalf("VBA260 findings = %+v, want none", got)
+	if got := findingsByCode(findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want none", got)
 	}
 }
 
@@ -87,8 +87,8 @@ func TestUnusedParameterSkipsEventHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AnalyzeProject: %v", err)
 	}
-	if got := findingsByCode(result.Findings, "VBA260"); len(got) != 0 {
-		t.Fatalf("VBA260 findings = %+v, want none for a document event handler", got)
+	if got := findingsByCode(result.Findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want none for a document event handler", got)
 	}
 }
 
@@ -99,8 +99,8 @@ Private Sub App_WindowBeforeDoubleClick(ByVal Sel As Selection, ByRef Cancel As 
   Cancel = True
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA260"); len(got) != 0 {
-		t.Fatalf("VBA260 findings = %+v, want none for a WithEvents callback", got)
+	if got := findingsByCode(findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want none for a WithEvents callback", got)
 	}
 }
 
@@ -110,8 +110,8 @@ Private WithEvents TestApp As Application
 Private Sub TestApp_WindowBeforeDoubleClick(ByVal Sel As Selection, ByRef Cancel As Boolean)
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA260"); len(got) != 0 {
-		t.Fatalf("VBA260 findings = %+v, want none for a Test-prefixed WithEvents callback", got)
+	if got := findingsByCode(findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want none for a Test-prefixed WithEvents callback", got)
 	}
 }
 
@@ -121,16 +121,16 @@ Private Sub Helper(ByVal extra As Long)
 End Sub
 `
 	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": source})
-	got := findingsByCode(findings, "VBA260")
+	got := findingsByCode(findings, "VBA265")
 	if len(got) != 1 {
-		t.Fatalf("VBA260 findings = %+v, want one", got)
+		t.Fatalf("VBA265 findings = %+v, want one", got)
 	}
 	line := strings.Split(source, "\n")[got[0].Line-1]
 	if got[0].Column < 1 || got[0].EndColumn > len(line)+1 {
-		t.Fatalf("VBA260 range %d-%d outside line %q", got[0].Column, got[0].EndColumn, line)
+		t.Fatalf("VBA265 range %d-%d outside line %q", got[0].Column, got[0].EndColumn, line)
 	}
 	if fragment := line[got[0].Column-1 : got[0].EndColumn-1]; fragment != "ByVal extra As Long" {
-		t.Fatalf("VBA260 range %d-%d covers %q, want the parameter declarator", got[0].Column, got[0].EndColumn, fragment)
+		t.Fatalf("VBA265 range %d-%d covers %q, want the parameter declarator", got[0].Column, got[0].EndColumn, fragment)
 	}
 }
 
@@ -149,8 +149,8 @@ func TestUnusedParameterSkipsDocumentObjectEventShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AnalyzeProject: %v", err)
 	}
-	if got := findingsByCode(result.Findings, "VBA260"); len(got) != 0 {
-		t.Fatalf("VBA260 findings = %+v, want none for a document object-event shape", got)
+	if got := findingsByCode(result.Findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want none for a document object-event shape", got)
 	}
 }
 
@@ -166,8 +166,42 @@ Private Sub IFace_DoWork(ByVal arg As Long)
 End Sub
 `,
 	})
-	if got := findingsByCode(findings, "VBA260"); len(got) != 0 {
-		t.Fatalf("VBA260 findings = %+v, want none", got)
+	if got := findingsByCode(findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want none", got)
+	}
+}
+
+func TestUnusedParameterSkipsQualifiedImplementsMembers(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{
+		"IFace.cls": `Option Explicit
+Public Sub DoWork(ByVal arg As Long)
+End Sub
+`,
+		"Impl.cls": `Option Explicit
+Implements Lib.IFace
+Private Sub IFace_DoWork(ByVal arg As Long)
+End Sub
+`,
+	})
+	if got := findingsByCode(findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want none for a qualified Implements member", got)
+	}
+}
+
+func TestUnusedParameterSkipsCrossModuleDynamicEntry(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{
+		"Main.bas": `Option Explicit
+Private Sub Helper(ByVal arg As Long)
+End Sub
+`,
+		"Driver.bas": `Option Explicit
+Public Sub Run()
+  Application.Run "Main.Helper", 1
+End Sub
+`,
+	})
+	if got := findingsByCode(findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want none for a cross-module dynamic entry point", got)
 	}
 }
 
@@ -177,12 +211,12 @@ Private Sub Helper(ByVal Value As Long)
   Debug.Print VALUE
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA260"); len(got) != 0 {
-		t.Fatalf("VBA260 findings = %+v, want none for case-insensitive use", got)
+	if got := findingsByCode(findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want none for case-insensitive use", got)
 	}
 }
 
-// ---------- VBA261: unused private constant ----------
+// ---------- VBA266: unused private constant ----------
 
 func TestUnusedPrivateConstReportsUnreadConstant(t *testing.T) {
 	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
@@ -192,9 +226,9 @@ Public Sub Run()
   Debug.Print UsedLimit
 End Sub
 `})
-	got := findingsByCode(findings, "VBA261")
+	got := findingsByCode(findings, "VBA266")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "DeadLimit") {
-		t.Fatalf("VBA261 findings = %+v, want one finding naming DeadLimit", got)
+		t.Fatalf("VBA266 findings = %+v, want one finding naming DeadLimit", got)
 	}
 }
 
@@ -209,8 +243,8 @@ Public Sub Run()
 End Sub
 #End If
 `})
-	if got := findingsByCode(findings, "VBA261"); len(got) != 0 {
-		t.Fatalf("VBA261 findings = %+v, want none", got)
+	if got := findingsByCode(findings, "VBA266"); len(got) != 0 {
+		t.Fatalf("VBA266 findings = %+v, want none", got)
 	}
 }
 
@@ -224,12 +258,26 @@ Public Sub Run()
   Debug.Print "done"
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA261"); len(got) != 0 {
-		t.Fatalf("VBA261 findings = %+v, want none for enum members", got)
+	if got := findingsByCode(findings, "VBA266"); len(got) != 0 {
+		t.Fatalf("VBA266 findings = %+v, want none for enum members", got)
 	}
 }
 
-// ---------- VBA262: unused UDT member ----------
+func TestUnusedPrivateConstCountsQualifiedReferenceUnderShadow(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Private Const Limit As Long = 10
+Public Sub Run()
+  Dim Limit As Long
+  Limit = 3
+  Debug.Print Main.Limit
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA266"); len(got) != 0 {
+		t.Fatalf("VBA266 findings = %+v, want none for a qualified module reference", got)
+	}
+}
+
+// ---------- VBA267: unused UDT member ----------
 
 func TestUnusedUDTMemberReportsUnreadMember(t *testing.T) {
 	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
@@ -242,9 +290,9 @@ Private Sub Helper()
   p.X = 1
 End Sub
 `})
-	got := findingsByCode(findings, "VBA262")
+	got := findingsByCode(findings, "VBA267")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "Y") {
-		t.Fatalf("VBA262 findings = %+v, want one finding naming Y", got)
+		t.Fatalf("VBA267 findings = %+v, want one finding naming Y", got)
 	}
 }
 
@@ -262,8 +310,8 @@ Private Sub Helper()
   End With
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA262"); len(got) != 0 {
-		t.Fatalf("VBA262 findings = %+v, want none", got)
+	if got := findingsByCode(findings, "VBA267"); len(got) != 0 {
+		t.Fatalf("VBA267 findings = %+v, want none", got)
 	}
 }
 
@@ -281,8 +329,49 @@ Private Sub Helper(ByVal columns As Variant)
   Next column
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA262"); len(got) != 0 {
-		t.Fatalf("VBA262 findings = %+v, want none for late-bound member access", got)
+	if got := findingsByCode(findings, "VBA267"); len(got) != 0 {
+		t.Fatalf("VBA267 findings = %+v, want none for late-bound member access", got)
+	}
+}
+
+func TestUnusedUDTMemberSkipsShadowedModuleVariable(t *testing.T) {
+	// A local of another type shadows the module-level UDT variable; member
+	// expressions on it are late-bound and must not resolve against the hidden
+	// module variable's private type.
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Private Type TPoint
+  X As Long
+End Type
+Private Type TMeta
+  Tag As String
+End Type
+Private p As TPoint
+Private Sub Helper()
+  Dim p As Object
+  Debug.Print p.Tag
+End Sub
+`})
+	for _, finding := range findingsByCode(findings, "VBA267") {
+		if strings.Contains(finding.Message, "Tag") {
+			t.Fatalf("VBA267 findings = %+v, want no finding for Tag through the shadowed receiver", findingsByCode(findings, "VBA267"))
+		}
+	}
+}
+
+func TestUnusedUDTMemberEscapesThroughNestedArgument(t *testing.T) {
+	// The writable argument root is the parenthesized expression; the UDT
+	// variable access sits one level below and must still escape the type.
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Private Type TPoint
+  X As Long
+End Type
+Private Sub Helper()
+  Dim p As TPoint
+  UnknownMutate (p)
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA267"); len(got) != 0 {
+		t.Fatalf("VBA267 findings = %+v, want none after a nested writable argument escapes the type", got)
 	}
 }
 
@@ -298,12 +387,12 @@ Private Sub Helper()
   v = p
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA262"); len(got) != 0 {
-		t.Fatalf("VBA262 findings = %+v, want none after Variant escape", got)
+	if got := findingsByCode(findings, "VBA267"); len(got) != 0 {
+		t.Fatalf("VBA267 findings = %+v, want none after Variant escape", got)
 	}
 }
 
-// ---------- VBA263/VBA264: definite assignment ----------
+// ---------- VBA268/VBA269: definite assignment ----------
 
 func TestNeverAssignedVariableReportsScalarRead(t *testing.T) {
 	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
@@ -314,9 +403,9 @@ Public Sub Run()
   Debug.Print total + other
 End Sub
 `})
-	got := findingsByCode(findings, "VBA263")
+	got := findingsByCode(findings, "VBA268")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "total") {
-		t.Fatalf("VBA263 findings = %+v, want one finding naming total", got)
+		t.Fatalf("VBA268 findings = %+v, want one finding naming total", got)
 	}
 }
 
@@ -331,8 +420,8 @@ Public Sub Run()
   Debug.Print total
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA263"); len(got) != 0 {
-		t.Fatalf("VBA263 findings = %+v, want none for ByRef-mutated variable", got)
+	if got := findingsByCode(findings, "VBA268"); len(got) != 0 {
+		t.Fatalf("VBA268 findings = %+v, want none for ByRef-mutated variable", got)
 	}
 }
 
@@ -345,9 +434,9 @@ Public Sub Run()
   total = 1
 End Sub
 `})
-	got := findingsByCode(findings, "VBA264")
+	got := findingsByCode(findings, "VBA269")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "total") {
-		t.Fatalf("VBA264 findings = %+v, want one finding naming total", got)
+		t.Fatalf("VBA269 findings = %+v, want one finding naming total", got)
 	}
 }
 
@@ -362,9 +451,9 @@ Public Sub Run(ByVal flag As Boolean)
   copy = total
 End Sub
 `})
-	got := findingsByCode(findings, "VBA264")
+	got := findingsByCode(findings, "VBA269")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "total") {
-		t.Fatalf("VBA264 findings = %+v, want one finding naming total", got)
+		t.Fatalf("VBA269 findings = %+v, want one finding naming total", got)
 	}
 }
 
@@ -381,8 +470,8 @@ On Error Resume Next
   Next x
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA264"); len(got) != 0 {
-		t.Fatalf("VBA264 findings = %+v, want none (Next-variable bookkeeping and On Error flow must not flood)", got)
+	if got := findingsByCode(findings, "VBA269"); len(got) != 0 {
+		t.Fatalf("VBA269 findings = %+v, want none (Next-variable bookkeeping and On Error flow must not flood)", got)
 	}
 }
 
@@ -422,14 +511,14 @@ Public Sub Run()
   t = s
 End Sub
 `})
-	for _, f := range findingsByCode(findings, "VBA263") {
+	for _, f := range findingsByCode(findings, "VBA268") {
 		if strings.Contains(f.Message, " s ") {
-			t.Fatalf("VBA263 reported Mid$ write target: %+v", f)
+			t.Fatalf("VBA268 reported Mid$ write target: %+v", f)
 		}
 	}
-	for _, f := range findingsByCode(findings, "VBA264") {
+	for _, f := range findingsByCode(findings, "VBA269") {
 		if strings.Contains(f.Message, " s ") {
-			t.Fatalf("VBA264 reported Mid$ write target: %+v", f)
+			t.Fatalf("VBA269 reported Mid$ write target: %+v", f)
 		}
 	}
 }
@@ -446,11 +535,11 @@ Public Sub Run()
   t = rval
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA263"); len(got) != 0 {
-		t.Fatalf("VBA263 findings = %+v, want none for LSet/RSet write targets", got)
+	if got := findingsByCode(findings, "VBA268"); len(got) != 0 {
+		t.Fatalf("VBA268 findings = %+v, want none for LSet/RSet write targets", got)
 	}
-	if got := findingsByCode(findings, "VBA264"); len(got) != 0 {
-		t.Fatalf("VBA264 findings = %+v, want none for LSet/RSet write targets", got)
+	if got := findingsByCode(findings, "VBA269"); len(got) != 0 {
+		t.Fatalf("VBA269 findings = %+v, want none for LSet/RSet write targets", got)
 	}
 }
 
@@ -467,7 +556,7 @@ Public Sub Run(ByVal flag As Boolean)
   copy = total
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA264"); len(got) != 0 {
-		t.Fatalf("VBA264 findings = %+v, want none", got)
+	if got := findingsByCode(findings, "VBA269"); len(got) != 0 {
+		t.Fatalf("VBA269 findings = %+v, want none", got)
 	}
 }
