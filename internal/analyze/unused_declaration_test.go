@@ -171,6 +171,40 @@ End Sub
 	}
 }
 
+func TestUnusedParameterSkipsQualifiedImplementsMembers(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{
+		"IFace.cls": `Option Explicit
+Public Sub DoWork(ByVal arg As Long)
+End Sub
+`,
+		"Impl.cls": `Option Explicit
+Implements Lib.IFace
+Private Sub IFace_DoWork(ByVal arg As Long)
+End Sub
+`,
+	})
+	if got := findingsByCode(findings, "VBA260"); len(got) != 0 {
+		t.Fatalf("VBA260 findings = %+v, want none for a qualified Implements member", got)
+	}
+}
+
+func TestUnusedParameterSkipsCrossModuleDynamicEntry(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{
+		"Main.bas": `Option Explicit
+Private Sub Helper(ByVal arg As Long)
+End Sub
+`,
+		"Driver.bas": `Option Explicit
+Public Sub Run()
+  Application.Run "Main.Helper", 1
+End Sub
+`,
+	})
+	if got := findingsByCode(findings, "VBA260"); len(got) != 0 {
+		t.Fatalf("VBA260 findings = %+v, want none for a cross-module dynamic entry point", got)
+	}
+}
+
 func TestUnusedParameterMatchesCaseInsensitively(t *testing.T) {
 	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
 Private Sub Helper(ByVal Value As Long)
@@ -229,6 +263,20 @@ End Sub
 	}
 }
 
+func TestUnusedPrivateConstCountsQualifiedReferenceUnderShadow(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Private Const Limit As Long = 10
+Public Sub Run()
+  Dim Limit As Long
+  Limit = 3
+  Debug.Print Main.Limit
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA261"); len(got) != 0 {
+		t.Fatalf("VBA261 findings = %+v, want none for a qualified module reference", got)
+	}
+}
+
 // ---------- VBA262: unused UDT member ----------
 
 func TestUnusedUDTMemberReportsUnreadMember(t *testing.T) {
@@ -283,6 +331,47 @@ End Sub
 `})
 	if got := findingsByCode(findings, "VBA262"); len(got) != 0 {
 		t.Fatalf("VBA262 findings = %+v, want none for late-bound member access", got)
+	}
+}
+
+func TestUnusedUDTMemberSkipsShadowedModuleVariable(t *testing.T) {
+	// A local of another type shadows the module-level UDT variable; member
+	// expressions on it are late-bound and must not resolve against the hidden
+	// module variable's private type.
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Private Type TPoint
+  X As Long
+End Type
+Private Type TMeta
+  Tag As String
+End Type
+Private p As TPoint
+Private Sub Helper()
+  Dim p As Object
+  Debug.Print p.Tag
+End Sub
+`})
+	for _, finding := range findingsByCode(findings, "VBA262") {
+		if strings.Contains(finding.Message, "Tag") {
+			t.Fatalf("VBA262 findings = %+v, want no finding for Tag through the shadowed receiver", findingsByCode(findings, "VBA262"))
+		}
+	}
+}
+
+func TestUnusedUDTMemberEscapesThroughNestedArgument(t *testing.T) {
+	// The writable argument root is the parenthesized expression; the UDT
+	// variable access sits one level below and must still escape the type.
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Private Type TPoint
+  X As Long
+End Type
+Private Sub Helper()
+  Dim p As TPoint
+  UnknownMutate (p)
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA262"); len(got) != 0 {
+		t.Fatalf("VBA262 findings = %+v, want none after a nested writable argument escapes the type", got)
 	}
 }
 

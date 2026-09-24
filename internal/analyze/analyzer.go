@@ -425,13 +425,18 @@ type analysisContext struct {
 	arrayObjectContainerIndexCacheMu *sync.RWMutex
 	arraySourceModuleTargetCache     map[arraySourceModuleTargetCacheKey]arraySourceModuleTargetCacheEntry
 	arraySourceModuleTargetCacheMu   *sync.RWMutex
-	procedures                       map[string]procedureSignature
-	procedureResolver                procedureir.Resolver
-	projectResolver                  procedureir.Resolver
-	objectAnalysis                   *objectAnalysisContext
-	worksheetCodenames               map[string]string
-	projectEffects                   effects.ProjectSummary
-	queryRevision                    *semanticquery.Revision
+	// dynamicEntryNames is the project-wide set of identifier tokens found in
+	// string literals. VBA260 consults it so a private procedure named by
+	// Application.Run "Module.Proc" in another module still counts as a
+	// discoverable dynamic entry point.
+	dynamicEntryNames  map[string]bool
+	procedures         map[string]procedureSignature
+	procedureResolver  procedureir.Resolver
+	projectResolver    procedureir.Resolver
+	objectAnalysis     *objectAnalysisContext
+	worksheetCodenames map[string]string
+	projectEffects     effects.ProjectSummary
+	queryRevision      *semanticquery.Revision
 }
 
 type arrayInterproceduralStats struct {
@@ -2701,6 +2706,21 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		)
 		analysisCtx.projectResolver = projectResolver
 		analysisCtx.queryRevision = queryRevision
+		if cfg.Analyze.DetectUnusedParameters {
+			// The context closure keeps only the type/call neighborhood, but a
+			// dynamic entry literal can live in any module. Scan the whole
+			// workspace snapshot so VBA260 stays conservative in realtime too.
+			names := analysisCtx.dynamicEntryNames
+			if names == nil {
+				names = make(map[string]bool)
+			}
+			for _, document := range projectDocuments {
+				forEachStringLiteral(document.Source, func(literal string) {
+					addStringLiteralNames(names, literal)
+				})
+			}
+			analysisCtx.dynamicEntryNames = names
+		}
 		// buildContext materializes the participant-restricted plan after the
 		// initial procedure projection above was copied. Rebind the realtime
 		// projection to that materialized revision so batch and realtime execute
@@ -2943,7 +2963,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		findings = append(findings, a.deadStoreFindings(file, proc)...)
 	}
 	if a.Config.Analyze.DetectUnusedParameters && plan.runsProjection(procedureProjectionUnusedParameter) {
-		findings = append(findings, a.unusedParameterFindings(file, proc)...)
+		findings = append(findings, a.unusedParameterFindings(file, proc, analysisCtx.dynamicEntryNames)...)
 	}
 	if (a.Config.Analyze.DetectNeverAssignedVariables || a.Config.Analyze.DetectUnassignedVariableUsage) &&
 		plan.runsAnyProjection(procedureProjectionNeverAssigned, procedureProjectionUnassignedRead) {
@@ -3159,7 +3179,17 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 			}
 		}
 	}
+	var dynamicEntryNames map[string]bool
+	if a.Config.Analyze.DetectUnusedParameters {
+		dynamicEntryNames = make(map[string]bool)
+		for i := range files {
+			for name := range files[i].moduleAnalysisFacts().unusedDeclarationFacts(files[i].Lines).literalNames {
+				dynamicEntryNames[name] = true
+			}
+		}
+	}
 	ctx := analysisContext{
+		dynamicEntryNames:                dynamicEntryNames,
 		functionReturns:                  map[string]string{},
 		functionReturnsQualified:         map[string]string{},
 		projectObjectTypes:               projectObjectTypes,
@@ -3660,7 +3690,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	}
 	if a.Config.Analyze.DetectUnusedParameters && plan.runsProjection(procedureProjectionUnusedParameter) {
 		unusedParamMeasurement := profile.begin(procedureDomainOther)
-		unusedParamFindings := a.unusedParameterFindings(file, proc)
+		unusedParamFindings := a.unusedParameterFindings(file, proc, ctx.dynamicEntryNames)
 		unusedParamMeasurement.finish(len(unusedParamFindings))
 		findings = append(findings, unusedParamFindings...)
 	}

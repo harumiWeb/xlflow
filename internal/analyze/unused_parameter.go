@@ -14,8 +14,12 @@ import (
 // boundaries, so their signatures are fixed by callers the analyzer cannot
 // enumerate. Implements members, event handlers, and procedures reachable
 // through string-based dynamic invocation are excluded for the same reason.
-func (a Analyzer) unusedParameterFindings(file parsedFile, proc sourceProcedure) []Finding {
-	if !unusedParameterEligibleProcedure(file, proc) {
+// dynamicNames is the project-wide set of identifier tokens found inside
+// string literals (Application.Run "Module.Proc", OnTime, OnAction,
+// CallByName). It is built once per analysis run from every visible module;
+// a nil set falls back to the candidate file's own literals.
+func (a Analyzer) unusedParameterFindings(file parsedFile, proc sourceProcedure, dynamicNames map[string]bool) []Finding {
+	if !unusedParameterEligibleProcedure(file, proc, dynamicNames) {
 		return nil
 	}
 	var findings []Finding
@@ -52,7 +56,7 @@ func (a Analyzer) unusedParameterFindings(file parsedFile, proc sourceProcedure)
 	return findings
 }
 
-func unusedParameterEligibleProcedure(file parsedFile, proc sourceProcedure) bool {
+func unusedParameterEligibleProcedure(file parsedFile, proc sourceProcedure, dynamicNames map[string]bool) bool {
 	if proc.IR == nil {
 		return false
 	}
@@ -66,19 +70,24 @@ func unusedParameterEligibleProcedure(file parsedFile, proc sourceProcedure) boo
 	if symbol.IsEventHandler || eventHandlerKind(file, proc) != "" {
 		return false
 	}
-	if signatureConstrainedEvent(file, proc) {
+	facts := file.moduleAnalysisFacts().unusedDeclarationFacts(file.Lines)
+	if signatureConstrainedEvent(file, proc, facts) {
 		return false
 	}
 	name := strings.ToLower(cleanIdentifier(symbol.Name))
-	for _, iface := range moduleImplementsTargets(file) {
+	for _, iface := range facts.implementsTargets {
 		if strings.HasPrefix(name, iface+"_") {
 			return false
 		}
 	}
 	// A string literal carrying this procedure's name marks a discoverable
 	// dynamic entry point (Application.Run, OnTime, OnAction, CallByName).
-	if fileStringLiteralMentionsName(file, symbol.Name) ||
-		fileStringLiteralMentionsName(file, file.Module+"."+symbol.Name) {
+	// The project-wide set subsumes this file's literals; a nil set means the
+	// caller had no project view and falls back to file-local literals.
+	if dynamicNames == nil {
+		dynamicNames = facts.literalNames
+	}
+	if dynamicNames[name] || dynamicNames[strings.ToLower(file.Module+"."+cleanIdentifier(symbol.Name))] {
 		return false
 	}
 	return true
@@ -91,19 +100,18 @@ func unusedParameterEligibleProcedure(file parsedFile, proc sourceProcedure) boo
 // events (worksheet ActiveX controls, Access form/report sections) that are not
 // statically discoverable, so any <object>_<event> name there is treated as a
 // constrained signature. Both directions only suppress findings.
-func signatureConstrainedEvent(file parsedFile, proc sourceProcedure) bool {
+func signatureConstrainedEvent(file parsedFile, proc sourceProcedure, facts *unusedDeclFileFacts) bool {
 	name := strings.ToLower(cleanIdentifier(proc.IR.Symbol.Name))
 	index := strings.LastIndex(name, "_")
 	if index <= 0 || index == len(name)-1 {
 		return false
 	}
-	fields, complete := userFormWithEventsFieldNames(string(file.Source))
-	if !complete {
+	if !facts.withEventsComplete {
 		// An unparseable WithEvents declaration means any underscored name in
 		// this module could be a field callback.
 		return true
 	}
-	for field := range fields {
+	for field := range facts.withEventsFields {
 		// A WithEvents field may itself begin with Test (for example
 		// TestApp_WindowBeforeDoubleClick), so field matching must run before
 		// the test-name exemption below.
@@ -173,54 +181,23 @@ func unusedNameMatcher(name string) *regexp.Regexp {
 }
 
 // moduleImplementsTargets returns the lowercased interface names declared by
-// Implements statements. Implements members must keep their
-// <interface>_<member> signature even when the implementation is Private.
-func moduleImplementsTargets(file parsedFile) []string {
+// Implements statements. A qualified target (`Implements Lib.IFace`) binds
+// members as <interface>_<member> using the final segment only, so the
+// qualifier is stripped. Implements members must keep their signature even
+// when the implementation is Private.
+func moduleImplementsTargets(lines []string) []string {
 	var targets []string
-	for _, line := range file.Lines {
+	for _, line := range lines {
 		fields := strings.Fields(strings.ToLower(normalizedCodeLine(line)))
 		if len(fields) == 2 && fields[0] == "implements" {
-			targets = append(targets, strings.Trim(fields[1], "[]"))
+			target := strings.Trim(fields[1], "[]")
+			if dot := strings.LastIndexByte(target, '.'); dot >= 0 {
+				target = strings.Trim(target[dot+1:], "[]")
+			}
+			targets = append(targets, target)
 		}
 	}
 	return targets
-}
-
-// fileStringLiteralMentionsName reports whether any string literal in the
-// file contains the name as a whole word (or as the trailing member of a
-// qualified path). This is the static surface for dynamic invocation such as
-// Application.Run "Module.Proc" or an OnAction assignment.
-func fileStringLiteralMentionsName(file parsedFile, name string) bool {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return false
-	}
-	for _, line := range file.Lines {
-		for i := 0; i < len(line); i++ {
-			if line[i] != '"' {
-				continue
-			}
-			j := i + 1
-			for j < len(line) {
-				if line[j] == '"' {
-					if j+1 < len(line) && line[j+1] == '"' {
-						j += 2
-						continue
-					}
-					break
-				}
-				j++
-			}
-			if j >= len(line) {
-				break
-			}
-			if stringLiteralContainsName(line[i+1:j], name) {
-				return true
-			}
-			i = j
-		}
-	}
-	return false
 }
 
 func stringLiteralContainsName(literal, name string) bool {

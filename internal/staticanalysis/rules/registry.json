@@ -2776,7 +2776,7 @@
     {
       "id": "VBA260",
       "title": "Unused procedure parameter",
-      "description": "A procedure parameter is never read or written inside the procedure body.",
+      "description": "A parameter of a Private procedure is never read or written inside the procedure body.",
       "family": "analyze",
       "category": "maintainability",
       "evidence_class": "maintainability",
@@ -2842,7 +2842,7 @@
     {
       "id": "VBA263",
       "title": "Variable never assigned",
-      "description": "A procedure-local variable is read but no statement, ReDim, or resolvable ByRef call ever assigns a value to it.",
+      "description": "A procedure-local scalar variable is read but no statement, ReDim, or resolvable ByRef call ever assigns a value to it.",
       "family": "analyze",
       "category": "reliability",
       "evidence_class": "inference",
@@ -2864,7 +2864,7 @@
     {
       "id": "VBA264",
       "title": "Variable read before assignment",
-      "description": "A procedure-local value-type variable is read on a control-flow path where no assignment is guaranteed to have executed.",
+      "description": "A procedure-local scalar variable is read on a control-flow path where no assignment is guaranteed to have executed.",
       "family": "analyze",
       "category": "reliability",
       "evidence_class": "inference",

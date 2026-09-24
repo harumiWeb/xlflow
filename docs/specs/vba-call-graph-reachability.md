@@ -22,9 +22,13 @@ The root set is built before internal procedures are classified. It includes:
   Excel, worksheet formulas, or external VBA are not present in the project
   call graph;
 
-- test procedures in standard modules, only while the module remains
-  host-visible — a `Test*` procedure inside a host-hidden module is reportable
-  like any other host-hidden public procedure;
+- test procedures (`Test*`/`*_Test` public `Sub`s) in standard modules as
+  confirmed roots, and the fixed per-module `BeforeAll`/`AfterAll`/
+  `BeforeEach`/`AfterEach` public `Sub` hooks as possible roots. The
+  generated xlflow test runner is injected as a standard module inside the
+  same VBA project and invokes tests and hooks through qualified
+  `Module.Name` calls, so `Option Private Module` — which only hides members
+  from the host and other projects — does not make them unreachable;
 - public members of `VB_Exposed = True` class modules as possible roots,
   because external clients can invoke them without a project caller;
 - `Auto_Open` and `Auto_Close`;

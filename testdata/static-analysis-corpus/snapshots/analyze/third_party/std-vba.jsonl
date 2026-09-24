@@ -541,12 +541,8 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdPowerPointLibraries/ShapeHook.cls","surface":"analyze","code":"VBA206","severity":"warning","line":145,"column":19}
 {"project":"third_party/std-vba","file":"src/WIP/stdPowerPointLibraries/ShapeHook.cls","surface":"analyze","code":"VBA214","severity":"warning","line":183,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA257","severity":"warning","line":75,"column":6}
-{"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA260","severity":"warning","line":82,"column":23}
-{"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA260","severity":"warning","line":90,"column":24}
 {"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA260","severity":"warning","line":95,"column":29}
 {"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA260","severity":"warning","line":95,"column":50}
-{"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA260","severity":"warning","line":100,"column":26}
-{"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA260","severity":"warning","line":100,"column":47}
 {"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA260","severity":"warning","line":110,"column":25}
 {"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA260","severity":"warning","line":110,"column":46}
 {"project":"third_party/std-vba","file":"src/WIP/stdRegex2.cls","surface":"analyze","code":"VBA260","severity":"warning","line":119,"column":29}

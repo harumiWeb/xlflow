@@ -2914,7 +2914,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA260
 
-**Unused procedure parameter.** A procedure parameter is never read or written inside the procedure body.
+**Unused procedure parameter.** A parameter of a Private procedure is never read or written inside the procedure body.
 
 | Property                    | Value                      |
 | --------------------------- | -------------------------- |
@@ -2980,7 +2980,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA263
 
-**Variable never assigned.** A procedure-local variable is read but no statement, ReDim, or resolvable ByRef call ever assigns a value to it.
+**Variable never assigned.** A procedure-local scalar variable is read but no statement, ReDim, or resolvable ByRef call ever assigns a value to it.
 
 | Property                    | Value                             |
 | --------------------------- | --------------------------------- |
@@ -3002,7 +3002,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA264
 
-**Variable read before assignment.** A procedure-local value-type variable is read on a control-flow path where no assignment is guaranteed to have executed.
+**Variable read before assignment.** A procedure-local scalar variable is read on a control-flow path where no assignment is guaranteed to have executed.
 
 | Property                    | Value                              |
 | --------------------------- | ---------------------------------- |

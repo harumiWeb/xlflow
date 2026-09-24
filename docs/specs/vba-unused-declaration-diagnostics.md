@@ -20,8 +20,9 @@ referenced in the procedure body. Only `Private` procedures are candidates:
 `Public` and `Friend` signatures are fixed by callers the analyzer cannot
 enumerate. Event handlers, recovered or conditional-compiled procedures,
 `Declare` statements, `<Interface>_<Member>` procedures in a module that
-declares `Implements <Interface>`, and procedures named by a string literal
-in the same module (the static surface of `Application.Run`, `OnTime`,
+declares `Implements <Interface>` (a qualified `Implements Lib.IFace` target
+still binds `IFace_<Member>` names), and procedures named by a string literal
+anywhere in the project (the static surface of `Application.Run`, `OnTime`,
 `OnAction`, `CallByName`, and similar dynamic dispatch) are excluded.
 
 Signature-constrained event shapes are excluded even when the generic event
@@ -48,7 +49,9 @@ also mark the constant used.
 
 When a procedure declares a local variable or parameter with the same name,
 occurrences inside that procedure's body are attributed to the local and do
-not count as constant references. Recovered or conditional-compiled
+not count as constant references — except explicitly qualified
+`Module.Const` occurrences, which still bind to the module-level constant
+under a shadowing local. Recovered or conditional-compiled
 declarations are skipped. Enum members are not `Const` declarations — they
 may carry the constant flag in the IR, but `VBA261` only considers
 declarations whose kind is `const`, so `Private Enum` members are never
@@ -73,11 +76,13 @@ Member usage resolves through:
 Fail-open rules:
 
 - an unresolved receiver marks the member name as used on every private UDT
-  that declares it;
+  that declares it — this includes member expressions on a local, parameter,
+  or function return slot that shadows a same-named module-level UDT
+  variable with a non-UDT type;
 - a type whose value flows through an unmodeled boundary — a `ByRef` or
-  unresolved call argument, a `Variant`/object/unknown assignment target, or
-  an ambiguous statement (`Input #`, `Get #`, `LSet`, `Mid$` assignment) —
-  is exempted entirely;
+  unresolved call argument at any expression depth inside the argument, a
+  `Variant`/object/unknown assignment target, or an ambiguous statement
+  (`Input #`, `Get #`, `LSet`, `Mid$` assignment) — is exempted entirely;
 - member lines inside the `Type` block that cannot be modeled (conditional
   compilation, unusual declarations, duplicates) mark the whole type
   ineligible; and
