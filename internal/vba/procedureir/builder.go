@@ -186,10 +186,12 @@ func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
 				passing = normalizedPassing(nodeText(mode, b.source))
 			}
 		}
+		nameNode := childByFieldOrKind(child, "name", "identifier")
 		param := Parameter{
-			Name: cleanIdentifier(nodeText(childByFieldOrKind(child, "name", "identifier"), b.source)),
+			Name: cleanIdentifier(nodeText(nameNode, b.source)),
 			Type: typeText(child, b.source), Passing: passing, PassingExplicit: passingExplicit,
-			Range: vbaast.NodeRange(child), Optional: child.ChildByFieldName("optional_modifier") != nil,
+			Range: vbaast.NodeRange(child), NameRange: rangePointer(nameNode),
+			Optional:   child.ChildByFieldName("optional_modifier") != nil,
 			ParamArray: child.ChildByFieldName("paramarray_modifier") != nil,
 			Recovered:  recovered(child), ArrayShape: ArrayShapeNone,
 		}

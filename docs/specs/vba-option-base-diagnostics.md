@@ -34,10 +34,15 @@ ambiguous, member, external, unresolved, or dynamic resolution stays
 silent.
 
 `VBA271` candidates are parameters declared with the `ParamArray` keyword.
-The diagnostic anchors on the parameter name inside the enclosing
+The diagnostic anchors on the parameter identifier inside the enclosing
 procedure's parameter list. `ParamArray` is always a `Variant` array with
 lower bound 0 regardless of `Option Base`, so no resolution or dataflow is
 required.
+
+Both rules skip a procedure whose symbol sits inside conditional-compilation
+(`#If`/`#ElseIf`/`#Else`) branches or whose IR is marked recovered, because
+the call/parameter projection for such procedures may be incomplete; this is
+a deliberate fail-open boundary, not a coverage claim.
 
 Explicitly bounded arrays (`Dim a(1 To 5)`, `ReDim a(1 To n)`) and ordinary
 indexed access to any array are outside both rules' scope; `Option Base`

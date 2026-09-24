@@ -139,6 +139,69 @@ End Sub
 	}
 }
 
+func TestOptionBaseArraySkipsSameModuleArrayFunction(t *testing.T) {
+	findings := runOptionBaseAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Option Base 1
+Public Function Array(ByVal seed As Long) As Variant
+    Array = VBA.Array(seed)
+End Function
+Public Sub Run()
+    Dim values As Variant
+    values = Array(1)
+End Sub
+`}, enableOptionBaseRules)
+	got := findingsByCode(findings, "VBA270")
+	if len(got) != 1 {
+		t.Fatalf("VBA270 findings = %+v, want only the explicit VBA.Array call, not the user-defined Array", got)
+	}
+	if !strings.Contains(got[0].Message, "VBA.Array") {
+		t.Fatalf("VBA270 message = %q, want the qualified intrinsic call", got[0].Message)
+	}
+}
+
+func TestOptionBaseArraySkipsIndexedAssignmentOnly(t *testing.T) {
+	findings := runOptionBaseAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Option Base 1
+Public Sub Run()
+    Array(0) = "a"
+End Sub
+`}, enableOptionBaseRules)
+	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
+		t.Fatalf("VBA270 findings = %+v, want none for an indexed assignment target", got)
+	}
+}
+
+func TestOptionBaseArraySkipsParameterShadow(t *testing.T) {
+	findings := runOptionBaseAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Option Base 1
+Public Sub Run(Array() As Variant)
+    Dim first As Variant
+    first = Array(0)
+End Sub
+`}, enableOptionBaseRules)
+	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
+		t.Fatalf("VBA270 findings = %+v, want none for a parameter shadowing Array", got)
+	}
+}
+
+func TestOptionBaseSkipsConditionalBranchProcedure(t *testing.T) {
+	findings := runOptionBaseAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Option Base 1
+#If VBA7 Then
+Public Sub Run(ParamArray values())
+    Dim copy As Variant
+    copy = Array("x")
+End Sub
+#End If
+`}, enableOptionBaseRules)
+	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
+		t.Fatalf("VBA270 findings = %+v, want none inside conditional-compilation branches", got)
+	}
+	if got := findingsByCode(findings, "VBA271"); len(got) != 0 {
+		t.Fatalf("VBA271 findings = %+v, want none inside conditional-compilation branches", got)
+	}
+}
+
 func TestOptionBaseArraySilentWithoutOptionBase1(t *testing.T) {
 	findings := runOptionBaseAnalysis(t, map[string]string{
 		"Base0.bas": `Option Explicit
@@ -201,6 +264,13 @@ End Sub
 	}
 	if !strings.Contains(got[0].Message, "values") {
 		t.Fatalf("VBA271 message = %q, want parameter name", got[0].Message)
+	}
+	// The diagnostic anchors on the `values` identifier inside
+	// `Public Sub Example(ParamArray values())`, not the whole
+	// `ParamArray values()` declaration.
+	if got[0].Line != 3 || got[0].Column != 31 || got[0].EndLine != 3 || got[0].EndColumn != 37 {
+		t.Fatalf("VBA271 range = line:%d col:%d-%d:%d, want 3:31-3:37 (identifier only)",
+			got[0].Line, got[0].Column, got[0].EndLine, got[0].EndColumn)
 	}
 }
 

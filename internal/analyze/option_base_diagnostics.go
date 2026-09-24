@@ -44,6 +44,9 @@ func (a Analyzer) optionBaseInconsistencyFindings(file parsedFile, proc sourcePr
 // or dynamic outcome stay silent.
 func (a Analyzer) optionBaseArrayFindings(file parsedFile, proc sourceProcedure, resolver procedureir.Resolver) []Finding {
 	var findings []Finding
+	// The shadow verdict is loop-invariant; compute it lazily on the first
+	// unqualified Array candidate instead of rescanning declarations per call.
+	shadowChecked, shadowed := false, false
 	for call := range proc.Calls.All() {
 		if call.IsRaiseEvent || !strings.EqualFold(call.Callee.BaseName, "array") {
 			continue
@@ -66,8 +69,14 @@ func (a Analyzer) optionBaseArrayFindings(file parsedFile, proc sourceProcedure,
 		// Any in-scope declaration named `Array` therefore still needs this
 		// lexical shadow check: under VBA rules it wins over the intrinsic for
 		// an unqualified reference, whatever its declared shape.
-		if call.Callee.Receiver == nil && optionBaseArrayShadowed(file, proc) {
-			continue
+		if call.Callee.Receiver == nil {
+			if !shadowChecked {
+				shadowed = optionBaseArrayShadowed(file, proc)
+				shadowChecked = true
+			}
+			if shadowed {
+				continue
+			}
 		}
 		resolution := call.Resolution
 		if resolution.Status == procedureir.ResolutionNotAttempted && resolver != nil {
@@ -120,7 +129,14 @@ func (a Analyzer) optionBaseParamArrayFindings(file parsedFile, proc sourceProce
 		if !parameter.ParamArray {
 			continue
 		}
-		line := parameter.Range.StartLine
+		// Anchor on the parameter identifier, not the whole `ParamArray ...`
+		// declaration; fall back to the declaration span only when the parser
+		// could not resolve a name token.
+		anchor := parameter.Range
+		if parameter.NameRange != nil {
+			anchor = *parameter.NameRange
+		}
+		line := anchor.StartLine
 		if line < 1 {
 			line = proc.IR.Symbol.DeclarationRange.StartLine
 		}
@@ -130,9 +146,9 @@ func (a Analyzer) optionBaseParamArrayFindings(file parsedFile, proc sourceProce
 			"The host supplies ParamArray arguments as a zero-based Variant array; Option Base does not change its lower bound.",
 			"Index the parameter from 0, or document that this signature intentionally mixes array bases.",
 		)
-		finding.Column = parameter.Range.StartColumn
-		finding.EndLine = parameter.Range.EndLine
-		finding.EndColumn = parameter.Range.EndColumn
+		finding.Column = anchor.StartColumn
+		finding.EndLine = anchor.EndLine
+		finding.EndColumn = anchor.EndColumn
 		finding.ScopeEndLine = proc.EndLine
 		findings = append(findings, finding)
 	}
