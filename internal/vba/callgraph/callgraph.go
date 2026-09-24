@@ -161,6 +161,11 @@ type Root struct {
 
 type ReachabilityRequest struct {
 	Roots []Root
+	// Reportable lists node IDs that callers may surface when unreachable even
+	// though their visibility is broader than Private (Friend members and
+	// Public procedures hidden by Option Private Module). Callers that leave
+	// it nil keep the private-only Unreachable contract.
+	Reportable map[string]bool
 }
 
 type ReachabilityResult struct {
@@ -570,7 +575,7 @@ func AnalyzeReachability(input Snapshot, request ReachabilityRequest) Reachabili
 			result.Confirmed = append(result.Confirmed, node)
 		case possible[key]:
 			result.Possible = append(result.Possible, node)
-		case strings.EqualFold(node.Visibility, "Private"):
+		case strings.EqualFold(node.Visibility, "Private") || request.Reportable[node.ID.String()]:
 			result.Unreachable = append(result.Unreachable, node)
 		}
 	}

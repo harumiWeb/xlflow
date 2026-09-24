@@ -431,13 +431,18 @@ type analysisContext struct {
 	arrayObjectContainerIndexCacheMu *sync.RWMutex
 	arraySourceModuleTargetCache     map[arraySourceModuleTargetCacheKey]arraySourceModuleTargetCacheEntry
 	arraySourceModuleTargetCacheMu   *sync.RWMutex
-	procedures                       map[string]procedureSignature
-	procedureResolver                procedureir.Resolver
-	projectResolver                  procedureir.Resolver
-	objectAnalysis                   *objectAnalysisContext
-	worksheetCodenames               map[string]string
-	projectEffects                   effects.ProjectSummary
-	queryRevision                    *semanticquery.Revision
+	// dynamicEntryNames is the project-wide set of identifier tokens found in
+	// string literals. VBA260 consults it so a private procedure named by
+	// Application.Run "Module.Proc" in another module still counts as a
+	// discoverable dynamic entry point.
+	dynamicEntryNames  map[string]bool
+	procedures         map[string]procedureSignature
+	procedureResolver  procedureir.Resolver
+	projectResolver    procedureir.Resolver
+	objectAnalysis     *objectAnalysisContext
+	worksheetCodenames map[string]string
+	projectEffects     effects.ProjectSummary
+	queryRevision      *semanticquery.Revision
 }
 
 type arrayInterproceduralStats struct {
@@ -1513,6 +1518,12 @@ func (a Analyzer) analyzeParsedFileBounded(ctx context.Context, file parsedFile,
 		return nil, nil, procedureErr
 	}
 	findings = append(findings, procedureFindings...)
+	if a.Config.Analyze.DetectUnusedPrivateConstants {
+		findings = append(findings, a.unusedPrivateConstFindings(file)...)
+	}
+	if a.Config.Analyze.DetectUnusedUDTMembers {
+		findings = append(findings, a.unusedUDTMemberFindings(file, analysisCtx.procedures)...)
+	}
 	readErr := file.Parsed.Read(func(view vbaast.ParsedView) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -2732,6 +2743,21 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		)
 		analysisCtx.projectResolver = projectResolver
 		analysisCtx.queryRevision = queryRevision
+		if cfg.Analyze.DetectUnusedParameters {
+			// The context closure keeps only the type/call neighborhood, but a
+			// dynamic entry literal can live in any module. Scan the whole
+			// workspace snapshot so VBA260 stays conservative in realtime too.
+			names := analysisCtx.dynamicEntryNames
+			if names == nil {
+				names = make(map[string]bool)
+			}
+			for _, document := range projectDocuments {
+				forEachStringLiteral(document.Source, func(literal string) {
+					addStringLiteralNames(names, literal)
+				})
+			}
+			analysisCtx.dynamicEntryNames = names
+		}
 		// buildContext materializes the participant-restricted plan after the
 		// initial procedure projection above was copied. Rebind the realtime
 		// projection to that materialized revision so batch and realtime execute
@@ -2755,6 +2781,12 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			return procedureErr
 		}
 		findings = append(findings, procedureFindings...)
+		if cfg.Analyze.DetectUnusedPrivateConstants {
+			findings = append(findings, analyzer.unusedPrivateConstFindings(file)...)
+		}
+		if cfg.Analyze.DetectUnusedUDTMembers {
+			findings = append(findings, analyzer.unusedUDTMemberFindings(file, analysisCtx.procedures)...)
+		}
 		if cfg.Analyze.DetectNonShortCircuitObjectGuard {
 			guardFindings, err := analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{projectEffects: projectEffects})
 			if err != nil {
@@ -2890,7 +2922,7 @@ sendJobs:
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255", "VBA256", "VBA257", "VBA259", "VBA261", "VBA262"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255", "VBA256", "VBA257", "VBA259", "VBA261", "VBA262", "VBA265", "VBA266", "VBA267", "VBA268", "VBA269"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -2971,6 +3003,13 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	findings = append(findings, a.opaqueBooleanArgumentFindings(file, proc, analysisCtx.procedures)...)
 	if a.Config.Analyze.DetectDeadStores && plan.runsProjection(procedureProjectionDeadStore) {
 		findings = append(findings, a.deadStoreFindings(file, proc)...)
+	}
+	if a.Config.Analyze.DetectUnusedParameters && plan.runsProjection(procedureProjectionUnusedParameter) {
+		findings = append(findings, a.unusedParameterFindings(file, proc, analysisCtx.dynamicEntryNames)...)
+	}
+	if (a.Config.Analyze.DetectNeverAssignedVariables || a.Config.Analyze.DetectUnassignedVariableUsage) &&
+		plan.runsAnyProjection(procedureProjectionNeverAssigned, procedureProjectionUnassignedRead) {
+		findings = append(findings, a.variableAssignmentFindings(file, proc, analysisCtx.procedures)...)
 	}
 	findings = append(findings, a.discardedReturnFindings(file, proc, analysisCtx.projectResolver)...)
 	if a.Config.Analyze.DetectHostBracketExpressions && plan.runsProjection(procedureProjectionExcelBracket) {
@@ -3188,7 +3227,17 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 			}
 		}
 	}
+	var dynamicEntryNames map[string]bool
+	if a.Config.Analyze.DetectUnusedParameters {
+		dynamicEntryNames = make(map[string]bool)
+		for i := range files {
+			for name := range files[i].moduleAnalysisFacts().unusedDeclarationFacts(files[i].Lines).literalNames {
+				dynamicEntryNames[name] = true
+			}
+		}
+	}
 	ctx := analysisContext{
+		dynamicEntryNames:                dynamicEntryNames,
 		functionReturns:                  map[string]string{},
 		functionReturnsQualified:         map[string]string{},
 		projectObjectTypes:               projectObjectTypes,
@@ -3691,6 +3740,19 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		deadStoreFindings := a.deadStoreFindings(file, proc)
 		deadStoreMeasurement.finish(len(deadStoreFindings))
 		findings = append(findings, deadStoreFindings...)
+	}
+	if a.Config.Analyze.DetectUnusedParameters && plan.runsProjection(procedureProjectionUnusedParameter) {
+		unusedParamMeasurement := profile.begin(procedureDomainOther)
+		unusedParamFindings := a.unusedParameterFindings(file, proc, ctx.dynamicEntryNames)
+		unusedParamMeasurement.finish(len(unusedParamFindings))
+		findings = append(findings, unusedParamFindings...)
+	}
+	if (a.Config.Analyze.DetectNeverAssignedVariables || a.Config.Analyze.DetectUnassignedVariableUsage) &&
+		plan.runsAnyProjection(procedureProjectionNeverAssigned, procedureProjectionUnassignedRead) {
+		assignmentMeasurement := profile.begin(procedureDomainOther)
+		assignmentFindings := a.variableAssignmentFindings(file, proc, ctx.procedures)
+		assignmentMeasurement.finish(len(assignmentFindings))
+		findings = append(findings, assignmentFindings...)
 	}
 	if plan.runsProjection(procedureProjectionRuntime) {
 		runtimeMeasurement := profile.begin(procedureDomainRuntime)

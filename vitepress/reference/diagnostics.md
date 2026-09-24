@@ -26,7 +26,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB018`](#vb018)   | lint    | warning     | project-wide    | no      | Scope shadowing                                    |
 | [`VB019`](#vb019)   | lint    | warning     | file-local      | yes     | Mixed declarator typing                            |
 | [`VB020`](#vb020)   | lint    | warning     | procedure-local | yes     | Unused local variable                              |
-| [`VB021`](#vb021)   | lint    | warning     | project-wide    | no      | Unused private procedure                           |
+| [`VB021`](#vb021)   | lint    | warning     | project-wide    | no      | Unreachable internal procedure                     |
 | [`VB022`](#vb022)   | lint    | warning     | procedure-local | yes     | Confusing call syntax                              |
 | [`VB023`](#vb023)   | lint    | warning     | procedure-local | yes     | Invalid For Each control type                      |
 | [`VB026`](#vb026)   | lint    | warning     | procedure-local | yes     | Dangerous Resume                                   |
@@ -138,6 +138,11 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA260`](#vba260) | analyze | warning     | procedure-local | no      | Worksheet string access                            |
 | [`VBA261`](#vba261) | analyze | information | procedure-local | no      | Application worksheet-function dispatch            |
 | [`VBA262`](#vba262) | analyze | warning     | procedure-local | no      | Excel host bracket expression                      |
+| [`VBA265`](#vba265) | analyze | warning     | procedure-local | no      | Unused procedure parameter                         |
+| [`VBA266`](#vba266) | analyze | warning     | file-local      | no      | Unused private constant                            |
+| [`VBA267`](#vba267) | analyze | information | file-local      | no      | Unused user-defined type member                    |
+| [`VBA268`](#vba268) | analyze | warning     | procedure-local | no      | Variable never assigned                            |
+| [`VBA269`](#vba269) | analyze | warning     | procedure-local | no      | Variable read before assignment                    |
 
 ## VB001
 
@@ -537,7 +542,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VB021
 
-**Unused private procedure.** A private procedure is unreachable from known project roots.
+**Unreachable internal procedure.** A Private or Friend procedure, or a Public procedure in a host-hidden (Option Private Module, non-exposed) module, is unreachable from known project roots.
 
 | Property                    | Value                              |
 | --------------------------- | ---------------------------------- |
@@ -2998,3 +3003,113 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                |
 | Real-time editor diagnostic | yes                               |
 | Fix available               | no                                |
+
+## VBA265
+
+**Unused procedure parameter.** A parameter of a Private procedure is never read or written inside the procedure body.
+
+| Property                    | Value                      |
+| --------------------------- | -------------------------- |
+| Family                      | `analyze`                  |
+| Category                    | `maintainability`          |
+| Evidence class              | `maintainability`          |
+| Compile-equivalent          | no                         |
+| Default severity            | `warning`                  |
+| Supported severities        | `warning`, `information`   |
+| Surfaces                    | `analyze`, `lsp`           |
+| Scope                       | `procedure-local`          |
+| Precision                   | `high`                     |
+| Enabled by default          | no                         |
+| Configuration               | `detect_unused_parameters` |
+| Inline suppression          | yes                        |
+| Blocks source preflight     | no                         |
+| Real-time editor diagnostic | yes                        |
+| Fix available               | no                         |
+
+## VBA266
+
+**Unused private constant.** A module-level Private Const declaration is never referenced by any expression, declaration, or conditional-compilation directive in the module.
+
+| Property                    | Value                             |
+| --------------------------- | --------------------------------- |
+| Family                      | `analyze`                         |
+| Category                    | `maintainability`                 |
+| Evidence class              | `maintainability`                 |
+| Compile-equivalent          | no                                |
+| Default severity            | `warning`                         |
+| Supported severities        | `warning`, `information`          |
+| Surfaces                    | `analyze`, `lsp`                  |
+| Scope                       | `file-local`                      |
+| Precision                   | `high`                            |
+| Enabled by default          | no                                |
+| Configuration               | `detect_unused_private_constants` |
+| Inline suppression          | yes                               |
+| Blocks source preflight     | no                                |
+| Real-time editor diagnostic | yes                               |
+| Fix available               | no                                |
+
+## VBA267
+
+**Unused user-defined type member.** A member of a Private Type declaration is never accessed through a resolvable member expression in the module.
+
+| Property                    | Value                       |
+| --------------------------- | --------------------------- |
+| Family                      | `analyze`                   |
+| Category                    | `maintainability`           |
+| Evidence class              | `maintainability`           |
+| Compile-equivalent          | no                          |
+| Default severity            | `information`               |
+| Supported severities        | `information`, `warning`    |
+| Surfaces                    | `analyze`, `lsp`            |
+| Scope                       | `file-local`                |
+| Precision                   | `medium`                    |
+| Enabled by default          | no                          |
+| Configuration               | `detect_unused_udt_members` |
+| Inline suppression          | yes                         |
+| Blocks source preflight     | no                          |
+| Real-time editor diagnostic | yes                         |
+| Fix available               | no                          |
+
+## VBA268
+
+**Variable never assigned.** A procedure-local scalar variable is read but no statement, ReDim, or resolvable ByRef call ever assigns a value to it.
+
+| Property                    | Value                             |
+| --------------------------- | --------------------------------- |
+| Family                      | `analyze`                         |
+| Category                    | `reliability`                     |
+| Evidence class              | `inference`                       |
+| Compile-equivalent          | no                                |
+| Default severity            | `warning`                         |
+| Supported severities        | `warning`, `information`          |
+| Surfaces                    | `analyze`, `lsp`                  |
+| Scope                       | `procedure-local`                 |
+| Precision                   | `high`                            |
+| Enabled by default          | no                                |
+| Configuration               | `detect_never_assigned_variables` |
+| Inline suppression          | yes                               |
+| Blocks source preflight     | no                                |
+| Real-time editor diagnostic | yes                               |
+| Fix available               | no                                |
+
+## VBA269
+
+**Variable read before assignment.** A procedure-local scalar variable is read on a control-flow path where no assignment is guaranteed to have executed.
+
+| Property                    | Value                              |
+| --------------------------- | ---------------------------------- |
+| Family                      | `analyze`                          |
+| Category                    | `reliability`                      |
+| Evidence class              | `inference`                        |
+| Compile-equivalent          | no                                 |
+| Default severity            | `warning`                          |
+| Supported severities        | `warning`, `information`           |
+| Surfaces                    | `analyze`, `lsp`                   |
+| Scope                       | `procedure-local`                  |
+| Precision                   | `high`                             |
+| Enabled by default          | no                                 |
+| Configuration               | `detect_unassigned_variable_usage` |
+| Inline suppression          | yes                                |
+| Blocks source preflight     | no                                 |
+| Real-time editor diagnostic | yes                                |
+| Fix available               | no                                 |

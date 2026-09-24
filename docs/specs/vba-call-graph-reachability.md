@@ -2,14 +2,17 @@
 
 ## Scope
 
-The opt-in `VB021` rule reports only private procedures that are definitely
-unreachable from the known project roots. It uses the project-wide call graph
-assembled by `internal/vba/callgraph` and the root classification in
-`internal/vba/reachability`.
+The opt-in `VB021` rule reports procedures that have no host-facing entry
+surface and are definitely unreachable from the known project roots. The
+reportable set covers `Private` and `Friend` procedures, plus `Public`
+procedures inside a host-hidden module — a standard or class module that
+declares `Option Private Module` and does not set `VB_Exposed = True`. It uses
+the project-wide call graph assembled by `internal/vba/callgraph` and the root
+classification in `internal/vba/reachability`.
 
 ## Root classification
 
-The root set is built before private procedures are classified. It includes:
+The root set is built before internal procedures are classified. It includes:
 
 - the configured `[project].entry` when it resolves uniquely;
 - public or implicitly public, argument-free `Sub` procedures in standard
@@ -18,13 +21,28 @@ The root set is built before private procedures are classified. It includes:
   procedures in standard modules as possible API roots, because callers from
   Excel, worksheet formulas, or external VBA are not present in the project
   call graph;
-- test procedures in standard modules;
+
+- test procedures (`Test*`/`*_Test` public `Sub`s) in standard modules as
+  confirmed roots, and the fixed per-module `BeforeAll`/`AfterAll`/
+  `BeforeEach`/`AfterEach` public `Sub` hooks as possible roots. The
+  generated xlflow test runner is injected as a standard module inside the
+  same VBA project and invokes tests and hooks through qualified
+  `Module.Name` calls, so `Option Private Module` — which only hides members
+  from the host and other projects — does not make them unreachable;
+- public members of `VB_Exposed = True` class modules as possible roots,
+  because external clients can invoke them without a project caller;
 - `Auto_Open` and `Auto_Close`;
 - recognized `Workbook_*` and `Worksheet_*` host-event procedures in document
   modules; the prefix alone does not make an arbitrary helper an event;
 - UserForm event procedures and control event procedures when form metadata is
   available; and
 - procedures whose names match a `WithEvents` field callback in the same class.
+
+`Friend` members and `Public` procedures in a host-hidden module are not
+roots: `Friend` is callable only inside the project, and `Option Private
+Module` removes the host-visible surface unless the module carries
+`VB_Exposed = True`. A module file that cannot be read from disk fails open —
+its public procedures keep their external classification and remain roots.
 
 An entry that cannot be resolved exactly is matched against procedure-name
 candidates as a possible root. Ambiguous roots are possible roots, never
@@ -60,8 +78,8 @@ never reported as definitely unreachable.
 
 ## Reporting
 
-`VB021` is emitted once at most for each unreachable private declaration. A
-private-only connected component of the unreachable confirmed-edge graph is
+`VB021` is emitted once at most for each unreachable reportable declaration. A
+connected component of the unreachable confirmed-edge graph is
 reported as one cluster context on its representative diagnostic; the
 declarations in the component still retain individual locations so existing
 inline suppression remains line-based. Dynamic references never become graph

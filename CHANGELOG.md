@@ -13,6 +13,17 @@ All notable changes to xlflow will be documented in this file.
   `detect_worksheet_string_access`,
   `detect_application_worksheet_function_dispatch`, and
   `detect_host_bracket_expressions`.
+- Added opt-in `VBA265`–`VBA269` diagnostics for broader unused-declaration
+  analysis: unused private-procedure parameters (`detect_unused_parameters`),
+  unreferenced `Private Const` declarations
+  (`detect_unused_private_constants`), never-accessed `Private Type` members
+  (`detect_unused_udt_members`), local scalar variables that are read but
+  never assigned (`detect_never_assigned_variables`), and scalar variables
+  read before a guaranteed assignment (`detect_unassigned_variable_usage`).
+  All five run in batch, realtime, and LSP analysis.
+- Extended `VB021` unused-procedure analysis to report unreachable `Friend`
+  procedures and `Public` procedures inside host-hidden (`Option Private
+Module`, non-`VB_Exposed`) modules.
 - Added opt-in `VBA257` warning and `VBA258` information diagnostics for
   discarded `Function`/`Property Get` return values. `VBA257` reports
   standalone call statements that drop a resolved return value in batch,

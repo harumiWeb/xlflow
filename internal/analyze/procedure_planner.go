@@ -43,6 +43,12 @@ const (
 	featureScalarAssignment
 	featureHostBracket
 	featureSelectCase
+	// featureLocalVariable records that the procedure declares a non-const
+	// local variable, which is the candidate population for assignment
+	// analysis.
+	featureLocalVariable
+	// featureParameter records that the procedure declares parameters.
+	featureParameter
 	procedureFeatureLimit
 )
 
@@ -82,6 +88,12 @@ func (features *procedureFeatureSet) observeDeclaration(declaration procedureir.
 	if declaration.Recovered || len(declaration.ConditionalBranches) > 0 {
 		features.addUnknown(uncertainProcedureFeatures)
 		return
+	}
+	if declaration.Scope == procedureir.ScopeParameter {
+		features.add(featureParameter)
+	}
+	if declaration.Scope == procedureir.ScopeLocal && !declaration.IsConst && declaration.Kind != "return_slot" {
+		features.add(featureLocalVariable)
 	}
 	if declaration.IsArray || declaration.ValueShape == procedureir.ValueShapeFixedArray || declaration.ValueShape == procedureir.ValueShapeDynamicArray {
 		features.add(featureArray)
@@ -370,6 +382,9 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA250", domain: analysisstats.DomainExcel, any: featureUIState, capabilities: projectCapabilityTypeDB | projectCapabilityResolution},
 	{id: "VBA262", domain: analysisstats.DomainExcel, any: featureHostBracket},
 	{id: "VBA256", domain: analysisstats.DomainOther, any: featureScalarAssignment},
+	{id: "VBA265", domain: analysisstats.DomainOther, any: featureParameter},
+	{id: "VBA268", domain: analysisstats.DomainOther, any: featureLocalVariable},
+	{id: "VBA269", domain: analysisstats.DomainOther, any: featureLocalVariable},
 	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
 	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureApplicationState, capabilities: projectCapabilityEventReentry},
 	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
@@ -497,6 +512,9 @@ const (
 	procedureProjectionApplicationReentry
 	procedureProjectionDeadStore
 	procedureProjectionSelectCase
+	procedureProjectionUnusedParameter
+	procedureProjectionNeverAssigned
+	procedureProjectionUnassignedRead
 	procedureProjectionLimit
 )
 
@@ -611,6 +629,12 @@ func procedureProjectionForRequirement(requirement procedureRuleRequirement) pro
 		return procedureProjectionDeadStore
 	case "VBA259":
 		return procedureProjectionSelectCase
+	case "VBA265":
+		return procedureProjectionUnusedParameter
+	case "VBA268":
+		return procedureProjectionNeverAssigned
+	case "VBA269":
+		return procedureProjectionUnassignedRead
 	}
 	// A future requirement must still be represented in a plan. Falling back
 	// to the first projection in its domain is conservative and keeps unknown

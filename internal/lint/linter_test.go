@@ -2939,6 +2939,67 @@ End Sub
 	}
 }
 
+func TestLinterVB021RootsHostHiddenTestProceduresAndHooks(t *testing.T) {
+	// Option Private Module hides members from the host and other projects,
+	// but the generated test runner is injected into the same VBA project and
+	// calls Module.TestName plus the BeforeAll/AfterAll hooks directly.
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Hidden.bas", `Option Private Module
+Public Sub BeforeAll()
+End Sub
+
+Public Sub TestWorkflow()
+  Helper
+End Sub
+
+Private Sub Helper()
+End Sub
+
+Public Sub HiddenPublic()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	if len(got) != 1 || got[0].Symbol != "HiddenPublic" {
+		t.Fatalf("host-hidden test procedure, hook, and private callee should stay reachable; only HiddenPublic reports: %+v", got)
+	}
+}
+
+func TestLinterVB021RootsExposedClassPublicMembers(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Service.cls", `Attribute VB_Name = "Service"
+Attribute VB_Exposed = True
+Option Explicit
+Public Function Serve(ByVal value As String) As String
+  Serve = Helper(value)
+End Function
+
+Private Function Helper(ByVal value As String) As String
+  Helper = value
+End Function
+
+Private Sub Orphan()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	if len(got) != 1 || got[0].Symbol != "Orphan" {
+		t.Fatalf("exposed class member reachability = %+v", got)
+	}
+}
+
 func TestLinterVB021RecognizesEventsAndWithEventsHandlers(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -3047,6 +3108,105 @@ End Sub
 				t.Fatalf("rooted event procedure was reported: %s (%+v)", name, got)
 			}
 		}
+	}
+}
+
+func TestLinterVB021ReportsUnreachableFriendProcedures(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Friend Sub FriendOrphan()
+End Sub
+
+Friend Sub FriendUsed()
+End Sub
+
+Public Sub Run()
+  FriendUsed
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	if len(got) != 1 || got[0].Symbol != "FriendOrphan" {
+		t.Fatalf("VB021 friend reachability = %+v, want FriendOrphan only", got)
+	}
+}
+
+func TestLinterVB021ReportsPublicProceduresHiddenByOptionPrivateModule(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Hidden.bas", `Attribute VB_Name = "Hidden"
+Option Explicit
+Option Private Module
+Public Sub HiddenPublic()
+End Sub
+
+Private Sub HiddenPrivate()
+End Sub
+`)
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Project.Entry = "Missing.Run"
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	symbols := map[string]bool{}
+	for _, issue := range got {
+		symbols[issue.Symbol] = true
+	}
+	if !symbols["HiddenPublic"] || !symbols["HiddenPrivate"] {
+		t.Fatalf("VB021 host-hidden module findings = %+v, want HiddenPublic and HiddenPrivate", got)
+	}
+}
+
+func TestLinterVB021KeepsExposedModulePublicSurfaceAsRoots(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Exposed.bas", `Attribute VB_Name = "Exposed"
+Attribute VB_Exposed = True
+Option Explicit
+Option Private Module
+Public Sub ExposedApi()
+End Sub
+
+Private Sub ExposedOrphan()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Project.Entry = "Missing.Run"
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	for _, issue := range got {
+		if issue.Symbol == "ExposedApi" {
+			t.Fatalf("VB_Exposed public procedure was reported: %+v", issue)
+		}
+	}
+	found := false
+	for _, issue := range got {
+		if issue.Symbol == "ExposedOrphan" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("private orphan in exposed module was not reported: %+v", got)
 	}
 }
 

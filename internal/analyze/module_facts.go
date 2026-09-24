@@ -3,6 +3,7 @@ package analyze
 import (
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
@@ -44,6 +45,25 @@ type moduleAnalysisFacts struct {
 	arrayOperationsByName map[string][]moduleArrayOperationFact
 	arrayOperationsByLine map[int][]moduleArrayOperationFact
 	lineFacts             []moduleSourceLineFact
+
+	// unusedDecl caches the per-file scans shared by every procedure's
+	// unused-declaration eligibility checks (VBA265). The scans depend only on
+	// the file revision, so computing them per procedure would rescale the
+	// rule by procedure count.
+	unusedDeclOnce sync.Once
+	unusedDecl     *unusedDeclFileFacts
+}
+
+// unusedDeclFileFacts holds the immutable per-file scans used by the
+// unused-declaration rules. literalNames contains every identifier token and
+// dotted path found inside string literals, lowercased: a token `a.b` stores
+// `a.b`, `a`, and `b` so both qualified and unqualified dynamic-entry lookups
+// are set memberships.
+type unusedDeclFileFacts struct {
+	withEventsFields   map[string]struct{}
+	withEventsComplete bool
+	implementsTargets  []string
+	literalNames       map[string]bool
 }
 
 type moduleOptionState uint8
@@ -570,6 +590,90 @@ func (facts *moduleAnalysisFacts) privateModuleState() moduleOptionState {
 
 func (facts *moduleAnalysisFacts) privateModulePresent() bool {
 	return facts.privateModuleState() == moduleOptionPresent
+}
+
+// unusedDeclarationFacts lazily builds and caches the per-file
+// unused-declaration scans. The lines argument must be the same revision the
+// facts object was built from; callers always pass file.Lines.
+func (facts *moduleAnalysisFacts) unusedDeclarationFacts(lines []string) *unusedDeclFileFacts {
+	if facts == nil {
+		return buildUnusedDeclFileFacts(lines)
+	}
+	facts.unusedDeclOnce.Do(func() {
+		facts.unusedDecl = buildUnusedDeclFileFacts(lines)
+	})
+	return facts.unusedDecl
+}
+
+// buildUnusedDeclFileFacts performs the three source scans VBA265 eligibility
+// needs for a whole file: WithEvents fields, Implements targets, and the
+// identifier tokens inside string literals.
+func buildUnusedDeclFileFacts(lines []string) *unusedDeclFileFacts {
+	fields, complete := userFormWithEventsFieldNames(strings.Join(lines, "\n"))
+	facts := &unusedDeclFileFacts{
+		withEventsFields:   fields,
+		withEventsComplete: complete,
+		implementsTargets:  moduleImplementsTargets(lines),
+		literalNames:       make(map[string]bool),
+	}
+	for _, line := range lines {
+		forEachStringLiteral(line, func(literal string) {
+			addStringLiteralNames(facts.literalNames, literal)
+		})
+	}
+	return facts
+}
+
+// forEachStringLiteral visits each complete string literal on a source line,
+// handling doubled-quote escapes.
+func forEachStringLiteral(line string, visit func(literal string)) {
+	for i := 0; i < len(line); i++ {
+		if line[i] != '"' {
+			continue
+		}
+		j := i + 1
+		for j < len(line) {
+			if line[j] == '"' {
+				if j+1 < len(line) && line[j+1] == '"' {
+					j += 2
+					continue
+				}
+				break
+			}
+			j++
+		}
+		if j >= len(line) {
+			break
+		}
+		visit(line[i+1 : j])
+		i = j
+	}
+}
+
+// addStringLiteralNames records every identifier token in a literal plus each
+// segment of dotted paths, so `"Main.Helper"` indexes `main.helper`, `main`,
+// and `helper`.
+func addStringLiteralNames(names map[string]bool, literal string) {
+	start := -1
+	for i := 0; i <= len(literal); i++ {
+		if i < len(literal) && (isIdentifierByte(literal[i]) || literal[i] == '.') {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if start < 0 {
+			continue
+		}
+		token := strings.ToLower(literal[start:i])
+		names[token] = true
+		for segment := range strings.SplitSeq(token, ".") {
+			if segment != "" {
+				names[segment] = true
+			}
+		}
+		start = -1
+	}
 }
 
 // forEachArrayOperationFor visits a copy of each operation for one canonical

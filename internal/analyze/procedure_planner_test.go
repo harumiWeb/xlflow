@@ -699,6 +699,7 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		"VBA203/application_state": true, "VBA220/application_state": true, "VBA221/application_state": true,
 		"VBA256/other": true,
 		"VBA259/other": true,
+		"VBA265/other": true, "VBA268/other": true, "VBA269/other": true,
 	}
 	seen := map[string]bool{}
 	always := map[string]bool{}

@@ -2735,17 +2735,17 @@ func (l Linter) unusedPrivateProcedureIssues(symbolResult *symbols.Result, callR
 	var issues []Issue
 	for _, file := range symbolResult.Files {
 		for _, sym := range file.Symbols {
-			if !procedureSymbolKind(sym.Kind) || !strings.EqualFold(sym.Visibility, "Private") {
+			if !procedureSymbolKind(sym.Kind) || strings.TrimSpace(sym.Name) == "" {
 				continue
 			}
 			key := callgraph.ID{
 				Module: sym.Module, QualifiedName: sym.Module + "." + sym.Name,
 				Kind: sym.Kind, File: sym.File, Line: sym.StartLine, Column: sym.StartColumn,
 			}.String()
-			if !unreachable[key] {
+			if !unreachable[key] || !analysis.Reportable[key] {
 				continue
 			}
-			issue := l.issueForSymbol(sym, "VB021", "warning", "Private procedure is not reachable from any known project root.")
+			issue := l.issueForSymbol(sym, "VB021", "warning", "Procedure is not reachable from any known project root.")
 			issue.Symbol = sym.Name
 			if context := clusterByNode[key]; context != "" {
 				issue.Context = context

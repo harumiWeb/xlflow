@@ -317,6 +317,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_missing_http_timeout`
 - `detect_multiple_declarator_clarity`
 - `detect_nested_with_ambiguity`
+- `detect_never_assigned_variables`
 - `detect_non_short_circuit_object_guard`
 - `detect_object_array_comparison`
 - `detect_object_use_before_set`
@@ -331,6 +332,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_risky_module_state`
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
+- `detect_unassigned_variable_usage`
 - `detect_unavailable_worksheet_function_members`
 - `detect_unbound_default_member_access`
 - `detect_unreachable_select_case`
@@ -342,7 +344,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_unstable_last_row_patterns`
 - `detect_untrusted_data_flow`
 - `detect_unused_local_variables`
+- `detect_unused_parameters`
+- `detect_unused_private_constants`
 - `detect_unused_private_procedures`
+- `detect_unused_udt_members`
 - `detect_value2_performance_opportunities`
 - `detect_worksheet_root_mismatch`
 - `detect_worksheet_string_access`

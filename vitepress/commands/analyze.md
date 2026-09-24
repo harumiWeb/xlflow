@@ -265,6 +265,11 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA255` | information / warning | Bang notation (`receiver!name`) relies on stringly typed/default-member semantics.                                                                                   |
 | `VBA256` | warning               | A procedure-local scalar assignment is never read before the value is overwritten or the procedure exits.                                                            |
 | `VBA259` | warning               | A `Select Case` item or `Case Else` branch can never execute because earlier `Case` items already cover every matching selector value.                               |
+| `VBA265` | warning               | A private-procedure parameter is never referenced in the procedure body.                                                                                             |
+| `VBA266` | warning               | A module-level `Private Const` declaration is never referenced in the module.                                                                                        |
+| `VBA267` | information           | A `Private Type` member is never accessed through a resolvable member expression.                                                                                    |
+| `VBA268` | warning               | A procedure-local scalar variable is read but never assigned.                                                                                                        |
+| `VBA269` | warning               | A procedure-local variable is read on a path where no assignment is guaranteed to have executed.                                                                     |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -301,6 +306,13 @@ scalar assignments. Enable it with `detect_dead_stores = true`.
 `VBA259` is opt-in and reports `Select Case` items or `Case Else` branches
 that can never execute because earlier items already cover every matching
 selector value. Enable it with `detect_unreachable_select_case = true`.
+
+`VBA265` through `VBA269` are opt-in unused-declaration rules; enable them with
+`detect_unused_parameters`, `detect_unused_private_constants`,
+`detect_unused_udt_members`, `detect_never_assigned_variables`, and
+`detect_unassigned_variable_usage`. They exclude externally fixed signatures —
+event handlers, `Implements` members, `WithEvents` callbacks, and dynamically
+invoked procedures — and fail open on unresolved or ambiguous shapes.
 Complete default-member runtime failures are reported by `VBA249`, while
 `VBA202` retains ownership of proven error-91 object-use-before-`Set`/`Nothing`
 cases.
