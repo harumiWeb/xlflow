@@ -438,6 +438,161 @@ End Sub
 	}
 }
 
+func parameterFindingMentions(finding Finding, name string) bool {
+	return strings.Contains(finding.Message, "parameter "+name+" ")
+}
+
+func TestParameterPassingPropagatesNamedByRefArgumentsRegardlessOfWidth(t *testing.T) {
+	// A named argument binds its value expression: alpha:=x must not lose the
+	// value to the wider label, and a:=x must not lose it to the label on a
+	// width tie.
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
+Private Sub Mutate(ByRef a As Long, ByRef b As Long)
+    a = 1
+End Sub
+
+Private Sub MutateLong(ByRef alpha As Long)
+    alpha = 1
+End Sub
+
+Private Sub Forward(ByRef x As Long, ByRef y As Long)
+    Mutate a:=x, b:=y
+End Sub
+
+Private Sub ForwardLong(ByRef z As Long)
+    MutateLong alpha:=z
+End Sub
+`})
+	got := findingsByCode(findings, "VBA272")
+	for _, finding := range got {
+		if finding.Procedure == "Forward" && parameterFindingMentions(finding, "x") {
+			t.Fatalf("VBA272 reported parameter written through a:=x: %+v", finding)
+		}
+		if finding.Procedure == "ForwardLong" {
+			t.Fatalf("VBA272 reported parameter written through alpha:=z: %+v", finding)
+		}
+	}
+	found := false
+	for _, finding := range got {
+		if finding.Procedure == "Forward" && parameterFindingMentions(finding, "y") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("VBA272 findings = %+v, want Forward.y bound to never-written b", got)
+	}
+}
+
+func TestParameterPassingPropagatesIndexedElementByRefArguments(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
+Private Sub Mutate(ByRef v As Long)
+    v = 1
+End Sub
+
+Private Sub ForwardElem(ByRef arr As Variant)
+    Mutate arr(0)
+End Sub
+
+Private Sub ForwardElemCall(ByRef items As Variant)
+    Call Mutate(items(0))
+End Sub
+
+Private Sub SwapElem(ByRef v As Variant, ByRef i As Long, ByRef j As Long)
+    Mutate v(i)
+    Mutate v(j)
+End Sub
+
+Private Sub DoubleParenElem(ByRef arr As Variant)
+    Call Mutate((arr(0)))
+End Sub
+
+Private Sub ForwardMemberElem(ByRef arr As Variant)
+    Call Mutate(arr(0).Left)
+End Sub
+`})
+	got := findingsByCode(findings, "VBA272")
+	for _, finding := range got {
+		switch finding.Procedure {
+		case "ForwardElem", "ForwardElemCall", "ForwardMemberElem", "SwapElem":
+			t.Fatalf("VBA272 reported element-forwarded parameter: %+v", finding)
+		}
+	}
+	// Call Mutate((arr(0))) double-parenthesizes the element to a value: arr
+	// is genuinely never written. SwapElem index reads inside v(i)/v(j) stay
+	// possiblyWritten like reads inside any computed argument.
+	want := map[string]bool{"DoubleParenElem.arr": false}
+	for _, finding := range got {
+		for param := range map[string]bool{"arr": true, "i": true, "j": true} {
+			if parameterFindingMentions(finding, param) {
+				want[finding.Procedure+"."+param] = true
+			}
+		}
+	}
+	for key, found := range want {
+		if !found {
+			t.Fatalf("VBA272 findings = %+v, want true positive %s", got, key)
+		}
+	}
+}
+
+func TestParameterPassingTreatsIndexedStatementOperandsAsWrites(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
+Private Type Pair
+    Left As Long
+End Type
+
+Private Type Outer
+    Items(0 To 4) As Pair
+End Type
+
+Private Sub WipeElem(ByRef arr As Variant)
+    Erase arr(0)
+End Sub
+
+Private Sub ReadIntoElem(ByRef arr As Variant)
+    Get #1, , arr(0)
+End Sub
+
+Private Sub WithElem(ByRef v As Variant)
+    With v(0)
+        .Left = 1
+    End With
+End Sub
+
+Private Sub WithMemberElem(ByRef p As Outer)
+    With p.Items(0)
+        .Left = 1
+    End With
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for indexed statement operands", got)
+	}
+}
+
+func TestParameterPassingTreatsBracketedAndShadowedTypeMemberWrites(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
+Private Type Pair
+    Left As Long
+End Type
+
+Private Type Collection
+    X As Long
+End Type
+
+Private Sub MutateBracket(ByRef [My Field] As Pair)
+    [My Field].Left = 1
+End Sub
+
+Private Sub MutateShadow(ByRef p As Collection)
+    p.X = 1
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for bracketed/shadowed member writes", got)
+	}
+}
+
 func TestParameterPassingSkipsConstrainedEventAndImplementsSignatures(t *testing.T) {
 	cfg := config.Default()
 	cfg.Analyze.DetectImplicitByRefParameters = true

@@ -207,9 +207,12 @@ func directParameterMutationSummary(proc sourceProcedure, udtTypes, objectTypes 
 	for _, statement := range proc.IR.Statements {
 		if statement.Target != nil && strings.ContainsAny(statement.Target.Text, ".!") {
 			root := parameterMemberTargetRoot(statement.Target.Text)
-			if root == "" && statement.Target.Kind == procedureir.ExpressionMember {
+			if _, ok := summary[root]; !ok && statement.Target.Kind == procedureir.ExpressionMember {
 				// Implicit member targets (.Left = 1) resolve through the
-				// enclosing With receiver instead of the leading text.
+				// enclosing With receiver instead of the leading text. A
+				// text root that matches no parameter (for example a
+				// bracketed name truncated at an interior space) falls back
+				// to expression resolution as well.
 				root = parameterExprRootName(exprByID, withReceiver, statement.Target.ID, 0)
 			}
 			recordParameterMemberWrite(summary, proc.IR.Symbol.Parameters, root, udtTypes, objectTypes)
@@ -288,6 +291,13 @@ func parameterExprRootName(exprByID map[int]procedureir.Expression, withReceiver
 			return parameterExprRootName(exprByID, withReceiver, expression.Children[0], depth+1)
 		}
 		return ""
+	case procedureir.ExpressionCall:
+		// arr(0) is rooted at its callee: the callee identifier is metadata
+		// recorded as the first child expression but emits no access.
+		if len(expression.Children) > 0 {
+			return parameterExprRootName(exprByID, withReceiver, expression.Children[0], depth+1)
+		}
+		return ""
 	default:
 		return ""
 	}
@@ -298,12 +308,18 @@ func recordParameterMemberWrite(summary parameterMutationSummary, parameters []p
 		return
 	}
 	parameter, ok := parameterByName(parameters, root)
-	if !ok || parameterTypeIsObject(parameter.Type, objectTypes) {
+	if !ok {
 		return
 	}
 	state := parameterPossiblyWritten
-	if parameterTypeIsUDT(parameter.Type, udtTypes) {
+	switch {
+	case parameterTypeIsUDT(parameter.Type, udtTypes):
+		// A user-defined type shadows builtin object type names in module
+		// scope, so the UDT check runs before the object check.
 		state = parameterWritten
+	case parameterTypeIsObject(parameter.Type, objectTypes):
+		// Object member writes never rebind the reference.
+		return
 	}
 	summary[root] = max(summary[root], state)
 }
@@ -326,6 +342,14 @@ func recordParameterWriteTarget(summary parameterMutationSummary, proc sourcePro
 	case procedureir.ExpressionMember:
 		root := parameterExprRootName(exprByID, withReceiver, expressionID, 0)
 		recordParameterMemberWrite(summary, proc.IR.Symbol.Parameters, root, udtTypes, objectTypes)
+	case procedureir.ExpressionCall:
+		// Erase arr(0) or Get #1,,arr(0) writes through one element: the
+		// binding survives, but the caller-visible contents may change.
+		if name := parameterExprRootName(exprByID, withReceiver, expressionID, 0); name != "" {
+			if _, ok := summary[name]; ok {
+				summary[name] = max(summary[name], parameterPossiblyWritten)
+			}
+		}
 	default:
 		markParameterSubtreePossiblyWritten(summary, proc.IR, accessesByExpression, expressionID)
 	}
@@ -344,6 +368,13 @@ func markParameterSubtreePossiblyWritten(summary parameterMutationSummary, proce
 
 func parameterMemberTargetRoot(text string) string {
 	text = strings.TrimSpace(text)
+	if strings.HasPrefix(text, "[") {
+		// Bracketed identifiers ([My Field].Left) may contain any
+		// characters up to the closing bracket; consume them whole.
+		if close := strings.IndexByte(text, ']'); close >= 0 {
+			return parameterName(text[:close+1])
+		}
+	}
 	end := 0
 	for end < len(text) {
 		char := text[end]
@@ -403,14 +434,13 @@ func propagateParameterCallMutations(record *parameterMutationRecord, records ma
 					}
 				}
 			}
-			// An implicit member argument (Call Replace(.Left) inside a With
-			// block) carries no receiver access, so resolve the member root
-			// through the enclosing With receiver.
-			if expression, ok := record.exprByID[expressionID]; ok && expression.Kind == procedureir.ExpressionMember {
-				if name := parameterExprRootName(record.exprByID, record.withReceiver, expressionID, 0); name != "" && !handled[name] {
-					if record.applyArgumentMutation(call, expressionID, name, false, records) {
-						changed = true
-					}
+			// Arguments whose root emits no receiver access — an implicit
+			// member (Call Replace(.Left)) inside a With block, or an
+			// indexed call (arr(0)) whose callee identifier is metadata —
+			// resolve the expression root directly.
+			if name := parameterExprRootName(record.exprByID, record.withReceiver, expressionID, 0); name != "" && !handled[name] {
+				if record.applyArgumentMutation(call, expressionID, name, false, records) {
+					changed = true
 				}
 			}
 		}

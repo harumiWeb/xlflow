@@ -44,7 +44,8 @@ members, Property Let/Set value parameters, arrays, and `ParamArray`.
 
 The proof starts with direct parameter writes and propagates through uniquely
 resolved project-local calls. Positional and named arguments are mapped to
-the callee signature. A write by a callee's effective `ByRef` parameter is a
+the callee signature; a named argument binds its value expression regardless
+of the label length. A write by a callee's effective `ByRef` parameter is a
 write by the caller; a resolved `ByVal` parameter is not. Ambiguous,
 unresolved, external, recovered, or conditional-compiled call boundaries are
 treated as possibly writing and suppress the diagnostic.
@@ -54,7 +55,10 @@ object's members through a parameter does not require the caller variable
 itself to be `ByRef`. A member write on a known user-defined type does mutate
 the caller-visible value and therefore prevents the recommendation. Unknown
 composite types fail open, including when a nested member is passed through a
-potentially writing `ByRef` call.
+potentially writing `ByRef` call. An argument rooted at an indexed call or a
+member of an indexed call (`Mutate arr(0)`, `Call Mutate(arr(0).Left)`)
+counts as an element-level write of the rooted parameter, not a binding
+replacement, so it suppresses the diagnostic without reporting `VBA271`.
 
 Member writes are resolved through `With` blocks as well: an implicit member
 target (`.Left = 1`) or an implicit member passed to a writing callee
@@ -67,11 +71,14 @@ parameter.
 `Erase`, `Input #`, `Line Input #`, and `Get #` write their variable
 operands directly and count as parameter writes; the file-number operand and
 the `Get` record operand remain reads, and `Put #` writes the file rather
-than the variable. An indexed element write such as `value(0) = 1` is not a
-binding replacement, but it can be caller-visible, so it suppresses the
-diagnostic without reporting `VBA271`. A parenthesized call argument
-(`Call Mutate((x))`) forces `ByVal` evaluation and does not propagate a
-write.
+than the variable. Indexed operands (`Erase arr(0)`, `Get #1, , arr(0)`)
+count as element writes of the rooted parameter. An indexed element write
+such as `value(0) = 1` is not a binding replacement, but it can be
+caller-visible, so it suppresses the diagnostic without reporting `VBA271`.
+A parenthesized call argument (`Call Mutate((x))`) forces `ByVal`
+evaluation and does not propagate a write. The `With` receiver itself may
+be an indexed member (`With p.Items(0)`); implicit member writes inside it
+resolve to the receiver's root parameter.
 
 ### VBA273 — misleading Property value ByRef
 
@@ -102,22 +109,25 @@ style choice.
 
 ## Parity mapping
 
-| Inspection intent               | xlflow   | Coverage notes                                                                                                                                   |
-| ------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Implicit ByRef modifier         | `VBA270` | Ordinary procedures; constrained signatures excluded.                                                                                            |
-| Assigned ByVal parameter        | `VBA271` | Canonical IR writes, including effective Property value semantics.                                                                               |
-| Parameter can be ByVal          | `VBA272` | Direct writes, `With` implicit members, `Erase`/`Input #`/`Get #` operands, plus project-local call-chain summary; unknown boundaries fail open. |
-| Misleading Property value ByRef | `VBA273` | Final Property Let/Set value parameter only; constrained signatures excluded.                                                                    |
-| Redundant ByRef modifier        | `VBA274` | Mutually exclusive configuration with `VBA270`; `ParamArray` excluded.                                                                           |
+| Inspection intent               | xlflow   | Coverage notes                                                                                                                                                                            |
+| ------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Implicit ByRef modifier         | `VBA270` | Ordinary procedures; constrained signatures excluded.                                                                                                                                     |
+| Assigned ByVal parameter        | `VBA271` | Canonical IR writes, including effective Property value semantics.                                                                                                                        |
+| Parameter can be ByVal          | `VBA272` | Direct writes, `With` implicit members, `Erase`/`Input #`/`Get #` operands, indexed element arguments and receivers, plus project-local call-chain summary; unknown boundaries fail open. |
+| Misleading Property value ByRef | `VBA273` | Final Property Let/Set value parameter only; constrained signatures excluded.                                                                                                             |
+| Redundant ByRef modifier        | `VBA274` | Mutually exclusive configuration with `VBA270`; `ParamArray` excluded.                                                                                                                    |
 
 ## Verification contract
 
 Focused tests cover direct and transitive writes, read-only parameters,
-unknown targets, named arguments, object-member mutation versus UDT-member
-mutation and binding replacement, `With`-block implicit member writes and
-call arguments, `Erase`/`Input #`/`Line Input #`/`Get #` operand writes,
-indexed element writes, parenthesized forced-`ByVal` arguments, array and
-`ParamArray` exclusions, Property Let/Set final-parameter semantics,
+unknown targets, named arguments including labels wider than their values,
+object-member mutation versus UDT-member mutation and binding replacement,
+`With`-block implicit member writes and call arguments,
+`Erase`/`Input #`/`Line Input #`/`Get #` operand writes, indexed
+element writes, indexed element arguments and `With` receivers,
+bracketed parameter names, user-defined types shadowing builtin object type
+names, parenthesized forced-`ByVal` arguments, array and `ParamArray`
+exclusions, Property Let/Set final-parameter semantics,
 host event and `Implements` exclusions, style configuration conflict, inline
 suppression, default-off behavior, batch/realtime parity, and filesystem /
 in-memory parity.

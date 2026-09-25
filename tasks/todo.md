@@ -100,3 +100,34 @@ verified against IR probes and real Excel runtime checks; all valid. Plan:
    not a VBA271 reassignment, still caller-visible so VBA272 stays
    suppressed. Call Mutate((x)) is forced ByVal and no longer propagates.
    Missing mutation summary now returns nil explicitly (fail-open).
+
+# Issue #823 final-review pass 2 follow-up
+
+Review run_7c453f1dc6a5 pass 2 on commit 378b1333. Three confirmed findings
+verified against the report's IR dumps, probe outputs, and the implicated
+source; all valid. Plan:
+
+1. F-P2-1: named-argument ExpressionIDs bind the widest expression in the
+   whole `a:=x` range, so a name at least as long as its value hides the
+   value from propagation (VBA272 false positive) and from every consumer
+   that assumes ExpressionIDs[i] == Named[].ExpressionID
+   (object_use_before_set, array_safety_source_order, object_container_flow,
+   variable_assignment). Fix in procedureir/visitor.go: use
+   argument.valueRange when the argument is named; add a width-inverted
+   regression test for parameter passing and named-argument coverage for the
+   sibling consumers.
+2. F-P2-2: indexed call expressions (arr(0)) emit no receiver access, so
+   element-valued arguments, With receivers, and file-statement operands are
+   invisible to propagation (VBA272 false positives). Fix: resolve
+   ExpressionCall roots through the callee child in parameterExprRootName,
+   generalize the implicit-member argument fallback to a root-resolution
+   fallback for any unhandled argument, and mark ExpressionCall write
+   targets possiblyWritten in recordParameterWriteTarget.
+3. F-P2-3: parameterMemberTargetRoot stops at spaces so [My Field] loses
+   member writes, and parameterTypeIsObject runs before the UDT check so a
+   UDT shadowing a builtin object name (e.g. Collection) drops member
+   writes. Fix: extract bracketed names whole, fall back to expression
+   resolution whenever the text root matches no parameter, and check UDT
+   membership before the builtin object list.
+4. Regression tests for each, plus docs/spec updates (named mapping is now
+   width-independent; element-valued arguments and receivers covered).

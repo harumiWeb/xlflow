@@ -36,7 +36,10 @@ style explicitly.
 `VBA271` and `VBA272` use one project-local parameter-mutation summary.
 Direct writes and read-writes mark a parameter as written. A resolved call
 maps positional and named arguments to the callee signature and propagates a
-write through effective `ByRef` parameters. Ambiguous, external, unresolved,
+write through effective `ByRef` parameters. A named argument binds its
+value expression, not the wider name:=value range, and an argument rooted
+at an indexed call (`arr(0)`) counts as an element-level write rather than
+a binding replacement. Ambiguous, external, unresolved,
 recovered, and conditional-compiled boundaries become `possibly written` and
 suppress `VBA272`. Resolved `ByVal` and `ParamArray` arguments do not
 propagate replacement of the caller's variable.
@@ -45,11 +48,14 @@ The mutation summary also covers statement forms that write a parameter
 without an ordinary assignment or call boundary: `With`-block implicit
 member targets and implicit member call arguments resolve through the
 enclosing `With` receiver, and `Erase`, `Input #`, `Line Input #`, and
-`Get #` write their variable operands. An indexed element write
+`Get #` write their variable operands, including indexed operands
+(`Erase arr(0)`). An indexed element write
 (`value(0) = 1`) is not a binding replacement, so it does not trip
 `VBA271`, but it is still treated as possibly caller-visible and suppresses
 `VBA272`. A parenthesized call argument forces `ByVal` evaluation and does
-not propagate a write.
+not propagate a write. Bracketed parameter names resolve through their
+closing bracket, and a user-defined type shadows a builtin object type name
+for member-write purposes.
 
 The analysis concerns replacement of the argument variable, not mutation of
 an object it references. `target.Caption = ...` on a known object does not
