@@ -1133,6 +1133,38 @@ End Sub
 	}
 }
 
+func TestCallExpressionIDsBindNamedArgumentValues(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+    Foo alpha:=x, b:=yy + 1
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := doc.Procedures[0].Calls[0]
+	if call.Arguments.Count != 2 || len(call.Arguments.ExpressionIDs) != 2 || len(call.Arguments.Named) != 2 {
+		t.Fatalf("named arguments were not captured: %+v", call.Arguments)
+	}
+	// Named labels are metadata: each ExpressionIDs slot must bind the
+	// argument value even when the label is wider than the value text
+	// (alpha:=x), not the widest expression inside the whole argument.
+	expressions := make(map[int]Expression, len(doc.Procedures[0].Expressions))
+	for _, expression := range doc.Procedures[0].Expressions {
+		expressions[expression.ID] = expression
+	}
+	wantText := []string{"x", "yy + 1"}
+	for i, named := range call.Arguments.Named {
+		if call.Arguments.ExpressionIDs[i] != named.ExpressionID {
+			t.Fatalf("named argument %q value expression %d does not match ExpressionIDs[%d]=%d",
+				named.Name, named.ExpressionID, i, call.Arguments.ExpressionIDs[i])
+		}
+		if got := expressions[named.ExpressionID].Text; got != wantText[i] {
+			t.Fatalf("named argument %q binds %q, want value %q", named.Name, got, wantText[i])
+		}
+	}
+}
+
 func TestCallArgumentsIgnoreLineContinuationNodes(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Private Sub Consume(ByRef values() As Byte, ByVal count As Long)

@@ -1463,12 +1463,19 @@ func (v *singleVisitor) finalize() {
 				call.Arguments.Named = nil
 			}
 			for _, argument := range fact.arguments {
-				expressionID := expressionIDWithin(procedure.Expressions, argument.rng)
+				argumentRange := argument.rng
+				if argument.name != "" {
+					// A named argument's caller-side actual is its value: bind
+					// the value expression, not the widest expression inside
+					// the whole name:=value range (the name metadata can be
+					// wider than the value and previously hid it).
+					argumentRange = argument.valueRange
+				}
+				expressionID := expressionIDWithin(procedure.Expressions, argumentRange)
 				call.Arguments.ExpressionIDs = append(call.Arguments.ExpressionIDs, expressionID)
 				if argument.name != "" {
-					valueID := expressionIDWithin(procedure.Expressions, argument.valueRange)
 					call.Arguments.Named = append(call.Arguments.Named, NamedArgument{
-						Name: argument.name, ValueText: argument.valueText, ExpressionID: valueID,
+						Name: argument.name, ValueText: argument.valueText, ExpressionID: expressionID,
 					})
 				}
 			}
