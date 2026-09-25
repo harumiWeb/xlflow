@@ -36,7 +36,10 @@ func buildParameterMutationSummaries(files []parsedFile) map[string]parameterMut
 }
 
 func buildParameterMutationSummariesWithWork(files []parsedFile) (map[string]parameterMutationSummary, parameterMutationWork) {
-	records := make(map[string]*parameterMutationRecord)
+	index := parameterMutationIndex{
+		byKey:  make(map[string]*parameterMutationRecord),
+		byName: make(map[string][]*parameterMutationRecord),
+	}
 	ordered := make([]*parameterMutationRecord, 0)
 	udtTypes, objectTypes := parameterCompositeTypes(files)
 	for _, file := range files {
@@ -55,9 +58,12 @@ func buildParameterMutationSummariesWithWork(files []parsedFile) (map[string]par
 				withReceiver: withReceiver,
 			}
 			registered := false
+			for _, name := range parameterProcedureNames(proc) {
+				index.byName[name] = append(index.byName[name], record)
+			}
 			for _, key := range parameterProcedureKeys(proc) {
-				if _, exists := records[key]; !exists {
-					records[key] = record
+				if _, exists := index.byKey[key]; !exists {
+					index.byKey[key] = record
 					registered = true
 				}
 			}
@@ -67,7 +73,7 @@ func buildParameterMutationSummariesWithWork(files []parsedFile) (map[string]par
 		}
 	}
 
-	callers := parameterMutationCallers(ordered, records)
+	callers := parameterMutationCallers(ordered, index)
 	queue := append([]*parameterMutationRecord(nil), ordered...)
 	queued := make(map[*parameterMutationRecord]bool, len(ordered))
 	for _, record := range queue {
@@ -79,7 +85,7 @@ func buildParameterMutationSummariesWithWork(files []parsedFile) (map[string]par
 		queue = queue[1:]
 		queued[record] = false
 		work.evaluations++
-		if !propagateParameterCallMutations(record, records) {
+		if !propagateParameterCallMutations(record, index) {
 			continue
 		}
 		for _, caller := range callers[record] {
@@ -90,8 +96,8 @@ func buildParameterMutationSummariesWithWork(files []parsedFile) (map[string]par
 		}
 	}
 
-	out := make(map[string]parameterMutationSummary, len(records))
-	for key, record := range records {
+	out := make(map[string]parameterMutationSummary, len(index.byKey))
+	for key, record := range index.byKey {
 		out[key] = record.summary
 	}
 	return out, work
@@ -144,7 +150,34 @@ func parameterWithReceivers(procedure *procedureir.ProcedureIR) map[int]int {
 	return withReceiverExpressions(*procedure)
 }
 
-func parameterMutationCallers(ordered []*parameterMutationRecord, records map[string]*parameterMutationRecord) map[*parameterMutationRecord][]*parameterMutationRecord {
+// parameterMutationIndex stores mutation records under kind-qualified keys
+// so same-named declarations with different procedure kinds (for example a
+// Property Get and Property Let pair) keep separate summaries. The name
+// index supports call candidates whose kind does not disambiguate: a unique
+// name match is reused, while a collision resolves to possiblyWritten.
+type parameterMutationIndex struct {
+	byKey  map[string]*parameterMutationRecord
+	byName map[string][]*parameterMutationRecord
+}
+
+func (index parameterMutationIndex) lookup(qualifiedName string, kind procedureir.ProcedureKind) *parameterMutationRecord {
+	name := strings.ToLower(strings.TrimSpace(qualifiedName))
+	if name == "" {
+		return nil
+	}
+	if k := parameterKindPrefix(kind); k != "procedure" {
+		if record := index.byKey[k+"|"+name]; record != nil {
+			return record
+		}
+	}
+	matches := index.byName[name]
+	if len(matches) == 1 {
+		return matches[0]
+	}
+	return nil
+}
+
+func parameterMutationCallers(ordered []*parameterMutationRecord, index parameterMutationIndex) map[*parameterMutationRecord][]*parameterMutationRecord {
 	callers := make(map[*parameterMutationRecord][]*parameterMutationRecord)
 	seen := make(map[*parameterMutationRecord]map[*parameterMutationRecord]bool)
 	for _, caller := range ordered {
@@ -153,7 +186,7 @@ func parameterMutationCallers(ordered []*parameterMutationRecord, records map[st
 				continue
 			}
 			for _, candidate := range call.Resolution.Candidates {
-				callee := records[strings.ToLower(strings.TrimSpace(candidate.QualifiedName))]
+				callee := index.lookup(candidate.QualifiedName, procedureir.ProcedureKind(candidate.Kind))
 				if callee == nil {
 					continue
 				}
@@ -407,7 +440,7 @@ func parameterTypeIsUDT(typeName string, udtTypes map[string]bool) bool {
 	return udtTypes[normalized] || udtTypes[parameterName(lastName(normalized))]
 }
 
-func propagateParameterCallMutations(record *parameterMutationRecord, records map[string]*parameterMutationRecord) bool {
+func propagateParameterCallMutations(record *parameterMutationRecord, index parameterMutationIndex) bool {
 	proc := record.proc
 	accessesByExpression := make(map[int][]procedureir.VariableAccess)
 	for access := range proc.Accesses.All() {
@@ -429,7 +462,7 @@ func propagateParameterCallMutations(record *parameterMutationRecord, records ma
 					name := parameterName(access.Name)
 					handled[name] = true
 					bareName := parameterArgumentIsBareName(proc.IR, expressionID, name)
-					if record.applyArgumentMutation(call, expressionID, name, bareName, records) {
+					if record.applyArgumentMutation(call, expressionID, name, bareName, index) {
 						changed = true
 					}
 				}
@@ -439,7 +472,7 @@ func propagateParameterCallMutations(record *parameterMutationRecord, records ma
 			// indexed call (arr(0)) whose callee identifier is metadata —
 			// resolve the expression root directly.
 			if name := parameterExprRootName(record.exprByID, record.withReceiver, expressionID, 0); name != "" && !handled[name] {
-				if record.applyArgumentMutation(call, expressionID, name, false, records) {
+				if record.applyArgumentMutation(call, expressionID, name, false, index) {
 					changed = true
 				}
 			}
@@ -470,17 +503,22 @@ func propagateParameterCallMutations(record *parameterMutationRecord, records ma
 // binding outright; member or element arguments follow the member-write
 // rules (object member writes do not rebind, UDT member writes propagate the
 // callee state, unknown composites fail open).
-func (record *parameterMutationRecord) applyArgumentMutation(call procedureir.CallSite, expressionID int, name string, bareName bool, records map[string]*parameterMutationRecord) bool {
+func (record *parameterMutationRecord) applyArgumentMutation(call procedureir.CallSite, expressionID int, name string, bareName bool, index parameterMutationIndex) bool {
 	if _, ok := record.summary[name]; !ok || record.summary[name] == parameterWritten {
 		return false
 	}
-	state := calledArgumentMutation(call, expressionID, records)
+	state := calledArgumentMutation(call, expressionID, index)
 	if !bareName {
 		parameter, found := parameterByName(record.proc.IR.Symbol.Parameters, name)
-		if found && parameterTypeIsObject(parameter.Type, record.objectTypes) {
+		switch {
+		case found && parameterTypeIsUDT(parameter.Type, record.udtTypes):
+			// A user-defined type shadows builtin object type names in module
+			// scope, so the UDT check runs before the object check and member
+			// arguments propagate the callee state.
+		case found && parameterTypeIsObject(parameter.Type, record.objectTypes):
+			// Object member writes never rebind the reference.
 			return false
-		}
-		if !found || !parameterTypeIsUDT(parameter.Type, record.udtTypes) {
+		default:
 			state = parameterPossiblyWritten
 		}
 	}
@@ -528,13 +566,13 @@ func parameterArgumentExpressionIDs(procedure *procedureir.ProcedureIR, root int
 	return ids
 }
 
-func calledArgumentMutation(call procedureir.CallSite, expressionID int, records map[string]*parameterMutationRecord) parameterMutationState {
+func calledArgumentMutation(call procedureir.CallSite, expressionID int, index parameterMutationIndex) parameterMutationState {
 	if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) == 0 {
 		return parameterPossiblyWritten
 	}
 	states := make([]parameterMutationState, 0, len(call.Resolution.Candidates))
 	for _, candidate := range call.Resolution.Candidates {
-		record := records[strings.ToLower(strings.TrimSpace(candidate.QualifiedName))]
+		record := index.lookup(candidate.QualifiedName, procedureir.ProcedureKind(candidate.Kind))
 		if record == nil {
 			return parameterPossiblyWritten
 		}
@@ -583,13 +621,31 @@ func callArgumentParameterIndex(call procedureir.CallSite, expressionID int, par
 	return 0, false
 }
 
-func parameterProcedureKeys(proc sourceProcedure) []string {
+func parameterKindPrefix(kind procedureir.ProcedureKind) string {
+	normalized := strings.ToLower(strings.TrimSpace(string(kind)))
+	if normalized == "" {
+		return "procedure"
+	}
+	return normalized
+}
+
+func parameterProcedureNames(proc sourceProcedure) []string {
 	qualified := strings.ToLower(strings.TrimSpace(proc.IR.Symbol.QualifiedName))
 	moduleQualified := strings.ToLower(strings.TrimSpace(proc.Module + "." + proc.Name))
 	if qualified == "" || qualified == moduleQualified {
 		return []string{moduleQualified}
 	}
 	return []string{qualified, moduleQualified}
+}
+
+func parameterProcedureKeys(proc sourceProcedure) []string {
+	kind := parameterKindPrefix(proc.IR.Symbol.Kind)
+	names := parameterProcedureNames(proc)
+	keys := make([]string, 0, len(names))
+	for _, name := range names {
+		keys = append(keys, kind+"|"+name)
+	}
+	return keys
 }
 
 func effectiveParameterPassing(symbol procedureir.ProcedureSymbol, index int) string {
@@ -611,9 +667,12 @@ func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure
 	if proc.IR == nil || proc.IR.Symbol.Recovered || len(proc.IR.Symbol.ConditionalBranches) > 0 {
 		return nil
 	}
-	summary := summaries[strings.ToLower(strings.TrimSpace(proc.IR.Symbol.QualifiedName))]
-	if summary == nil {
-		summary = summaries[strings.ToLower(strings.TrimSpace(proc.Module+"."+proc.Name))]
+	var summary parameterMutationSummary
+	for _, key := range parameterProcedureKeys(proc) {
+		if s := summaries[key]; s != nil {
+			summary = s
+			break
+		}
 	}
 	if summary == nil {
 		// Fail open: without a mutation record xlflow cannot prove the

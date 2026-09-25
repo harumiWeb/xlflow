@@ -1,3 +1,31 @@
+# PR #845 review follow-up (Issue #823, VBA270-VBA274)
+
+Review comments on internal/analyze/parameter_passing.go. Verified against
+code; both bug reports are valid and in scope. Plan:
+
+1. [Devin + CodeRabbit] Property accessor collision: mutation records are
+   keyed by qualified name only, so Property Get Item and Property Let Item
+   share one summary (first registered wins). VBA272 can falsely claim the
+   Let index parameter is never written; VBA271 can miss a written Let value
+   parameter. Fix: kind-qualify record keys (kind|name) for summary storage
+   and finding lookup; call-edge resolution uses candidate kind when present
+   and falls back to unique-name match or possiblyWritten when ambiguous.
+   Regression test: Property Get before Property Let, Let writes index and
+   assigns value parameter.
+2. [Devin] applyArgumentMutation checks parameterTypeIsObject before
+   parameterTypeIsUDT, so a member argument on a UDT that shadows a builtin
+   object name (Type Collection) drops the propagated write and VBA272
+   falsely fires. Same latent issue family as the recordParameterMemberWrite
+   fix. Fix: UDT check first, matching VBA name-resolution precedence.
+   Regression test: module UDT named Collection, member forwarded to a
+   writing ByRef call.
+
+Advisory (Devin): no executed VBE oracle case IDs. Oracle v1 supports
+compile probes only; the modeled semantics (property value ByVal, forced
+ByVal parens) are covered by byref-parenthesized-variable (accepted) and
+property-signature-valid/invalid at compile level; runtime cases are out of
+scope for the current probe contract. Rules remain opt-in and fail open.
+
 # PR #837 review follow-up (Issue #822, VBA257/VBA258)
 
 Review comments on internal/analyze/discarded_return.go. Verified against IR

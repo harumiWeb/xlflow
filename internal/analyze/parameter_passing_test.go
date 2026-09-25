@@ -593,6 +593,54 @@ End Sub
 	}
 }
 
+func TestParameterPassingTreatsShadowedUDTMemberByRefCallAsCallerVisibleMutation(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
+Private Type Collection
+    X As Long
+End Type
+
+Private Sub Replace(ByRef value As Long)
+    value = 1
+End Sub
+
+Private Sub Forward(ByRef p As Collection)
+    Replace p.X
+End Sub
+`})
+	// The UDT named Collection shadows the builtin object type, so p.X is a
+	// caller-visible member write forwarded through Replace, not an object
+	// member mutation that leaves the binding untouched.
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for shadowed UDT member call", got)
+	}
+}
+
+func TestParameterPassingKeepsSameNamedPropertyAccessorSummariesSeparate(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Widget.cls": `Option Explicit
+Private stored As Long
+
+Public Property Get Item(ByRef index As Long) As Long
+    Item = index
+End Property
+
+Public Property Let Item(ByRef index As Long, ByVal value As Long)
+    index = 2
+    value = index
+End Property
+`})
+	// Both accessors share the qualified name Widget.Item; each must keep its
+	// own mutation summary. The Let accessor writes index, so only the Get
+	// accessor's index may be reported as can-be-ByVal.
+	canByVal := findingsByCode(findings, "VBA272")
+	if len(canByVal) != 1 || canByVal[0].Line >= 8 {
+		t.Fatalf("VBA272 findings = %+v, want only the Property Get index", canByVal)
+	}
+	assigned := findingsByCode(findings, "VBA271")
+	if len(assigned) != 1 || !strings.Contains(assigned[0].Message, "value") {
+		t.Fatalf("VBA271 findings = %+v, want the Property Let value assignment", assigned)
+	}
+}
+
 func TestParameterPassingSkipsConstrainedEventAndImplementsSignatures(t *testing.T) {
 	cfg := config.Default()
 	cfg.Analyze.DetectImplicitByRefParameters = true
@@ -723,7 +771,7 @@ func TestParameterMutationWorklistScalesWithLongCallChain(t *testing.T) {
 	}
 	file := parameterPassingParsedFile(t, source.String())
 	summaries, work := buildParameterMutationSummariesWithWork([]parsedFile{file})
-	if got := summaries["main.step000"]["value"]; got != parameterWritten {
+	if got := summaries["sub|main.step000"]["value"]; got != parameterWritten {
 		t.Fatalf("Step000.value state = %v, want written", got)
 	}
 	if work.records != procedureCount*2 {

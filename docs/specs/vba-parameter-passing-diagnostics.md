@@ -126,11 +126,19 @@ object-member mutation versus UDT-member mutation and binding replacement,
 `Erase`/`Input #`/`Line Input #`/`Get #` operand writes, indexed
 element writes, indexed element arguments and `With` receivers,
 bracketed parameter names, user-defined types shadowing builtin object type
-names, parenthesized forced-`ByVal` arguments, array and `ParamArray`
+names (including member arguments forwarded through calls), parenthesized
+forced-`ByVal` arguments, array and `ParamArray`
 exclusions, Property Let/Set final-parameter semantics,
+same-named Property Get/Let accessor summaries,
 host event and `Implements` exclusions, style configuration conflict, inline
 suppression, default-off behavior, batch/realtime parity, and filesystem /
 in-memory parity.
+
+Mutation summaries are keyed by procedure kind plus qualified name, so a
+`Property Get`/`Let`/`Set` family sharing one name keeps a separate
+record per accessor. Call candidates that carry the accessor kind select the
+matching summary; a candidate whose kind is absent or collides across the
+same-named declarations resolves conservatively to possibly-written.
 
 The Property Let/Set rule describes runtime passing behavior, not a VBE
 compile rejection, so all five registry entries are
