@@ -310,11 +310,12 @@ scalar assignments. Enable it with `detect_dead_stores = true`.
 that can never execute because earlier items already cover every matching
 selector value. Enable it with `detect_unreachable_select_case = true`.
 
-`VBA270` and `VBA271` are opt-in `Option Base` consistency rules; enable them
-with `detect_option_base_array_inconsistency` and
-`detect_option_base_paramarray_inconsistency`. They report only inside modules
-declaring `Option Base 1`, require the `Array` call to resolve to the VBA
-intrinsic, and stay silent for user-defined or shadowed `Array` names.
+`VBA271` and `VBA272` are opt-in `Option Base` consistency rules; enable them
+with `detect_option_base_paramarray_inconsistency` and
+`detect_option_base_array_inconsistency`. They report only inside modules
+declaring `Option Base 1`: `VBA271` reports `ParamArray` parameters, and
+`VBA272` reports `VBA.Array(...)` calls with an explicit `VBA` receiver.
+Unqualified `Array(...)` honors `Option Base` and is not reported.
 
 `VBA265` through `VBA269` are opt-in unused-declaration rules; enable them with
 `detect_unused_parameters`, `detect_unused_private_constants`,

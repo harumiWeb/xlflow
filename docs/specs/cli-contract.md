@@ -1668,15 +1668,16 @@ conservative: event handlers, `Implements` members, dynamically invoked
 procedures, and host-facing signatures are excluded, and unresolved or
 ambiguous shapes fail open rather than report.
 
-`VBA270` and `VBA271` are opt-in, warning-level, non-blocking,
+`VBA271` and `VBA272` are opt-in, warning-level, non-blocking,
 inline-suppressible procedure-local rules available in batch and realtime
 analysis. They report only inside a module that declares `Option Base 1`:
-`VBA270` reports `Array(...)` calls resolved to the VBA intrinsic
-(including explicit `VBA.Array(...)`), and `VBA271` reports `ParamArray`
-parameters, both of which stay zero-based regardless of `Option Base`.
-Project procedures named `Array`, lexical or module-level declarations
-shadowing `Array`, indexed assignment targets, other qualified receivers,
-and every unresolved or ambiguous call shape stay silent. Their detailed
+`VBA271` reports `ParamArray` parameters, and `VBA272` reports calls whose
+base name is `Array` with an explicit `VBA` receiver. `ParamArray` and
+explicitly qualified `VBA.Array(...)` calls remain zero-based regardless of
+`Option Base`. The `VBA.` qualifier cannot be shadowed, so `VBA272` reports
+these calls without consulting call resolution. An unqualified `Array(...)`
+call honors `Option Base` and is not reported. Indexed assignment targets
+and calls qualified by other receivers stay silent. Their detailed
 contracts are defined in
 [Option Base inconsistency diagnostics](vba-option-base-diagnostics.md).
 
