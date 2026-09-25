@@ -245,6 +245,7 @@ type AnalyzeConfig struct {
 	DetectUnusedUDTMembers                    bool     `toml:"detect_unused_udt_members"`
 	DetectNeverAssignedVariables              bool     `toml:"detect_never_assigned_variables"`
 	DetectUnassignedVariableUsage             bool     `toml:"detect_unassigned_variable_usage"`
+	DetectUdfCellReferenceNames               bool     `toml:"detect_udf_cell_reference_names"`
 	DetectOptionBaseArrayInconsistency        bool     `toml:"detect_option_base_array_inconsistency"`
 	DetectOptionBaseParamArrayInconsistency   bool     `toml:"detect_option_base_paramarray_inconsistency"`
 	DevelopmentHTTPOrigins                    []string `toml:"development_http_origins"`
@@ -362,8 +363,9 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA267": {Get: func(c AnalyzeConfig) bool { return c.DetectUnusedUDTMembers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnusedUDTMembers = v }},
 	"VBA268": {Get: func(c AnalyzeConfig) bool { return c.DetectNeverAssignedVariables }, Set: func(c *AnalyzeConfig, v bool) { c.DetectNeverAssignedVariables = v }},
 	"VBA269": {Get: func(c AnalyzeConfig) bool { return c.DetectUnassignedVariableUsage }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnassignedVariableUsage = v }},
-	"VBA270": {Get: func(c AnalyzeConfig) bool { return c.DetectOptionBaseArrayInconsistency }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOptionBaseArrayInconsistency = v }},
+	"VBA270": {Get: func(c AnalyzeConfig) bool { return c.DetectUdfCellReferenceNames }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUdfCellReferenceNames = v }},
 	"VBA271": {Get: func(c AnalyzeConfig) bool { return c.DetectOptionBaseParamArrayInconsistency }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOptionBaseParamArrayInconsistency = v }},
+	"VBA272": {Get: func(c AnalyzeConfig) bool { return c.DetectOptionBaseArrayInconsistency }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOptionBaseArrayInconsistency = v }},
 }
 
 var (

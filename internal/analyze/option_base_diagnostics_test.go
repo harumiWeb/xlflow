@@ -32,7 +32,7 @@ func enableOptionBaseRules(cfg *config.Config) {
 	cfg.Analyze.DetectOptionBaseParamArrayInconsistency = true
 }
 
-// ---------- VBA270: Array call ignores Option Base 1 ----------
+// ---------- VBA272: VBA.Array call ignores Option Base 1 ----------
 
 func TestOptionBaseArrayReportsQualifiedVBAArray(t *testing.T) {
 	findings := runOptionBaseAnalysis(t, map[string]string{"Main.bas": `Option Explicit
@@ -42,16 +42,19 @@ Public Sub Run()
     values = VBA.Array("a", "b", "c")
 End Sub
 `}, enableOptionBaseRules)
-	got := findingsByCode(findings, "VBA270")
+	got := findingsByCode(findings, "VBA272")
 	if len(got) != 1 {
-		t.Fatalf("VBA270 findings = %+v, want one", got)
+		t.Fatalf("VBA272 findings = %+v, want one", got)
 	}
 	if !strings.Contains(got[0].Message, "VBA.Array") {
-		t.Fatalf("VBA270 message = %q, want callee text", got[0].Message)
+		t.Fatalf("VBA272 message = %q, want callee text", got[0].Message)
 	}
 }
 
-func TestOptionBaseArrayReportsUnqualifiedIntrinsic(t *testing.T) {
+// Unqualified `Array(...)` honors `Option Base` per the language reference,
+// so under `Option Base 1` it returns a one-based array — consistent with the
+// module's declared base and never a VBA272 finding.
+func TestOptionBaseArraySkipsUnqualifiedIntrinsic(t *testing.T) {
 	findings := runOptionBaseAnalysis(t, map[string]string{"Main.bas": `Option Explicit
 Option Base 1
 Public Sub Run()
@@ -59,9 +62,9 @@ Public Sub Run()
     values = Array("a", "b", "c")
 End Sub
 `}, enableOptionBaseRules)
-	got := findingsByCode(findings, "VBA270")
-	if len(got) != 1 {
-		t.Fatalf("VBA270 findings = %+v, want one", got)
+	got := findingsByCode(findings, "VBA272")
+	if len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for unqualified Array", got)
 	}
 }
 
@@ -69,12 +72,12 @@ func TestOptionBaseArrayReportsNestedCall(t *testing.T) {
 	findings := runOptionBaseAnalysis(t, map[string]string{"Main.bas": `Option Explicit
 Option Base 1
 Public Sub Run()
-    Debug.Print LBound(Array(1, 2))
+    Debug.Print LBound(VBA.Array(1, 2))
 End Sub
 `}, enableOptionBaseRules)
-	got := findingsByCode(findings, "VBA270")
+	got := findingsByCode(findings, "VBA272")
 	if len(got) != 1 {
-		t.Fatalf("VBA270 findings = %+v, want one for nested Array call", got)
+		t.Fatalf("VBA272 findings = %+v, want one for nested VBA.Array call", got)
 	}
 }
 
@@ -92,8 +95,8 @@ Public Function Array(ParamArray items() As Variant) As Variant
     Array = items
 End Function
 `}, enableOptionBaseRules)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none for user-defined Array", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for a user-defined Array", got)
 	}
 }
 
@@ -107,8 +110,8 @@ Public Sub Run()
     first = Array(0)
 End Sub
 `}, enableOptionBaseRules)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none for lexically shadowed Array", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for a lexically shadowed Array", got)
 	}
 }
 
@@ -121,8 +124,8 @@ Public Sub Run()
     first = Array(0)
 End Sub
 `}, enableOptionBaseRules)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none for module-level shadowed Array", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for module-level shadowed Array", got)
 	}
 }
 
@@ -134,8 +137,8 @@ Public Sub Run()
     values = Helpers.Array("a")
 End Sub
 `}, enableOptionBaseRules)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none for a non-VBA qualified receiver", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for a non-VBA qualified receiver", got)
 	}
 }
 
@@ -150,12 +153,12 @@ Public Sub Run()
     values = Array(1)
 End Sub
 `}, enableOptionBaseRules)
-	got := findingsByCode(findings, "VBA270")
+	got := findingsByCode(findings, "VBA272")
 	if len(got) != 1 {
-		t.Fatalf("VBA270 findings = %+v, want only the explicit VBA.Array call, not the user-defined Array", got)
+		t.Fatalf("VBA272 findings = %+v, want only the explicit VBA.Array call, not the user-defined Array", got)
 	}
 	if !strings.Contains(got[0].Message, "VBA.Array") {
-		t.Fatalf("VBA270 message = %q, want the qualified intrinsic call", got[0].Message)
+		t.Fatalf("VBA272 message = %q, want the qualified intrinsic call", got[0].Message)
 	}
 }
 
@@ -166,8 +169,8 @@ Public Sub Run()
     Array(0) = "a"
 End Sub
 `}, enableOptionBaseRules)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none for an indexed assignment target", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for an indexed assignment target", got)
 	}
 }
 
@@ -179,8 +182,8 @@ Public Sub Run(Array() As Variant)
     first = Array(0)
 End Sub
 `}, enableOptionBaseRules)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none for a parameter shadowing Array", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for a parameter shadowing Array", got)
 	}
 }
 
@@ -190,12 +193,12 @@ Option Base 1
 #If VBA7 Then
 Public Sub Run(ParamArray values())
     Dim copy As Variant
-    copy = Array("x")
+    copy = VBA.Array("x")
 End Sub
 #End If
 `}, enableOptionBaseRules)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none inside conditional-compilation branches", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none inside conditional-compilation branches", got)
 	}
 	if got := findingsByCode(findings, "VBA271"); len(got) != 0 {
 		t.Fatalf("VBA271 findings = %+v, want none inside conditional-compilation branches", got)
@@ -208,7 +211,7 @@ func TestOptionBaseArraySilentWithoutOptionBase1(t *testing.T) {
 Option Base 0
 Public Sub Run0()
     Dim values As Variant
-    values = Array("a")
+    values = VBA.Array("a")
 End Sub
 `,
 		"NoBase.bas": `Option Explicit
@@ -217,8 +220,8 @@ Public Sub Run1()
     values = VBA.Array("a")
 End Sub
 `}, enableOptionBaseRules)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none under Option Base 0 / absent", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none under Option Base 0 / absent", got)
 	}
 }
 
@@ -231,8 +234,8 @@ Public Sub Run()
     ReDim dynamic(1 To 3) As String
 End Sub
 `}, enableOptionBaseRules)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none for bounded array declarations", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for bounded array declarations", got)
 	}
 }
 
@@ -241,11 +244,11 @@ func TestOptionBaseArrayDisabledByDefault(t *testing.T) {
 Option Base 1
 Public Sub Run()
     Dim values As Variant
-    values = Array("a")
+    values = VBA.Array("a")
 End Sub
 `}, nil)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none when the rule is not enabled", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none when the rule is not enabled", got)
 	}
 }
 
@@ -308,7 +311,7 @@ func TestOptionBaseMatchesBatchAndRealtime(t *testing.T) {
 Option Base 1
 Public Sub Run(ParamArray ignored())
     Dim values As Variant
-    values = Array("a", "b")
+    values = VBA.Array("a", "b")
 End Sub
 `)
 	cfg := config.Default()
@@ -326,7 +329,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, code := range []string{"VBA270", "VBA271"} {
+	for _, code := range []string{"VBA271", "VBA272"} {
 		if got, want := findingsByCode(realtime, code), findingsByCode(batch, code); !reflect.DeepEqual(got, want) {
 			t.Fatalf("batch/realtime %s mismatch: batch=%+v realtime=%+v", code, want, got)
 		}
@@ -338,11 +341,11 @@ func TestOptionBaseMixedConstructsReportIndependently(t *testing.T) {
 Option Base 1
 Public Sub Example(ParamArray values())
     Dim copy As Variant
-    copy = Array("x")
+    copy = VBA.Array("x")
 End Sub
 `}, enableOptionBaseRules)
-	if got := findingsByCode(findings, "VBA270"); len(got) != 1 {
-		t.Fatalf("VBA270 findings = %+v, want one", got)
+	if got := findingsByCode(findings, "VBA272"); len(got) != 1 {
+		t.Fatalf("VBA272 findings = %+v, want one", got)
 	}
 	if got := findingsByCode(findings, "VBA271"); len(got) != 1 {
 		t.Fatalf("VBA271 findings = %+v, want one", got)

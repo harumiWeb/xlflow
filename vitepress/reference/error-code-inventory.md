@@ -334,6 +334,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_risky_module_state`
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
+- `detect_udf_cell_reference_names`
 - `detect_unassigned_variable_usage`
 - `detect_unavailable_worksheet_function_members`
 - `detect_unbound_default_member_access`

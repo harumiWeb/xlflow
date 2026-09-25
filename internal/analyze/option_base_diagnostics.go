@@ -7,13 +7,13 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
-// optionBaseInconsistencyFindings implements VBA270 and VBA271, the opt-in
+// optionBaseInconsistencyFindings implements VBA271 and VBA272, the opt-in
 // Option Base consistency diagnostics. Both rules report only inside a module
 // that explicitly declares `Option Base 1`: `Option Base 0` and the default
 // (no Option Base directive) already agree with the zero-based constructs, so
 // they stay silent. A recovered or multi-branch procedure symbol is skipped
 // because its parameter/call projection may be incomplete.
-func (a Analyzer) optionBaseInconsistencyFindings(file parsedFile, proc sourceProcedure, resolver procedureir.Resolver) []Finding {
+func (a Analyzer) optionBaseInconsistencyFindings(file parsedFile, proc sourceProcedure) []Finding {
 	// Both rules are opt-in; check the flags before touching module facts so
 	// the common disabled configuration costs one branch per procedure.
 	if !a.Config.Analyze.DetectOptionBaseArrayInconsistency && !a.Config.Analyze.DetectOptionBaseParamArrayInconsistency {
@@ -27,7 +27,7 @@ func (a Analyzer) optionBaseInconsistencyFindings(file parsedFile, proc sourcePr
 	}
 	var findings []Finding
 	if a.Config.Analyze.DetectOptionBaseArrayInconsistency {
-		findings = append(findings, a.optionBaseArrayFindings(file, proc, resolver)...)
+		findings = append(findings, a.optionBaseArrayFindings(file, proc)...)
 	}
 	if a.Config.Analyze.DetectOptionBaseParamArrayInconsistency {
 		findings = append(findings, a.optionBaseParamArrayFindings(file, proc)...)
@@ -35,60 +35,34 @@ func (a Analyzer) optionBaseInconsistencyFindings(file parsedFile, proc sourcePr
 	return findings
 }
 
-// optionBaseArrayFindings implements VBA270: an `Array(...)` call that provably
-// resolves to the VBA intrinsic is reported because `VBA.Array` always returns
-// a zero-based array regardless of the module's Option Base. Only
-// ResolutionBuiltinLike counts: a user-defined `Array` procedure
-// (ResolutionMatched), a lexical non-callable shadow such as `Dim Array`
-// (ResolutionNonCallable), and every ambiguous, member, external, unresolved,
-// or dynamic outcome stay silent.
-func (a Analyzer) optionBaseArrayFindings(file parsedFile, proc sourceProcedure, resolver procedureir.Resolver) []Finding {
+// optionBaseArrayFindings implements VBA272: an explicitly qualified
+// `VBA.Array(...)` call is reported because the type-library-qualified
+// intrinsic always returns a zero-based array regardless of the module's
+// Option Base. An unqualified `Array(...)` call is never reported: per the
+// language reference it honors Option Base, so under `Option Base 1` it
+// already returns a one-based array — consistent with the module's declared
+// base. A qualified call on any other receiver (`foo.Array(...)`) may be a
+// project or host member returning an arbitrary lower bound and stays
+// silent. The `VBA.` qualifier names the type library itself and cannot be
+// shadowed, so no call resolution is needed.
+func (a Analyzer) optionBaseArrayFindings(file parsedFile, proc sourceProcedure) []Finding {
 	var findings []Finding
-	// The shadow verdict is loop-invariant; compute it lazily on the first
-	// unqualified Array candidate instead of rescanning declarations per call.
-	shadowChecked, shadowed := false, false
 	for call := range proc.Calls.All() {
 		if call.IsRaiseEvent || !strings.EqualFold(call.Callee.BaseName, "array") {
 			continue
 		}
-		// Indexed assignment targets such as `Array(0) = "a"` are recorded as
-		// call-shaped facts but are never invocations: they bind to a lexical
-		// array variable, and the resolver deliberately leaves their
-		// NonCallableNames empty.
+		// Indexed assignment targets such as `VBA.Array(0) = "a"` are
+		// recorded as call-shaped facts but are never invocations.
 		if procedureir.IsAssignmentTargetCall(call, *proc.IR) {
 			continue
 		}
-		// A qualified call is evidence only for the explicit `VBA.Array` form:
-		// `foo.Array(...)` on an unknown receiver may be a project or host
-		// member returning an arbitrary lower bound.
-		if call.Callee.Receiver != nil && !strings.EqualFold(cleanIdentifier(*call.Callee.Receiver), "vba") {
-			continue
-		}
-		// The resolver does not list array declarations in NonCallableNames
-		// because an indexed read `arr(i)` is grammar-identical to a call.
-		// Any in-scope declaration named `Array` therefore still needs this
-		// lexical shadow check: under VBA rules it wins over the intrinsic for
-		// an unqualified reference, whatever its declared shape.
-		if call.Callee.Receiver == nil {
-			if !shadowChecked {
-				shadowed = optionBaseArrayShadowed(file, proc)
-				shadowChecked = true
-			}
-			if shadowed {
-				continue
-			}
-		}
-		resolution := call.Resolution
-		if resolution.Status == procedureir.ResolutionNotAttempted && resolver != nil {
-			resolution = resolver.ResolveCall(call)
-		}
-		if resolution.Status != procedureir.ResolutionBuiltinLike {
+		if call.Callee.Receiver == nil || !strings.EqualFold(cleanIdentifier(*call.Callee.Receiver), "vba") {
 			continue
 		}
 		finding := a.simpleFinding(
-			file, proc, call.Range.StartLine, "VBA270", "warning",
+			file, proc, call.Range.StartLine, "VBA272", "warning",
 			fmt.Sprintf("%s returns a zero-based array even though this module declares Option Base 1.", strings.TrimSpace(call.Callee.Text)),
-			"VBA.Array always produces a lower bound of 0; Option Base only changes the default bound of Dim/ReDim declarations.",
+			"VBA.Array always produces a lower bound of 0; Option Base only changes the default bound of Dim/ReDim declarations and unqualified Array calls.",
 			"Review indexing assumptions on the returned array, or construct it with explicit bounds instead.",
 		)
 		finding.Column = call.Range.StartColumn
@@ -98,26 +72,6 @@ func (a Analyzer) optionBaseArrayFindings(file parsedFile, proc sourceProcedure,
 		findings = append(findings, finding)
 	}
 	return findings
-}
-
-// optionBaseArrayShadowed reports whether any in-scope declaration is named
-// `Array`: procedure locals and parameters first, then the module-level
-// declaration projection. Module declarations are keyed by lowercase name.
-// A project procedure named `Array` in another module is not a shadow here;
-// it is already excluded by the call resolution status.
-func optionBaseArrayShadowed(file parsedFile, proc sourceProcedure) bool {
-	for declaration := range proc.Declarations.All() {
-		if strings.EqualFold(cleanIdentifier(declaration.Name), "array") {
-			return true
-		}
-	}
-	for parameter := range proc.Params.All() {
-		if strings.EqualFold(cleanIdentifier(parameter.Name), "array") {
-			return true
-		}
-	}
-	_, shadowed := file.moduleDecls()["array"]
-	return shadowed
 }
 
 // optionBaseParamArrayFindings implements VBA271: a ParamArray parameter is
