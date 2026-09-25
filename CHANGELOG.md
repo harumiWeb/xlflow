@@ -8,14 +8,30 @@ All notable changes to xlflow will be documented in this file.
   call-shaped targets such as `Input #1, arr(0)` and
   `Line Input #1, p.Items(0)` parse as file-I/O statements instead of being
   lost to parser recovery.
-- Added opt-in `VBA270`-`VBA274` parameter-passing diagnostics for implicit
+- Added opt-in `VBA273`-`VBA277` parameter-passing diagnostics for implicit
   `ByRef`, assignments to effective `ByVal` parameters, `ByRef` parameters
   that can be `ByVal`, misleading `ByRef` on Property Let/Set value
   parameters, and redundant explicit `ByRef`. The mutation analysis
   propagates project-local positional and named `ByRef` calls conservatively,
-  and configuration rejects enabling the mutually exclusive `VBA270` and
-  `VBA274` style policies together. All five rules are available in batch,
+  and configuration rejects enabling the mutually exclusive `VBA273` and
+  `VBA277` style policies together. All five rules are available in batch,
   realtime, and LSP analysis and remain disabled by default.
+- Added opt-in `VBA270` warning diagnostics for worksheet-visible `Function`
+  declarations in standard modules whose names parse as valid A1 or absolute
+  R1C1 Excel cell references, so worksheet formulas resolve the cell instead
+  of calling the UDF. `Private`/`Friend` members, non-`Function` procedures,
+  `Option Private Module` files, and non-standard modules are excluded. The
+  rule is configurable with `detect_udf_cell_reference_names` and is
+  available in batch, realtime, and LSP analysis.
+- Added opt-in `VBA271` and `VBA272` `Option Base` consistency diagnostics.
+  `VBA271` warns on `ParamArray` parameters inside a module declaring
+  `Option Base 1`, and `VBA272` warns on explicitly qualified
+  `VBA.Array(...)` calls in the same modules; both constructs stay
+  zero-based regardless of `Option Base`. Unqualified `Array(...)` honors
+  `Option Base` and is not reported. The rules use
+  `detect_option_base_paramarray_inconsistency` and
+  `detect_option_base_array_inconsistency` and run in batch, realtime,
+  and LSP analysis.
 - Added opt-in Excel semantic inspections: batch-only `VBA260` warns when an
   authoritative workbook catalog can replace `ThisWorkbook.Worksheets("name")`
   with a stable worksheet CodeName; `VBA261` reports generated-TypeLib

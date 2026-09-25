@@ -245,6 +245,9 @@ type AnalyzeConfig struct {
 	DetectUnusedUDTMembers                    bool     `toml:"detect_unused_udt_members"`
 	DetectNeverAssignedVariables              bool     `toml:"detect_never_assigned_variables"`
 	DetectUnassignedVariableUsage             bool     `toml:"detect_unassigned_variable_usage"`
+	DetectUdfCellReferenceNames               bool     `toml:"detect_udf_cell_reference_names"`
+	DetectOptionBaseArrayInconsistency        bool     `toml:"detect_option_base_array_inconsistency"`
+	DetectOptionBaseParamArrayInconsistency   bool     `toml:"detect_option_base_paramarray_inconsistency"`
 	DetectImplicitByRefParameters             bool     `toml:"detect_implicit_byref_parameters"`
 	DetectAssignedByValParameters             bool     `toml:"detect_assigned_byval_parameters"`
 	DetectByRefParametersCanBeByVal           bool     `toml:"detect_byref_parameters_can_be_byval"`
@@ -365,11 +368,14 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA267": {Get: func(c AnalyzeConfig) bool { return c.DetectUnusedUDTMembers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnusedUDTMembers = v }},
 	"VBA268": {Get: func(c AnalyzeConfig) bool { return c.DetectNeverAssignedVariables }, Set: func(c *AnalyzeConfig, v bool) { c.DetectNeverAssignedVariables = v }},
 	"VBA269": {Get: func(c AnalyzeConfig) bool { return c.DetectUnassignedVariableUsage }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnassignedVariableUsage = v }},
-	"VBA270": {Get: func(c AnalyzeConfig) bool { return c.DetectImplicitByRefParameters }, Set: func(c *AnalyzeConfig, v bool) { c.DetectImplicitByRefParameters = v }},
-	"VBA271": {Get: func(c AnalyzeConfig) bool { return c.DetectAssignedByValParameters }, Set: func(c *AnalyzeConfig, v bool) { c.DetectAssignedByValParameters = v }},
-	"VBA272": {Get: func(c AnalyzeConfig) bool { return c.DetectByRefParametersCanBeByVal }, Set: func(c *AnalyzeConfig, v bool) { c.DetectByRefParametersCanBeByVal = v }},
-	"VBA273": {Get: func(c AnalyzeConfig) bool { return c.DetectMisleadingPropertyValueByRef }, Set: func(c *AnalyzeConfig, v bool) { c.DetectMisleadingPropertyValueByRef = v }},
-	"VBA274": {Get: func(c AnalyzeConfig) bool { return c.DetectRedundantByRefModifiers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRedundantByRefModifiers = v }},
+	"VBA270": {Get: func(c AnalyzeConfig) bool { return c.DetectUdfCellReferenceNames }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUdfCellReferenceNames = v }},
+	"VBA271": {Get: func(c AnalyzeConfig) bool { return c.DetectOptionBaseParamArrayInconsistency }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOptionBaseParamArrayInconsistency = v }},
+	"VBA272": {Get: func(c AnalyzeConfig) bool { return c.DetectOptionBaseArrayInconsistency }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOptionBaseArrayInconsistency = v }},
+	"VBA273": {Get: func(c AnalyzeConfig) bool { return c.DetectImplicitByRefParameters }, Set: func(c *AnalyzeConfig, v bool) { c.DetectImplicitByRefParameters = v }},
+	"VBA274": {Get: func(c AnalyzeConfig) bool { return c.DetectAssignedByValParameters }, Set: func(c *AnalyzeConfig, v bool) { c.DetectAssignedByValParameters = v }},
+	"VBA275": {Get: func(c AnalyzeConfig) bool { return c.DetectByRefParametersCanBeByVal }, Set: func(c *AnalyzeConfig, v bool) { c.DetectByRefParametersCanBeByVal = v }},
+	"VBA276": {Get: func(c AnalyzeConfig) bool { return c.DetectMisleadingPropertyValueByRef }, Set: func(c *AnalyzeConfig, v bool) { c.DetectMisleadingPropertyValueByRef = v }},
+	"VBA277": {Get: func(c AnalyzeConfig) bool { return c.DetectRedundantByRefModifiers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRedundantByRefModifiers = v }},
 }
 
 var (

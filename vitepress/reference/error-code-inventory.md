@@ -326,6 +326,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_object_array_comparison`
 - `detect_object_use_before_set`
 - `detect_opaque_boolean_arguments`
+- `detect_option_base_array_inconsistency`
+- `detect_option_base_paramarray_inconsistency`
 - `detect_procedure_call_cycles`
 - `detect_public_api_type_safety`
 - `detect_range_find_nothing_check`
@@ -337,6 +339,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_risky_module_state`
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
+- `detect_udf_cell_reference_names`
 - `detect_unassigned_variable_usage`
 - `detect_unavailable_worksheet_function_members`
 - `detect_unbound_default_member_access`

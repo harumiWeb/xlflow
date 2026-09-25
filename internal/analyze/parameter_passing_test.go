@@ -44,13 +44,13 @@ Public Sub Run(ByVal localCopy As Long, ByRef outputValue As Long, ByRef inputVa
     observed = inputValue
 End Sub
 `})
-	assigned := findingsByCode(findings, "VBA271")
+	assigned := findingsByCode(findings, "VBA274")
 	if len(assigned) != 1 || !strings.Contains(assigned[0].Message, "localCopy") {
-		t.Fatalf("VBA271 findings = %+v", assigned)
+		t.Fatalf("VBA274 findings = %+v", assigned)
 	}
-	canByVal := findingsByCode(findings, "VBA272")
+	canByVal := findingsByCode(findings, "VBA275")
 	if len(canByVal) != 1 || !strings.Contains(canByVal[0].Message, "inputValue") {
-		t.Fatalf("VBA272 findings = %+v", canByVal)
+		t.Fatalf("VBA275 findings = %+v", canByVal)
 	}
 }
 
@@ -72,12 +72,12 @@ Private Sub ForwardReadOnly(ByRef target As Long)
     Observe target
 End Sub
 `})
-	for _, finding := range findingsByCode(findings, "VBA272") {
+	for _, finding := range findingsByCode(findings, "VBA275") {
 		if finding.Procedure == "Forward" {
-			t.Fatalf("VBA272 reported transitively written parameter: %+v", finding)
+			t.Fatalf("VBA275 reported transitively written parameter: %+v", finding)
 		}
 	}
-	got := findingsByCode(findings, "VBA272")
+	got := findingsByCode(findings, "VBA275")
 	found := false
 	for _, finding := range got {
 		if finding.Procedure == "ForwardReadOnly" && strings.Contains(finding.Message, "target") {
@@ -85,7 +85,7 @@ End Sub
 		}
 	}
 	if !found {
-		t.Fatalf("VBA272 findings = %+v, want ForwardReadOnly.target", got)
+		t.Fatalf("VBA275 findings = %+v, want ForwardReadOnly.target", got)
 	}
 }
 
@@ -95,8 +95,8 @@ Private Sub ForwardUnknown(ByRef target As Long)
     ExternalHelper target
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
-		t.Fatalf("VBA272 findings = %+v, want none for unknown call", got)
+	if got := findingsByCode(findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 findings = %+v, want none for unknown call", got)
 	}
 }
 
@@ -108,12 +108,12 @@ Public Property Let Item(ByRef index As Long, ByRef newValue As Long)
     stored = newValue + index
 End Property
 `})
-	got := findingsByCode(findings, "VBA273")
+	got := findingsByCode(findings, "VBA276")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "newValue") {
-		t.Fatalf("VBA273 findings = %+v", got)
+		t.Fatalf("VBA276 findings = %+v", got)
 	}
 	if got[0].Column <= 0 || got[0].EndColumn <= got[0].Column {
-		t.Fatalf("VBA273 range = %+v", got[0])
+		t.Fatalf("VBA276 range = %+v", got[0])
 	}
 }
 
@@ -126,16 +126,16 @@ End Sub
 `}
 	implicitCfg := config.Default()
 	implicitCfg.Analyze.DetectImplicitByRefParameters = true
-	implicit := findingsByCode(runParameterPassingAnalysis(t, implicitCfg, modules), "VBA270")
+	implicit := findingsByCode(runParameterPassingAnalysis(t, implicitCfg, modules), "VBA273")
 	if len(implicit) != 1 || !strings.Contains(implicit[0].Message, "implicitValue") {
-		t.Fatalf("VBA270 findings = %+v", implicit)
+		t.Fatalf("VBA273 findings = %+v", implicit)
 	}
 
 	redundantCfg := config.Default()
 	redundantCfg.Analyze.DetectRedundantByRefModifiers = true
-	redundant := findingsByCode(runParameterPassingAnalysis(t, redundantCfg, modules), "VBA274")
+	redundant := findingsByCode(runParameterPassingAnalysis(t, redundantCfg, modules), "VBA277")
 	if len(redundant) != 1 || !strings.Contains(redundant[0].Message, "explicitValue") {
-		t.Fatalf("VBA274 findings = %+v", redundant)
+		t.Fatalf("VBA277 findings = %+v", redundant)
 	}
 }
 
@@ -145,8 +145,8 @@ Public Sub Run(ByRef values() As Long)
     Debug.Print UBound(values)
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
-		t.Fatalf("VBA272 findings = %+v, want none for array parameter", got)
+	if got := findingsByCode(findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 findings = %+v, want none for array parameter", got)
 	}
 }
 
@@ -160,9 +160,9 @@ Public Sub ReplaceObject(ByRef target As Object)
     Set target = New Collection
 End Sub
 `})
-	got := findingsByCode(findings, "VBA272")
+	got := findingsByCode(findings, "VBA275")
 	if len(got) != 1 || got[0].Procedure != "MutateMember" {
-		t.Fatalf("VBA272 findings = %+v, want only MutateMember.target", got)
+		t.Fatalf("VBA275 findings = %+v, want only MutateMember.target", got)
 	}
 }
 
@@ -177,8 +177,8 @@ Private Sub Mutate(ByRef value As Pair)
     value.Left = 1
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
-		t.Fatalf("VBA272 UDT findings = %+v, want none", got)
+	if got := findingsByCode(findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 UDT findings = %+v, want none", got)
 	}
 }
 
@@ -200,18 +200,18 @@ Private Sub MutateObjectMember(ByRef objectValue As Object)
     Replace objectValue.Tag
 End Sub
 `})
-	got := findingsByCode(findings, "VBA272")
+	got := findingsByCode(findings, "VBA275")
 	foundObject := false
 	for _, finding := range got {
 		if finding.Procedure == "MutateUDT" {
-			t.Fatalf("VBA272 reported UDT member passed through ByRef: %+v", finding)
+			t.Fatalf("VBA275 reported UDT member passed through ByRef: %+v", finding)
 		}
 		if finding.Procedure == "MutateObjectMember" {
 			foundObject = true
 		}
 	}
 	if !foundObject {
-		t.Fatalf("VBA272 findings = %+v, want MutateObjectMember.objectValue", got)
+		t.Fatalf("VBA275 findings = %+v, want MutateObjectMember.objectValue", got)
 	}
 }
 
@@ -256,14 +256,14 @@ Private Sub MutateObject(ByRef value As Collection)
     End With
 End Sub
 `})
-	got := findingsByCode(findings, "VBA272")
+	got := findingsByCode(findings, "VBA275")
 	for _, finding := range got {
 		if finding.Procedure != "MutateObject" {
-			t.Fatalf("VBA272 reported With-block written parameter: %+v", finding)
+			t.Fatalf("VBA275 reported With-block written parameter: %+v", finding)
 		}
 	}
 	if len(got) != 1 {
-		t.Fatalf("VBA272 findings = %+v, want only MutateObject.value", got)
+		t.Fatalf("VBA275 findings = %+v, want only MutateObject.value", got)
 	}
 }
 
@@ -289,8 +289,8 @@ Private Sub MutateSpacedCallee(ByRef value As Pair)
     End With
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
-		t.Fatalf("VBA272 findings = %+v, want none for implicit member call arguments", got)
+	if got := findingsByCode(findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 findings = %+v, want none for implicit member call arguments", got)
 	}
 }
 
@@ -328,7 +328,7 @@ Private Sub WriteRecord(ByRef value As Variant)
     Put #1, , value
 End Sub
 `})
-	got := findingsByCode(findings, "VBA272")
+	got := findingsByCode(findings, "VBA275")
 	found := map[string]bool{}
 	for _, finding := range got {
 		found[finding.Procedure+":"+finding.Message] = true
@@ -336,7 +336,7 @@ End Sub
 	for _, procedure := range []string{"ResetValue", "ReadInput", "ReadLine", "ReadRecord", "ReadInputMember"} {
 		for _, finding := range got {
 			if finding.Procedure == procedure {
-				t.Fatalf("VBA272 reported %s parameter written by file statement: %+v", procedure, got)
+				t.Fatalf("VBA275 reported %s parameter written by file statement: %+v", procedure, got)
 			}
 		}
 	}
@@ -352,7 +352,7 @@ End Sub
 		}
 	}
 	if !wantFileNumber || wantSecond || !wantPut {
-		t.Fatalf("VBA272 findings = %+v, want only ReadInputMulti.fileNumber and WriteRecord.value", got)
+		t.Fatalf("VBA275 findings = %+v, want only ReadInputMulti.fileNumber and WriteRecord.value", got)
 	}
 }
 
@@ -364,8 +364,8 @@ End Sub
 `}
 	implicitCfg := config.Default()
 	implicitCfg.Analyze.DetectImplicitByRefParameters = true
-	if got := findingsByCode(runParameterPassingAnalysis(t, implicitCfg, modules), "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 findings = %+v, want none for ParamArray", got)
+	if got := findingsByCode(runParameterPassingAnalysis(t, implicitCfg, modules), "VBA273"); len(got) != 0 {
+		t.Fatalf("VBA273 findings = %+v, want none for ParamArray", got)
 	}
 }
 
@@ -379,11 +379,11 @@ Private Sub WriteElementByRef(ByRef value As Variant)
     value(0) = 1
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA271"); len(got) != 0 {
-		t.Fatalf("VBA271 findings = %+v, want none for element write", got)
+	if got := findingsByCode(findings, "VBA274"); len(got) != 0 {
+		t.Fatalf("VBA274 findings = %+v, want none for element write", got)
 	}
-	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
-		t.Fatalf("VBA272 findings = %+v, want none for caller-visible element write", got)
+	if got := findingsByCode(findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 findings = %+v, want none for caller-visible element write", got)
 	}
 }
 
@@ -397,9 +397,9 @@ Private Sub Forward(ByRef target As Long)
     Call Mutate((target))
 End Sub
 `})
-	got := findingsByCode(findings, "VBA272")
+	got := findingsByCode(findings, "VBA275")
 	if len(got) != 1 || got[0].Procedure != "Forward" {
-		t.Fatalf("VBA272 findings = %+v, want Forward.target for forced ByVal argument", got)
+		t.Fatalf("VBA275 findings = %+v, want Forward.target for forced ByVal argument", got)
 	}
 }
 
@@ -416,8 +416,8 @@ End Property
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(result.Findings, "VBA273"); len(got) != 0 {
-		t.Fatalf("VBA273 constrained findings = %+v, want none", got)
+	if got := findingsByCode(result.Findings, "VBA276"); len(got) != 0 {
+		t.Fatalf("VBA276 constrained findings = %+v, want none", got)
 	}
 }
 
@@ -431,9 +431,9 @@ Private Sub Forward(ByRef target As Long)
     Mutate value:=target
 End Sub
 `})
-	for _, finding := range findingsByCode(findings, "VBA272") {
+	for _, finding := range findingsByCode(findings, "VBA275") {
 		if finding.Procedure == "Forward" {
-			t.Fatalf("VBA272 reported named transitively written parameter: %+v", finding)
+			t.Fatalf("VBA275 reported named transitively written parameter: %+v", finding)
 		}
 	}
 }
@@ -463,13 +463,13 @@ Private Sub ForwardLong(ByRef z As Long)
     MutateLong alpha:=z
 End Sub
 `})
-	got := findingsByCode(findings, "VBA272")
+	got := findingsByCode(findings, "VBA275")
 	for _, finding := range got {
 		if finding.Procedure == "Forward" && parameterFindingMentions(finding, "x") {
-			t.Fatalf("VBA272 reported parameter written through a:=x: %+v", finding)
+			t.Fatalf("VBA275 reported parameter written through a:=x: %+v", finding)
 		}
 		if finding.Procedure == "ForwardLong" {
-			t.Fatalf("VBA272 reported parameter written through alpha:=z: %+v", finding)
+			t.Fatalf("VBA275 reported parameter written through alpha:=z: %+v", finding)
 		}
 	}
 	found := false
@@ -479,7 +479,7 @@ End Sub
 		}
 	}
 	if !found {
-		t.Fatalf("VBA272 findings = %+v, want Forward.y bound to never-written b", got)
+		t.Fatalf("VBA275 findings = %+v, want Forward.y bound to never-written b", got)
 	}
 }
 
@@ -510,11 +510,11 @@ Private Sub ForwardMemberElem(ByRef arr As Variant)
     Call Mutate(arr(0).Left)
 End Sub
 `})
-	got := findingsByCode(findings, "VBA272")
+	got := findingsByCode(findings, "VBA275")
 	for _, finding := range got {
 		switch finding.Procedure {
 		case "ForwardElem", "ForwardElemCall", "ForwardMemberElem", "SwapElem":
-			t.Fatalf("VBA272 reported element-forwarded parameter: %+v", finding)
+			t.Fatalf("VBA275 reported element-forwarded parameter: %+v", finding)
 		}
 	}
 	// Call Mutate((arr(0))) double-parenthesizes the element to a value: arr
@@ -530,7 +530,7 @@ End Sub
 	}
 	for key, found := range want {
 		if !found {
-			t.Fatalf("VBA272 findings = %+v, want true positive %s", got, key)
+			t.Fatalf("VBA275 findings = %+v, want true positive %s", got, key)
 		}
 	}
 }
@@ -565,8 +565,8 @@ Private Sub WithMemberElem(ByRef p As Outer)
     End With
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
-		t.Fatalf("VBA272 findings = %+v, want none for indexed statement operands", got)
+	if got := findingsByCode(findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 findings = %+v, want none for indexed statement operands", got)
 	}
 }
 
@@ -588,8 +588,8 @@ Private Sub MutateShadow(ByRef p As Collection)
     p.X = 1
 End Sub
 `})
-	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
-		t.Fatalf("VBA272 findings = %+v, want none for bracketed/shadowed member writes", got)
+	if got := findingsByCode(findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 findings = %+v, want none for bracketed/shadowed member writes", got)
 	}
 }
 
@@ -610,8 +610,8 @@ End Sub
 	// The UDT named Collection shadows the builtin object type, so p.X is a
 	// caller-visible member write forwarded through Replace, not an object
 	// member mutation that leaves the binding untouched.
-	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
-		t.Fatalf("VBA272 findings = %+v, want none for shadowed UDT member call", got)
+	if got := findingsByCode(findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 findings = %+v, want none for shadowed UDT member call", got)
 	}
 }
 
@@ -631,13 +631,13 @@ End Property
 	// Both accessors share the qualified name Widget.Item; each must keep its
 	// own mutation summary. The Let accessor writes index, so only the Get
 	// accessor's index may be reported as can-be-ByVal.
-	canByVal := findingsByCode(findings, "VBA272")
+	canByVal := findingsByCode(findings, "VBA275")
 	if len(canByVal) != 1 || canByVal[0].Line >= 8 {
-		t.Fatalf("VBA272 findings = %+v, want only the Property Get index", canByVal)
+		t.Fatalf("VBA275 findings = %+v, want only the Property Get index", canByVal)
 	}
-	assigned := findingsByCode(findings, "VBA271")
+	assigned := findingsByCode(findings, "VBA274")
 	if len(assigned) != 1 || !strings.Contains(assigned[0].Message, "value") {
-		t.Fatalf("VBA271 findings = %+v, want the Property Let value assignment", assigned)
+		t.Fatalf("VBA274 findings = %+v, want the Property Let value assignment", assigned)
 	}
 }
 
@@ -662,11 +662,11 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(result.Findings, "VBA270"); len(got) != 0 {
-		t.Fatalf("VBA270 constrained findings = %+v, want none", got)
+	if got := findingsByCode(result.Findings, "VBA273"); len(got) != 0 {
+		t.Fatalf("VBA273 constrained findings = %+v, want none", got)
 	}
-	if got := findingsByCode(result.Findings, "VBA272"); len(got) != 0 {
-		t.Fatalf("VBA272 constrained findings = %+v, want none", got)
+	if got := findingsByCode(result.Findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 constrained findings = %+v, want none", got)
 	}
 }
 
@@ -676,7 +676,7 @@ Public Sub Run(ByVal copy As Long, implicitValue As Long, ByRef explicitValue As
     copy = 1
 End Sub
 `})
-	for _, code := range []string{"VBA270", "VBA271", "VBA272", "VBA273", "VBA274"} {
+	for _, code := range []string{"VBA273", "VBA274", "VBA275", "VBA276", "VBA277"} {
 		if got := findingsByCode(findings, code); len(got) != 0 {
 			t.Fatalf("default %s findings = %+v, want none", code, got)
 		}
@@ -686,7 +686,7 @@ End Sub
 func TestParameterPassingBatchRealtimeAndInlineSuppression(t *testing.T) {
 	dir := t.TempDir()
 	source := []byte(`Option Explicit
-Public Sub Run(ByVal copy As Long, ByRef inputValue As Long) ' xlflow:disable-line VBA271
+Public Sub Run(ByVal copy As Long, ByRef inputValue As Long) ' xlflow:disable-line VBA274
     copy = 1
     Dim observed As Long
     observed = inputValue
@@ -703,12 +703,12 @@ End Sub
 		t.Fatal(err)
 	}
 	for _, findings := range [][]Finding{batch, realtime} {
-		if got := findingsByCode(findings, "VBA271"); len(got) != 0 {
-			t.Fatalf("suppressed VBA271 findings = %+v", got)
+		if got := findingsByCode(findings, "VBA274"); len(got) != 0 {
+			t.Fatalf("suppressed VBA274 findings = %+v", got)
 		}
-		got := findingsByCode(findings, "VBA272")
+		got := findingsByCode(findings, "VBA275")
 		if len(got) != 1 || !strings.Contains(got[0].Message, "inputValue") {
-			t.Fatalf("VBA272 findings = %+v", got)
+			t.Fatalf("VBA275 findings = %+v", got)
 		}
 	}
 }

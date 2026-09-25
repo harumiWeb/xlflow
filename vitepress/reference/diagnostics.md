@@ -143,11 +143,14 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA267`](#vba267) | analyze | information | file-local      | no      | Unused user-defined type member                    |
 | [`VBA268`](#vba268) | analyze | warning     | procedure-local | no      | Variable never assigned                            |
 | [`VBA269`](#vba269) | analyze | warning     | procedure-local | no      | Variable read before assignment                    |
-| [`VBA270`](#vba270) | analyze | information | procedure-local | no      | Implicit ByRef parameter                           |
-| [`VBA271`](#vba271) | analyze | warning     | procedure-local | no      | Assigned ByVal parameter                           |
-| [`VBA272`](#vba272) | analyze | information | procedure-local | no      | ByRef parameter can be ByVal                       |
-| [`VBA273`](#vba273) | analyze | warning     | procedure-local | no      | Misleading Property value ByRef                    |
-| [`VBA274`](#vba274) | analyze | information | procedure-local | no      | Redundant explicit ByRef modifier                  |
+| [`VBA270`](#vba270) | analyze | warning     | file-local      | no      | UDF name collides with Excel cell reference        |
+| [`VBA271`](#vba271) | analyze | warning     | procedure-local | no      | ParamArray ignores Option Base 1                   |
+| [`VBA272`](#vba272) | analyze | warning     | procedure-local | no      | VBA.Array call ignores Option Base 1               |
+| [`VBA273`](#vba273) | analyze | information | procedure-local | no      | Implicit ByRef parameter                           |
+| [`VBA274`](#vba274) | analyze | warning     | procedure-local | no      | Assigned ByVal parameter                           |
+| [`VBA275`](#vba275) | analyze | information | procedure-local | no      | ByRef parameter can be ByVal                       |
+| [`VBA276`](#vba276) | analyze | warning     | procedure-local | no      | Misleading Property value ByRef                    |
+| [`VBA277`](#vba277) | analyze | information | procedure-local | no      | Redundant explicit ByRef modifier                  |
 
 ## VB001
 
@@ -3121,6 +3124,72 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA270
 
+**UDF name collides with Excel cell reference.** A worksheet-visible Function in a standard module is named after a valid A1 or R1C1 cell reference, so worksheet formulas resolve the cell instead of calling the function.
+
+| Property                    | Value                             |
+| --------------------------- | --------------------------------- |
+| Family                      | `analyze`                         |
+| Category                    | `correctness`                     |
+| Evidence class              | `inference`                       |
+| Compile-equivalent          | no                                |
+| Default severity            | `warning`                         |
+| Supported severities        | `warning`, `information`          |
+| Surfaces                    | `analyze`, `lsp`                  |
+| Scope                       | `file-local`                      |
+| Precision                   | `high`                            |
+| Enabled by default          | no                                |
+| Configuration               | `detect_udf_cell_reference_names` |
+| Inline suppression          | yes                               |
+| Blocks source preflight     | no                                |
+| Real-time editor diagnostic | yes                               |
+| Fix available               | no                                |
+
+## VBA271
+
+**ParamArray ignores Option Base 1.** A ParamArray parameter is always passed as a zero-based Variant array even though the module declares Option Base 1.
+
+| Property                    | Value                                         |
+| --------------------------- | --------------------------------------------- |
+| Family                      | `analyze`                                     |
+| Category                    | `correctness`                                 |
+| Evidence class              | `inference`                                   |
+| Compile-equivalent          | no                                            |
+| Default severity            | `warning`                                     |
+| Supported severities        | `warning`, `information`                      |
+| Surfaces                    | `analyze`, `lsp`                              |
+| Scope                       | `procedure-local`                             |
+| Precision                   | `high`                                        |
+| Enabled by default          | no                                            |
+| Configuration               | `detect_option_base_paramarray_inconsistency` |
+| Inline suppression          | yes                                           |
+| Blocks source preflight     | no                                            |
+| Real-time editor diagnostic | yes                                           |
+| Fix available               | no                                            |
+
+## VBA272
+
+**VBA.Array call ignores Option Base 1.** A qualified VBA.Array(...) call returns a zero-based array even though the module declares Option Base 1; unqualified Array(...) honors Option Base and is not reported.
+
+| Property                    | Value                                    |
+| --------------------------- | ---------------------------------------- |
+| Family                      | `analyze`                                |
+| Category                    | `correctness`                            |
+| Evidence class              | `inference`                              |
+| Compile-equivalent          | no                                       |
+| Default severity            | `warning`                                |
+| Supported severities        | `warning`, `information`                 |
+| Surfaces                    | `analyze`, `lsp`                         |
+| Scope                       | `procedure-local`                        |
+| Precision                   | `high`                                   |
+| Enabled by default          | no                                       |
+| Configuration               | `detect_option_base_array_inconsistency` |
+| Inline suppression          | yes                                      |
+| Blocks source preflight     | no                                       |
+| Real-time editor diagnostic | yes                                      |
+| Fix available               | no                                       |
+
+## VBA273
+
 **Implicit ByRef parameter.** An ordinary procedure parameter omits its passing modifier and therefore defaults to ByRef.
 
 | Property                    | Value                              |
@@ -3141,7 +3210,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | yes                                |
 | Fix available               | no                                 |
 
-## VBA271
+## VBA274
 
 **Assigned ByVal parameter.** A ByVal parameter is reassigned even though the new value cannot be observed by the caller.
 
@@ -3163,7 +3232,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | yes                                |
 | Fix available               | no                                 |
 
-## VBA272
+## VBA275
 
 **ByRef parameter can be ByVal.** A ByRef parameter is never written or passed through an uncertain writable boundary and can be declared ByVal.
 
@@ -3185,7 +3254,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | yes                                    |
 | Fix available               | no                                     |
 
-## VBA273
+## VBA276
 
 **Misleading Property value ByRef.** A Property Let or Property Set value parameter is declared ByRef even though VBA always applies ByVal semantics to that final parameter.
 
@@ -3207,7 +3276,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | yes                                      |
 | Fix available               | no                                       |
 
-## VBA274
+## VBA277
 
 **Redundant explicit ByRef modifier.** An ordinary procedure parameter explicitly declares ByRef even though ByRef is the VBA default.
 

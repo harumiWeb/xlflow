@@ -1,19 +1,19 @@
 # VBA Parameter-Passing Diagnostics
 
-<!-- xlflow-rule-contract: {"id":"VBA270","family":"analyze","category":"maintainability","default_severity":"information","scope":"procedure-local","realtime":true,"configuration_key":"detect_implicit_byref_parameters","inline_suppressible":true,"preflight_blocking":false} -->
-<!-- xlflow-rule-contract: {"id":"VBA271","family":"analyze","category":"reliability","default_severity":"warning","scope":"procedure-local","realtime":true,"configuration_key":"detect_assigned_byval_parameters","inline_suppressible":true,"preflight_blocking":false} -->
-<!-- xlflow-rule-contract: {"id":"VBA272","family":"analyze","category":"maintainability","default_severity":"information","scope":"procedure-local","realtime":true,"configuration_key":"detect_byref_parameters_can_be_byval","inline_suppressible":true,"preflight_blocking":false} -->
-<!-- xlflow-rule-contract: {"id":"VBA273","family":"analyze","category":"correctness","default_severity":"warning","scope":"procedure-local","realtime":true,"configuration_key":"detect_misleading_property_value_byref","inline_suppressible":true,"preflight_blocking":false} -->
-<!-- xlflow-rule-contract: {"id":"VBA274","family":"analyze","category":"maintainability","default_severity":"information","scope":"procedure-local","realtime":true,"configuration_key":"detect_redundant_byref_modifiers","inline_suppressible":true,"preflight_blocking":false} -->
+<!-- xlflow-rule-contract: {"id":"VBA273","family":"analyze","category":"maintainability","default_severity":"information","scope":"procedure-local","realtime":true,"configuration_key":"detect_implicit_byref_parameters","inline_suppressible":true,"preflight_blocking":false} -->
+<!-- xlflow-rule-contract: {"id":"VBA274","family":"analyze","category":"reliability","default_severity":"warning","scope":"procedure-local","realtime":true,"configuration_key":"detect_assigned_byval_parameters","inline_suppressible":true,"preflight_blocking":false} -->
+<!-- xlflow-rule-contract: {"id":"VBA275","family":"analyze","category":"maintainability","default_severity":"information","scope":"procedure-local","realtime":true,"configuration_key":"detect_byref_parameters_can_be_byval","inline_suppressible":true,"preflight_blocking":false} -->
+<!-- xlflow-rule-contract: {"id":"VBA276","family":"analyze","category":"correctness","default_severity":"warning","scope":"procedure-local","realtime":true,"configuration_key":"detect_misleading_property_value_byref","inline_suppressible":true,"preflight_blocking":false} -->
+<!-- xlflow-rule-contract: {"id":"VBA277","family":"analyze","category":"maintainability","default_severity":"information","scope":"procedure-local","realtime":true,"configuration_key":"detect_redundant_byref_modifiers","inline_suppressible":true,"preflight_blocking":false} -->
 
-`VBA270` through `VBA274` are opt-in, non-blocking diagnostics available in
+`VBA273` through `VBA277` are opt-in, non-blocking diagnostics available in
 batch analysis and realtime/LSP analysis. They are disabled by default and
 support the normal `xlflow:disable-line` and `xlflow:disable-next-line`
 suppression comments.
 
 ## Rule contracts
 
-### VBA270 — implicit ByRef parameter
+### VBA273 — implicit ByRef parameter
 
 Reports an ordinary parameter whose declaration omits `ByVal` or `ByRef`.
 VBA defaults that parameter to `ByRef`; the diagnostic asks projects that
@@ -23,7 +23,7 @@ Let/Set value parameters, event handlers, `Implements` members, and
 rejects an explicit passing modifier on it, so the suggestion could not
 compile.
 
-### VBA271 — assigned ByVal parameter
+### VBA274 — assigned ByVal parameter
 
 Reports a direct assignment, `Set` replacement, or other canonical IR write
 to a parameter with effective `ByVal` semantics. The new value changes only
@@ -35,7 +35,7 @@ Changing members of an object passed `ByVal` is not a write to the parameter
 binding and is not reported. Replacing that binding with `Set parameter = ...`
 is reported.
 
-### VBA272 — ByRef parameter can be ByVal
+### VBA275 — ByRef parameter can be ByVal
 
 Reports an ordinary `ByRef` parameter when xlflow can prove that its binding
 is never replaced. Eligibility includes ordinary `Public`, `Friend`, and
@@ -58,7 +58,7 @@ composite types fail open, including when a nested member is passed through a
 potentially writing `ByRef` call. An argument rooted at an indexed call or a
 member of an indexed call (`Mutate arr(0)`, `Call Mutate(arr(0).Left)`)
 counts as an element-level write of the rooted parameter, not a binding
-replacement, so it suppresses the diagnostic without reporting `VBA271`.
+replacement, so it suppresses the diagnostic without reporting `VBA274`.
 
 Member writes are resolved through `With` blocks as well: an implicit member
 target (`.Left = 1`) or an implicit member passed to a writing callee
@@ -74,13 +74,13 @@ the `Get` record operand remain reads, and `Put #` writes the file rather
 than the variable. Indexed operands (`Erase arr(0)`, `Get #1, , arr(0)`)
 count as element writes of the rooted parameter. An indexed element write
 such as `value(0) = 1` is not a binding replacement, but it can be
-caller-visible, so it suppresses the diagnostic without reporting `VBA271`.
+caller-visible, so it suppresses the diagnostic without reporting `VBA274`.
 A parenthesized call argument (`Call Mutate((x))`) forces `ByVal`
 evaluation and does not propagate a write. The `With` receiver itself may
 be an indexed member (`With p.Items(0)`); implicit member writes inside it
 resolve to the receiver's root parameter.
 
-### VBA273 — misleading Property value ByRef
+### VBA276 — misleading Property value ByRef
 
 Reports an explicit `ByRef` modifier on the final value parameter of
 `Property Let` or `Property Set`. VBA applies `ByVal` runtime semantics to
@@ -91,12 +91,12 @@ under this rule. Event handlers and `Implements` members are excluded
 because the VBE enforces the interface signature, including the passing
 modifier, so the declaration is externally fixed.
 
-### VBA274 — redundant explicit ByRef
+### VBA277 — redundant explicit ByRef
 
 Reports explicit `ByRef` on ordinary parameters for projects that prefer the
 VBA default spelling. Property value parameters, event handlers, and
 `Implements` members are excluded. `ParamArray` parameters are excluded for
-consistency with `VBA270`, although VBA already forbids an explicit modifier
+consistency with `VBA273`, although VBA already forbids an explicit modifier
 there.
 
 ## Configuration conflict
@@ -104,18 +104,18 @@ there.
 `detect_implicit_byref_parameters` and
 `detect_redundant_byref_modifiers` encode mutually exclusive style policies.
 Configuration loading fails when both are `true`; neither is enabled by
-default. The semantic rules `VBA271` through `VBA273` are independent of this
+default. The semantic rules `VBA274` through `VBA276` are independent of this
 style choice.
 
 ## Parity mapping
 
 | Inspection intent               | xlflow   | Coverage notes                                                                                                                                                                            |
 | ------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Implicit ByRef modifier         | `VBA270` | Ordinary procedures; constrained signatures excluded.                                                                                                                                     |
-| Assigned ByVal parameter        | `VBA271` | Canonical IR writes, including effective Property value semantics.                                                                                                                        |
-| Parameter can be ByVal          | `VBA272` | Direct writes, `With` implicit members, `Erase`/`Input #`/`Get #` operands, indexed element arguments and receivers, plus project-local call-chain summary; unknown boundaries fail open. |
-| Misleading Property value ByRef | `VBA273` | Final Property Let/Set value parameter only; constrained signatures excluded.                                                                                                             |
-| Redundant ByRef modifier        | `VBA274` | Mutually exclusive configuration with `VBA270`; `ParamArray` excluded.                                                                                                                    |
+| Implicit ByRef modifier         | `VBA273` | Ordinary procedures; constrained signatures excluded.                                                                                                                                     |
+| Assigned ByVal parameter        | `VBA274` | Canonical IR writes, including effective Property value semantics.                                                                                                                        |
+| Parameter can be ByVal          | `VBA275` | Direct writes, `With` implicit members, `Erase`/`Input #`/`Get #` operands, indexed element arguments and receivers, plus project-local call-chain summary; unknown boundaries fail open. |
+| Misleading Property value ByRef | `VBA276` | Final Property Let/Set value parameter only; constrained signatures excluded.                                                                                                             |
+| Redundant ByRef modifier        | `VBA277` | Mutually exclusive configuration with `VBA273`; `ParamArray` excluded.                                                                                                                    |
 
 ## Verification contract
 

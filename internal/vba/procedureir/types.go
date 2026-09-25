@@ -144,10 +144,13 @@ type Parameter struct {
 	HasDefault      bool          `json:"hasDefault,omitempty"`
 	DefaultRange    *vbaast.Range `json:"defaultRange,omitempty"`
 	Range           vbaast.Range  `json:"range"`
-	IsArray         bool          `json:"isArray,omitempty"`
-	ArrayShape      ArrayShape    `json:"arrayShape,omitempty"`
-	BoundsRange     *vbaast.Range `json:"boundsRange,omitempty"`
-	ArrayBounds     []ArrayBound  `json:"arrayBounds,omitempty"`
+	// NameRange is the identifier-only span inside Range; it stays nil for
+	// parameters whose name token could not be resolved by the parser.
+	NameRange   *vbaast.Range `json:"nameRange,omitempty"`
+	IsArray     bool          `json:"isArray,omitempty"`
+	ArrayShape  ArrayShape    `json:"arrayShape,omitempty"`
+	BoundsRange *vbaast.Range `json:"boundsRange,omitempty"`
+	ArrayBounds []ArrayBound  `json:"arrayBounds,omitempty"`
 	// ValueShape is the normalized declaration shape. ArrayShape remains the
 	// source-compatible syntax fact used by signature validation.
 	ValueShape ValueShapeKind `json:"valueShape,omitempty"`

@@ -35,11 +35,14 @@ var requiredSpecContracts = map[string]string{
 	"VBA260": "excel-semantic-inspections.md",
 	"VBA261": "excel-semantic-inspections.md",
 	"VBA262": "excel-semantic-inspections.md",
-	"VBA270": "vba-parameter-passing-diagnostics.md",
-	"VBA271": "vba-parameter-passing-diagnostics.md",
-	"VBA272": "vba-parameter-passing-diagnostics.md",
+	"VBA270": "excel-semantic-inspections.md",
+	"VBA271": "vba-option-base-diagnostics.md",
+	"VBA272": "vba-option-base-diagnostics.md",
 	"VBA273": "vba-parameter-passing-diagnostics.md",
 	"VBA274": "vba-parameter-passing-diagnostics.md",
+	"VBA275": "vba-parameter-passing-diagnostics.md",
+	"VBA276": "vba-parameter-passing-diagnostics.md",
+	"VBA277": "vba-parameter-passing-diagnostics.md",
 }
 
 type specRuleContract struct {

@@ -22,6 +22,7 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 		out.Symbol.Parameters[i].Range = rebase(out.Symbol.Parameters[i].Range)
 		out.Symbol.Parameters[i].PassingRange = rebasePointer(out.Symbol.Parameters[i].PassingRange, rebase)
 		out.Symbol.Parameters[i].DefaultRange = rebasePointer(out.Symbol.Parameters[i].DefaultRange, rebase)
+		out.Symbol.Parameters[i].NameRange = rebasePointer(out.Symbol.Parameters[i].NameRange, rebase)
 		out.Symbol.Parameters[i].BoundsRange = rebasePointer(out.Symbol.Parameters[i].BoundsRange, rebase)
 		for j := range out.Symbol.Parameters[i].ArrayBounds {
 			bound := &out.Symbol.Parameters[i].ArrayBounds[j]
@@ -46,6 +47,7 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 			parameter.Range = rebase(parameter.Range)
 			parameter.PassingRange = rebasePointer(parameter.PassingRange, rebase)
 			parameter.DefaultRange = rebasePointer(parameter.DefaultRange, rebase)
+			parameter.NameRange = rebasePointer(parameter.NameRange, rebase)
 			parameter.BoundsRange = rebasePointer(parameter.BoundsRange, rebase)
 			for k := range parameter.ArrayBounds {
 				bound := &parameter.ArrayBounds[k]

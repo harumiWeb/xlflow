@@ -228,8 +228,8 @@ func directParameterMutationSummary(proc sourceProcedure, udtTypes, objectTypes 
 		}
 		if access.Mode == procedureir.AccessWrite || access.Mode == procedureir.AccessReadWrite {
 			// v(0) = 1 writes through the binding to an element instead of
-			// replacing it: not a VBA271 reassignment, but still possibly
-			// caller-visible, so VBA272 must stay suppressed.
+			// replacing it: not a VBA274 reassignment, but still possibly
+			// caller-visible, so VBA275 must stay suppressed.
 			if parameterElementWrite(exprByID, access.ExpressionID) {
 				summary[name] = max(summary[name], parameterPossiblyWritten)
 				continue
@@ -692,30 +692,30 @@ func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure
 		state := summary[parameterName(name)]
 		switch {
 		case a.Config.Analyze.DetectMisleadingPropertyValueByRef && valueParameter && !constrained && parameter.PassingExplicit && strings.EqualFold(parameter.Passing, "ByRef"):
-			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA273", "warning",
+			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA276", "warning",
 				"Property value parameter "+name+" is declared ByRef but VBA always passes it ByVal.",
 				"The final value parameter of Property Let and Property Set has ByVal runtime semantics even when ByRef is written.",
 				"Declare the property value parameter ByVal so the signature matches its actual behavior."))
 		case a.Config.Analyze.DetectImplicitByRefParameters && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && !parameter.PassingExplicit:
-			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA270", "information",
+			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA273", "information",
 				"Parameter "+name+" is implicitly passed ByRef.",
 				"VBA defaults ordinary parameters to ByRef when no passing modifier is written.",
 				"Add an explicit ByRef or ByVal modifier to document the intended API contract."))
 		case a.Config.Analyze.DetectRedundantByRefModifiers && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && parameter.PassingExplicit:
-			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA274", "information",
+			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA277", "information",
 				"Explicit ByRef on parameter "+name+" repeats VBA's default.",
 				"Ordinary VBA parameters are already ByRef when the modifier is omitted.",
 				"Remove the ByRef modifier when the project style relies on VBA's default."))
 		}
 		if a.Config.Analyze.DetectAssignedByValParameters && effective == "byval" && state == parameterWritten {
-			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA271", "warning",
+			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA274", "warning",
 				"ByVal parameter "+name+" is reassigned inside the procedure.",
 				"The assignment changes only the procedure-local copy and is not visible to the caller.",
 				"Use a separate local variable, or change the API contract only when caller-visible mutation is intended."))
 		}
 		if a.Config.Analyze.DetectByRefParametersCanBeByVal && !constrained && !valueParameter && effective == "byref" &&
 			!parameter.IsArray && !parameter.ParamArray && state == parameterNotWritten {
-			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA272", "information",
+			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA275", "information",
 				"ByRef parameter "+name+" is never written and can be passed ByVal.",
 				"No direct assignment or conservatively modeled ByRef call can replace the caller's argument.",
 				"Declare the parameter ByVal to prevent unintended caller-visible reassignment."))

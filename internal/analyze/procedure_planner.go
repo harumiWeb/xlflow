@@ -385,11 +385,11 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA265", domain: analysisstats.DomainOther, any: featureParameter},
 	{id: "VBA268", domain: analysisstats.DomainOther, any: featureLocalVariable},
 	{id: "VBA269", domain: analysisstats.DomainOther, any: featureLocalVariable},
-	{id: "VBA270", domain: analysisstats.DomainOther, any: featureParameter},
-	{id: "VBA271", domain: analysisstats.DomainOther, any: featureParameter},
-	{id: "VBA272", domain: analysisstats.DomainOther, any: featureParameter},
 	{id: "VBA273", domain: analysisstats.DomainOther, any: featureParameter},
 	{id: "VBA274", domain: analysisstats.DomainOther, any: featureParameter},
+	{id: "VBA275", domain: analysisstats.DomainOther, any: featureParameter},
+	{id: "VBA276", domain: analysisstats.DomainOther, any: featureParameter},
+	{id: "VBA277", domain: analysisstats.DomainOther, any: featureParameter},
 	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
 	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureApplicationState, capabilities: projectCapabilityEventReentry},
 	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
@@ -641,7 +641,7 @@ func procedureProjectionForRequirement(requirement procedureRuleRequirement) pro
 		return procedureProjectionNeverAssigned
 	case "VBA269":
 		return procedureProjectionUnassignedRead
-	case "VBA270", "VBA271", "VBA272", "VBA273", "VBA274":
+	case "VBA273", "VBA274", "VBA275", "VBA276", "VBA277":
 		return procedureProjectionParameterPassing
 	}
 	// A future requirement must still be represented in a plan. Falling back

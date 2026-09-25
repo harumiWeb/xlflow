@@ -1,12 +1,12 @@
-# PR #845 review follow-up (Issue #823, VBA270-VBA274)
+# PR #845 review follow-up (Issue #823, VBA273-VBA277)
 
 Review comments on internal/analyze/parameter_passing.go. Verified against
 code; both bug reports are valid and in scope. Plan:
 
 1. [Devin + CodeRabbit] Property accessor collision: mutation records are
    keyed by qualified name only, so Property Get Item and Property Let Item
-   share one summary (first registered wins). VBA272 can falsely claim the
-   Let index parameter is never written; VBA271 can miss a written Let value
+   share one summary (first registered wins). VBA275 can falsely claim the
+   Let index parameter is never written; VBA274 can miss a written Let value
    parameter. Fix: kind-qualify record keys (kind|name) for summary storage
    and finding lookup; call-edge resolution uses candidate kind when present
    and falls back to unique-name match or possiblyWritten when ambiguous.
@@ -14,7 +14,7 @@ code; both bug reports are valid and in scope. Plan:
    assigns value parameter.
 2. [Devin] applyArgumentMutation checks parameterTypeIsObject before
    parameterTypeIsUDT, so a member argument on a UDT that shadows a builtin
-   object name (Type Collection) drops the propagated write and VBA272
+   object name (Type Collection) drops the propagated write and VBA275
    falsely fires. Same latent issue family as the recordParameterMemberWrite
    fix. Fix: UDT check first, matching VBA name-resolution precedence.
    Regression test: module UDT named Collection, member forwarded to a
@@ -118,14 +118,14 @@ verified against IR probes and real Excel runtime checks; all valid. Plan:
 2. F2: Erase/Input #/Line Input #/Get # operands surface as unknown
    statements with read accesses. Fix: record write targets for those
    syntax kinds (file_number_literal excluded; Get uses TargetID only).
-3. F3: VBA270 fires on ParamArray with an impossible suggestion. Fix:
-   exclude ParamArray from VBA270 and VBA274.
+3. F3: VBA273 fires on ParamArray with an impossible suggestion. Fix:
+   exclude ParamArray from VBA273 and VBA277.
 4. F4: cfg/clone.go cloneParameters missed PassingRange. Fix: clone it and
    extend the snapshot-isolation test.
-5. Follow-ups: VBA273 gains the constrained exclusion (VBE rejects
+5. Follow-ups: VBA276 gains the constrained exclusion (VBE rejects
    Implements passing-modifier mismatches in both directions; verified on
    real Excel). Indexed element writes (v(0) = 1) become possiblyWritten:
-   not a VBA271 reassignment, still caller-visible so VBA272 stays
+   not a VBA274 reassignment, still caller-visible so VBA275 stays
    suppressed. Call Mutate((x)) is forced ByVal and no longer propagates.
    Missing mutation summary now returns nil explicitly (fail-open).
 
@@ -137,7 +137,7 @@ source; all valid. Plan:
 
 1. F-P2-1: named-argument ExpressionIDs bind the widest expression in the
    whole `a:=x` range, so a name at least as long as its value hides the
-   value from propagation (VBA272 false positive) and from every consumer
+   value from propagation (VBA275 false positive) and from every consumer
    that assumes ExpressionIDs[i] == Named[].ExpressionID
    (object_use_before_set, array_safety_source_order, object_container_flow,
    variable_assignment). Fix in procedureir/visitor.go: use
@@ -146,7 +146,7 @@ source; all valid. Plan:
    sibling consumers.
 2. F-P2-2: indexed call expressions (arr(0)) emit no receiver access, so
    element-valued arguments, With receivers, and file-statement operands are
-   invisible to propagation (VBA272 false positives). Fix: resolve
+   invisible to propagation (VBA275 false positives). Fix: resolve
    ExpressionCall roots through the callee child in parameterExprRootName,
    generalize the implicit-member argument fallback to a root-resolution
    fallback for any unhandled argument, and mark ExpressionCall write

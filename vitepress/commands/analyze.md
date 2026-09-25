@@ -270,6 +270,9 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA267` | information           | A `Private Type` member is never accessed through a resolvable member expression.                                                                                    |
 | `VBA268` | warning               | A procedure-local scalar variable is read but never assigned.                                                                                                        |
 | `VBA269` | warning               | A procedure-local variable is read on a path where no assignment is guaranteed to have executed.                                                                     |
+| `VBA270` | warning               | A worksheet-visible `Function` in a standard module is named after a valid A1 or R1C1 cell reference, so worksheet formulas resolve the cell instead.                |
+| `VBA271` | warning               | A `ParamArray` parameter is always passed as a zero-based `Variant` array despite `Option Base 1`.                                                                   |
+| `VBA272` | warning               | A qualified `VBA.Array(...)` call returns a zero-based array despite `Option Base 1`; unqualified `Array(...)` honors `Option Base`.                                 |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -297,7 +300,7 @@ Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-block
 
 Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, `VBA244` through `VBA247`, and `VBA249` through `VBA252` are enabled by default. `VBA230` through `VBA239`, `VBA241`, and `VBA245` through `VBA248` and `VBA250` through `VBA252` are warning-level, non-blocking, and inline-suppressible. `VBA249` is an error-level, non-blocking, procedure-local rule available in realtime diagnostics; it reports only runtime failures proven by shared constant, type, control-flow, and dataflow facts and remains silent for unknown values, Variants, and late-bound cases. `VBA250` is a warning-level, non-blocking, procedure-local rule available in realtime diagnostics; it reports a `Worksheet.Select` or `Range.Select` call only when the required active workbook or worksheet cannot be proven on every reachable path. `VBA251` is a warning-level, non-blocking, high-precision, procedure-local rule available in realtime diagnostics; it reports typed Excel lookup calls that omit their match-mode argument and remains silent for explicit, unresolved, late-bound, and user-defined calls. `VBA252` is a warning-level, non-blocking, high-precision, procedure-local rule available in realtime diagnostics; it reports typed `Excel.WorksheetFunction` member calls absent from the complete generated TypeLib member set and remains silent when the type database is incomplete or the receiver is unresolved, late-bound, or user-defined. `VBA241` is non-blocking and inline-suppressible; it may use `information` for a single non-nested loop with loop-invariant dimensions and `warning` for loop-variable growth or nested loops. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, `VBA241`, and `VBA245` through `VBA252` are procedure-local and available in realtime diagnostics. `VBA244` is project-wide, batch-only, non-blocking, and inline-suppressible; it reports one deterministic representative witness per cyclic strongly connected component (SCC), retaining the closed path in JSON rather than enumerating every simple cycle. `VBA222` is a batch-only warning that checks public function/property return types, all public parameters, and custom event parameters against project visibility and the available TypeLib database. Standard modules and `VB_Exposed=True` classes/interfaces are public API surfaces; private or unexposed project types, ambiguous names, and unresolved external types are reported conservatively. Host-required event handlers are excluded. Suppress an intentional case with `xlflow:disable-line VBA222` or `xlflow:disable-next-line VBA222`, or add `VBA222` to `[analyze].disabled_rules`. `VBA248` is an opt-in warning-level, non-blocking, procedure-local rule available in realtime diagnostics; declaration-level Boolean-control metrics remain part of `xlflow metrics` rather than a declaration diagnostic.
 
-`VBA270` through `VBA274` are opt-in parameter-passing diagnostics available
+`VBA273` through `VBA277` are opt-in parameter-passing diagnostics available
 in batch, realtime, and LSP analysis. They cover implicit `ByRef`, reassigned
 effective-`ByVal` parameters, `ByRef` parameters proved safe to change to
 `ByVal`, misleading Property Let/Set value-parameter `ByRef`, and redundant
@@ -314,12 +317,25 @@ scalar assignments. Enable it with `detect_dead_stores = true`.
 that can never execute because earlier items already cover every matching
 selector value. Enable it with `detect_unreachable_select_case = true`.
 
+`VBA271` and `VBA272` are opt-in `Option Base` consistency rules; enable them
+with `detect_option_base_paramarray_inconsistency` and
+`detect_option_base_array_inconsistency`. They report only inside modules
+declaring `Option Base 1`: `VBA271` reports `ParamArray` parameters, and
+`VBA272` reports `VBA.Array(...)` calls with an explicit `VBA` receiver.
+Unqualified `Array(...)` honors `Option Base` and is not reported.
+
 `VBA265` through `VBA269` are opt-in unused-declaration rules; enable them with
 `detect_unused_parameters`, `detect_unused_private_constants`,
 `detect_unused_udt_members`, `detect_never_assigned_variables`, and
 `detect_unassigned_variable_usage`. They exclude externally fixed signatures —
 event handlers, `Implements` members, `WithEvents` callbacks, and dynamically
 invoked procedures — and fail open on unresolved or ambiguous shapes.
+`VBA270` is an opt-in file-local rule enabled with
+`detect_udf_cell_reference_names`; it reports worksheet-visible `Function`
+declarations in standard modules whose names parse as valid A1 or absolute
+R1C1 cell references within the current worksheet limits, and skips `Private`,
+`Friend`, non-`Function`, `Option Private Module`, and non-standard-module
+declarations that cannot produce a UDF.
 Complete default-member runtime failures are reported by `VBA249`, while
 `VBA202` retains ownership of proven error-91 object-use-before-`Set`/`Nothing`
 cases.
