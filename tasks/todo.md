@@ -76,3 +76,27 @@ excelize v2.11.0 dependency with no fixed version, so it is tracked separately
 from this review fix. VBE-oracle need will be reassessed after checking existing
 bracket fixtures; VBA262 is not compile-equivalent and will not be promoted as
 compile evidence.
+
+# Issue #823 final-review pass 1 follow-up
+
+Review run_7c453f1dc6a5 on commit 202af7ff. All four confirmed findings
+verified against IR probes and real Excel runtime checks; all valid. Plan:
+
+1. F1: With-block implicit member writes invisible to the mutation summary.
+   Fix: build a shared withReceiver map (statement ID to innermost With
+   receiver expression), resolve implicit member targets and implicit member
+   call arguments through it, and fail open on the unresolved spaced-callee
+   form (Replace .Left parses into the callee expression).
+2. F2: Erase/Input #/Line Input #/Get # operands surface as unknown
+   statements with read accesses. Fix: record write targets for those
+   syntax kinds (file_number_literal excluded; Get uses TargetID only).
+3. F3: VBA270 fires on ParamArray with an impossible suggestion. Fix:
+   exclude ParamArray from VBA270 and VBA274.
+4. F4: cfg/clone.go cloneParameters missed PassingRange. Fix: clone it and
+   extend the snapshot-isolation test.
+5. Follow-ups: VBA273 gains the constrained exclusion (VBE rejects
+   Implements passing-modifier mismatches in both directions; verified on
+   real Excel). Indexed element writes (v(0) = 1) become possiblyWritten:
+   not a VBA271 reassignment, still caller-visible so VBA272 stays
+   suppressed. Call Mutate((x)) is forced ByVal and no longer propagates.
+   Missing mutation summary now returns nil explicitly (fail-open).

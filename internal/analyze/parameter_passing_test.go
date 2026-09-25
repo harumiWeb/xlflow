@@ -215,6 +215,212 @@ End Sub
 	}
 }
 
+func TestParameterPassingTreatsWithBlockMemberWriteAsCallerVisibleMutation(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
+Private Type Pair
+    Left As Long
+    Right As Long
+End Type
+
+Private Type Outer
+    Inner As Pair
+End Type
+
+Private Sub MutateDirect(ByRef value As Pair)
+    With value
+        .Left = 1
+    End With
+End Sub
+
+Private Sub MutateNested(ByRef value As Outer)
+    With value.Inner
+        .Left = 1
+    End With
+End Sub
+
+Private Sub MutateChained(ByRef value As Outer)
+    With value
+        .Inner.Left = 1
+    End With
+End Sub
+
+Private Sub MutateUnknown(ByRef value As SomeExternal)
+    With value
+        .Left = 1
+    End With
+End Sub
+
+Private Sub MutateObject(ByRef value As Collection)
+    With value
+        .Add 1
+    End With
+End Sub
+`})
+	got := findingsByCode(findings, "VBA272")
+	for _, finding := range got {
+		if finding.Procedure != "MutateObject" {
+			t.Fatalf("VBA272 reported With-block written parameter: %+v", finding)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("VBA272 findings = %+v, want only MutateObject.value", got)
+	}
+}
+
+func TestParameterPassingTreatsWithBlockImplicitCallArgumentAsMutation(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
+Private Type Pair
+    Left As Long
+End Type
+
+Private Sub Replace(ByRef value As Long)
+    value = 9
+End Sub
+
+Private Sub MutateCallKeyword(ByRef value As Pair)
+    With value
+        Call Replace(.Left)
+    End With
+End Sub
+
+Private Sub MutateSpacedCallee(ByRef value As Pair)
+    With value
+        Replace .Left
+    End With
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for implicit member call arguments", got)
+	}
+}
+
+func TestParameterPassingTreatsFileStatementsAsParameterWrites(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
+Private Type Pair
+    Left As Long
+End Type
+
+Private Sub ResetValue(ByRef value As Variant)
+    Erase value
+End Sub
+
+Private Sub ReadInput(ByRef text As String)
+    Input #1, text
+End Sub
+
+Private Sub ReadLine(ByRef text As String)
+    Line Input #1, text
+End Sub
+
+Private Sub ReadRecord(ByRef value As Variant)
+    Get #1, , value
+End Sub
+
+Private Sub ReadInputMulti(ByRef fileNumber As Long, ByRef first As String, ByRef second As String)
+    Input #fileNumber, first, second
+End Sub
+
+Private Sub ReadInputMember(ByRef pairValue As Pair)
+    Input #1, pairValue.Left
+End Sub
+
+Private Sub WriteRecord(ByRef value As Variant)
+    Put #1, , value
+End Sub
+`})
+	got := findingsByCode(findings, "VBA272")
+	found := map[string]bool{}
+	for _, finding := range got {
+		found[finding.Procedure+":"+finding.Message] = true
+	}
+	for _, procedure := range []string{"ResetValue", "ReadInput", "ReadLine", "ReadRecord", "ReadInputMember"} {
+		for _, finding := range got {
+			if finding.Procedure == procedure {
+				t.Fatalf("VBA272 reported %s parameter written by file statement: %+v", procedure, got)
+			}
+		}
+	}
+	wantFileNumber, wantSecond, wantPut := false, false, false
+	for _, finding := range got {
+		switch {
+		case finding.Procedure == "ReadInputMulti" && strings.Contains(finding.Message, "fileNumber"):
+			wantFileNumber = true
+		case finding.Procedure == "WriteRecord" && strings.Contains(finding.Message, "value"):
+			wantPut = true
+		case finding.Procedure == "ReadInputMulti" && strings.Contains(finding.Message, "second"):
+			wantSecond = true
+		}
+	}
+	if !wantFileNumber || wantSecond || !wantPut {
+		t.Fatalf("VBA272 findings = %+v, want only ReadInputMulti.fileNumber and WriteRecord.value", got)
+	}
+}
+
+func TestParameterPassingSkipsParamArrayForStyleRules(t *testing.T) {
+	modules := map[string]string{"Main.bas": `Option Explicit
+Public Sub Run(ParamArray args())
+    Debug.Print UBound(args)
+End Sub
+`}
+	implicitCfg := config.Default()
+	implicitCfg.Analyze.DetectImplicitByRefParameters = true
+	if got := findingsByCode(runParameterPassingAnalysis(t, implicitCfg, modules), "VBA270"); len(got) != 0 {
+		t.Fatalf("VBA270 findings = %+v, want none for ParamArray", got)
+	}
+}
+
+func TestParameterPassingIndexedWriteIsNotBindingReplacement(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
+Private Sub WriteElement(ByVal value As Variant)
+    value(0) = 1
+End Sub
+
+Private Sub WriteElementByRef(ByRef value As Variant)
+    value(0) = 1
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA271"); len(got) != 0 {
+		t.Fatalf("VBA271 findings = %+v, want none for element write", got)
+	}
+	if got := findingsByCode(findings, "VBA272"); len(got) != 0 {
+		t.Fatalf("VBA272 findings = %+v, want none for caller-visible element write", got)
+	}
+}
+
+func TestParameterPassingParenthesizedArgumentIsForcedByVal(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
+Private Sub Mutate(ByRef value As Long)
+    value = 1
+End Sub
+
+Private Sub Forward(ByRef target As Long)
+    Call Mutate((target))
+End Sub
+`})
+	got := findingsByCode(findings, "VBA272")
+	if len(got) != 1 || got[0].Procedure != "Forward" {
+		t.Fatalf("VBA272 findings = %+v, want Forward.target for forced ByVal argument", got)
+	}
+}
+
+func TestParameterPassingSkipsImplementsPropertyValueByRef(t *testing.T) {
+	cfg := config.Default()
+	cfg.Analyze.DetectMisleadingPropertyValueByRef = true
+	result, err := (Analyzer{Config: cfg}).AnalyzeProject(t.Context(), sourceproject.SourceProject{Files: []sourceproject.SourceFile{
+		{Path: "virtual/Worker.cls", ModuleKind: sourceproject.ModuleKindClass, Source: []byte(`Option Explicit
+Implements IWorker
+Private Property Let IWorker_Value(ByRef newValue As Long)
+End Property
+`)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(result.Findings, "VBA273"); len(got) != 0 {
+		t.Fatalf("VBA273 constrained findings = %+v, want none", got)
+	}
+}
+
 func TestParameterPassingPropagatesNamedByRefArguments(t *testing.T) {
 	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
 Private Sub Mutate(ByRef value As Long)

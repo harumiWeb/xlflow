@@ -440,6 +440,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enum_member`
 - `enum_type`
 - `environment_variable`
+- `erase_statement`
 - `error_candidate_procedures`
 - `error_cfg_walks`
 - `error_handling_count`
@@ -505,6 +506,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `field_count`
 - `file_count`
 - `file_input`
+- `file_number_literal`
 - `file_operation`
 - `file_picker`
 - `file_read`
@@ -581,6 +583,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generator_version_missing`
 - `generic_dataflow_cfg_walks`
 - `generic_dataflow_kernel_runs`
+- `get_statement`
 - `global_values`
 - `goto_count`
 - `goto_statement`
@@ -616,6 +619,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `infrastructure_failure`
 - `init_failed`
 - `input_dependent`
+- `input_statement`
 - `inspect_args_invalid`
 - `inspect_failed`
 - `inspect_form_args_invalid`
@@ -679,6 +683,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `likely_cause`
 - `line_continuation`
 - `line_count`
+- `line_input_statement`
 - `line_number_label`
 - `line_number_literal`
 - `line_number_statement`

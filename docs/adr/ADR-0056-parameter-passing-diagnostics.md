@@ -41,6 +41,16 @@ recovered, and conditional-compiled boundaries become `possibly written` and
 suppress `VBA272`. Resolved `ByVal` and `ParamArray` arguments do not
 propagate replacement of the caller's variable.
 
+The mutation summary also covers statement forms that write a parameter
+without an ordinary assignment or call boundary: `With`-block implicit
+member targets and implicit member call arguments resolve through the
+enclosing `With` receiver, and `Erase`, `Input #`, `Line Input #`, and
+`Get #` write their variable operands. An indexed element write
+(`value(0) = 1`) is not a binding replacement, so it does not trip
+`VBA271`, but it is still treated as possibly caller-visible and suppresses
+`VBA272`. A parenthesized call argument forces `ByVal` evaluation and does
+not propagate a write.
+
 The analysis concerns replacement of the argument variable, not mutation of
 an object it references. `target.Caption = ...` on a known object does not
 write the `target` binding; `Set target = ...` does. User-defined types are
@@ -50,7 +60,12 @@ Arrays and `ParamArray` parameters are not eligible for `VBA272`, because VBA
 does not permit typed arrays to be passed `ByVal`.
 
 Host event signatures and `Implements` members are excluded from `VBA270`,
-`VBA272`, and `VBA274` because their declaration shape is externally fixed.
+`VBA272`, `VBA273`, and `VBA274` because their declaration shape is
+externally fixed; the VBE rejects an `Implements` member whose passing
+modifier differs from the interface declaration in either direction, so even
+the `VBA273` suggestion cannot compile there. `ParamArray` parameters are
+excluded from `VBA270` and `VBA274` because VBA forbids an explicit
+passing modifier on them.
 Ordinary `Public`, `Friend`, and `Private` procedures remain eligible: these
 rules describe their declared API contract rather than claiming a parameter
 is unused by unknown callers.
@@ -91,8 +106,15 @@ is unused by unknown callers.
   mutation summaries and the five projections.
 - `internal/analyze/parameter_passing_test.go` covers writes, local call
   propagation, unknown calls, named arguments, object-member mutation,
+  `With`-block member writes and call arguments, file-statement operand
+  writes, indexed element writes, parenthesized forced-`ByVal` arguments,
   property value semantics, constrained signatures, suppression, realtime,
   and in-memory parity.
+- Real Excel/VBE verification confirmed the runtime premises: a
+  `Property Let`/`Set` value parameter declared `ByRef` does not write
+  back to the caller's variable, a parenthesized call argument is passed
+  `ByVal`, and the VBE rejects an `Implements` passing-modifier mismatch
+  in both directions.
 - `docs/specs/vba-parameter-passing-diagnostics.md` records the public
   contract, and the shared rule registry records surface metadata.
 

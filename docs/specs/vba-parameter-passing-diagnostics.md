@@ -18,8 +18,10 @@ suppression comments.
 Reports an ordinary parameter whose declaration omits `ByVal` or `ByRef`.
 VBA defaults that parameter to `ByRef`; the diagnostic asks projects that
 prefer explicit API contracts to write the intended modifier. Property
-Let/Set value parameters, event handlers, and `Implements` members are
-excluded.
+Let/Set value parameters, event handlers, `Implements` members, and
+`ParamArray` parameters are excluded. `ParamArray` is excluded because VBA
+rejects an explicit passing modifier on it, so the suggestion could not
+compile.
 
 ### VBA271 — assigned ByVal parameter
 
@@ -54,6 +56,23 @@ the caller-visible value and therefore prevents the recommendation. Unknown
 composite types fail open, including when a nested member is passed through a
 potentially writing `ByRef` call.
 
+Member writes are resolved through `With` blocks as well: an implicit member
+target (`.Left = 1`) or an implicit member passed to a writing callee
+(`Call Replace(.Left)`) counts as a write to the `With` receiver parameter
+when it resolves to one. A space-separated implicit member argument
+(`Replace .Left`) parses into the callee expression rather than the argument
+list; inside a `With` block that unresolved shape fails open on the receiver
+parameter.
+
+`Erase`, `Input #`, `Line Input #`, and `Get #` write their variable
+operands directly and count as parameter writes; the file-number operand and
+the `Get` record operand remain reads, and `Put #` writes the file rather
+than the variable. An indexed element write such as `value(0) = 1` is not a
+binding replacement, but it can be caller-visible, so it suppresses the
+diagnostic without reporting `VBA271`. A parenthesized call argument
+(`Call Mutate((x))`) forces `ByVal` evaluation and does not propagate a
+write.
+
 ### VBA273 — misleading Property value ByRef
 
 Reports an explicit `ByRef` modifier on the final value parameter of
@@ -61,13 +80,17 @@ Reports an explicit `ByRef` modifier on the final value parameter of
 that parameter even when the declaration says `ByRef`; spelling it `ByVal`
 makes the signature match its behavior. Index parameters before the final
 value parameter retain their ordinary passing semantics and are not reported
-under this rule.
+under this rule. Event handlers and `Implements` members are excluded
+because the VBE enforces the interface signature, including the passing
+modifier, so the declaration is externally fixed.
 
 ### VBA274 — redundant explicit ByRef
 
 Reports explicit `ByRef` on ordinary parameters for projects that prefer the
 VBA default spelling. Property value parameters, event handlers, and
-`Implements` members are excluded.
+`Implements` members are excluded. `ParamArray` parameters are excluded for
+consistency with `VBA270`, although VBA already forbids an explicit modifier
+there.
 
 ## Configuration conflict
 
@@ -79,19 +102,22 @@ style choice.
 
 ## Parity mapping
 
-| Inspection intent               | xlflow   | Coverage notes                                                                       |
-| ------------------------------- | -------- | ------------------------------------------------------------------------------------ |
-| Implicit ByRef modifier         | `VBA270` | Ordinary procedures; constrained signatures excluded.                                |
-| Assigned ByVal parameter        | `VBA271` | Canonical IR writes, including effective Property value semantics.                   |
-| Parameter can be ByVal          | `VBA272` | Direct plus project-local call-chain mutation summary; unknown boundaries fail open. |
-| Misleading Property value ByRef | `VBA273` | Final Property Let/Set value parameter only.                                         |
-| Redundant ByRef modifier        | `VBA274` | Mutually exclusive configuration with `VBA270`.                                      |
+| Inspection intent               | xlflow   | Coverage notes                                                                                                                                   |
+| ------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Implicit ByRef modifier         | `VBA270` | Ordinary procedures; constrained signatures excluded.                                                                                            |
+| Assigned ByVal parameter        | `VBA271` | Canonical IR writes, including effective Property value semantics.                                                                               |
+| Parameter can be ByVal          | `VBA272` | Direct writes, `With` implicit members, `Erase`/`Input #`/`Get #` operands, plus project-local call-chain summary; unknown boundaries fail open. |
+| Misleading Property value ByRef | `VBA273` | Final Property Let/Set value parameter only; constrained signatures excluded.                                                                    |
+| Redundant ByRef modifier        | `VBA274` | Mutually exclusive configuration with `VBA270`; `ParamArray` excluded.                                                                           |
 
 ## Verification contract
 
 Focused tests cover direct and transitive writes, read-only parameters,
 unknown targets, named arguments, object-member mutation versus UDT-member
-mutation and binding replacement, array exclusion, Property Let/Set final-parameter semantics,
+mutation and binding replacement, `With`-block implicit member writes and
+call arguments, `Erase`/`Input #`/`Line Input #`/`Get #` operand writes,
+indexed element writes, parenthesized forced-`ByVal` arguments, array and
+`ParamArray` exclusions, Property Let/Set final-parameter semantics,
 host event and `Implements` exclusions, style configuration conflict, inline
 suppression, default-off behavior, batch/realtime parity, and filesystem /
 in-memory parity.
@@ -100,4 +126,8 @@ The Property Let/Set rule describes runtime passing behavior, not a VBE
 compile rejection, so all five registry entries are
 `compile_equivalent: false`. Compile-only oracle fixtures cannot establish
 caller-visible mutation semantics; runtime language-observation evidence is
-kept separate from compile-equivalent diagnostic binding.
+kept separate from compile-equivalent diagnostic binding. The runtime
+premise was verified against real Excel VBA: a `Property Let`/`Set` value
+parameter declared `ByRef` does not write back to the caller's variable,
+and the VBE rejects `Implements` members whose passing modifier differs
+from the interface declaration in either direction.

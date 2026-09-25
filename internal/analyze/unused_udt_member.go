@@ -1,7 +1,9 @@
 package analyze
 
 import (
+	"cmp"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -211,27 +213,7 @@ func (u *udtMemberUsage) observeProcedure(procedure procedureir.ProcedureIR) {
 	for _, statement := range procedure.Statements {
 		statements[statement.ID] = statement
 	}
-	withReceiver := make(map[int]int) // statement ID → With receiver expression ID
-	withStatements := make([]procedureir.Statement, 0)
-	for _, statement := range procedure.Statements {
-		if statement.Kind == procedureir.StatementWith {
-			withStatements = append(withStatements, statement)
-		}
-	}
-	// Process With statements in source order so a nested With overwrites the
-	// receiver mapping for its own subtree.
-	sort.Slice(withStatements, func(i, j int) bool {
-		return withStatements[i].Range.StartByte < withStatements[j].Range.StartByte
-	})
-	for _, statement := range withStatements {
-		receiver := udtWithReceiverExpression(procedure, statement)
-		if receiver == 0 {
-			continue
-		}
-		for _, descendant := range udtDescendantStatements(procedure, statement) {
-			withReceiver[descendant] = receiver
-		}
-	}
+	withReceiver := withReceiverExpressions(procedure)
 
 	// Escape: a UDT-typed variable passed where a callee may write it, or
 	// touched by a statement whose write shape is unmodeled.
@@ -499,6 +481,33 @@ func udtDescendantStatements(procedure procedureir.ProcedureIR, withStatement pr
 		}
 	}
 	return out
+}
+
+// withReceiverExpressions maps each statement ID to the receiver expression
+// of its innermost enclosing With block. With statements are processed in
+// source order so a nested With overwrites the receiver mapping for its own
+// subtree.
+func withReceiverExpressions(procedure procedureir.ProcedureIR) map[int]int {
+	withReceiver := make(map[int]int)
+	withStatements := make([]procedureir.Statement, 0)
+	for _, statement := range procedure.Statements {
+		if statement.Kind == procedureir.StatementWith {
+			withStatements = append(withStatements, statement)
+		}
+	}
+	slices.SortFunc(withStatements, func(a, b procedureir.Statement) int {
+		return cmp.Compare(a.Range.StartByte, b.Range.StartByte)
+	})
+	for _, statement := range withStatements {
+		receiver := udtWithReceiverExpression(procedure, statement)
+		if receiver == 0 {
+			continue
+		}
+		for _, descendant := range udtDescendantStatements(procedure, statement) {
+			withReceiver[descendant] = receiver
+		}
+	}
+	return withReceiver
 }
 
 // udtAssignmentEscapes reports whether a UDT-typed variable read in an

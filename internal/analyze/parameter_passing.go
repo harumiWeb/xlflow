@@ -17,10 +17,12 @@ const (
 type parameterMutationSummary map[string]parameterMutationState
 
 type parameterMutationRecord struct {
-	proc        sourceProcedure
-	summary     parameterMutationSummary
-	udtTypes    map[string]bool
-	objectTypes map[string]bool
+	proc         sourceProcedure
+	summary      parameterMutationSummary
+	udtTypes     map[string]bool
+	objectTypes  map[string]bool
+	exprByID     map[int]procedureir.Expression
+	withReceiver map[int]int
 }
 
 type parameterMutationWork struct {
@@ -42,9 +44,15 @@ func buildParameterMutationSummariesWithWork(files []parsedFile) (map[string]par
 			if proc.IR == nil {
 				continue
 			}
+			exprByID := parameterExpressionIndex(proc.IR)
+			withReceiver := parameterWithReceivers(proc.IR)
 			record := &parameterMutationRecord{
-				proc: proc, summary: directParameterMutationSummary(proc, udtTypes, objectTypes),
-				udtTypes: udtTypes, objectTypes: objectTypes,
+				proc:         proc,
+				summary:      directParameterMutationSummary(proc, udtTypes, objectTypes, exprByID, withReceiver),
+				udtTypes:     udtTypes,
+				objectTypes:  objectTypes,
+				exprByID:     exprByID,
+				withReceiver: withReceiver,
 			}
 			registered := false
 			for _, key := range parameterProcedureKeys(proc) {
@@ -118,6 +126,24 @@ func parameterCompositeTypes(files []parsedFile) (map[string]bool, map[string]bo
 	return udtTypes, objectTypes
 }
 
+func parameterExpressionIndex(procedure *procedureir.ProcedureIR) map[int]procedureir.Expression {
+	if procedure == nil {
+		return nil
+	}
+	byID := make(map[int]procedureir.Expression, len(procedure.Expressions))
+	for _, expression := range procedure.Expressions {
+		byID[expression.ID] = expression
+	}
+	return byID
+}
+
+func parameterWithReceivers(procedure *procedureir.ProcedureIR) map[int]int {
+	if procedure == nil {
+		return nil
+	}
+	return withReceiverExpressions(*procedure)
+}
+
 func parameterMutationCallers(ordered []*parameterMutationRecord, records map[string]*parameterMutationRecord) map[*parameterMutationRecord][]*parameterMutationRecord {
 	callers := make(map[*parameterMutationRecord][]*parameterMutationRecord)
 	seen := make(map[*parameterMutationRecord]map[*parameterMutationRecord]bool)
@@ -144,7 +170,7 @@ func parameterMutationCallers(ordered []*parameterMutationRecord, records map[st
 	return callers
 }
 
-func directParameterMutationSummary(proc sourceProcedure, udtTypes, objectTypes map[string]bool) parameterMutationSummary {
+func directParameterMutationSummary(proc sourceProcedure, udtTypes, objectTypes map[string]bool, exprByID map[int]procedureir.Expression, withReceiver map[int]int) parameterMutationSummary {
 	summary := make(parameterMutationSummary, proc.Params.Len())
 	for parameter := range proc.Params.All() {
 		summary[parameterName(parameter.Name)] = parameterNotWritten
@@ -155,39 +181,165 @@ func directParameterMutationSummary(proc sourceProcedure, udtTypes, objectTypes 
 		}
 		return summary
 	}
+	accessesByExpression := make(map[int][]procedureir.VariableAccess)
 	for access := range proc.Accesses.All() {
 		if access.Scope != procedureir.ScopeParameter {
 			continue
+		}
+		if access.ExpressionID != 0 {
+			accessesByExpression[access.ExpressionID] = append(accessesByExpression[access.ExpressionID], access)
 		}
 		name := parameterName(access.Name)
 		if _, ok := summary[name]; !ok {
 			continue
 		}
 		if access.Mode == procedureir.AccessWrite || access.Mode == procedureir.AccessReadWrite {
+			// v(0) = 1 writes through the binding to an element instead of
+			// replacing it: not a VBA271 reassignment, but still possibly
+			// caller-visible, so VBA272 must stay suppressed.
+			if parameterElementWrite(exprByID, access.ExpressionID) {
+				summary[name] = max(summary[name], parameterPossiblyWritten)
+				continue
+			}
 			summary[name] = parameterWritten
 		}
 	}
 	for _, statement := range proc.IR.Statements {
-		if statement.Target == nil || !strings.ContainsAny(statement.Target.Text, ".!") {
+		if statement.Target != nil && strings.ContainsAny(statement.Target.Text, ".!") {
+			root := parameterMemberTargetRoot(statement.Target.Text)
+			if root == "" && statement.Target.Kind == procedureir.ExpressionMember {
+				// Implicit member targets (.Left = 1) resolve through the
+				// enclosing With receiver instead of the leading text.
+				root = parameterExprRootName(exprByID, withReceiver, statement.Target.ID, 0)
+			}
+			recordParameterMemberWrite(summary, proc.IR.Symbol.Parameters, root, udtTypes, objectTypes)
+		}
+		if statement.Kind != procedureir.StatementUnknown {
 			continue
 		}
-		root := parameterMemberTargetRoot(statement.Target.Text)
-		if _, ok := summary[root]; !ok {
-			continue
-		}
-		parameter, ok := parameterByName(proc.IR.Symbol.Parameters, root)
-		if !ok || parameterTypeIsObject(parameter.Type, objectTypes) {
-			continue
-		}
-		state := parameterPossiblyWritten
-		if parameterTypeIsUDT(parameter.Type, udtTypes) {
-			state = parameterWritten
-		}
-		if state > summary[root] {
-			summary[root] = state
+		// Erase, Input #, Line Input #, and Get # write their variable
+		// operands but surface as unknown statements with read accesses.
+		switch statement.SyntaxKind {
+		case "erase_statement", "input_statement", "line_input_statement":
+			for _, expressionID := range statement.ExpressionIDs {
+				expression, ok := exprByID[expressionID]
+				if !ok || expression.SyntaxKind == "file_number_literal" {
+					continue
+				}
+				recordParameterWriteTarget(summary, proc, udtTypes, objectTypes, exprByID, withReceiver, accessesByExpression, expressionID)
+			}
+		case "get_statement":
+			if statement.TargetID != 0 {
+				recordParameterWriteTarget(summary, proc, udtTypes, objectTypes, exprByID, withReceiver, accessesByExpression, statement.TargetID)
+				continue
+			}
+			for _, expressionID := range statement.ExpressionIDs {
+				expression, ok := exprByID[expressionID]
+				if !ok || expression.SyntaxKind == "file_number_literal" {
+					continue
+				}
+				markParameterSubtreePossiblyWritten(summary, proc.IR, accessesByExpression, expressionID)
+			}
 		}
 	}
 	return summary
+}
+
+// parameterElementWrite reports whether a write-mode access targets an
+// element reached through the binding (v(0) = 1) rather than replacing the
+// binding itself.
+func parameterElementWrite(exprByID map[int]procedureir.Expression, expressionID int) bool {
+	expression, ok := exprByID[expressionID]
+	if !ok {
+		return false
+	}
+	parent, ok := exprByID[expression.ParentID]
+	if !ok {
+		return false
+	}
+	return parent.Kind == procedureir.ExpressionCall || parent.Kind == procedureir.ExpressionMember
+}
+
+// parameterExprRootName resolves the variable an expression is rooted at.
+// Qualified members recurse into the receiver; implicit members (.Left)
+// resolve through the innermost enclosing With receiver.
+func parameterExprRootName(exprByID map[int]procedureir.Expression, withReceiver map[int]int, expressionID, depth int) string {
+	if depth > 16 {
+		return ""
+	}
+	expression, ok := exprByID[expressionID]
+	if !ok {
+		return ""
+	}
+	switch expression.Kind {
+	case procedureir.ExpressionIdentifier:
+		return parameterName(expression.Text)
+	case procedureir.ExpressionMember:
+		_, receiver := udtMemberParts(expression, exprByID)
+		if receiver != 0 {
+			return parameterExprRootName(exprByID, withReceiver, receiver, depth+1)
+		}
+		if receiver, ok := withReceiver[expression.StatementID]; ok {
+			return parameterExprRootName(exprByID, withReceiver, receiver, depth+1)
+		}
+		return ""
+	case procedureir.ExpressionParentheses:
+		if len(expression.Children) == 1 {
+			return parameterExprRootName(exprByID, withReceiver, expression.Children[0], depth+1)
+		}
+		return ""
+	default:
+		return ""
+	}
+}
+
+func recordParameterMemberWrite(summary parameterMutationSummary, parameters []procedureir.Parameter, root string, udtTypes, objectTypes map[string]bool) {
+	if _, ok := summary[root]; !ok {
+		return
+	}
+	parameter, ok := parameterByName(parameters, root)
+	if !ok || parameterTypeIsObject(parameter.Type, objectTypes) {
+		return
+	}
+	state := parameterPossiblyWritten
+	if parameterTypeIsUDT(parameter.Type, udtTypes) {
+		state = parameterWritten
+	}
+	summary[root] = max(summary[root], state)
+}
+
+// recordParameterWriteTarget records a write to an expression used as a
+// statement operand (Erase, Input #, Get #). Bare parameters are written;
+// member targets follow the member-write rules; anything else fails open on
+// every parameter read inside the target subtree.
+func recordParameterWriteTarget(summary parameterMutationSummary, proc sourceProcedure, udtTypes, objectTypes map[string]bool, exprByID map[int]procedureir.Expression, withReceiver map[int]int, accessesByExpression map[int][]procedureir.VariableAccess, expressionID int) {
+	expression, ok := exprByID[expressionID]
+	if !ok {
+		return
+	}
+	switch expression.Kind {
+	case procedureir.ExpressionIdentifier:
+		name := parameterName(expression.Text)
+		if _, ok := summary[name]; ok {
+			summary[name] = parameterWritten
+		}
+	case procedureir.ExpressionMember:
+		root := parameterExprRootName(exprByID, withReceiver, expressionID, 0)
+		recordParameterMemberWrite(summary, proc.IR.Symbol.Parameters, root, udtTypes, objectTypes)
+	default:
+		markParameterSubtreePossiblyWritten(summary, proc.IR, accessesByExpression, expressionID)
+	}
+}
+
+func markParameterSubtreePossiblyWritten(summary parameterMutationSummary, procedure *procedureir.ProcedureIR, accessesByExpression map[int][]procedureir.VariableAccess, expressionID int) {
+	for _, nestedID := range parameterArgumentExpressionIDs(procedure, expressionID) {
+		for _, access := range accessesByExpression[nestedID] {
+			name := parameterName(access.Name)
+			if _, ok := summary[name]; ok {
+				summary[name] = max(summary[name], parameterPossiblyWritten)
+			}
+		}
+	}
 }
 
 func parameterMemberTargetRoot(text string) string {
@@ -235,31 +387,78 @@ func propagateParameterCallMutations(record *parameterMutationRecord, records ma
 	changed := false
 	for call := range proc.Calls.All() {
 		for _, expressionID := range call.Arguments.ExpressionIDs {
+			// A parenthesized argument ((x)) forces ByVal evaluation: the
+			// callee receives a value and cannot write the caller binding.
+			if expression, ok := record.exprByID[expressionID]; ok && expression.Kind == procedureir.ExpressionParentheses {
+				continue
+			}
+			handled := make(map[string]bool)
 			for _, nestedID := range parameterArgumentExpressionIDs(proc.IR, expressionID) {
 				for _, access := range accessesByExpression[nestedID] {
 					name := parameterName(access.Name)
-					if _, ok := record.summary[name]; !ok || record.summary[name] == parameterWritten {
-						continue
-					}
-					state := calledArgumentMutation(call, expressionID, records)
-					if !parameterArgumentIsBareName(proc.IR, expressionID, name) {
-						parameter, found := parameterByName(proc.IR.Symbol.Parameters, name)
-						if found && parameterTypeIsObject(parameter.Type, record.objectTypes) {
-							continue
-						}
-						if !found || !parameterTypeIsUDT(parameter.Type, record.udtTypes) {
-							state = parameterPossiblyWritten
-						}
-					}
-					if state > record.summary[name] {
-						record.summary[name] = state
+					handled[name] = true
+					bareName := parameterArgumentIsBareName(proc.IR, expressionID, name)
+					if record.applyArgumentMutation(call, expressionID, name, bareName, records) {
 						changed = true
+					}
+				}
+			}
+			// An implicit member argument (Call Replace(.Left) inside a With
+			// block) carries no receiver access, so resolve the member root
+			// through the enclosing With receiver.
+			if expression, ok := record.exprByID[expressionID]; ok && expression.Kind == procedureir.ExpressionMember {
+				if name := parameterExprRootName(record.exprByID, record.withReceiver, expressionID, 0); name != "" && !handled[name] {
+					if record.applyArgumentMutation(call, expressionID, name, false, records) {
+						changed = true
+					}
+				}
+			}
+		}
+		// A space-separated implicit member argument (Replace .Left inside a
+		// With block) parses into the callee expression instead of the
+		// argument list. When the unresolved callee shows a spaced member
+		// operator, fail open on the enclosing With receiver parameter.
+		if call.Resolution.Status != procedureir.ResolutionMatched {
+			if callee, ok := record.exprByID[call.ExpressionID]; ok &&
+				callee.Kind == procedureir.ExpressionMember && strings.Contains(callee.Text, " .") {
+				if receiverID, ok := record.withReceiver[call.StatementID]; ok {
+					if name := parameterExprRootName(record.exprByID, record.withReceiver, receiverID, 0); name != "" {
+						if _, ok := record.summary[name]; ok && record.summary[name] < parameterPossiblyWritten {
+							record.summary[name] = parameterPossiblyWritten
+							changed = true
+						}
 					}
 				}
 			}
 		}
 	}
 	return changed
+}
+
+// applyArgumentMutation records how one argument expression may mutate the
+// caller-visible parameter binding. bareName arguments can replace the
+// binding outright; member or element arguments follow the member-write
+// rules (object member writes do not rebind, UDT member writes propagate the
+// callee state, unknown composites fail open).
+func (record *parameterMutationRecord) applyArgumentMutation(call procedureir.CallSite, expressionID int, name string, bareName bool, records map[string]*parameterMutationRecord) bool {
+	if _, ok := record.summary[name]; !ok || record.summary[name] == parameterWritten {
+		return false
+	}
+	state := calledArgumentMutation(call, expressionID, records)
+	if !bareName {
+		parameter, found := parameterByName(record.proc.IR.Symbol.Parameters, name)
+		if found && parameterTypeIsObject(parameter.Type, record.objectTypes) {
+			return false
+		}
+		if !found || !parameterTypeIsUDT(parameter.Type, record.udtTypes) {
+			state = parameterPossiblyWritten
+		}
+	}
+	if state > record.summary[name] {
+		record.summary[name] = state
+		return true
+	}
+	return false
 }
 
 func parameterArgumentIsBareName(procedure *procedureir.ProcedureIR, expressionID int, name string) bool {
@@ -386,6 +585,12 @@ func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure
 	if summary == nil {
 		summary = summaries[strings.ToLower(strings.TrimSpace(proc.Module+"."+proc.Name))]
 	}
+	if summary == nil {
+		// Fail open: without a mutation record xlflow cannot prove the
+		// parameter is never written, so no parameter-passing finding is
+		// emitted for this procedure.
+		return nil
+	}
 	constrained := parameterPassingSignatureConstrained(file, proc)
 	var findings []Finding
 	for index, parameter := range proc.IR.Symbol.Parameters {
@@ -397,17 +602,17 @@ func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure
 		effective := effectiveParameterPassing(proc.IR.Symbol, index)
 		state := summary[parameterName(name)]
 		switch {
-		case a.Config.Analyze.DetectMisleadingPropertyValueByRef && valueParameter && parameter.PassingExplicit && strings.EqualFold(parameter.Passing, "ByRef"):
+		case a.Config.Analyze.DetectMisleadingPropertyValueByRef && valueParameter && !constrained && parameter.PassingExplicit && strings.EqualFold(parameter.Passing, "ByRef"):
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA273", "warning",
 				"Property value parameter "+name+" is declared ByRef but VBA always passes it ByVal.",
 				"The final value parameter of Property Let and Property Set has ByVal runtime semantics even when ByRef is written.",
 				"Declare the property value parameter ByVal so the signature matches its actual behavior."))
-		case a.Config.Analyze.DetectImplicitByRefParameters && !constrained && !valueParameter && effective == "byref" && !parameter.PassingExplicit:
+		case a.Config.Analyze.DetectImplicitByRefParameters && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && !parameter.PassingExplicit:
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA270", "information",
 				"Parameter "+name+" is implicitly passed ByRef.",
 				"VBA defaults ordinary parameters to ByRef when no passing modifier is written.",
 				"Add an explicit ByRef or ByVal modifier to document the intended API contract."))
-		case a.Config.Analyze.DetectRedundantByRefModifiers && !constrained && !valueParameter && effective == "byref" && parameter.PassingExplicit:
+		case a.Config.Analyze.DetectRedundantByRefModifiers && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && parameter.PassingExplicit:
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA274", "information",
 				"Explicit ByRef on parameter "+name+" repeats VBA's default.",
 				"Ordinary VBA parameters are already ByRef when the modifier is omitted.",
