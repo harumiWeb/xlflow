@@ -53,6 +53,7 @@ func cloneParameters(in []procedureir.Parameter) []procedureir.Parameter {
 	out := append([]procedureir.Parameter(nil), in...)
 	for i := range out {
 		out[i].DefaultRange = cloneRangePointer(in[i].DefaultRange)
+		out[i].NameRange = cloneRangePointer(in[i].NameRange)
 		out[i].BoundsRange = cloneRangePointer(in[i].BoundsRange)
 		out[i].ArrayBounds = cloneArrayBounds(in[i].ArrayBounds)
 	}

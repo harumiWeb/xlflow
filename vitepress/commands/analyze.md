@@ -271,6 +271,8 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA268` | warning               | A procedure-local scalar variable is read but never assigned.                                                                                                        |
 | `VBA269` | warning               | A procedure-local variable is read on a path where no assignment is guaranteed to have executed.                                                                     |
 | `VBA270` | warning               | A worksheet-visible `Function` in a standard module is named after a valid A1 or R1C1 cell reference, so worksheet formulas resolve the cell instead.                |
+| `VBA271` | warning               | A `ParamArray` parameter is always passed as a zero-based `Variant` array despite `Option Base 1`.                                                                   |
+| `VBA272` | warning               | A qualified `VBA.Array(...)` call returns a zero-based array despite `Option Base 1`; unqualified `Array(...)` honors `Option Base`.                                 |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -307,6 +309,13 @@ scalar assignments. Enable it with `detect_dead_stores = true`.
 `VBA259` is opt-in and reports `Select Case` items or `Case Else` branches
 that can never execute because earlier items already cover every matching
 selector value. Enable it with `detect_unreachable_select_case = true`.
+
+`VBA271` and `VBA272` are opt-in `Option Base` consistency rules; enable them
+with `detect_option_base_paramarray_inconsistency` and
+`detect_option_base_array_inconsistency`. They report only inside modules
+declaring `Option Base 1`: `VBA271` reports `ParamArray` parameters, and
+`VBA272` reports `VBA.Array(...)` calls with an explicit `VBA` receiver.
+Unqualified `Array(...)` honors `Option Base` and is not reported.
 
 `VBA265` through `VBA269` are opt-in unused-declaration rules; enable them with
 `detect_unused_parameters`, `detect_unused_private_constants`,

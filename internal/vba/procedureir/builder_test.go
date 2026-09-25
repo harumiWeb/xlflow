@@ -1477,6 +1477,37 @@ func TestCloneAndRebasePreserveOwnedSignatureRanges(t *testing.T) {
 	}
 }
 
+func TestCloneAndRebasePreserveParameterNameRange(t *testing.T) {
+	t.Parallel()
+	source, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte("Public Sub Run(ParamArray values())\nEnd Sub\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nameRange := source.Procedures[0].Symbol.Parameters[0].NameRange
+	if nameRange == nil {
+		t.Fatalf("parameter NameRange = nil: %#v", source.Procedures[0].Symbol.Parameters[0])
+	}
+	clone := Clone(source)
+	clonedName := clone.Procedures[0].Symbol.Parameters[0].NameRange
+	if clonedName == nil || clonedName == nameRange {
+		t.Fatalf("Clone shares NameRange storage: source=%#v clone=%#v", nameRange, clonedName)
+	}
+	oldBase := clone.Procedures[0].Symbol.DeclarationRange
+	newBase := oldBase
+	newBase.StartLine++
+	newBase.EndLine++
+	newBase.StartByte += 10
+	newBase.EndByte += 10
+	rebased := RebaseProcedure(clone.Procedures[0], oldBase, newBase)
+	rebasedName := rebased.Symbol.Parameters[0].NameRange
+	if rebasedName == nil || rebasedName.StartLine != nameRange.StartLine+1 || rebasedName.StartByte != nameRange.StartByte+10 {
+		t.Fatalf("NameRange not rebased: before=%#v after=%#v", nameRange, rebasedName)
+	}
+	if source.Procedures[0].Symbol.Parameters[0].NameRange.StartLine != nameRange.StartLine {
+		t.Fatal("RebaseProcedure mutated the source NameRange")
+	}
+}
+
 func TestCloneControlFlowMetadataIsDeep(t *testing.T) {
 	t.Parallel()
 	source, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte("Public Sub Run()\nGoTo Done\nDone:\nEnd Sub\n"))

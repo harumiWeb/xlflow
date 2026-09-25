@@ -514,6 +514,7 @@ func TestCFGViewPreservesDenseOrdinalsForDefensiveZeroIDs(t *testing.T) {
 
 func TestCloneDeepCopiesProcedureSignatureRanges(t *testing.T) {
 	defaultRange := vbaast.Range{StartLine: 1, EndLine: 1, StartByte: 2, EndByte: 4}
+	nameRange := vbaast.Range{StartLine: 1, EndLine: 1, StartByte: 12, EndByte: 18}
 	boundsRange := vbaast.Range{StartLine: 2, EndLine: 2, StartByte: 5, EndByte: 8}
 	lowerRange := vbaast.Range{StartLine: 3, EndLine: 3, StartByte: 9, EndByte: 10}
 	upperRange := vbaast.Range{StartLine: 3, EndLine: 3, StartByte: 11, EndByte: 12}
@@ -521,6 +522,7 @@ func TestCloneDeepCopiesProcedureSignatureRanges(t *testing.T) {
 	graph := Graph{Procedure: procedureir.ProcedureSymbol{
 		Parameters: []procedureir.Parameter{{
 			DefaultRange: &defaultRange,
+			NameRange:    &nameRange,
 			BoundsRange:  &boundsRange,
 			ArrayBounds:  []procedureir.ArrayBound{{LowerRange: &lowerRange, UpperRange: &upperRange}},
 		}},
@@ -528,6 +530,7 @@ func TestCloneDeepCopiesProcedureSignatureRanges(t *testing.T) {
 		DeclarationRange: procedureRange,
 	}}
 	wantDefaultStart := graph.Procedure.Parameters[0].DefaultRange.StartByte
+	wantNameEnd := graph.Procedure.Parameters[0].NameRange.EndByte
 	wantBoundsEnd := graph.Procedure.Parameters[0].BoundsRange.EndByte
 	wantParameterLowerStart := graph.Procedure.Parameters[0].ArrayBounds[0].LowerRange.StartByte
 	wantParameterUpperEnd := graph.Procedure.Parameters[0].ArrayBounds[0].UpperRange.EndByte
@@ -535,12 +538,14 @@ func TestCloneDeepCopiesProcedureSignatureRanges(t *testing.T) {
 	wantProcedureUpperEnd := graph.Procedure.ArrayBounds[0].UpperRange.EndByte
 	clone := Clone(graph)
 	clone.Procedure.Parameters[0].DefaultRange.StartByte++
+	clone.Procedure.Parameters[0].NameRange.EndByte++
 	clone.Procedure.Parameters[0].BoundsRange.EndByte++
 	clone.Procedure.Parameters[0].ArrayBounds[0].LowerRange.StartByte++
 	clone.Procedure.Parameters[0].ArrayBounds[0].UpperRange.EndByte++
 	clone.Procedure.ArrayBounds[0].LowerRange.StartByte++
 	clone.Procedure.ArrayBounds[0].UpperRange.EndByte++
 	if graph.Procedure.Parameters[0].DefaultRange.StartByte != wantDefaultStart ||
+		graph.Procedure.Parameters[0].NameRange.EndByte != wantNameEnd ||
 		graph.Procedure.Parameters[0].BoundsRange.EndByte != wantBoundsEnd ||
 		graph.Procedure.Parameters[0].ArrayBounds[0].LowerRange.StartByte != wantParameterLowerStart ||
 		graph.Procedure.Parameters[0].ArrayBounds[0].UpperRange.EndByte != wantParameterUpperEnd ||

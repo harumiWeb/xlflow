@@ -11,6 +11,15 @@ All notable changes to xlflow will be documented in this file.
   `Option Private Module` files, and non-standard modules are excluded. The
   rule is configurable with `detect_udf_cell_reference_names` and is
   available in batch, realtime, and LSP analysis.
+- Added opt-in `VBA271` and `VBA272` `Option Base` consistency diagnostics.
+  `VBA271` warns on `ParamArray` parameters inside a module declaring
+  `Option Base 1`, and `VBA272` warns on explicitly qualified
+  `VBA.Array(...)` calls in the same modules; both constructs stay
+  zero-based regardless of `Option Base`. Unqualified `Array(...)` honors
+  `Option Base` and is not reported. The rules use
+  `detect_option_base_paramarray_inconsistency` and
+  `detect_option_base_array_inconsistency` and run in batch, realtime,
+  and LSP analysis.
 - Added opt-in Excel semantic inspections: batch-only `VBA260` warns when an
   authoritative workbook catalog can replace `ThisWorkbook.Worksheets("name")`
   with a stable worksheet CodeName; `VBA261` reports generated-TypeLib
