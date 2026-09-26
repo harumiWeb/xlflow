@@ -4,6 +4,21 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `VBA273` through `VBA277` warning diagnostics for VBA
+  class and interface public-API hazards: `VBA273` reports public
+  object-module member names containing underscores that collide with
+  `<Interface>_<Member>` and `<Object>_<Event>` naming; `VBA274` reports
+  non-Private `Enum` declarations inside document modules; `VBA275`
+  reports public-facing `Property Let`/`Set` members without a matching
+  `Property Get`; `VBA276` reports public members matching an implemented
+  interface binding and explicitly `Public` event handlers; and `VBA277`
+  reports self-name references inside modules with a predeclared default
+  instance. Each rule is configurable with `detect_public_member_underscore_names`,
+  `detect_document_module_public_enum`, `detect_write_only_property`,
+  `detect_public_interface_event_members`, and
+  `detect_predeclared_instance_access`, and is available in batch,
+  realtime, and LSP analysis.
+
 - Added opt-in `VBA270` warning diagnostics for worksheet-visible `Function`
   declarations in standard modules whose names parse as valid A1 or absolute
   R1C1 Excel cell references, so worksheet formulas resolve the cell instead

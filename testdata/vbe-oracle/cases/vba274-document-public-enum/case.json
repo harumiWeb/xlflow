@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "vba274-document-public-enum",
+  "description": "Observe whether VBE accepts a Public Enum declared in a worksheet document module; VBA274 reports the copy-time ambiguous-name hazard only when compilation succeeds.",
+  "modules": [
+    {
+      "name": "Sheet1",
+      "kind": "document",
+      "path": "Sheet1.bas",
+      "entry": true,
+      "document_target": "worksheet"
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "maintainability"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "language-observation",
+    "rule_codes": ["VBA274"],
+    "binding_note": "VBA274 is an opt-in correctness warning for a sheet-copy compile hazard; the fixture records whether VBE accepts a Public Enum in a worksheet document module."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-09-25T18:12:27Z"
+      }
+    ]
+  }
+}

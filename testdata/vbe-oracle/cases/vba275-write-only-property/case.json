@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "vba275-write-only-property",
+  "description": "Observe whether VBE accepts Public Property Let/Set members without a matching Property Get; VBA275 reports the write-only API smell only when compilation succeeds.",
+  "modules": [
+    {
+      "name": "Widget",
+      "kind": "class",
+      "path": "Widget.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "maintainability"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "maintainability-observation",
+    "rule_codes": ["VBA275"],
+    "binding_note": "VBA275 is an opt-in maintainability warning, not a compile-equivalent rule; the fixture records whether VBE accepts write-only public properties."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-09-25T18:12:27Z"
+      }
+    ]
+  }
+}

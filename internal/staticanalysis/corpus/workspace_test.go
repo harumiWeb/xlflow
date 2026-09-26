@@ -54,6 +54,11 @@ func TestMaterializeThirdPartyProjectsPreservesSourcesAndClassifications(t *test
 			"VBA270": loaded.Analyze.DetectUdfCellReferenceNames,
 			"VBA271": loaded.Analyze.DetectOptionBaseParamArrayInconsistency,
 			"VBA272": loaded.Analyze.DetectOptionBaseArrayInconsistency,
+			"VBA273": loaded.Analyze.DetectPublicMemberUnderscoreNames,
+			"VBA274": loaded.Analyze.DetectDocumentModulePublicEnum,
+			"VBA275": loaded.Analyze.DetectWriteOnlyProperty,
+			"VBA276": loaded.Analyze.DetectPublicInterfaceEventMembers,
+			"VBA277": loaded.Analyze.DetectPredeclaredInstanceAccess,
 		} {
 			if !enabled {
 				t.Fatalf("generated config did not enable %s for corpus review for %s", code, project.ID)

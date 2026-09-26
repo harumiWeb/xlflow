@@ -1,3 +1,37 @@
+# Issue #826: VBA class/interface public-API hazard diagnostics (VBA273-VBA277)
+
+Parent issue #816. Implemented five opt-in warning rules, all default-disabled,
+warning-level, inline-suppressible, non-blocking, on batch + realtime + LSP:
+
+- VBA273 public member underscore names (class/form/document; skips
+  event handlers, Implements bindings, Class_Initialize/Class_Terminate).
+- VBA274 non-Private Enum in document modules.
+- VBA275 write-only Property (Let/Set without Get), one finding per name.
+- VBA276 public members matching `<Interface>_<Member>` binding (full interface
+  name prefix match) and explicitly Public event handlers.
+- VBA277 self-name access inside predeclared modules (document/form/
+  VB_PredeclaredId class); type operands excluded via expression parents.
+
+Artifacts: internal/analyze/class_interface_hazards.go + tests, config keys
+detect_public_member_underscore_names / detect_document_module_public_enum /
+detect_write_only_property / detect_public_interface_event_members /
+detect_predeclared_instance_access, registry.json entries,
+docs/specs/vba-class-interface-diagnostics.md, cli-contract/vitepress docs,
+CHANGELOG Unreleased entry, corpus materialization flags + snapshots +
+273 true-positive ledger rows, six VBE oracle fixtures (promoted
+2026-09-25T18:12:27Z, asserted expectations).
+
+Verified: go test ./internal/analyze ./internal/config
+./internal/staticanalysis/rules ./internal/oracle; task corpus:test
+(snapshots match, unreviewed=0); task corpus:metrics (reviewed=10531
+tp=7648 fp=2883 allowed=90); pnpm docs:check / format:check; gofmt.
+
+Remaining: commit/push/PR on user request; record oracle case IDs
+(vba273-public-underscore-member, vba274-document-public-enum,
+vba275-write-only-property, vba276-public-event-handler,
+vba276-public-interface-member-collision, vba277-predeclared-self-access)
+in the PR body.
+
 # PR #837 review follow-up (Issue #822, VBA257/VBA258)
 
 Review comments on internal/analyze/discarded_return.go. Verified against IR

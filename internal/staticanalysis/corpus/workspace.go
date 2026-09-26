@@ -198,6 +198,11 @@ func MaterializeThirdPartyProject(corpusRoot string, project Project, opts Mater
 	cfg.Analyze.DetectUdfCellReferenceNames = true
 	cfg.Analyze.DetectOptionBaseArrayInconsistency = true
 	cfg.Analyze.DetectOptionBaseParamArrayInconsistency = true
+	cfg.Analyze.DetectPublicMemberUnderscoreNames = true
+	cfg.Analyze.DetectDocumentModulePublicEnum = true
+	cfg.Analyze.DetectWriteOnlyProperty = true
+	cfg.Analyze.DetectPublicInterfaceEventMembers = true
+	cfg.Analyze.DetectPredeclaredInstanceAccess = true
 	if err := config.Write(filepath.Join(workspace.Root, config.FileName), cfg); err != nil {
 		return workspace, fmt.Errorf("write materialized project config: %w", err)
 	}

@@ -248,6 +248,11 @@ type AnalyzeConfig struct {
 	DetectUdfCellReferenceNames               bool     `toml:"detect_udf_cell_reference_names"`
 	DetectOptionBaseArrayInconsistency        bool     `toml:"detect_option_base_array_inconsistency"`
 	DetectOptionBaseParamArrayInconsistency   bool     `toml:"detect_option_base_paramarray_inconsistency"`
+	DetectPublicMemberUnderscoreNames         bool     `toml:"detect_public_member_underscore_names"`
+	DetectDocumentModulePublicEnum            bool     `toml:"detect_document_module_public_enum"`
+	DetectWriteOnlyProperty                   bool     `toml:"detect_write_only_property"`
+	DetectPublicInterfaceEventMembers         bool     `toml:"detect_public_interface_event_members"`
+	DetectPredeclaredInstanceAccess           bool     `toml:"detect_predeclared_instance_access"`
 	DevelopmentHTTPOrigins                    []string `toml:"development_http_origins"`
 }
 
@@ -366,6 +371,11 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA270": {Get: func(c AnalyzeConfig) bool { return c.DetectUdfCellReferenceNames }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUdfCellReferenceNames = v }},
 	"VBA271": {Get: func(c AnalyzeConfig) bool { return c.DetectOptionBaseParamArrayInconsistency }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOptionBaseParamArrayInconsistency = v }},
 	"VBA272": {Get: func(c AnalyzeConfig) bool { return c.DetectOptionBaseArrayInconsistency }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOptionBaseArrayInconsistency = v }},
+	"VBA273": {Get: func(c AnalyzeConfig) bool { return c.DetectPublicMemberUnderscoreNames }, Set: func(c *AnalyzeConfig, v bool) { c.DetectPublicMemberUnderscoreNames = v }},
+	"VBA274": {Get: func(c AnalyzeConfig) bool { return c.DetectDocumentModulePublicEnum }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDocumentModulePublicEnum = v }},
+	"VBA275": {Get: func(c AnalyzeConfig) bool { return c.DetectWriteOnlyProperty }, Set: func(c *AnalyzeConfig, v bool) { c.DetectWriteOnlyProperty = v }},
+	"VBA276": {Get: func(c AnalyzeConfig) bool { return c.DetectPublicInterfaceEventMembers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectPublicInterfaceEventMembers = v }},
+	"VBA277": {Get: func(c AnalyzeConfig) bool { return c.DetectPredeclaredInstanceAccess }, Set: func(c *AnalyzeConfig, v bool) { c.DetectPredeclaredInstanceAccess = v }},
 }
 
 var (

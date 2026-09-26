@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "vba273-public-underscore-member",
+  "description": "Observe whether VBE accepts public class members whose names contain underscores; VBA273 reports the maintainability hazard only when compilation succeeds.",
+  "modules": [
+    {
+      "name": "Widget",
+      "kind": "class",
+      "path": "Widget.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "maintainability"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "maintainability-observation",
+    "rule_codes": ["VBA273"],
+    "binding_note": "VBA273 is an opt-in maintainability warning, not a compile-equivalent rule; the fixture records whether VBE accepts underscored public member names."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-09-25T18:12:27Z"
+      }
+    ]
+  }
+}

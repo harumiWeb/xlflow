@@ -1576,6 +1576,11 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA270`: a worksheet-visible `Function` in a standard module is named after a valid A1 or R1C1 cell reference (opt-in)
 - `VBA271`: a `ParamArray` parameter is always zero-based despite `Option Base 1` (opt-in)
 - `VBA272`: a qualified `VBA.Array(...)` call returns a zero-based array despite `Option Base 1`; unqualified `Array(...)` honors `Option Base` (opt-in)
+- `VBA273`: a public class/form/document member name contains an underscore colliding with `<Interface>_<Member>` or `<Object>_<Event>` naming (opt-in)
+- `VBA274`: a non-Private `Enum` is declared inside a worksheet or workbook document module (opt-in)
+- `VBA275`: a public-facing `Property Let`/`Set` has no matching `Property Get`, forming a write-only API (opt-in)
+- `VBA276`: a public member matches the implemented `<Interface>_<Member>` binding or an event handler is declared explicitly `Public` (opt-in)
+- `VBA277`: a module with a predeclared default instance references its own module name, binding to the shared instance rather than `Me` (opt-in)
 
 `VBA203` correlates each changed `Application` property with its saved prior
 value across control-flow joins. A path on which the property was never changed
@@ -1617,8 +1622,13 @@ to `detect_unreachable_select_case`; `VBA260` maps to
 `detect_never_assigned_variables`; `VBA269` maps to
 `detect_unassigned_variable_usage`; and `VBA270` maps to
 `detect_udf_cell_reference_names`. `VBA271` maps to
-`detect_option_base_paramarray_inconsistency`; and `VBA272` maps to
-`detect_option_base_array_inconsistency`.
+`detect_option_base_paramarray_inconsistency`; `VBA272` maps to
+`detect_option_base_array_inconsistency`; `VBA273` maps to
+`detect_public_member_underscore_names`; `VBA274` maps to
+`detect_document_module_public_enum`; `VBA275` maps to
+`detect_write_only_property`; `VBA276` maps to
+`detect_public_interface_event_members`; and `VBA277` maps to
+`detect_predeclared_instance_access`.
 
 Analyzer rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, `VBA244`, and `VBA249` through `VBA252` are enabled by default. `VBA230` through `VBA239`, `VBA241`, and `VBA250` through `VBA252` are warning-level, non-blocking, and inline-suppressible; `VBA241` may emit `information` for a single non-nested loop with loop-invariant dimensions. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, `VBA241`, and `VBA249` through `VBA252` are procedure-local and available in realtime diagnostics. `VBA222` is a batch-only, warning-level, non-blocking rule; it checks public function/property return types, all public parameters, and custom event parameters. Intrinsic types and types resolved from the project or available TypeLib database are allowed. Private/unexposed project types and ambiguous names remain conservative warnings that include the type name. Unresolved external types are warned about only when the project and TypeLib resolution view is complete; missing, empty, malformed, or partial generated TypeLib data makes their absence unknown and the rule fails open for that branch. Host-required event handlers are excluded. It can be suppressed inline or with `[analyze].disabled_rules = ["VBA222"]`. `VBA240` is disabled by default, warning-level, non-blocking, inline-suppressible, and batch-only; enable it with `detect_risky_module_state` and disable it with `[analyze].disabled_rules = ["VBA240"]` for project-specific policy. `VBA242` and `VBA243` are disabled by default, information-level, procedure-local, non-blocking, inline-suppressible, and available in realtime diagnostics; enable them with `detect_expensive_full_range_operations` and `detect_value2_performance_opportunities`, respectively, or disable them explicitly with `[analyze].disabled_rules = ["VBA242"]` and `[analyze].disabled_rules = ["VBA243"]`. When enabled, full-range and Value2 opportunities outside loops use `information` and reachable loop operations use `warning`. `VBA244` is default-enabled, information-level for ordinary cycles, warning-level when dangerous effects are present, project-wide, non-blocking, inline-suppressible, and batch-only; disable it with `detect_procedure_call_cycles = false` or `[analyze].disabled_rules = ["VBA244"]`.
 
@@ -1680,6 +1690,18 @@ call honors `Option Base` and is not reported. Indexed assignment targets
 and calls qualified by other receivers stay silent. Their detailed
 contracts are defined in
 [Option Base inconsistency diagnostics](vba-option-base-diagnostics.md).
+
+`VBA273` through `VBA277` are opt-in, warning-level, non-blocking,
+inline-suppressible rules for VBA class and interface public-API hazards,
+available in batch, realtime, and LSP analysis. `VBA273`, `VBA275`, and
+`VBA276` read procedure-symbol metadata on class, form, and document
+modules; `VBA274` reads module declarations on document modules only; and
+`VBA277` reports self-name references inside modules with a predeclared
+default instance. Recovered symbols, conditional-compilation members,
+recognized event handlers, implemented-interface members, private
+implementations, and type-position self-name references fail open by
+contract. Their detailed contracts are defined in
+[VBA class/interface diagnostics](vba-class-interface-diagnostics.md).
 
 `VBA249` is default-enabled, `error`-level, high-precision, procedure-local,
 available in batch and real-time analysis, inline-suppressible, and
