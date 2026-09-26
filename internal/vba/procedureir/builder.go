@@ -175,8 +175,10 @@ func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
 		}
 		passing := "ByRef"
 		passingExplicit := false
+		var passingRange *vbaast.Range
 		if mode := child.ChildByFieldName("passing_mode"); mode != nil {
 			passingExplicit = true
+			passingRange = rangePointer(mode)
 			switch mode.Kind() {
 			case "byval_modifier":
 				passing = "ByVal"
@@ -189,7 +191,7 @@ func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
 		nameNode := childByFieldOrKind(child, "name", "identifier")
 		param := Parameter{
 			Name: cleanIdentifier(nodeText(nameNode, b.source)),
-			Type: typeText(child, b.source), Passing: passing, PassingExplicit: passingExplicit,
+			Type: typeText(child, b.source), Passing: passing, PassingExplicit: passingExplicit, PassingRange: passingRange,
 			Range: vbaast.NodeRange(child), NameRange: rangePointer(nameNode),
 			Optional:   child.ChildByFieldName("optional_modifier") != nil,
 			ParamArray: child.ChildByFieldName("paramarray_modifier") != nil,

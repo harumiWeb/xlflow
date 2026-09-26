@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "id": "vba276-public-interface-member-collision",
-  "description": "Observe whether VBE rejects a public member duplicating the private \u003cInterface\u003e_\u003cMember\u003e implementation binding; the rejection binds the VBA276 collision mechanism.",
+  "id": "vba281-public-interface-member-collision",
+  "description": "Observe whether VBE rejects a public member duplicating the private \u003cInterface\u003e_\u003cMember\u003e implementation binding; the rejection binds the VBA281 collision mechanism.",
   "modules": [
     {
       "name": "IFoo",
@@ -26,8 +26,8 @@
   "analysis": {
     "binding_status": "unbound",
     "evidence_role": "language-observation",
-    "rule_codes": ["VBA276"],
-    "binding_note": "VBA276 is an opt-in correctness warning; the fixture records whether VBE rejects a public member colliding with the private interface implementation name."
+    "rule_codes": ["VBA281"],
+    "binding_note": "VBA281 is an opt-in correctness warning; the fixture records whether VBE rejects a public member colliding with the private interface implementation name."
   },
   "provenance": {
     "status": "asserted",

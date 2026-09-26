@@ -283,8 +283,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_application_state_restore`
 - `detect_application_worksheet_function_dispatch`
 - `detect_array_lifecycle_safety`
+- `detect_assigned_byval_parameters`
 - `detect_bang_notation`
 - `detect_byref_argument_mismatch`
+- `detect_byref_parameters_can_be_byval`
 - `detect_collection_index_origin`
 - `detect_collection_iteration_mutation`
 - `detect_confusing_call_syntax`
@@ -311,11 +313,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_hardcoded_secrets`
 - `detect_host_bracket_expressions`
 - `detect_implicit_approximate_lookups`
+- `detect_implicit_byref_parameters`
 - `detect_implicit_default_member_access`
 - `detect_implicit_variant`
 - `detect_late_bound_dictionary_constants`
 - `detect_leaked_on_error_resume_next_scopes`
 - `detect_loop_invariant_excel_object_resolution`
+- `detect_misleading_property_value_byref`
 - `detect_missing_http_timeout`
 - `detect_multiple_declarator_clarity`
 - `detect_nested_with_ambiguity`
@@ -335,6 +339,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_range_value_array_shape`
 - `detect_redim_preserve_dimension`
 - `detect_redim_preserve_in_loops`
+- `detect_redundant_byref_modifiers`
 - `detect_resource_leaks`
 - `detect_risky_module_state`
 - `detect_scope_shadowing`
@@ -444,6 +449,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enum_member`
 - `enum_type`
 - `environment_variable`
+- `erase_statement`
 - `error_candidate_procedures`
 - `error_cfg_walks`
 - `error_handling_count`
@@ -509,6 +515,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `field_count`
 - `file_count`
 - `file_input`
+- `file_number_literal`
 - `file_operation`
 - `file_picker`
 - `file_read`
@@ -585,6 +592,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generator_version_missing`
 - `generic_dataflow_cfg_walks`
 - `generic_dataflow_kernel_runs`
+- `get_statement`
 - `global_values`
 - `goto_count`
 - `goto_statement`
@@ -620,6 +628,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `infrastructure_failure`
 - `init_failed`
 - `input_dependent`
+- `input_statement`
 - `inspect_args_invalid`
 - `inspect_failed`
 - `inspect_form_args_invalid`
@@ -683,6 +692,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `likely_cause`
 - `line_continuation`
 - `line_count`
+- `line_input_statement`
 - `line_number_label`
 - `line_number_literal`
 - `line_number_statement`

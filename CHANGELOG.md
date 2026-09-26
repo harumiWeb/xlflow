@@ -4,21 +4,33 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added opt-in `VBA273` through `VBA277` warning diagnostics for VBA
-  class and interface public-API hazards: `VBA273` reports public
+- Updated the `tree-sitter-vba` parser dependency to v0.14.4 so indexed or
+  call-shaped targets such as `Input #1, arr(0)` and
+  `Line Input #1, p.Items(0)` parse as file-I/O statements instead of being
+  lost to parser recovery.
+- Added opt-in `VBA273`-`VBA277` parameter-passing diagnostics for implicit
+  `ByRef`, assignments to effective `ByVal` parameters, `ByRef` parameters
+  that can be `ByVal`, misleading `ByRef` on Property Let/Set value
+  parameters, and redundant explicit `ByRef`. The mutation analysis
+  propagates project-local positional and named `ByRef` calls conservatively,
+  and configuration rejects enabling the mutually exclusive `VBA273` and
+  `VBA277` style policies together. All five rules are available in batch,
+  realtime, and LSP analysis and remain disabled by default.
+- Added opt-in `VBA278` through `VBA282` warning diagnostics for VBA
+  class and interface public-API hazards: `VBA278` reports public
   object-module member names containing underscores that collide with
-  `<Interface>_<Member>` and `<Object>_<Event>` naming; `VBA274` reports
-  non-Private `Enum` declarations inside document modules; `VBA275`
+  `<Interface>_<Member>` and `<Object>_<Event>` naming; `VBA279` reports
+  non-Private `Enum` declarations inside document modules; `VBA280`
   reports public-facing `Property Let`/`Set` members without a matching
-  `Property Get`; `VBA276` reports public members matching an implemented
-  interface binding and explicitly `Public` event handlers; and `VBA277`
-  reports self-name references inside modules with a predeclared default
-  instance. Each rule is configurable with `detect_public_member_underscore_names`,
+  `Property Get`; `VBA281` reports public members matching a verified
+  implemented interface binding and explicitly `Public` event handlers;
+  and `VBA282` reports self-name references inside modules with a
+  predeclared default instance. Each rule is configurable with
+  `detect_public_member_underscore_names`,
   `detect_document_module_public_enum`, `detect_write_only_property`,
   `detect_public_interface_event_members`, and
   `detect_predeclared_instance_access`, and is available in batch,
   realtime, and LSP analysis.
-
 - Added opt-in `VBA270` warning diagnostics for worksheet-visible `Function`
   declarations in standard modules whose names parse as valid A1 or absolute
   R1C1 Excel cell references, so worksheet formulas resolve the cell instead

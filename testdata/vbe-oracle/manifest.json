@@ -567,28 +567,28 @@
       "path": "cases/vba259-local-const-tail-declaration/case.json"
     },
     {
-      "id": "vba273-public-underscore-member",
-      "path": "cases/vba273-public-underscore-member/case.json"
+      "id": "vba278-public-underscore-member",
+      "path": "cases/vba278-public-underscore-member/case.json"
     },
     {
-      "id": "vba274-document-public-enum",
-      "path": "cases/vba274-document-public-enum/case.json"
+      "id": "vba279-document-public-enum",
+      "path": "cases/vba279-document-public-enum/case.json"
     },
     {
-      "id": "vba275-write-only-property",
-      "path": "cases/vba275-write-only-property/case.json"
+      "id": "vba280-write-only-property",
+      "path": "cases/vba280-write-only-property/case.json"
     },
     {
-      "id": "vba276-public-interface-member-collision",
-      "path": "cases/vba276-public-interface-member-collision/case.json"
+      "id": "vba281-public-interface-member-collision",
+      "path": "cases/vba281-public-interface-member-collision/case.json"
     },
     {
-      "id": "vba276-public-event-handler",
-      "path": "cases/vba276-public-event-handler/case.json"
+      "id": "vba281-public-event-handler",
+      "path": "cases/vba281-public-event-handler/case.json"
     },
     {
-      "id": "vba277-predeclared-self-access",
-      "path": "cases/vba277-predeclared-self-access/case.json"
+      "id": "vba282-predeclared-self-access",
+      "path": "cases/vba282-predeclared-self-access/case.json"
     }
   ]
 }

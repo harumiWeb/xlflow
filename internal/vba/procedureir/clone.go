@@ -94,6 +94,7 @@ func cloneProcedure(in ProcedureIR) ProcedureIR {
 func cloneParameters(in []Parameter) []Parameter {
 	out := append([]Parameter(nil), in...)
 	for i := range out {
+		out[i].PassingRange = cloneRangePointer(in[i].PassingRange)
 		out[i].DefaultRange = cloneRangePointer(in[i].DefaultRange)
 		out[i].NameRange = cloneRangePointer(in[i].NameRange)
 		out[i].BoundsRange = cloneRangePointer(in[i].BoundsRange)

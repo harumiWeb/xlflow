@@ -1,0 +1,132 @@
+# ADR-0056: Conservative Parameter-Passing Diagnostics
+
+## Status
+
+Accepted
+
+## Context
+
+Issue #823 (sub-issue of #816) asks xlflow to cover five VBA parameter-passing
+hazards and style choices. VBA defaults ordinary parameters to `ByRef`, while
+the final value parameter of `Property Let` and `Property Set` has `ByVal`
+runtime semantics even if its declaration says `ByRef`. A useful
+"can be ByVal" diagnostic therefore needs mutation analysis rather than a
+textual search.
+
+Two requested style rules intentionally recommend opposite declarations:
+one requires explicit `ByRef`, while the other removes redundant explicit
+`ByRef`. Enabling both would create contradictory project policy.
+
+## Decision
+
+Add five opt-in, procedure-local, realtime-capable diagnostics:
+
+| Rule     | Contract                                                                                                                       | Severity    |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------- |
+| `VBA273` | An ordinary parameter omits its passing modifier and therefore defaults to `ByRef`.                                            | information |
+| `VBA274` | A parameter with effective `ByVal` semantics is reassigned.                                                                    | warning     |
+| `VBA275` | An ordinary `ByRef` parameter is never directly reassigned or passed through a potentially writing `ByRef` boundary.           | information |
+| `VBA276` | The final value parameter of `Property Let` or `Property Set` explicitly says `ByRef`, although VBA applies `ByVal` semantics. | warning     |
+| `VBA277` | An ordinary parameter explicitly says `ByRef`, repeating VBA's default.                                                        | information |
+
+All five rules are disabled by default. Configuration rejects enabling
+`VBA273` and `VBA277` together, so a project must choose its declaration
+style explicitly.
+
+`VBA274` and `VBA275` use one project-local parameter-mutation summary.
+Direct writes and read-writes mark a parameter as written. A resolved call
+maps positional and named arguments to the callee signature and propagates a
+write through effective `ByRef` parameters. A named argument binds its
+value expression, not the wider name:=value range, and an argument rooted
+at an indexed call (`arr(0)`) counts as an element-level write rather than
+a binding replacement. Ambiguous, external, unresolved,
+recovered, and conditional-compiled boundaries become `possibly written` and
+suppress `VBA275`. Resolved `ByVal` and `ParamArray` arguments do not
+propagate replacement of the caller's variable.
+
+The mutation summary also covers statement forms that write a parameter
+without an ordinary assignment or call boundary: `With`-block implicit
+member targets and implicit member call arguments resolve through the
+enclosing `With` receiver, and `Erase`, `Input #`, `Line Input #`, and
+`Get #` write their variable operands, including indexed operands
+(`Erase arr(0)`). An indexed element write
+(`value(0) = 1`) is not a binding replacement, so it does not trip
+`VBA274`, but it is still treated as possibly caller-visible and suppresses
+`VBA275`. A parenthesized call argument forces `ByVal` evaluation and does
+not propagate a write. Bracketed parameter names resolve through their
+closing bracket, and a user-defined type shadows a builtin object type name
+for member-write purposes.
+
+The analysis concerns replacement of the argument variable, not mutation of
+an object it references. `target.Caption = ...` on a known object does not
+write the `target` binding; `Set target = ...` does. User-defined types are
+value-like: direct member writes and members passed through writing `ByRef`
+calls count as caller-visible mutation. Unknown composite types fail open.
+Arrays and `ParamArray` parameters are not eligible for `VBA275`, because VBA
+does not permit typed arrays to be passed `ByVal`.
+
+Host event signatures and `Implements` members are excluded from `VBA273`,
+`VBA275`, `VBA276`, and `VBA277` because their declaration shape is
+externally fixed; the VBE rejects an `Implements` member whose passing
+modifier differs from the interface declaration in either direction, so even
+the `VBA276` suggestion cannot compile there. `ParamArray` parameters are
+excluded from `VBA273` and `VBA277` because VBA forbids an explicit
+passing modifier on them.
+Ordinary `Public`, `Friend`, and `Private` procedures remain eligible: these
+rules describe their declared API contract rather than claiming a parameter
+is unused by unknown callers.
+
+## Consequences
+
+- The semantic rules and style rules have separate IDs and configuration.
+- Unknown calls reduce findings instead of creating false-positive
+  "can be ByVal" claims.
+- Mutation summaries are computed only when at least one of the five opt-in
+  rules is enabled, preserving the default analysis cost.
+- A project that wants explicit parameter contracts enables `VBA273`; a
+  project that treats `ByRef` as idiomatic default syntax enables `VBA277`.
+- Property value semantics are represented explicitly and are reused by
+  call propagation as well as declaration diagnostics.
+
+## Alternatives Considered
+
+1. **Textually search for assignments.** Rejected because it misses writes
+   propagated through local `ByRef` call chains and mishandles member writes.
+2. **Treat every call argument as a write.** Rejected because resolved
+   `ByVal` arguments are provably non-writing at the caller binding; unknown
+   targets alone need the conservative boundary.
+3. **Restrict `VBA275` to private procedures.** Rejected because changing a
+   public/friend parameter from `ByRef` to `ByVal` is precisely an API-design
+   recommendation. Event and interface contracts remain excluded.
+4. **Allow both style flags and rely on per-parameter exclusivity.** Rejected
+   because one project could then receive opposing recommendations across
+   implicit and explicit declarations.
+5. **Enable semantic rules by default.** Rejected pending corpus review; all
+   five rules initially accumulate opt-in evidence.
+
+## Evidence
+
+- Issue #823 defines the five diagnostic families and requires actual
+  mutation analysis plus conservative ByRef handling.
+- `internal/analyze/parameter_passing.go` implements direct and propagated
+  mutation summaries and the five projections.
+- `internal/analyze/parameter_passing_test.go` covers writes, local call
+  propagation, unknown calls, named arguments, object-member mutation,
+  `With`-block member writes and call arguments, file-statement operand
+  writes, indexed element writes, parenthesized forced-`ByVal` arguments,
+  property value semantics, constrained signatures, suppression, realtime,
+  and in-memory parity.
+- Real Excel/VBE verification confirmed the runtime premises: a
+  `Property Let`/`Set` value parameter declared `ByRef` does not write
+  back to the caller's variable, a parenthesized call argument is passed
+  `ByVal`, and the VBE rejects an `Implements` passing-modifier mismatch
+  in both directions.
+- `docs/specs/vba-parameter-passing-diagnostics.md` records the public
+  contract, and the shared rule registry records surface metadata.
+
+## Related
+
+- Issue #816
+- Issue #823
+- ADR-0024, ADR-0046, ADR-0055
+- `docs/specs/vba-parameter-passing-diagnostics.md`

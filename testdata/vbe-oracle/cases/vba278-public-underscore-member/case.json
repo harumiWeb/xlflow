@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "id": "vba275-write-only-property",
-  "description": "Observe whether VBE accepts Public Property Let/Set members without a matching Property Get; VBA275 reports the write-only API smell only when compilation succeeds.",
+  "id": "vba278-public-underscore-member",
+  "description": "Observe whether VBE accepts public class members whose names contain underscores; VBA278 reports the maintainability hazard only when compilation succeeds.",
   "modules": [
     {
       "name": "Widget",
@@ -21,8 +21,8 @@
   "analysis": {
     "binding_status": "unbound",
     "evidence_role": "maintainability-observation",
-    "rule_codes": ["VBA275"],
-    "binding_note": "VBA275 is an opt-in maintainability warning, not a compile-equivalent rule; the fixture records whether VBE accepts write-only public properties."
+    "rule_codes": ["VBA278"],
+    "binding_note": "VBA278 is an opt-in maintainability warning, not a compile-equivalent rule; the fixture records whether VBE accepts underscored public member names."
   },
   "provenance": {
     "status": "asserted",

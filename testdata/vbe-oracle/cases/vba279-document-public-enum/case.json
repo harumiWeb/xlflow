@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "id": "vba277-predeclared-self-access",
-  "description": "Observe whether VBE accepts a self-name reference to the worksheet module's predeclared default instance inside its own procedures; VBA277 reports the ambiguity only when compilation succeeds.",
+  "id": "vba279-document-public-enum",
+  "description": "Observe whether VBE accepts a Public Enum declared in a worksheet document module; VBA279 reports the copy-time ambiguous-name hazard only when compilation succeeds.",
   "modules": [
     {
       "name": "Sheet1",
@@ -21,9 +21,9 @@
   },
   "analysis": {
     "binding_status": "unbound",
-    "evidence_role": "maintainability-observation",
-    "rule_codes": ["VBA277"],
-    "binding_note": "VBA277 is an opt-in warning for ambiguous predeclared-instance access; the fixture records whether VBE accepts a self-name reference in a worksheet document module."
+    "evidence_role": "language-observation",
+    "rule_codes": ["VBA279"],
+    "binding_note": "VBA279 is an opt-in correctness warning for a sheet-copy compile hazard; the fixture records whether VBE accepts a Public Enum in a worksheet document module."
   },
   "provenance": {
     "status": "asserted",

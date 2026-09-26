@@ -273,11 +273,11 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA270` | warning               | A worksheet-visible `Function` in a standard module is named after a valid A1 or R1C1 cell reference, so worksheet formulas resolve the cell instead.                |
 | `VBA271` | warning               | A `ParamArray` parameter is always passed as a zero-based `Variant` array despite `Option Base 1`.                                                                   |
 | `VBA272` | warning               | A qualified `VBA.Array(...)` call returns a zero-based array despite `Option Base 1`; unqualified `Array(...)` honors `Option Base`.                                 |
-| `VBA273` | warning               | A public class/form/document member name contains an underscore that collides with `<Interface>_<Member>` or `<Object>_<Event>` naming.                              |
-| `VBA274` | warning               | A non-Private `Enum` is declared inside a worksheet or workbook document module.                                                                                     |
-| `VBA275` | warning               | A public-facing `Property Let`/`Set` has no matching `Property Get`, forming a write-only API.                                                                       |
-| `VBA276` | warning               | A public member matches an implemented `<Interface>_<Member>` binding or an event handler is declared `Public`.                                                      |
-| `VBA277` | warning               | A module with a predeclared default instance references its own name, binding to the shared instance instead of `Me`.                                                |
+| `VBA278` | warning               | A public class/form/document member name contains an underscore that collides with `<Interface>_<Member>` or `<Object>_<Event>` naming.                              |
+| `VBA279` | warning               | A non-Private `Enum` is declared inside a worksheet or workbook document module.                                                                                     |
+| `VBA280` | warning               | A public-facing `Property Let`/`Set` has no matching `Property Get`, forming a write-only API.                                                                       |
+| `VBA281` | warning               | A public member matches a verified implemented `<Interface>_<Member>` binding or an event handler is declared `Public`.                                              |
+| `VBA282` | warning               | A module with a predeclared default instance references its own name, binding to the shared instance instead of `Me`.                                                |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -304,6 +304,13 @@ Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-block
 `VBA210` checks every reachable path to a `Function` or `Property Get` normal exit, including `Exit Function`, `Exit Property`, error-handler paths that return normally, and shared cleanup labels. A dominating return assignment satisfies all paths; VBA's default-initialized return value does not. Known non-returning `Err.Raise` statements are treated as exceptional exits rather than normal fallthrough. Object returns require `Set`, known value returns require ordinary assignment or `Let`, and the diagnostic reason identifies a representative uncovered exit when practical. The rule is opt-in through `detect_function_return_path` and remains batch-only.
 
 Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, `VBA244` through `VBA247`, and `VBA249` through `VBA252` are enabled by default. `VBA230` through `VBA239`, `VBA241`, and `VBA245` through `VBA248` and `VBA250` through `VBA252` are warning-level, non-blocking, and inline-suppressible. `VBA249` is an error-level, non-blocking, procedure-local rule available in realtime diagnostics; it reports only runtime failures proven by shared constant, type, control-flow, and dataflow facts and remains silent for unknown values, Variants, and late-bound cases. `VBA250` is a warning-level, non-blocking, procedure-local rule available in realtime diagnostics; it reports a `Worksheet.Select` or `Range.Select` call only when the required active workbook or worksheet cannot be proven on every reachable path. `VBA251` is a warning-level, non-blocking, high-precision, procedure-local rule available in realtime diagnostics; it reports typed Excel lookup calls that omit their match-mode argument and remains silent for explicit, unresolved, late-bound, and user-defined calls. `VBA252` is a warning-level, non-blocking, high-precision, procedure-local rule available in realtime diagnostics; it reports typed `Excel.WorksheetFunction` member calls absent from the complete generated TypeLib member set and remains silent when the type database is incomplete or the receiver is unresolved, late-bound, or user-defined. `VBA241` is non-blocking and inline-suppressible; it may use `information` for a single non-nested loop with loop-invariant dimensions and `warning` for loop-variable growth or nested loops. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, `VBA241`, and `VBA245` through `VBA252` are procedure-local and available in realtime diagnostics. `VBA244` is project-wide, batch-only, non-blocking, and inline-suppressible; it reports one deterministic representative witness per cyclic strongly connected component (SCC), retaining the closed path in JSON rather than enumerating every simple cycle. `VBA222` is a batch-only warning that checks public function/property return types, all public parameters, and custom event parameters against project visibility and the available TypeLib database. Standard modules and `VB_Exposed=True` classes/interfaces are public API surfaces; private or unexposed project types, ambiguous names, and unresolved external types are reported conservatively. Host-required event handlers are excluded. Suppress an intentional case with `xlflow:disable-line VBA222` or `xlflow:disable-next-line VBA222`, or add `VBA222` to `[analyze].disabled_rules`. `VBA248` is an opt-in warning-level, non-blocking, procedure-local rule available in realtime diagnostics; declaration-level Boolean-control metrics remain part of `xlflow metrics` rather than a declaration diagnostic.
+
+`VBA273` through `VBA277` are opt-in parameter-passing diagnostics available
+in batch, realtime, and LSP analysis. They cover implicit `ByRef`, reassigned
+effective-`ByVal` parameters, `ByRef` parameters proved safe to change to
+`ByVal`, misleading Property Let/Set value-parameter `ByRef`, and redundant
+explicit `ByRef`. Unknown call boundaries suppress the can-be-ByVal claim.
+The explicit-`ByRef` and redundant-`ByRef` style flags are mutually exclusive.
 `VBA253`, `VBA254`, and `VBA255` are opt-in typed default-member rules through
 `detect_implicit_default_member_access`,
 `detect_unbound_default_member_access`, and `detect_bang_notation`.
@@ -334,16 +341,16 @@ declarations in standard modules whose names parse as valid A1 or absolute
 R1C1 cell references within the current worksheet limits, and skips `Private`,
 `Friend`, non-`Function`, `Option Private Module`, and non-standard-module
 declarations that cannot produce a UDF.
-`VBA273` through `VBA277` are opt-in class/interface public-API rules:
-`VBA273` (`detect_public_member_underscore_names`) reports public object-module
+`VBA278` through `VBA282` are opt-in class/interface public-API rules:
+`VBA278` (`detect_public_member_underscore_names`) reports public object-module
 member names containing underscores that collide with `<Interface>_<Member>`
-and `<Object>_<Event>` naming; `VBA274` (`detect_document_module_public_enum`)
+and `<Object>_<Event>` naming; `VBA279` (`detect_document_module_public_enum`)
 reports non-Private `Enum` declarations inside document modules;
-`VBA275` (`detect_write_only_property`) reports public-facing
+`VBA280` (`detect_write_only_property`) reports public-facing
 `Property Let`/`Set` members without a matching `Property Get`;
-`VBA276` (`detect_public_interface_event_members`) reports public members
-matching an implemented interface binding and explicitly `Public` event
-handlers; and `VBA277` (`detect_predeclared_instance_access`) reports self-name
+`VBA281` (`detect_public_interface_event_members`) reports public members
+matching a verified implemented interface binding and explicitly `Public` event
+handlers; and `VBA282` (`detect_predeclared_instance_access`) reports self-name
 references inside modules that own a predeclared default instance.
 Complete default-member runtime failures are reported by `VBA249`, while
 `VBA202` retains ownership of proven error-91 object-use-before-`Set`/`Nothing`

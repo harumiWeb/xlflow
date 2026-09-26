@@ -448,12 +448,12 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"vba259-local-const-shadows-module",
 		"vba259-local-const-tail-declaration",
 		"vba259-unreachable-case-items",
-		"vba273-public-underscore-member",
-		"vba274-document-public-enum",
-		"vba275-write-only-property",
-		"vba276-public-event-handler",
-		"vba276-public-interface-member-collision",
-		"vba277-predeclared-self-access",
+		"vba278-public-underscore-member",
+		"vba279-document-public-enum",
+		"vba280-write-only-property",
+		"vba281-public-event-handler",
+		"vba281-public-interface-member-collision",
+		"vba282-predeclared-self-access",
 	})
 	assertIDs("not-applicable", report.NotApplicableIDs, []string{"known-compile-accept", "known-compile-reject"})
 }

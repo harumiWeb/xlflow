@@ -81,7 +81,7 @@ func (s *analysisScheduler) acquire(ctx context.Context, class analysisWorkClass
 				s.removeWaiterLocked(class)
 			}
 			s.mu.Unlock()
-			return nil, time.Since(started), analysisWorkerState{}, err
+			return nil, analysisWaitDuration(started, waiting), analysisWorkerState{}, err
 		}
 		if s.canAcquireLocked(class) {
 			if waiting {
@@ -93,10 +93,7 @@ func (s *analysisScheduler) acquire(ctx context.Context, class analysisWorkClass
 			}
 			state := analysisWorkerState{Current: s.active[class], Maximum: s.maximum[class]}
 			s.mu.Unlock()
-			wait := time.Duration(0)
-			if waiting {
-				wait = time.Since(started)
-			}
+			wait := analysisWaitDuration(started, waiting)
 			var once sync.Once
 			return func() {
 				once.Do(func() { s.release(class) })
@@ -117,9 +114,19 @@ func (s *analysisScheduler) acquire(ctx context.Context, class analysisWorkClass
 				s.removeWaiterLocked(class)
 			}
 			s.mu.Unlock()
-			return nil, time.Since(started), analysisWorkerState{}, ctx.Err()
+			return nil, analysisWaitDuration(started, waiting), analysisWorkerState{}, ctx.Err()
 		}
 	}
+}
+
+// analysisWaitDuration reserves zero for acquisitions that never entered the
+// wait queue. On clocks with coarse resolution, a real wait can otherwise
+// measure as zero and suppress permit-wait telemetry.
+func analysisWaitDuration(started time.Time, waited bool) time.Duration {
+	if !waited {
+		return 0
+	}
+	return max(time.Since(started), time.Nanosecond)
 }
 
 func (s *analysisScheduler) canAcquireLocked(class analysisWorkClass) bool {
