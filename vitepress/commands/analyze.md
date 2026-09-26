@@ -273,6 +273,11 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA270` | warning               | A worksheet-visible `Function` in a standard module is named after a valid A1 or R1C1 cell reference, so worksheet formulas resolve the cell instead.                |
 | `VBA271` | warning               | A `ParamArray` parameter is always passed as a zero-based `Variant` array despite `Option Base 1`.                                                                   |
 | `VBA272` | warning               | A qualified `VBA.Array(...)` call returns a zero-based array despite `Option Base 1`; unqualified `Array(...)` honors `Option Base`.                                 |
+| `VBA278` | warning               | A public class/form/document member name contains an underscore that collides with `<Interface>_<Member>` or `<Object>_<Event>` naming.                              |
+| `VBA279` | warning               | A non-Private `Enum` is declared inside a worksheet or workbook document module.                                                                                     |
+| `VBA280` | warning               | A public-facing `Property Let`/`Set` has no matching `Property Get`, forming a write-only API.                                                                       |
+| `VBA281` | warning               | A public member matches a verified implemented `<Interface>_<Member>` binding or an event handler is declared `Public`.                                              |
+| `VBA282` | warning               | A module with a predeclared default instance references its own name, binding to the shared instance instead of `Me`.                                                |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -336,6 +341,17 @@ declarations in standard modules whose names parse as valid A1 or absolute
 R1C1 cell references within the current worksheet limits, and skips `Private`,
 `Friend`, non-`Function`, `Option Private Module`, and non-standard-module
 declarations that cannot produce a UDF.
+`VBA278` through `VBA282` are opt-in class/interface public-API rules:
+`VBA278` (`detect_public_member_underscore_names`) reports public object-module
+member names containing underscores that collide with `<Interface>_<Member>`
+and `<Object>_<Event>` naming; `VBA279` (`detect_document_module_public_enum`)
+reports non-Private `Enum` declarations inside document modules;
+`VBA280` (`detect_write_only_property`) reports public-facing
+`Property Let`/`Set` members without a matching `Property Get`;
+`VBA281` (`detect_public_interface_event_members`) reports public members
+matching a verified implemented interface binding and explicitly `Public` event
+handlers; and `VBA282` (`detect_predeclared_instance_access`) reports self-name
+references inside modules that own a predeclared default instance.
 Complete default-member runtime failures are reported by `VBA249`, while
 `VBA202` retains ownership of proven error-91 object-use-before-`Set`/`Nothing`
 cases.

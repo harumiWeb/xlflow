@@ -105,8 +105,8 @@ func TestCommittedDiagnosticReviews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reviews) != 9158 {
-		t.Fatalf("committed reviews = %d, want 9158", len(reviews))
+	if len(reviews) != 9437 {
+		t.Fatalf("committed reviews = %d, want 9437", len(reviews))
 	}
 	if err := ValidateReviewSources(repoRoot, corpusRoot, reviews); err != nil {
 		t.Fatal(err)
@@ -154,14 +154,14 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 10262 || metrics.TP != 7379 || metrics.FP != 2883 || metrics.Allowed != 90 || metrics.Unreviewed != 0 {
-		t.Fatalf("committed review metrics = %#v, want Reviewed=10262 TP=7379 FP=2883 Allowed=90 Unreviewed=0", metrics)
+	if metrics.Reviewed != 10541 || metrics.TP != 7658 || metrics.FP != 2883 || metrics.Allowed != 90 || metrics.Unreviewed != 0 {
+		t.Fatalf("committed review metrics = %#v, want Reviewed=10541 TP=7658 FP=2883 Allowed=90 Unreviewed=0", metrics)
 	}
 	// This review pass expanded the ledger with confirmed VBA256, VBA257,
 	// VBA258, VBA259, and VBA265-VBA270 findings, plus the VBA202/VBA224/
 	// VBA269 rows newly anchored by the tree-sitter-vba v0.14.4 paren-less
-	// call parse fix, so the observed precision remains close to the review
-	// floor.
+	// call parse fix and the VBA278-VBA282 class/interface hazard findings,
+	// so the observed precision remains close to the review floor.
 	// Keep a small margin below the current precision to catch a material
 	// regression without blocking legitimate review progress.
 	if precision := float64(metrics.TP) / float64(metrics.TP+metrics.FP); precision < 0.400 {

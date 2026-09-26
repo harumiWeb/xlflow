@@ -1,4 +1,4 @@
-# ADR-0056: Conservative Parameter-Passing Diagnostics
+# ADR-0058: Conservative Parameter-Passing Diagnostics
 
 ## Status
 

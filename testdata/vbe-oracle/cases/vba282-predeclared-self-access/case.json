@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "vba282-predeclared-self-access",
+  "description": "Observe whether VBE accepts a self-name reference to the worksheet module's predeclared default instance inside its own procedures; VBA282 reports the ambiguity only when compilation succeeds.",
+  "modules": [
+    {
+      "name": "Sheet1",
+      "kind": "document",
+      "path": "Sheet1.bas",
+      "entry": true,
+      "document_target": "worksheet"
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "maintainability"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "maintainability-observation",
+    "rule_codes": ["VBA282"],
+    "binding_note": "VBA282 is an opt-in warning for ambiguous predeclared-instance access; the fixture records whether VBE accepts a self-name reference in a worksheet document module."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-09-25T18:12:27Z"
+      }
+    ]
+  }
+}

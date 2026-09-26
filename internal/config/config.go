@@ -248,6 +248,11 @@ type AnalyzeConfig struct {
 	DetectUdfCellReferenceNames               bool     `toml:"detect_udf_cell_reference_names"`
 	DetectOptionBaseArrayInconsistency        bool     `toml:"detect_option_base_array_inconsistency"`
 	DetectOptionBaseParamArrayInconsistency   bool     `toml:"detect_option_base_paramarray_inconsistency"`
+	DetectPublicMemberUnderscoreNames         bool     `toml:"detect_public_member_underscore_names"`
+	DetectDocumentModulePublicEnum            bool     `toml:"detect_document_module_public_enum"`
+	DetectWriteOnlyProperty                   bool     `toml:"detect_write_only_property"`
+	DetectPublicInterfaceEventMembers         bool     `toml:"detect_public_interface_event_members"`
+	DetectPredeclaredInstanceAccess           bool     `toml:"detect_predeclared_instance_access"`
 	DetectImplicitByRefParameters             bool     `toml:"detect_implicit_byref_parameters"`
 	DetectAssignedByValParameters             bool     `toml:"detect_assigned_byval_parameters"`
 	DetectByRefParametersCanBeByVal           bool     `toml:"detect_byref_parameters_can_be_byval"`
@@ -376,6 +381,11 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA275": {Get: func(c AnalyzeConfig) bool { return c.DetectByRefParametersCanBeByVal }, Set: func(c *AnalyzeConfig, v bool) { c.DetectByRefParametersCanBeByVal = v }},
 	"VBA276": {Get: func(c AnalyzeConfig) bool { return c.DetectMisleadingPropertyValueByRef }, Set: func(c *AnalyzeConfig, v bool) { c.DetectMisleadingPropertyValueByRef = v }},
 	"VBA277": {Get: func(c AnalyzeConfig) bool { return c.DetectRedundantByRefModifiers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRedundantByRefModifiers = v }},
+	"VBA278": {Get: func(c AnalyzeConfig) bool { return c.DetectPublicMemberUnderscoreNames }, Set: func(c *AnalyzeConfig, v bool) { c.DetectPublicMemberUnderscoreNames = v }},
+	"VBA279": {Get: func(c AnalyzeConfig) bool { return c.DetectDocumentModulePublicEnum }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDocumentModulePublicEnum = v }},
+	"VBA280": {Get: func(c AnalyzeConfig) bool { return c.DetectWriteOnlyProperty }, Set: func(c *AnalyzeConfig, v bool) { c.DetectWriteOnlyProperty = v }},
+	"VBA281": {Get: func(c AnalyzeConfig) bool { return c.DetectPublicInterfaceEventMembers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectPublicInterfaceEventMembers = v }},
+	"VBA282": {Get: func(c AnalyzeConfig) bool { return c.DetectPredeclaredInstanceAccess }, Set: func(c *AnalyzeConfig, v bool) { c.DetectPredeclaredInstanceAccess = v }},
 }
 
 var (

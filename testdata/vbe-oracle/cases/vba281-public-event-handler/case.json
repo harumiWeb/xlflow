@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "vba281-public-event-handler",
+  "description": "Observe whether VBE accepts a recognized worksheet event handler declared Public; VBA281 reports the exposed handler only when compilation succeeds.",
+  "modules": [
+    {
+      "name": "Sheet1",
+      "kind": "document",
+      "path": "Sheet1.bas",
+      "entry": true,
+      "document_target": "worksheet"
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "maintainability"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "maintainability-observation",
+    "rule_codes": ["VBA281"],
+    "binding_note": "VBA281 is an opt-in correctness warning, not a compile-equivalent rule; the fixture records whether VBE accepts a Public event handler in a worksheet module."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-09-25T18:12:27Z"
+      }
+    ]
+  }
+}

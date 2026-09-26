@@ -171,6 +171,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `char_position`
 - `check_dialog`
 - `check_failed`
+- `class_initialize`
 - `class_terminate`
 - `classes_dir`
 - `clean_up`
@@ -298,6 +299,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_dictionary_key_normalization`
 - `detect_dictionary_loop_materialization`
 - `detect_discarded_function_return`
+- `detect_document_module_public_enum`
 - `detect_error_handler_fallthrough`
 - `detect_error_suppression_propagation`
 - `detect_event_handler_reentry`
@@ -328,8 +330,11 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_opaque_boolean_arguments`
 - `detect_option_base_array_inconsistency`
 - `detect_option_base_paramarray_inconsistency`
+- `detect_predeclared_instance_access`
 - `detect_procedure_call_cycles`
 - `detect_public_api_type_safety`
+- `detect_public_interface_event_members`
+- `detect_public_member_underscore_names`
 - `detect_range_find_nothing_check`
 - `detect_range_value_array_shape`
 - `detect_redim_preserve_dimension`
@@ -359,6 +364,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_value2_performance_opportunities`
 - `detect_worksheet_root_mismatch`
 - `detect_worksheet_string_access`
+- `detect_write_only_property`
 - `development_http_origins`
 - `diagnostic_meaning`
 - `diagnostic_runs`
@@ -1248,6 +1254,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `type_declaration`
 - `type_expression`
 - `type_member`
+- `type_of`
 - `type_of_expression`
 - `type_preprocessor_else`
 - `type_preprocessor_elseif`

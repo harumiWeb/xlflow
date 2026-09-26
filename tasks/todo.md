@@ -1,3 +1,55 @@
+# Issue #826: VBA class/interface public-API hazard diagnostics (VBA278-VBA282)
+
+Parent issue #816. Five opt-in warning rules, all default-disabled,
+warning-level, inline-suppressible, non-blocking, on batch + realtime + LSP.
+Renumbered from the originally implemented VBA273-VBA277 because origin/main
+PR #845 (issue #823) already owns those IDs for parameter-passing rules.
+
+- VBA278 public member underscore names (class/form/document; skips
+  control-verified/intrinsic event handlers, verified Implements bindings,
+  unresolved-Implements prefixes, and Class_Initialize/Class_Terminate).
+- VBA279 non-Private Enum in document modules.
+- VBA280 write-only Property (Let/Set without Get), one finding per name;
+  Friend counts as public-facing; conditional/recovered accessors mark the
+  name uncertain and fail open.
+- VBA281 public members whose <Interface>\_<Member> binding resolves to a
+  declared public member of the implemented interface class, and explicitly
+  Public recognized event handlers.
+- VBA282 self-name access inside predeclared modules (document/form/
+  VB_PredeclaredId class); local/parameter/module-scope shadows and TypeOf
+  type operands excluded; recovered/conditional procedures skipped.
+
+PR #847 review fixes applied (Devin 1-6 + CodeRabbit 1-4; all verified valid):
+
+- Form helper misclassified as event: recognizedEventMember validates the
+  control prefix against designer controls when known and falls back to
+  intrinsic UserForm\_\* names when unknown. Lazily resolves controls because
+  VBA220's gate only covers \_change/\_click names.
+- IFace_Utility FP: interfaceBindingMatch requires the suffix to name a
+  public member of the resolved, unambiguous interface class; resolved but
+  absent suffixes fall back to VBA278, unresolved interfaces fail open.
+- VBA280 uncertain accessors: Recovered/ConditionalBranches mark the
+  property name uncertain; Friend writers now count as public-facing.
+- VBA282 guards: proc.IR.Symbol.Recovered/ConditionalBranches fail open;
+  ScopeLocal/ScopeParameter/ScopeModule accesses excluded; TypeOf exclusion
+  narrowed to the last (type-operand) child of type_of_expression.
+- Spec fail-open text updated to match implementation.
+
+# Conflict resolution (merge origin/main @ aabb6575)
+
+- Rule ID collision: our VBA273-277 -> VBA278-282; config keys unchanged.
+- registry.json: main entries kept, ours appended renumbered.
+- diagnostics.md regenerated from registry; oracle fixture dirs + ids and
+  fixture_contract_test.go renumbered; workspace_test.go keys renumbered.
+- Corpus snapshots to be regenerated (corpus:update-snapshots) and ledger
+  rows renumbered to VBA278-282; metrics numbers rechecked after regen.
+
+Remaining: corpus regen + metrics, format:check/docs:check, full test pass,
+commit merge, push, update PR #847 body (new rule IDs + oracle case IDs
+vba278-public-underscore-member, vba279-document-public-enum,
+vba280-write-only-property, vba281-public-event-handler,
+vba281-public-interface-member-collision, vba282-predeclared-self-access).
+
 # PR #845 review follow-up (Issue #823, VBA273-VBA277)
 
 Review comments on internal/analyze/parameter_passing.go. Verified against
