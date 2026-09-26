@@ -38,11 +38,11 @@ Optional Variant parameters because `IsMissing` observes whether the caller
 passed the argument, not whether its effective value equals the declared
 default.
 
-Treat parentheses as transparent around a parameter argument. The runtime
-behavior of forced parenthesized evaluation was not confirmed in the local
-Excel probe, so this is a precision-first analyzer boundary and not a claim
-that every parenthesized form preserves the missing-state bit. Report member
-expressions and other non-parameter expressions; fail open on malformed
+Treat parentheses as transparent around a parameter argument. A local Excel
+runtime probe confirmed that one and three nested parentheses preserve the
+omitted-argument state for a direct Optional Variant parameter: `IsMissing`
+returned True when omitted and False when supplied in both forms. Report
+member expressions and other non-parameter expressions; fail open on malformed
 arity, recovered or conditional syntax, and incomplete resolution.
 
 Use a dedicated procedure feature and projection so procedures without a
@@ -57,9 +57,9 @@ dataflow, CFG, or interprocedural state.
   diagnostics.
 - Resolver-based intrinsic identity prevents project shadowing and arbitrary
   receiver calls from being reported as VBA behavior.
-- Parentheses may conservatively hide some ineffective calls until runtime
-  evidence is available; accepting them avoids an unsupported false-positive
-  claim.
+- The parenthesized forms verified in the local Excel probe retain the missing
+  state, so the analyzer accepts them while continuing to reject member and
+  computed expressions.
 - Corpus workspaces enable the rule for evidence collection without changing
   the production default.
 
@@ -70,9 +70,9 @@ dataflow, CFG, or interprocedural state.
 2. **Treat any Variant expression as valid.** Rejected because `IsMissing`
    observes an omitted optional argument, not whether an arbitrary Variant
    contains a value.
-3. **Warn on every parenthesized argument.** Rejected because the local
-   runtime behavior was unavailable and the issue requires avoiding
-   unsupported false positives.
+3. **Warn on every parenthesized argument.** Rejected because a local Excel
+   runtime probe confirmed that parenthesized direct references preserve the
+   missing state, so warning on them would be a false positive.
 4. **Enable by default.** Rejected until reviewed corpus evidence supports
    that rollout.
 
@@ -85,6 +85,12 @@ dataflow, CFG, or interprocedural state.
 - The [Microsoft named and optional arguments example](https://learn.microsoft.com/en-us/office/vba/language/concepts/getting-started/understanding-named-arguments-and-optional-arguments)
   declares an Optional Variant with a default and checks that argument with
   `IsMissing`.
+- A Windows Excel 16.0 build 17932 x64 runtime probe on 2026-09-26 used the
+  disposable workbook at
+  `C:\dev\go\xlflow\tmp_workspaces\vba283-parentheses-e2e-20260926`.
+  `Main.Run` observed True for omitted plain, singly-parenthesized, and
+  triply-parenthesized Optional Variant arguments, and False for all three
+  when a value was supplied.
 - `internal/analyze/ismissing.go` consumes Procedure IR and resolver facts;
   `internal/analyze/ismissing_test.go` covers eligibility, resolution,
   suppression, and surface parity.

@@ -27,7 +27,15 @@ func (a Analyzer) invalidIsMissingUsageFindings(file parsedFile, proc sourceProc
 	}
 
 	var findings []Finding
+	isMissingArrayShadow := hasIsMissingArrayDeclaration(proc)
 	for call := range proc.Facts.Calls().All() {
+		if isMissingArrayShadow && call.Callee.Receiver == nil &&
+			strings.EqualFold(cleanIdentifier(call.Callee.BaseName), "IsMissing") {
+			// Procedure IR represents both intrinsic calls and array indexing as
+			// call-shaped expressions. A same-named lexical array takes precedence
+			// for an unqualified reference; explicit VBA.IsMissing remains intrinsic.
+			continue
+		}
 		if !isResolvedIsMissingIntrinsic(call, resolver) || procedureir.IsAssignmentTargetCall(call, *proc.IR) {
 			continue
 		}
@@ -77,6 +85,33 @@ func (a Analyzer) invalidIsMissingUsageFindings(file parsedFile, proc sourceProc
 		findings = append(findings, finding)
 	}
 	return findings
+}
+
+func hasIsMissingArrayDeclaration(proc sourceProcedure) bool {
+	isIsMissingArray := func(name string, isArray bool) bool {
+		return isArray && strings.EqualFold(cleanIdentifier(name), "IsMissing")
+	}
+	for _, parameter := range proc.IR.Symbol.Parameters {
+		if isIsMissingArray(parameter.Name, parameter.IsArray || parameter.ParamArray) {
+			return true
+		}
+	}
+	for _, declaration := range proc.IR.Declarations {
+		if isIsMissingArray(declaration.Name, declaration.IsArray) {
+			return true
+		}
+	}
+	if proc.Document == nil {
+		return false
+	}
+	for _, declaration := range proc.Document.Declarations {
+		if declaration.Parent == "" &&
+			(declaration.Scope == procedureir.ScopeModule || declaration.Scope == procedureir.ScopeProject) &&
+			isIsMissingArray(declaration.Name, declaration.IsArray) {
+			return true
+		}
+	}
+	return false
 }
 
 func isResolvedIsMissingIntrinsic(call procedureir.CallSite, resolver procedureir.Resolver) bool {

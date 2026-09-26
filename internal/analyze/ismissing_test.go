@@ -137,6 +137,38 @@ End Sub
 	}
 }
 
+func TestInvalidIsMissingUsageIgnoresIndexedArraysNamedIntrinsic(t *testing.T) {
+	cfg := config.Default()
+	cfg.Analyze.DetectInvalidIsMissingUsage = true
+	findings := runParameterPassingAnalysis(t, cfg, map[string]string{
+		"ModuleArray.bas": `Option Explicit
+Private IsMissing(0 To 1) As Boolean
+
+Private Sub ModuleArray()
+    If IsMissing(0) Then
+    End If
+End Sub
+
+Private Sub ExplicitIntrinsicBesideModuleArray()
+    If VBA.IsMissing(0) Then
+    End If
+End Sub
+`,
+		"LocalArray.bas": `Option Explicit
+
+Private Sub LocalArray()
+    Dim IsMissing(0 To 1) As Boolean
+    If IsMissing(0) Then
+    End If
+End Sub
+`,
+	})
+	got := findingsByCode(findings, "VBA283")
+	if len(got) != 1 || got[0].Procedure != "ExplicitIntrinsicBesideModuleArray" {
+		t.Fatalf("VBA283 array shadowing findings = %+v, want only explicit VBA intrinsic", got)
+	}
+}
+
 func TestInvalidIsMissingUsageIsOptInAndFailsOpenOnWrongArity(t *testing.T) {
 	source := []byte(`Option Explicit
 Private Sub Run(Optional value As Variant)
