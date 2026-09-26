@@ -27,7 +27,7 @@ func (a Analyzer) invalidIsMissingUsageFindings(file parsedFile, proc sourceProc
 	}
 
 	var findings []Finding
-	isMissingArrayShadow := hasIsMissingArrayDeclaration(proc)
+	isMissingArrayShadow := hasIsMissingArrayDeclaration(proc, resolver)
 	for call := range proc.Facts.Calls().All() {
 		if isMissingArrayShadow && call.Callee.Receiver == nil &&
 			strings.EqualFold(cleanIdentifier(call.Callee.BaseName), "IsMissing") {
@@ -87,7 +87,7 @@ func (a Analyzer) invalidIsMissingUsageFindings(file parsedFile, proc sourceProc
 	return findings
 }
 
-func hasIsMissingArrayDeclaration(proc sourceProcedure) bool {
+func hasIsMissingArrayDeclaration(proc sourceProcedure, resolver procedureir.Resolver) bool {
 	isIsMissingArray := func(name string, isArray bool) bool {
 		return isArray && strings.EqualFold(cleanIdentifier(name), "IsMissing")
 	}
@@ -111,7 +111,16 @@ func hasIsMissingArrayDeclaration(proc sourceProcedure) bool {
 			return true
 		}
 	}
-	return false
+	if resolver == nil {
+		return false
+	}
+	caller := procedureir.ProcedureRef{
+		Name: proc.Name, Kind: proc.ProcedureKind, QualifiedName: proc.IR.Symbol.QualifiedName,
+	}
+	resolution := resolver.ResolveSymbol(procedureir.SymbolReference{
+		Name: "IsMissing", Module: proc.Module, Caller: caller,
+	})
+	return resolution.HasArrayCandidate
 }
 
 func isResolvedIsMissingIntrinsic(call procedureir.CallSite, resolver procedureir.Resolver) bool {

@@ -165,7 +165,37 @@ End Sub
 	})
 	got := findingsByCode(findings, "VBA283")
 	if len(got) != 1 || got[0].Procedure != "ExplicitIntrinsicBesideModuleArray" {
-		t.Fatalf("VBA283 array shadowing findings = %+v, want only explicit VBA intrinsic", got)
+		t.Fatalf("VBA283 same-module array findings = %+v, want only explicit VBA intrinsic", got)
+	}
+
+	publicArrayFindings := runParameterPassingAnalysis(t, cfg, map[string]string{
+		"PublicArray.bas": `Option Explicit
+Public IsMissing(0 To 1) As Boolean
+`,
+		"ArrayCaller.bas": `Option Explicit
+Private Sub PublicArrayShadow()
+    If IsMissing(0) Then
+    End If
+End Sub
+`,
+	})
+	if got := findingsByCode(publicArrayFindings, "VBA283"); len(got) != 0 {
+		t.Fatalf("VBA283 public cross-module array findings = %+v, want none", got)
+	}
+
+	privateArrayFindings := runParameterPassingAnalysis(t, cfg, map[string]string{
+		"PrivateArray.bas": `Option Explicit
+Private IsMissing(0 To 1) As Boolean
+`,
+		"ArrayCaller.bas": `Option Explicit
+Private Sub PrivateArrayNotVisible()
+    If IsMissing(0) Then
+    End If
+End Sub
+`,
+	})
+	if got := findingsByCode(privateArrayFindings, "VBA283"); len(got) != 1 || got[0].Procedure != "PrivateArrayNotVisible" {
+		t.Fatalf("VBA283 private cross-module array findings = %+v, want intrinsic warning", got)
 	}
 }
 

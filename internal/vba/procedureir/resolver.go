@@ -830,11 +830,15 @@ func (r SymbolResolver) ResolveSymbol(ref SymbolReference) SymbolResolution {
 		}
 	}
 	var candidates []Candidate
+	hasArrayCandidate := false
 	for _, entry := range entries {
 		if isProcedureSymbolKind(entry.Kind) || strings.EqualFold(entry.Kind, "module") {
 			continue
 		}
 		candidates = append(candidates, entry.Candidate)
+		if entry.isArray && entry.parent == "" && strings.EqualFold(entry.moduleKind, "standard") {
+			hasArrayCandidate = true
+		}
 	}
 	if len(candidates) == 0 {
 		result := SymbolResolution{Scope: ScopeUnresolved, Status: ResolutionUnresolved}
@@ -847,7 +851,10 @@ func (r SymbolResolver) ResolveSymbol(ref SymbolReference) SymbolResolution {
 	if len(candidates) > 1 {
 		status = ResolutionAmbiguous
 	}
-	return SymbolResolution{Scope: ScopeProject, Status: status, Candidates: candidates}
+	return SymbolResolution{
+		Scope: ScopeProject, Status: status, Candidates: candidates,
+		HasArrayCandidate: hasArrayCandidate,
+	}
 }
 
 // ResolveEnumMember resolves a bare or qualified enum constant while
