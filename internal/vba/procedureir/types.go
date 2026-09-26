@@ -137,6 +137,7 @@ type Parameter struct {
 	Type            string        `json:"type,omitempty"`
 	Passing         string        `json:"passing,omitempty"`
 	PassingExplicit bool          `json:"passingExplicit,omitempty"`
+	PassingRange    *vbaast.Range `json:"passingRange,omitempty"`
 	Optional        bool          `json:"optional,omitempty"`
 	ParamArray      bool          `json:"paramArray,omitempty"`
 	Default         string        `json:"default,omitempty"`

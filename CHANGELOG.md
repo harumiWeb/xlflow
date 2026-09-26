@@ -4,6 +4,18 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated the `tree-sitter-vba` parser dependency to v0.14.4 so indexed or
+  call-shaped targets such as `Input #1, arr(0)` and
+  `Line Input #1, p.Items(0)` parse as file-I/O statements instead of being
+  lost to parser recovery.
+- Added opt-in `VBA273`-`VBA277` parameter-passing diagnostics for implicit
+  `ByRef`, assignments to effective `ByVal` parameters, `ByRef` parameters
+  that can be `ByVal`, misleading `ByRef` on Property Let/Set value
+  parameters, and redundant explicit `ByRef`. The mutation analysis
+  propagates project-local positional and named `ByRef` calls conservatively,
+  and configuration rejects enabling the mutually exclusive `VBA273` and
+  `VBA277` style policies together. All five rules are available in batch,
+  realtime, and LSP analysis and remain disabled by default.
 - Added opt-in `VBA270` warning diagnostics for worksheet-visible `Function`
   declarations in standard modules whose names parse as valid A1 or absolute
   R1C1 Excel cell references, so worksheet formulas resolve the cell instead

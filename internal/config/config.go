@@ -248,6 +248,11 @@ type AnalyzeConfig struct {
 	DetectUdfCellReferenceNames               bool     `toml:"detect_udf_cell_reference_names"`
 	DetectOptionBaseArrayInconsistency        bool     `toml:"detect_option_base_array_inconsistency"`
 	DetectOptionBaseParamArrayInconsistency   bool     `toml:"detect_option_base_paramarray_inconsistency"`
+	DetectImplicitByRefParameters             bool     `toml:"detect_implicit_byref_parameters"`
+	DetectAssignedByValParameters             bool     `toml:"detect_assigned_byval_parameters"`
+	DetectByRefParametersCanBeByVal           bool     `toml:"detect_byref_parameters_can_be_byval"`
+	DetectMisleadingPropertyValueByRef        bool     `toml:"detect_misleading_property_value_byref"`
+	DetectRedundantByRefModifiers             bool     `toml:"detect_redundant_byref_modifiers"`
 	DevelopmentHTTPOrigins                    []string `toml:"development_http_origins"`
 }
 
@@ -366,6 +371,11 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA270": {Get: func(c AnalyzeConfig) bool { return c.DetectUdfCellReferenceNames }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUdfCellReferenceNames = v }},
 	"VBA271": {Get: func(c AnalyzeConfig) bool { return c.DetectOptionBaseParamArrayInconsistency }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOptionBaseParamArrayInconsistency = v }},
 	"VBA272": {Get: func(c AnalyzeConfig) bool { return c.DetectOptionBaseArrayInconsistency }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOptionBaseArrayInconsistency = v }},
+	"VBA273": {Get: func(c AnalyzeConfig) bool { return c.DetectImplicitByRefParameters }, Set: func(c *AnalyzeConfig, v bool) { c.DetectImplicitByRefParameters = v }},
+	"VBA274": {Get: func(c AnalyzeConfig) bool { return c.DetectAssignedByValParameters }, Set: func(c *AnalyzeConfig, v bool) { c.DetectAssignedByValParameters = v }},
+	"VBA275": {Get: func(c AnalyzeConfig) bool { return c.DetectByRefParametersCanBeByVal }, Set: func(c *AnalyzeConfig, v bool) { c.DetectByRefParametersCanBeByVal = v }},
+	"VBA276": {Get: func(c AnalyzeConfig) bool { return c.DetectMisleadingPropertyValueByRef }, Set: func(c *AnalyzeConfig, v bool) { c.DetectMisleadingPropertyValueByRef = v }},
+	"VBA277": {Get: func(c AnalyzeConfig) bool { return c.DetectRedundantByRefModifiers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRedundantByRefModifiers = v }},
 }
 
 var (
@@ -566,6 +576,9 @@ func applyDefaults(cfg *Config) {
 }
 
 func validate(cfg Config) error {
+	if cfg.Analyze.DetectImplicitByRefParameters && cfg.Analyze.DetectRedundantByRefModifiers {
+		return errors.New("[analyze].detect_implicit_byref_parameters and [analyze].detect_redundant_byref_modifiers cannot both be enabled")
+	}
 	if cfg.Project.Entry == "" {
 		return errors.New("project.entry is required")
 	}

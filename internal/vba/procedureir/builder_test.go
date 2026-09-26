@@ -20,10 +20,35 @@ func TestParameterJSONOmitsUnsetOptionalRanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded := string(data)
-	for _, field := range []string{"defaultRange", "boundsRange"} {
+	for _, field := range []string{"passingRange", "defaultRange", "boundsRange"} {
 		if strings.Contains(encoded, field) {
 			t.Fatalf("unset %s should be omitted: %s", field, encoded)
 		}
+	}
+}
+
+func TestProcedureSignatureRetainsPassingModifierRanges(t *testing.T) {
+	t.Parallel()
+	source := []byte("Public Sub Run(ByVal inputValue As Long, ByRef outputValue As Long, implicitValue As Long)\nEnd Sub\n")
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parameters := doc.Procedures[0].Symbol.Parameters
+	if len(parameters) != 3 {
+		t.Fatalf("parameters = %#v", parameters)
+	}
+	for index, keyword := range []string{"ByVal", "ByRef"} {
+		rng := parameters[index].PassingRange
+		if !parameters[index].PassingExplicit || rng == nil || rng.StartByte >= rng.EndByte {
+			t.Fatalf("parameter %d passing range = %#v", index, parameters[index])
+		}
+		if got := string(source[rng.StartByte:rng.EndByte]); got != keyword {
+			t.Fatalf("parameter %d passing text = %q, want %q", index, got, keyword)
+		}
+	}
+	if parameters[2].PassingExplicit || parameters[2].PassingRange != nil {
+		t.Fatalf("implicit parameter passing facts = %#v", parameters[2])
 	}
 }
 
@@ -1105,6 +1130,38 @@ End Sub
 	}
 	if len(foo.Arguments.Named) != 1 || foo.Arguments.Named[0].ExpressionID == 0 {
 		t.Fatalf("named argument value lacks expression link: %+v", foo.Arguments.Named)
+	}
+}
+
+func TestCallExpressionIDsBindNamedArgumentValues(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+    Foo alpha:=x, b:=yy + 1
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := doc.Procedures[0].Calls[0]
+	if call.Arguments.Count != 2 || len(call.Arguments.ExpressionIDs) != 2 || len(call.Arguments.Named) != 2 {
+		t.Fatalf("named arguments were not captured: %+v", call.Arguments)
+	}
+	// Named labels are metadata: each ExpressionIDs slot must bind the
+	// argument value even when the label is wider than the value text
+	// (alpha:=x), not the widest expression inside the whole argument.
+	expressions := make(map[int]Expression, len(doc.Procedures[0].Expressions))
+	for _, expression := range doc.Procedures[0].Expressions {
+		expressions[expression.ID] = expression
+	}
+	wantText := []string{"x", "yy + 1"}
+	for i, named := range call.Arguments.Named {
+		if call.Arguments.ExpressionIDs[i] != named.ExpressionID {
+			t.Fatalf("named argument %q value expression %d does not match ExpressionIDs[%d]=%d",
+				named.Name, named.ExpressionID, i, call.Arguments.ExpressionIDs[i])
+		}
+		if got := expressions[named.ExpressionID].Text; got != wantText[i] {
+			t.Fatalf("named argument %q binds %q, want value %q", named.Name, got, wantText[i])
+		}
 	}
 }
 

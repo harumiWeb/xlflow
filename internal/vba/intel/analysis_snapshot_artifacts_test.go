@@ -39,7 +39,9 @@ func TestNewAnalysisSnapshotWithArtifactsSeedsCompletedCachesDefensively(t *test
 	boundsRange := vbaast.Range{StartLine: 2, EndLine: 2, StartByte: 16, EndByte: 17}
 	lowerRange := vbaast.Range{StartLine: 2, EndLine: 2, StartByte: 18, EndByte: 19}
 	upperRange := vbaast.Range{StartLine: 2, EndLine: 2, StartByte: 20, EndByte: 21}
+	passingRange := vbaast.Range{StartLine: 2, EndLine: 2, StartByte: 12, EndByte: 13}
 	ir.Procedures[0].Symbol.Parameters = []procedureir.Parameter{{
+		PassingRange: &passingRange,
 		DefaultRange: &defaultRange,
 		BoundsRange:  &boundsRange,
 		ArrayBounds:  []procedureir.ArrayBound{{LowerRange: &lowerRange, UpperRange: &upperRange}},
@@ -77,11 +79,13 @@ func TestNewAnalysisSnapshotWithArtifactsSeedsCompletedCachesDefensively(t *test
 	// snapshot-owned caches.
 	ir.Procedures[0].Symbol.Name = "mutated input"
 	ir.Procedures[0].Statements[0].Text = "mutated input"
+	ir.Procedures[0].Symbol.Parameters[0].PassingRange.StartByte++
 	ir.Procedures[0].Symbol.Parameters[0].DefaultRange.StartByte++
 	ir.Procedures[0].Symbol.Parameters[0].BoundsRange.EndByte++
 	ir.Procedures[0].Symbol.Parameters[0].ArrayBounds[0].LowerRange.StartByte++
 	ir.Procedures[0].Symbol.Parameters[0].ArrayBounds[0].UpperRange.EndByte++
 	cfg.Graphs[0].Procedure.Name = "mutated input"
+	cfg.Graphs[0].Procedure.Parameters[0].PassingRange.StartByte++
 	cfg.Graphs[0].Procedure.Parameters[0].DefaultRange.StartByte++
 	cfg.Graphs[0].Procedure.Parameters[0].BoundsRange.EndByte++
 	cfg.Graphs[0].Procedure.Parameters[0].ArrayBounds[0].LowerRange.StartByte++
