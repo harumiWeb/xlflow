@@ -461,15 +461,21 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 			for _, finding := range findings {
 				diagnosticRange := issueRange(doc.Source, finding.Line, finding.Column)
 				if finding.EndLine > 0 {
-					// Analyzer findings with an end range (currently VBA215) carry
-					// LSP UTF-16 columns, unlike issueRange's byte-based input.
-					diagnosticRange = Range{Start: Position{
-						Line:      max(0, finding.Line-1),
-						Character: max(0, finding.Column-1),
-					}, End: Position{
-						Line:      max(0, finding.EndLine-1),
-						Character: max(0, finding.EndColumn-1),
-					}}
+					if finding.Code == "VBA283" {
+						// VBA283 ranges come from AST byte columns; map them to LSP's
+						// UTF-16 positions using the document source.
+						diagnosticRange = issueRangeWithEnd(doc.Source, finding.Line, finding.Column, finding.EndLine, finding.EndColumn)
+					} else {
+						// Other analyzer findings with an end range (currently VBA215)
+						// already carry LSP UTF-16 columns.
+						diagnosticRange = Range{Start: Position{
+							Line:      max(0, finding.Line-1),
+							Character: max(0, finding.Column-1),
+						}, End: Position{
+							Line:      max(0, finding.EndLine-1),
+							Character: max(0, finding.EndColumn-1),
+						}}
+					}
 				}
 				out = append(out, Diagnostic{
 					Code:          finding.Code,
