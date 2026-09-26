@@ -403,7 +403,11 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 					Status: ResolutionNonCallable, Candidates: entriesToCandidates(nonCallable),
 				}, nonCallable)
 			}
-			if builtinLikeNames[strings.ToLower(base)] {
+			// IsMissing is an intrinsic only without a receiver or through the
+			// explicit VBA namespace. Keep unknown receiver calls late-bound so
+			// their effects remain uncertain.
+			if builtinLikeNames[strings.ToLower(base)] &&
+				(!strings.EqualFold(base, "IsMissing") || strings.EqualFold(receiver, "VBA")) {
 				return CallResolution{Status: ResolutionBuiltinLike}
 			}
 			return CallResolution{Status: ResolutionMemberCall}

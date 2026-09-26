@@ -732,6 +732,29 @@ func TestResolverClassifiesEffectfulBuiltins(t *testing.T) {
 	}
 }
 
+func TestResolverKeepsUnknownIsMissingReceiverAsMemberCall(t *testing.T) {
+	t.Parallel()
+	resolver := NewResolver(nil)
+	for _, test := range []struct {
+		name     string
+		receiver string
+		want     ResolutionStatus
+	}{
+		{name: "VBA intrinsic", receiver: "VBA", want: ResolutionBuiltinLike},
+		{name: "unknown receiver", receiver: "obj", want: ResolutionMemberCall},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			receiver := test.receiver
+			resolution := resolver.ResolveCall(CallSite{Callee: Callee{
+				Text: receiver + ".IsMissing", BaseName: "IsMissing", Receiver: &receiver, Member: "IsMissing",
+			}})
+			if resolution.Status != test.want {
+				t.Fatalf("IsMissing receiver %q status = %q, want %q", receiver, resolution.Status, test.want)
+			}
+		})
+	}
+}
+
 func TestResolverRequiresReceiverForCrossModuleClassProcedure(t *testing.T) {
 	t.Parallel()
 	resolver := NewResolver([]ResolverSymbol{{
