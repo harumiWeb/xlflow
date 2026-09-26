@@ -316,6 +316,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_implicit_byref_parameters`
 - `detect_implicit_default_member_access`
 - `detect_implicit_variant`
+- `detect_invalid_ismissing_usage`
 - `detect_late_bound_dictionary_constants`
 - `detect_leaked_on_error_resume_next_scopes`
 - `detect_loop_invariant_excel_object_resolution`

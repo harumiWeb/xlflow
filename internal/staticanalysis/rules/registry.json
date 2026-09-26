@@ -3256,6 +3256,28 @@
       "configuration_key": "detect_predeclared_instance_access",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA283",
+      "title": "Invalid IsMissing argument",
+      "description": "The argument passed to IsMissing does not identify an Optional Variant parameter in the containing procedure.",
+      "family": "analyze",
+      "category": "correctness",
+      "evidence_class": "inference",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning", "information"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": false,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba283",
+      "configurable": true,
+      "configuration_key": "detect_invalid_ismissing_usage",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

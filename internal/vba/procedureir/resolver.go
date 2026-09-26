@@ -403,7 +403,11 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 					Status: ResolutionNonCallable, Candidates: entriesToCandidates(nonCallable),
 				}, nonCallable)
 			}
-			if builtinLikeNames[strings.ToLower(base)] {
+			// IsMissing is an intrinsic only without a receiver or through the
+			// explicit VBA namespace. Keep unknown receiver calls late-bound so
+			// their effects remain uncertain.
+			if builtinLikeNames[strings.ToLower(base)] &&
+				(!strings.EqualFold(base, "IsMissing") || strings.EqualFold(receiver, "VBA")) {
 				return CallResolution{Status: ResolutionBuiltinLike}
 			}
 			return CallResolution{Status: ResolutionMemberCall}
@@ -826,11 +830,15 @@ func (r SymbolResolver) ResolveSymbol(ref SymbolReference) SymbolResolution {
 		}
 	}
 	var candidates []Candidate
+	hasArrayCandidate := false
 	for _, entry := range entries {
 		if isProcedureSymbolKind(entry.Kind) || strings.EqualFold(entry.Kind, "module") {
 			continue
 		}
 		candidates = append(candidates, entry.Candidate)
+		if entry.isArray && entry.parent == "" && strings.EqualFold(entry.moduleKind, "standard") {
+			hasArrayCandidate = true
+		}
 	}
 	if len(candidates) == 0 {
 		result := SymbolResolution{Scope: ScopeUnresolved, Status: ResolutionUnresolved}
@@ -843,7 +851,10 @@ func (r SymbolResolver) ResolveSymbol(ref SymbolReference) SymbolResolution {
 	if len(candidates) > 1 {
 		status = ResolutionAmbiguous
 	}
-	return SymbolResolution{Scope: ScopeProject, Status: status, Candidates: candidates}
+	return SymbolResolution{
+		Scope: ScopeProject, Status: status, Candidates: candidates,
+		HasArrayCandidate: hasArrayCandidate,
+	}
 }
 
 // ResolveEnumMember resolves a bare or qualified enum constant while
@@ -1134,7 +1145,7 @@ var builtinLikeNames = map[string]bool{
 	"createobject": true, "cstr": true, "date": true, "dateadd": true,
 	"debug.print": true, "dir": true, "doevents": true, "environ": true, "error": true,
 	"format": true, "getobject": true, "inputbox": true, "instr": true,
-	"isarray": true, "isdate": true, "isempty": true, "iserror": true,
+	"isarray": true, "isdate": true, "isempty": true, "iserror": true, "ismissing": true,
 	"isnull": true, "isnumeric": true, "join": true, "lbound": true,
 	"lcase": true, "left": true, "len": true, "mid": true, "msgbox": true,
 	"replace": true, "right": true, "rnd": true, "shell": true, "split": true, "str": true,

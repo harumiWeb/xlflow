@@ -156,6 +156,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA280`](#vba280) | analyze | warning     | file-local      | no      | Write-only property                                         |
 | [`VBA281`](#vba281) | analyze | warning     | file-local      | no      | Interface implementation or event handler exposed as Public |
 | [`VBA282`](#vba282) | analyze | warning     | procedure-local | no      | Predeclared-instance self-name access                       |
+| [`VBA283`](#vba283) | analyze | warning     | procedure-local | no      | Invalid IsMissing argument                                  |
 
 ## VB001
 
@@ -3412,3 +3413,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                   |
 | Real-time editor diagnostic | yes                                  |
 | Fix available               | no                                   |
+
+## VBA283
+
+**Invalid IsMissing argument.** The argument passed to IsMissing does not identify an Optional Variant parameter in the containing procedure.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `correctness`                    |
+| Evidence class              | `inference`                      |
+| Compile-equivalent          | no                               |
+| Default severity            | `warning`                        |
+| Supported severities        | `warning`, `information`         |
+| Surfaces                    | `analyze`, `lsp`                 |
+| Scope                       | `procedure-local`                |
+| Precision                   | `high`                           |
+| Enabled by default          | no                               |
+| Configuration               | `detect_invalid_ismissing_usage` |
+| Inline suppression          | yes                              |
+| Blocks source preflight     | no                               |
+| Real-time editor diagnostic | yes                              |
+| Fix available               | no                               |

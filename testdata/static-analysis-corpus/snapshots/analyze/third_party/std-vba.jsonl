@@ -483,6 +483,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":391,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":391,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":407,"column":9}
+{"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA283","severity":"warning","line":417,"column":18}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA202","severity":"warning","line":430,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA202","severity":"warning","line":432,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"analyze","code":"VBA202","severity":"warning","line":433,"column":0}
@@ -510,6 +511,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA206","severity":"warning","line":395,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA206","severity":"warning","line":395,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA206","severity":"warning","line":411,"column":9}
+{"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA283","severity":"warning","line":421,"column":18}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA202","severity":"warning","line":434,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA202","severity":"warning","line":436,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA202","severity":"warning","line":437,"column":0}

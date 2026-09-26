@@ -49,6 +49,8 @@ const (
 	featureLocalVariable
 	// featureParameter records that the procedure declares parameters.
 	featureParameter
+	// featureIsMissingCall records call sites that may resolve to VBA.IsMissing.
+	featureIsMissingCall
 	procedureFeatureLimit
 )
 
@@ -178,6 +180,9 @@ func isKnownNonValueExpressionSyntax(syntaxKind string) bool {
 
 func (features *procedureFeatureSet) observeCall(call procedureir.CallSite) {
 	features.add(featureCalls | featureByRefCalls)
+	if strings.EqualFold(cleanIdentifier(call.Callee.BaseName), "IsMissing") {
+		features.add(featureIsMissingCall)
+	}
 	features.observeText(call.Callee.Text)
 	features.observeText(call.Callee.BaseName)
 	features.observeText(call.Callee.Member)
@@ -189,10 +194,21 @@ func (features *procedureFeatureSet) observeCall(call procedureir.CallSite) {
 	case procedureir.ResolutionExternal, procedureir.ResolutionMemberCall:
 		// The syntax is owned and can classify known APIs, but the external
 		// implementation can still supply values or mutations to flow domains.
-		features.addUnknown(uncertainProcedureFeatures)
+		features.addUnknown(uncertainCallFeatures(call))
 	default:
-		features.addUnknown(uncertainProcedureFeatures)
+		features.addUnknown(uncertainCallFeatures(call))
 	}
+}
+
+func uncertainCallFeatures(call procedureir.CallSite) procedureFeature {
+	uncertain := uncertainProcedureFeatures
+	calleeName := cleanIdentifier(call.Callee.BaseName)
+	if calleeName != "" && !strings.EqualFold(calleeName, "IsMissing") {
+		// Resolution uncertainty for a known, differently named call cannot
+		// make it an IsMissing call. Keep that uncertainty for other analyses.
+		uncertain &^= featureIsMissingCall
+	}
+	return uncertain
 }
 
 func (features *procedureFeatureSet) observeText(text string) {
@@ -390,6 +406,7 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA275", domain: analysisstats.DomainOther, any: featureParameter},
 	{id: "VBA276", domain: analysisstats.DomainOther, any: featureParameter},
 	{id: "VBA277", domain: analysisstats.DomainOther, any: featureParameter},
+	{id: "VBA283", domain: analysisstats.DomainOther, any: featureIsMissingCall},
 	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
 	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureApplicationState, capabilities: projectCapabilityEventReentry},
 	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
@@ -521,6 +538,7 @@ const (
 	procedureProjectionNeverAssigned
 	procedureProjectionUnassignedRead
 	procedureProjectionParameterPassing
+	procedureProjectionIsMissingUsage
 	procedureProjectionLimit
 )
 
@@ -643,6 +661,8 @@ func procedureProjectionForRequirement(requirement procedureRuleRequirement) pro
 		return procedureProjectionUnassignedRead
 	case "VBA273", "VBA274", "VBA275", "VBA276", "VBA277":
 		return procedureProjectionParameterPassing
+	case "VBA283":
+		return procedureProjectionIsMissingUsage
 	}
 	// A future requirement must still be represented in a plan. Falling back
 	// to the first projection in its domain is conservative and keeps unknown
@@ -927,7 +947,10 @@ func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc
 	features.add(moduleFeatures.present)
 	if proc.Effects != nil {
 		if len(proc.Effects.DirectUncertainty) > 0 || len(proc.Effects.PropagatedUncertainty) > 0 {
-			features.addUnknown(uncertainProcedureFeatures)
+			// Effect uncertainty cannot hide a direct IsMissing call from the
+			// procedure-local call facts. Recovery and missing IR remain covered
+			// by the broader uncertainty paths above.
+			features.addUnknown(uncertainProcedureFeatures &^ featureIsMissingCall)
 		}
 		if proc.Effects.Error.HasErrorHandler || proc.Effects.Error.UsesResumeNext || proc.Effects.Error.SuppressesErrors || proc.Effects.Error.MayRaise || len(proc.Effects.Error.Direct) > 0 || len(proc.Effects.Error.Propagated) > 0 {
 			features.add(featureOnError)

@@ -724,11 +724,34 @@ End Sub
 func TestResolverClassifiesEffectfulBuiltins(t *testing.T) {
 	t.Parallel()
 	resolver := NewResolver(nil)
-	for _, name := range []string{"Shell", "Error"} {
+	for _, name := range []string{"Shell", "Error", "IsMissing"} {
 		resolution := resolver.ResolveCall(CallSite{Callee: Callee{Text: name, BaseName: name, Member: name}})
 		if resolution.Status != ResolutionBuiltinLike {
 			t.Fatalf("%s status = %q, want %q", name, resolution.Status, ResolutionBuiltinLike)
 		}
+	}
+}
+
+func TestResolverKeepsUnknownIsMissingReceiverAsMemberCall(t *testing.T) {
+	t.Parallel()
+	resolver := NewResolver(nil)
+	for _, test := range []struct {
+		name     string
+		receiver string
+		want     ResolutionStatus
+	}{
+		{name: "VBA intrinsic", receiver: "VBA", want: ResolutionBuiltinLike},
+		{name: "unknown receiver", receiver: "obj", want: ResolutionMemberCall},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			receiver := test.receiver
+			resolution := resolver.ResolveCall(CallSite{Callee: Callee{
+				Text: receiver + ".IsMissing", BaseName: "IsMissing", Receiver: &receiver, Member: "IsMissing",
+			}})
+			if resolution.Status != test.want {
+				t.Fatalf("IsMissing receiver %q status = %q, want %q", receiver, resolution.Status, test.want)
+			}
+		})
 	}
 }
 
