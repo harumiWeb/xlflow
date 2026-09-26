@@ -347,7 +347,7 @@ Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` rema
 
 `detect_implicit_byref_parameters` and
 `detect_redundant_byref_modifiers` are opposing style policies. Configuration
-loading fails when both are enabled. `VBA271` through `VBA273` are independent
+loading fails when both are enabled. `VBA274` through `VBA276` are independent
 semantic/API-design checks and can be combined with either style policy.
 
 `development_http_origins` accepts only exact absolute origins of the form `http://host[:port]`. It rejects credentials, paths (including a trailing slash), queries, fragments, wildcards, and HTTPS values. Host names are case-normalized, IPv6 is canonicalized, and the default port `:80` is removed. The exemption applies only to `plain_http_credentials`; loopback origins are exempt without configuration.
