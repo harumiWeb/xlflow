@@ -253,6 +253,7 @@ type AnalyzeConfig struct {
 	DetectWriteOnlyProperty                   bool     `toml:"detect_write_only_property"`
 	DetectPublicInterfaceEventMembers         bool     `toml:"detect_public_interface_event_members"`
 	DetectPredeclaredInstanceAccess           bool     `toml:"detect_predeclared_instance_access"`
+	DetectInvalidIsMissingUsage               bool     `toml:"detect_invalid_ismissing_usage"`
 	DetectImplicitByRefParameters             bool     `toml:"detect_implicit_byref_parameters"`
 	DetectAssignedByValParameters             bool     `toml:"detect_assigned_byval_parameters"`
 	DetectByRefParametersCanBeByVal           bool     `toml:"detect_byref_parameters_can_be_byval"`
@@ -386,6 +387,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA280": {Get: func(c AnalyzeConfig) bool { return c.DetectWriteOnlyProperty }, Set: func(c *AnalyzeConfig, v bool) { c.DetectWriteOnlyProperty = v }},
 	"VBA281": {Get: func(c AnalyzeConfig) bool { return c.DetectPublicInterfaceEventMembers }, Set: func(c *AnalyzeConfig, v bool) { c.DetectPublicInterfaceEventMembers = v }},
 	"VBA282": {Get: func(c AnalyzeConfig) bool { return c.DetectPredeclaredInstanceAccess }, Set: func(c *AnalyzeConfig, v bool) { c.DetectPredeclaredInstanceAccess = v }},
+	"VBA283": {Get: func(c AnalyzeConfig) bool { return c.DetectInvalidIsMissingUsage }, Set: func(c *AnalyzeConfig, v bool) { c.DetectInvalidIsMissingUsage = v }},
 }
 
 var (

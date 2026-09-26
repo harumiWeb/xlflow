@@ -278,6 +278,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA280` | warning               | A public-facing `Property Let`/`Set` has no matching `Property Get`, forming a write-only API.                                                                       |
 | `VBA281` | warning               | A public member matches a verified implemented `<Interface>_<Member>` binding or an event handler is declared `Public`.                                              |
 | `VBA282` | warning               | A module with a predeclared default instance references its own name, binding to the shared instance instead of `Me`.                                                |
+| `VBA283` | warning               | An `IsMissing` argument is not a direct Optional Variant parameter of the containing procedure (opt-in).                                                             |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -311,6 +312,15 @@ effective-`ByVal` parameters, `ByRef` parameters proved safe to change to
 `ByVal`, misleading Property Let/Set value-parameter `ByRef`, and redundant
 explicit `ByRef`. Unknown call boundaries suppress the can-be-ByVal claim.
 The explicit-`ByRef` and redundant-`ByRef` style flags are mutually exclusive.
+
+`VBA283` is an opt-in warning for `IsMissing` calls whose argument is not a
+direct Optional Variant parameter of the current procedure. It accepts omitted
+parameter types as Variant, allows explicit defaults, and treats parentheses
+as transparent. Only calls resolved as the VBA intrinsic are checked;
+unresolved calls and other receivers remain silent. Enable it with
+`detect_invalid_ismissing_usage = true` or suppress an individual finding with
+`xlflow:disable-line VBA283` / `xlflow:disable-next-line VBA283`.
+
 `VBA253`, `VBA254`, and `VBA255` are opt-in typed default-member rules through
 `detect_implicit_default_member_access`,
 `detect_unbound_default_member_access`, and `detect_bang_notation`.

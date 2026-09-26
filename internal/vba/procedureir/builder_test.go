@@ -724,7 +724,7 @@ End Sub
 func TestResolverClassifiesEffectfulBuiltins(t *testing.T) {
 	t.Parallel()
 	resolver := NewResolver(nil)
-	for _, name := range []string{"Shell", "Error"} {
+	for _, name := range []string{"Shell", "Error", "IsMissing"} {
 		resolution := resolver.ResolveCall(CallSite{Callee: Callee{Text: name, BaseName: name, Member: name}})
 		if resolution.Status != ResolutionBuiltinLike {
 			t.Fatalf("%s status = %q, want %q", name, resolution.Status, ResolutionBuiltinLike)

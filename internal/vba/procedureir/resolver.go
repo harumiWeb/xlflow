@@ -1134,7 +1134,7 @@ var builtinLikeNames = map[string]bool{
 	"createobject": true, "cstr": true, "date": true, "dateadd": true,
 	"debug.print": true, "dir": true, "doevents": true, "environ": true, "error": true,
 	"format": true, "getobject": true, "inputbox": true, "instr": true,
-	"isarray": true, "isdate": true, "isempty": true, "iserror": true,
+	"isarray": true, "isdate": true, "isempty": true, "iserror": true, "ismissing": true,
 	"isnull": true, "isnumeric": true, "join": true, "lbound": true,
 	"lcase": true, "left": true, "len": true, "mid": true, "msgbox": true,
 	"replace": true, "right": true, "rnd": true, "shell": true, "split": true, "str": true,

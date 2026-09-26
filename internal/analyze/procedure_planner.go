@@ -49,6 +49,8 @@ const (
 	featureLocalVariable
 	// featureParameter records that the procedure declares parameters.
 	featureParameter
+	// featureIsMissingCall records call sites that may resolve to VBA.IsMissing.
+	featureIsMissingCall
 	procedureFeatureLimit
 )
 
@@ -178,6 +180,9 @@ func isKnownNonValueExpressionSyntax(syntaxKind string) bool {
 
 func (features *procedureFeatureSet) observeCall(call procedureir.CallSite) {
 	features.add(featureCalls | featureByRefCalls)
+	if strings.EqualFold(cleanIdentifier(call.Callee.BaseName), "IsMissing") {
+		features.add(featureIsMissingCall)
+	}
 	features.observeText(call.Callee.Text)
 	features.observeText(call.Callee.BaseName)
 	features.observeText(call.Callee.Member)
@@ -390,6 +395,7 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA275", domain: analysisstats.DomainOther, any: featureParameter},
 	{id: "VBA276", domain: analysisstats.DomainOther, any: featureParameter},
 	{id: "VBA277", domain: analysisstats.DomainOther, any: featureParameter},
+	{id: "VBA283", domain: analysisstats.DomainOther, any: featureIsMissingCall},
 	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
 	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureApplicationState, capabilities: projectCapabilityEventReentry},
 	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
@@ -521,6 +527,7 @@ const (
 	procedureProjectionNeverAssigned
 	procedureProjectionUnassignedRead
 	procedureProjectionParameterPassing
+	procedureProjectionIsMissingUsage
 	procedureProjectionLimit
 )
 
@@ -643,6 +650,8 @@ func procedureProjectionForRequirement(requirement procedureRuleRequirement) pro
 		return procedureProjectionUnassignedRead
 	case "VBA273", "VBA274", "VBA275", "VBA276", "VBA277":
 		return procedureProjectionParameterPassing
+	case "VBA283":
+		return procedureProjectionIsMissingUsage
 	}
 	// A future requirement must still be represented in a plan. Falling back
 	// to the first projection in its domain is conservative and keeps unknown

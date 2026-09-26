@@ -702,6 +702,7 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		"VBA259/other": true,
 		"VBA265/other": true, "VBA268/other": true, "VBA269/other": true,
 		"VBA273/other": true, "VBA274/other": true, "VBA275/other": true, "VBA276/other": true, "VBA277/other": true,
+		"VBA283/other": true,
 	}
 	seen := map[string]bool{}
 	always := map[string]bool{}
@@ -729,6 +730,30 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		if enabled, known := config.AnalyzeRuleEnabled(config.Default().Analyze, id); !known && !always[key] {
 			t.Errorf("gated rule %q is not known by the config registry (enabled=%v)", id, enabled)
 		}
+	}
+}
+
+func TestIsMissingUsageProjectionPlansOnlyCandidateProcedures(t *testing.T) {
+	cfg := analyzeConfigForRules("VBA283")
+	var features procedureFeatureSet
+	features.observeCall(procedureir.CallSite{Callee: procedureir.Callee{BaseName: "IsMissing"}})
+	if !features.mayHave(featureIsMissingCall) {
+		t.Fatalf("IsMissing call features = %#v, want candidate feature", features)
+	}
+	positive := sourceProcedureWithFeatureSet(features)
+	if plan := positive.analysisPlan(cfg, nil); !plan.runsProjection(procedureProjectionIsMissingUsage) {
+		t.Fatal("procedure with IsMissing call is missing its rule projection")
+	}
+
+	const unrelatedProcedures = 1000
+	plannedUnrelated := 0
+	for range unrelatedProcedures {
+		if plan := sourceProcedureWithFeatureSet(procedureFeatureSet{}).analysisPlan(cfg, nil); plan.runsProjection(procedureProjectionIsMissingUsage) {
+			plannedUnrelated++
+		}
+	}
+	if plannedUnrelated != 0 {
+		t.Fatalf("unrelated procedures planned IsMissing projection %d times, want 0", plannedUnrelated)
 	}
 }
 
@@ -870,6 +895,8 @@ func analyzeConfigForRules(ids ...string) config.AnalyzeConfig {
 			cfg.DetectDeterministicRuntimeErrors = true
 		case "VBA259":
 			cfg.DetectUnreachableSelectCase = true
+		case "VBA283":
+			cfg.DetectInvalidIsMissingUsage = true
 		default:
 			panic("test helper has no field for " + id)
 		}

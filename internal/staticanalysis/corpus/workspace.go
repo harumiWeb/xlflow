@@ -203,6 +203,7 @@ func MaterializeThirdPartyProject(corpusRoot string, project Project, opts Mater
 	cfg.Analyze.DetectWriteOnlyProperty = true
 	cfg.Analyze.DetectPublicInterfaceEventMembers = true
 	cfg.Analyze.DetectPredeclaredInstanceAccess = true
+	cfg.Analyze.DetectInvalidIsMissingUsage = true
 	if err := config.Write(filepath.Join(workspace.Root, config.FileName), cfg); err != nil {
 		return workspace, fmt.Errorf("write materialized project config: %w", err)
 	}

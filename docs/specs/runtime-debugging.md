@@ -161,10 +161,13 @@ private-procedure parameters, `VBA266` unreferenced module-level
 `Private Const` declarations, `VBA267` unaccessed `Private Type` members,
 `VBA268` scalar locals read but never assigned, and `VBA269` locals read on a
 path where no assignment is guaranteed. The cell-reference and Option Base expansion adds VBA270 through VBA272, and the parameter-passing expansion
-extends the stable range through `VBA277`: `VBA273` reports implicit `ByRef`,
+extends the stable range through `VBA283`: `VBA273` reports implicit `ByRef`,
 `VBA274` assignments to effective `ByVal` parameters, `VBA275` parameters
 proved safe to change to `ByVal`, `VBA276` misleading Property value
-`ByRef`, and `VBA277` redundant explicit `ByRef`. `VBA253`, `VBA254`, and `VBA255` are
+`ByRef`, and `VBA277` redundant explicit `ByRef`. `VBA278` through `VBA282`
+report opt-in class/interface public-API hazards. `VBA283` reports ineffective
+`IsMissing` arguments outside the containing procedure's Optional Variant
+parameters. `VBA253`, `VBA254`, and `VBA255` are
 opt-in and remain fail-open for incomplete negative evidence or dynamically
 dispatched type information; `VBA259` and `VBA265` through `VBA269` follow the
 same opt-in, fail-open posture.
