@@ -194,10 +194,21 @@ func (features *procedureFeatureSet) observeCall(call procedureir.CallSite) {
 	case procedureir.ResolutionExternal, procedureir.ResolutionMemberCall:
 		// The syntax is owned and can classify known APIs, but the external
 		// implementation can still supply values or mutations to flow domains.
-		features.addUnknown(uncertainProcedureFeatures)
+		features.addUnknown(uncertainCallFeatures(call))
 	default:
-		features.addUnknown(uncertainProcedureFeatures)
+		features.addUnknown(uncertainCallFeatures(call))
 	}
+}
+
+func uncertainCallFeatures(call procedureir.CallSite) procedureFeature {
+	uncertain := uncertainProcedureFeatures
+	calleeName := cleanIdentifier(call.Callee.BaseName)
+	if calleeName != "" && !strings.EqualFold(calleeName, "IsMissing") {
+		// Resolution uncertainty for a known, differently named call cannot
+		// make it an IsMissing call. Keep that uncertainty for other analyses.
+		uncertain &^= featureIsMissingCall
+	}
+	return uncertain
 }
 
 func (features *procedureFeatureSet) observeText(text string) {
@@ -936,7 +947,10 @@ func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc
 	features.add(moduleFeatures.present)
 	if proc.Effects != nil {
 		if len(proc.Effects.DirectUncertainty) > 0 || len(proc.Effects.PropagatedUncertainty) > 0 {
-			features.addUnknown(uncertainProcedureFeatures)
+			// Effect uncertainty cannot hide a direct IsMissing call from the
+			// procedure-local call facts. Recovery and missing IR remain covered
+			// by the broader uncertainty paths above.
+			features.addUnknown(uncertainProcedureFeatures &^ featureIsMissingCall)
 		}
 		if proc.Effects.Error.HasErrorHandler || proc.Effects.Error.UsesResumeNext || proc.Effects.Error.SuppressesErrors || proc.Effects.Error.MayRaise || len(proc.Effects.Error.Direct) > 0 || len(proc.Effects.Error.Propagated) > 0 {
 			features.add(featureOnError)
