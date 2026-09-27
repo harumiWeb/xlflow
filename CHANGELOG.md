@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `VBA283` warnings for ineffective `IsMissing` calls that do not
+  pass a direct Optional Variant parameter from the containing procedure.
+  Explicit defaults on Variant parameters remain valid. Parentheses around an
+  eligible parameter are transparent; shadowed or unresolved calls remain
+  silent. The rule is available in batch, realtime, and LSP analysis and is
+  disabled by default.
 - Updated the `tree-sitter-vba` parser dependency to v0.14.4 so indexed or
   call-shaped targets such as `Input #1, arr(0)` and
   `Line Input #1, p.Items(0)` parse as file-I/O statements instead of being

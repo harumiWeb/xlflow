@@ -696,6 +696,7 @@
 {"project":"third_party/access-examples","file":"modDate.bas","surface":"analyze","code":"VBA214","severity":"warning","line":75,"column":0}
 {"project":"third_party/access-examples","file":"modDate.bas","surface":"analyze","code":"VBA214","severity":"warning","line":89,"column":0}
 {"project":"third_party/access-examples","file":"modDate.bas","surface":"analyze","code":"VBA214","severity":"warning","line":101,"column":0}
+{"project":"third_party/access-examples","file":"modDate.bas","surface":"analyze","code":"VBA283","severity":"warning","line":110,"column":14}
 {"project":"third_party/access-examples","file":"modDate.bas","surface":"analyze","code":"VBA214","severity":"warning","line":118,"column":0}
 {"project":"third_party/access-examples","file":"modDate.bas","surface":"analyze","code":"VBA214","severity":"warning","line":118,"column":0}
 {"project":"third_party/access-examples","file":"modDate.bas","surface":"analyze","code":"VBA214","severity":"warning","line":219,"column":0}

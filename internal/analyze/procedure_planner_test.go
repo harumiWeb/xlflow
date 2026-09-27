@@ -10,6 +10,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/effects"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
@@ -194,8 +195,8 @@ func TestProcedureFeatureSetFailsOpenForRecoveredAndDynamicIR(t *testing.T) {
 		}},
 		nil,
 	)
-	if dynamic.features.present|dynamic.features.unknown != uncertainProcedureFeatures {
-		t.Fatalf("dynamic-call features = %#v, want semantic features present or unknown and host bracket absent", dynamic.features)
+	if (dynamic.features.present | dynamic.features.unknown) != (uncertainProcedureFeatures &^ featureIsMissingCall) {
+		t.Fatalf("dynamic-call features = %#v, want all features except the known IsMissing-call absence to fail open", dynamic.features)
 	}
 
 	missingDocument := procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{{
@@ -702,6 +703,7 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		"VBA259/other": true,
 		"VBA265/other": true, "VBA268/other": true, "VBA269/other": true,
 		"VBA273/other": true, "VBA274/other": true, "VBA275/other": true, "VBA276/other": true, "VBA277/other": true,
+		"VBA283/other": true,
 	}
 	seen := map[string]bool{}
 	always := map[string]bool{}
@@ -729,6 +731,82 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 		if enabled, known := config.AnalyzeRuleEnabled(config.Default().Analyze, id); !known && !always[key] {
 			t.Errorf("gated rule %q is not known by the config registry (enabled=%v)", id, enabled)
 		}
+	}
+}
+
+func TestIsMissingUsageProjectionPlansOnlyCandidateProcedures(t *testing.T) {
+	cfg := analyzeConfigForRules("VBA283")
+	var features procedureFeatureSet
+	features.observeCall(procedureir.CallSite{Callee: procedureir.Callee{BaseName: "IsMissing"}})
+	if !features.mayHave(featureIsMissingCall) {
+		t.Fatalf("IsMissing call features = %#v, want candidate feature", features)
+	}
+	positive := sourceProcedureWithFeatureSet(features)
+	if plan := positive.analysisPlan(cfg, nil); !plan.runsProjection(procedureProjectionIsMissingUsage) {
+		t.Fatal("procedure with IsMissing call is missing its rule projection")
+	}
+	for _, test := range []struct {
+		name           string
+		call           procedureir.CallSite
+		effects        *effects.ProcedureSummary
+		wantProjection bool
+	}{
+		{
+			name: "unresolved unrelated call",
+			call: procedureir.CallSite{
+				Callee:     procedureir.Callee{Text: "LookupValue", BaseName: "LookupValue"},
+				Resolution: procedureir.CallResolution{Status: procedureir.ResolutionUnresolved},
+			},
+		},
+		{
+			name: "external unrelated member",
+			call: procedureir.CallSite{
+				Callee:     procedureir.Callee{Text: "provider.Execute", BaseName: "Execute", Member: "Execute"},
+				Resolution: procedureir.CallResolution{Status: procedureir.ResolutionMemberCall},
+			},
+		},
+		{
+			name: "unrelated effect uncertainty",
+			call: procedureir.CallSite{
+				Callee:     procedureir.Callee{Text: "LookupValue", BaseName: "LookupValue"},
+				Resolution: procedureir.CallResolution{Status: procedureir.ResolutionUnresolved},
+			},
+			effects: &effects.ProcedureSummary{
+				DirectUncertainty: []effects.CallUncertainty{{Kind: effects.UncertaintyUnresolved}},
+			},
+		},
+		{
+			name: "unknown callee remains fail-open",
+			call: procedureir.CallSite{
+				Resolution: procedureir.CallResolution{Status: procedureir.ResolutionUnresolved},
+			},
+			wantProjection: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var features procedureFeatureSet
+			features.observeCall(test.call)
+			if !features.mayHave(featureArray) {
+				t.Fatal("unresolved call stopped failing open for unrelated analyzer features")
+			}
+			procedure := sourceProcedureWithFeatureSet(features)
+			procedure.Effects = test.effects
+			plan := procedure.analysisPlan(cfg, nil)
+			if got := plan.runsProjection(procedureProjectionIsMissingUsage); got != test.wantProjection {
+				t.Fatalf("IsMissing projection = %v, want %v (features = %#v)", got, test.wantProjection, features)
+			}
+		})
+	}
+
+	const unrelatedProcedures = 1000
+	plannedUnrelated := 0
+	for range unrelatedProcedures {
+		if plan := sourceProcedureWithFeatureSet(procedureFeatureSet{}).analysisPlan(cfg, nil); plan.runsProjection(procedureProjectionIsMissingUsage) {
+			plannedUnrelated++
+		}
+	}
+	if plannedUnrelated != 0 {
+		t.Fatalf("unrelated procedures planned IsMissing projection %d times, want 0", plannedUnrelated)
 	}
 }
 
@@ -870,6 +948,8 @@ func analyzeConfigForRules(ids ...string) config.AnalyzeConfig {
 			cfg.DetectDeterministicRuntimeErrors = true
 		case "VBA259":
 			cfg.DetectUnreachableSelectCase = true
+		case "VBA283":
+			cfg.DetectInvalidIsMissingUsage = true
 		default:
 			panic("test helper has no field for " + id)
 		}

@@ -2935,7 +2935,7 @@ sendJobs:
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255", "VBA256", "VBA257", "VBA259", "VBA261", "VBA262", "VBA265", "VBA266", "VBA267", "VBA268", "VBA269", "VBA270", "VBA271", "VBA272", "VBA273", "VBA274", "VBA275", "VBA276", "VBA277", "VBA278", "VBA279", "VBA280", "VBA281", "VBA282"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249", "VBA250", "VBA251", "VBA252", "VBA253", "VBA254", "VBA255", "VBA256", "VBA257", "VBA259", "VBA261", "VBA262", "VBA265", "VBA266", "VBA267", "VBA268", "VBA269", "VBA270", "VBA271", "VBA272", "VBA273", "VBA274", "VBA275", "VBA276", "VBA277", "VBA278", "VBA279", "VBA280", "VBA281", "VBA282", "VBA283"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -3026,6 +3026,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	}
 	if plan.runsProjection(procedureProjectionParameterPassing) {
 		findings = append(findings, a.parameterPassingFindings(file, proc, analysisCtx.parameterMutations)...)
+	}
+	if plan.runsProjection(procedureProjectionIsMissingUsage) {
+		findings = append(findings, a.invalidIsMissingUsageFindings(file, proc, analysisCtx.projectResolver)...)
 	}
 	findings = append(findings, a.discardedReturnFindings(file, proc, analysisCtx.projectResolver)...)
 	findings = append(findings, a.optionBaseInconsistencyFindings(file, proc)...)
@@ -3787,6 +3790,9 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		parameterFindings := a.parameterPassingFindings(file, proc, ctx.parameterMutations)
 		parameterMeasurement.finish(len(parameterFindings))
 		findings = append(findings, parameterFindings...)
+	}
+	if plan.runsProjection(procedureProjectionIsMissingUsage) {
+		findings = append(findings, a.invalidIsMissingUsageFindings(file, proc, ctx.projectResolver)...)
 	}
 	if plan.runsProjection(procedureProjectionRuntime) {
 		runtimeMeasurement := profile.begin(procedureDomainRuntime)

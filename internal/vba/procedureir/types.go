@@ -474,6 +474,9 @@ type SymbolResolution struct {
 	Status     ResolutionStatus `json:"status,omitempty"`
 	Scope      SymbolScope      `json:"scope"`
 	Candidates []Candidate      `json:"candidates,omitempty"`
+	// HasArrayCandidate reports visible module-scope array declarations without
+	// changing the serialized symbol-resolution contract.
+	HasArrayCandidate bool `json:"-"`
 }
 
 // Resolver provides project-dependent overlays. Implementations must be safe

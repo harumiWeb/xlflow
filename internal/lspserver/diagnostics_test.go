@@ -782,6 +782,37 @@ func TestLSPDiagnosticsPreserveVBA215UTF16StartRange(t *testing.T) {
 	t.Fatalf("VBA215 diagnostic missing: %+v", diagnostics)
 }
 
+func TestLSPDiagnosticsConvertVBA283ByteRangeToUTF16(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Analyze.DetectInvalidIsMissingUsage = true
+	s, cleanup, err := New(Options{RootDir: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	line := `    Debug.Print "猫": If IsMissing(value) Then`
+	source := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run(Optional value As Long)\n" + line + "\n    End If\nEnd Sub\n"
+	diagnostics := s.diagnostics(context.Background(), intel.Document{
+		Path:   filepath.Join(root, "Main.bas"),
+		Source: source,
+	})
+	argumentStart := strings.Index(line, "value")
+	wantStart := len(utf16.Encode([]rune(line[:argumentStart])))
+	wantEnd := len(utf16.Encode([]rune(line[:argumentStart+len("value")])))
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "VBA283" {
+			if diagnostic.Range.Start.Line != 3 || diagnostic.Range.Start.Character != wantStart ||
+				diagnostic.Range.End.Line != 3 || diagnostic.Range.End.Character != wantEnd {
+				t.Fatalf("VBA283 UTF-16 range = %+v, want line 3 characters %d-%d", diagnostic.Range, wantStart, wantEnd)
+			}
+			return
+		}
+	}
+	t.Fatalf("VBA283 diagnostic missing: %+v", diagnostics)
+}
+
 func TestDiagnosticsChangeDuringDidOpenAnalysisBecomesLatestPendingGeneration(t *testing.T) {
 	s, timers, cleanup := newDiagnosticsTestServer(t)
 	defer cleanup()

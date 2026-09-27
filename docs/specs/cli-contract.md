@@ -1586,6 +1586,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA280`: a public-facing `Property Let`/`Set` has no matching `Property Get`, forming a write-only API (opt-in)
 - `VBA281`: a public member matches a verified implemented `<Interface>_<Member>` binding or an event handler is declared explicitly `Public` (opt-in)
 - `VBA282`: a module with a predeclared default instance references its own module name, binding to the shared instance rather than `Me` (opt-in)
+- `VBA283`: `IsMissing` does not receive a direct Optional Variant parameter from the containing procedure (opt-in)
 
 `VBA203` correlates each changed `Application` property with its saved prior
 value across control-flow joins. A path on which the property was never changed
@@ -1639,6 +1640,7 @@ to `detect_unreachable_select_case`; `VBA260` maps to
 `detect_write_only_property`; `VBA281` maps to
 `detect_public_interface_event_members`; and `VBA282` maps to
 `detect_predeclared_instance_access`.
+`VBA283` maps to `detect_invalid_ismissing_usage`.
 
 Analyzer rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, `VBA244`, and `VBA249` through `VBA252` are enabled by default. `VBA230` through `VBA239`, `VBA241`, and `VBA250` through `VBA252` are warning-level, non-blocking, and inline-suppressible; `VBA241` may emit `information` for a single non-nested loop with loop-invariant dimensions. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, `VBA241`, and `VBA249` through `VBA252` are procedure-local and available in realtime diagnostics. `VBA222` is a batch-only, warning-level, non-blocking rule; it checks public function/property return types, all public parameters, and custom event parameters. Intrinsic types and types resolved from the project or available TypeLib database are allowed. Private/unexposed project types and ambiguous names remain conservative warnings that include the type name. Unresolved external types are warned about only when the project and TypeLib resolution view is complete; missing, empty, malformed, or partial generated TypeLib data makes their absence unknown and the rule fails open for that branch. Host-required event handlers are excluded. It can be suppressed inline or with `[analyze].disabled_rules = ["VBA222"]`. `VBA240` is disabled by default, warning-level, non-blocking, inline-suppressible, and batch-only; enable it with `detect_risky_module_state` and disable it with `[analyze].disabled_rules = ["VBA240"]` for project-specific policy. `VBA242` and `VBA243` are disabled by default, information-level, procedure-local, non-blocking, inline-suppressible, and available in realtime diagnostics; enable them with `detect_expensive_full_range_operations` and `detect_value2_performance_opportunities`, respectively, or disable them explicitly with `[analyze].disabled_rules = ["VBA242"]` and `[analyze].disabled_rules = ["VBA243"]`. When enabled, full-range and Value2 opportunities outside loops use `information` and reachable loop operations use `warning`. `VBA244` is default-enabled, information-level for ordinary cycles, warning-level when dangerous effects are present, project-wide, non-blocking, inline-suppressible, and batch-only; disable it with `detect_procedure_call_cycles = false` or `[analyze].disabled_rules = ["VBA244"]`.
 
@@ -1725,6 +1727,15 @@ recognized event handlers, unverified or implemented-interface bindings,
 private implementations, and type-position self-name references fail open
 by contract. Their detailed contracts are defined in
 [VBA class/interface diagnostics](vba-class-interface-diagnostics.md).
+
+`VBA283` is an opt-in warning-level, non-blocking, inline-suppressible,
+procedure-local diagnostic available in batch, realtime, and LSP analysis. It
+checks only calls resolved as the VBA `IsMissing` intrinsic. A direct
+`Optional Variant` parameter of the containing procedure is valid, including
+when it has an explicit default; members, locals, other expressions, typed or
+required parameters, and arrays are reported. Unresolved, shadowed, malformed,
+recovered, and conditionally compiled calls remain silent. Its contract is in
+[VBA IsMissing Diagnostics](vba-ismissing-diagnostics.md).
 
 `VBA249` is default-enabled, `error`-level, high-precision, procedure-local,
 available in batch and real-time analysis, inline-suppressible, and

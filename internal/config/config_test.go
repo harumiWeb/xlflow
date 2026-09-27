@@ -75,6 +75,27 @@ func TestErrorSuppressionPropagationDefaultsEnabled(t *testing.T) {
 	}
 }
 
+func TestInvalidIsMissingUsageIsOptInAndRoundTrips(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA283"); !ok || enabled || cfg.Analyze.DetectInvalidIsMissingUsage {
+		t.Fatalf("VBA283 enabled = %v, known = %v, config = %v; want known and disabled", enabled, ok, cfg.Analyze.DetectInvalidIsMissingUsage)
+	}
+	cfg.Analyze.DetectInvalidIsMissingUsage = true
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	if err := Write(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA283"); !ok || !enabled || !loaded.Analyze.DetectInvalidIsMissingUsage {
+		t.Fatalf("loaded VBA283 enabled = %v, known = %v, config = %v; want enabled", enabled, ok, loaded.Analyze.DetectInvalidIsMissingUsage)
+	}
+}
+
 func TestLoopInvariantExcelObjectResolutionDefaultsEnabled(t *testing.T) {
 	t.Parallel()
 	cfg := Default()

@@ -73,6 +73,19 @@ func TestBuildUsesResolutionViewWithoutReplacingCanonicalIR(t *testing.T) {
 	}
 }
 
+func TestUnknownIsMissingMemberRetainsEffectUncertainty(t *testing.T) {
+	project := buildSources(t, sourceFile{"Calls.bas", "Calls", `Public Sub Run()
+    Dim obj As Object
+    If obj.IsMissing(1) Then
+    End If
+End Sub
+`})
+	run := find(t, project, "Calls.Run")
+	if len(run.DirectUncertainty) != 1 || run.DirectUncertainty[0].Kind != UncertaintyDynamic {
+		t.Fatalf("unknown IsMissing member uncertainty = %#v, want one dynamic uncertainty", run.DirectUncertainty)
+	}
+}
+
 func TestBuildIncrementalMatchesFreshRecomputation(t *testing.T) {
 	root := t.TempDir()
 	calleePath := filepath.Join(root, "Worker.bas")

@@ -43,6 +43,7 @@ var requiredSpecContracts = map[string]string{
 	"VBA275": "vba-parameter-passing-diagnostics.md",
 	"VBA276": "vba-parameter-passing-diagnostics.md",
 	"VBA277": "vba-parameter-passing-diagnostics.md",
+	"VBA283": "vba-ismissing-diagnostics.md",
 	"VBA278": "vba-class-interface-diagnostics.md",
 	"VBA279": "vba-class-interface-diagnostics.md",
 	"VBA280": "vba-class-interface-diagnostics.md",
