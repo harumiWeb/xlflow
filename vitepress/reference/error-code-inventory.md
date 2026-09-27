@@ -207,6 +207,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `components_applied`
 - `compressible_short_roundtrips`
 - `condition_binary_expression`
+- `conditional_branch_body`
 - `conditional_function_declaration`
 - `conditional_property_declaration`
 - `conditional_sub_declaration`

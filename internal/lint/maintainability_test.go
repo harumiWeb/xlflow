@@ -162,3 +162,96 @@ func TestMaintainabilityTypeSuffixSkipsIntrinsicCall(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMaintainabilityConditionalProcedureKeepsLocalScope(t *testing.T) {
+	source := "#If VBA7 Then\nPublic Sub Work()\nDim leftValue As Long\n#Else\nPublic Sub Work()\nDim rightValue As Long\n#End If\nDim value As Long\nDebug.Print value\nEnd Sub\n"
+	cfg := config.Default()
+	cfg.Lint.DetectModuleDim = true
+	cfg.Lint.DetectEmptyProcedure = true
+	doc, err := vbaast.ParseDocument("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	if err := doc.Read(func(view vbaast.ParsedView) error {
+		for _, issue := range (Linter{RootDir: ".", Config: cfg}).maintainabilityIssues("Main.bas", view.Source, view.Root) {
+			if issue.Code == "VB087" || issue.Code == "VB074" {
+				t.Errorf("conditional procedure finding = %+v", issue)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMaintainabilityImplicitPublicIgnoresBodyText(t *testing.T) {
+	source := "Sub Work()\nDebug.Print \"Private\"\nEnd Sub\n"
+	cfg := config.Default()
+	cfg.Lint.DetectImplicitPublic = true
+	doc, err := vbaast.ParseDocument("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	if err := doc.Read(func(view vbaast.ParsedView) error {
+		got := (Linter{RootDir: ".", ModuleKind: "standard", Config: cfg}).maintainabilityIssues("Main.bas", view.Source, view.Root)
+		if len(got) != 1 || got[0].Code != "VB088" || got[0].Line != 1 {
+			t.Errorf("implicit Public finding = %+v", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMaintainabilityUnusedNumericLabels(t *testing.T) {
+	source := "Sub Work()\n10:\n20 Debug.Print 1\nGoTo 20\nEnd Sub\n"
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedLabels = true
+	doc, err := vbaast.ParseDocument("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	if err := doc.Read(func(view vbaast.ParsedView) error {
+		got := (Linter{RootDir: ".", Config: cfg}).maintainabilityIssues("Main.bas", view.Source, view.Root)
+		if len(got) != 1 || got[0].Code != "VB090" || got[0].Line != 2 {
+			t.Errorf("numeric label findings = %+v", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMaintainabilityTypeSuffixReportsDeclaredCallee(t *testing.T) {
+	source := "Function Compute$()\nCompute$ = \"x\"\nEnd Function\nSub Work()\nDebug.Print Compute$()\nDebug.Print Chr$(65)\nEnd Sub\n"
+	cfg := config.Default()
+	cfg.Lint.DetectIdentifierTypeSuffix = true
+	doc, err := vbaast.ParseDocument("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	if err := doc.Read(func(view vbaast.ParsedView) error {
+		found := false
+		for _, issue := range (Linter{RootDir: ".", Config: cfg}).maintainabilityIssues("Main.bas", view.Source, view.Root) {
+			if issue.Code != "VB081" {
+				continue
+			}
+			if issue.Line == 5 {
+				found = true
+			}
+			if issue.Line == 6 {
+				t.Errorf("intrinsic Chr$ reported: %+v", issue)
+			}
+		}
+		if !found {
+			t.Error("declared Compute$ call was not reported")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

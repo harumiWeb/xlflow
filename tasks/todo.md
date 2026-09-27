@@ -211,3 +211,12 @@ source; all valid. Plan:
    membership before the builtin object list.
 4. Regression tests for each, plus docs/spec updates (named mapping is now
    width-independent; element-valued arguments and receivers covered).
+
+# PR #849 review and security follow-up (Issue #828)
+
+- [x] Update tree-sitter-vba v0.14.5 in the third-party licence inventory; verify the exact security gate locally.
+- [x] Fix conditional-procedure scope for VB087. VB074 checks every parsed branch body; VB090 fails open for branch-dependent labels.
+- [x] Make VB088 inspect only declaration visibility and cache module kind once per scan.
+- [x] Cover numeric labels and their branch references for VB090.
+- [x] Report VB081 on same-source declared suffixed callees while leaving unknown and intrinsic callees unreported.
+- [x] Confirm focused and full Go suites, corpus snapshots, lint/docs, and security inventory locally; push a review-fix commit to PR #849.

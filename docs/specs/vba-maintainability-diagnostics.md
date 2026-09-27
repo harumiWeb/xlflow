@@ -37,9 +37,15 @@ Empty branch and loop rules report only when the CST proves that the body has no
 executable statement. Comments, declarations, attributes, and Option statements
 are not executable. A recovered or missing CST fails open. VB074 and VB075 apply
 the same test to whole procedures and modules.
+For conditional procedure headers, VB074 considers all parsed branch bodies and
+the shared body. VB087 treats declarations in those bodies as procedure-local.
 
 VB081 checks identifier type suffixes on source identifiers, excluding a member
-bang selector. VB090 counts only references within the containing procedure and
+bang selector. At call sites it reports only when a matching suffixed procedure
+is declared in the same source; unknown or intrinsic calls remain unreported.
+VB088 reads only the declaration header's visibility modifier, and skips
+conditional procedure headers whose branch modifiers may differ. VB090 checks
+named and numeric labels against references within the containing procedure and
 fails open across conditional compilation. VB089 yields to the default-enabled
 VB019 warning when a multi-name declaration has mixed explicit typing.
 

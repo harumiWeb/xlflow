@@ -57,6 +57,15 @@ func (l Linter) maintainabilityIssues(path string, source []byte, root *tree_sit
 	if cfg.DetectEmptyModule && !hasExecutable(root, source) {
 		add(root, "VB075", "Module has no executable statements.")
 	}
+	implicitPublicModule := false
+	if cfg.DetectImplicitPublic {
+		moduleKind := l.moduleKindForPath(path)
+		implicitPublicModule = strings.EqualFold(moduleKind, "standard") || strings.EqualFold(moduleKind, "class")
+	}
+	var suffixedProcedures map[string]bool
+	if cfg.DetectIdentifierTypeSuffix {
+		suffixedProcedures = declaredSuffixedProcedures(root, source)
+	}
 	var walk func(*tree_sitter.Node, bool)
 	walk = func(node *tree_sitter.Node, inProcedure bool) {
 		if node == nil || node.HasError() || node.IsMissing() {
@@ -65,13 +74,14 @@ func (l Linter) maintainabilityIssues(path string, source []byte, root *tree_sit
 		kind := node.Kind()
 		if maintainabilityProcedureKind(kind) {
 			inProcedure = true
-			if cfg.DetectEmptyProcedure && !hasExecutable(node.ChildByFieldName("body"), source) {
+			conditional := conditionalProcedureKind(kind)
+			if cfg.DetectEmptyProcedure && !procedureHasExecutableBody(node, source) {
 				add(node, "VB074", "Procedure has no executable statements.")
 			}
-			if cfg.DetectUnusedLabels {
+			if cfg.DetectUnusedLabels && !conditional {
 				issues = append(issues, l.unusedLabelIssues(path, source, node)...)
 			}
-			if cfg.DetectImplicitPublic && (strings.EqualFold(l.moduleKindForPath(path), "standard") || strings.EqualFold(l.moduleKindForPath(path), "class")) && visibilityText(node, source) == "" {
+			if implicitPublicModule && !conditional && explicitProcedureVisibility(node, source) == "" {
 				add(node, "VB088", "Public member has no explicit Public modifier.")
 			}
 		}
@@ -165,7 +175,8 @@ func (l Linter) maintainabilityIssues(path string, source []byte, root *tree_sit
 		case "identifier", "bang_identifier":
 			if cfg.DetectIdentifierTypeSuffix {
 				raw := node.Utf8Text(source)
-				if len(raw) > 1 && strings.ContainsAny(raw[len(raw)-1:], "$%&!#@") && !callCalleeIdentifier(node) {
+				if len(raw) > 1 && strings.ContainsAny(raw[len(raw)-1:], "$%&!#@") &&
+					(!callCalleeIdentifier(node) || suffixedProcedures[strings.ToLower(raw)]) {
 					add(node, "VB081", "Use an As clause instead of an identifier type suffix.")
 				}
 			}
@@ -187,10 +198,68 @@ func startsWithKeyword(text, keyword string) bool {
 func maintainabilityProcedureKind(kind string) bool {
 	switch kind {
 	case "sub_declaration", "function_declaration", "property_declaration",
-		"property_get_declaration", "property_let_declaration", "property_set_declaration":
+		"property_get_declaration", "property_let_declaration", "property_set_declaration",
+		"conditional_sub_declaration", "conditional_function_declaration", "conditional_property_declaration":
 		return true
 	}
 	return false
+}
+
+func conditionalProcedureKind(kind string) bool {
+	switch kind {
+	case "conditional_sub_declaration", "conditional_function_declaration", "conditional_property_declaration":
+		return true
+	}
+	return false
+}
+
+func procedureHasExecutableBody(node *tree_sitter.Node, source []byte) bool {
+	if !conditionalProcedureKind(node.Kind()) {
+		return hasExecutable(node.ChildByFieldName("body"), source)
+	}
+	for i := range node.NamedChildCount() {
+		child := node.NamedChild(i)
+		if (child.Kind() == "conditional_branch_body" || child.Kind() == "block") && hasExecutable(child, source) {
+			return true
+		}
+	}
+	return false
+}
+
+func explicitProcedureVisibility(node *tree_sitter.Node, source []byte) string {
+	if visibility := node.ChildByFieldName("visibility"); visibility != nil {
+		return normalizeKeyword(visibility.Utf8Text(source))
+	}
+	for i := range node.NamedChildCount() {
+		child := node.NamedChild(i)
+		if child.Kind() == "visibility" {
+			return normalizeKeyword(child.Utf8Text(source))
+		}
+	}
+	return ""
+}
+
+func declaredSuffixedProcedures(root *tree_sitter.Node, source []byte) map[string]bool {
+	names := make(map[string]bool)
+	var walk func(*tree_sitter.Node)
+	walk = func(node *tree_sitter.Node) {
+		if node == nil {
+			return
+		}
+		if maintainabilityProcedureKind(node.Kind()) {
+			if name := node.ChildByFieldName("name"); name != nil {
+				raw := name.Utf8Text(source)
+				if len(raw) > 1 && strings.ContainsAny(raw[len(raw)-1:], "$%&!#@") {
+					names[strings.ToLower(raw)] = true
+				}
+			}
+		}
+		for i := range node.NamedChildCount() {
+			walk(node.NamedChild(i))
+		}
+	}
+	walk(root)
+	return names
 }
 
 func callCalleeIdentifier(node *tree_sitter.Node) bool {
@@ -219,7 +288,9 @@ func hasExecutable(node *tree_sitter.Node, source []byte) bool {
 		"declare_statement", "declare_sub_statement", "declare_function_statement",
 		"def_type_statement", "label_statement", "event_declaration", "event_statement":
 		return false
-	case "source_file", "program", "module", "block", "preprocessor_block", "single_line_block", "inline_statement_sequence":
+	case "line_number_statement":
+		return hasExecutable(node.ChildByFieldName("statement"), source)
+	case "source_file", "program", "module", "block", "preprocessor_block", "single_line_block", "inline_statement_sequence", "conditional_branch_body":
 		for i := range node.NamedChildCount() {
 			if hasExecutable(node.NamedChild(i), source) {
 				return true
@@ -228,7 +299,7 @@ func hasExecutable(node *tree_sitter.Node, source []byte) bool {
 		return false
 	}
 	if maintainabilityProcedureKind(node.Kind()) {
-		return hasExecutable(node.ChildByFieldName("body"), source)
+		return procedureHasExecutableBody(node, source)
 	}
 	if strings.HasPrefix(node.Kind(), "preprocessor_") {
 		for i := range node.NamedChildCount() {
@@ -302,7 +373,7 @@ func (l Linter) unusedLabelIssues(path string, source []byte, procedure *tree_si
 			labels = nil
 			refs["*"] = true
 			return
-		case "label_statement":
+		case "label_statement", "line_number_statement":
 			labels = append(labels, node)
 		case "goto_statement", "gosub_statement", "resume_statement", "on_error_statement", "on_goto_statement":
 			if node.Kind() == "on_goto_statement" {
@@ -332,7 +403,11 @@ func (l Linter) unusedLabelIssues(path string, source []byte, procedure *tree_si
 	}
 	var issues []Issue
 	for _, label := range labels {
-		if name := label.ChildByFieldName("name"); name != nil && !refs[strings.ToLower(strings.TrimSpace(name.Utf8Text(source)))] {
+		field := "name"
+		if label.Kind() == "line_number_statement" {
+			field = "number"
+		}
+		if name := label.ChildByFieldName(field); name != nil && !refs[strings.ToLower(strings.TrimSpace(name.Utf8Text(source)))] {
 			issues = append(issues, l.issueAt(path, vbaast.NodeRange(name), "VB090", "information", "Label is never referenced by a branch."))
 		}
 	}
