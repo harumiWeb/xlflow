@@ -813,6 +813,28 @@ func TestLSPDiagnosticsConvertVBA283ByteRangeToUTF16(t *testing.T) {
 	t.Fatalf("VBA283 diagnostic missing: %+v", diagnostics)
 }
 
+func TestLSPPublishesOptInMaintainabilityDiagnostic(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Lint.DetectOnLocalError = true
+	s, cleanup, err := New(Options{RootDir: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	source := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n    On Local Error Resume Next\nEnd Sub\n"
+	diagnostics := s.diagnostics(context.Background(), intel.Document{Path: filepath.Join(root, "Main.bas"), Source: source})
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "VB092" {
+			if diagnostic.Range.Start.Line != 3 {
+				t.Fatalf("VB092 range = %+v, want source line 4", diagnostic.Range)
+			}
+			return
+		}
+	}
+	t.Fatalf("VB092 diagnostic missing: %+v", diagnostics)
+}
+
 func TestDiagnosticsChangeDuringDidOpenAnalysisBecomesLatestPendingGeneration(t *testing.T) {
 	s, timers, cleanup := newDiagnosticsTestServer(t)
 	defer cleanup()

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "maintainability-on-local-error",
+  "description": "Observe VBA compilation of On Local Error statement.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "maintainability"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "maintainability-observation",
+    "binding_note": "VBE accepts this syntax. VB092 is an opt-in maintainability lint, not a compile-error-equivalent diagnostic, so this fixture has no expected or forbidden diagnostic contract."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-09-27T01:46:14Z"
+      }
+    ]
+  }
+}

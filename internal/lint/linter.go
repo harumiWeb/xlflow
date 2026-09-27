@@ -425,6 +425,7 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 			return lintCtx.err
 		}
 		issues = append(issues, lintCtx.issues...)
+		issues = append(issues, l.maintainabilityIssues(path, source, view.Root)...)
 		// Module-kind findings are compile-equivalent, so parser recovery is
 		// insufficient evidence for them. The generic recovery diagnostic (or
 		// a more specific syntax rule) remains the safe fallback in that state.

@@ -11,7 +11,7 @@ func TestRegistryContainsEveryProductionDiagnostic(t *testing.T) {
 	want := strings.Fields(`
 VB001 VB002 VB003 VB004 VB005 VB006 VB007 VB008 VB009 VB010 VB011 VB012 VB013 VB014 VB015
 VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB033 VB034
-VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045 VB046 VB047 VB048 VB049 VB050 VB051 VB052 VB053 VB054 VB055 VB056 VB057 VB058 VB059 VB060 VB061 VB062 VB063 VB064 VB065 VB066
+VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045 VB046 VB047 VB048 VB049 VB050 VB051 VB052 VB053 VB054 VB055 VB056 VB057 VB058 VB059 VB060 VB061 VB062 VB063 VB064 VB065 VB066 VB067 VB068 VB069 VB070 VB071 VB072 VB073 VB074 VB075 VB076 VB077 VB078 VB079 VB080 VB081 VB082 VB083 VB084 VB085 VB086 VB087 VB088 VB089 VB090 VB091 VB092
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
 VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228 VBA229
 VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241 VBA242 VBA243 VBA244 VBA245 VBA246 VBA247 VBA248 VBA249 VBA250 VBA251 VBA252 VBA253 VBA254 VBA255 VBA256 VBA257 VBA258 VBA259 VBA260 VBA261 VBA262 VBA265 VBA266 VBA267 VBA268 VBA269 VBA270 VBA271 VBA272 VBA273 VBA274 VBA275 VBA276 VBA277 VBA278 VBA279 VBA280 VBA281 VBA282 VBA283`)
@@ -499,5 +499,52 @@ func TestIsMissingRuleMetadata(t *testing.T) {
 		rule.Precision != PrecisionHigh ||
 		!reflect.DeepEqual(rule.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) {
 		t.Fatalf("unexpected VBA283 metadata: %+v, %v", rule, ok)
+	}
+}
+
+func TestMaintainabilityRuleMetadata(t *testing.T) {
+	want := map[string]struct {
+		severity RuleSeverity
+		key      string
+		scope    RuleScope
+	}{
+		"VB067": {SeverityInformation, "detect_empty_if", ScopeProcedureLocal},
+		"VB068": {SeverityInformation, "detect_empty_else", ScopeProcedureLocal},
+		"VB069": {SeverityInformation, "detect_empty_case", ScopeProcedureLocal},
+		"VB070": {SeverityInformation, "detect_empty_for", ScopeProcedureLocal},
+		"VB071": {SeverityInformation, "detect_empty_for_each", ScopeProcedureLocal},
+		"VB072": {SeverityInformation, "detect_empty_do", ScopeProcedureLocal},
+		"VB073": {SeverityInformation, "detect_empty_while", ScopeProcedureLocal},
+		"VB074": {SeverityInformation, "detect_empty_procedure", ScopeProcedureLocal},
+		"VB075": {SeverityInformation, "detect_empty_module", ScopeFileLocal},
+		"VB076": {SeverityInformation, "detect_legacy_call", ScopeProcedureLocal},
+		"VB077": {SeverityInformation, "detect_rem_comment", ScopeFileLocal},
+		"VB078": {SeverityInformation, "detect_error_statement", ScopeProcedureLocal},
+		"VB079": {SeverityInformation, "detect_global_declaration", ScopeFileLocal},
+		"VB080": {SeverityInformation, "detect_let_assignment", ScopeProcedureLocal},
+		"VB081": {SeverityInformation, "detect_identifier_type_suffix", ScopeFileLocal},
+		"VB082": {SeverityInformation, "detect_while_wend", ScopeProcedureLocal},
+		"VB083": {SeverityInformation, "detect_def_type", ScopeFileLocal},
+		"VB084": {SeverityInformation, "detect_redundant_step_one", ScopeProcedureLocal},
+		"VB085": {SeverityInformation, "require_explicit_step", ScopeProcedureLocal},
+		"VB086": {SeverityInformation, "detect_redundant_option_base_zero", ScopeFileLocal},
+		"VB087": {SeverityInformation, "detect_module_dim", ScopeFileLocal},
+		"VB088": {SeverityInformation, "detect_implicit_public", ScopeProcedureLocal},
+		"VB089": {SeverityInformation, "detect_multiple_declarations", ScopeFileLocal},
+		"VB090": {SeverityInformation, "detect_unused_labels", ScopeProcedureLocal},
+		"VB091": {SeverityWarning, "detect_stop_statement", ScopeProcedureLocal},
+		"VB092": {SeverityInformation, "detect_on_local_error", ScopeProcedureLocal},
+	}
+	for id, expected := range want {
+		rule, ok := Lookup(id)
+		if !ok || rule.Family != FamilyLint || rule.Category != CategoryMaintainability ||
+			rule.EvidenceClass != EvidenceMaintainability || rule.CompileEquivalent ||
+			rule.DefaultSeverity != expected.severity || rule.DefaultEnabled ||
+			!rule.Configurable || rule.ConfigurationKey != expected.key ||
+			rule.PreflightBlocking || !rule.InlineSuppressible || !rule.Realtime ||
+			rule.Scope != expected.scope || rule.Precision != PrecisionHigh ||
+			!reflect.DeepEqual(rule.Surfaces, []RuleSurface{SurfaceLint, SurfaceLSP}) {
+			t.Errorf("unexpected %s metadata: %+v, %v", id, rule, ok)
+		}
 	}
 }

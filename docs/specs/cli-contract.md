@@ -1503,6 +1503,11 @@ Configurable lint rule IDs map to legacy keys as follows: `VB001` = `require_opt
 
 Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are enabled by default. Heavier project-wide lint rules `VB018`, `VB021`, and `VB027` are disabled by default and can still be enabled with their legacy `[lint]` booleans during the compatibility window.
 
+Optional maintainability rules `VB067`-`VB092` are disabled by default and
+available in `lint` and LSP. Their independent `[lint]` keys, syntax boundaries,
+and VBE evidence are specified in [VBA maintainability diagnostics](vba-maintainability-diagnostics.md).
+`detect_redundant_step_one` and `require_explicit_step` cannot both be true.
+
 ## Analysis Rules
 
 - `VBA101`: object variable assignment likely missing `Set`

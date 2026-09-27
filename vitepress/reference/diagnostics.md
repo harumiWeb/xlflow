@@ -70,6 +70,32 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB064`](#vb064)   | lint    | error       | procedure-local | yes     | Invalid Open mode syntax                                    |
 | [`VB065`](#vb065)   | lint    | error       | procedure-local | yes     | Invalid TypeOf syntax                                       |
 | [`VB066`](#vb066)   | lint    | warning     | file-local      | yes     | Procedure terminator style mismatch                         |
+| [`VB067`](#vb067)   | lint    | information | procedure-local | no      | Empty If branch                                             |
+| [`VB068`](#vb068)   | lint    | information | procedure-local | no      | Empty Else branch                                           |
+| [`VB069`](#vb069)   | lint    | information | procedure-local | no      | Empty Case branch                                           |
+| [`VB070`](#vb070)   | lint    | information | procedure-local | no      | Empty For loop                                              |
+| [`VB071`](#vb071)   | lint    | information | procedure-local | no      | Empty For Each loop                                         |
+| [`VB072`](#vb072)   | lint    | information | procedure-local | no      | Empty Do loop                                               |
+| [`VB073`](#vb073)   | lint    | information | procedure-local | no      | Empty While loop                                            |
+| [`VB074`](#vb074)   | lint    | information | procedure-local | no      | Empty procedure                                             |
+| [`VB075`](#vb075)   | lint    | information | file-local      | no      | Empty module                                                |
+| [`VB076`](#vb076)   | lint    | information | procedure-local | no      | Legacy Call statement                                       |
+| [`VB077`](#vb077)   | lint    | information | file-local      | no      | Rem comment                                                 |
+| [`VB078`](#vb078)   | lint    | information | procedure-local | no      | Error statement                                             |
+| [`VB079`](#vb079)   | lint    | information | file-local      | no      | Global declaration                                          |
+| [`VB080`](#vb080)   | lint    | information | procedure-local | no      | Let assignment                                              |
+| [`VB081`](#vb081)   | lint    | information | file-local      | no      | Identifier type suffix                                      |
+| [`VB082`](#vb082)   | lint    | information | procedure-local | no      | While Wend syntax                                           |
+| [`VB083`](#vb083)   | lint    | information | file-local      | no      | DefType directive                                           |
+| [`VB084`](#vb084)   | lint    | information | procedure-local | no      | Redundant Step 1                                            |
+| [`VB085`](#vb085)   | lint    | information | procedure-local | no      | Omitted Step                                                |
+| [`VB086`](#vb086)   | lint    | information | file-local      | no      | Redundant Option Base 0                                     |
+| [`VB087`](#vb087)   | lint    | information | file-local      | no      | Module Dim declaration                                      |
+| [`VB088`](#vb088)   | lint    | information | procedure-local | no      | Implicit Public member                                      |
+| [`VB089`](#vb089)   | lint    | information | file-local      | no      | Multiple declarations                                       |
+| [`VB090`](#vb090)   | lint    | information | procedure-local | no      | Unused label                                                |
+| [`VB091`](#vb091)   | lint    | warning     | procedure-local | no      | Stop statement                                              |
+| [`VB092`](#vb092)   | lint    | information | procedure-local | no      | On Local Error syntax                                       |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                               |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set                |
 | [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                          |
@@ -1521,6 +1547,578 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                |
 | Real-time editor diagnostic | yes               |
 | Fix available               | no                |
+
+## VB067
+
+**Empty If branch.** An If branch has no executable statements.
+
+| Property                    | Value             |
+| --------------------------- | ----------------- |
+| Family                      | `lint`            |
+| Category                    | `maintainability` |
+| Evidence class              | `maintainability` |
+| Compile-equivalent          | no                |
+| Default severity            | `information`     |
+| Supported severities        | `information`     |
+| Surfaces                    | `lint`, `lsp`     |
+| Scope                       | `procedure-local` |
+| Precision                   | `high`            |
+| Enabled by default          | no                |
+| Configuration               | `detect_empty_if` |
+| Inline suppression          | yes               |
+| Blocks source preflight     | no                |
+| Real-time editor diagnostic | yes               |
+| Fix available               | no                |
+
+## VB068
+
+**Empty Else branch.** An Else branch has no executable statements.
+
+| Property                    | Value               |
+| --------------------------- | ------------------- |
+| Family                      | `lint`              |
+| Category                    | `maintainability`   |
+| Evidence class              | `maintainability`   |
+| Compile-equivalent          | no                  |
+| Default severity            | `information`       |
+| Supported severities        | `information`       |
+| Surfaces                    | `lint`, `lsp`       |
+| Scope                       | `procedure-local`   |
+| Precision                   | `high`              |
+| Enabled by default          | no                  |
+| Configuration               | `detect_empty_else` |
+| Inline suppression          | yes                 |
+| Blocks source preflight     | no                  |
+| Real-time editor diagnostic | yes                 |
+| Fix available               | no                  |
+
+## VB069
+
+**Empty Case branch.** A Case branch has no executable statements.
+
+| Property                    | Value               |
+| --------------------------- | ------------------- |
+| Family                      | `lint`              |
+| Category                    | `maintainability`   |
+| Evidence class              | `maintainability`   |
+| Compile-equivalent          | no                  |
+| Default severity            | `information`       |
+| Supported severities        | `information`       |
+| Surfaces                    | `lint`, `lsp`       |
+| Scope                       | `procedure-local`   |
+| Precision                   | `high`              |
+| Enabled by default          | no                  |
+| Configuration               | `detect_empty_case` |
+| Inline suppression          | yes                 |
+| Blocks source preflight     | no                  |
+| Real-time editor diagnostic | yes                 |
+| Fix available               | no                  |
+
+## VB070
+
+**Empty For loop.** A For loop has no executable statements.
+
+| Property                    | Value              |
+| --------------------------- | ------------------ |
+| Family                      | `lint`             |
+| Category                    | `maintainability`  |
+| Evidence class              | `maintainability`  |
+| Compile-equivalent          | no                 |
+| Default severity            | `information`      |
+| Supported severities        | `information`      |
+| Surfaces                    | `lint`, `lsp`      |
+| Scope                       | `procedure-local`  |
+| Precision                   | `high`             |
+| Enabled by default          | no                 |
+| Configuration               | `detect_empty_for` |
+| Inline suppression          | yes                |
+| Blocks source preflight     | no                 |
+| Real-time editor diagnostic | yes                |
+| Fix available               | no                 |
+
+## VB071
+
+**Empty For Each loop.** A For Each loop has no executable statements.
+
+| Property                    | Value                   |
+| --------------------------- | ----------------------- |
+| Family                      | `lint`                  |
+| Category                    | `maintainability`       |
+| Evidence class              | `maintainability`       |
+| Compile-equivalent          | no                      |
+| Default severity            | `information`           |
+| Supported severities        | `information`           |
+| Surfaces                    | `lint`, `lsp`           |
+| Scope                       | `procedure-local`       |
+| Precision                   | `high`                  |
+| Enabled by default          | no                      |
+| Configuration               | `detect_empty_for_each` |
+| Inline suppression          | yes                     |
+| Blocks source preflight     | no                      |
+| Real-time editor diagnostic | yes                     |
+| Fix available               | no                      |
+
+## VB072
+
+**Empty Do loop.** A Do loop has no executable statements.
+
+| Property                    | Value             |
+| --------------------------- | ----------------- |
+| Family                      | `lint`            |
+| Category                    | `maintainability` |
+| Evidence class              | `maintainability` |
+| Compile-equivalent          | no                |
+| Default severity            | `information`     |
+| Supported severities        | `information`     |
+| Surfaces                    | `lint`, `lsp`     |
+| Scope                       | `procedure-local` |
+| Precision                   | `high`            |
+| Enabled by default          | no                |
+| Configuration               | `detect_empty_do` |
+| Inline suppression          | yes               |
+| Blocks source preflight     | no                |
+| Real-time editor diagnostic | yes               |
+| Fix available               | no                |
+
+## VB073
+
+**Empty While loop.** A While...Wend loop has no executable statements.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `maintainability`    |
+| Evidence class              | `maintainability`    |
+| Compile-equivalent          | no                   |
+| Default severity            | `information`        |
+| Supported severities        | `information`        |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `procedure-local`    |
+| Precision                   | `high`               |
+| Enabled by default          | no                   |
+| Configuration               | `detect_empty_while` |
+| Inline suppression          | yes                  |
+| Blocks source preflight     | no                   |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VB074
+
+**Empty procedure.** A procedure has no executable statements.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `maintainability`        |
+| Evidence class              | `maintainability`        |
+| Compile-equivalent          | no                       |
+| Default severity            | `information`            |
+| Supported severities        | `information`            |
+| Surfaces                    | `lint`, `lsp`            |
+| Scope                       | `procedure-local`        |
+| Precision                   | `high`                   |
+| Enabled by default          | no                       |
+| Configuration               | `detect_empty_procedure` |
+| Inline suppression          | yes                      |
+| Blocks source preflight     | no                       |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB075
+
+**Empty module.** A module has no executable statements.
+
+| Property                    | Value                 |
+| --------------------------- | --------------------- |
+| Family                      | `lint`                |
+| Category                    | `maintainability`     |
+| Evidence class              | `maintainability`     |
+| Compile-equivalent          | no                    |
+| Default severity            | `information`         |
+| Supported severities        | `information`         |
+| Surfaces                    | `lint`, `lsp`         |
+| Scope                       | `file-local`          |
+| Precision                   | `high`                |
+| Enabled by default          | no                    |
+| Configuration               | `detect_empty_module` |
+| Inline suppression          | yes                   |
+| Blocks source preflight     | no                    |
+| Real-time editor diagnostic | yes                   |
+| Fix available               | no                    |
+
+## VB076
+
+**Legacy Call statement.** An explicit Call statement uses optional legacy syntax.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `maintainability`    |
+| Evidence class              | `maintainability`    |
+| Compile-equivalent          | no                   |
+| Default severity            | `information`        |
+| Supported severities        | `information`        |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `procedure-local`    |
+| Precision                   | `high`               |
+| Enabled by default          | no                   |
+| Configuration               | `detect_legacy_call` |
+| Inline suppression          | yes                  |
+| Blocks source preflight     | no                   |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VB077
+
+**Rem comment.** A Rem comment uses optional legacy syntax.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `maintainability`    |
+| Evidence class              | `maintainability`    |
+| Compile-equivalent          | no                   |
+| Default severity            | `information`        |
+| Supported severities        | `information`        |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | no                   |
+| Configuration               | `detect_rem_comment` |
+| Inline suppression          | yes                  |
+| Blocks source preflight     | no                   |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VB078
+
+**Error statement.** An Error statement uses a legacy error raising form.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `maintainability`        |
+| Evidence class              | `maintainability`        |
+| Compile-equivalent          | no                       |
+| Default severity            | `information`            |
+| Supported severities        | `information`            |
+| Surfaces                    | `lint`, `lsp`            |
+| Scope                       | `procedure-local`        |
+| Precision                   | `high`                   |
+| Enabled by default          | no                       |
+| Configuration               | `detect_error_statement` |
+| Inline suppression          | yes                      |
+| Blocks source preflight     | no                       |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB079
+
+**Global declaration.** A Global declaration uses a legacy visibility modifier.
+
+| Property                    | Value                       |
+| --------------------------- | --------------------------- |
+| Family                      | `lint`                      |
+| Category                    | `maintainability`           |
+| Evidence class              | `maintainability`           |
+| Compile-equivalent          | no                          |
+| Default severity            | `information`               |
+| Supported severities        | `information`               |
+| Surfaces                    | `lint`, `lsp`               |
+| Scope                       | `file-local`                |
+| Precision                   | `high`                      |
+| Enabled by default          | no                          |
+| Configuration               | `detect_global_declaration` |
+| Inline suppression          | yes                         |
+| Blocks source preflight     | no                          |
+| Real-time editor diagnostic | yes                         |
+| Fix available               | no                          |
+
+## VB080
+
+**Let assignment.** A Let assignment uses an optional legacy keyword.
+
+| Property                    | Value                   |
+| --------------------------- | ----------------------- |
+| Family                      | `lint`                  |
+| Category                    | `maintainability`       |
+| Evidence class              | `maintainability`       |
+| Compile-equivalent          | no                      |
+| Default severity            | `information`           |
+| Supported severities        | `information`           |
+| Surfaces                    | `lint`, `lsp`           |
+| Scope                       | `procedure-local`       |
+| Precision                   | `high`                  |
+| Enabled by default          | no                      |
+| Configuration               | `detect_let_assignment` |
+| Inline suppression          | yes                     |
+| Blocks source preflight     | no                      |
+| Real-time editor diagnostic | yes                     |
+| Fix available               | no                      |
+
+## VB081
+
+**Identifier type suffix.** An identifier uses a type declaration suffix.
+
+| Property                    | Value                           |
+| --------------------------- | ------------------------------- |
+| Family                      | `lint`                          |
+| Category                    | `maintainability`               |
+| Evidence class              | `maintainability`               |
+| Compile-equivalent          | no                              |
+| Default severity            | `information`                   |
+| Supported severities        | `information`                   |
+| Surfaces                    | `lint`, `lsp`                   |
+| Scope                       | `file-local`                    |
+| Precision                   | `high`                          |
+| Enabled by default          | no                              |
+| Configuration               | `detect_identifier_type_suffix` |
+| Inline suppression          | yes                             |
+| Blocks source preflight     | no                              |
+| Real-time editor diagnostic | yes                             |
+| Fix available               | no                              |
+
+## VB082
+
+**While Wend syntax.** A While...Wend loop uses legacy loop syntax.
+
+| Property                    | Value               |
+| --------------------------- | ------------------- |
+| Family                      | `lint`              |
+| Category                    | `maintainability`   |
+| Evidence class              | `maintainability`   |
+| Compile-equivalent          | no                  |
+| Default severity            | `information`       |
+| Supported severities        | `information`       |
+| Surfaces                    | `lint`, `lsp`       |
+| Scope                       | `procedure-local`   |
+| Precision                   | `high`              |
+| Enabled by default          | no                  |
+| Configuration               | `detect_while_wend` |
+| Inline suppression          | yes                 |
+| Blocks source preflight     | no                  |
+| Real-time editor diagnostic | yes                 |
+| Fix available               | no                  |
+
+## VB083
+
+**DefType directive.** A DefType directive sets implicit identifier types.
+
+| Property                    | Value             |
+| --------------------------- | ----------------- |
+| Family                      | `lint`            |
+| Category                    | `maintainability` |
+| Evidence class              | `maintainability` |
+| Compile-equivalent          | no                |
+| Default severity            | `information`     |
+| Supported severities        | `information`     |
+| Surfaces                    | `lint`, `lsp`     |
+| Scope                       | `file-local`      |
+| Precision                   | `high`            |
+| Enabled by default          | no                |
+| Configuration               | `detect_def_type` |
+| Inline suppression          | yes               |
+| Blocks source preflight     | no                |
+| Real-time editor diagnostic | yes               |
+| Fix available               | no                |
+
+## VB084
+
+**Redundant Step 1.** A For loop spells out its default Step 1.
+
+| Property                    | Value                       |
+| --------------------------- | --------------------------- |
+| Family                      | `lint`                      |
+| Category                    | `maintainability`           |
+| Evidence class              | `maintainability`           |
+| Compile-equivalent          | no                          |
+| Default severity            | `information`               |
+| Supported severities        | `information`               |
+| Surfaces                    | `lint`, `lsp`               |
+| Scope                       | `procedure-local`           |
+| Precision                   | `high`                      |
+| Enabled by default          | no                          |
+| Configuration               | `detect_redundant_step_one` |
+| Inline suppression          | yes                         |
+| Blocks source preflight     | no                          |
+| Real-time editor diagnostic | yes                         |
+| Fix available               | no                          |
+
+## VB085
+
+**Omitted Step.** A For loop omits an explicit Step.
+
+| Property                    | Value                   |
+| --------------------------- | ----------------------- |
+| Family                      | `lint`                  |
+| Category                    | `maintainability`       |
+| Evidence class              | `maintainability`       |
+| Compile-equivalent          | no                      |
+| Default severity            | `information`           |
+| Supported severities        | `information`           |
+| Surfaces                    | `lint`, `lsp`           |
+| Scope                       | `procedure-local`       |
+| Precision                   | `high`                  |
+| Enabled by default          | no                      |
+| Configuration               | `require_explicit_step` |
+| Inline suppression          | yes                     |
+| Blocks source preflight     | no                      |
+| Real-time editor diagnostic | yes                     |
+| Fix available               | no                      |
+
+## VB086
+
+**Redundant Option Base 0.** Option Base 0 restates the default lower bound.
+
+| Property                    | Value                               |
+| --------------------------- | ----------------------------------- |
+| Family                      | `lint`                              |
+| Category                    | `maintainability`                   |
+| Evidence class              | `maintainability`                   |
+| Compile-equivalent          | no                                  |
+| Default severity            | `information`                       |
+| Supported severities        | `information`                       |
+| Surfaces                    | `lint`, `lsp`                       |
+| Scope                       | `file-local`                        |
+| Precision                   | `high`                              |
+| Enabled by default          | no                                  |
+| Configuration               | `detect_redundant_option_base_zero` |
+| Inline suppression          | yes                                 |
+| Blocks source preflight     | no                                  |
+| Real-time editor diagnostic | yes                                 |
+| Fix available               | no                                  |
+
+## VB087
+
+**Module Dim declaration.** A module-level Dim declaration could say Private.
+
+| Property                    | Value               |
+| --------------------------- | ------------------- |
+| Family                      | `lint`              |
+| Category                    | `maintainability`   |
+| Evidence class              | `maintainability`   |
+| Compile-equivalent          | no                  |
+| Default severity            | `information`       |
+| Supported severities        | `information`       |
+| Surfaces                    | `lint`, `lsp`       |
+| Scope                       | `file-local`        |
+| Precision                   | `high`              |
+| Enabled by default          | no                  |
+| Configuration               | `detect_module_dim` |
+| Inline suppression          | yes                 |
+| Blocks source preflight     | no                  |
+| Real-time editor diagnostic | yes                 |
+| Fix available               | no                  |
+
+## VB088
+
+**Implicit Public member.** A publicly visible member omits Public.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `maintainability`        |
+| Evidence class              | `maintainability`        |
+| Compile-equivalent          | no                       |
+| Default severity            | `information`            |
+| Supported severities        | `information`            |
+| Surfaces                    | `lint`, `lsp`            |
+| Scope                       | `procedure-local`        |
+| Precision                   | `high`                   |
+| Enabled by default          | no                       |
+| Configuration               | `detect_implicit_public` |
+| Inline suppression          | yes                      |
+| Blocks source preflight     | no                       |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB089
+
+**Multiple declarations.** A statement declares multiple names.
+
+| Property                    | Value                          |
+| --------------------------- | ------------------------------ |
+| Family                      | `lint`                         |
+| Category                    | `maintainability`              |
+| Evidence class              | `maintainability`              |
+| Compile-equivalent          | no                             |
+| Default severity            | `information`                  |
+| Supported severities        | `information`                  |
+| Surfaces                    | `lint`, `lsp`                  |
+| Scope                       | `file-local`                   |
+| Precision                   | `high`                         |
+| Enabled by default          | no                             |
+| Configuration               | `detect_multiple_declarations` |
+| Inline suppression          | yes                            |
+| Blocks source preflight     | no                             |
+| Real-time editor diagnostic | yes                            |
+| Fix available               | no                             |
+
+## VB090
+
+**Unused label.** A procedure label has no branch reference.
+
+| Property                    | Value                  |
+| --------------------------- | ---------------------- |
+| Family                      | `lint`                 |
+| Category                    | `maintainability`      |
+| Evidence class              | `maintainability`      |
+| Compile-equivalent          | no                     |
+| Default severity            | `information`          |
+| Supported severities        | `information`          |
+| Surfaces                    | `lint`, `lsp`          |
+| Scope                       | `procedure-local`      |
+| Precision                   | `high`                 |
+| Enabled by default          | no                     |
+| Configuration               | `detect_unused_labels` |
+| Inline suppression          | yes                    |
+| Blocks source preflight     | no                     |
+| Real-time editor diagnostic | yes                    |
+| Fix available               | no                     |
+
+## VB091
+
+**Stop statement.** A Stop statement remains in distributable code.
+
+| Property                    | Value                   |
+| --------------------------- | ----------------------- |
+| Family                      | `lint`                  |
+| Category                    | `maintainability`       |
+| Evidence class              | `maintainability`       |
+| Compile-equivalent          | no                      |
+| Default severity            | `warning`               |
+| Supported severities        | `warning`               |
+| Surfaces                    | `lint`, `lsp`           |
+| Scope                       | `procedure-local`       |
+| Precision                   | `high`                  |
+| Enabled by default          | no                      |
+| Configuration               | `detect_stop_statement` |
+| Inline suppression          | yes                     |
+| Blocks source preflight     | no                      |
+| Real-time editor diagnostic | yes                     |
+| Fix available               | no                      |
+
+## VB092
+
+**On Local Error syntax.** An On Local Error statement uses a legacy error-handling qualifier.
+
+| Property                    | Value                   |
+| --------------------------- | ----------------------- |
+| Family                      | `lint`                  |
+| Category                    | `maintainability`       |
+| Evidence class              | `maintainability`       |
+| Compile-equivalent          | no                      |
+| Default severity            | `information`           |
+| Supported severities        | `information`           |
+| Surfaces                    | `lint`, `lsp`           |
+| Scope                       | `procedure-local`       |
+| Precision                   | `high`                  |
+| Enabled by default          | no                      |
+| Configuration               | `detect_on_local_error` |
+| Inline suppression          | yes                     |
+| Blocks source preflight     | no                      |
+| Real-time editor diagnostic | yes                     |
+| Fix available               | no                      |
 
 ## VBA101
 

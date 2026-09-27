@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `VB067`-`VB092` VBA maintainability diagnostics for empty
+  structures, legacy syntax, and redundant or project-policy syntax. Each
+  rule is independently configurable in `[lint]` and available in LSP;
+  `Stop` is a warning and the other new rules are informational. The updated
+  `tree-sitter-vba` v0.14.5 parser recognizes VBE-accepted `Global`, `Let`,
+  `Error`, and `On Local Error` forms.
+  Conditional procedure bodies, numeric labels, and calls to locally declared
+  type-suffixed functions are covered by their respective inspections.
 - Added opt-in `VBA283` warnings for ineffective `IsMissing` calls that do not
   pass a direct Optional Variant parameter from the containing procedure.
   Explicit defaults on Variant parameters remain valid. Parentheses around an
