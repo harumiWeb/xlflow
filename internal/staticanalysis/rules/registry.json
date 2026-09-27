@@ -3722,7 +3722,7 @@
     {
       "id": "VBA278",
       "title": "Public member name contains underscore",
-      "description": "A public Sub, Function, or Property in a class, form, or document module contains an underscore, colliding with VBA's <Interface>_<Member> implementation and <Object>_<Event> handler naming conventions.",
+      "description": "A public Sub, Function, or Property in a class, form, or document module contains an underscore, colliding with VBA's `<Interface>_<Member>` implementation and `<Object>_<Event>` handler naming conventions.",
       "family": "analyze",
       "category": "maintainability",
       "evidence_class": "maintainability",

@@ -3904,7 +3904,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA278
 
-**Public member name contains underscore.** A public Sub, Function, or Property in a class, form, or document module contains an underscore, colliding with VBA's <Interface>_<Member> implementation and <Object>_<Event> handler naming conventions.
+**Public member name contains underscore.** A public Sub, Function, or Property in a class, form, or document module contains an underscore, colliding with VBA's `<Interface>_<Member>` implementation and `<Object>_<Event>` handler naming conventions.
 
 | Property                    | Value                                   |
 | --------------------------- | --------------------------------------- |
