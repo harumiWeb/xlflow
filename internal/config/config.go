@@ -168,6 +168,32 @@ type LintConfig struct {
 	DetectForEachControlType        bool                        `toml:"detect_for_each_control_type"`
 	DetectDangerousResume           bool                        `toml:"detect_dangerous_resume"`
 	DetectNestedWithAmbiguity       bool                        `toml:"detect_nested_with_ambiguity"`
+	DetectEmptyIf                   bool                        `toml:"detect_empty_if"`
+	DetectEmptyElse                 bool                        `toml:"detect_empty_else"`
+	DetectEmptyCase                 bool                        `toml:"detect_empty_case"`
+	DetectEmptyFor                  bool                        `toml:"detect_empty_for"`
+	DetectEmptyForEach              bool                        `toml:"detect_empty_for_each"`
+	DetectEmptyDo                   bool                        `toml:"detect_empty_do"`
+	DetectEmptyWhile                bool                        `toml:"detect_empty_while"`
+	DetectEmptyProcedure            bool                        `toml:"detect_empty_procedure"`
+	DetectEmptyModule               bool                        `toml:"detect_empty_module"`
+	DetectLegacyCall                bool                        `toml:"detect_legacy_call"`
+	DetectRemComment                bool                        `toml:"detect_rem_comment"`
+	DetectErrorStatement            bool                        `toml:"detect_error_statement"`
+	DetectGlobalDeclaration         bool                        `toml:"detect_global_declaration"`
+	DetectLetAssignment             bool                        `toml:"detect_let_assignment"`
+	DetectIdentifierTypeSuffix      bool                        `toml:"detect_identifier_type_suffix"`
+	DetectWhileWend                 bool                        `toml:"detect_while_wend"`
+	DetectDefType                   bool                        `toml:"detect_def_type"`
+	DetectRedundantStepOne          bool                        `toml:"detect_redundant_step_one"`
+	RequireExplicitStep             bool                        `toml:"require_explicit_step"`
+	DetectRedundantOptionBaseZero   bool                        `toml:"detect_redundant_option_base_zero"`
+	DetectModuleDim                 bool                        `toml:"detect_module_dim"`
+	DetectImplicitPublic            bool                        `toml:"detect_implicit_public"`
+	DetectMultipleDeclarations      bool                        `toml:"detect_multiple_declarations"`
+	DetectUnusedLabels              bool                        `toml:"detect_unused_labels"`
+	DetectStopStatement             bool                        `toml:"detect_stop_statement"`
+	DetectOnLocalError              bool                        `toml:"detect_on_local_error"`
 	ProcedureNameConstant           ProcedureNameConstantConfig `toml:"procedure_name_constant"`
 }
 
@@ -305,6 +331,32 @@ var lintRuleAdapters = map[string]lintRuleAdapter{
 	"VB023": {Get: func(c LintConfig) bool { return c.DetectForEachControlType }, Set: func(c *LintConfig, v bool) { c.DetectForEachControlType = v }},
 	"VB026": {Get: func(c LintConfig) bool { return c.DetectDangerousResume }, Set: func(c *LintConfig, v bool) { c.DetectDangerousResume = v }},
 	"VB027": {Get: func(c LintConfig) bool { return c.DetectNestedWithAmbiguity }, Set: func(c *LintConfig, v bool) { c.DetectNestedWithAmbiguity = v }},
+	"VB067": {Get: func(c LintConfig) bool { return c.DetectEmptyIf }, Set: func(c *LintConfig, v bool) { c.DetectEmptyIf = v }},
+	"VB068": {Get: func(c LintConfig) bool { return c.DetectEmptyElse }, Set: func(c *LintConfig, v bool) { c.DetectEmptyElse = v }},
+	"VB069": {Get: func(c LintConfig) bool { return c.DetectEmptyCase }, Set: func(c *LintConfig, v bool) { c.DetectEmptyCase = v }},
+	"VB070": {Get: func(c LintConfig) bool { return c.DetectEmptyFor }, Set: func(c *LintConfig, v bool) { c.DetectEmptyFor = v }},
+	"VB071": {Get: func(c LintConfig) bool { return c.DetectEmptyForEach }, Set: func(c *LintConfig, v bool) { c.DetectEmptyForEach = v }},
+	"VB072": {Get: func(c LintConfig) bool { return c.DetectEmptyDo }, Set: func(c *LintConfig, v bool) { c.DetectEmptyDo = v }},
+	"VB073": {Get: func(c LintConfig) bool { return c.DetectEmptyWhile }, Set: func(c *LintConfig, v bool) { c.DetectEmptyWhile = v }},
+	"VB074": {Get: func(c LintConfig) bool { return c.DetectEmptyProcedure }, Set: func(c *LintConfig, v bool) { c.DetectEmptyProcedure = v }},
+	"VB075": {Get: func(c LintConfig) bool { return c.DetectEmptyModule }, Set: func(c *LintConfig, v bool) { c.DetectEmptyModule = v }},
+	"VB076": {Get: func(c LintConfig) bool { return c.DetectLegacyCall }, Set: func(c *LintConfig, v bool) { c.DetectLegacyCall = v }},
+	"VB077": {Get: func(c LintConfig) bool { return c.DetectRemComment }, Set: func(c *LintConfig, v bool) { c.DetectRemComment = v }},
+	"VB078": {Get: func(c LintConfig) bool { return c.DetectErrorStatement }, Set: func(c *LintConfig, v bool) { c.DetectErrorStatement = v }},
+	"VB079": {Get: func(c LintConfig) bool { return c.DetectGlobalDeclaration }, Set: func(c *LintConfig, v bool) { c.DetectGlobalDeclaration = v }},
+	"VB080": {Get: func(c LintConfig) bool { return c.DetectLetAssignment }, Set: func(c *LintConfig, v bool) { c.DetectLetAssignment = v }},
+	"VB081": {Get: func(c LintConfig) bool { return c.DetectIdentifierTypeSuffix }, Set: func(c *LintConfig, v bool) { c.DetectIdentifierTypeSuffix = v }},
+	"VB082": {Get: func(c LintConfig) bool { return c.DetectWhileWend }, Set: func(c *LintConfig, v bool) { c.DetectWhileWend = v }},
+	"VB083": {Get: func(c LintConfig) bool { return c.DetectDefType }, Set: func(c *LintConfig, v bool) { c.DetectDefType = v }},
+	"VB084": {Get: func(c LintConfig) bool { return c.DetectRedundantStepOne }, Set: func(c *LintConfig, v bool) { c.DetectRedundantStepOne = v }},
+	"VB085": {Get: func(c LintConfig) bool { return c.RequireExplicitStep }, Set: func(c *LintConfig, v bool) { c.RequireExplicitStep = v }},
+	"VB086": {Get: func(c LintConfig) bool { return c.DetectRedundantOptionBaseZero }, Set: func(c *LintConfig, v bool) { c.DetectRedundantOptionBaseZero = v }},
+	"VB087": {Get: func(c LintConfig) bool { return c.DetectModuleDim }, Set: func(c *LintConfig, v bool) { c.DetectModuleDim = v }},
+	"VB088": {Get: func(c LintConfig) bool { return c.DetectImplicitPublic }, Set: func(c *LintConfig, v bool) { c.DetectImplicitPublic = v }},
+	"VB089": {Get: func(c LintConfig) bool { return c.DetectMultipleDeclarations }, Set: func(c *LintConfig, v bool) { c.DetectMultipleDeclarations = v }},
+	"VB090": {Get: func(c LintConfig) bool { return c.DetectUnusedLabels }, Set: func(c *LintConfig, v bool) { c.DetectUnusedLabels = v }},
+	"VB091": {Get: func(c LintConfig) bool { return c.DetectStopStatement }, Set: func(c *LintConfig, v bool) { c.DetectStopStatement = v }},
+	"VB092": {Get: func(c LintConfig) bool { return c.DetectOnLocalError }, Set: func(c *LintConfig, v bool) { c.DetectOnLocalError = v }},
 	"VB044": {Get: func(c LintConfig) bool { return c.ProcedureNameConstant.Enabled }, Set: func(c *LintConfig, v bool) { c.ProcedureNameConstant.Enabled = v }},
 }
 
@@ -588,6 +640,9 @@ func applyDefaults(cfg *Config) {
 }
 
 func validate(cfg Config) error {
+	if cfg.Lint.DetectRedundantStepOne && cfg.Lint.RequireExplicitStep {
+		return errors.New("[lint].detect_redundant_step_one and [lint].require_explicit_step cannot both be enabled")
+	}
 	if cfg.Analyze.DetectImplicitByRefParameters && cfg.Analyze.DetectRedundantByRefModifiers {
 		return errors.New("[analyze].detect_implicit_byref_parameters and [analyze].detect_redundant_byref_modifiers cannot both be enabled")
 	}

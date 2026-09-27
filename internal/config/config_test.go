@@ -51,6 +51,38 @@ func TestConfigRuleDefaultsComeFromRegistry(t *testing.T) {
 	}
 }
 
+func TestMaintainabilityRuleConfiguration(t *testing.T) {
+	cfg := Default()
+	for id := 67; id <= 92; id++ {
+		code := "VB" + strconv.Itoa(id)
+		if id < 100 {
+			code = "VB0" + strconv.Itoa(id)
+		}
+		rule, ok := lintRuleByID[code]
+		if enabled := rule.Get(cfg.Lint); !ok || enabled {
+			t.Fatalf("%s default = %v, known = %v; want disabled", code, enabled, ok)
+		}
+	}
+	cfg.Lint.DetectOnLocalError = true
+	dir := t.TempDir()
+	if err := Write(filepath.Join(dir, FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, ok := lintRuleByID["VB092"]
+	if enabled := rule.Get(loaded.Lint); !ok || !enabled {
+		t.Fatalf("VB092 round trip = %v, known = %v", enabled, ok)
+	}
+	cfg.Lint.DetectRedundantStepOne = true
+	cfg.Lint.RequireExplicitStep = true
+	if err := validate(cfg); err == nil {
+		t.Fatal("opposing Step policies were accepted")
+	}
+}
+
 func TestDefaultBuildExcludesAreScaffoldOnly(t *testing.T) {
 	if got := Default().Build.Exclude; len(got) != 0 {
 		t.Fatalf("config defaults must not impose scaffold build exclusions: %#v", got)
