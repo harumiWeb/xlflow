@@ -757,7 +757,7 @@ func parameterPassingSignatureConstrained(file parsedFile, proc sourceProcedure,
 		return true
 	}
 	name := strings.ToLower(cleanIdentifier(proc.IR.Symbol.Name))
-	if facts.addressOfNames[name] || projectAddressOfNames[name] {
+	if addressOfCanTargetProcedure(proc) && (facts.addressOfNames[name] || projectAddressOfNames[name]) {
 		return true
 	}
 	for _, iface := range facts.implementsTargets {
@@ -766,6 +766,15 @@ func parameterPassingSignatureConstrained(file parsedFile, proc sourceProcedure,
 		}
 	}
 	return false
+}
+
+// addressOfCanTargetProcedure reports whether the AddressOf operator could
+// bind to this procedure. AddressOf accepts only procedures in standard
+// modules, so a class/document/form member that merely shares a name with
+// an AddressOf target is not signature-constrained by it.
+func addressOfCanTargetProcedure(proc sourceProcedure) bool {
+	kind := strings.TrimSpace(proc.ModuleKind)
+	return kind == "" || strings.EqualFold(kind, "standard")
 }
 
 func parameterName(name string) string {

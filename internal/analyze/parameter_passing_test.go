@@ -140,6 +140,46 @@ End Function
 	}
 }
 
+func TestParameterPassingAddressOfOnlyConstrainsStandardModule(t *testing.T) {
+	// AddressOf binds only to procedures in standard modules. A class member
+	// that shares a name with an AddressOf target is not signature-constrained
+	// by it, so VBA273 must still report its implicit ByRef parameters while
+	// the same-named standard-module callback stays suppressed.
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare PtrSafe Function EnumWindows Lib "user32" (ByVal callback As LongPtr, ByVal lParam As LongPtr) As Long
+Public Sub Run()
+    EnumWindows AddressOf SharedName, 0
+End Sub
+Public Function SharedName(hwnd As LongPtr, lParam As LongPtr) As Long
+    Debug.Print hwnd
+    SharedName = 1
+End Function
+`)
+	writeClass(t, dir, "Widget.cls", `Option Explicit
+Public Function SharedName(hwnd As LongPtr, lParam As LongPtr) As Long
+    Debug.Print hwnd
+    SharedName = 1
+End Function
+`)
+	cfg := parameterPassingConfig()
+	cfg.Analyze.DetectImplicitByRefParameters = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	classCount := 0
+	for _, finding := range findingsByCode(findings, "VBA273") {
+		if !strings.EqualFold(finding.Module, "Widget") {
+			t.Fatalf("VBA273 finding = %+v, want only class module member", finding)
+		}
+		classCount++
+	}
+	if classCount != 2 {
+		t.Fatalf("VBA273 class findings = %d, want 2 (hwnd and lParam on Widget.SharedName)", classCount)
+	}
+}
+
 func TestParameterPassingRealtimeSkipsCrossModuleAddressOfSignature(t *testing.T) {
 	// The realtime widening loop scans the whole projectDocuments snapshot,
 	// so an AddressOf target in a sibling module is signature-constrained
