@@ -156,3 +156,15 @@ parameter-passing signatures) are pre-existing design boundaries, not
 defects introduced by this change; the realtime `addressOfEntryNames`
 widening now shares the VBA265 scan loop so parity bookkeeping stays
 symmetric.
+
+A second independent review pass on the remediation commit found no
+in-scope defect (verdict: approve-with-notes). Its three notes were:
+the realtime widening loop lacked dedicated coverage (fixed by a
+`SourceRealtimeFindings*ProjectContext` regression test where the
+`AddressOf` call sits outside the analyzed document's type/call closure),
+the name-only project-wide set can over-suppress a same-named non-target
+procedure (accepted under the analyzer's documented suppression-only
+fail-open convention, matching the existing `dynamicEntryNames`
+contract), and the widening adds an O(project) per-refresh scan to the
+realtime path under the default config (bounded, memoized in batch via
+`unusedDeclOnce`, and consistent with the existing widening pattern).
