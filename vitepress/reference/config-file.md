@@ -105,9 +105,11 @@ disabled_rules = []
 # Add "VB020" to disabled_rules if a project intentionally keeps scratch locals.
 #
 # Optional project-wide lint rules. Uncomment individual rules to enable them.
-# detect_scope_shadowing = true          # VB018
+# detect_scope_shadowing = true # VB018
 # detect_unused_private_procedures = true # VB021
-# detect_nested_with_ambiguity = true    # VB027
+# detect_nested_with_ambiguity = true # VB027
+# detect_empty_if = true # VB067
+# ... (VB068-VB092 and conflict notes; see the generated xlflow.toml)
 
 # Optional local procedure-name constant check (VB044).
 # [lint.procedure_name_constant]
@@ -118,6 +120,13 @@ disabled_rules = []
 [analyze]
 # Disable specific analyzer rules by diagnostic ID.
 disabled_rules = []
+
+# Optional dataflow-sensitive analyzer rules are disabled by default.
+# detect_function_return_path = true # VBA210
+# Other optional analyzer rules (commented suggestions):
+# detect_dictionary_collection_guard = true # VBA207
+# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA282 opt-ins
+# and conflict notes; see the generated xlflow.toml)
 
 # Procedure complexity metrics are independent from lint/analyze diagnostics.
 [metrics]

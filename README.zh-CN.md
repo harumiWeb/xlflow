@@ -696,9 +696,14 @@ disabled_rules = []
 #
 # 可选的全项目 lint rule。它们在 callback 较多或由工作簿驱动的 VBA 中
 # 可能产生较多提示，因此默认禁用。取消对应设置的注释即可启用。
-# detect_scope_shadowing = true          # VB018
+# detect_scope_shadowing = true # VB018
 # detect_unused_private_procedures = true # VB021
-# detect_nested_with_ambiguity = true    # VB027
+# detect_nested_with_ambiguity = true # VB027
+# detect_empty_if = true # VB067
+# ... (VB068-VB092 以及冲突提示; 请参阅生成的 xlflow.toml)
+
+# Note: VB084 (detect_redundant_step_one) 与 VB085 (require_explicit_step)
+# 对 For Step 子句表达相反的策略; 最多只能启用其中一个。
 
 # 可选的本地 procedure 名称常量检查（VB044）。
 # [lint.procedure_name_constant]
@@ -724,6 +729,15 @@ development_http_origins = []
 # 可选的 dataflow analyzer rule 默认禁用。
 # 若要检查 Function 和 Property Get 的 return path，请取消下行注释。
 # detect_function_return_path = true # VBA210
+
+# 其他可选 analyzer rule（注释形式的建议; 另请参阅诊断目录）:
+# detect_dictionary_collection_guard = true # VBA207
+# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA282 的 opt-in rule 和
+# 冲突提示; 请参阅生成的 xlflow.toml)
+
+# Note: detect_implicit_byref_parameters (VBA273) 与
+# detect_redundant_byref_modifiers (VBA277) 表达相反的 ByRef 风格策略;
+# 同时启用会导致配置校验失败。
 ```
 
 未指定宏名称运行 `xlflow run` 时会使用 `project.entry`。

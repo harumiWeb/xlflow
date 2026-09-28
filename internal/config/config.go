@@ -1184,18 +1184,18 @@ func renderLintConfig(cfg LintConfig) string {
 	b.WriteString("# Optional project-wide lint rules. They are disabled by default because\n")
 	b.WriteString("# they can be noisy in projects with callback-heavy or workbook-driven VBA.\n")
 	b.WriteString("# Uncomment individual rules to enable them.\n")
-	for _, hint := range []struct {
-		Key  string
-		Line string
-	}{
-		{"detect_scope_shadowing", "# detect_scope_shadowing = true          # VB018\n"},
-		{"detect_unused_private_procedures", "# detect_unused_private_procedures = true # VB021\n"},
-		{"detect_nested_with_ambiguity", "# detect_nested_with_ambiguity = true    # VB027\n"},
-	} {
-		if !optInSet[hint.Key] {
-			b.WriteString(hint.Line)
+	for _, rule := range configurableLintRules {
+		if rule.ID == "VB044" || rule.Default || optInSet[rule.Key] {
+			continue
 		}
+		b.WriteString("# ")
+		b.WriteString(rule.Key)
+		b.WriteString(" = true # ")
+		b.WriteString(rule.ID)
+		b.WriteString("\n")
 	}
+	b.WriteString("\n# Note: VB084 (detect_redundant_step_one) and VB085 (require_explicit_step)\n")
+	b.WriteString("# express opposite policies for For Step clauses; enable at most one.\n")
 	if len(optIn) > 0 {
 		b.WriteString("\n")
 		b.WriteString("# Enabled optional lint settings.\n")
@@ -1288,12 +1288,26 @@ func renderAnalyzeConfig(cfg AnalyzeConfig) string {
 	for _, rule := range optIn {
 		optInSet[rule.Key] = true
 	}
+	b.WriteString("\n")
 	if !optInSet["detect_function_return_path"] {
-		b.WriteString("\n")
 		b.WriteString("# Optional dataflow-sensitive analyzer rules are disabled by default.\n")
 		b.WriteString("# Uncomment the following setting to check Function and Property Get return paths.\n")
 		b.WriteString("# detect_function_return_path = true # VBA210\n")
 	}
+	b.WriteString("\n# Other optional analyzer rules (commented suggestions; also see the diagnostic catalog):\n")
+	for _, rule := range configurableAnalyzeRules {
+		if rule.Default || rule.Key == "detect_function_return_path" || optInSet[rule.Key] {
+			continue
+		}
+		b.WriteString("# ")
+		b.WriteString(rule.Key)
+		b.WriteString(" = true # ")
+		b.WriteString(rule.ID)
+		b.WriteString("\n")
+	}
+	b.WriteString("# Note: detect_implicit_byref_parameters (VBA273) and\n")
+	b.WriteString("# detect_redundant_byref_modifiers (VBA277) express opposite ByRef style\n")
+	b.WriteString("# policies; enabling both fails configuration validation.\n")
 	if len(optIn) > 0 {
 		b.WriteString("\n# Enabled optional analyzer settings.\n")
 		for _, rule := range optIn {

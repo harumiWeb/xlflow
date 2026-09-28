@@ -729,9 +729,14 @@ disabled_rules = []
 # Optional project-wide lint rules. They are disabled by default because
 # they can be noisy in projects with callback-heavy or workbook-driven VBA.
 # Uncomment individual rules to enable them.
-# detect_scope_shadowing = true          # VB018
+# detect_scope_shadowing = true # VB018
 # detect_unused_private_procedures = true # VB021
-# detect_nested_with_ambiguity = true    # VB027
+# detect_nested_with_ambiguity = true # VB027
+# detect_empty_if = true # VB067
+# ... (VB068-VB092 and conflict notes; see the generated xlflow.toml)
+
+# Note: VB084 (detect_redundant_step_one) and VB085 (require_explicit_step)
+# express opposite policies for For Step clauses; enable at most one.
 
 # Optional local procedure-name constant check (VB044).
 # [lint.procedure_name_constant]
@@ -752,6 +757,15 @@ development_http_origins = []
 # Optional dataflow-sensitive analyzer rules are disabled by default.
 # Uncomment the following setting to check Function and Property Get return paths.
 # detect_function_return_path = true # VBA210
+
+# Other optional analyzer rules (commented suggestions; also see the diagnostic catalog):
+# detect_dictionary_collection_guard = true # VBA207
+# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA282 opt-ins
+# and conflict notes; see the generated xlflow.toml)
+
+# Note: detect_implicit_byref_parameters (VBA273) and
+# detect_redundant_byref_modifiers (VBA277) express opposite ByRef style
+# policies; enabling both fails configuration validation.
 ```
 
 `project.entry` is used when `xlflow run` is invoked without a macro name.
