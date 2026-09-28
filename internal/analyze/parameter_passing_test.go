@@ -54,6 +54,37 @@ End Sub
 	}
 }
 
+func TestParameterPassingSkipsAddressOfCallbackSignature(t *testing.T) {
+	cfg := parameterPassingConfig()
+	cfg.Analyze.DetectImplicitByRefParameters = true
+	findings := runParameterPassingAnalysis(t, cfg, map[string]string{"Main.bas": `Option Explicit
+Private Declare PtrSafe Function EnumWindows Lib "user32" (ByVal callback As LongPtr, ByVal lParam As LongPtr) As Long
+Private Function EnumProc(ByRef hwnd As LongPtr, ByRef lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProc = 1
+End Function
+Private Function EnumProcImplicit(hwnd As LongPtr, lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProcImplicit = 1
+End Function
+Private Function IEnumVARIANT_Skip(ByRef This As Long, ByVal celt As Long) As Long
+    IEnumVARIANT_Skip = -1
+End Function
+Public Sub Run()
+    EnumWindows AddressOf EnumProc, 0
+    EnumWindows AddressOf EnumProcImplicit, 0
+    Dim VTable(0) As LongPtr
+    VTable(0) = FncPtr(AddressOf IEnumVARIANT_Skip)
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 callback signature findings = %+v, want none", got)
+	}
+	if got := findingsByCode(findings, "VBA273"); len(got) != 0 {
+		t.Fatalf("VBA273 callback signature findings = %+v, want none", got)
+	}
+}
+
 func TestParameterPassingPropagatesResolvedByRefWrites(t *testing.T) {
 	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
 Private Sub Mutate(ByRef value As Long)
@@ -676,10 +707,25 @@ Public Sub Run(ByVal copy As Long, implicitValue As Long, ByRef explicitValue As
     copy = 1
 End Sub
 `})
-	for _, code := range []string{"VBA273", "VBA274", "VBA275", "VBA276", "VBA277"} {
+	for _, code := range []string{"VBA273", "VBA274", "VBA275", "VBA277"} {
 		if got := findingsByCode(findings, code); len(got) != 0 {
 			t.Fatalf("default %s findings = %+v, want none", code, got)
 		}
+	}
+}
+
+func TestParameterPassingVBA276DefaultEnabledAndCanBeDisabled(t *testing.T) {
+	source := map[string]string{"Main.bas": `Option Explicit
+Public Property Let Value(ByRef item As Long)
+End Property
+`}
+	if got := findingsByCode(runParameterPassingAnalysis(t, config.Default(), source), "VBA276"); len(got) != 1 {
+		t.Fatalf("default VBA276 findings = %+v, want one", got)
+	}
+	cfg := config.Default()
+	cfg.Analyze.DetectMisleadingPropertyValueByRef = false
+	if got := findingsByCode(runParameterPassingAnalysis(t, cfg, source), "VBA276"); len(got) != 0 {
+		t.Fatalf("disabled VBA276 findings = %+v, want none", got)
 	}
 }
 

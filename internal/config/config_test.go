@@ -107,24 +107,31 @@ func TestErrorSuppressionPropagationDefaultsEnabled(t *testing.T) {
 	}
 }
 
-func TestInvalidIsMissingUsageIsOptInAndRoundTrips(t *testing.T) {
+func TestInvalidIsMissingUsageDefaultsOnAndDisabledRoundTrips(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
-	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA283"); !ok || enabled || cfg.Analyze.DetectInvalidIsMissingUsage {
-		t.Fatalf("VBA283 enabled = %v, known = %v, config = %v; want known and disabled", enabled, ok, cfg.Analyze.DetectInvalidIsMissingUsage)
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA283"); !ok || !enabled || !cfg.Analyze.DetectInvalidIsMissingUsage {
+		t.Fatalf("VBA283 enabled = %v, known = %v, config = %v; want known and enabled", enabled, ok, cfg.Analyze.DetectInvalidIsMissingUsage)
 	}
-	cfg.Analyze.DetectInvalidIsMissingUsage = true
+	cfg.Analyze.DetectInvalidIsMissingUsage = false
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)
 	if err := Write(path, cfg); err != nil {
 		t.Fatal(err)
 	}
+	text, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), `"VBA283"`) {
+		t.Fatalf("generated config should disable VBA283 through disabled_rules:\n%s", text)
+	}
 	loaded, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA283"); !ok || !enabled || !loaded.Analyze.DetectInvalidIsMissingUsage {
-		t.Fatalf("loaded VBA283 enabled = %v, known = %v, config = %v; want enabled", enabled, ok, loaded.Analyze.DetectInvalidIsMissingUsage)
+	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA283"); !ok || enabled || loaded.Analyze.DetectInvalidIsMissingUsage {
+		t.Fatalf("loaded VBA283 enabled = %v, known = %v, config = %v; want disabled", enabled, ok, loaded.Analyze.DetectInvalidIsMissingUsage)
 	}
 }
 

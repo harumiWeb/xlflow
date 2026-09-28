@@ -1,0 +1,18 @@
+goos: windows
+goarch: amd64
+pkg: github.com/harumiWeb/xlflow/internal/staticanalysis/corpus
+cpu: 12th Gen Intel(R) Core(TM) i7-12700
+BenchmarkDefaultVBA276Promotion/ronecone/before-20  	       1	13173259700 ns/op	       169.0 findings/op	9731702136 B/op	85198563 allocs/op
+BenchmarkDefaultVBA276Promotion/ronecone/before-20  	       1	11879561300 ns/op	       169.0 findings/op	6900469864 B/op	63443149 allocs/op
+BenchmarkDefaultVBA276Promotion/ronecone/before-20  	       1	12003067900 ns/op	       169.0 findings/op	6900093624 B/op	63443277 allocs/op
+BenchmarkDefaultVBA276Promotion/ronecone/after-20   	       1	13928024800 ns/op	       169.0 findings/op	11436089520 B/op	94023251 allocs/op
+BenchmarkDefaultVBA276Promotion/ronecone/after-20   	       1	12381530600 ns/op	       169.0 findings/op	8622981208 B/op	72388004 allocs/op
+BenchmarkDefaultVBA276Promotion/ronecone/after-20   	       1	12636712700 ns/op	       169.0 findings/op	8623524584 B/op	72396279 allocs/op
+BenchmarkDefaultVBA276Promotion/std-vba/before-20   	       1	54202253400 ns/op	      1097 findings/op	29039638984 B/op	229385392 allocs/op
+BenchmarkDefaultVBA276Promotion/std-vba/before-20   	       1	48138927100 ns/op	      1097 findings/op	20689020264 B/op	138390918 allocs/op
+BenchmarkDefaultVBA276Promotion/std-vba/before-20   	       1	48337182700 ns/op	      1097 findings/op	20705877200 B/op	138452758 allocs/op
+BenchmarkDefaultVBA276Promotion/std-vba/after-20    	       1	54200183000 ns/op	      1097 findings/op	32622206624 B/op	247313771 allocs/op
+BenchmarkDefaultVBA276Promotion/std-vba/after-20    	       1	49150272000 ns/op	      1097 findings/op	24298845504 B/op	156361950 allocs/op
+BenchmarkDefaultVBA276Promotion/std-vba/after-20    	       1	49454717600 ns/op	      1097 findings/op	24302664856 B/op	156357001 allocs/op
+PASS
+ok  	github.com/harumiWeb/xlflow/internal/staticanalysis/corpus	382.146s

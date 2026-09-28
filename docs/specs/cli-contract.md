@@ -1584,14 +1584,14 @@ and VBE evidence are specified in [VBA maintainability diagnostics](vba-maintain
 - `VBA273`: an ordinary parameter implicitly defaults to `ByRef` (opt-in)
 - `VBA274`: a parameter with effective `ByVal` semantics is reassigned (opt-in)
 - `VBA275`: a `ByRef` parameter is provably never used to replace the caller's argument and can be `ByVal` (opt-in)
-- `VBA276`: a Property Let/Set final value parameter explicitly says `ByRef` although VBA passes it `ByVal` (opt-in)
+- `VBA276`: a Property Let/Set final value parameter explicitly says `ByRef` although VBA passes it `ByVal` (default-on)
 - `VBA277`: explicit `ByRef` repeats VBA's default under the project's selected style policy (opt-in)
 - `VBA278`: a public class/form/document member name contains an underscore colliding with `<Interface>_<Member>` or `<Object>_<Event>` naming (opt-in)
 - `VBA279`: a non-Private `Enum` is declared inside a worksheet or workbook document module (opt-in)
 - `VBA280`: a public-facing `Property Let`/`Set` has no matching `Property Get`, forming a write-only API (opt-in)
 - `VBA281`: a public member matches a verified implemented `<Interface>_<Member>` binding or an event handler is declared explicitly `Public` (opt-in)
 - `VBA282`: a module with a predeclared default instance references its own module name, binding to the shared instance rather than `Me` (opt-in)
-- `VBA283`: `IsMissing` does not receive a direct Optional Variant parameter from the containing procedure (opt-in)
+- `VBA283`: `IsMissing` does not receive a direct Optional Variant parameter from the containing procedure (default-on)
 
 `VBA203` correlates each changed `Application` property with its saved prior
 value across control-flow joins. A path on which the property was never changed
@@ -1708,8 +1708,9 @@ and calls qualified by other receivers stay silent. Their detailed
 contracts are defined in
 [Option Base inconsistency diagnostics](vba-option-base-diagnostics.md).
 
-`VBA273` through `VBA277` are opt-in, non-blocking, inline-suppressible,
-procedure-local rules available in batch and realtime analysis. `VBA273`,
+`VBA273` through `VBA277` are non-blocking, inline-suppressible,
+procedure-local rules available in batch and realtime analysis. `VBA276` is
+default-on; the other four rules remain opt-in. `VBA273`,
 `VBA275`, and `VBA277` are information-level; `VBA274` and `VBA276` are
 warning-level. `VBA275` propagates direct parameter writes through uniquely
 resolved project-local positional and named `ByRef` calls; ambiguous,
@@ -1733,7 +1734,7 @@ private implementations, and type-position self-name references fail open
 by contract. Their detailed contracts are defined in
 [VBA class/interface diagnostics](vba-class-interface-diagnostics.md).
 
-`VBA283` is an opt-in warning-level, non-blocking, inline-suppressible,
+`VBA283` is a default-on warning-level, non-blocking, inline-suppressible,
 procedure-local diagnostic available in batch, realtime, and LSP analysis. It
 checks only calls resolved as the VBA `IsMissing` intrinsic. A direct
 `Optional Variant` parameter of the containing procedure is valid, including

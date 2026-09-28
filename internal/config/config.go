@@ -530,6 +530,39 @@ func AnalyzeRuleEnabled(cfg AnalyzeConfig, id string) (bool, bool) {
 	return rule.Get(cfg), true
 }
 
+// LintRuleEnabled reads a configurable lint rule through the config adapter
+// boundary. The registry deliberately does not depend on Config.
+func LintRuleEnabled(cfg LintConfig, id string) (bool, bool) {
+	rule, ok := lintRuleByID[strings.ToUpper(strings.TrimSpace(id))]
+	if !ok {
+		return false, false
+	}
+	return rule.Get(cfg), true
+}
+
+// SetLintRuleEnabled writes a configurable lint rule through the config
+// adapter boundary. It reports false for unknown or non-configurable IDs.
+func SetLintRuleEnabled(cfg *LintConfig, id string, enabled bool) bool {
+	rule, ok := lintRuleByID[strings.ToUpper(strings.TrimSpace(id))]
+	if !ok {
+		return false
+	}
+	rule.Set(cfg, enabled)
+	return true
+}
+
+// SetAnalyzeRuleEnabled writes a configurable analyzer rule through the
+// config adapter boundary. It reports false for unknown or non-configurable
+// IDs.
+func SetAnalyzeRuleEnabled(cfg *AnalyzeConfig, id string, enabled bool) bool {
+	rule, ok := analyzeRuleByID[strings.ToUpper(strings.TrimSpace(id))]
+	if !ok {
+		return false
+	}
+	rule.Set(cfg, enabled)
+	return true
+}
+
 func Load(cwd string) (Config, error) {
 	return load(cwd, false)
 }

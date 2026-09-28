@@ -175,14 +175,14 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA273`](#vba273) | analyze | information | procedure-local | no      | Implicit ByRef parameter                                    |
 | [`VBA274`](#vba274) | analyze | warning     | procedure-local | no      | Assigned ByVal parameter                                    |
 | [`VBA275`](#vba275) | analyze | information | procedure-local | no      | ByRef parameter can be ByVal                                |
-| [`VBA276`](#vba276) | analyze | warning     | procedure-local | no      | Misleading Property value ByRef                             |
+| [`VBA276`](#vba276) | analyze | warning     | procedure-local | yes     | Misleading Property value ByRef                             |
 | [`VBA277`](#vba277) | analyze | information | procedure-local | no      | Redundant explicit ByRef modifier                           |
 | [`VBA278`](#vba278) | analyze | warning     | file-local      | no      | Public member name contains underscore                      |
 | [`VBA279`](#vba279) | analyze | warning     | file-local      | no      | Public Enum in document module                              |
 | [`VBA280`](#vba280) | analyze | warning     | file-local      | no      | Write-only property                                         |
 | [`VBA281`](#vba281) | analyze | warning     | file-local      | no      | Interface implementation or event handler exposed as Public |
 | [`VBA282`](#vba282) | analyze | warning     | procedure-local | no      | Predeclared-instance self-name access                       |
-| [`VBA283`](#vba283) | analyze | warning     | procedure-local | no      | Invalid IsMissing argument                                  |
+| [`VBA283`](#vba283) | analyze | warning     | procedure-local | yes     | Invalid IsMissing argument                                  |
 
 ## VB001
 
@@ -3873,7 +3873,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Surfaces                    | `analyze`, `lsp`                         |
 | Scope                       | `procedure-local`                        |
 | Precision                   | `high`                                   |
-| Enabled by default          | no                                       |
+| Enabled by default          | yes                                      |
 | Configuration               | `detect_misleading_property_value_byref` |
 | Inline suppression          | yes                                      |
 | Blocks source preflight     | no                                       |
@@ -4027,7 +4027,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Surfaces                    | `analyze`, `lsp`                 |
 | Scope                       | `procedure-local`                |
 | Precision                   | `high`                           |
-| Enabled by default          | no                               |
+| Enabled by default          | yes                              |
 | Configuration               | `detect_invalid_ismissing_usage` |
 | Inline suppression          | yes                              |
 | Blocks source preflight     | no                               |

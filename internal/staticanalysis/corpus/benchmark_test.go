@@ -16,6 +16,73 @@ import (
 
 var realWorldCorpusBenchmarkProjectIDs = []string{"std-vba", "ronecone"}
 
+// BenchmarkDefaultVBA276Promotion compares the same production-default
+// configuration with VBA276 disabled and enabled. It isolates promotion cost
+// from the corpus review profile's other opt-in rules.
+func BenchmarkDefaultVBA276Promotion(b *testing.B) {
+	benchmarkDefaultRulePromotion(b, func(cfg *config.Config, enabled bool) {
+		cfg.Analyze.DetectMisleadingPropertyValueByRef = enabled
+	})
+}
+
+func BenchmarkDefaultVBA283Promotion(b *testing.B) {
+	benchmarkDefaultRulePromotion(b, func(cfg *config.Config, enabled bool) {
+		cfg.Analyze.DetectInvalidIsMissingUsage = enabled
+	})
+}
+
+func benchmarkDefaultRulePromotion(b *testing.B, setEnabled func(*config.Config, bool)) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		b.Fatal(err)
+	}
+	manifest, corpusRoot, err := LoadManifest(filepath.Join(repoRoot, "testdata", "static-analysis-corpus", "manifest.json"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	projects, err := SelectThirdPartyProjects(manifest.Projects, realWorldCorpusBenchmarkProjectIDs)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Setenv(typedb.EnvDir, filepath.Join(b.TempDir(), "typelib"))
+	for _, project := range projects {
+		b.Run(project.ID, func(b *testing.B) {
+			workspace, err := MaterializeThirdPartyProject(corpusRoot, project, MaterializeOptions{TempRoot: b.TempDir()})
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(func() {
+				if err := workspace.Close(); err != nil {
+					b.Error(err)
+				}
+			})
+			for _, enabled := range []bool{false, true} {
+				name := "before"
+				if enabled {
+					name = "after"
+				}
+				b.Run(name, func(b *testing.B) {
+					cfg := config.Default()
+					cfg.Project.Name = project.ID
+					cfg.UserForm.CodeSource = "frm"
+					if project.Profile != ProfileExcel {
+						cfg.Analyze.DisabledRules = append([]string(nil), configurableNonExcelAnalyzeRuleIDs...)
+					}
+					setEnabled(&cfg, enabled)
+					b.ReportAllocs()
+					for b.Loop() {
+						result, err := (analyze.Analyzer{RootDir: workspace.Root, Config: cfg}).RunResult()
+						if err != nil {
+							b.Fatal(err)
+						}
+						b.ReportMetric(float64(len(result.Findings)), "findings/op")
+					}
+				})
+			}
+		})
+	}
+}
+
 // BenchmarkRealWorldCorpus provides an opt-in, developer-only profiling path
 // for the slowest checked-in third-party projects. The benchmark deliberately
 // bypasses snapshot and review evaluation; invoke it with -bench and use a

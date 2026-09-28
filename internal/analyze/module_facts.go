@@ -64,6 +64,7 @@ type unusedDeclFileFacts struct {
 	withEventsComplete bool
 	implementsTargets  []string
 	literalNames       map[string]bool
+	addressOfNames     map[string]bool
 }
 
 type moduleOptionState uint8
@@ -615,6 +616,7 @@ func buildUnusedDeclFileFacts(lines []string) *unusedDeclFileFacts {
 		withEventsComplete: complete,
 		implementsTargets:  moduleImplementsTargets(lines),
 		literalNames:       make(map[string]bool),
+		addressOfNames:     addressOfCallbackNames(lines),
 	}
 	for _, line := range lines {
 		forEachStringLiteral(line, func(literal string) {

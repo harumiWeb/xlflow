@@ -9,6 +9,32 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 )
 
+func TestInvalidIsMissingUsageDefaultEnabledAndCanBeDisabled(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Check(value As Variant)
+    If IsMissing(value) Then
+    End If
+End Sub
+`)
+	cfg := config.Default()
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA283"); len(got) != 1 {
+		t.Fatalf("default VBA283 findings = %+v, want one", got)
+	}
+	cfg.Analyze.DetectInvalidIsMissingUsage = false
+	findings, err = (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA283"); len(got) != 0 {
+		t.Fatalf("disabled VBA283 findings = %+v, want none", got)
+	}
+}
+
 func TestInvalidIsMissingUsageFindsMisuseAndAcceptsOptionalVariants(t *testing.T) {
 	cfg := config.Default()
 	cfg.Analyze.DetectInvalidIsMissingUsage = true

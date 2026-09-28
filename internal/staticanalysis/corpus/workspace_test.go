@@ -10,6 +10,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 )
 
@@ -39,33 +40,47 @@ func TestMaterializeThirdPartyProjectsPreservesSourcesAndClassifications(t *test
 		if loaded.UserForm.CodeSource != "frm" {
 			t.Fatalf("generated userform code source = %q", loaded.UserForm.CodeSource)
 		}
-		if !loaded.Analyze.DetectRiskyModuleState {
-			t.Fatalf("generated config did not enable VBA240 for %s", project.ID)
-		}
-		if !loaded.Analyze.DetectDeadStores {
-			t.Fatalf("generated config did not enable VBA256 for corpus review for %s", project.ID)
-		}
-		for code, enabled := range map[string]bool{
-			"VBA265": loaded.Analyze.DetectUnusedParameters,
-			"VBA266": loaded.Analyze.DetectUnusedPrivateConstants,
-			"VBA267": loaded.Analyze.DetectUnusedUDTMembers,
-			"VBA268": loaded.Analyze.DetectNeverAssignedVariables,
-			"VBA269": loaded.Analyze.DetectUnassignedVariableUsage,
-			"VBA270": loaded.Analyze.DetectUdfCellReferenceNames,
-			"VBA271": loaded.Analyze.DetectOptionBaseParamArrayInconsistency,
-			"VBA272": loaded.Analyze.DetectOptionBaseArrayInconsistency,
-			"VBA273": loaded.Analyze.DetectPublicMemberUnderscoreNames,
-			"VBA274": loaded.Analyze.DetectDocumentModulePublicEnum,
-			"VBA275": loaded.Analyze.DetectWriteOnlyProperty,
-			"VBA276": loaded.Analyze.DetectPublicInterfaceEventMembers,
-			"VBA277": loaded.Analyze.DetectPredeclaredInstanceAccess,
-		} {
+		for _, id := range corpusReviewRuleIDs {
+			rule, ok := staticrules.Lookup(id)
+			if !ok || !rule.Configurable || rule.DefaultEnabled {
+				t.Fatalf("corpus review rule %s is not a configurable opt-in rule", id)
+			}
+			var enabled bool
+			switch rule.Family {
+			case staticrules.FamilyLint:
+				enabled, _ = config.LintRuleEnabled(loaded.Lint, id)
+			case staticrules.FamilyAnalyze:
+				enabled, _ = config.AnalyzeRuleEnabled(loaded.Analyze, id)
+			default:
+				t.Fatalf("corpus review rule %s has unsupported family %s", id, rule.Family)
+			}
+			if profileExcludes(project.Profile, id) {
+				if enabled {
+					t.Fatalf("generated config enabled host-excluded %s for %s profile %s", id, project.ID, project.Profile)
+				}
+				continue
+			}
 			if !enabled {
-				t.Fatalf("generated config did not enable %s for corpus review for %s", code, project.ID)
+				t.Fatalf("generated config did not enable %s for corpus review for %s", id, project.ID)
 			}
 		}
-		if !loaded.Analyze.DetectUnreachableSelectCase {
-			t.Fatalf("generated config did not enable VBA259 for corpus review for %s", project.ID)
+		for id := range corpusReviewExcludedRules {
+			rule, ok := staticrules.Lookup(id)
+			if !ok || !rule.Configurable || rule.DefaultEnabled {
+				t.Fatalf("corpus review exclusion %s is not a configurable opt-in rule", id)
+			}
+			var enabled bool
+			switch rule.Family {
+			case staticrules.FamilyLint:
+				enabled, _ = config.LintRuleEnabled(loaded.Lint, id)
+			case staticrules.FamilyAnalyze:
+				enabled, _ = config.AnalyzeRuleEnabled(loaded.Analyze, id)
+			default:
+				continue
+			}
+			if enabled {
+				t.Fatalf("generated config unexpectedly enabled excluded %s for %s", id, project.ID)
+			}
 		}
 		if project.Profile == ProfileExcel && !loaded.Analyze.DetectExpensiveFullRangeOperations {
 			t.Fatalf("generated config did not opt in VBA242 for %s", project.ID)

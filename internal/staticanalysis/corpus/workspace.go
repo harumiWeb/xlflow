@@ -181,29 +181,7 @@ func MaterializeThirdPartyProject(corpusRoot string, project Project, opts Mater
 	cfg.Project.Entry = "Corpus.Run"
 	cfg.UserForm.CodeSource = "frm"
 	applyProfilePolicy(&cfg, project.Profile)
-	// Corpus snapshots intentionally include opt-in analyzer rules so their
-	// real-world behavior can be reviewed without changing production defaults.
-	// Profile-specific exclusions still take precedence when a profile
-	// deliberately omits a rule.
-	cfg.Analyze.DetectRiskyModuleState = true
-	cfg.Analyze.DetectDeadStores = true
-	cfg.Analyze.DetectDiscardedFunctionReturn = true
-	cfg.Analyze.DetectFunctionReturnAlwaysDiscarded = true
-	cfg.Analyze.DetectUnreachableSelectCase = true
-	cfg.Analyze.DetectUnusedParameters = true
-	cfg.Analyze.DetectUnusedPrivateConstants = true
-	cfg.Analyze.DetectUnusedUDTMembers = true
-	cfg.Analyze.DetectNeverAssignedVariables = true
-	cfg.Analyze.DetectUnassignedVariableUsage = true
-	cfg.Analyze.DetectUdfCellReferenceNames = true
-	cfg.Analyze.DetectOptionBaseArrayInconsistency = true
-	cfg.Analyze.DetectOptionBaseParamArrayInconsistency = true
-	cfg.Analyze.DetectPublicMemberUnderscoreNames = true
-	cfg.Analyze.DetectDocumentModulePublicEnum = true
-	cfg.Analyze.DetectWriteOnlyProperty = true
-	cfg.Analyze.DetectPublicInterfaceEventMembers = true
-	cfg.Analyze.DetectPredeclaredInstanceAccess = true
-	cfg.Analyze.DetectInvalidIsMissingUsage = true
+	applyCorpusReviewPolicy(&cfg, project.Profile)
 	if err := config.Write(filepath.Join(workspace.Root, config.FileName), cfg); err != nil {
 		return workspace, fmt.Errorf("write materialized project config: %w", err)
 	}

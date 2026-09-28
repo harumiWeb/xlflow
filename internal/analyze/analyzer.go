@@ -3252,7 +3252,11 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	if a.Config.Analyze.DetectUnusedParameters {
 		dynamicEntryNames = make(map[string]bool)
 		for i := range files {
-			for name := range files[i].moduleAnalysisFacts().unusedDeclarationFacts(files[i].Lines).literalNames {
+			facts := files[i].moduleAnalysisFacts().unusedDeclarationFacts(files[i].Lines)
+			for name := range facts.literalNames {
+				dynamicEntryNames[name] = true
+			}
+			for name := range facts.addressOfNames {
 				dynamicEntryNames[name] = true
 			}
 		}
@@ -3374,7 +3378,6 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	if a.Config.Analyze.DetectImplicitByRefParameters ||
 		a.Config.Analyze.DetectAssignedByValParameters ||
 		a.Config.Analyze.DetectByRefParametersCanBeByVal ||
-		a.Config.Analyze.DetectMisleadingPropertyValueByRef ||
 		a.Config.Analyze.DetectRedundantByRefModifiers {
 		ctx.parameterMutations = buildParameterMutationSummaries(files)
 	}

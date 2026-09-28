@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Enabled `VBA276` and `VBA283` by default after reviewing real-world
+  diagnostics across four and five projects, respectively. Fixed `VBA265`
+  removal advice and `VBA273`/`VBA275` passing advice for `AddressOf`
+  callback signatures.
 - Added opt-in `VB067`-`VB092` VBA maintainability diagnostics for empty
   structures, legacy syntax, and redundant or project-policy syntax. Each
   rule is independently configurable in `[lint]` and available in LSP;

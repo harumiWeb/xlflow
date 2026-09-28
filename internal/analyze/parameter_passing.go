@@ -674,10 +674,10 @@ func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure
 			break
 		}
 	}
-	if summary == nil {
-		// Fail open: without a mutation record xlflow cannot prove the
-		// parameter is never written, so no parameter-passing finding is
-		// emitted for this procedure.
+	if summary == nil && !a.Config.Analyze.DetectMisleadingPropertyValueByRef {
+		// Fail open: without a mutation record xlflow cannot prove
+		// mutation-sensitive parameter claims. VBA276 only needs the
+		// declaration, so it can still be checked without a summary.
 		return nil
 	}
 	constrained := parameterPassingSignatureConstrained(file, proc)
@@ -696,24 +696,24 @@ func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure
 				"Property value parameter "+name+" is declared ByRef but VBA always passes it ByVal.",
 				"The final value parameter of Property Let and Property Set has ByVal runtime semantics even when ByRef is written.",
 				"Declare the property value parameter ByVal so the signature matches its actual behavior."))
-		case a.Config.Analyze.DetectImplicitByRefParameters && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && !parameter.PassingExplicit:
+		case summary != nil && a.Config.Analyze.DetectImplicitByRefParameters && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && !parameter.PassingExplicit:
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA273", "information",
 				"Parameter "+name+" is implicitly passed ByRef.",
 				"VBA defaults ordinary parameters to ByRef when no passing modifier is written.",
 				"Add an explicit ByRef or ByVal modifier to document the intended API contract."))
-		case a.Config.Analyze.DetectRedundantByRefModifiers && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && parameter.PassingExplicit:
+		case summary != nil && a.Config.Analyze.DetectRedundantByRefModifiers && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && parameter.PassingExplicit:
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA277", "information",
 				"Explicit ByRef on parameter "+name+" repeats VBA's default.",
 				"Ordinary VBA parameters are already ByRef when the modifier is omitted.",
 				"Remove the ByRef modifier when the project style relies on VBA's default."))
 		}
-		if a.Config.Analyze.DetectAssignedByValParameters && effective == "byval" && state == parameterWritten {
+		if summary != nil && a.Config.Analyze.DetectAssignedByValParameters && effective == "byval" && state == parameterWritten {
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA274", "warning",
 				"ByVal parameter "+name+" is reassigned inside the procedure.",
 				"The assignment changes only the procedure-local copy and is not visible to the caller.",
 				"Use a separate local variable, or change the API contract only when caller-visible mutation is intended."))
 		}
-		if a.Config.Analyze.DetectByRefParametersCanBeByVal && !constrained && !valueParameter && effective == "byref" &&
+		if summary != nil && a.Config.Analyze.DetectByRefParametersCanBeByVal && !constrained && !valueParameter && effective == "byref" &&
 			!parameter.IsArray && !parameter.ParamArray && state == parameterNotWritten {
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA275", "information",
 				"ByRef parameter "+name+" is never written and can be passed ByVal.",
@@ -745,6 +745,9 @@ func parameterPassingSignatureConstrained(file parsedFile, proc sourceProcedure)
 		return true
 	}
 	name := strings.ToLower(cleanIdentifier(proc.IR.Symbol.Name))
+	if facts.addressOfNames[name] {
+		return true
+	}
 	for _, iface := range facts.implementsTargets {
 		if strings.HasPrefix(name, iface+"_") {
 			return true
