@@ -760,7 +760,7 @@ development_http_origins = []
 
 # Other optional analyzer rules (commented suggestions; also see the diagnostic catalog):
 # detect_dictionary_collection_guard = true # VBA207
-# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA282 opt-ins
+# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA275, VBA277-VBA282 opt-ins
 # and conflict notes; see the generated xlflow.toml)
 
 # Note: detect_implicit_byref_parameters (VBA273) and

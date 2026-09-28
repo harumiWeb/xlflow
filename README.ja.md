@@ -736,7 +736,7 @@ development_http_origins = []
 
 # その他のオプション analyzer ルール（コメント形式の候補。診断カタログも参照）:
 # detect_dictionary_collection_guard = true # VBA207
-# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA282 の opt-in ルールと
+# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA275, VBA277-VBA282 の opt-in ルールと
 # 競合注意; 生成される xlflow.toml を参照)
 
 # Note: detect_implicit_byref_parameters (VBA273) と

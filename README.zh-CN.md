@@ -732,7 +732,7 @@ development_http_origins = []
 
 # 其他可选 analyzer rule（注释形式的建议; 另请参阅诊断目录）:
 # detect_dictionary_collection_guard = true # VBA207
-# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA282 的 opt-in rule 和
+# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA275, VBA277-VBA282 的 opt-in rule 和
 # 冲突提示; 请参阅生成的 xlflow.toml)
 
 # Note: detect_implicit_byref_parameters (VBA273) 与

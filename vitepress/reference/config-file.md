@@ -125,7 +125,7 @@ disabled_rules = []
 # detect_function_return_path = true # VBA210
 # Other optional analyzer rules (commented suggestions):
 # detect_dictionary_collection_guard = true # VBA207
-# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA282 opt-ins
+# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA275, VBA277-VBA282 opt-ins
 # and conflict notes; see the generated xlflow.toml)
 
 # Procedure complexity metrics are independent from lint/analyze diagnostics.

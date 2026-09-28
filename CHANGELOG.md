@@ -7,8 +7,8 @@ All notable changes to xlflow will be documented in this file.
 ## v0.33.0
 
 - The generated `xlflow.toml` now lists every opt-in lint and analyzer rule
-  as a commented suggestion with its diagnostic ID, including the
-  `VB067`-`VB092` and `VBA253`-`VBA282` families, and documents the
+  as a commented suggestion with its diagnostic ID, including the opt-in
+  rules of the `VB067`-`VB092` and `VBA253`-`VBA282` families, and documents the
   mutually exclusive `VB084`/`VB085` and `VBA273`/`VBA277` pairs.
 - Enabled `VBA276` and `VBA283` by default after reviewing real-world
   diagnostics across four and five projects, respectively. Fixed `VBA265`
