@@ -168,3 +168,29 @@ fail-open convention, matching the existing `dynamicEntryNames`
 contract), and the widening adds an O(project) per-refresh scan to the
 realtime path under the default config (bounded, memoized in batch via
 `unusedDeclOnce`, and consistent with the existing widening pattern).
+
+## Independent final review (pre-release, whole branch)
+
+A third independent Orca-supervised Codex worker (`gpt-6-luna`, effort
+`xhigh`) reviewed the complete `f302764d..aa889dfc` diff (65 files,
+10,382/-204) read-only for the v0.33.0 release, covering the previously
+un-reviewed `xlflow.toml` opt-in hint generation and the release bump.
+Verdict: **approve-with-notes**; no blocking finding. Report:
+`tmp_workspaces/final-review-v033.md`; benchmark evidence:
+`tmp_workspaces/final-review-v033-perf.md`.
+
+- **P3 corpus metrics floor**: `review_test.go` asserts lower bounds
+  without an `unreviewed` ceiling after the snapshot grew to 9,231
+  unreviewed observations. Intentional for the review profile, but a
+  ceiling or other invariant is worth adding once the backlog is triaged
+  so unexpected growth is still detected (follow-up).
+- **Follow-up (pre-existing design boundary)**: the project-wide
+  `addressOfEntryNames` set is name-only, so a same-named non-callback
+  procedure can be over-suppressed for VBA273/VBA275/VBA277 advice - a
+  bounded false negative consistent with the analyzer's documented
+  suppression-only fail-open convention.
+- **Benchmark note**: corpus benchmark `findings/op` increased (ROneCOne
+  316 to 2,547; std-vba 1,623 to 2,278) because the materialized-project
+  config now enables the corpus-review profile's opt-in rules; the
+  production-default VBA276 toggle showed no material regression
+  (B/op +0.08-0.18%, allocs +0.25-0.40%, within run noise).

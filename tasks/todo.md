@@ -1,3 +1,15 @@
+# Final review pass 3 follow-ups (validate-static-rules-default, aa889dfc)
+
+Independent whole-branch review verdict: approve-with-notes. Remaining items:
+
+1. P3 corpus metrics invariant: review_test.go uses floors with no
+   unreviewed ceiling. Once the 9,231-item unreviewed backlog is triaged,
+   add a ceiling (or another invariant) so unintended growth is caught.
+2. Follow-up: addressOfEntryNames is a name-only project-wide set; a
+   same-named non-callback procedure can be over-suppressed (bounded
+   false negative, consistent with the suppression-only fail-open
+   contract). Revisit only if a real misreport is observed.
+
 # Final review pass 1 fixes (validate-static-rules-default, cc016ad9)
 
 Independent review verdict: approve-with-notes. Verified findings:
