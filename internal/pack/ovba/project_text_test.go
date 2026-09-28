@@ -71,6 +71,28 @@ func TestRebuildProjectTextRejectsTemplateOwnedTopologyChanges(t *testing.T) {
 	}
 }
 
+func TestRebuildProjectTextReportsTemplateOwnedRemovalInDeclarationOrder(t *testing.T) {
+	raw := []byte("Document=Sheet2/&H00000000\r\nDocument=Sheet1/&H00000000\r\n")
+	_, err := RebuildProjectText(raw, nil)
+	want := "template-owned PROJECT component Document=Sheet2 cannot be added, removed, or renamed"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+}
+
+func TestRebuildProjectTextReportsTemplateOwnedAdditionInSpecOrder(t *testing.T) {
+	raw := []byte("Document=Sheet1/&H00000000\r\n")
+	_, err := RebuildProjectText(raw, []ProjectComponentSpec{
+		{Kind: "Document", Name: "Sheet1"},
+		{Kind: "BaseClass", Name: "UserForm2"},
+		{Kind: "BaseClass", Name: "UserForm1"},
+	})
+	want := "template-owned PROJECT component BaseClass=UserForm2 is not present in the template"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+}
+
 func TestRebuildProjectTextRejectsCaseInsensitiveDuplicates(t *testing.T) {
 	_, err := RebuildProjectText([]byte("Module=Module1\r\n"), []ProjectComponentSpec{
 		{Kind: "Module", Name: "Module1"},

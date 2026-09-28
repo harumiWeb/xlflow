@@ -53,16 +53,21 @@ func RebuildProjectText(raw []byte, specs []ProjectComponentSpec) ([]byte, error
 		}
 		originalTemplateOwned[key] = component
 	}
-	for key, component := range originalTemplateOwned {
+	for _, component := range original {
+		if component.Kind != "Document" && component.Kind != "BaseClass" {
+			continue
+		}
+		key := projectComponentKey(component.Name)
 		spec, ok := desired[key]
 		if !ok || spec.Name != component.Name || spec.Kind != component.Kind {
 			return nil, fmt.Errorf("template-owned PROJECT component %s=%s cannot be added, removed, or renamed", component.Kind, component.Name)
 		}
 	}
-	for key, spec := range desired {
+	for _, spec := range specs {
 		if spec.Kind != "Document" && spec.Kind != "BaseClass" {
 			continue
 		}
+		key := projectComponentKey(spec.Name)
 		component, ok := originalTemplateOwned[key]
 		if !ok || component.Name != spec.Name || component.Kind != spec.Kind {
 			return nil, fmt.Errorf("template-owned PROJECT component %s=%s is not present in the template", spec.Kind, spec.Name)

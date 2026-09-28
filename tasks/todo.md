@@ -220,3 +220,9 @@ source; all valid. Plan:
 - [x] Cover numeric labels and their branch references for VB090.
 - [x] Report VB081 on same-source declared suffixed callees while leaving unknown and intrinsic callees unreported.
 - [x] Confirm focused and full Go suites, corpus snapshots, lint/docs, and security inventory locally; push a review-fix commit to PR #849.
+
+# Issue #852 final-review pass 2 follow-up
+
+- [x] Make template-owned PROJECT topology validation deterministic by checking removals/renames in original declaration order and additions in requested spec order.
+- [x] Add regressions that assert the first reported conflict for multiple invalid components.
+- [x] Run focused pack tests, formatting checks, and commit the review fix.
