@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,8 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/effects"
+	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/sourceproject"
 )
@@ -134,6 +137,79 @@ End Function
 	got := findingsByCode(redundantFindings, "VBA275")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "inputValue") {
 		t.Fatalf("VBA275 findings = %+v, want only NonCallback inputValue", got)
+	}
+}
+
+func TestParameterPassingRealtimeSkipsCrossModuleAddressOfSignature(t *testing.T) {
+	// The realtime widening loop scans the whole projectDocuments snapshot,
+	// so an AddressOf target in a sibling module is signature-constrained
+	// even when the context closure does not include that module.
+	ctx := context.Background()
+	root := t.TempDir()
+	callbacksPath := filepath.Join(root, "src", "modules", "Callbacks.bas")
+	mainPath := filepath.Join(root, "src", "modules", "Main.bas")
+	callbacksSource := `Option Explicit
+Public Function EnumProc(hwnd As LongPtr, lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProc = 1
+End Function
+`
+	mainSource := `Option Explicit
+Private Declare PtrSafe Function EnumWindows Lib "user32" (ByVal callback As LongPtr, ByVal lParam As LongPtr) As Long
+Public Sub Run()
+    EnumWindows AddressOf EnumProc, 0
+End Sub
+`
+	type sourceDocument struct {
+		path   string
+		module string
+		source string
+	}
+	sources := []sourceDocument{
+		{path: callbacksPath, module: "Callbacks", source: callbacksSource},
+		{path: mainPath, module: "Main", source: mainSource},
+	}
+	documents := make([]intel.ProjectAnalysisDocument, 0, len(sources))
+	parsedDocuments := make([]*vbaast.ParsedDocument, 0, len(sources))
+	for _, source := range sources {
+		parsed, err := vbaast.ParseDocument(source.path, []byte(source.source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsedDocuments = append(parsedDocuments, parsed)
+		ir, err := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{
+			RootDir: root, Path: source.path, ModuleName: source.module, ModuleKind: "standard",
+		}, parsed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		controlFlow, err := vbacfg.BuildDocumentContext(ctx, ir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		documents = append(documents, intel.ProjectAnalysisDocument{IR: ir, CFG: controlFlow, Source: source.source})
+	}
+	defer func() {
+		for _, parsed := range parsedDocuments {
+			parsed.Close()
+		}
+	}()
+
+	cfg := parameterPassingConfig()
+	cfg.Analyze.DetectImplicitByRefParameters = true
+	current := documents[0]
+	findings, err := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(
+		ctx, root, cfg, parsedDocuments[0], current.IR, current.CFG, nil,
+		effects.ProjectSummary{}, nil, nil, nil, documents,
+		intel.Document{Path: current.IR.Path, Source: current.Source, ModuleKind: "standard"}, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VBA273", "VBA275"} {
+		if got := findingsByCode(findings, code); len(got) != 0 {
+			t.Fatalf("%s realtime cross-module callback findings = %+v, want none", code, got)
+		}
 	}
 }
 
