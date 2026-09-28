@@ -235,6 +235,9 @@ func applySources(project *vbaproject.Project, sources []SourceModule) (PackMeta
 		if err != nil {
 			return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 		}
+		if err := vbaproject.ValidateModuleIdentity(source.Name, normalized); err != nil {
+			return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+		}
 		modules = append(modules, vbaproject.Module{
 			Name: source.Name, StreamName: source.Name, Type: targetType, Source: normalized,
 		})

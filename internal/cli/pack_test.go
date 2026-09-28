@@ -330,6 +330,24 @@ func TestPackCommandAddsModuleAbsentFromTemplate(t *testing.T) {
 	}
 }
 
+func TestPackCommandRejectsAddedModuleNameMismatch(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+	writePackSourceModule(t, dir, filepath.Join("src", "modules", "NewModule.bas"), []byte("Attribute VB_Name = \"OldName\"\r\nOption Explicit\r\n"))
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("err=%v exit=%d, want validation failure", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_ambiguous_layout" {
+		t.Fatalf("error code = %q, want pack_ambiguous_layout\n%s", got, stdout)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "dist", "Book.xlsm")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("output artifact should not be published, stat error = %v", statErr)
+	}
+}
+
 func runPackCommandForTest(dir string, args ...string) (string, error) {
 	var stdout bytes.Buffer
 	a := &app{

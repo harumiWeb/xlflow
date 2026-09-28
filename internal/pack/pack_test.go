@@ -228,6 +228,25 @@ func TestGenerateVBAProjectAddsModuleMissingFromTemplate(t *testing.T) {
 	}
 }
 
+func TestGenerateVBAProjectRejectsAddedModuleNameMismatch(t *testing.T) {
+	template := readTestFile(t, "corpus", "p1_compiled.bin")
+	cases := []SourceModule{
+		{Name: "AddedModule", Type: ModuleTypeStandard, Source: standardSource("OldModule")},
+		{Name: "AddedClass", Type: ModuleTypeClass, Source: classSource(t, "OldClass")},
+	}
+	for _, source := range cases {
+		t.Run(string(source.Type), func(t *testing.T) {
+			_, err := GenerateVBAProject(template, []SourceModule{source})
+			if !errors.Is(err, ErrAmbiguousLayout) {
+				t.Fatalf("error = %v, want ErrAmbiguousLayout", err)
+			}
+			if !strings.Contains(err.Error(), "does not match component name") {
+				t.Fatalf("error = %q, want component identity mismatch", err)
+			}
+		})
+	}
+}
+
 func projectModuleSource(project *vbaproject.Project, name string) string {
 	for _, module := range project.Modules {
 		if module.Name == name {

@@ -266,3 +266,28 @@ func TestNormalizeFormErrorsWhenFRMHasNoAttribute(t *testing.T) {
 		t.Fatal("expected error when .frm has no Attribute VB_ line")
 	}
 }
+
+func TestValidateModuleIdentity(t *testing.T) {
+	t.Run("matching", func(t *testing.T) {
+		err := ValidateModuleIdentity("Added", "Attribute VB_Name = \"Added\"\r\nOption Explicit\r\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name   string
+		source string
+	}{
+		{name: "different name", source: "Attribute VB_Name = \"OldName\"\r\n"},
+		{name: "different casing", source: "Attribute VB_Name = \"added\"\r\n"},
+		{name: "malformed", source: "Attribute VB_Name = Added\r\n"},
+		{name: "missing", source: "Option Explicit\r\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateModuleIdentity("Added", tc.source); err == nil {
+				t.Fatal("expected module identity validation error")
+			}
+		})
+	}
+}
