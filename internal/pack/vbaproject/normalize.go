@@ -31,8 +31,9 @@ func NormalizeModuleSource(mt ModuleType, disk string, existing *Module) (string
 
 // ValidateModuleIdentity verifies that the in-bin Attribute VB_Name agrees
 // with the component identity used by PROJECT, dir, and the VBA stream. It is
-// used when pack creates a new standard or class component, where no template
-// module exists to supply or constrain that identity.
+// used whenever pack updates or creates a standard or class component. The
+// textual source remains authoritative for code, but its declared identity
+// must agree with the component model.
 func ValidateModuleIdentity(expectedName, source string) error {
 	for line := range strings.SplitSeq(toCRLF(source), "\r\n") {
 		if !strings.HasPrefix(line, "Attribute VB_Name ") {

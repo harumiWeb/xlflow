@@ -217,6 +217,11 @@ func applySources(project *vbaproject.Project, sources []SourceModule) (PackMeta
 			if err != nil {
 				return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 			}
+			if module.Type == vbaproject.ModuleStd || module.Type == vbaproject.ModuleClass {
+				if err := vbaproject.ValidateModuleIdentity(module.Name, normalized); err != nil {
+					return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+				}
+			}
 			module.Source = normalized
 			consumed[key] = true
 		}
