@@ -307,18 +307,26 @@ func TestPackCommandMapsProtectedProjectEngineError(t *testing.T) {
 	}
 }
 
-func TestPackCommandMapsAmbiguousLayoutEngineError(t *testing.T) {
+func TestPackCommandAddsModuleAbsentFromTemplate(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)
 	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
-	writePackSourceModule(t, dir, filepath.Join("src", "modules", "Module99.bas"), []byte("Attribute VB_Name = \"Module99\"\r\n"))
+	writePackSourceModule(t, dir, filepath.Join("src", "modules", "Module99.bas"), []byte("Attribute VB_Name = \"Module99\"\r\nOption Explicit\r\n"))
 
 	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
-	if err == nil || output.ExitCode(err) != output.ExitValidation {
-		t.Fatalf("err=%v exit=%d, want validation failure", err, output.ExitCode(err))
+	if err != nil {
+		t.Fatalf("pack command error = %v\n%s", err, stdout)
 	}
-	if got := errorCodeFromJSON(t, stdout); got != "pack_ambiguous_layout" {
-		t.Fatalf("error code = %q, want pack_ambiguous_layout\n%s", got, stdout)
+	bin := zipEntryBytes(t, readFileForTest(t, filepath.Join(dir, "dist", "Book.xlsm")), "xl/vbaProject.bin")
+	project, err := vbaproject.Read(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := moduleSourceForTest(project, "Module99"); !strings.Contains(got, `Attribute VB_Name = "Module99"`) {
+		t.Fatalf("Module99 was not packed: %q", got)
+	}
+	if got := moduleSourceForTest(project, "Module1"); got != "" {
+		t.Fatalf("template-only Module1 survived source-authoritative pack: %q", got)
 	}
 }
 

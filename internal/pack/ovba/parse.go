@@ -138,13 +138,20 @@ type ProjectText struct {
 	ID, Name     string
 	CMG, DPB, GC string
 	Kinds        map[string]string // module name → "Module"/"Class"/"Document"/"BaseClass"
+	Components   []ProjectComponent
+}
+
+// ProjectComponent is one component declaration from the textual PROJECT stream.
+type ProjectComponent struct {
+	Kind string
+	Name string
 }
 
 // ParseProjectText parses the PROJECT stream line by line. Surrounding "..." quotes on values are stripped.
 func ParseProjectText(raw []byte) ProjectText {
 	pt := ProjectText{Kinds: map[string]string{}}
 	unq := func(s string) string { return strings.Trim(strings.TrimSpace(s), "\"") }
-	for _, line := range strings.Split(string(raw), "\r\n") {
+	for line := range strings.SplitSeq(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n") {
 		eq := strings.IndexByte(line, '=')
 		if eq < 0 {
 			continue
@@ -162,13 +169,17 @@ func ParseProjectText(raw []byte) ProjectText {
 		case "GC":
 			pt.GC = unq(val)
 		case "Module", "Class", "BaseClass":
-			pt.Kinds[unq(val)] = key
+			name := unq(val)
+			pt.Kinds[name] = key
+			pt.Components = append(pt.Components, ProjectComponent{Kind: key, Name: name})
 		case "Document":
 			name := val
 			if i := strings.IndexByte(val, '/'); i >= 0 { // "Sheet1/&H00000000"
 				name = val[:i]
 			}
-			pt.Kinds[unq(name)] = "Document"
+			name = unq(name)
+			pt.Kinds[name] = "Document"
+			pt.Components = append(pt.Components, ProjectComponent{Kind: key, Name: name})
 		}
 	}
 	return pt

@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Extended experimental `xlflow pack` so the source tree is authoritative for
+  standard and class module topology. Packed projects can now add, remove, and
+  rename those components while keeping `PROJECT`, `PROJECTMODULES`, and VBA
+  module streams consistent; document-module and UserForm topology remains
+  bound to the workbook template.
 - Added opt-in `VB067`-`VB092` VBA maintainability diagnostics for empty
   structures, legacy syntax, and redundant or project-policy syntax. Each
   rule is independently configurable in `[lint]` and available in LSP;

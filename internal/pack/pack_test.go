@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
+	"github.com/harumiWeb/xlflow/internal/pack/ovba"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 )
 
@@ -35,6 +36,15 @@ func p1SourceModules(t *testing.T) []SourceModule {
 		{Name: "Module1", Type: ModuleTypeStandard, Source: readTestText(t, "disk", "p1", "modules", "Module1.bas")},
 		{Name: "Class1", Type: ModuleTypeClass, Source: readTestText(t, "disk", "p1", "classes", "Class1.cls")},
 	}
+}
+
+func standardSource(name string) string {
+	return "Attribute VB_Name = \"" + name + "\"\r\nOption Explicit\r\n"
+}
+
+func classSource(t *testing.T, name string) string {
+	t.Helper()
+	return strings.ReplaceAll(readTestText(t, "disk", "p1", "classes", "Class1.cls"), "Class1", name)
 }
 
 func TestGenerateVBAProjectGoldenAndSources(t *testing.T) {
@@ -179,15 +189,15 @@ func TestGenerateVBAProjectTypedErrors(t *testing.T) {
 			want: ErrUserFormGenerationUnsupported,
 		},
 		{
-			name:    "unknown layout",
+			name:    "ambiguous duplicate source",
 			bin:     template,
-			sources: []SourceModule{{Name: "Missing", Type: ModuleTypeStandard, Source: `Attribute VB_Name = "Missing"` + "\r\n"}},
+			sources: []SourceModule{{Name: "Module1", Type: ModuleTypeStandard}, {Name: "module1", Type: ModuleTypeClass}},
 			want:    ErrAmbiguousLayout,
 		},
 		{
-			name:    "ambiguous duplicate source",
+			name:    "document topology change",
 			bin:     template,
-			sources: []SourceModule{{Name: "Module1", Type: ModuleTypeStandard}, {Name: "Module1", Type: ModuleTypeStandard}},
+			sources: []SourceModule{{Name: "Sheet99", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"}},
 			want:    ErrAmbiguousLayout,
 		},
 	}
@@ -201,17 +211,130 @@ func TestGenerateVBAProjectTypedErrors(t *testing.T) {
 	}
 }
 
-func TestGenerateVBAProjectMissingTemplateModuleExplainsMVPLimitation(t *testing.T) {
+func TestGenerateVBAProjectAddsModuleMissingFromTemplate(t *testing.T) {
 	template := readTestFile(t, "corpus", "p1_compiled.bin")
-	_, err := GenerateVBAProject(template, []SourceModule{{
-		Name: "Missing", Type: ModuleTypeStandard, Source: `Attribute VB_Name = "Missing"` + "\r\n",
+	out, err := GenerateVBAProject(template, []SourceModule{{
+		Name: "Added", Type: ModuleTypeStandard, Source: standardSource("Added"),
 	}})
-	if !errors.Is(err, ErrAmbiguousLayout) {
-		t.Fatalf("error = %v, want errors.Is(..., ErrAmbiguousLayout)", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	want := `source module "Missing" is not in the template; pack updates existing modules only and cannot add new modules in the experimental MVP`
-	if !strings.Contains(err.Error(), want) {
-		t.Fatalf("error message = %q, want it to contain %q", err.Error(), want)
+	project, err := vbaproject.Read(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := projectModuleSource(project, "Added"); !strings.Contains(got, `Attribute VB_Name = "Added"`) {
+		t.Fatalf("added module source = %q", got)
+	}
+}
+
+func projectModuleSource(project *vbaproject.Project, name string) string {
+	for _, module := range project.Modules {
+		if module.Name == name {
+			return module.Source
+		}
+	}
+	return ""
+}
+
+func TestGenerateVBAProjectReconstructsSourceAuthoritativeComponentSet(t *testing.T) {
+	template := readTestFile(t, "corpus", "p1_compiled.bin")
+	module1 := SourceModule{Name: "Module1", Type: ModuleTypeStandard, Source: readTestText(t, "disk", "p1", "modules", "Module1.bas")}
+	class1 := SourceModule{Name: "Class1", Type: ModuleTypeClass, Source: readTestText(t, "disk", "p1", "classes", "Class1.cls")}
+	cases := []struct {
+		name    string
+		sources []SourceModule
+		want    map[string]vbaproject.ModuleType
+	}{
+		{
+			name:    "add standard",
+			sources: []SourceModule{module1, class1, {Name: "AddedModule", Type: ModuleTypeStandard, Source: standardSource("AddedModule")}},
+			want:    map[string]vbaproject.ModuleType{"Module1": vbaproject.ModuleStd, "Class1": vbaproject.ModuleClass, "AddedModule": vbaproject.ModuleStd},
+		},
+		{
+			name:    "add class",
+			sources: []SourceModule{module1, class1, {Name: "AddedClass", Type: ModuleTypeClass, Source: classSource(t, "AddedClass")}},
+			want:    map[string]vbaproject.ModuleType{"Module1": vbaproject.ModuleStd, "Class1": vbaproject.ModuleClass, "AddedClass": vbaproject.ModuleClass},
+		},
+		{
+			name:    "remove standard",
+			sources: []SourceModule{class1},
+			want:    map[string]vbaproject.ModuleType{"Class1": vbaproject.ModuleClass},
+		},
+		{
+			name:    "remove class",
+			sources: []SourceModule{module1},
+			want:    map[string]vbaproject.ModuleType{"Module1": vbaproject.ModuleStd},
+		},
+		{
+			name:    "remove all standard and class modules",
+			sources: nil,
+			want:    map[string]vbaproject.ModuleType{},
+		},
+		{
+			name: "rename standard",
+			sources: []SourceModule{
+				{Name: "RenamedModule", Type: ModuleTypeStandard, Source: standardSource("RenamedModule")},
+				class1,
+			},
+			want: map[string]vbaproject.ModuleType{"RenamedModule": vbaproject.ModuleStd, "Class1": vbaproject.ModuleClass},
+		},
+		{
+			name: "rename class",
+			sources: []SourceModule{
+				module1,
+				{Name: "RenamedClass", Type: ModuleTypeClass, Source: classSource(t, "RenamedClass")},
+			},
+			want: map[string]vbaproject.ModuleType{"Module1": vbaproject.ModuleStd, "RenamedClass": vbaproject.ModuleClass},
+		},
+		{
+			name: "multiple simultaneous changes",
+			sources: []SourceModule{
+				{Name: "NewModule", Type: ModuleTypeStandard, Source: standardSource("NewModule")},
+				{Name: "NewClass", Type: ModuleTypeClass, Source: classSource(t, "NewClass")},
+			},
+			want: map[string]vbaproject.ModuleType{"NewModule": vbaproject.ModuleStd, "NewClass": vbaproject.ModuleClass},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := GenerateVBAProject(template, tc.sources)
+			if err != nil {
+				t.Fatal(err)
+			}
+			project, err := vbaproject.Read(out)
+			if err != nil {
+				t.Fatalf("re-read generated project: %v", err)
+			}
+			got := make(map[string]vbaproject.ModuleType)
+			for _, module := range project.Modules {
+				if module.Type == vbaproject.ModuleStd || module.Type == vbaproject.ModuleClass {
+					got[module.Name] = module.Type
+				}
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("editable modules = %v, want %v", got, tc.want)
+			}
+			for name, wantType := range tc.want {
+				if got[name] != wantType {
+					t.Errorf("module %s type = %v, want %v", name, got[name], wantType)
+				}
+			}
+			projectText := ovba.ParseProjectText(project.ProjectStreamRaw)
+			for name, wantType := range tc.want {
+				wantKind := "Module"
+				if wantType == vbaproject.ModuleClass {
+					wantKind = "Class"
+				}
+				if projectText.Kinds[name] != wantKind {
+					t.Errorf("PROJECT kind for %s = %q, want %q", name, projectText.Kinds[name], wantKind)
+				}
+			}
+			if projectText.Kinds["ThisWorkbook"] != "Document" || projectText.Kinds["Sheet1"] != "Document" {
+				t.Errorf("document topology was not preserved: %v", projectText.Kinds)
+			}
+		})
 	}
 }
 
