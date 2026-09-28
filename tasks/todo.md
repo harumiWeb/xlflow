@@ -1,3 +1,50 @@
+# Final review pass 3 follow-ups (validate-static-rules-default, aa889dfc)
+
+Independent whole-branch review verdict: approve-with-notes. Remaining items:
+
+1. DONE (PR #860 review round 4): review_test.go now bounds Unreviewed by
+   the committed backlog (<= 9231). Review-driven decreases still pass;
+   new snapshot findings fail until triaged or the ceiling is raised.
+2. Follow-up: addressOfEntryNames is a name-only project-wide set; a
+   same-named non-callback procedure can be over-suppressed (bounded
+   false negative, consistent with the suppression-only fail-open
+   contract). Revisit only if a real misreport is observed.
+
+# Final review pass 1 fixes (validate-static-rules-default, cc016ad9)
+
+Independent review verdict: approve-with-notes. Verified findings:
+
+1. P2 cross-module AddressOf signature constraint: VBA resolves a bare
+   AddressOf target project-wide across public procedures in standard
+   modules, but parameterPassingSignatureConstrained only consulted the
+   candidate file's own facts.addressOfNames. A callback declared in a
+   dedicated module still received VBA273/VBA275/VBA277 advice - the same FP
+   class this branch fixed in-module. VBA265 is unaffected (its candidates
+   are Private-only) and keeps its current merged dynamic-entry contract.
+   Fix: add analysisContext.addressOfEntryNames (project-wide union of
+   facts.addressOfNames) populated when any signature-constrained
+   parameter-passing rule is enabled (VBA273/275/276/277), thread it into
+   parameterPassingSignatureConstrained alongside the file-local check, and
+   widen it in the realtime path from projectDocuments the same way
+   dynamicEntryNames is widened. Add a two-module regression test.
+2. P3 metrics assertion: review_test.go now uses floors + dropped
+   Unreviewed==0. Intentional (opt-in profile emits unreviewed observations
+   by design); add a TODO documenting when the bounds can be tightened.
+3. P3 missing config row: vitepress/reference/config-file.md [analyze]
+   table lacks detect_invalid_ismissing_usage (pre-existing gap, now
+   user-facing because VBA283 is default-on). Add the row + narrative line.
+4. P3 stale comments/doc: analyzer.go dynamicEntryNames comment (mentions
+   VBA260, actual consumers are VBA265 + now includes AddressOf names),
+   module_facts.go "three source scans" comment (now four), and
+   vba-parameter-passing-diagnostics.md VBA276 exclusion list (code applies
+   the AddressOf constraint too, though unreachable for Property Let/Set -
+   document the check or the dead branch).
+5. Unsupported/follow-up observations recorded by the reviewer (realtime
+   private-name-collision parity, Application.Run string-literal names not
+   consulted by parameter passing) are pre-existing design boundaries; the
+   realtime addressOfEntryNames widening shares the VBA265 scan loop so
+   parity bookkeeping stays symmetric. No separate fix.
+
 # Issue #826: VBA class/interface public-API hazard diagnostics (VBA278-VBA282)
 
 Parent issue #816. Five opt-in warning rules, all default-disabled,

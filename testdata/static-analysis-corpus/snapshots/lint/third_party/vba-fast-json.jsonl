@@ -1,5 +1,8 @@
+{"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"lint","code":"VB067","severity":"information","line":559,"column":13}
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"lint","code":"VB020","severity":"warning","line":608,"column":9}
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"lint","code":"VB020","severity":"warning","line":609,"column":9}
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"lint","code":"VB020","severity":"warning","line":702,"column":9}
+{"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"lint","code":"VB067","severity":"information","line":874,"column":9}
+{"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"lint","code":"VB067","severity":"information","line":1598,"column":9}
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"lint","code":"VB020","severity":"warning","line":2121,"column":9}
 {"project":"third_party/vba-fast-json","file":"src/LibJSON.bas","surface":"lint","code":"VB020","severity":"warning","line":2122,"column":9}

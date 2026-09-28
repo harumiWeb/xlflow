@@ -700,9 +700,14 @@ disabled_rules = []
 # プロジェクト全体に適用するオプションのlintルールです。callback中心または
 # workbook駆動のVBAではノイズになりやすいため、デフォルトでは無効です。
 # 個別の設定のコメントを外して有効化してください。
-# detect_scope_shadowing = true          # VB018
+# detect_scope_shadowing = true # VB018
 # detect_unused_private_procedures = true # VB021
-# detect_nested_with_ambiguity = true    # VB027
+# detect_nested_with_ambiguity = true # VB027
+# detect_empty_if = true # VB067
+# ... (VB068-VB092 および競合注意; 生成される xlflow.toml を参照)
+
+# Note: VB084 (detect_redundant_step_one) と VB085 (require_explicit_step) は
+# For Step 句について相反するポリシーを表すため、同時には有効化しません。
 
 # オプションのprocedure名定数チェック（VB044）。
 # [lint.procedure_name_constant]
@@ -728,6 +733,15 @@ development_http_origins = []
 # オプションのdataflow対応 analyzerルールはデフォルトで無効です。
 # FunctionおよびProperty Getのreturn pathを検査するには、次の設定のコメントを外してください。
 # detect_function_return_path = true # VBA210
+
+# その他のオプション analyzer ルール（コメント形式の候補。診断カタログも参照）:
+# detect_dictionary_collection_guard = true # VBA207
+# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA275, VBA277-VBA282 の opt-in ルールと
+# 競合注意; 生成される xlflow.toml を参照)
+
+# Note: detect_implicit_byref_parameters (VBA273) と
+# detect_redundant_byref_modifiers (VBA277) は相反する ByRef スタイルポリシーを
+# 表すため、両方を有効化すると設定検証に失敗します。
 ```
 
 `project.entry` は `xlflow run` の macro 名を省略した場合に使われます。

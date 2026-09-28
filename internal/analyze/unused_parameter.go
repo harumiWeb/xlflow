@@ -8,15 +8,39 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
+var addressOfTargetPattern = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])AddressOf[ \t]+(\[?[A-Za-z_][A-Za-z0-9_]*\]?)`)
+
+// addressOfCallbackNames records procedures passed as AddressOf targets.
+// A callback's parameters are fixed by its external caller even when xlflow
+// sees no reads of individual parameters inside the VBA procedure body.
+func addressOfCallbackNames(lines []string) map[string]bool {
+	names := make(map[string]bool)
+	var pending string
+	for _, line := range lines {
+		masked := strings.TrimSpace(maskVBAStringsAndComments(line))
+		pending += masked
+		if strings.HasSuffix(pending, "_") {
+			pending = strings.TrimSuffix(pending, "_") + " "
+			continue
+		}
+		for _, match := range addressOfTargetPattern.FindAllStringSubmatch(pending, -1) {
+			names[strings.ToLower(cleanIdentifier(match[1]))] = true
+		}
+		pending = ""
+	}
+	return names
+}
+
 // unusedParameterFindings reports parameters of private procedures that are
 // never referenced in the procedure body. Only Private procedures are
 // candidates: Public and Friend members are callable across module or project
 // boundaries, so their signatures are fixed by callers the analyzer cannot
 // enumerate. Implements members, event handlers, and procedures reachable
-// through string-based dynamic invocation are excluded for the same reason.
-// dynamicNames is the project-wide set of identifier tokens found inside
-// string literals (Application.Run "Module.Proc", OnTime, OnAction,
-// CallByName). It is built once per analysis run from every visible module;
+// through string-based dynamic invocation or AddressOf are excluded for the
+// same reason. dynamicNames is the project-wide set of identifier tokens
+// found inside string literals (Application.Run "Module.Proc", OnTime,
+// OnAction, CallByName) and AddressOf targets. It is built once per analysis
+// run from every visible module;
 // a nil set falls back to the candidate file's own literals.
 func (a Analyzer) unusedParameterFindings(file parsedFile, proc sourceProcedure, dynamicNames map[string]bool) []Finding {
 	if !unusedParameterEligibleProcedure(file, proc, dynamicNames) {
@@ -87,7 +111,7 @@ func unusedParameterEligibleProcedure(file parsedFile, proc sourceProcedure, dyn
 	if dynamicNames == nil {
 		dynamicNames = facts.literalNames
 	}
-	if dynamicNames[name] || dynamicNames[strings.ToLower(file.Module+"."+cleanIdentifier(symbol.Name))] {
+	if facts.addressOfNames[name] || dynamicNames[name] || dynamicNames[strings.ToLower(file.Module+"."+cleanIdentifier(symbol.Name))] {
 		return false
 	}
 	return true

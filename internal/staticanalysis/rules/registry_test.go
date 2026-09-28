@@ -452,7 +452,7 @@ func TestParameterPassingRuleMetadata(t *testing.T) {
 		rule, ok := Lookup(id)
 		if !ok || rule.Family != FamilyAnalyze || rule.Category != expected.category ||
 			rule.EvidenceClass == EvidenceCompileEquivalent || rule.CompileEquivalent ||
-			rule.DefaultSeverity != expected.severity || rule.DefaultEnabled ||
+			rule.DefaultSeverity != expected.severity || rule.DefaultEnabled != (id == "VBA276") ||
 			!rule.Configurable || rule.ConfigurationKey != expected.key ||
 			rule.PreflightBlocking || !rule.InlineSuppressible || !rule.Realtime ||
 			rule.Scope != ScopeProcedureLocal || rule.Precision != PrecisionHigh ||
@@ -493,7 +493,7 @@ func TestIsMissingRuleMetadata(t *testing.T) {
 	rule, ok := Lookup("VBA283")
 	if !ok || rule.Family != FamilyAnalyze || rule.Category != CategoryCorrectness ||
 		rule.EvidenceClass != EvidenceInference || rule.CompileEquivalent ||
-		rule.DefaultSeverity != SeverityWarning || rule.DefaultEnabled || !rule.Configurable ||
+		rule.DefaultSeverity != SeverityWarning || !rule.DefaultEnabled || !rule.Configurable ||
 		rule.ConfigurationKey != "detect_invalid_ismissing_usage" || rule.PreflightBlocking ||
 		!rule.InlineSuppressible || !rule.Realtime || rule.Scope != ScopeProcedureLocal ||
 		rule.Precision != PrecisionHigh ||

@@ -24,6 +24,11 @@ declares `Implements <Interface>` (a qualified `Implements Lib.IFace` target
 still binds `IFace_<Member>` names), and procedures named by a string literal
 anywhere in the project (the static surface of `Application.Run`, `OnTime`,
 `OnAction`, `CallByName`, and similar dynamic dispatch) are excluded.
+Procedures used as `AddressOf` targets are also excluded: an external callback
+signature cannot drop an unused parameter. Callback targets are collected
+once per source file and combined across the analyzed project; strings and
+comments do not establish a callback target. Explicit line continuations
+between `AddressOf` and the callback name are recognized.
 
 Signature-constrained event shapes are excluded even when the generic event
 classifier does not recognize them: procedures whose name starts with a
@@ -134,7 +139,7 @@ the default.
 
 Focused tests cover each declaration category: unused and used parameters,
 case-insensitive name matching, ignored-name conventions, public/friend,
-event, `Implements`, and dynamic-entry exclusions for `VBA265`; constant
+event, `Implements`, `AddressOf`, and dynamic-entry exclusions for `VBA265`; constant
 references in initializers and conditional compilation for `VBA266`; direct,
 `With`-block, nested, and Variant-escape member resolution for `VBA267`;
 never-assigned scalars, ByRef mutation, and straight-line/branching

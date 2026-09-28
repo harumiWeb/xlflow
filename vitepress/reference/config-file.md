@@ -105,9 +105,11 @@ disabled_rules = []
 # Add "VB020" to disabled_rules if a project intentionally keeps scratch locals.
 #
 # Optional project-wide lint rules. Uncomment individual rules to enable them.
-# detect_scope_shadowing = true          # VB018
+# detect_scope_shadowing = true # VB018
 # detect_unused_private_procedures = true # VB021
-# detect_nested_with_ambiguity = true    # VB027
+# detect_nested_with_ambiguity = true # VB027
+# detect_empty_if = true # VB067
+# ... (VB068-VB092 and conflict notes; see the generated xlflow.toml)
 
 # Optional local procedure-name constant check (VB044).
 # [lint.procedure_name_constant]
@@ -118,6 +120,13 @@ disabled_rules = []
 [analyze]
 # Disable specific analyzer rules by diagnostic ID.
 disabled_rules = []
+
+# Optional dataflow-sensitive analyzer rules are disabled by default.
+# detect_function_return_path = true # VBA210
+# Other optional analyzer rules (commented suggestions):
+# detect_dictionary_collection_guard = true # VBA207
+# ... (VBA213, VBA240, VBA242-VBA243, VBA248, VBA253-VBA275, VBA277-VBA282 opt-ins
+# and conflict notes; see the generated xlflow.toml)
 
 # Procedure complexity metrics are independent from lint/analyze diagnostics.
 [metrics]
@@ -294,45 +303,46 @@ inline. This includes every preflight-blocking lint diagnostic.
 
 ### `[analyze]`
 
-| Key                                             | Type     | Required | Default | Description                                                                                                                                                        |
-| ----------------------------------------------- | -------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `disabled_rules`                                | string[] | no       | `[]`    | Disable configurable analyzer rules by diagnostic ID.                                                                                                              |
-| `detect_risky_module_state`                     | bool     | no       | `false` | Opt in to `VBA240` project-wide module-state coupling analysis and read/write metrics.                                                                             |
-| `detect_redim_preserve_in_loops`                | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA241` repeated `ReDim Preserve` analysis inside loops.                                                                 |
-| `detect_expensive_full_range_operations`        | bool     | no       | `false` | Opt in to `VBA242` full-row, full-column, full-sheet, and unbounded `UsedRange` operation analysis.                                                                |
-| `detect_value2_performance_opportunities`       | bool     | no       | `false` | Opt in to `VBA243` suggestions to use `Range.Value2` for bulk or repeated transfers when Date/Currency coercion is not required.                                   |
-| `detect_procedure_call_cycles`                  | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA244` project-wide recursive and cyclic procedure dependency analysis.                                                 |
-| `detect_unsafe_http_configuration`              | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA246` HTTP transport-security analysis.                                                                                |
-| `detect_missing_http_timeout`                   | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA247` HTTP timeout reliability analysis.                                                                               |
-| `detect_opaque_boolean_arguments`               | bool     | no       | `false` | Opt in to `VBA248` warnings for opaque positional Boolean control arguments.                                                                                       |
-| `detect_deterministic_runtime_errors`           | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA249` diagnostics when constant, type, control-flow, and dataflow facts prove a runtime failure.                       |
-| `detect_unsafe_select_operations`               | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA250` warnings when `Worksheet.Select` or `Range.Select` lacks a proven active-state precondition.                     |
-| `detect_implicit_approximate_lookups`           | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA251` warnings when typed Excel `Match`, `VLookup`, or `HLookup` omits its match-mode argument.                        |
-| `detect_unavailable_worksheet_function_members` | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA252` warnings when a typed `Excel.WorksheetFunction` member is absent from the complete generated TypeLib member set. |
-| `detect_implicit_default_member_access`         | bool     | no       | `false` | Opt in to `VBA253` warnings for known implicit, indexed, or recursive default-member access.                                                                       |
-| `detect_unbound_default_member_access`          | bool     | no       | `false` | Opt in to `VBA254` information/warning diagnostics for unbound, late-bound, or incomplete default-member access.                                                   |
-| `detect_bang_notation`                          | bool     | no       | `false` | Opt in to `VBA255` information/warning diagnostics for `receiver!name` bang notation.                                                                              |
-| `detect_dead_stores`                            | bool     | no       | `false` | Opt in to `VBA256` warnings for overwritten or never-read local scalar assignments.                                                                                |
-| `detect_unreachable_select_case`                | bool     | no       | `false` | Opt in to `VBA259` warnings for `Select Case` items or `Case Else` branches that earlier items make unreachable.                                                   |
-| `detect_unused_parameters`                      | bool     | no       | `false` | Opt in to `VBA265` warnings for unused parameters of private procedures.                                                                                           |
-| `detect_unused_private_constants`               | bool     | no       | `false` | Opt in to `VBA266` warnings for unreferenced module-level `Private Const` declarations.                                                                            |
-| `detect_unused_udt_members`                     | bool     | no       | `false` | Opt in to `VBA267` diagnostics for members of `Private Type` declarations that are never accessed through a resolvable member expression.                          |
-| `detect_never_assigned_variables`               | bool     | no       | `false` | Opt in to `VBA268` warnings for local scalar variables that are read but never assigned.                                                                           |
-| `detect_unassigned_variable_usage`              | bool     | no       | `false` | Opt in to `VBA269` warnings for local scalar variables read before any guaranteed assignment.                                                                      |
-| `detect_udf_cell_reference_names`               | bool     | no       | `false` | Opt in to `VBA270` warnings for worksheet-visible `Function` names that collide with valid A1 or R1C1 cell references.                                             |
-| `detect_option_base_paramarray_inconsistency`   | bool     | no       | `false` | Opt in to `VBA271` warnings for `ParamArray` parameters that stay zero-based under `Option Base 1`.                                                                |
-| `detect_option_base_array_inconsistency`        | bool     | no       | `false` | Opt in to `VBA272` warnings for qualified `VBA.Array(...)` calls that stay zero-based under `Option Base 1`.                                                       |
-| `detect_implicit_byref_parameters`              | bool     | no       | `false` | Opt in to `VBA273` information diagnostics for parameters that implicitly default to `ByRef`.                                                                      |
-| `detect_assigned_byval_parameters`              | bool     | no       | `false` | Opt in to `VBA274` warnings for reassigned parameters with effective `ByVal` semantics.                                                                            |
-| `detect_byref_parameters_can_be_byval`          | bool     | no       | `false` | Opt in to `VBA275` information diagnostics for `ByRef` parameters proven not to replace caller arguments.                                                          |
-| `detect_misleading_property_value_byref`        | bool     | no       | `false` | Opt in to `VBA276` warnings for explicit `ByRef` on Property Let/Set final value parameters, which VBA passes `ByVal`.                                             |
-| `detect_redundant_byref_modifiers`              | bool     | no       | `false` | Opt in to `VBA277` information diagnostics for explicit `ByRef` that repeats VBA's default. Cannot be enabled with `detect_implicit_byref_parameters`.             |
-| `detect_public_member_underscore_names`         | bool     | no       | `false` | Opt in to `VBA278` warnings for public object-module member names containing underscores.                                                                          |
-| `detect_document_module_public_enum`            | bool     | no       | `false` | Opt in to `VBA279` warnings for non-Private `Enum` declarations inside document modules.                                                                           |
-| `detect_write_only_property`                    | bool     | no       | `false` | Opt in to `VBA280` warnings for public-facing `Property Let`/`Set` members without a matching `Property Get`.                                                      |
-| `detect_public_interface_event_members`         | bool     | no       | `false` | Opt in to `VBA281` warnings for public members matching a verified implemented interface binding and explicitly `Public` event handlers.                           |
-| `detect_predeclared_instance_access`            | bool     | no       | `false` | Opt in to `VBA282` warnings for self-name references inside modules with a predeclared default instance.                                                           |
-| `development_http_origins`                      | string[] | no       | `[]`    | Exact plain-HTTP origins exempted only from `VBA246` plain-HTTP credential findings.                                                                               |
+| Key                                             | Type     | Required | Default | Description                                                                                                                                                                |
+| ----------------------------------------------- | -------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disabled_rules`                                | string[] | no       | `[]`    | Disable configurable analyzer rules by diagnostic ID.                                                                                                                      |
+| `detect_risky_module_state`                     | bool     | no       | `false` | Opt in to `VBA240` project-wide module-state coupling analysis and read/write metrics.                                                                                     |
+| `detect_redim_preserve_in_loops`                | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA241` repeated `ReDim Preserve` analysis inside loops.                                                                         |
+| `detect_expensive_full_range_operations`        | bool     | no       | `false` | Opt in to `VBA242` full-row, full-column, full-sheet, and unbounded `UsedRange` operation analysis.                                                                        |
+| `detect_value2_performance_opportunities`       | bool     | no       | `false` | Opt in to `VBA243` suggestions to use `Range.Value2` for bulk or repeated transfers when Date/Currency coercion is not required.                                           |
+| `detect_procedure_call_cycles`                  | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA244` project-wide recursive and cyclic procedure dependency analysis.                                                         |
+| `detect_unsafe_http_configuration`              | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA246` HTTP transport-security analysis.                                                                                        |
+| `detect_missing_http_timeout`                   | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA247` HTTP timeout reliability analysis.                                                                                       |
+| `detect_opaque_boolean_arguments`               | bool     | no       | `false` | Opt in to `VBA248` warnings for opaque positional Boolean control arguments.                                                                                               |
+| `detect_deterministic_runtime_errors`           | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA249` diagnostics when constant, type, control-flow, and dataflow facts prove a runtime failure.                               |
+| `detect_unsafe_select_operations`               | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA250` warnings when `Worksheet.Select` or `Range.Select` lacks a proven active-state precondition.                             |
+| `detect_implicit_approximate_lookups`           | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA251` warnings when typed Excel `Match`, `VLookup`, or `HLookup` omits its match-mode argument.                                |
+| `detect_unavailable_worksheet_function_members` | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA252` warnings when a typed `Excel.WorksheetFunction` member is absent from the complete generated TypeLib member set.         |
+| `detect_implicit_default_member_access`         | bool     | no       | `false` | Opt in to `VBA253` warnings for known implicit, indexed, or recursive default-member access.                                                                               |
+| `detect_unbound_default_member_access`          | bool     | no       | `false` | Opt in to `VBA254` information/warning diagnostics for unbound, late-bound, or incomplete default-member access.                                                           |
+| `detect_bang_notation`                          | bool     | no       | `false` | Opt in to `VBA255` information/warning diagnostics for `receiver!name` bang notation.                                                                                      |
+| `detect_dead_stores`                            | bool     | no       | `false` | Opt in to `VBA256` warnings for overwritten or never-read local scalar assignments.                                                                                        |
+| `detect_unreachable_select_case`                | bool     | no       | `false` | Opt in to `VBA259` warnings for `Select Case` items or `Case Else` branches that earlier items make unreachable.                                                           |
+| `detect_unused_parameters`                      | bool     | no       | `false` | Opt in to `VBA265` warnings for unused parameters of private procedures.                                                                                                   |
+| `detect_unused_private_constants`               | bool     | no       | `false` | Opt in to `VBA266` warnings for unreferenced module-level `Private Const` declarations.                                                                                    |
+| `detect_unused_udt_members`                     | bool     | no       | `false` | Opt in to `VBA267` diagnostics for members of `Private Type` declarations that are never accessed through a resolvable member expression.                                  |
+| `detect_never_assigned_variables`               | bool     | no       | `false` | Opt in to `VBA268` warnings for local scalar variables that are read but never assigned.                                                                                   |
+| `detect_unassigned_variable_usage`              | bool     | no       | `false` | Opt in to `VBA269` warnings for local scalar variables read before any guaranteed assignment.                                                                              |
+| `detect_udf_cell_reference_names`               | bool     | no       | `false` | Opt in to `VBA270` warnings for worksheet-visible `Function` names that collide with valid A1 or R1C1 cell references.                                                     |
+| `detect_option_base_paramarray_inconsistency`   | bool     | no       | `false` | Opt in to `VBA271` warnings for `ParamArray` parameters that stay zero-based under `Option Base 1`.                                                                        |
+| `detect_option_base_array_inconsistency`        | bool     | no       | `false` | Opt in to `VBA272` warnings for qualified `VBA.Array(...)` calls that stay zero-based under `Option Base 1`.                                                               |
+| `detect_implicit_byref_parameters`              | bool     | no       | `false` | Opt in to `VBA273` information diagnostics for parameters that implicitly default to `ByRef`.                                                                              |
+| `detect_assigned_byval_parameters`              | bool     | no       | `false` | Opt in to `VBA274` warnings for reassigned parameters with effective `ByVal` semantics.                                                                                    |
+| `detect_byref_parameters_can_be_byval`          | bool     | no       | `false` | Opt in to `VBA275` information diagnostics for `ByRef` parameters proven not to replace caller arguments.                                                                  |
+| `detect_misleading_property_value_byref`        | bool     | no       | `true`  | Compatibility key for `VBA276` warnings for explicit `ByRef` on Property Let/Set final value parameters, which VBA passes `ByVal`; prefer `disabled_rules` to turn it off. |
+| `detect_redundant_byref_modifiers`              | bool     | no       | `false` | Opt in to `VBA277` information diagnostics for explicit `ByRef` that repeats VBA's default. Cannot be enabled with `detect_implicit_byref_parameters`.                     |
+| `detect_public_member_underscore_names`         | bool     | no       | `false` | Opt in to `VBA278` warnings for public object-module member names containing underscores.                                                                                  |
+| `detect_document_module_public_enum`            | bool     | no       | `false` | Opt in to `VBA279` warnings for non-Private `Enum` declarations inside document modules.                                                                                   |
+| `detect_write_only_property`                    | bool     | no       | `false` | Opt in to `VBA280` warnings for public-facing `Property Let`/`Set` members without a matching `Property Get`.                                                              |
+| `detect_public_interface_event_members`         | bool     | no       | `false` | Opt in to `VBA281` warnings for public members matching a verified implemented interface binding and explicitly `Public` event handlers.                                   |
+| `detect_predeclared_instance_access`            | bool     | no       | `false` | Opt in to `VBA282` warnings for self-name references inside modules with a predeclared default instance.                                                                   |
+| `detect_invalid_ismissing_usage`                | bool     | no       | `true`  | Compatibility key for `VBA283` warnings when `IsMissing` does not receive a direct Optional Variant parameter; prefer `disabled_rules` to turn it off.                     |
+| `development_http_origins`                      | string[] | no       | `[]`    | Exact plain-HTTP origins exempted only from `VBA246` plain-HTTP credential findings.                                                                                       |
 
 Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VBA205"]`. `detect_risky_module_state = true` is the opt-in compatibility key for `VBA240`; disable it with `disabled_rules = ["VBA240"]`. `detect_redim_preserve_in_loops = false` is the compatibility key for disabling `VBA241`; prefer `disabled_rules = ["VBA241"]`. `detect_expensive_full_range_operations = true` is the opt-in compatibility key for `VBA242`; prefer enabling it explicitly only for Excel projects and use `disabled_rules = ["VBA242"]` to suppress it under a project policy. `detect_value2_performance_opportunities = true` is the opt-in compatibility key for `VBA243`; prefer enabling it explicitly only for projects that want this performance signal and use `disabled_rules = ["VBA243"]` to suppress it under a project policy. `detect_procedure_call_cycles = false` is the compatibility key for disabling `VBA244`; prefer `disabled_rules = ["VBA244"]` so the policy is explicit. `detect_unsafe_http_configuration` and `detect_missing_http_timeout` are compatibility switches for `VBA246` and `VBA247`; prefer `disabled_rules` for policy suppression. `detect_opaque_boolean_arguments = true` is the opt-in compatibility key for `VBA248`; prefer enabling it only for projects that want this maintainability signal and use `disabled_rules = ["VBA248"]` for policy suppression. `detect_deterministic_runtime_errors = false` is the compatibility key for disabling `VBA249`; prefer `disabled_rules = ["VBA249"]` for policy suppression. `detect_unsafe_select_operations = false` is the compatibility key for disabling `VBA250`; prefer `disabled_rules = ["VBA250"]` for policy suppression.
 
@@ -349,6 +359,10 @@ Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` rema
 `detect_redundant_byref_modifiers` are opposing style policies. Configuration
 loading fails when both are enabled. `VBA274` through `VBA276` are independent
 semantic/API-design checks and can be combined with either style policy.
+
+`detect_invalid_ismissing_usage = false` is the compatibility key for
+disabling `VBA283`; prefer `disabled_rules = ["VBA283"]` for policy
+suppression.
 
 `development_http_origins` accepts only exact absolute origins of the form `http://host[:port]`. It rejects credentials, paths (including a trailing slash), queries, fragments, wildcards, and HTTPS values. Host names are case-normalized, IPv6 is canonicalized, and the default port `:80` is removed. The exemption applies only to `plain_http_credentials`; loopback origins are exempt without configuration.
 
