@@ -3,6 +3,7 @@ package analyze
 import (
 	"strings"
 
+	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
@@ -663,7 +664,7 @@ func propertyValueParameter(symbol procedureir.ProcedureSymbol, index int) bool 
 		index == len(symbol.Parameters)-1 && index >= 0
 }
 
-func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure, summaries map[string]parameterMutationSummary) []Finding {
+func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure, summaries map[string]parameterMutationSummary, addressOfNames map[string]bool) []Finding {
 	if proc.IR == nil || proc.IR.Symbol.Recovered || len(proc.IR.Symbol.ConditionalBranches) > 0 {
 		return nil
 	}
@@ -680,7 +681,7 @@ func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure
 		// declaration, so it can still be checked without a summary.
 		return nil
 	}
-	constrained := parameterPassingSignatureConstrained(file, proc)
+	constrained := parameterPassingSignatureConstrained(file, proc, addressOfNames)
 	var findings []Finding
 	for index, parameter := range proc.IR.Symbol.Parameters {
 		name := cleanIdentifier(parameter.Name)
@@ -736,7 +737,18 @@ func (a Analyzer) parameterFinding(file parsedFile, proc sourceProcedure, parame
 	return finding
 }
 
-func parameterPassingSignatureConstrained(file parsedFile, proc sourceProcedure) bool {
+// parameterPassingConstrainedRulesEnabled reports whether any
+// parameter-passing rule that suppresses findings for signature-constrained
+// procedures is enabled. The check gates the project-wide AddressOf index;
+// keep it aligned with the rules that consult constrained below.
+func parameterPassingConstrainedRulesEnabled(cfg config.AnalyzeConfig) bool {
+	return cfg.DetectImplicitByRefParameters ||
+		cfg.DetectByRefParametersCanBeByVal ||
+		cfg.DetectMisleadingPropertyValueByRef ||
+		cfg.DetectRedundantByRefModifiers
+}
+
+func parameterPassingSignatureConstrained(file parsedFile, proc sourceProcedure, projectAddressOfNames map[string]bool) bool {
 	if proc.IR == nil || proc.IR.Symbol.IsEventHandler || eventHandlerKind(file, proc) != "" {
 		return true
 	}
@@ -745,7 +757,7 @@ func parameterPassingSignatureConstrained(file parsedFile, proc sourceProcedure)
 		return true
 	}
 	name := strings.ToLower(cleanIdentifier(proc.IR.Symbol.Name))
-	if facts.addressOfNames[name] {
+	if facts.addressOfNames[name] || projectAddressOfNames[name] {
 		return true
 	}
 	for _, iface := range facts.implementsTargets {

@@ -432,12 +432,18 @@ type analysisContext struct {
 	arraySourceModuleTargetCache     map[arraySourceModuleTargetCacheKey]arraySourceModuleTargetCacheEntry
 	arraySourceModuleTargetCacheMu   *sync.RWMutex
 	// dynamicEntryNames is the project-wide set of identifier tokens found in
-	// string literals. VBA260 consults it so a private procedure named by
-	// Application.Run "Module.Proc" in another module still counts as a
-	// discoverable dynamic entry point.
-	dynamicEntryNames  map[string]bool
-	procedures         map[string]procedureSignature
-	parameterMutations map[string]parameterMutationSummary
+	// string literals and AddressOf targets. VBA265 consults it so a private
+	// procedure named by Application.Run "Module.Proc" or AddressOf in another
+	// module still counts as a discoverable dynamic entry point.
+	dynamicEntryNames map[string]bool
+	// addressOfEntryNames is the project-wide set of AddressOf target names.
+	// VBA resolves a bare AddressOf name across public procedures in every
+	// standard module, so the signature-constrained parameter-passing rules
+	// must consult the union of every file's targets rather than only the
+	// candidate file's own AddressOf calls.
+	addressOfEntryNames map[string]bool
+	procedures          map[string]procedureSignature
+	parameterMutations  map[string]parameterMutationSummary
 	// interfaceMembers indexes the public members of each class module in the
 	// analyzed file set so the class/interface hazard rules can verify
 	// <Interface>_<Member> bindings instead of trusting the name prefix alone.
@@ -2752,20 +2758,41 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		)
 		analysisCtx.projectResolver = projectResolver
 		analysisCtx.queryRevision = queryRevision
-		if cfg.Analyze.DetectUnusedParameters {
+		if cfg.Analyze.DetectUnusedParameters || parameterPassingConstrainedRulesEnabled(cfg.Analyze) {
 			// The context closure keeps only the type/call neighborhood, but a
-			// dynamic entry literal can live in any module. Scan the whole
-			// workspace snapshot so VBA260 stays conservative in realtime too.
+			// dynamic entry literal or an AddressOf callback reference can live
+			// in any module. Scan the whole workspace snapshot so VBA265 and
+			// the signature-constrained parameter rules stay conservative in
+			// realtime too.
 			names := analysisCtx.dynamicEntryNames
-			if names == nil {
-				names = make(map[string]bool)
-			}
+			addressOfNames := analysisCtx.addressOfEntryNames
 			for _, document := range projectDocuments {
-				forEachStringLiteral(document.Source, func(literal string) {
-					addStringLiteralNames(names, literal)
-				})
+				if cfg.Analyze.DetectUnusedParameters {
+					if names == nil {
+						names = make(map[string]bool)
+					}
+					forEachStringLiteral(document.Source, func(literal string) {
+						addStringLiteralNames(names, literal)
+					})
+				}
+				for name := range addressOfCallbackNames(normalizedSourceLines(document.Source)) {
+					if cfg.Analyze.DetectUnusedParameters {
+						names[name] = true
+					}
+					if parameterPassingConstrainedRulesEnabled(cfg.Analyze) {
+						if addressOfNames == nil {
+							addressOfNames = make(map[string]bool)
+						}
+						addressOfNames[name] = true
+					}
+				}
 			}
-			analysisCtx.dynamicEntryNames = names
+			if names != nil {
+				analysisCtx.dynamicEntryNames = names
+			}
+			if addressOfNames != nil {
+				analysisCtx.addressOfEntryNames = addressOfNames
+			}
 		}
 		// buildContext materializes the participant-restricted plan after the
 		// initial procedure projection above was copied. Rebind the realtime
@@ -3025,7 +3052,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		findings = append(findings, a.variableAssignmentFindings(file, proc, analysisCtx.procedures)...)
 	}
 	if plan.runsProjection(procedureProjectionParameterPassing) {
-		findings = append(findings, a.parameterPassingFindings(file, proc, analysisCtx.parameterMutations)...)
+		findings = append(findings, a.parameterPassingFindings(file, proc, analysisCtx.parameterMutations, analysisCtx.addressOfEntryNames)...)
 	}
 	if plan.runsProjection(procedureProjectionIsMissingUsage) {
 		findings = append(findings, a.invalidIsMissingUsageFindings(file, proc, analysisCtx.projectResolver)...)
@@ -3249,20 +3276,34 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		}
 	}
 	var dynamicEntryNames map[string]bool
-	if a.Config.Analyze.DetectUnusedParameters {
-		dynamicEntryNames = make(map[string]bool)
+	var addressOfEntryNames map[string]bool
+	if a.Config.Analyze.DetectUnusedParameters || parameterPassingConstrainedRulesEnabled(a.Config.Analyze) {
 		for i := range files {
 			facts := files[i].moduleAnalysisFacts().unusedDeclarationFacts(files[i].Lines)
-			for name := range facts.literalNames {
-				dynamicEntryNames[name] = true
+			if a.Config.Analyze.DetectUnusedParameters {
+				if dynamicEntryNames == nil {
+					dynamicEntryNames = make(map[string]bool)
+				}
+				for name := range facts.literalNames {
+					dynamicEntryNames[name] = true
+				}
+				for name := range facts.addressOfNames {
+					dynamicEntryNames[name] = true
+				}
 			}
-			for name := range facts.addressOfNames {
-				dynamicEntryNames[name] = true
+			if parameterPassingConstrainedRulesEnabled(a.Config.Analyze) {
+				if addressOfEntryNames == nil {
+					addressOfEntryNames = make(map[string]bool)
+				}
+				for name := range facts.addressOfNames {
+					addressOfEntryNames[name] = true
+				}
 			}
 		}
 	}
 	ctx := analysisContext{
 		dynamicEntryNames:                dynamicEntryNames,
+		addressOfEntryNames:              addressOfEntryNames,
 		functionReturns:                  map[string]string{},
 		functionReturnsQualified:         map[string]string{},
 		projectObjectTypes:               projectObjectTypes,
@@ -3790,7 +3831,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	}
 	if plan.runsProjection(procedureProjectionParameterPassing) {
 		parameterMeasurement := profile.begin(procedureDomainOther)
-		parameterFindings := a.parameterPassingFindings(file, proc, ctx.parameterMutations)
+		parameterFindings := a.parameterPassingFindings(file, proc, ctx.parameterMutations, ctx.addressOfEntryNames)
 		parameterMeasurement.finish(len(parameterFindings))
 		findings = append(findings, parameterFindings...)
 	}

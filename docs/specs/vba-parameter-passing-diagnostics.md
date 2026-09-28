@@ -93,7 +93,10 @@ makes the signature match its behavior. Index parameters before the final
 value parameter retain their ordinary passing semantics and are not reported
 under this rule. Event handlers and `Implements` members are excluded
 because the VBE enforces the interface signature, including the passing
-modifier, so the declaration is externally fixed.
+modifier, so the declaration is externally fixed. The implementation also
+consults `AddressOf` callback targets, but VBA cannot take the address of a
+`Property Let`/`Set`, so that exclusion is unreachable for this rule and is
+kept only to share the signature-constraint check.
 
 ### VBA277 — redundant explicit ByRef
 

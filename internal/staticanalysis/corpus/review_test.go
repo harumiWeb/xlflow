@@ -154,6 +154,9 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// TODO: tighten these floors back to exact totals once the opt-in review
+	// profile observations are classified; Unreviewed is intentionally
+	// unbounded while corpus:metrics tracks the parity-rule backlog.
 	if metrics.Reviewed < 10548 || metrics.TP < 7664 || metrics.FP < 2884 || metrics.Allowed != 90 {
 		t.Fatalf("committed review metrics = %#v, want Reviewed>=10548 TP>=7664 FP>=2884 Allowed=90", metrics)
 	}

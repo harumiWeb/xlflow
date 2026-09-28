@@ -127,3 +127,32 @@ Commands used for the isolated measurement:
 rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkDefaultVBA276Promotion$' -benchmem -benchtime=1x -count=3 -timeout=25m
 rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkDefaultVBA283Promotion$' -benchmem -benchtime=1x -count=3 -timeout=25m
 ```
+
+## Independent final review (pass 1) and remediation
+
+An independent Orca-supervised Codex worker reviewed the committed change
+read-only (verdict: approve-with-notes). One in-scope P2 was confirmed and
+fixed in the follow-up commit:
+
+- **P2 cross-module `AddressOf` signature constraint**: VBA resolves a bare
+  `AddressOf` target across public procedures in every standard module, but
+  `parameterPassingSignatureConstrained` only consulted the candidate
+  file's own `AddressOf` calls, so a callback declared in a dedicated
+  callbacks module still received VBA273/VBA275/VBA277 advice. The fix adds
+  a project-wide `addressOfEntryNames` set (populated only when a
+  signature-constrained parameter-passing rule is enabled), widened in the
+  realtime path from `projectDocuments` the same way `dynamicEntryNames` is,
+  plus a two-module regression test. VBA265 needs no change: its candidates
+  are `Private`-only, and `Private` procedures cannot be `AddressOf`
+  targets from another module.
+
+The P3 notes were also addressed: a TODO documents when the corpus metrics
+floors can be tightened back to exact totals, `detect_invalid_ismissing_usage`
+was added to the `[analyze]` config-key table, and stale comments plus the
+VBA276 spec exclusion note were corrected. The reviewer's two
+unsupported/follow-up observations (realtime private-name-collision parity
+for VBA265, and `Application.Run` string-literal names not constraining
+parameter-passing signatures) are pre-existing design boundaries, not
+defects introduced by this change; the realtime `addressOfEntryNames`
+widening now shares the VBA265 scan loop so parity bookkeeping stays
+symmetric.

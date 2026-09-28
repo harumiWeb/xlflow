@@ -85,6 +85,58 @@ End Sub
 	}
 }
 
+func TestParameterPassingSkipsCrossModuleAddressOfSignature(t *testing.T) {
+	// A bare AddressOf name resolves project-wide across public procedures in
+	// standard modules, so a callback declared in a dedicated callbacks module
+	// is signature-constrained even though the AddressOf call lives elsewhere.
+	modules := map[string]string{
+		"Main.bas": `Option Explicit
+Private Declare PtrSafe Function EnumWindows Lib "user32" (ByVal callback As LongPtr, ByVal lParam As LongPtr) As Long
+Public Sub Run()
+    EnumWindows AddressOf EnumProcImplicit, 0
+    EnumWindows AddressOf EnumProcExplicit, 0
+End Sub
+`,
+		"Callbacks.bas": `Option Explicit
+Public Function EnumProcImplicit(hwnd As LongPtr, lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProcImplicit = 1
+End Function
+Public Function EnumProcExplicit(ByRef hwnd As LongPtr, ByRef lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProcExplicit = 1
+End Function
+Public Function NonCallback(ByRef inputValue As Long) As Long
+    NonCallback = inputValue
+End Function
+`,
+	}
+	cfg := parameterPassingConfig()
+	cfg.Analyze.DetectImplicitByRefParameters = true
+	findings := runParameterPassingAnalysis(t, cfg, modules)
+	for _, code := range []string{"VBA273", "VBA275"} {
+		for _, finding := range findingsByCode(findings, code) {
+			if !strings.Contains(finding.Message, "inputValue") {
+				t.Fatalf("%s cross-module callback finding = %+v, want only NonCallback inputValue", code, finding)
+			}
+		}
+	}
+
+	redundant := parameterPassingConfig()
+	redundant.Analyze.DetectImplicitByRefParameters = false
+	redundant.Analyze.DetectRedundantByRefModifiers = true
+	redundantFindings := runParameterPassingAnalysis(t, redundant, modules)
+	for _, finding := range findingsByCode(redundantFindings, "VBA277") {
+		if !strings.Contains(finding.Message, "inputValue") {
+			t.Fatalf("VBA277 finding = %+v, want only NonCallback inputValue", finding)
+		}
+	}
+	got := findingsByCode(redundantFindings, "VBA275")
+	if len(got) != 1 || !strings.Contains(got[0].Message, "inputValue") {
+		t.Fatalf("VBA275 findings = %+v, want only NonCallback inputValue", got)
+	}
+}
+
 func TestParameterPassingPropagatesResolvedByRefWrites(t *testing.T) {
 	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
 Private Sub Mutate(ByRef value As Long)

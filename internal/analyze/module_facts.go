@@ -606,9 +606,10 @@ func (facts *moduleAnalysisFacts) unusedDeclarationFacts(lines []string) *unused
 	return facts.unusedDecl
 }
 
-// buildUnusedDeclFileFacts performs the three source scans VBA265 eligibility
-// needs for a whole file: WithEvents fields, Implements targets, and the
-// identifier tokens inside string literals.
+// buildUnusedDeclFileFacts performs the source scans signature-constraint
+// checks need for a whole file: WithEvents fields, Implements targets,
+// AddressOf callback targets, and the identifier tokens inside string
+// literals.
 func buildUnusedDeclFileFacts(lines []string) *unusedDeclFileFacts {
 	fields, complete := userFormWithEventsFieldNames(strings.Join(lines, "\n"))
 	facts := &unusedDeclFileFacts{
