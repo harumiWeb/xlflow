@@ -2,9 +2,9 @@
 
 Independent whole-branch review verdict: approve-with-notes. Remaining items:
 
-1. P3 corpus metrics invariant: review_test.go uses floors with no
-   unreviewed ceiling. Once the 9,231-item unreviewed backlog is triaged,
-   add a ceiling (or another invariant) so unintended growth is caught.
+1. DONE (PR #860 review round 4): review_test.go now bounds Unreviewed by
+   the committed backlog (<= 9231). Review-driven decreases still pass;
+   new snapshot findings fail until triaged or the ceiling is raised.
 2. Follow-up: addressOfEntryNames is a name-only project-wide set; a
    same-named non-callback procedure can be over-suppressed (bounded
    false negative, consistent with the suppression-only fail-open

@@ -155,10 +155,14 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 		t.Fatal(err)
 	}
 	// TODO: tighten these floors back to exact totals once the opt-in review
-	// profile observations are classified; Unreviewed is intentionally
-	// unbounded while corpus:metrics tracks the parity-rule backlog.
+	// profile observations are classified; Unreviewed is bounded by the
+	// committed parity-rule backlog so new snapshot findings fail this test
+	// until they are reviewed or the ceiling is consciously raised.
 	if metrics.Reviewed < 10548 || metrics.TP < 7664 || metrics.FP < 2884 || metrics.Allowed != 90 {
 		t.Fatalf("committed review metrics = %#v, want Reviewed>=10548 TP>=7664 FP>=2884 Allowed=90", metrics)
+	}
+	if metrics.Unreviewed > 9231 {
+		t.Fatalf("committed review metrics = %#v, want Unreviewed<=9231 (committed backlog)", metrics)
 	}
 	// New corpus observations are unreviewed until their exact source and full
 	// range have been checked. Snapshot changes must not force a TP judgment.
