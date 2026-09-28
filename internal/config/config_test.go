@@ -107,24 +107,31 @@ func TestErrorSuppressionPropagationDefaultsEnabled(t *testing.T) {
 	}
 }
 
-func TestInvalidIsMissingUsageIsOptInAndRoundTrips(t *testing.T) {
+func TestInvalidIsMissingUsageDefaultsOnAndDisabledRoundTrips(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
-	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA283"); !ok || enabled || cfg.Analyze.DetectInvalidIsMissingUsage {
-		t.Fatalf("VBA283 enabled = %v, known = %v, config = %v; want known and disabled", enabled, ok, cfg.Analyze.DetectInvalidIsMissingUsage)
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA283"); !ok || !enabled || !cfg.Analyze.DetectInvalidIsMissingUsage {
+		t.Fatalf("VBA283 enabled = %v, known = %v, config = %v; want known and enabled", enabled, ok, cfg.Analyze.DetectInvalidIsMissingUsage)
 	}
-	cfg.Analyze.DetectInvalidIsMissingUsage = true
+	cfg.Analyze.DetectInvalidIsMissingUsage = false
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)
 	if err := Write(path, cfg); err != nil {
 		t.Fatal(err)
 	}
+	text, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), `"VBA283"`) {
+		t.Fatalf("generated config should disable VBA283 through disabled_rules:\n%s", text)
+	}
 	loaded, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA283"); !ok || !enabled || !loaded.Analyze.DetectInvalidIsMissingUsage {
-		t.Fatalf("loaded VBA283 enabled = %v, known = %v, config = %v; want enabled", enabled, ok, loaded.Analyze.DetectInvalidIsMissingUsage)
+	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA283"); !ok || enabled || loaded.Analyze.DetectInvalidIsMissingUsage {
+		t.Fatalf("loaded VBA283 enabled = %v, known = %v, config = %v; want disabled", enabled, ok, loaded.Analyze.DetectInvalidIsMissingUsage)
 	}
 }
 
@@ -2384,6 +2391,54 @@ func TestWriteOmitsOptionalLintHintsForEnabledOptIns(t *testing.T) {
 	}
 }
 
+func TestWriteListsEveryOptInRuleHint(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Default()
+
+	p := filepath.Join(dir, FileName)
+	if err := Write(p, cfg); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	body, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, rule := range configurableLintRules {
+		if rule.ID == "VB044" {
+			// VB044 is enabled via [lint.procedure_name_constant], not a boolean key.
+			continue
+		}
+		hint := "# " + rule.Key + " = true # " + rule.ID
+		if rule.Default {
+			if strings.Contains(text, hint) {
+				t.Fatalf("generated config should not list default-on lint rule %s as an opt-in hint:\n%s", rule.ID, text)
+			}
+			continue
+		}
+		if !strings.Contains(text, hint) {
+			t.Fatalf("generated config missing opt-in lint hint %q:\n%s", hint, text)
+		}
+	}
+	for _, rule := range configurableAnalyzeRules {
+		hint := "# " + rule.Key + " = true # " + rule.ID
+		if rule.Default {
+			if strings.Contains(text, hint) {
+				t.Fatalf("generated config should not list default-on analyze rule %s as an opt-in hint:\n%s", rule.ID, text)
+			}
+			continue
+		}
+		if !strings.Contains(text, hint) {
+			t.Fatalf("generated config missing opt-in analyze hint %q:\n%s", hint, text)
+		}
+	}
+	if !strings.Contains(text, "express opposite policies for For Step clauses") {
+		t.Fatalf("generated config missing VB084/VB085 conflict note:\n%s", text)
+	}
+	if !strings.Contains(text, "express opposite ByRef style") {
+		t.Fatalf("generated config missing VBA273/VBA277 conflict note:\n%s", text)
+	}
+}
 func TestUpdateUserFormCodeSourcePreservesUnrelatedConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)

@@ -2,8 +2,8 @@
 
 <!-- xlflow-rule-contract: {"id":"VBA283","family":"analyze","category":"correctness","default_severity":"warning","scope":"procedure-local","realtime":true,"configuration_key":"detect_invalid_ismissing_usage","inline_suppressible":true,"preflight_blocking":false} -->
 
-`VBA283` is an opt-in, non-blocking warning available in batch analysis and
-realtime/LSP diagnostics. It is disabled by default and supports
+`VBA283` is a default-on, non-blocking warning available in batch analysis and
+realtime/LSP diagnostics. It supports
 `xlflow:disable-line` and `xlflow:disable-next-line` suppressions.
 
 ## Eligibility contract
@@ -35,11 +35,11 @@ runtime values or inspect callers.
 
 ## Configuration
 
-Enable the rule with:
+Disable the rule when needed with:
 
 ```toml
 [analyze]
-detect_invalid_ismissing_usage = true
+disabled_rules = ["VBA283"]
 ```
 
 The equivalent stable rule ID is `VBA283` in

@@ -205,6 +205,55 @@ End Sub
 	}
 }
 
+func TestUnusedParameterSkipsAddressOfCallback(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Private Declare PtrSafe Function EnumWindows Lib "user32" ( _
+    ByVal lpEnumFunc As LongPtr, _
+    ByVal lParam As LongPtr _
+) As Long
+Private Function EnumProc(ByVal hwnd As LongPtr, ByVal lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProc = 1
+End Function
+Public Sub Run()
+    EnumWindows AddressOf EnumProc, 0
+End Sub
+`})
+	got := findingsByCode(findings, "VBA265")
+	if len(got) != 0 {
+		t.Fatalf("VBA265 findings = %+v, want no removal advice for callback parameters", got)
+	}
+}
+
+func TestUnusedParameterSkipsAddressOfVTableCallback(t *testing.T) {
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+Private Function IEnumVARIANT_Skip(ByRef This As Long, ByVal celt As Long) As Long
+    IEnumVARIANT_Skip = -1
+End Function
+Private Sub Install()
+    Dim VTable(0) As Long
+    VTable(0) = FncPtr(AddressOf IEnumVARIANT_Skip)
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA265"); len(got) != 0 {
+		t.Fatalf("VBA265 vtable callback findings = %+v, want none", got)
+	}
+}
+
+func TestUnusedParameterAddressOfTextDoesNotConstrainSignature(t *testing.T) {
+	names := addressOfCallbackNames([]string{
+		`Debug.Print "AddressOf Helper"`,
+		`' AddressOf Helper`,
+		`Rem AddressOf Helper`,
+		`EnumWindows AddressOf EnumProc, 0`,
+		`EnumWindows AddressOf _`,
+		`    EnumProc, 0`,
+	})
+	if len(names) != 1 || !names["enumproc"] {
+		t.Fatalf("AddressOf target names = %v, want only enumproc", names)
+	}
+}
+
 func TestUnusedParameterMatchesCaseInsensitively(t *testing.T) {
 	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
 Private Sub Helper(ByVal Value As Long)

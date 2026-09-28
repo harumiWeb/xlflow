@@ -198,19 +198,34 @@ Profiles are selected in the corpus adapter, not in the shared static-analysis
 registry. `excel` keeps the normal rule set. `generic-vba` and `access` omit
 the Excel object-model rules `VB002`, `VB003`, `VB027`, `VBA104`, `VBA201`,
 `VBA203`, `VBA205`, `VBA211`, `VBA215`, `VBA216`, `VBA217`, `VBA218`, `VBA221`,
-`VBA225`, `VBA226`, `VBA238`, `VBA242`, and `VBA243` from corpus evidence. For these
+`VBA225`, `VBA226`, `VBA238`, `VBA242`, `VBA243`, `VBA251`, `VBA252`, `VBA260`,
+`VBA261`, and `VBA262` from corpus evidence. For these
 generic/access profiles, configurable rules are disabled in the generated
 project config; always-on `VBA104` and `VBA211` are
 filtered
 at normalization. This policy affects corpus evidence only and does not alter
 production analyzer semantics.
 
+Every generated third-party workspace also applies the corpus review
+evaluation profile (`corpusReviewRuleIDs` in
+`internal/staticanalysis/corpus/profile.go`): the listed opt-in rules are
+explicitly enabled in the generated `xlflow.toml` so real-world evidence
+covers the new VB067-VB092 lint family and the VBA253-VBA283 analyzer wave
+alongside previously reviewed opt-in rules. Rules the validator marks as
+mutually exclusive (`VB085`, `VBA277`), convention-configured rules
+(`VB044`), pre-existing opt-ins outside the reviewed family, and rules
+omitted by the project's host profile stay disabled. Native `self/*`
+projects keep their committed configurations and are not part of this
+evaluation profile. This is an evidence/testing policy; it does not change any
+production default.
+
 Excel-profile workspaces explicitly opt in to `VBA242`
 (`detect_expensive_full_range_operations`) and `VBA243`
 (`detect_value2_performance_opportunities`) so full-range and Value2
 performance evidence is captured in the Excel corpus. Generic VBA and Access
 profiles disable and exclude `VBA242` and `VBA243` because they do not
-establish Excel object-model identity.
+establish Excel object-model identity. `VBA261`, `VBA262`, and `VBA260` are
+Excel-host rules and receive the same treatment.
 
 ### Deterministic diagnostic snapshots
 

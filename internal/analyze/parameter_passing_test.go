@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,8 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/effects"
+	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/sourceproject"
 )
@@ -51,6 +54,202 @@ End Sub
 	canByVal := findingsByCode(findings, "VBA275")
 	if len(canByVal) != 1 || !strings.Contains(canByVal[0].Message, "inputValue") {
 		t.Fatalf("VBA275 findings = %+v", canByVal)
+	}
+}
+
+func TestParameterPassingSkipsAddressOfCallbackSignature(t *testing.T) {
+	cfg := parameterPassingConfig()
+	cfg.Analyze.DetectImplicitByRefParameters = true
+	findings := runParameterPassingAnalysis(t, cfg, map[string]string{"Main.bas": `Option Explicit
+Private Declare PtrSafe Function EnumWindows Lib "user32" (ByVal callback As LongPtr, ByVal lParam As LongPtr) As Long
+Private Function EnumProc(ByRef hwnd As LongPtr, ByRef lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProc = 1
+End Function
+Private Function EnumProcImplicit(hwnd As LongPtr, lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProcImplicit = 1
+End Function
+Private Function IEnumVARIANT_Skip(ByRef This As Long, ByVal celt As Long) As Long
+    IEnumVARIANT_Skip = -1
+End Function
+Public Sub Run()
+    EnumWindows AddressOf EnumProc, 0
+    EnumWindows AddressOf EnumProcImplicit, 0
+    Dim VTable(0) As LongPtr
+    VTable(0) = FncPtr(AddressOf IEnumVARIANT_Skip)
+End Sub
+`})
+	if got := findingsByCode(findings, "VBA275"); len(got) != 0 {
+		t.Fatalf("VBA275 callback signature findings = %+v, want none", got)
+	}
+	if got := findingsByCode(findings, "VBA273"); len(got) != 0 {
+		t.Fatalf("VBA273 callback signature findings = %+v, want none", got)
+	}
+}
+
+func TestParameterPassingSkipsCrossModuleAddressOfSignature(t *testing.T) {
+	// A bare AddressOf name resolves project-wide across public procedures in
+	// standard modules, so a callback declared in a dedicated callbacks module
+	// is signature-constrained even though the AddressOf call lives elsewhere.
+	modules := map[string]string{
+		"Main.bas": `Option Explicit
+Private Declare PtrSafe Function EnumWindows Lib "user32" (ByVal callback As LongPtr, ByVal lParam As LongPtr) As Long
+Public Sub Run()
+    EnumWindows AddressOf EnumProcImplicit, 0
+    EnumWindows AddressOf EnumProcExplicit, 0
+End Sub
+`,
+		"Callbacks.bas": `Option Explicit
+Public Function EnumProcImplicit(hwnd As LongPtr, lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProcImplicit = 1
+End Function
+Public Function EnumProcExplicit(ByRef hwnd As LongPtr, ByRef lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProcExplicit = 1
+End Function
+Public Function NonCallback(ByRef inputValue As Long) As Long
+    NonCallback = inputValue
+End Function
+`,
+	}
+	cfg := parameterPassingConfig()
+	cfg.Analyze.DetectImplicitByRefParameters = true
+	findings := runParameterPassingAnalysis(t, cfg, modules)
+	for _, code := range []string{"VBA273", "VBA275"} {
+		for _, finding := range findingsByCode(findings, code) {
+			if !strings.Contains(finding.Message, "inputValue") {
+				t.Fatalf("%s cross-module callback finding = %+v, want only NonCallback inputValue", code, finding)
+			}
+		}
+	}
+
+	redundant := parameterPassingConfig()
+	redundant.Analyze.DetectImplicitByRefParameters = false
+	redundant.Analyze.DetectRedundantByRefModifiers = true
+	redundantFindings := runParameterPassingAnalysis(t, redundant, modules)
+	for _, finding := range findingsByCode(redundantFindings, "VBA277") {
+		if !strings.Contains(finding.Message, "inputValue") {
+			t.Fatalf("VBA277 finding = %+v, want only NonCallback inputValue", finding)
+		}
+	}
+	got := findingsByCode(redundantFindings, "VBA275")
+	if len(got) != 1 || !strings.Contains(got[0].Message, "inputValue") {
+		t.Fatalf("VBA275 findings = %+v, want only NonCallback inputValue", got)
+	}
+}
+
+func TestParameterPassingAddressOfOnlyConstrainsStandardModule(t *testing.T) {
+	// AddressOf binds only to procedures in standard modules. A class member
+	// that shares a name with an AddressOf target is not signature-constrained
+	// by it, so VBA273 must still report its implicit ByRef parameters while
+	// the same-named standard-module callback stays suppressed.
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare PtrSafe Function EnumWindows Lib "user32" (ByVal callback As LongPtr, ByVal lParam As LongPtr) As Long
+Public Sub Run()
+    EnumWindows AddressOf SharedName, 0
+End Sub
+Public Function SharedName(hwnd As LongPtr, lParam As LongPtr) As Long
+    Debug.Print hwnd
+    SharedName = 1
+End Function
+`)
+	writeClass(t, dir, "Widget.cls", `Option Explicit
+Public Function SharedName(hwnd As LongPtr, lParam As LongPtr) As Long
+    Debug.Print hwnd
+    SharedName = 1
+End Function
+`)
+	cfg := parameterPassingConfig()
+	cfg.Analyze.DetectImplicitByRefParameters = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	classCount := 0
+	for _, finding := range findingsByCode(findings, "VBA273") {
+		if !strings.EqualFold(finding.Module, "Widget") {
+			t.Fatalf("VBA273 finding = %+v, want only class module member", finding)
+		}
+		classCount++
+	}
+	if classCount != 2 {
+		t.Fatalf("VBA273 class findings = %d, want 2 (hwnd and lParam on Widget.SharedName)", classCount)
+	}
+}
+
+func TestParameterPassingRealtimeSkipsCrossModuleAddressOfSignature(t *testing.T) {
+	// The realtime widening loop scans the whole projectDocuments snapshot,
+	// so an AddressOf target in a sibling module is signature-constrained
+	// even when the context closure does not include that module.
+	ctx := context.Background()
+	root := t.TempDir()
+	callbacksPath := filepath.Join(root, "src", "modules", "Callbacks.bas")
+	mainPath := filepath.Join(root, "src", "modules", "Main.bas")
+	callbacksSource := `Option Explicit
+Public Function EnumProc(hwnd As LongPtr, lParam As LongPtr) As Long
+    Debug.Print hwnd
+    EnumProc = 1
+End Function
+`
+	mainSource := `Option Explicit
+Private Declare PtrSafe Function EnumWindows Lib "user32" (ByVal callback As LongPtr, ByVal lParam As LongPtr) As Long
+Public Sub Run()
+    EnumWindows AddressOf EnumProc, 0
+End Sub
+`
+	type sourceDocument struct {
+		path   string
+		module string
+		source string
+	}
+	sources := []sourceDocument{
+		{path: callbacksPath, module: "Callbacks", source: callbacksSource},
+		{path: mainPath, module: "Main", source: mainSource},
+	}
+	documents := make([]intel.ProjectAnalysisDocument, 0, len(sources))
+	parsedDocuments := make([]*vbaast.ParsedDocument, 0, len(sources))
+	for _, source := range sources {
+		parsed, err := vbaast.ParseDocument(source.path, []byte(source.source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsedDocuments = append(parsedDocuments, parsed)
+		ir, err := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{
+			RootDir: root, Path: source.path, ModuleName: source.module, ModuleKind: "standard",
+		}, parsed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		controlFlow, err := vbacfg.BuildDocumentContext(ctx, ir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		documents = append(documents, intel.ProjectAnalysisDocument{IR: ir, CFG: controlFlow, Source: source.source})
+	}
+	defer func() {
+		for _, parsed := range parsedDocuments {
+			parsed.Close()
+		}
+	}()
+
+	cfg := parameterPassingConfig()
+	cfg.Analyze.DetectImplicitByRefParameters = true
+	current := documents[0]
+	findings, err := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentResolverProjectContext(
+		ctx, root, cfg, parsedDocuments[0], current.IR, current.CFG, nil,
+		effects.ProjectSummary{}, nil, nil, nil, documents,
+		intel.Document{Path: current.IR.Path, Source: current.Source, ModuleKind: "standard"}, 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VBA273", "VBA275"} {
+		if got := findingsByCode(findings, code); len(got) != 0 {
+			t.Fatalf("%s realtime cross-module callback findings = %+v, want none", code, got)
+		}
 	}
 }
 
@@ -676,10 +875,25 @@ Public Sub Run(ByVal copy As Long, implicitValue As Long, ByRef explicitValue As
     copy = 1
 End Sub
 `})
-	for _, code := range []string{"VBA273", "VBA274", "VBA275", "VBA276", "VBA277"} {
+	for _, code := range []string{"VBA273", "VBA274", "VBA275", "VBA277"} {
 		if got := findingsByCode(findings, code); len(got) != 0 {
 			t.Fatalf("default %s findings = %+v, want none", code, got)
 		}
+	}
+}
+
+func TestParameterPassingVBA276DefaultEnabledAndCanBeDisabled(t *testing.T) {
+	source := map[string]string{"Main.bas": `Option Explicit
+Public Property Let Value(ByRef item As Long)
+End Property
+`}
+	if got := findingsByCode(runParameterPassingAnalysis(t, config.Default(), source), "VBA276"); len(got) != 1 {
+		t.Fatalf("default VBA276 findings = %+v, want one", got)
+	}
+	cfg := config.Default()
+	cfg.Analyze.DetectMisleadingPropertyValueByRef = false
+	if got := findingsByCode(runParameterPassingAnalysis(t, cfg, source), "VBA276"); len(got) != 0 {
+		t.Fatalf("disabled VBA276 findings = %+v, want none", got)
 	}
 }
 

@@ -6,10 +6,11 @@
 <!-- xlflow-rule-contract: {"id":"VBA276","family":"analyze","category":"correctness","default_severity":"warning","scope":"procedure-local","realtime":true,"configuration_key":"detect_misleading_property_value_byref","inline_suppressible":true,"preflight_blocking":false} -->
 <!-- xlflow-rule-contract: {"id":"VBA277","family":"analyze","category":"maintainability","default_severity":"information","scope":"procedure-local","realtime":true,"configuration_key":"detect_redundant_byref_modifiers","inline_suppressible":true,"preflight_blocking":false} -->
 
-`VBA273` through `VBA277` are opt-in, non-blocking diagnostics available in
-batch analysis and realtime/LSP analysis. They are disabled by default and
-support the normal `xlflow:disable-line` and `xlflow:disable-next-line`
-suppression comments.
+`VBA276` is enabled by default. `VBA273`, `VBA274`, `VBA275`, and `VBA277`
+remain opt-in. All five are non-blocking diagnostics available in batch and
+realtime/LSP analysis and support the normal `xlflow:disable-line` and
+`xlflow:disable-next-line` suppression comments. Projects can disable
+`VBA276` through `[analyze].disabled_rules`.
 
 ## Rule contracts
 
@@ -18,8 +19,9 @@ suppression comments.
 Reports an ordinary parameter whose declaration omits `ByVal` or `ByRef`.
 VBA defaults that parameter to `ByRef`; the diagnostic asks projects that
 prefer explicit API contracts to write the intended modifier. Property
-Let/Set value parameters, event handlers, `Implements` members, and
-`ParamArray` parameters are excluded. `ParamArray` is excluded because VBA
+Let/Set value parameters, event handlers, `Implements` members,
+`AddressOf` callback targets, and `ParamArray` parameters are excluded.
+`ParamArray` is excluded because VBA
 rejects an explicit passing modifier on it, so the suggestion could not
 compile.
 
@@ -41,6 +43,8 @@ Reports an ordinary `ByRef` parameter when xlflow can prove that its binding
 is never replaced. Eligibility includes ordinary `Public`, `Friend`, and
 `Private` procedures, but excludes host event signatures, `Implements`
 members, Property Let/Set value parameters, arrays, and `ParamArray`.
+Procedures passed as `AddressOf` callbacks are excluded because their
+parameter declarations form an externally constrained signature.
 
 The proof starts with direct parameter writes and propagates through uniquely
 resolved project-local calls. Positional and named arguments are mapped to
@@ -89,13 +93,17 @@ makes the signature match its behavior. Index parameters before the final
 value parameter retain their ordinary passing semantics and are not reported
 under this rule. Event handlers and `Implements` members are excluded
 because the VBE enforces the interface signature, including the passing
-modifier, so the declaration is externally fixed.
+modifier, so the declaration is externally fixed. The implementation also
+consults `AddressOf` callback targets, but VBA cannot take the address of a
+`Property Let`/`Set`, so that exclusion is unreachable for this rule and is
+kept only to share the signature-constraint check.
 
 ### VBA277 — redundant explicit ByRef
 
 Reports explicit `ByRef` on ordinary parameters for projects that prefer the
-VBA default spelling. Property value parameters, event handlers, and
-`Implements` members are excluded. `ParamArray` parameters are excluded for
+VBA default spelling. Property value parameters, event handlers,
+`Implements` members, and `AddressOf` callback targets are excluded.
+`ParamArray` parameters are excluded for
 consistency with `VBA273`, although VBA already forbids an explicit modifier
 there.
 

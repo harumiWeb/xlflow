@@ -1,3 +1,4 @@
+{"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB088","severity":"information","line":24,"column":1}
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":114,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":154,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":194,"column":0}
@@ -5,5 +6,22 @@
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":262,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":333,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":406,"column":0}
+{"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"lint","code":"VB069","severity":"information","line":949,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"lint","code":"VB069","severity":"information","line":950,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"lint","code":"VB069","severity":"information","line":951,"column":5}
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"lint","code":"VB020","severity":"warning","line":1017,"column":9}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":67,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":107,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":149,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":174,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":225,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":277,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":278,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":417,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":468,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":497,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":536,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":633,"column":5}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":674,"column":5}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB020","severity":"warning","line":958,"column":9}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB089","severity":"information","line":970,"column":5}
