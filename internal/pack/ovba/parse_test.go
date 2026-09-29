@@ -31,7 +31,10 @@ func TestParseDirP1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	di := ParseDir(plain)
+	di, err := ParseDir(plain)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
 	if di.CodePage != 932 {
 		t.Errorf("CodePage = %d, want 932", di.CodePage)
 	}
@@ -48,6 +51,22 @@ func TestParseDirP1(t *testing.T) {
 			t.Errorf("module %s offset = %d, want %d", k, got[k], v)
 		}
 	}
+	for _, m := range di.Modules {
+		if m.StreamName != m.Name {
+			t.Errorf("module %s stream name = %q", m.Name, m.StreamName)
+		}
+		if m.HelpContext != 0 || m.ReadOnly {
+			t.Errorf("module %s unexpected metadata: help=%d readOnly=%v", m.Name, m.HelpContext, m.ReadOnly)
+		}
+	}
+	for _, m := range di.Modules {
+		if m.Name == "Class1" && !m.Private {
+			t.Error("Class1 should carry MODULEPRIVATE")
+		}
+		if m.Name == "Module1" && m.Private {
+			t.Error("Module1 must not be private")
+		}
+	}
 	if len(di.RefNames) != 2 { // stdole/Office
 		t.Errorf("RefNames = %v, want [stdole Office]", di.RefNames)
 	}
@@ -59,7 +78,11 @@ func TestParseDirReferences(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return ParseDir(plain)
+		di, err := ParseDir(plain)
+		if err != nil {
+			t.Fatalf("ParseDir(%s): %v", book, err)
+		}
+		return di
 	}
 	// p4_form: duplicate names from nested REFERENCECONTROL must not inflate the count (I1 regression)
 	if got := read("p4_form").RefNames; !eqStrings(got, []string{"stdole", "Office", "MSForms"}) {
@@ -96,7 +119,10 @@ func TestParseProjectText(t *testing.T) {
 		"BaseClass=UserForm1\r\n" +
 		"Name=\"VBAProject\"\r\n" +
 		"CMG=\"0C0E\"\r\nDPB=\"5D5F\"\r\nGC=\"AEAC\"\r\n"
-	pt := ParseProjectText([]byte(sample))
+	pt, err := ParseProjectText([]byte(sample), 1252)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if pt.ID != "{ABC}" || pt.Name != "VBAProject" {
 		t.Errorf("ID/Name = %q/%q", pt.ID, pt.Name)
 	}
@@ -117,7 +143,10 @@ func TestParseDirProjectInfoRaw(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	di := ParseDir(plain)
+	di, err := ParseDir(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(di.ProjectInfoRaw) == 0 {
 		t.Fatal("ProjectInfoRaw is empty")
 	}

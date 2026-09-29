@@ -9,7 +9,7 @@ import (
 // a file) into the in-bin form that Excel keeps in the module stream (Module.Source).
 // It is a pure string-to-string transform, independent of encoding: disk form
 // is UTF-8, and the conversion to the in-bin MBCS encoding is handled by
-// encodeMBCS in Write.
+// ovba.EncodeMBCS in Write.
 //
 // existing is required only for document modules (it supplies the Attribute
 // header of the existing in-bin module). It may be nil for std/class modules.

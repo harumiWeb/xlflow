@@ -21,7 +21,7 @@ func TestRebuildProjectTextChangesOnlySourceOwnedComponents(t *testing.T) {
 		{Kind: "Module", Name: "NewModule"},
 	}
 
-	got, err := RebuildProjectText(raw, specs)
+	got, err := RebuildProjectText(raw, specs, 1252)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestRebuildProjectTextLeavesUnchangedProjectByteExact(t *testing.T) {
 	got, err := RebuildProjectText(raw, []ProjectComponentSpec{
 		{Kind: "Document", Name: "Sheet1"},
 		{Kind: "Module", Name: "Module1"},
-	})
+	}, 1252)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestRebuildProjectTextRejectsTemplateOwnedTopologyChanges(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := RebuildProjectText(raw, tc.specs)
+			_, err := RebuildProjectText(raw, tc.specs, 1252)
 			if err == nil || !strings.Contains(err.Error(), "template-owned") {
 				t.Fatalf("error = %v, want template-owned topology error", err)
 			}
@@ -73,7 +73,7 @@ func TestRebuildProjectTextRejectsTemplateOwnedTopologyChanges(t *testing.T) {
 
 func TestRebuildProjectTextReportsTemplateOwnedRemovalInDeclarationOrder(t *testing.T) {
 	raw := []byte("Document=Sheet2/&H00000000\r\nDocument=Sheet1/&H00000000\r\n")
-	_, err := RebuildProjectText(raw, nil)
+	_, err := RebuildProjectText(raw, nil, 1252)
 	want := "template-owned PROJECT component Document=Sheet2 cannot be added, removed, or renamed"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v, want %q", err, want)
@@ -86,7 +86,7 @@ func TestRebuildProjectTextReportsTemplateOwnedAdditionInSpecOrder(t *testing.T)
 		{Kind: "Document", Name: "Sheet1"},
 		{Kind: "BaseClass", Name: "UserForm2"},
 		{Kind: "BaseClass", Name: "UserForm1"},
-	})
+	}, 1252)
 	want := "template-owned PROJECT component BaseClass=UserForm2 is not present in the template"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v, want %q", err, want)
@@ -97,14 +97,14 @@ func TestRebuildProjectTextRejectsCaseInsensitiveDuplicates(t *testing.T) {
 	_, err := RebuildProjectText([]byte("Module=Module1\r\n"), []ProjectComponentSpec{
 		{Kind: "Module", Name: "Module1"},
 		{Kind: "Class", Name: "module1"},
-	})
+	}, 1252)
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("error = %v, want duplicate component error", err)
 	}
 }
 
 func TestRebuildProjectTextReplacesFinalDeclarationWithoutLeadingBlankLine(t *testing.T) {
-	got, err := RebuildProjectText([]byte("Module=Old"), []ProjectComponentSpec{{Kind: "Module", Name: "New"}})
+	got, err := RebuildProjectText([]byte("Module=Old"), []ProjectComponentSpec{{Kind: "Module", Name: "New"}}, 1252)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,6 +3,7 @@ package vbaproject
 import (
 	"fmt"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/ovba"
@@ -26,10 +27,7 @@ func Write(p *Project) ([]byte, error) {
 		// in-bin source is an Attribute header plus code, the same shape as a class
 		// or document module). The form's designer storage (UserForm1/...) is not
 		// modeled here; it is carried verbatim via RawStreams (see Read).
-		// Module/stream names are assumed to be within ASCII. Only ASCII can be written losslessly to both
-		// the dir MBCS field (CODEPAGE written directly) and the UNICODE field (utf16le); for non-ASCII,
-		// utf16le would truncate non-BMP characters and MBCS would ignore the CODEPAGE, so it is rejected.
-		if err := ValidateWritableComponentIdentity(m.Name, m.StreamName); err != nil {
+		if err := ValidateWritableComponentIdentity(m.Name, m.StreamName, p.Props.CodePage); err != nil {
 			return nil, err
 		}
 		nameKey := strings.ToLower(m.Name)
@@ -47,11 +45,18 @@ func Write(p *Project) ([]byte, error) {
 			return nil, fmt.Errorf("vbaproject: module %q has an unknown ModuleType %d", m.Name, m.Type)
 		}
 		specs = append(specs, ovba.ModuleSpec{
-			Name: m.Name, StreamName: m.StreamName, TypeID: moduleTypeID(m.Type),
+			Name:        m.Name,
+			StreamName:  m.StreamName,
+			TypeID:      moduleTypeID(m.Type),
+			DocString:   m.DocString,
+			HelpContext: m.HelpContext,
+			ReadOnly:    m.ReadOnly,
+			Private:     m.Private,
+			Extra:       m.Extra,
 		})
 		projectSpecs = append(projectSpecs, ovba.ProjectComponentSpec{Kind: kind, Name: m.Name})
 	}
-	projectStream, err := ovba.RebuildProjectText(p.ProjectStreamRaw, projectSpecs)
+	projectStream, err := ovba.RebuildProjectText(p.ProjectStreamRaw, projectSpecs, p.Props.CodePage)
 	if err != nil {
 		return nil, fmt.Errorf("vbaproject: rebuild PROJECT stream: %w", err)
 	}
@@ -60,7 +65,11 @@ func Write(p *Project) ([]byte, error) {
 	dirPlain := make([]byte, 0, len(p.ProjectInfoRaw)+len(p.ReferencesRaw)+256)
 	dirPlain = append(dirPlain, p.ProjectInfoRaw...)
 	dirPlain = append(dirPlain, p.ReferencesRaw...)
-	dirPlain = append(dirPlain, ovba.BuildProjectModules(specs)...)
+	projectModules, err := ovba.BuildProjectModules(specs, p.Props.CodePage)
+	if err != nil {
+		return nil, fmt.Errorf("vbaproject: %w", err)
+	}
+	dirPlain = append(dirPlain, projectModules...)
 
 	w := cfb.NewWriter()
 	// Pass through every stream the writer does not own (root-level designer
@@ -78,7 +87,7 @@ func Write(p *Project) ([]byte, error) {
 	}
 	w.AddStream([]string{"VBA", "dir"}, dirComp)
 	for _, m := range p.Modules {
-		enc, err := encodeMBCS(m.Source, p.Props.CodePage)
+		enc, err := ovba.EncodeMBCS(m.Source, p.Props.CodePage)
 		if err != nil {
 			return nil, fmt.Errorf("vbaproject: module %q: %w", m.Name, err)
 		}
@@ -92,13 +101,25 @@ func Write(p *Project) ([]byte, error) {
 }
 
 // ValidateWritableComponentIdentity checks the name/stream-name restrictions
-// imposed by the current vbaProject.bin writer without mutating a project.
-func ValidateWritableComponentIdentity(name, streamName string) error {
-	if !isASCII(name) || !isASCII(streamName) {
-		return fmt.Errorf("vbaproject: non-ASCII module names are not supported in v1 (Name=%q StreamName=%q)", name, streamName)
-	}
+// imposed by the vbaProject.bin writer without mutating a project. Both names
+// must be representable in the project code page (the dir stream stores them
+// twice: MBCS and UTF-16), must not contain characters that corrupt the
+// textual PROJECT stream, and the stream name must fit the CFB directory
+// entry limit of 31 UTF-16 code units.
+func ValidateWritableComponentIdentity(name, streamName string, codepage uint16) error {
 	if name == "" || streamName == "" {
 		return fmt.Errorf("vbaproject: module and stream names must not be empty")
+	}
+	for _, field := range []struct{ label, value string }{{"module", name}, {"stream", streamName}} {
+		if strings.ContainsAny(field.value, "\x00\r\n") {
+			return fmt.Errorf("vbaproject: %s name %q contains a NUL or newline", field.label, field.value)
+		}
+		if _, err := ovba.EncodeMBCS(field.value, codepage); err != nil {
+			return fmt.Errorf("vbaproject: %s name %q cannot be represented in project codepage %d: %w", field.label, field.value, codepage, err)
+		}
+	}
+	if n := len(utf16.Encode([]rune(streamName))); n > 31 {
+		return fmt.Errorf("vbaproject: stream name %q needs %d UTF-16 code units (max 31 for CFB)", streamName, n)
 	}
 	return nil
 }
@@ -110,16 +131,6 @@ func moduleTypeID(t ModuleType) uint16 {
 		return 0x0021
 	}
 	return 0x0022
-}
-
-// isASCII reports whether s is entirely ASCII (0x00-0x7F).
-func isASCII(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] >= 0x80 {
-			return false
-		}
-	}
-	return true
 }
 
 // projectKind maps a ModuleType to the kind keyword PROJECT uses

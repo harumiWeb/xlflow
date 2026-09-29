@@ -54,7 +54,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 	}
 	templateByName := make(map[string]vbaproject.Module, len(project.Modules))
 	for _, module := range project.Modules {
-		if err := vbaproject.ValidateWritableComponentIdentity(module.Name, module.StreamName); err != nil {
+		if err := vbaproject.ValidateWritableComponentIdentity(module.Name, module.StreamName, project.Props.CodePage); err != nil {
 			return PackPlan{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 		}
 		key := strings.ToLower(module.Name)
@@ -70,7 +70,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 		if !sourceinventory.ValidComponentName(source.Name) {
 			return PackPlan{}, fmt.Errorf("%w: invalid VBA component name %q", ErrAmbiguousLayout, source.Name)
 		}
-		if err := vbaproject.ValidateWritableComponentIdentity(source.Name, source.Name); err != nil {
+		if err := vbaproject.ValidateWritableComponentIdentity(source.Name, source.Name, project.Props.CodePage); err != nil {
 			return PackPlan{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 		}
 		if _, err := toProjectModuleType(source.Type); err != nil {
