@@ -11,6 +11,7 @@ import (
 // Writer assembles the streams registered via AddStream into a single CFB file.
 type Writer struct {
 	streams []streamSpec
+	format  Format
 }
 
 type streamSpec struct {
@@ -18,8 +19,16 @@ type streamSpec struct {
 	data []byte
 }
 
-// NewWriter returns an empty Writer.
-func NewWriter() *Writer { return &Writer{} }
+// NewWriter returns an empty v3 Writer.
+func NewWriter() *Writer { return &Writer{format: FormatV3} }
+
+// NewWriterForFormat returns an empty Writer for the requested CFB version.
+func NewWriterForFormat(format Format) (*Writer, error) {
+	if _, err := geometryFor(format); err != nil {
+		return nil, err
+	}
+	return &Writer{format: format}, nil
+}
 
 // AddStream registers a stream. The last path element becomes the stream name
 // and the intermediate elements become storages. Multiple streams that share
@@ -44,7 +53,7 @@ type node struct {
 	left, right uint32 // sibling red-black tree links (all black)
 	child       uint32 // root of the child-element tree
 	startSector uint32
-	size        uint32
+	size        uint64
 }
 
 func newNode(name string, objType byte) *node {
@@ -64,7 +73,11 @@ func (w *Writer) Bytes() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return assemble(root, all)
+	format := w.format
+	if format == 0 {
+		format = FormatV3
+	}
+	return assemble(root, all, format)
 }
 
 // buildTree constructs the directory tree from the AddStream calls, assigns ids,
@@ -200,10 +213,12 @@ func DirectoryNameKey(name string) string {
 	return string(key)
 }
 
-func ceilDiv(a, b int) int { return (a + b - 1) / b }
-
 // assemble lays out the sectors in two passes and builds the CFB byte stream.
-func assemble(root *node, all []*node) ([]byte, error) {
+func assemble(root *node, all []*node, format Format) ([]byte, error) {
+	g, err := geometryFor(format)
+	if err != nil {
+		return nil, err
+	}
 	// --- Pass 1: decide the layout ---
 	// regular streams (>=cutoff) -> mini stream container -> mini FAT -> directory -> FAT.
 	var large, mini []*node
@@ -218,28 +233,51 @@ func assemble(root *node, all []*node) ([]byte, error) {
 		}
 	}
 
-	sector := uint32(0)
+	sector := uint64(0)
+	reserve := func(count uint64, label string) (uint32, error) {
+		if count > uint64(^uint32(0))-sector || sector > uint64(^uint32(0)) {
+			return 0, fmt.Errorf("cfb: %s exceeds the sector-number limit", label)
+		}
+		start := uint32(sector)
+		sector += count
+		return start, nil
+	}
 
-	// Regular streams: stored directly in 512B sectors.
+	// Regular streams: stored directly in sectors.
 	for _, n := range large {
-		n.startSector = sector
-		n.size = uint32(len(n.data))
-		sector += uint32(ceilDiv(len(n.data), sectorSize))
+		count := ceilDiv64(uint64(len(n.data)), uint64(g.sectorSize))
+		start, err := reserve(count, "regular stream")
+		if err != nil {
+			return nil, err
+		}
+		n.startSector = start
+		n.size = uint64(len(n.data))
 	}
 
 	// Build the mini stream container and mini FAT.
 	var miniStream []byte
 	var miniFat []uint32
 	for _, n := range mini {
-		n.size = uint32(len(n.data))
+		n.size = uint64(len(n.data))
 		if len(n.data) == 0 {
 			n.startSector = endOfChain
 			continue
 		}
+		nMini64 := ceilDiv64(uint64(len(n.data)), miniSectorSize)
+		if uint64(len(miniFat)) > uint64(^uint32(0)) || nMini64 > uint64(^uint32(0))-uint64(len(miniFat)) {
+			return nil, fmt.Errorf("cfb: mini stream exceeds the mini-sector-number limit")
+		}
+		nMini, err := checkedInt(nMini64, "mini stream sector count")
+		if err != nil {
+			return nil, err
+		}
+		chunkSize, err := checkedInt(nMini64*miniSectorSize, "mini stream padded size")
+		if err != nil {
+			return nil, err
+		}
 		start := uint32(len(miniFat)) // mini sector number
 		n.startSector = start
-		nMini := ceilDiv(len(n.data), miniSectorSize)
-		chunk := make([]byte, nMini*miniSectorSize) // zero-pad to the 64B boundary
+		chunk := make([]byte, chunkSize) // zero-pad to the 64B boundary
 		copy(chunk, n.data)
 		miniStream = append(miniStream, chunk...)
 		for j := 0; j < nMini; j++ {
@@ -253,75 +291,108 @@ func assemble(root *node, all []*node) ([]byte, error) {
 
 	// Mini stream container (regular sectors, 512B boundary).
 	containerStart := uint32(endOfChain)
-	var containerSectors uint32
+	var containerSectors uint64
 	if len(miniStream) > 0 {
-		containerStart = sector
-		containerSectors = uint32(ceilDiv(len(miniStream), sectorSize))
-		sector += containerSectors
+		containerSectors = ceilDiv64(uint64(len(miniStream)), uint64(g.sectorSize))
+		var err error
+		containerStart, err = reserve(containerSectors, "mini stream container")
+		if err != nil {
+			return nil, err
+		}
 	}
 	root.startSector = containerStart
-	root.size = uint32(len(miniStream))
+	root.size = uint64(len(miniStream))
 
 	// Mini FAT (regular sectors).
 	miniFatStart := uint32(endOfChain)
-	var miniFatSectors uint32
+	var miniFatSectors uint64
 	if len(miniFat) > 0 {
-		miniFatStart = sector
-		miniFatSectors = uint32(ceilDiv(len(miniFat)*4, sectorSize))
-		sector += miniFatSectors
+		miniFatSectors = ceilDiv64(uint64(len(miniFat))*4, uint64(g.sectorSize))
+		var err error
+		miniFatStart, err = reserve(miniFatSectors, "mini-FAT")
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Directory (regular sectors, 4 entries/sector).
-	dirSectors := uint32(ceilDiv(len(all), entriesPerDirSector))
-	dirStart := sector
-	sector += dirSectors
+	// Directory.
+	dirSectors := ceilDiv64(uint64(len(all)), uint64(g.entriesPerDirSector))
+	dirStart, err := reserve(dirSectors, "directory")
+	if err != nil {
+		return nil, err
+	}
 
-	// --- Converge on the number of FAT sectors ---
-	// The minimum number of sectors (at 128 entries/sector) able to describe the total sector count, FAT included.
-	nonFat := sector
-	fatSectors := uint32(1)
-	for uint32(entriesPerFatSector)*fatSectors < nonFat+fatSectors {
-		fatSectors++
+	// --- Converge on FAT and DIFAT sector counts. ---
+	nonAllocation := sector
+	fatSectors, difatSectors := uint64(1), uint64(0)
+	for {
+		total := nonAllocation + fatSectors + difatSectors
+		nextFat := ceilDiv64(total, uint64(g.entriesPerFatSector))
+		nextDifat := uint64(0)
+		if nextFat > difatHeaderLen {
+			nextDifat = ceilDiv64(nextFat-difatHeaderLen, uint64(g.entriesPerDifatSector))
+		}
+		if nextFat == fatSectors && nextDifat == difatSectors {
+			break
+		}
+		fatSectors, difatSectors = nextFat, nextDifat
 	}
-	if fatSectors > difatHeaderLen {
-		return nil, fmt.Errorf("cfb: FAT needs %d sectors, which exceeds the 109 DIFAT header entries (outside the minimal profile)", fatSectors)
+	fatStart, err := reserve(fatSectors, "FAT")
+	if err != nil {
+		return nil, err
 	}
-	fatStart := sector
-	sector += fatSectors
+	difatStart := uint32(endOfChain)
+	if difatSectors > 0 {
+		difatStart, err = reserve(difatSectors, "DIFAT")
+		if err != nil {
+			return nil, err
+		}
+	}
 	totalSectors := sector
 
 	// --- Pass 2: fill the FAT array ---
-	fat := make([]uint32, fatSectors*uint32(entriesPerFatSector))
+	fatEntries, err := checkedInt(fatSectors*uint64(g.entriesPerFatSector), "writer FAT entry count")
+	if err != nil {
+		return nil, err
+	}
+	fat := make([]uint32, fatEntries)
 	for i := range fat {
 		fat[i] = freeSect
 	}
 	for _, n := range large {
-		chainRun(fat, n.startSector, uint32(ceilDiv(len(n.data), sectorSize)))
+		chainRun(fat, n.startSector, uint32(ceilDiv64(uint64(len(n.data)), uint64(g.sectorSize))))
 	}
 	if containerSectors > 0 {
-		chainRun(fat, containerStart, containerSectors)
+		chainRun(fat, containerStart, uint32(containerSectors))
 	}
 	if miniFatSectors > 0 {
-		chainRun(fat, miniFatStart, miniFatSectors)
+		chainRun(fat, miniFatStart, uint32(miniFatSectors))
 	}
-	chainRun(fat, dirStart, dirSectors)
-	for i := uint32(0); i < fatSectors; i++ {
+	chainRun(fat, dirStart, uint32(dirSectors))
+	for i := uint32(0); i < uint32(fatSectors); i++ {
 		fat[fatStart+i] = fatSect
+	}
+	for i := uint32(0); i < uint32(difatSectors); i++ {
+		fat[difatStart+i] = difSect
 	}
 
 	// Pad the mini FAT array with FREESECT up to the 512B (128-entry) boundary.
-	miniFatPadded := make([]uint32, miniFatSectors*uint32(entriesPerFatSector))
+	miniFatPadded := make([]uint32, int(miniFatSectors)*g.entriesPerFatSector)
 	for i := range miniFatPadded {
 		miniFatPadded[i] = freeSect
 	}
 	copy(miniFatPadded, miniFat)
 
 	// --- Assemble the byte stream ---
-	buf := make([]byte, headerSize+int(totalSectors)*sectorSize)
-	off := func(s uint32) int { return headerSize + int(s)*sectorSize }
+	outputSize, err := checkedInt(uint64(g.headerSpan)+totalSectors*uint64(g.sectorSize), "output size")
+	if err != nil {
+		return nil, err
+	}
+	buf := make([]byte, outputSize)
+	off := func(s uint32) int { return g.headerSpan + int(s)*g.sectorSize }
 
 	// Header.
-	writeHeader(buf, fatSectors, dirStart, miniFatStart, miniFatSectors, fatStart)
+	writeHeader(buf, g, uint32(fatSectors), dirStart, uint32(dirSectors), miniFatStart, uint32(miniFatSectors), fatStart, difatStart, uint32(difatSectors))
 
 	// Regular stream bodies.
 	for _, n := range large {
@@ -336,10 +407,28 @@ func assemble(root *node, all []*node) ([]byte, error) {
 		binary.LittleEndian.PutUint32(buf[off(miniFatStart)+i*4:], v)
 	}
 	// Directory.
-	writeDirectory(buf[off(dirStart):], all, dirSectors)
+	writeDirectory(buf[off(dirStart):], all, uint32(dirSectors), g.entriesPerDirSector)
 	// FAT.
 	for i, v := range fat {
 		binary.LittleEndian.PutUint32(buf[off(fatStart)+i*4:], v)
+	}
+	// DIFAT sectors contain FAT sector numbers beyond the 109 header entries.
+	remainingFat := int(fatSectors) - difatHeaderLen
+	for i := range int(difatSectors) {
+		base := off(difatStart + uint32(i))
+		for j := range g.entriesPerDifatSector {
+			v := uint32(freeSect)
+			index := i*g.entriesPerDifatSector + j
+			if index < remainingFat {
+				v = fatStart + uint32(difatHeaderLen+index)
+			}
+			binary.LittleEndian.PutUint32(buf[base+j*4:], v)
+		}
+		next := uint32(endOfChain)
+		if i+1 < int(difatSectors) {
+			next = difatStart + uint32(i+1)
+		}
+		binary.LittleEndian.PutUint32(buf[base+g.entriesPerDifatSector*4:], next)
 	}
 
 	return buf, nil
@@ -357,24 +446,26 @@ func chainRun(fat []uint32, start, count uint32) {
 }
 
 // writeHeader writes the 512B header at the start of buf.
-func writeHeader(buf []byte, fatSectors, dirStart, miniFatStart, miniFatSectors, fatStart uint32) {
+func writeHeader(buf []byte, g geometry, fatSectors, dirStart, dirSectors, miniFatStart, miniFatSectors, fatStart, difatStart, difatSectors uint32) {
 	copy(buf[0:8], []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1})
 	// CLSID(8..24) zero
 	binary.LittleEndian.PutUint16(buf[24:], minorVersion)
-	binary.LittleEndian.PutUint16(buf[26:], majorVersion)
+	binary.LittleEndian.PutUint16(buf[26:], uint16(g.format))
 	binary.LittleEndian.PutUint16(buf[28:], byteOrderMark)
-	binary.LittleEndian.PutUint16(buf[30:], sectorShift)
+	binary.LittleEndian.PutUint16(buf[30:], g.sectorShift)
 	binary.LittleEndian.PutUint16(buf[32:], miniSectorShift)
 	// reserved(34..40) zero
-	binary.LittleEndian.PutUint32(buf[40:], 0) // numDirSectors (0 in v3)
+	if g.format == FormatV4 {
+		binary.LittleEndian.PutUint32(buf[40:], dirSectors)
+	}
 	binary.LittleEndian.PutUint32(buf[44:], fatSectors)
 	binary.LittleEndian.PutUint32(buf[48:], dirStart)
 	binary.LittleEndian.PutUint32(buf[52:], 0) // transactionSignature
 	binary.LittleEndian.PutUint32(buf[56:], cutoff)
 	binary.LittleEndian.PutUint32(buf[60:], miniFatStart)
 	binary.LittleEndian.PutUint32(buf[64:], miniFatSectors)
-	binary.LittleEndian.PutUint32(buf[68:], endOfChain) // firstDifatSectorLocation
-	binary.LittleEndian.PutUint32(buf[72:], 0)          // numDifatSectors
+	binary.LittleEndian.PutUint32(buf[68:], difatStart)
+	binary.LittleEndian.PutUint32(buf[72:], difatSectors)
 
 	// DIFAT array (76..512, 109 entries). FAT sector numbers first, the rest FREESECT.
 	for i := 0; i < difatHeaderLen; i++ {
@@ -388,8 +479,8 @@ func writeHeader(buf []byte, fatSectors, dirStart, miniFatStart, miniFatSectors,
 
 // writeDirectory writes the 128B entry array into dst (the start of the directory region).
 // Leftover entries are filled as unused (objType=0, sibling/child=NOSTREAM).
-func writeDirectory(dst []byte, all []*node, dirSectors uint32) {
-	totalEntries := int(dirSectors) * entriesPerDirSector
+func writeDirectory(dst []byte, all []*node, dirSectors uint32, entriesPerSector int) {
+	totalEntries := int(dirSectors) * entriesPerSector
 	for i := 0; i < totalEntries; i++ {
 		e := dst[i*dirEntrySize : (i+1)*dirEntrySize]
 		if i < len(all) {

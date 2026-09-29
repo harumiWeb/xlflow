@@ -1,6 +1,9 @@
 package vbaproject
 
-import "github.com/harumiWeb/xlflow/internal/pack/ovba"
+import (
+	"github.com/harumiWeb/xlflow/internal/pack/cfb"
+	"github.com/harumiWeb/xlflow/internal/pack/ovba"
+)
 
 // ModuleType is the kind of a module. It distinguishes the editable kinds
 // (Std/Class/Document) from Form, which is detected but not edited.
@@ -54,6 +57,7 @@ type Protection struct {
 // Project is the model of an entire vbaProject.bin and the central type for
 // read-modify-write.
 type Project struct {
+	CFBFormat        cfb.Format
 	Modules          []Module
 	References       []Reference // best-effort, for display (not edited in v1)
 	ReferencesRaw    []byte      // verbatim byte span of the dir references section (written back unchanged)

@@ -42,6 +42,7 @@ func Read(data []byte) (*Project, error) {
 		return nil, err
 	}
 	p := &Project{
+		CFBFormat: c.Format(),
 		Props: ProjectProps{
 			ProjectID: pt.ID, Name: pt.Name,
 			SysKind: di.SysKind, LCID: di.LCID, CodePage: di.CodePage,

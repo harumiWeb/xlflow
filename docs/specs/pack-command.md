@@ -30,6 +30,22 @@ xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm>] --experimental
 - `pack` operates only on closed workbook files. If a live xlflow session or an open workbook for the target is detected, `pack` fails with `pack_active_session` (exit 2) rather than reading possibly-dirty live state.
 - Document-module hosts (`ThisWorkbook`, sheet modules) come from the template. `pack` maps document-module source onto them only when the mapping is unambiguous.
 
+### VBA container compatibility
+
+The `xl/vbaProject.bin` reader and writer support CFB major versions 3 and 4.
+`pack` preserves the template container's major version: v3 templates remain
+v3 with 512-byte sectors, and v4 templates remain v4 with 4096-byte sectors.
+The writer emits DIFAT sectors when the FAT no longer fits in the 109 header
+entries, so large carried-through streams do not impose the former header-only
+FAT limit.
+
+CFB sector chains, allocation tables, and directory references are validated
+for bounds, cycles, duplicate ownership, declared length, and version geometry.
+MS-OVBA compressed streams are limited to 64 MiB of decompressed data per
+stream, and malformed compressed chunks or truncated `dir` records are
+rejected. These failures are reported through `pack_ambiguous_layout`; `pack`
+does not publish a partial artifact.
+
 ## Atomic publication
 
 `pack` never writes the destination directly. Publication goes through a temporary sibling artifact in the destination directory (same volume):
@@ -151,6 +167,10 @@ The backend identifier `pack.backend = "pure-go"` is deliberately distinct from 
 - **Golden / byte-exact tests**: regenerate `xl/vbaProject.bin` for fixture projects and compare against committed golden bins; round-trip read → write → read for stability.
 - **Source cross-checks**: decompress the regenerated module streams and compare against expected source text (and, where available, against `olevba` output) to confirm MS-OVBA correctness.
 - **Negative tests**: each unsupported case asserts the documented error code and exit code.
+- **Parser fuzzing**: native Go fuzz targets cover CFB parsing and round trips,
+  MS-OVBA decompression and `dir` parsing, encrypted-data decoding, and complete
+  `vbaProject.bin` reads. Successful CFB parses are rewritten and reparsed to
+  check stream contents and major-version preservation.
 
 These run on the existing Linux PR CI lane; no Windows runner is required for the `pack` path, and the automated PR path stays Linux/pure-Go only. Windows/Excel smoke tests that open the artifact and run a macro are a pre-stable milestone performed in the release gate, not in PR CI; see _Release-gate Excel smoke_ below.
 

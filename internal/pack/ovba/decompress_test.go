@@ -4,8 +4,31 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestDecompressRejectsInvalidChunkSignature(t *testing.T) {
+	if _, err := Decompress([]byte{0x01, 0x00, 0x00, 0x42}); err == nil || !strings.Contains(err.Error(), "signature") {
+		t.Fatalf("Decompress error = %v, want chunk-signature rejection", err)
+	}
+}
+
+func TestDecompressRejectsContainerOver64MiB(t *testing.T) {
+	one, err := Compress(bytes.Repeat([]byte{'A'}, 4096))
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := maxDecompressedContainerSize/4096 + 1
+	input := make([]byte, 1, 1+chunks*(len(one)-1))
+	input[0] = 0x01
+	for range chunks {
+		input = append(input, one[1:]...)
+	}
+	if _, err := Decompress(input); err == nil || !strings.Contains(err.Error(), "64 MiB") {
+		t.Fatalf("Decompress error = %v, want 64 MiB rejection", err)
+	}
+}
 
 func TestDecompressRejectsTruncatedRawChunk(t *testing.T) {
 	// Crafted input with the raw-chunk flag (bit15=0) but fewer than 4096B -> error, not a panic.

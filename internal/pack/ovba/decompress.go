@@ -5,6 +5,8 @@ import (
 	"errors"
 )
 
+const maxDecompressedContainerSize = 64 << 20
+
 // Decompress expands an MS-OVBA CompressedContainer ([MS-OVBA] §2.4.1).
 // It is the inverse of Compress.
 func Decompress(data []byte) ([]byte, error) {
@@ -22,6 +24,9 @@ func Decompress(data []byte) ([]byte, error) {
 		}
 		hdr := binary.LittleEndian.Uint16(data[pos:])
 		pos += 2
+		if hdr&0x7000 != 0x3000 {
+			return nil, errors.New("ovba: compressed chunk signature is not 0b011")
+		}
 		size := int(hdr&0x0FFF) + 3 // total byte count including the header
 		compressed := hdr&0x8000 != 0
 		body := size - 2
@@ -29,9 +34,15 @@ func Decompress(data []byte) ([]byte, error) {
 			return nil, errors.New("ovba: chunk body truncated")
 		}
 		if !compressed {
+			if body != 4096 {
+				return nil, errors.New("ovba: raw chunk size is not 4096 bytes")
+			}
 			// Per spec a raw chunk has a fixed body=4096. Guard against an out-of-range panic on malformed short input.
 			if pos+4096 > len(data) {
 				return nil, errors.New("ovba: raw chunk shorter than 4096 bytes")
+			}
+			if len(out) > maxDecompressedContainerSize-4096 {
+				return nil, errors.New("ovba: decompressed container exceeds 64 MiB")
 			}
 			out = append(out, data[pos:pos+4096]...)
 			pos += 4096
@@ -40,6 +51,9 @@ func Decompress(data []byte) ([]byte, error) {
 		decoded, err := decompressChunk(data[pos : pos+body])
 		if err != nil {
 			return nil, err
+		}
+		if len(decoded) > maxDecompressedContainerSize-len(out) {
+			return nil, errors.New("ovba: decompressed container exceeds 64 MiB")
 		}
 		out = append(out, decoded...)
 		pos += body
