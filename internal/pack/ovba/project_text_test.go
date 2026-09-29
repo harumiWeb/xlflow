@@ -112,3 +112,17 @@ func TestRebuildProjectTextReplacesFinalDeclarationWithoutLeadingBlankLine(t *te
 		t.Fatalf("PROJECT stream = %q, want replacement without a leading blank line", got)
 	}
 }
+
+func TestRebuildProjectTextRejectsUncarryableNames(t *testing.T) {
+	for _, name := range []string{"a\r\nName=x", "a\nb", "a\x00b", "\"quoted\"", " pad", "pad "} {
+		t.Run(name, func(t *testing.T) {
+			_, err := RebuildProjectText([]byte("Module=Old\r\n"), []ProjectComponentSpec{
+				{Kind: "Module", Name: "Old"},
+				{Kind: "Module", Name: name},
+			}, 1252)
+			if err == nil {
+				t.Fatalf("name %q should be rejected before it reaches the stream", name)
+			}
+		})
+	}
+}

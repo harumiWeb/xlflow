@@ -43,6 +43,13 @@ func RebuildProjectText(raw []byte, specs []ProjectComponentSpec, codepage uint1
 		if !isProjectComponentKind(spec.Kind) {
 			return nil, fmt.Errorf("PROJECT component %q has unknown kind %q", spec.Name, spec.Kind)
 		}
+		// A name is written raw into a textual "Kind=Name" line and re-parsed
+		// with quotes and surrounding whitespace stripped, so anything that
+		// could inject or corrupt a line is rejected here regardless of what
+		// the caller validated.
+		if strings.ContainsAny(spec.Name, "\x00\r\n\"") || strings.TrimSpace(spec.Name) != spec.Name {
+			return nil, fmt.Errorf("PROJECT component %q contains characters a declaration line cannot carry", spec.Name)
+		}
 		key := projectComponentKey(spec.Name)
 		if prior, ok := desired[key]; ok {
 			return nil, fmt.Errorf("duplicate PROJECT component names %q and %q", prior.Name, spec.Name)

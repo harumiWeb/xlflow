@@ -209,3 +209,36 @@ func TestWriteRejectsDuplicateNamesAndStreams(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteRejectsCFBEquivalentStreamNames(t *testing.T) {
+	// CFB directory entry names compare case-insensitively on upcased UTF-16
+	// code units, which is not the same equivalence as Unicode lowercase: the
+	// Turkish dotless i ("\u0131") upcases to ASCII "I". Two modules whose
+	// stream names differ only that way would collide in the container.
+	p := &Project{
+		Props: ProjectProps{CodePage: 1254},
+		Modules: []Module{
+			{Name: "I", StreamName: "I", Type: ModuleStd, Source: "Attribute VB_Name = \"I\"\r\n"},
+			{Name: "\u0131", StreamName: "\u0131", Type: ModuleStd, Source: "Attribute VB_Name = \"\u0131\"\r\n"},
+		},
+	}
+	if _, err := Write(p); err == nil {
+		t.Fatal("stream names that collide in the CFB directory should fail")
+	}
+}
+
+func TestWriteRejectsReservedStreamNames(t *testing.T) {
+	for _, name := range []string{"dir", "DIR", "_VBA_PROJECT"} {
+		t.Run(name, func(t *testing.T) {
+			p := &Project{
+				Props: ProjectProps{CodePage: 1252},
+				Modules: []Module{
+					{Name: name, StreamName: name, Type: ModuleStd, Source: "Attribute VB_Name = \"" + name + "\"\r\n"},
+				},
+			}
+			if _, err := Write(p); err == nil {
+				t.Fatal("a module stream name reserved by the writer should fail")
+			}
+		})
+	}
+}

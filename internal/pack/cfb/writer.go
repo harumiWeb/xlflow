@@ -186,6 +186,20 @@ func upcase(u uint16) uint16 {
 	return uint16(unicode.ToUpper(rune(u)))
 }
 
+// DirectoryNameKey returns the case-insensitive identity key a CFB directory
+// applies to an entry name: its UTF-16 code units, each upcased per
+// [MS-CFB] \u00a72.6.4. Two names are equivalent in the container (and
+// therefore collide) exactly when their keys are equal.
+func DirectoryNameKey(name string) string {
+	units := utf16.Encode([]rune(name))
+	key := make([]byte, 0, len(units)*2)
+	for _, u := range units {
+		u = upcase(u)
+		key = append(key, byte(u), byte(u>>8))
+	}
+	return string(key)
+}
+
 func ceilDiv(a, b int) int { return (a + b - 1) / b }
 
 // assemble lays out the sectors in two passes and builds the CFB byte stream.

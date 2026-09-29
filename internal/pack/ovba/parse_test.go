@@ -138,6 +138,21 @@ func TestParseProjectText(t *testing.T) {
 	}
 }
 
+func TestParseProjectTextDecodesCodepageName(t *testing.T) {
+	enc, err := EncodeMBCS("\u65e5\u672c\u8a9e", 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sample := "ID=\"{ABC}\"\r\nName=\"" + string(enc) + "\"\r\nModule=Module1\r\n"
+	pt, err := ParseProjectText([]byte(sample), 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pt.Name != "\u65e5\u672c\u8a9e" {
+		t.Errorf("Name = %q, want %q", pt.Name, "\u65e5\u672c\u8a9e")
+	}
+}
+
 func TestParseDirProjectInfoRaw(t *testing.T) {
 	plain, err := os.ReadFile(filepath.Join("testdata", "golden", "dir.plain"))
 	if err != nil {

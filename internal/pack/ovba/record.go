@@ -35,11 +35,13 @@ func utf16leString(b []byte) (string, error) {
 	for i := range units {
 		units[i] = binary.LittleEndian.Uint16(b[i*2:])
 	}
-	for i, u := range units {
+	for i := 0; i < len(units); i++ {
+		u := units[i]
 		if u >= 0xD800 && u <= 0xDBFF {
 			if i+1 >= len(units) || units[i+1] < 0xDC00 || units[i+1] > 0xDFFF {
 				return "", fmt.Errorf("ovba: UTF-16 field has an unpaired surrogate at unit %d", i)
 			}
+			i++ // consume the paired low surrogate
 		} else if u >= 0xDC00 && u <= 0xDFFF {
 			return "", fmt.Errorf("ovba: UTF-16 field has a lone low surrogate at unit %d", i)
 		}

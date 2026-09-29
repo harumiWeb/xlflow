@@ -2,6 +2,7 @@ package ovba
 
 import (
 	"encoding/binary"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -140,5 +141,97 @@ func TestBuildProjectModulesRejectsUnrepresentableName(t *testing.T) {
 	}, 932)
 	if err == nil {
 		t.Fatal("unrepresentable name should fail")
+	}
+}
+
+func TestParseDirSupplementaryPlaneRoundTrip(t *testing.T) {
+	// Code page 65001 can encode supplementary-plane characters, which take a
+	// surrogate pair in the paired UTF-16 records.
+	spec := ModuleSpec{
+		Name:       "mod\U00010400ule",
+		StreamName: "mod\U00010400ule",
+		TypeID:     0x0021,
+		DocString:  "doc\U00010401",
+	}
+	rec, err := modRecord(spec, 65001)
+	if err != nil {
+		t.Fatalf("modRecord: %v", err)
+	}
+	di, err := ParseDir(dirPlainFixture(65001, rec))
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if len(di.Modules) != 1 {
+		t.Fatalf("modules = %d, want 1", len(di.Modules))
+	}
+	m := di.Modules[0]
+	if m.Name != spec.Name || m.StreamName != spec.StreamName || m.DocString != spec.DocString {
+		t.Errorf("supplementary-plane fields drifted: Name=%q StreamName=%q DocString=%q", m.Name, m.StreamName, m.DocString)
+	}
+}
+
+func TestParseDirRejectsUnpairedSurrogates(t *testing.T) {
+	build := func(nameUnits []uint16) []byte {
+		nameMBCS := []byte("M")
+		var uni []byte
+		for _, u := range nameUnits {
+			var p [2]byte
+			binary.LittleEndian.PutUint16(p[:], u)
+			uni = append(uni, p[:]...)
+		}
+		var rec []byte
+		rec = append(rec, sizedRecord(0x0019, nameMBCS)...)
+		rec = append(rec, sizedRecord(0x0047, uni)...)
+		rec = append(rec, sizedRecord(0x001A, nameMBCS)...)
+		rec = append(rec, sizedRecord(0x0032, utf16le("M"))...)
+		rec = append(rec, sizedRecord(0x001C, nil)...)
+		rec = append(rec, sizedRecord(0x0048, nil)...)
+		rec = append(rec, recU32(0x0031, 4, 0)...)
+		rec = append(rec, recU32(0x001E, 4, 0)...)
+		rec = append(rec, recU16(0x002C, 2, 0xFFFF)...)
+		rec = append(rec, sizedRecord(0x0021, nil)...)
+		rec = append(rec, sizedRecord(0x002B, nil)...)
+		return rec
+	}
+	for _, tc := range []struct {
+		name  string
+		units []uint16
+	}{
+		{"unpaired high surrogate at end", []uint16{0x004D, 0xD800}},
+		{"high surrogate followed by BMP", []uint16{0xD800, 0x004D}},
+		{"lone low surrogate", []uint16{0x004D, 0xDC00}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ParseDir(dirPlainFixture(1252, build(tc.units))); err == nil {
+				t.Fatal("unpaired surrogate should fail")
+			}
+		})
+	}
+}
+
+func TestBuildProjectModulesRejectsReservedExtraIDs(t *testing.T) {
+	for _, id := range []uint16{0x000F, 0x0010, 0x0013, 0x0019, 0x0047, 0x001A,
+		0x0032, 0x001C, 0x0048, 0x0031, 0x001E, 0x002C, 0x0021, 0x0022, 0x0025,
+		0x0028, 0x002B} {
+		t.Run(fmt.Sprintf("0x%04X", id), func(t *testing.T) {
+			_, err := BuildProjectModules([]ModuleSpec{
+				{Name: "M", StreamName: "M", TypeID: 0x0021,
+					Extra: []ModuleExtraRecord{{ID: id}}},
+			}, 1252)
+			if err == nil {
+				t.Fatal("reserved record id supplied as an extra should fail")
+			}
+		})
+	}
+	// An unknown id must still pass through.
+	rec, err := BuildProjectModules([]ModuleSpec{
+		{Name: "M", StreamName: "M", TypeID: 0x0021,
+			Extra: []ModuleExtraRecord{{ID: 0x7777, Payload: []byte{0x01}}}},
+	}, 1252)
+	if err != nil {
+		t.Fatalf("unknown extra record: %v", err)
+	}
+	if len(rec) == 0 {
+		t.Fatal("empty output")
 	}
 }

@@ -64,6 +64,15 @@ func modRecord(spec ModuleSpec, codepage uint16) ([]byte, error) {
 		b = append(b, sizedRecord(0x0028, nil)...) // MODULEPRIVATE
 	}
 	for _, extra := range spec.Extra {
+		switch extra.ID {
+		// Record IDs the writer itself emits (or that delimit sections) must
+		// not be supplied as opaque extras; parsed Extras can never contain
+		// them, but a caller-built ModuleSpec could otherwise emit a second
+		// MODULENAME or a stray terminator and corrupt the module record.
+		case 0x000F, 0x0010, 0x0013, 0x0019, 0x0047, 0x001A, 0x0032, 0x001C,
+			0x0048, 0x0031, 0x001E, 0x002C, 0x0021, 0x0022, 0x0025, 0x0028, 0x002B:
+			return nil, fmt.Errorf("ovba: module %q: reserved record 0x%04X cannot be an extra record", spec.Name, extra.ID)
+		}
 		b = append(b, sizedRecord(extra.ID, extra.Payload)...)
 	}
 	b = append(b, sizedRecord(0x002B, nil)...) // MODULE terminator

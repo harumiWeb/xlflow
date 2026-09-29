@@ -144,3 +144,21 @@ func TestPlanProjectRejectsSourceOnlyTemplateOwnedTopology(t *testing.T) {
 		t.Fatalf("form err = %v", err)
 	}
 }
+
+func TestPlanProjectRejectsCFBEquivalentStreamNames(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Upcased UTF-16 code units are the CFB directory equivalence, so dotted
+	// "I" and dotless "\u0131" collide even though they are distinct lowercase
+	// keys. CP1254 can represent both.
+	project.Props.CodePage = 1254
+	sources := []SourceModule{
+		{Name: "I", Type: ModuleTypeStandard, Source: standardSource("I")},
+		{Name: "\u0131", Type: ModuleTypeStandard, Source: standardSource("\u0131")},
+	}
+	if _, err := PlanProject(project, sources); !errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("err = %v, want ErrAmbiguousLayout", err)
+	}
+}

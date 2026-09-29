@@ -35,7 +35,7 @@ func Write(p *Project) ([]byte, error) {
 			return nil, fmt.Errorf("vbaproject: duplicate module names %q and %q", prior, m.Name)
 		}
 		names[nameKey] = m.Name
-		streamKey := strings.ToLower(m.StreamName)
+		streamKey := cfb.DirectoryNameKey(m.StreamName)
 		if prior, ok := streams[streamKey]; ok {
 			return nil, fmt.Errorf("vbaproject: duplicate module stream names %q and %q", prior, m.StreamName)
 		}
@@ -104,8 +104,9 @@ func Write(p *Project) ([]byte, error) {
 // imposed by the vbaProject.bin writer without mutating a project. Both names
 // must be representable in the project code page (the dir stream stores them
 // twice: MBCS and UTF-16), must not contain characters that corrupt the
-// textual PROJECT stream, and the stream name must fit the CFB directory
-// entry limit of 31 UTF-16 code units.
+// textual PROJECT stream, the stream name must fit the CFB directory entry
+// limit of 31 UTF-16 code units, and the stream name must not collide with a
+// reserved VBA storage stream (dir, _VBA_PROJECT).
 func ValidateWritableComponentIdentity(name, streamName string, codepage uint16) error {
 	if name == "" || streamName == "" {
 		return fmt.Errorf("vbaproject: module and stream names must not be empty")
@@ -120,6 +121,10 @@ func ValidateWritableComponentIdentity(name, streamName string, codepage uint16)
 	}
 	if n := len(utf16.Encode([]rune(streamName))); n > 31 {
 		return fmt.Errorf("vbaproject: stream name %q needs %d UTF-16 code units (max 31 for CFB)", streamName, n)
+	}
+	switch cfb.DirectoryNameKey(streamName) {
+	case cfb.DirectoryNameKey("dir"), cfb.DirectoryNameKey("_VBA_PROJECT"):
+		return fmt.Errorf("vbaproject: stream name %q collides with a reserved VBA storage stream", streamName)
 	}
 	return nil
 }

@@ -373,7 +373,11 @@ func ParseProjectText(raw []byte, codepage uint16) (ProjectText, error) {
 		case "ID":
 			pt.ID = unq(val)
 		case "Name":
-			pt.Name = unq(val)
+			decoded, err := DecodeMBCS([]byte(unq(val)), codepage)
+			if err != nil {
+				return pt, fmt.Errorf("ovba: PROJECT Name decode: %w", err)
+			}
+			pt.Name = decoded
 		case "CMG":
 			pt.CMG = unq(val)
 		case "DPB":
