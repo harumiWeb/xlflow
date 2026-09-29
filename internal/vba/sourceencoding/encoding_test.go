@@ -145,6 +145,56 @@ func TestCheckReportsBOMAndMultipleInvalidFilesWithoutScanningFRX(t *testing.T) 
 	}
 }
 
+func TestCheckAllowsExternalConfiguredRootOnlyWhenEnabled(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+	path := filepath.Join(external, "External.bas")
+	if err := os.WriteFile(path, []byte("Sub Broken()\n\xff\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Check(t.Context(), Options{RootDir: root, Roots: Roots{Modules: external}})
+	if scope, ok := errors.AsType[*ScopeError](err); !ok || scope == nil {
+		t.Fatalf("default external-root error = %v, want ScopeError", err)
+	}
+
+	result, err := Check(t.Context(), Options{
+		RootDir:            root,
+		Roots:              Roots{Modules: external},
+		AllowExternalRoots: true,
+	})
+	var violations *ValidationErrors
+	if violations, _ = errors.AsType[*ValidationErrors](err); violations == nil || len(violations.Errors) != 1 {
+		t.Fatalf("external-root error = %v, want one encoding violation", err)
+	}
+	if len(result.Files) != 1 || result.Files[0].Path != filepath.ToSlash(path) || result.Files[0].Status != StatusInvalidUTF8 {
+		t.Fatalf("external-root result = %+v", result)
+	}
+}
+
+func TestCheckNormalizesConfiguredRootSeparators(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Bad.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("Sub Broken()\n\xff\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Check(t.Context(), Options{
+		RootDir: root,
+		Roots:   Roots{Modules: `src\modules`},
+	})
+	var violations *ValidationErrors
+	if violations, _ = errors.AsType[*ValidationErrors](err); violations == nil || len(violations.Errors) != 1 {
+		t.Fatalf("backslash-root error = %v, want one encoding violation", err)
+	}
+	if len(result.Files) != 1 || result.Files[0].Path != "src/modules/Bad.bas" || result.Files[0].Status != StatusInvalidUTF8 {
+		t.Fatalf("backslash-root result = %+v", result)
+	}
+}
+
 func TestConvertDoesNotMutateWhenAnyCP932InputIsInvalid(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "src", "modules")

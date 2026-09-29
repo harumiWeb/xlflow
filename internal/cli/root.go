@@ -2325,6 +2325,9 @@ func (a *app) packCommand() *cobra.Command {
 				return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("an xlflow session is active for %s", wb))
 			}
 
+			if err := a.runPackSourceEncodingPreflight(cmd.Context(), cfg); err != nil {
+				return err
+			}
 			sources, err := collectPackSourceModules(a.cwd, cfg)
 			if err != nil {
 				if errors.Is(err, packpkg.ErrAmbiguousLayout) {
