@@ -71,7 +71,14 @@ func Write(p *Project) ([]byte, error) {
 	}
 	dirPlain = append(dirPlain, projectModules...)
 
-	w := cfb.NewWriter()
+	format := p.CFBFormat
+	if format == 0 {
+		format = cfb.FormatV3
+	}
+	w, err := cfb.NewWriterForFormat(format)
+	if err != nil {
+		return nil, fmt.Errorf("vbaproject: create CFB writer: %w", err)
+	}
 	// Pass through every stream the writer does not own (root-level designer
 	// storages, PROJECTwm, ...) verbatim before adding the regenerated VBA/* and
 	// PROJECT. RawStreams excludes the VBA/ and PROJECT namespaces, so there is no

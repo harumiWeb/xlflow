@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -12,8 +13,12 @@ func TestWalkRecordsReachesModules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	records, err := walkRecords(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var sawSysKind, sawModuleOffset bool
-	for _, r := range walkRecords(plain) {
+	for _, r := range records {
 		switch r.id {
 		case 0x0001:
 			sawSysKind = true
@@ -23,6 +28,39 @@ func TestWalkRecordsReachesModules(t *testing.T) {
 	}
 	if !sawSysKind || !sawModuleOffset {
 		t.Errorf("the walk did not reach the modules (sysKind=%v moduleOffset=%v)", sawSysKind, sawModuleOffset)
+	}
+}
+
+func TestWalkRecordsRejectsTruncatedAndOversizedRecords(t *testing.T) {
+	for _, input := range [][]byte{
+		{0x01},
+		{0x01, 0x00, 0xFF, 0xFF, 0xFF, 0xFF},
+		{0x09, 0x00, 0, 0, 0, 0, 0},
+	} {
+		if _, err := walkRecords(input); err == nil {
+			t.Fatalf("walkRecords(%x) succeeded, want error", input)
+		}
+	}
+}
+
+func TestParseDirAcceptsZeroPaddingAfterProjectModulesTerminator(t *testing.T) {
+	plain := append(dirPlainFixture(1252), make([]byte, 5)...)
+	if _, err := ParseDir(plain); err != nil {
+		t.Fatalf("ParseDir with raw-chunk padding: %v", err)
+	}
+}
+
+func TestParseDirRejectsNonzeroPaddingAfterProjectModulesTerminator(t *testing.T) {
+	plain := append(dirPlainFixture(1252), 0, 1, 0)
+	if _, err := ParseDir(plain); err == nil || !strings.Contains(err.Error(), "nonzero padding") {
+		t.Fatalf("ParseDir error = %v, want nonzero-padding rejection", err)
+	}
+}
+
+func TestParseDirRejectsShortKnownRecord(t *testing.T) {
+	plain := append(sizedRecord(0x0001, []byte{1}), sizedRecord(0x0003, []byte{0xE4, 0x04})...)
+	if _, err := ParseDir(plain); err == nil || !strings.Contains(err.Error(), "payload size") {
+		t.Fatalf("ParseDir error = %v, want payload-size rejection", err)
 	}
 }
 

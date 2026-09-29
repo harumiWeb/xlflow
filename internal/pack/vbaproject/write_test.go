@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"testing"
+
+	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 )
 
 func loadBin(t *testing.T, name string) []byte {
@@ -49,6 +51,25 @@ func TestWriteRoundTrip(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWritePreservesCFBVersion(t *testing.T) {
+	p, err := Read(loadBin(t, "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.CFBFormat = cfb.FormatV4
+	out, err := Write(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := Read(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p2.CFBFormat != cfb.FormatV4 {
+		t.Fatalf("CFB format = %d, want v4", p2.CFBFormat)
 	}
 }
 

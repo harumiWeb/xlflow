@@ -2,6 +2,7 @@ package cfb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +12,163 @@ import (
 
 	"github.com/richardlehane/mscfb"
 )
+
+func TestOpenRejectsDeclaredCountsBeforeAllocation(t *testing.T) {
+	w := NewWriter()
+	w.AddStream([]string{"PROJECT"}, []byte("x"))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.LittleEndian.PutUint32(data[44:48], ^uint32(0))
+	if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "exceeds physical sector count") {
+		t.Fatalf("Open error = %v, want physical-sector count rejection", err)
+	}
+}
+
+func TestOpenRejectsFATThatDoesNotCoverPhysicalSectors(t *testing.T) {
+	w := NewWriter()
+	w.AddStream([]string{"PROJECT"}, []byte("x"))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := geometryFor(FormatV3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	physical := (len(data) - g.headerSpan) / g.sectorSize
+	data = append(data, make([]byte, (g.entriesPerFatSector+1-physical)*g.sectorSize)...)
+	if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "FAT covers") {
+		t.Fatalf("Open error = %v, want insufficient FAT coverage rejection", err)
+	}
+}
+
+func TestOpenRejectsOversizedDeclaredRegularChainBeforeAllocation(t *testing.T) {
+	w := NewWriter()
+	w.AddStream([]string{"large"}, bytes.Repeat([]byte("x"), 5000))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDir := binary.LittleEndian.Uint32(data[48:52])
+	dirOffset := headerSize + int(firstDir)*512
+	binary.LittleEndian.PutUint64(data[dirOffset+dirEntrySize+120:dirOffset+dirEntrySize+128], uint64(^uint32(0)))
+	if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "physical sectors") {
+		t.Fatalf("Open error = %v, want oversized regular-chain rejection", err)
+	}
+}
+
+func TestOpenRejectsOversizedV4DirectoryCountBeforeAllocation(t *testing.T) {
+	w, err := NewWriterForFormat(FormatV4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.AddStream([]string{"PROJECT"}, []byte("x"))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	physical := (len(data) - 4096) / 4096
+	binary.LittleEndian.PutUint32(data[40:44], uint32(physical+1))
+	if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "physical sectors") {
+		t.Fatalf("Open error = %v, want oversized directory-chain rejection", err)
+	}
+}
+
+func TestOpenRejectsCyclicDirectoryChain(t *testing.T) {
+	w := NewWriter()
+	w.AddStream([]string{"PROJECT"}, bytes.Repeat([]byte("x"), 5000))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDir := binary.LittleEndian.Uint32(data[48:52])
+	firstFat := binary.LittleEndian.Uint32(data[76:80])
+	fatOffset := headerSize + int(firstFat)*512 + int(firstDir)*4
+	binary.LittleEndian.PutUint32(data[fatOffset:fatOffset+4], firstDir)
+	if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "shared by directory") {
+		t.Fatalf("Open error = %v, want cyclic directory-chain rejection", err)
+	}
+}
+
+func TestOpenRejectsCyclicMiniFATChain(t *testing.T) {
+	w := NewWriter()
+	w.AddStream([]string{"small"}, bytes.Repeat([]byte("x"), 128))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstMiniFAT := binary.LittleEndian.Uint32(data[60:64])
+	miniFATOffset := headerSize + int(firstMiniFAT)*512
+	binary.LittleEndian.PutUint32(data[miniFATOffset:miniFATOffset+4], 0)
+	if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "mini-sector 0 is shared") {
+		t.Fatalf("Open error = %v, want cyclic mini-FAT rejection", err)
+	}
+}
+
+func TestOpenRejectsCyclicDIFATChain(t *testing.T) {
+	w := NewWriter()
+	w.AddStream([]string{"large"}, bytes.Repeat([]byte{0xA5}, 8<<20))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDIFAT := binary.LittleEndian.Uint32(data[68:72])
+	if firstDIFAT == endOfChain {
+		t.Fatal("fixture did not produce a DIFAT sector")
+	}
+	g, err := geometryFor(FormatV3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	difatOffset := headerSize + int(firstDIFAT)*512
+	binary.LittleEndian.PutUint32(data[difatOffset+g.entriesPerDifatSector*4:], firstDIFAT)
+	if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "DIFAT chain ends") {
+		t.Fatalf("Open error = %v, want cyclic DIFAT rejection", err)
+	}
+}
+
+func TestOpenRejectsVersionGeometryMismatch(t *testing.T) {
+	w := NewWriter()
+	w.AddStream([]string{"PROJECT"}, []byte("x"))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.LittleEndian.PutUint16(data[26:28], uint16(FormatV4))
+	if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "4096-byte sector geometry") {
+		t.Fatalf("Open error = %v, want v4 geometry rejection", err)
+	}
+}
+
+func TestOpenRejectsOutOfRangeDirectoryReference(t *testing.T) {
+	w := NewWriter()
+	w.AddStream([]string{"PROJECT"}, []byte("x"))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDir := binary.LittleEndian.Uint32(data[48:52])
+	dirOffset := headerSize + int(firstDir)*512
+	binary.LittleEndian.PutUint32(data[dirOffset+76:dirOffset+80], ^uint32(0)-1)
+	if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "directory reference") {
+		t.Fatalf("Open error = %v, want out-of-range directory-reference rejection", err)
+	}
+}
+
+func TestParseDirEntryRejectsForbiddenNameCharacters(t *testing.T) {
+	for _, forbidden := range []uint16{0, '/', '\\', ':', '!'} {
+		raw := make([]byte, dirEntrySize)
+		binary.LittleEndian.PutUint16(raw[0:2], forbidden)
+		binary.LittleEndian.PutUint16(raw[2:4], 0)
+		binary.LittleEndian.PutUint16(raw[64:66], 4)
+		raw[66] = objStream
+		if _, err := parseDirEntry(raw, FormatV3); err == nil || !strings.Contains(err.Error(), "forbidden character") {
+			t.Fatalf("parseDirEntry(%q) error = %v, want forbidden-character rejection", rune(forbidden), err)
+		}
+	}
+}
 
 func loadBin(t *testing.T, book string) []byte {
 	t.Helper()

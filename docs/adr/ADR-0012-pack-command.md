@@ -58,15 +58,36 @@ The contract for command shape, the JSON envelope, and exit codes lives in `docs
 
 "No VBE validation" is a permanent semantic boundary, not a temporary limitation. `pack` never compiles or executes VBA. Its output is a file artifact whose correctness against the VBE has not been verified; Excel compiles it from source on first open. Every `pack` run reports this in its output. Consumers that need compile or runtime validation must use the Excel/VBIDE-backed `push` path on Windows.
 
+### CFB and OVBA compatibility boundary
+
+The internal artifact path supports both CFB v3 and v4 and preserves the
+template's major version. It implements DIFAT output instead of rewriting large
+or v4 templates into a smaller v3-only profile. This keeps the template as the
+authority for its storage geometry and avoids an implicit format migration.
+The repository's current Excel-derived fixture survey found v3 containers, but
+that evidence is not treated as a stable guarantee that user templates cannot
+use v4; both geometries are therefore part of the supported boundary.
+
+Because CFB and MS-OVBA inputs can contain attacker-controlled lengths and
+links, parsing is fail-loud and bounded. Sector and directory graphs reject
+cycles, invalid references, and shared ownership; MS-OVBA decompression has a
+64 MiB per-stream output limit. Native fuzz targets are maintained alongside
+focused regression fixtures. A malformed or unsupported container remains a
+content validation failure and never produces a best-effort artifact.
+
 ## Consequences
 
 - Positive: `push` semantics are unchanged; the live-session workflow does not regress.
 - Positive: a cross-platform path exists for CI, containers, release packaging, and headless or agent artifact generation, with no Windows-plus-Excel host.
 - Positive: keeping the backend independent of configuration means a command's meaning stays stable and legible in CI logs and to agents.
 - Positive: ownership in `internal/pack` keeps the artifact-generation path's maintenance and compatibility behavior inside xlflow.
+- Positive: preserving CFB v3/v4 geometry and supporting DIFAT avoids silent
+  template format conversion and removes the header-only FAT size ceiling.
 - Negative: `pack` output lacks VBE compile and runtime validation; consumers must treat it as unvalidated, and the contract must keep saying so.
 - Negative: two commands (`pack`, `push`) with overlapping inputs but different guarantees increase the surface to document and explain.
 - Negative: xlflow takes on maintenance of MS-OVBA and OLE/CFB compatibility behavior in-repo rather than delegating it to an external module.
+- Negative: supporting both CFB geometries and bounded graph parsing adds more
+  compatibility and adversarial-input cases to the internal implementation.
 - Negative: the experimental surface needs staged hardening — fixtures, detection, smoke tests — before it can be considered stable.
 
 ## Alternatives Considered

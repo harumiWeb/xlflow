@@ -1,20 +1,63 @@
-// Package cfb is a minimal-profile reader and writer for [MS-CFB] v3. It is a
+// Package cfb is a reader and writer for [MS-CFB] v3 and v4. It is a
 // generic CFB implementation and knows nothing about VBA.
 //
-// Sectors are 512 bytes (sectorShift=9) and mini sectors are 64 bytes
-// (miniSectorShift=6). Streams smaller than 4096 bytes (miniStreamCutoffSize)
-// are placed in the mini stream; larger streams use the regular FAT path
-// (stored directly in 512-byte sectors). The output is not byte-exact; instead
+// V3 sectors are 512 bytes and v4 sectors are 4096 bytes. Mini sectors are
+// always 64 bytes. Streams smaller than 4096 bytes (miniStreamCutoffSize) are
+// placed in the mini stream; larger streams use the regular FAT path. The
+// output is not byte-exact; instead
 // it aims for "semantic equivalence": when read back with richardlehane/mscfb,
 // the tree structure and the contents of every stream match.
 package cfb
 
+import "fmt"
+
+// Format is the on-disk CFB major version. Writers preserve the format read
+// from the template instead of silently converting between sector geometries.
+type Format uint16
+
+const (
+	FormatV3 Format = 3
+	FormatV4 Format = 4
+)
+
+type geometry struct {
+	format                Format
+	sectorSize            int
+	headerSpan            int
+	sectorShift           uint16
+	entriesPerFatSector   int
+	entriesPerDirSector   int
+	entriesPerDifatSector int
+}
+
+func geometryFor(format Format) (geometry, error) {
+	var sectorSize int
+	var sectorShift uint16
+	switch format {
+	case FormatV3:
+		sectorSize, sectorShift = 512, 9
+	case FormatV4:
+		sectorSize, sectorShift = 4096, 12
+	default:
+		return geometry{}, fmt.Errorf("cfb: unsupported major version %d (supported: 3 and 4)", format)
+	}
+	return geometry{
+		format:                format,
+		sectorSize:            sectorSize,
+		headerSpan:            sectorSize,
+		sectorShift:           sectorShift,
+		entriesPerFatSector:   sectorSize / 4,
+		entriesPerDirSector:   sectorSize / dirEntrySize,
+		entriesPerDifatSector: sectorSize/4 - 1,
+	}, nil
+}
+
 // Sector and mini-sector sizes.
 const (
-	sectorSize     = 512
 	miniSectorSize = 64
 	dirEntrySize   = 128  // byte length of one DirectoryEntry
 	cutoff         = 4096 // miniStreamCutoffSize
+	headerSize     = 512  // fixed header fields; v4 pads this to one 4096-byte sector
 )
 
 // Special FAT / DIFAT sector values ([MS-CFB] §2.2).
@@ -34,21 +77,21 @@ const (
 	objRoot    = 5
 )
 
-// CFB v3 header constants.
+// CFB header constants shared by v3 and v4.
 const (
-	headerSize      = 512
 	minorVersion    = 0x003E
-	majorVersion    = 0x0003
 	byteOrderMark   = 0xFFFE
-	sectorShift     = 0x0009
 	miniSectorShift = 0x0006
 	difatHeaderLen  = 109 // number of DIFAT array entries at the end of the header
 )
 
-// Constants for counting 512B sectors on 4096B boundaries, to avoid magic numbers.
-const (
-	entriesPerFatSector   = sectorSize / 4            // 128
-	entriesPerDirSector   = sectorSize / dirEntrySize // 4
-	entriesPerDifatSector = entriesPerFatSector - 1   // 127: a DIFAT sector uses its last 4 bytes for the next DIFAT sector number
-	dirNameMaxBytes       = 64                        // byte length of the DirectoryEntry name field (UTF-16, incl. NUL)
-)
+const dirNameMaxBytes = 64 // byte length of the DirectoryEntry name field (UTF-16, incl. NUL)
+
+func forbiddenDirectoryNameUnit(unit uint16) bool {
+	switch unit {
+	case 0, '/', '\\', ':', '!':
+		return true
+	default:
+		return false
+	}
+}

@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Hardened experimental `xlflow pack` VBA container handling: CFB v3 and v4
+  templates now retain their original major version, large containers emit
+  DIFAT sectors beyond the 109 header entries, and malformed allocation chains,
+  directory graphs, compressed chunks, and `dir` records fail loudly. OVBA
+  decompression is capped at 64 MiB per stream, with native fuzz targets for
+  the CFB, OVBA, and complete `vbaProject.bin` readers.
 - Hardened experimental `xlflow pack` for non-ASCII VBA components: module and
   stream names are now serialized in the project code page with matching
   UTF-16 records, code pages 874, 932, 936, 949, 950, 1250-1258, and 65001 are

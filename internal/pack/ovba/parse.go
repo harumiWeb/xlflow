@@ -14,23 +14,42 @@ type record struct {
 
 // walkRecords breaks dir.plain into a sequence of (id, start, payload).
 // PROJECTVERSION (0x0009) is special-cased because it has no size field and is a fixed 12 bytes.
-func walkRecords(buf []byte) []record {
+func walkRecords(buf []byte) ([]record, error) {
 	var recs []record
 	i := 0
-	for i+6 <= len(buf) {
+	for i < len(buf) {
+		if len(buf)-i < 6 {
+			return nil, fmt.Errorf("ovba: record header truncated at offset %d", i)
+		}
 		id := binary.LittleEndian.Uint16(buf[i:])
 		if id == 0x0009 { // id(2)+Reserved(4)+Major(4)+Minor(2)
+			if len(buf)-i < 12 {
+				return nil, fmt.Errorf("ovba: PROJECTVERSION record truncated at offset %d", i)
+			}
 			i += 12
 			continue
 		}
-		size := int(binary.LittleEndian.Uint32(buf[i+2:]))
-		if i+6+size > len(buf) {
-			break
+		size := uint64(binary.LittleEndian.Uint32(buf[i+2:]))
+		end := uint64(i) + 6 + size
+		if end > uint64(len(buf)) {
+			return nil, fmt.Errorf("ovba: record 0x%04X at offset %d declares %d bytes beyond the stream", id, i, size)
 		}
-		recs = append(recs, record{id: id, start: i, payload: buf[i+6 : i+6+size]})
-		i += 6 + size
+		endInt := int(end)
+		recs = append(recs, record{id: id, start: i, payload: buf[i+6 : endInt]})
+		i = endInt
+		if id == 0x0010 {
+			if size != 0 {
+				return nil, fmt.Errorf("ovba: PROJECTMODULES terminator at offset %d has payload size %d", recs[len(recs)-1].start, size)
+			}
+			for paddingOffset, b := range buf[i:] {
+				if b != 0 {
+					return nil, fmt.Errorf("ovba: nonzero padding after PROJECTMODULES terminator at offset %d", i+paddingOffset)
+				}
+			}
+			return recs, nil
+		}
 	}
-	return recs
+	return recs, nil
 }
 
 // DirModule holds the metadata of one module found in the dir stream.
@@ -73,7 +92,10 @@ type DirInfo struct {
 // rejected rather than silently misread.
 func ParseDir(plain []byte) (DirInfo, error) {
 	var di DirInfo
-	recs := walkRecords(plain)
+	recs, err := walkRecords(plain)
+	if err != nil {
+		return di, err
+	}
 	// References section = from the first REFERENCENAME(0x0016) up to just before the first PROJECTMODULES(0x000F).
 	// The internal structure (nested REFERENCECONTROL, etc.) is not interpreted; the byte span is preserved verbatim.
 	// 0x000F is a top-level marker that never appears in a reference sub-record, so it is safe as a terminator.
@@ -83,10 +105,19 @@ func ParseDir(plain []byte) (DirInfo, error) {
 	for _, r := range recs {
 		switch r.id {
 		case 0x0001:
+			if err := requirePayloadSize(r, 4); err != nil {
+				return di, err
+			}
 			di.SysKind = le32(r.payload)
 		case 0x0014:
+			if err := requirePayloadSize(r, 4); err != nil {
+				return di, err
+			}
 			di.LCID = le32(r.payload)
 		case 0x0003:
+			if err := requirePayloadSize(r, 2); err != nil {
+				return di, err
+			}
 			di.CodePage = le16(r.payload)
 		case 0x0016: // REFERENCENAME (duplicate names inside REFERENCECONTROL are folded by dedup)
 			if refStart < 0 {
@@ -301,17 +332,42 @@ func applyModuleField(cur *DirModule, r record, codepage uint16) error {
 		}
 		cur.DocString = doc
 	case 0x0031:
+		if err := requirePayloadSize(r, 4); err != nil {
+			return err
+		}
 		cur.Offset = le32(r.payload)
 	case 0x001E:
+		if err := requirePayloadSize(r, 4); err != nil {
+			return err
+		}
 		cur.HelpContext = le32(r.payload)
 	case 0x002C:
+		if err := requirePayloadSize(r, 2); err != nil {
+			return err
+		}
 		// MODULECOOKIE is ignored on read; the writer always emits 0xFFFF.
 	case 0x0021, 0x0022:
+		if err := requirePayloadSize(r, 0); err != nil {
+			return err
+		}
 		cur.TypeID = r.id
 	case 0x0025:
+		if err := requirePayloadSize(r, 0); err != nil {
+			return err
+		}
 		cur.ReadOnly = true
 	case 0x0028:
+		if err := requirePayloadSize(r, 0); err != nil {
+			return err
+		}
 		cur.Private = true
+	}
+	return nil
+}
+
+func requirePayloadSize(r record, want int) error {
+	if len(r.payload) != want {
+		return fmt.Errorf("ovba: record 0x%04X at offset %d has payload size %d (want %d)", r.id, r.start, len(r.payload), want)
 	}
 	return nil
 }

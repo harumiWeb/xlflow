@@ -2,12 +2,95 @@ package cfb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/richardlehane/mscfb"
 )
+
+func TestVersion4RoundTrip(t *testing.T) {
+	w, err := NewWriterForFormat(FormatV4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.AddStream([]string{"PROJECT"}, []byte("v4 project"))
+	w.AddStream([]string{"VBA", "large"}, bytes.Repeat([]byte("v4"), 2000))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint16(data[26:28]); got != uint16(FormatV4) {
+		t.Fatalf("major version = %d, want 4", got)
+	}
+	if got := binary.LittleEndian.Uint16(data[30:32]); got != 12 {
+		t.Fatalf("sector shift = %d, want 12", got)
+	}
+	if got := binary.LittleEndian.Uint32(data[40:44]); got == 0 {
+		t.Fatal("v4 directory sector count is zero")
+	}
+	if len(data)%4096 != 0 {
+		t.Fatalf("v4 file size %d is not 4096-byte aligned", len(data))
+	}
+	c, err := Open(data)
+	if err != nil {
+		t.Fatalf("Open(v4): %v", err)
+	}
+	if c.Format() != FormatV4 {
+		t.Fatalf("format = %d, want v4", c.Format())
+	}
+	got := readBack(t, data)
+	if !bytes.Equal(got["PROJECT"], []byte("v4 project")) || len(got["VBA/large"]) != 4000 {
+		t.Fatalf("external v4 read-back mismatch: PROJECT=%q large=%d", got["PROJECT"], len(got["VBA/large"]))
+	}
+}
+
+func TestWriterRejectsForbiddenNameCharacters(t *testing.T) {
+	for _, forbidden := range []rune{0, '/', '\\', ':', '!'} {
+		w := NewWriter()
+		w.AddStream([]string{"bad" + string(forbidden) + "name"}, []byte("x"))
+		if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "forbidden character") {
+			t.Fatalf("Bytes(%q) error = %v, want forbidden-character rejection", forbidden, err)
+		}
+	}
+	w := NewWriter()
+	w.AddStream([]string{""}, []byte("x"))
+	if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "must not be empty") {
+		t.Fatalf("Bytes(empty name) error = %v, want empty-name rejection", err)
+	}
+}
+
+func TestWriterEmitsDIFATBeyondHeaderEntries(t *testing.T) {
+	w := NewWriter()
+	payload := bytes.Repeat([]byte{0xA5}, 8<<20)
+	w.AddStream([]string{"large"}, payload)
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(data[44:48]); got <= difatHeaderLen {
+		t.Fatalf("FAT sector count = %d, want more than %d", got, difatHeaderLen)
+	}
+	if got := binary.LittleEndian.Uint32(data[72:76]); got == 0 {
+		t.Fatal("DIFAT sector count is zero")
+	}
+	if got := binary.LittleEndian.Uint32(data[68:72]); got == endOfChain {
+		t.Fatal("first DIFAT sector is ENDOFCHAIN")
+	}
+	c, err := Open(data)
+	if err != nil {
+		t.Fatalf("Open(DIFAT output): %v", err)
+	}
+	stream, ok := c.Stream("large")
+	if !ok || !bytes.Equal(stream, payload) {
+		t.Fatalf("internal DIFAT read-back mismatch: ok=%v len=%d", ok, len(stream))
+	}
+	got := readBack(t, data)
+	if !bytes.Equal(got["large"], payload) {
+		t.Fatalf("external DIFAT read-back mismatch: len=%d", len(got["large"]))
+	}
+}
 
 // readBack parses the cfb output with mscfb into a path->contents map.
 func readBack(t *testing.T, data []byte) map[string][]byte {
