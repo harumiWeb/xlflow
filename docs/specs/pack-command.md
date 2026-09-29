@@ -53,7 +53,9 @@ Document-module and UserForm topology remains template-authoritative. Omitting t
 
 ## Read-only source plan
 
-Before regenerating `vbaProject.bin`, `pack` builds a deterministic, read-only plan. Source discovery is shared with `build`, but `[build].exclude` is deliberately not applied to `pack`. Every configured source root must exist and be readable. Unknown extensions, invalid component names, case-insensitive duplicate names across component types, incomplete or ambiguous UserForm artifacts, filename/`Attribute VB_Name` identity mismatches, source-only document modules, and source-only UserForms fail before project mutation or output publication.
+Before building the source plan, `pack` validates the complete managed VBA source scope as UTF-8 without BOM. The scan covers configured module, class, form, and workbook roots plus the legacy top-level `tests/` root. It includes `.frm` designer files even in sidecar mode and includes sidecar `.bas` files; binary `.frx` files are excluded. Invalid input returns `source_encoding_invalid` (exit 1) with the same source path, byte position, status, and remediation suggestions as `encoding check`. No source planning, template payload read, `vbaProject.bin` generation, or output publication occurs after this failure. `pack` never converts source implicitly; use `encoding convert --from cp932` explicitly for eligible CP932 input.
+
+After encoding validation, `pack` builds a deterministic, read-only plan. Source discovery is shared with `build`, but `[build].exclude` is deliberately not applied to `pack`. Every configured source root must exist and be readable. Unknown extensions, invalid component names, case-insensitive duplicate names across component types, incomplete or ambiguous UserForm artifacts, filename/`Attribute VB_Name` identity mismatches, source-only document modules, and source-only UserForms fail before project mutation or output publication.
 
 The plan records each component's primary source path, related UserForm artifact paths, component type, topology authority, code authority, and action (`add`, `update`, `remove`, or `preserve`). Existing template order is retained. Source-authoritative standard/class additions are appended in stable type/name/path order. Standard/class topology and code are source-authoritative; document topology is template-authoritative while its supplied code is source-authoritative; UserForm topology/designer state is template-authoritative while its code follows `[userform].code_source`. Source files, the template, and the output artifact are not modified while the plan is built.
 
@@ -70,6 +72,7 @@ Each unsupported case is a specific, loud error. `pack` never falls back to best
 | atomic publication impossible (no fallback)         | `pack_output_replace_failed`                    | 3    |
 | protected VBA project                               | `pack_protected_project`                        | 1    |
 | signed VBA project                                  | `pack_signed_project`                           | 1    |
+| managed source is not UTF-8 without BOM             | `source_encoding_invalid`                       | 1    |
 | creating a new UserForm / `.frx` generation         | `pack_userform_generation_unsupported`          | 1    |
 | unknown or ambiguous VBA project layout             | `pack_ambiguous_layout`                         | 1    |
 | missing `--out`, bad extension, other arg errors    | `pack_args_invalid`                             | 2    |
@@ -80,7 +83,7 @@ Each unsupported case is a specific, loud error. `pack` never falls back to best
 
 ## Output / JSON contract
 
-On success with `--json`, `pack` emits the standard envelope (`status`, `command = "pack"`, `error = null`, `logs`) plus two top-level fields:
+On success with `--json`, `pack` emits the standard envelope (`status`, `command = "pack"`, `error = null`, `logs`) plus two top-level fields. An encoding failure instead uses the shared source-encoding failure envelope: `command = "pack"`, `error.code = "source_encoding_invalid"`, and `source.expected`, `source.files[]`, and `source.summary` describe the complete managed-source check.
 
 - `output`: the produced artifact, mirroring the `export-image` `output` object — `path`, `format` (`"xlsm"`), optional `created_parent_dirs`, and the publication contract shared with `build`: `replaced_existing` (bool), `publication` (`"atomic_create"` or `"atomic_replace"`), and `temporary_cleanup` (`{"status": "clean"|"failed", "residual_path"?, "error"?}`).
 - `pack`: identifies the backend and the validation posture.

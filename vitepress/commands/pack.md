@@ -6,11 +6,11 @@ Build a release `.xlsm` artifact from source and a workbook template.
 xlflow pack --out build/Release.xlsm --experimental
 ```
 
-`pack` is intended for controlled release automation. Run source checks first and open the resulting artifact in real Excel to compile/run a sentinel macro before publishing. See the repository's [pack specification](https://github.com/harumiWeb/xlflow/blob/main/docs/specs/pack-command.md) for release-gate details.
+`pack` is intended for controlled release automation. It validates every managed `.bas`, `.cls`, and `.frm` file as UTF-8 without BOM before source planning or binary generation. Invalid input returns `source_encoding_invalid`; run `xlflow encoding check`, then use `xlflow encoding convert --from cp932` only for eligible CP932 source. Open the resulting artifact in real Excel to compile/run a sentinel macro before publishing. See the repository's [pack specification](https://github.com/harumiWeb/xlflow/blob/main/docs/specs/pack-command.md) for release-gate details.
 
 ## Common failures
 
-Unsupported extensions, missing templates, source preflight failures, an aliased `--out` path, or a locked destination return structured errors. The artifact is published atomically through a temporary sibling file, so a failed `pack` never corrupts a previously valid output. Keep the source and template under version control and never treat a generated artifact as the source of truth.
+Unsupported extensions, missing templates, source-encoding or source-plan failures, an aliased `--out` path, or a locked destination return structured errors. UserForm `.frm` files and sidecar code are both included in encoding validation, while binary `.frx` files are excluded. The artifact is published atomically through a temporary sibling file, so a failed `pack` never corrupts a previously valid output. Keep the source and template under version control and never treat a generated artifact as the source of truth.
 
 <!-- xlflow-command-guidance -->
 

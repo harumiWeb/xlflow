@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added the shared managed-source encoding preflight to experimental `xlflow
+pack`. All `.bas`, `.cls`, and `.frm` source, including UserForm designer and
+  sidecar code, must be UTF-8 without BOM before source planning or
+  `vbaProject.bin` generation; failures now return the standard
+  `source_encoding_invalid` diagnostics and remediation suggestions.
 - Hardened experimental `xlflow pack` output publication: the artifact is
   staged as a temporary sibling file, structurally validated, and installed
   with an atomic create/replace so a failed or interrupted pack cannot corrupt

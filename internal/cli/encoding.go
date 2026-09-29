@@ -47,10 +47,10 @@ func (a *app) encodingCheckCommand() *cobra.Command {
 	}
 }
 
-// runSourceEncodingPreflight is used by commands that may eventually invoke
-// Excel. It deliberately scans the complete managed source scope, including
-// files that a particular analyzer mode may otherwise skip (for example a
-// sidecar form designer file).
+// runSourceEncodingPreflight is used by commands that consume managed VBA
+// source. It deliberately scans the complete managed source scope, including
+// files that a particular consumer may otherwise skip (for example a sidecar
+// form designer file).
 func (a *app) runSourceEncodingPreflight(ctx context.Context, command string, cfg config.Config) error {
 	result, err := sourceencoding.Check(ctx, sourceEncodingOptions(a.cwd, cfg, nil))
 	if err == nil {

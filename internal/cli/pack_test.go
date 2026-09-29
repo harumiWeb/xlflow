@@ -8,8 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/text/encoding/japanese"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
@@ -313,6 +316,145 @@ func TestPackCommandEndToEndJSONAndWorkbook(t *testing.T) {
 		t.Fatalf("unexpected publication metadata for replaced output: %#v", secondOutput)
 	}
 	assertNoPackStagingResidual(t, filepath.Join(dir, "dist"))
+}
+
+func TestPackCommandAcceptsUTF8JapaneseSource(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+	writePackSourceTree(t, dir, false)
+
+	modulePath := filepath.Join(dir, "src", "modules", "Module1.bas")
+	module := append(readFileForTest(t, modulePath), []byte("' 日本語コメント\r\n")...)
+	if err := os.WriteFile(modulePath, module, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err != nil {
+		t.Fatalf("pack command error = %v, exit = %d\n%s", err, output.ExitCode(err), stdout)
+	}
+	bin := zipEntryBytes(t, readFileForTest(t, filepath.Join(dir, "dist", "Book.xlsm")), "xl/vbaProject.bin")
+	project, err := vbaproject.Read(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := moduleSourceForTest(project, "Module1"); !strings.Contains(got, "日本語コメント") {
+		t.Fatalf("packed Module1 lost UTF-8 Japanese source:\n%s", got)
+	}
+}
+
+func TestPackCommandRunsSourceEncodingPreflightBeforeGeneration(t *testing.T) {
+	cp932, err := japanese.ShiftJIS.NewEncoder().Bytes([]byte("Attribute VB_Name = \"Japanese\"\r\n' 日本語\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name         string
+		path         string
+		status       string
+		suggestion   string
+		writeInvalid func(*testing.T, string)
+	}{
+		{
+			name:       "CP932 module",
+			path:       "src/modules/Japanese.bas",
+			status:     "invalid_utf8",
+			suggestion: "encoding convert --from cp932",
+			writeInvalid: func(t *testing.T, dir string) {
+				writePackSourceModule(t, dir, filepath.Join("src", "modules", "Japanese.bas"), cp932)
+			},
+		},
+		{
+			name:       "UTF-8 BOM form",
+			path:       "src/forms/UserForm1.frm",
+			status:     "utf8_bom",
+			suggestion: "save the file as UTF-8 without BOM",
+			writeInvalid: func(t *testing.T, dir string) {
+				writePackSourceModule(t, dir, filepath.Join("src", "forms", "UserForm1.frm"), []byte{0xef, 0xbb, 0xbf, 'x'})
+			},
+		},
+		{
+			name:       "invalid UTF-8 form sidecar",
+			path:       "src/forms/code/UserForm1.bas",
+			status:     "invalid_utf8",
+			suggestion: "encoding check",
+			writeInvalid: func(t *testing.T, dir string) {
+				writePackSourceModule(t, dir, filepath.Join("src", "forms", "UserForm1.frm"), []byte("VERSION 5.00\r\nBegin VB.UserForm UserForm1\r\nEnd\r\n"))
+				writePackSourceModule(t, dir, filepath.Join("src", "forms", "code", "UserForm1.bas"), []byte("Private Sub Broken()\r\n\x81\r\nEnd Sub\r\n"))
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writePackConfig(t, dir)
+			// A protected template proves encoding validation wins before the
+			// pack engine can parse or regenerate vbaProject.bin.
+			writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p3_protected.bin"))
+			tc.writeInvalid(t, dir)
+
+			sentinel := []byte("previous-valid-output")
+			outPath := filepath.Join(dir, "dist", "Book.xlsm")
+			if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(outPath, sentinel, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+			if err == nil || output.ExitCode(err) != output.ExitValidation {
+				t.Fatalf("pack error = %v, exit = %d, want validation failure\n%s", err, output.ExitCode(err), stdout)
+			}
+			var env struct {
+				Command string `json:"command"`
+				Source  struct {
+					Expected string `json:"expected"`
+					Files    []struct {
+						Path   string `json:"path"`
+						Status string `json:"status"`
+					} `json:"files"`
+					Summary struct {
+						Invalid int `json:"invalid"`
+					} `json:"summary"`
+				} `json:"source"`
+				Error *struct {
+					Code        string         `json:"code"`
+					Source      string         `json:"source"`
+					Details     map[string]any `json:"details"`
+					Suggestions []string       `json:"suggestions"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+				t.Fatalf("decode pack failure JSON: %v\n%s", err, stdout)
+			}
+			if env.Command != "pack" || env.Error == nil || env.Error.Code != "source_encoding_invalid" || env.Error.Source != tc.path {
+				t.Fatalf("unexpected error envelope: %+v\n%s", env.Error, stdout)
+			}
+			if env.Error.Details["status"] != tc.status || !slices.Contains(env.Error.Suggestions, tc.suggestion) {
+				t.Fatalf("unexpected encoding details/suggestions: %+v %+v", env.Error.Details, env.Error.Suggestions)
+			}
+			for _, key := range []string{"reason", "offset", "line", "byte_column"} {
+				if _, ok := env.Error.Details[key]; !ok {
+					t.Fatalf("encoding details missing %q: %+v", key, env.Error.Details)
+				}
+			}
+			fileIndex := slices.IndexFunc(env.Source.Files, func(file struct {
+				Path   string `json:"path"`
+				Status string `json:"status"`
+			}) bool {
+				return file.Path == tc.path && file.Status == tc.status
+			})
+			if env.Source.Expected != "utf-8" || env.Source.Summary.Invalid == 0 || fileIndex < 0 {
+				t.Fatalf("unexpected source payload: %+v", env.Source)
+			}
+			if got := readFileForTest(t, outPath); !bytes.Equal(got, sentinel) {
+				t.Fatalf("pack modified existing output after encoding failure: %q", got)
+			}
+		})
+	}
 }
 
 func TestPackCommandPublishesThroughOutputSymlink(t *testing.T) {
