@@ -215,6 +215,9 @@ func buildFAT(data []byte, h *cfbHeader) ([]uint32, []uint32, []uint32, error) {
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	if uint64(fatLen) < uint64(h.sectorCount) {
+		return nil, nil, nil, fmt.Errorf("cfb: FAT covers %d sectors, fewer than the %d physical sectors", fatLen, h.sectorCount)
+	}
 	fat := make([]uint32, 0, fatLen)
 	for _, s := range fatSectorNums {
 		sec, err := sectorSlice(data, h, s)
@@ -257,6 +260,9 @@ func readRegularChain(data []byte, h *cfbHeader, fat []uint32, owners []string, 
 	}
 	capacity := 0
 	if expected > 0 {
+		if uint64(expected) > uint64(h.sectorCount) {
+			return nil, fmt.Errorf("cfb: %s declares %d sectors, exceeding the %d physical sectors", owner, expected, h.sectorCount)
+		}
 		var err error
 		capacity, err = checkedInt(uint64(expected)*uint64(h.sectorSize), owner+" chain size")
 		if err != nil {
@@ -364,6 +370,9 @@ func parseDirEntry(raw []byte, format Format) (dirEntry, error) {
 	units := make([]uint16, (nameLen-2)/2)
 	for i := range units {
 		units[i] = binary.LittleEndian.Uint16(raw[i*2:])
+		if forbiddenDirectoryNameUnit(units[i]) {
+			return dirEntry{}, fmt.Errorf("cfb: directory name contains forbidden character %q", rune(units[i]))
+		}
 	}
 	size := binary.LittleEndian.Uint64(raw[120:128])
 	if format == FormatV3 {
@@ -399,7 +408,10 @@ func Open(data []byte) (*Container, error) {
 	}
 	dirExpected := -1
 	if h.format == FormatV4 {
-		dirExpected = int(h.numDirSectors)
+		dirExpected, err = checkedInt(uint64(h.numDirSectors), "directory sector count")
+		if err != nil {
+			return nil, err
+		}
 	}
 	dirData, err := readRegularChain(data, h, fat, owners, h.firstDir, dirExpected, "directory")
 	if err != nil {
@@ -443,7 +455,11 @@ func Open(data []byte) (*Container, error) {
 			return nil, errors.New("cfb: mini-FAT start is set while its sector count is zero")
 		}
 	} else {
-		raw, err := readRegularChain(data, h, fat, owners, h.firstMiniFat, int(h.numMiniFat), "mini-FAT")
+		miniFATCount, countErr := checkedInt(uint64(h.numMiniFat), "mini-FAT sector count")
+		if countErr != nil {
+			return nil, countErr
+		}
+		raw, err := readRegularChain(data, h, fat, owners, h.firstMiniFat, miniFATCount, "mini-FAT")
 		if err != nil {
 			return nil, err
 		}

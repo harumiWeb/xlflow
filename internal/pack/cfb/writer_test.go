@@ -46,6 +46,21 @@ func TestVersion4RoundTrip(t *testing.T) {
 	}
 }
 
+func TestWriterRejectsForbiddenNameCharacters(t *testing.T) {
+	for _, forbidden := range []rune{0, '/', '\\', ':', '!'} {
+		w := NewWriter()
+		w.AddStream([]string{"bad" + string(forbidden) + "name"}, []byte("x"))
+		if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "forbidden character") {
+			t.Fatalf("Bytes(%q) error = %v, want forbidden-character rejection", forbidden, err)
+		}
+	}
+	w := NewWriter()
+	w.AddStream([]string{""}, []byte("x"))
+	if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "must not be empty") {
+		t.Fatalf("Bytes(empty name) error = %v, want empty-name rejection", err)
+	}
+}
+
 func TestWriterEmitsDIFATBeyondHeaderEntries(t *testing.T) {
 	w := NewWriter()
 	payload := bytes.Repeat([]byte{0xA5}, 8<<20)

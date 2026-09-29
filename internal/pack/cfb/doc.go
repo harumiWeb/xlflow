@@ -86,3 +86,12 @@ const (
 )
 
 const dirNameMaxBytes = 64 // byte length of the DirectoryEntry name field (UTF-16, incl. NUL)
+
+func forbiddenDirectoryNameUnit(unit uint16) bool {
+	switch unit {
+	case 0, '/', '\\', ':', '!':
+		return true
+	default:
+		return false
+	}
+}

@@ -90,9 +90,18 @@ func (w *Writer) buildTree() (*node, []*node, error) {
 			return nil, nil, fmt.Errorf("cfb: empty stream path is not allowed")
 		}
 		for _, part := range s.path {
+			if part == "" {
+				return nil, nil, fmt.Errorf("cfb: directory name must not be empty")
+			}
 			// The name must fit in the 64B field (UTF-16 + NUL terminator).
-			if len(utf16.Encode([]rune(part))) > 31 {
+			units := utf16.Encode([]rune(part))
+			if len(units) > 31 {
 				return nil, nil, fmt.Errorf("cfb: name %q is too long (must fit in 31 UTF-16 code units)", part)
+			}
+			for _, unit := range units {
+				if forbiddenDirectoryNameUnit(unit) {
+					return nil, nil, fmt.Errorf("cfb: name %q contains forbidden character %q", part, rune(unit))
+				}
 			}
 		}
 		cur := root

@@ -43,6 +43,20 @@ func TestWalkRecordsRejectsTruncatedAndOversizedRecords(t *testing.T) {
 	}
 }
 
+func TestParseDirAcceptsZeroPaddingAfterProjectModulesTerminator(t *testing.T) {
+	plain := append(dirPlainFixture(1252), make([]byte, 5)...)
+	if _, err := ParseDir(plain); err != nil {
+		t.Fatalf("ParseDir with raw-chunk padding: %v", err)
+	}
+}
+
+func TestParseDirRejectsNonzeroPaddingAfterProjectModulesTerminator(t *testing.T) {
+	plain := append(dirPlainFixture(1252), 0, 1, 0)
+	if _, err := ParseDir(plain); err == nil || !strings.Contains(err.Error(), "nonzero padding") {
+		t.Fatalf("ParseDir error = %v, want nonzero-padding rejection", err)
+	}
+}
+
 func TestParseDirRejectsShortKnownRecord(t *testing.T) {
 	plain := append(sizedRecord(0x0001, []byte{1}), sizedRecord(0x0003, []byte{0xE4, 0x04})...)
 	if _, err := ParseDir(plain); err == nil || !strings.Contains(err.Error(), "payload size") {

@@ -37,6 +37,17 @@ func walkRecords(buf []byte) ([]record, error) {
 		endInt := int(end)
 		recs = append(recs, record{id: id, start: i, payload: buf[i+6 : endInt]})
 		i = endInt
+		if id == 0x0010 {
+			if size != 0 {
+				return nil, fmt.Errorf("ovba: PROJECTMODULES terminator at offset %d has payload size %d", recs[len(recs)-1].start, size)
+			}
+			for paddingOffset, b := range buf[i:] {
+				if b != 0 {
+					return nil, fmt.Errorf("ovba: nonzero padding after PROJECTMODULES terminator at offset %d", i+paddingOffset)
+				}
+			}
+			return recs, nil
+		}
 	}
 	return recs, nil
 }
