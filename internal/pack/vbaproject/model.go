@@ -49,7 +49,7 @@ type Project struct {
 	References       []Reference // best-effort, for display (not edited in v1)
 	ReferencesRaw    []byte      // verbatim byte span of the dir references section (written back unchanged)
 	ProjectInfoRaw   []byte      // verbatim span of dir PROJECTINFORMATION (written back unchanged)
-	ProjectStreamRaw []byte      // verbatim of the entire PROJECT stream (incl. CMG/DPB/GC and Host Extender Info)
+	ProjectStreamRaw []byte      // template PROJECT stream; unrelated content is preserved while component declarations are rebuilt
 	// RawStreams holds every stream the writer does not own, keyed by full
 	// "/"-separated path, captured verbatim at read time and re-emitted on write.
 	// Membership is structural: the first path segment is neither "VBA" (owned and

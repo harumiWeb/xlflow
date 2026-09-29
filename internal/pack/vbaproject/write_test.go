@@ -78,16 +78,68 @@ func TestWriteRejectsNonASCIIModuleName(t *testing.T) {
 	}
 }
 
-func TestWriteRejectsModuleSetChange(t *testing.T) {
+func TestWriteSupportsStandardAndClassTopologyChanges(t *testing.T) {
 	p, err := Read(loadBin(t, "p1_compiled.bin"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Adding a module that the PROJECT stream does not list makes the verbatim-preserved PROJECT and the
-	// PROJECTMODULES rebuilt from p.Modules diverge, producing an internal inconsistency.
-	// v1 is for source editing only, so changing the module set is rejected.
-	p.Modules = append(p.Modules, Module{Name: "Ghost", StreamName: "Ghost", Type: ModuleStd})
+	p.Modules = append(p.Modules[:2],
+		Module{Name: "RenamedModule", StreamName: "RenamedModule", Type: ModuleStd, Source: "Attribute VB_Name = \"RenamedModule\"\r\n"},
+		Module{Name: "AddedClass", StreamName: "AddedClass", Type: ModuleClass, Source: "Attribute VB_Name = \"AddedClass\"\r\n"},
+	)
+	out, err := Write(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]ModuleType{
+		"ThisWorkbook":  ModuleDocument,
+		"Sheet1":        ModuleDocument,
+		"RenamedModule": ModuleStd,
+		"AddedClass":    ModuleClass,
+	}
+	if len(got.Modules) != len(want) {
+		t.Fatalf("module count = %d, want %d", len(got.Modules), len(want))
+	}
+	for _, module := range got.Modules {
+		wantType, ok := want[module.Name]
+		if !ok || wantType != module.Type {
+			t.Errorf("module %q type = %v, want %v (present=%v)", module.Name, module.Type, wantType, ok)
+		}
+	}
+}
+
+func TestWriteRejectsTemplateOwnedTopologyChanges(t *testing.T) {
+	p, err := Read(loadBin(t, "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Modules = p.Modules[1:]
 	if _, err := Write(p); err == nil {
-		t.Error("changing the module set (diverging from PROJECT) should return an error")
+		t.Fatal("removing a document module should fail")
+	}
+}
+
+func TestWriteRejectsDuplicateNamesAndStreams(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		module Module
+	}{
+		{name: "name", module: Module{Name: "module1", StreamName: "Other", Type: ModuleStd}},
+		{name: "stream", module: Module{Name: "Other", StreamName: "module1", Type: ModuleStd}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := Read(loadBin(t, "p1_compiled.bin"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.Modules = append(p.Modules, tc.module)
+			if _, err := Write(p); err == nil {
+				t.Fatal("duplicate module identity should fail")
+			}
+		})
 	}
 }

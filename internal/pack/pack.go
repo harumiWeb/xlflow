@@ -35,11 +35,11 @@ const (
 
 // SourceModule is one source-tree module to apply to a template vbaProject.bin.
 //
-// Source is the disk-form text read from a .bas/.cls/.frm file. Standard and class modules are
-// replaced when Name and Type match an existing template module. Document modules are replaced by
-// exact module name match against an existing template document module. A UserForm's code-behind is
-// replaced when the form already exists in the template; its designer layout is preserved, not
-// authored, and creating a new form is unsupported.
+// Source is the disk-form text read from a .bas/.cls/.frm file. The complete set of supplied standard
+// and class modules is authoritative: missing template modules are removed and new modules are added.
+// Document modules are replaced by exact module name match against an existing template document
+// module. A UserForm's code-behind is replaced when the form already exists in the template; its
+// designer layout is preserved, not authored, and creating a new form is unsupported.
 type SourceModule struct {
 	Name   string
 	Type   ModuleType
@@ -57,9 +57,10 @@ type PackMeta struct {
 
 // GenerateVBAProject returns a regenerated vbaProject.bin based on template.
 //
-// The engine replaces only supplied standard, class, and unambiguous document
-// module source. Project records, references, codepage, and opaque streams such
-// as existing UserForm designer storages are carried through from the template.
+// The engine reconstructs the standard and class component set from sources and
+// replaces supplied unambiguous document and UserForm code. Project records,
+// references, codepage, document/UserForm topology, and opaque streams such as
+// existing UserForm designer storages are carried through from the template.
 // Unsupported content returns one of the exported sentinel errors so the CLI can
 // map it to the pack error contract.
 func GenerateVBAProject(template []byte, sources []SourceModule) ([]byte, error) {
@@ -150,45 +151,46 @@ func generateVBAProject(template []byte, sources []SourceModule) ([]byte, PackMe
 }
 
 func applySources(project *vbaproject.Project, sources []SourceModule) (PackMeta, error) {
-	byKey := make(map[string]int, len(project.Modules))
-	for i, m := range project.Modules {
-		key := moduleKey(m.Name, fromProjectModuleType(m.Type))
-		if _, exists := byKey[key]; exists {
-			return PackMeta{}, fmt.Errorf("%w: duplicate template module %s", ErrAmbiguousLayout, m.Name)
+	byKey := make(map[string]bool, len(project.Modules))
+	templateNames := make(map[string]string, len(project.Modules))
+	for _, m := range project.Modules {
+		nameKey := strings.ToLower(m.Name)
+		if prior, exists := templateNames[nameKey]; exists {
+			return PackMeta{}, fmt.Errorf("%w: duplicate template modules %s and %s", ErrAmbiguousLayout, prior, m.Name)
 		}
-		byKey[key] = i
+		templateNames[nameKey] = m.Name
+		key := moduleKey(m.Name, fromProjectModuleType(m.Type))
+		byKey[key] = true
 	}
 
 	var meta PackMeta
-	seen := make(map[string]bool, len(sources))
+	seen := make(map[string]string, len(sources))
+	sourceByKey := make(map[string]SourceModule, len(sources))
 	for _, source := range sources {
 		if source.Name == "" {
 			return PackMeta{}, fmt.Errorf("%w: source module name is empty", ErrAmbiguousLayout)
 		}
-		targetType, err := toProjectModuleType(source.Type)
+		_, err := toProjectModuleType(source.Type)
 		if err != nil {
 			return PackMeta{}, err
 		}
+		nameKey := strings.ToLower(source.Name)
+		if prior, ok := seen[nameKey]; ok {
+			return PackMeta{}, fmt.Errorf("%w: duplicate source modules %s and %s", ErrAmbiguousLayout, prior, source.Name)
+		}
+		seen[nameKey] = source.Name
 		key := moduleKey(source.Name, source.Type)
-		if seen[key] {
-			return PackMeta{}, fmt.Errorf("%w: duplicate source module %s", ErrAmbiguousLayout, source.Name)
+		sourceByKey[key] = source
+		ok := byKey[key]
+		if !ok && source.Type == ModuleTypeForm {
+			// A form's designer storage cannot be authored from source, so creating a
+			// form that is not already in the template is UserForm generation (Stage 3),
+			// not the generic "cannot add modules" limitation.
+			return PackMeta{}, fmt.Errorf("%w: form %q is not in the template; pack updates the code-behind of existing forms only and cannot create a new UserForm", ErrUserFormGenerationUnsupported, source.Name)
 		}
-		seen[key] = true
-		idx, ok := byKey[key]
-		if !ok {
-			if source.Type == ModuleTypeForm {
-				// A form's designer storage cannot be authored from source, so creating a
-				// form that is not already in the template is UserForm generation (Stage 3),
-				// not the generic "cannot add modules" limitation.
-				return PackMeta{}, fmt.Errorf("%w: form %q is not in the template; pack updates the code-behind of existing forms only and cannot create a new UserForm", ErrUserFormGenerationUnsupported, source.Name)
-			}
-			return PackMeta{}, fmt.Errorf("%w: source module %q is not in the template; pack updates existing modules only and cannot add new modules in the experimental MVP", ErrAmbiguousLayout, source.Name)
+		if !ok && source.Type == ModuleTypeDocument {
+			return PackMeta{}, fmt.Errorf("%w: document module %q is not in the template; document topology is template-owned", ErrAmbiguousLayout, source.Name)
 		}
-		normalized, err := vbaproject.NormalizeModuleSource(targetType, source.Source, &project.Modules[idx])
-		if err != nil {
-			return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
-		}
-		project.Modules[idx].Source = normalized
 		switch source.Type {
 		case ModuleTypeStandard:
 			meta.Standard++
@@ -200,6 +202,52 @@ func applySources(project *vbaproject.Project, sources []SourceModule) (PackMeta
 			meta.Form++
 		}
 	}
+
+	modules := make([]vbaproject.Module, 0, len(project.Modules)+len(sources))
+	consumed := make(map[string]bool, len(sources))
+	for _, module := range project.Modules {
+		typ := fromProjectModuleType(module.Type)
+		key := moduleKey(module.Name, typ)
+		source, supplied := sourceByKey[key]
+		if !supplied && (module.Type == vbaproject.ModuleStd || module.Type == vbaproject.ModuleClass) {
+			continue
+		}
+		if supplied {
+			normalized, err := vbaproject.NormalizeModuleSource(module.Type, source.Source, &module)
+			if err != nil {
+				return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+			}
+			if module.Type == vbaproject.ModuleStd || module.Type == vbaproject.ModuleClass {
+				if err := vbaproject.ValidateModuleIdentity(module.Name, normalized); err != nil {
+					return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+				}
+			}
+			module.Source = normalized
+			consumed[key] = true
+		}
+		modules = append(modules, module)
+	}
+	for _, source := range sources {
+		if source.Type != ModuleTypeStandard && source.Type != ModuleTypeClass {
+			continue
+		}
+		key := moduleKey(source.Name, source.Type)
+		if consumed[key] {
+			continue
+		}
+		targetType, _ := toProjectModuleType(source.Type)
+		normalized, err := vbaproject.NormalizeModuleSource(targetType, source.Source, nil)
+		if err != nil {
+			return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+		}
+		if err := vbaproject.ValidateModuleIdentity(source.Name, normalized); err != nil {
+			return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+		}
+		modules = append(modules, vbaproject.Module{
+			Name: source.Name, StreamName: source.Name, Type: targetType, Source: normalized,
+		})
+	}
+	project.Modules = modules
 	return meta, nil
 }
 

@@ -9,14 +9,18 @@ import (
 )
 
 // Write assembles a *Project (whose Source fields hold the in-bin form) into a
-// source-only vbaProject.bin. The preserved set (ProjectInfoRaw, ReferencesRaw,
-// ProjectStreamRaw) is written verbatim; only PROJECTMODULES and the module
-// streams are built from the model.
+// source-only vbaProject.bin. ProjectInfoRaw and ReferencesRaw are written
+// verbatim. The PROJECT stream preserves unrelated text while rebuilding its
+// component declarations; PROJECTMODULES and module streams are rebuilt from
+// the model.
 func Write(p *Project) ([]byte, error) {
 	if p.Protection.IsProtected {
 		return nil, fmt.Errorf("vbaproject: protected projects are not supported in v1")
 	}
 	specs := make([]ovba.ModuleSpec, 0, len(p.Modules))
+	projectSpecs := make([]ovba.ProjectComponentSpec, 0, len(p.Modules))
+	names := make(map[string]string, len(p.Modules))
+	streams := make(map[string]string, len(p.Modules))
 	for _, m := range p.Modules {
 		// A UserForm's code-behind module is written like any other module (its
 		// in-bin source is an Attribute header plus code, the same shape as a class
@@ -28,15 +32,31 @@ func Write(p *Project) ([]byte, error) {
 		if !isASCII(m.Name) || !isASCII(m.StreamName) {
 			return nil, fmt.Errorf("vbaproject: non-ASCII module names are not supported in v1 (Name=%q StreamName=%q)", m.Name, m.StreamName)
 		}
+		if m.Name == "" || m.StreamName == "" {
+			return nil, fmt.Errorf("vbaproject: module and stream names must not be empty")
+		}
+		nameKey := strings.ToLower(m.Name)
+		if prior, ok := names[nameKey]; ok {
+			return nil, fmt.Errorf("vbaproject: duplicate module names %q and %q", prior, m.Name)
+		}
+		names[nameKey] = m.Name
+		streamKey := strings.ToLower(m.StreamName)
+		if prior, ok := streams[streamKey]; ok {
+			return nil, fmt.Errorf("vbaproject: duplicate module stream names %q and %q", prior, m.StreamName)
+		}
+		streams[streamKey] = m.StreamName
+		kind := projectKind(m.Type)
+		if kind == "" {
+			return nil, fmt.Errorf("vbaproject: module %q has an unknown ModuleType %d", m.Name, m.Type)
+		}
 		specs = append(specs, ovba.ModuleSpec{
 			Name: m.Name, StreamName: m.StreamName, TypeID: moduleTypeID(m.Type),
 		})
+		projectSpecs = append(projectSpecs, ovba.ProjectComponentSpec{Kind: kind, Name: m.Name})
 	}
-	// v1 is for source editing only. The PROJECT stream is preserved verbatim, but PROJECTMODULES is
-	// rebuilt from p.Modules, so if the module set disagrees with PROJECT the output bin becomes internally
-	// inconsistent. Adding/removing/renaming a module is an unsupported operation and is rejected fail-loud.
-	if err := checkModuleSet(p); err != nil {
-		return nil, err
+	projectStream, err := ovba.RebuildProjectText(p.ProjectStreamRaw, projectSpecs)
+	if err != nil {
+		return nil, fmt.Errorf("vbaproject: rebuild PROJECT stream: %w", err)
 	}
 
 	// dir.plain = PROJECTINFORMATION(span) ++ PROJECTREFERENCES(span) ++ PROJECTMODULES(built).
@@ -53,7 +73,7 @@ func Write(p *Project) ([]byte, error) {
 	for path, data := range p.RawStreams {
 		w.AddStream(strings.Split(path, "/"), data)
 	}
-	w.AddStream([]string{"PROJECT"}, p.ProjectStreamRaw)
+	w.AddStream([]string{"PROJECT"}, projectStream)
 	w.AddStream([]string{"VBA", "_VBA_PROJECT"}, ovba.VBAProjectStub())
 	dirComp, err := ovba.Compress(dirPlain)
 	if err != nil {
@@ -93,38 +113,8 @@ func isASCII(s string) bool {
 	return true
 }
 
-// checkModuleSet verifies that the set of module names listed by the PROJECT stream being preserved
-// matches p.Modules. PROJECT enumerates modules via Module=/Class=/BaseClass=/Document= lines, and any
-// mismatch with p.Modules (the source for rebuilding PROJECTMODULES) would be an internal inconsistency.
-func checkModuleSet(p *Project) error {
-	listed := ovba.ParseProjectText(p.ProjectStreamRaw).Kinds
-	have := make(map[string]bool, len(p.Modules))
-	for _, m := range p.Modules {
-		have[m.Name] = true
-		kind, ok := listed[m.Name]
-		if !ok {
-			return fmt.Errorf("vbaproject: module %q is not listed in the PROJECT stream (changing the module set is not supported in v1)", m.Name)
-		}
-		want := projectKind(m.Type)
-		if want == "" {
-			return fmt.Errorf("vbaproject: module %q has an unknown ModuleType %d", m.Name, m.Type)
-		}
-		if kind != want {
-			return fmt.Errorf("vbaproject: module %q kind mismatch: PROJECT declares %s but the model is %s (changing a module's kind is not supported in v1)", m.Name, kind, want)
-		}
-	}
-	for name := range listed {
-		if !have[name] {
-			return fmt.Errorf("vbaproject: module %q from the PROJECT stream is missing from p.Modules (changing the module set is not supported in v1)", name)
-		}
-	}
-	return nil
-}
-
 // projectKind maps a ModuleType to the kind keyword PROJECT uses
-// (Module/Class/BaseClass/Document, per ovba.ParseProjectText). It returns ""
-// for a ModuleType with no PROJECT keyword; checkModuleSet treats that as an
-// error rather than silently skipping the kind check.
+// (Module/Class/BaseClass/Document, per ovba.ParseProjectText).
 func projectKind(t ModuleType) string {
 	switch t {
 	case ModuleStd:

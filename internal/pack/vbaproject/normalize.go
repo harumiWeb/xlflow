@@ -29,6 +29,33 @@ func NormalizeModuleSource(mt ModuleType, disk string, existing *Module) (string
 	}
 }
 
+// ValidateModuleIdentity verifies that the in-bin Attribute VB_Name agrees
+// with the component identity used by PROJECT, dir, and the VBA stream. It is
+// used whenever pack updates or creates a standard or class component. The
+// textual source remains authoritative for code, but its declared identity
+// must agree with the component model.
+func ValidateModuleIdentity(expectedName, source string) error {
+	for line := range strings.SplitSeq(toCRLF(source), "\r\n") {
+		if !strings.HasPrefix(line, "Attribute VB_Name ") {
+			continue
+		}
+		_, value, ok := strings.Cut(line, "=")
+		if !ok {
+			break
+		}
+		value = strings.TrimSpace(value)
+		if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+			return fmt.Errorf("vbaproject: Attribute VB_Name is malformed")
+		}
+		declared := value[1 : len(value)-1]
+		if declared != expectedName {
+			return fmt.Errorf("vbaproject: Attribute VB_Name %q does not match component name %q", declared, expectedName)
+		}
+		return nil
+	}
+	return fmt.Errorf("vbaproject: Attribute VB_Name was not found")
+}
+
 // toCRLF normalizes mixed line endings to CRLF (the in-bin form is always CRLF). Observed disk
 // forms are already CRLF, so it is effectively a no-op, but it guards against stray LFs.
 func toCRLF(s string) string {
