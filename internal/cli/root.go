@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"archive/zip"
 	"bytes"
 	"cmp"
 	"context"
@@ -2300,10 +2301,19 @@ func (a *app) packCommand() *cobra.Command {
 			}
 
 			resolvedOut := workbookArgPath(a.cwd, outPath)
-			if samePath(resolvedOut, resolvedTemplate) || samePath(resolvedOut, configuredWorkbook) {
+			aliasesWorkbook, err := packOutputAliasesWorkbook(a.cwd, resolvedOut, resolvedTemplate, configuredWorkbook)
+			if err != nil {
+				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
+			}
+			if aliasesWorkbook {
 				return a.writeFailure("pack", output.ExitConfig, "pack_in_place_overwrite", fmt.Errorf("--out must differ from template and configured workbook: %s", resolvedOut))
 			}
-			candidates := uniqueNonEmptyPaths(resolvedTemplate, configuredWorkbook, resolvedOut)
+			outputIdentity, err := coordination.NewWorkbookIdentity(a.cwd, resolvedOut)
+			if err != nil {
+				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
+			}
+			publicationOut := outputIdentity.CanonicalPath
+			candidates := packCandidatePaths(a.cwd, resolvedTemplate, configuredWorkbook, resolvedOut)
 			for _, candidate := range candidates {
 				if lockPath, locked := officeLockFilePresent(candidate); locked {
 					return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("workbook appears to be open: %s", lockPath))
@@ -2330,19 +2340,34 @@ func (a *app) packCommand() *cobra.Command {
 			if err != nil {
 				return a.writePackEngineFailure(err)
 			}
-			createdParentDirs, err := writePackOutput(resolvedOut, workbookBytes)
+			createdParentDirs, publication, err := writePackOutput(publicationOut, workbookBytes)
 			if err != nil {
-				return a.writeFailure("pack", output.ExitEnvironment, "pack_write_failed", err)
+				switch {
+				case errors.Is(err, coordination.ErrPublishTargetBusy):
+					return a.writeFailure("pack", output.ExitEnvironment, "pack_output_busy", err)
+				case errors.Is(err, coordination.ErrPublishReplaceFailed):
+					return a.writeFailure("pack", output.ExitEnvironment, "pack_output_replace_failed", err)
+				default:
+					return a.writeFailure("pack", output.ExitEnvironment, "pack_write_failed", err)
+				}
 			}
 
 			env := output.New("pack")
 			outputPayload := map[string]any{
-				"path":   displayPath(a.cwd, resolvedOut),
-				"format": "xlsm",
+				"path":              displayPath(a.cwd, resolvedOut),
+				"format":            "xlsm",
+				"replaced_existing": publication.ReplacedExisting,
+				"publication":       publication.Publication,
 			}
 			if createdParentDirs {
 				outputPayload["created_parent_dirs"] = true
 			}
+			cleanup := map[string]any{"status": publication.Cleanup.Status}
+			if publication.Cleanup.Status == "failed" {
+				cleanup["residual_path"] = displayPath(a.cwd, publication.Cleanup.ResidualPath)
+				cleanup["error"] = publication.Cleanup.Error
+			}
+			outputPayload["temporary_cleanup"] = cleanup
 			env.Output = outputPayload
 			env.Pack = map[string]any{
 				"backend":        "pure-go",
@@ -2357,10 +2382,17 @@ func (a *app) packCommand() *cobra.Command {
 					"carried_streams": meta.CarriedStreams,
 				},
 			}
-			env.Warnings = []map[string]any{{
+			warnings := []map[string]any{{
 				"code":    "vbe_validation_skipped",
 				"message": "pack did not open Excel; no VBE compile or runtime validation was performed.",
 			}}
+			if publication.Cleanup.Status == "failed" {
+				warnings = append(warnings, map[string]any{
+					"code":    "pack_temporary_cleanup_failed",
+					"message": "pack published the output but could not remove the temporary artifact: " + publication.Cleanup.ResidualPath,
+				})
+			}
+			env.Warnings = warnings
 			env.Logs = []string{"packed " + displayPath(a.cwd, resolvedOut)}
 			return a.write(env, output.ExitSuccess)
 		},
@@ -2975,7 +3007,11 @@ func (a *app) packActiveSession(candidates []string) (string, bool, error) {
 		return "", false, err
 	}
 	for _, candidate := range candidates {
-		if samePath(metadata.WorkbookPath, candidate) {
+		match, identityErr := coordination.SameFileIdentity(a.cwd, metadata.WorkbookPath, candidate)
+		if identityErr != nil {
+			match = samePath(metadata.WorkbookPath, candidate)
+		}
+		if match {
 			return metadata.WorkbookPath, true, nil
 		}
 	}
@@ -6459,19 +6495,49 @@ func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceM
 	return sources, nil
 }
 
-func uniqueNonEmptyPaths(paths ...string) []string {
+// packOutputAliasesWorkbook reports whether the --out destination resolves to
+// the same filesystem object as the template or the configured workbook. The
+// comparison uses canonical workbook identities, which resolve the nearest
+// existing ancestor through symlinks and junctions, so a destination that only
+// differs lexically (for example an aliased directory) is still rejected.
+func packOutputAliasesWorkbook(baseDir, outPath string, workbooks ...string) (bool, error) {
+	for _, workbook := range workbooks {
+		if strings.TrimSpace(workbook) == "" {
+			continue
+		}
+		same, err := coordination.SameFileIdentity(baseDir, outPath, workbook)
+		if err != nil {
+			return false, err
+		}
+		if same {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// packCandidatePaths retains both requested and canonical names. Office lock
+// files use the name Excel opened, while session matching needs canonical
+// identity, so discarding either representation can miss an active workbook.
+func packCandidatePaths(baseDir string, paths ...string) []string {
 	seen := map[string]bool{}
 	var out []string
+	appendPath := func(path string) {
+		key := filepath.Clean(path)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, path)
+	}
 	for _, path := range paths {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
-		key := strings.ToLower(filepath.Clean(path))
-		if seen[key] {
-			continue
+		appendPath(path)
+		if identity, err := coordination.NewWorkbookIdentity(baseDir, path); err == nil {
+			appendPath(identity.CanonicalPath)
 		}
-		seen[key] = true
-		out = append(out, path)
 	}
 	return out
 }
@@ -6484,21 +6550,61 @@ func officeLockFilePresent(workbookPath string) (string, bool) {
 	return lockPath, false
 }
 
-func writePackOutput(path string, body []byte) (bool, error) {
+// writePackOutput publishes the generated workbook through a temporary sibling
+// artifact so an interrupted or failed pack cannot corrupt a previously valid
+// output. See coordination.PublishFile for the staging and atomicity contract.
+func writePackOutput(path string, body []byte) (bool, coordination.PublishResult, error) {
 	parent := filepath.Dir(path)
 	createdParentDirs := false
 	if parent != "." && parent != "" {
 		if _, err := os.Stat(parent); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
-				return false, err
+				return false, coordination.PublishResult{}, err
 			}
 			createdParentDirs = true
 		}
 		if err := os.MkdirAll(parent, 0o755); err != nil {
-			return false, err
+			return false, coordination.PublishResult{}, err
 		}
 	}
-	return createdParentDirs, os.WriteFile(path, body, 0o644)
+	result, err := coordination.PublishFile(path, body, validatePackArtifact)
+	if err != nil {
+		return createdParentDirs, coordination.PublishResult{}, err
+	}
+	return createdParentDirs, result, nil
+}
+
+// validatePackArtifact performs the lightweight structural check required
+// before publication: the staged file must be a readable OOXML zip containing
+// the regenerated vbaProject.bin.
+func validatePackArtifact(path string) error {
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		return fmt.Errorf("staged artifact is not a readable zip: %w", err)
+	}
+	defer func() { _ = reader.Close() }()
+	for _, entry := range reader.File {
+		if entry.Name != "xl/vbaProject.bin" {
+			continue
+		}
+		stream, err := entry.Open()
+		if err != nil {
+			return fmt.Errorf("open staged xl/vbaProject.bin: %w", err)
+		}
+		size, readErr := io.Copy(io.Discard, stream)
+		closeErr := stream.Close()
+		if readErr != nil {
+			return fmt.Errorf("read staged xl/vbaProject.bin: %w", readErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close staged xl/vbaProject.bin: %w", closeErr)
+		}
+		if size == 0 {
+			return errors.New("staged xl/vbaProject.bin is empty")
+		}
+		return nil
+	}
+	return errors.New("staged artifact is missing xl/vbaProject.bin")
 }
 
 func buildDiffOptions(root, beforeWorkbook, afterWorkbook, vbaBefore, vbaAfter string) (diff.Options, error) {

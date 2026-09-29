@@ -4,6 +4,19 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Hardened experimental `xlflow pack` output publication: the artifact is
+  staged as a temporary sibling file, structurally validated, and installed
+  with an atomic create/replace so a failed or interrupted pack cannot corrupt
+  a previously valid output. `--out` now compares canonical filesystem
+  identity and rejects destinations that alias the template or configured
+  workbook through symlinks, junctions, or hard links. Existing output
+  symlinks publish through their referent, Unix replacements preserve file
+  permissions, and validation reads the VBA payload to verify its ZIP CRC.
+  Locked destinations fail with the new `pack_output_busy` error, non-atomic
+  publication with
+  `pack_output_replace_failed`, and successful JSON reports
+  `output.replaced_existing`, `output.publication`, and
+  `output.temporary_cleanup`.
 - Added deterministic read-only source planning to experimental `xlflow pack`: `build` and `pack` now share strict source-tree discovery, while `pack` deliberately ignores `[build].exclude`; pack validates configured roots, extensions, names, UserForm artifacts, source/template identity, and topology before mutation, then applies an explicit authority/action plan in stable order.
 - Extended experimental `xlflow pack` so the source tree is authoritative for
   standard and class module topology. Packed projects can now add, remove, and

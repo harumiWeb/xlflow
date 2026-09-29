@@ -147,6 +147,26 @@ func TestPackCommandActiveSessionOutputLockFile(t *testing.T) {
 	}
 }
 
+func TestPackCommandActiveSessionAliasLockFile(t *testing.T) {
+	dir := t.TempDir()
+	writePackProject(t, dir, false)
+	alias := filepath.Join(dir, "build", "Alias.xlsm")
+	if err := os.Symlink(filepath.Join(dir, "build", "Book.xlsm"), alias); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "build", "~$Alias.xlsm"), []byte("lock"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--template", "build/Alias.xlsm", "--out", "dist/Book.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("err=%v exit=%d, want config failure", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_active_session" {
+		t.Fatalf("error code = %q, want pack_active_session\n%s", got, stdout)
+	}
+}
+
 func TestPackCommandActiveSessionMetadata(t *testing.T) {
 	dir := t.TempDir()
 	writePackProject(t, dir, false)
@@ -268,6 +288,109 @@ func TestPackCommandEndToEndJSONAndWorkbook(t *testing.T) {
 	if len(env.Warnings) != 1 || env.Warnings[0].Code != "vbe_validation_skipped" {
 		t.Fatalf("unexpected warnings: %#v", env.Warnings)
 	}
+
+	if env.Output["publication"] != "atomic_create" || env.Output["replaced_existing"] != false {
+		t.Fatalf("unexpected publication metadata for new output: %#v", env.Output)
+	}
+	cleanup, ok := env.Output["temporary_cleanup"].(map[string]any)
+	if !ok || cleanup["status"] != "clean" {
+		t.Fatalf("unexpected temporary_cleanup payload: %#v", env.Output["temporary_cleanup"])
+	}
+	assertNoPackStagingResidual(t, filepath.Join(dir, "dist"))
+
+	// A second pack over the same destination must publish through the atomic
+	// replace path and report it.
+	stdout, err = runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err != nil {
+		t.Fatalf("second pack command error = %v\n%s", err, stdout)
+	}
+	var second map[string]any
+	if err := json.Unmarshal([]byte(stdout), &second); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout)
+	}
+	secondOutput, _ := second["output"].(map[string]any)
+	if secondOutput["publication"] != "atomic_replace" || secondOutput["replaced_existing"] != true {
+		t.Fatalf("unexpected publication metadata for replaced output: %#v", secondOutput)
+	}
+	assertNoPackStagingResidual(t, filepath.Join(dir, "dist"))
+}
+
+func TestPackCommandPublishesThroughOutputSymlink(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+	writePackSourceTree(t, dir, false)
+
+	referent := filepath.Join(dir, "shared", "Release.xlsm")
+	if err := os.MkdirAll(filepath.Dir(referent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(referent, []byte("previous-output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(dir, "dist", "Book.xlsm")
+	if err := os.MkdirAll(filepath.Dir(alias), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(referent, alias); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err != nil {
+		t.Fatalf("pack command error = %v\n%s", err, stdout)
+	}
+	info, err := os.Lstat(alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("output symlink was replaced instead of publishing through it")
+	}
+	bin := zipEntryBytes(t, readFileForTest(t, referent), "xl/vbaProject.bin")
+	if _, err := vbaproject.Read(bin); err != nil {
+		t.Fatalf("referent vbaProject.bin is not readable: %v", err)
+	}
+	var env struct {
+		Output map[string]any `json:"output"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json output should be valid: %v\n%s", err, stdout)
+	}
+	if env.Output["path"] != "dist/Book.xlsm" || env.Output["publication"] != "atomic_replace" {
+		t.Fatalf("unexpected output payload: %#v", env.Output)
+	}
+}
+
+func TestValidatePackArtifactReadsVBAPayload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "corrupt.xlsm")
+	payload := []byte("unique-vba-payload-for-crc")
+	var buf bytes.Buffer
+	writer := zip.NewWriter(&buf)
+	header := &zip.FileHeader{Name: "xl/vbaProject.bin", Method: zip.Store}
+	entry, err := writer.CreateHeader(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	artifact := buf.Bytes()
+	offset := bytes.Index(artifact, payload)
+	if offset < 0 {
+		t.Fatal("stored VBA payload not found in fixture")
+	}
+	artifact[offset] ^= 0xff
+	if err := os.WriteFile(path, artifact, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePackArtifact(path); err == nil || !strings.Contains(err.Error(), "read staged xl/vbaProject.bin") {
+		t.Fatalf("err = %v, want staged VBA payload read failure", err)
+	}
 }
 
 func TestPackCommandEndToEndUpdatesFormCodeBehind(t *testing.T) {
@@ -363,6 +486,86 @@ func TestPackCommandRejectsAddedModuleNameMismatch(t *testing.T) {
 	}
 }
 
+func TestPackCommandInPlaceGuardRejectsAliasedOutput(t *testing.T) {
+	dir := t.TempDir()
+	writePackProject(t, dir, false)
+
+	link := filepath.Join(dir, "build-alias")
+	if err := os.Symlink(filepath.Join(dir, "build"), link); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	defer func() { _ = os.Remove(link) }()
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "build-alias/Book.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("err=%v exit=%d, want config failure", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_in_place_overwrite" {
+		t.Fatalf("error code = %q, want pack_in_place_overwrite\n%s", got, stdout)
+	}
+}
+
+func TestPackCommandPreservesExistingOutputOnEngineFailure(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p3_protected.bin"))
+	sentinel := []byte("previous-valid-output")
+	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "dist", "Book.xlsm")
+	if err := os.WriteFile(outPath, sentinel, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("err=%v exit=%d, want validation failure", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_protected_project" {
+		t.Fatalf("error code = %q, want pack_protected_project\n%s", got, stdout)
+	}
+	body, readErr := os.ReadFile(outPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(body, sentinel) {
+		t.Fatalf("existing output was modified after failed pack: %q", body)
+	}
+}
+
+func TestPackCommandActiveSessionAlias(t *testing.T) {
+	dir := t.TempDir()
+	writePackProject(t, dir, false)
+
+	// A session recorded through a symlinked project alias must still block pack.
+	link := filepath.Join(dir, "alias-project")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	defer func() { _ = os.Remove(link) }()
+	meta, err := json.Marshal(map[string]any{
+		"workbook_path": filepath.Join(link, "build", "Book.xlsm"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".xlflow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".xlflow", "session.json"), meta, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("err=%v exit=%d, want config failure", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_active_session" {
+		t.Fatalf("error code = %q, want pack_active_session\n%s", got, stdout)
+	}
+}
+
 func runPackCommandForTest(dir string, args ...string) (string, error) {
 	var stdout bytes.Buffer
 	a := &app{
@@ -438,6 +641,19 @@ func readPackFixture(t *testing.T, parts ...string) []byte {
 	t.Helper()
 	all := append([]string{"..", "pack"}, parts...)
 	return readFileForTest(t, filepath.Join(all...))
+}
+
+func assertNoPackStagingResidual(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read output dir: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".xlflow-publish-") {
+			t.Fatalf("temporary publish artifact was not cleaned: %s", entry.Name())
+		}
+	}
 }
 
 func readFileForTest(t *testing.T, path string) []byte {

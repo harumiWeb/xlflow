@@ -10,7 +10,7 @@ xlflow pack --out build/Release.xlsm --experimental
 
 ## Common failures
 
-Unsupported extensions, missing templates, source preflight failures, or an existing output file return structured errors. Keep the source and template under version control and never treat a generated artifact as the source of truth.
+Unsupported extensions, missing templates, source preflight failures, an aliased `--out` path, or a locked destination return structured errors. The artifact is published atomically through a temporary sibling file, so a failed `pack` never corrupts a previously valid output. Keep the source and template under version control and never treat a generated artifact as the source of truth.
 
 <!-- xlflow-command-guidance -->
 

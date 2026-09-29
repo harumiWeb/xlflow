@@ -911,10 +911,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `pack_experimental_required`
 - `pack_failed`
 - `pack_in_place_overwrite`
+- `pack_output_busy`
+- `pack_output_replace_failed`
 - `pack_protected_project`
 - `pack_signed_project`
 - `pack_source_read_failed`
 - `pack_template_not_found`
+- `pack_temporary_cleanup_failed`
 - `pack_userform_generation_unsupported`
 - `pack_write_failed`
 - `parallel_safe`
