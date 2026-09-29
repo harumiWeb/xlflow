@@ -26,8 +26,21 @@ xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm>] --experimental
 ## Template and source workbook handling
 
 - The template is read-only. `pack` never writes back into it. `--out` must resolve to a different path than both the template and the configured source workbook; otherwise `pack` fails with `pack_in_place_overwrite` (exit 2).
+- The identity comparison is canonical, not lexical. `pack` resolves the nearest existing ancestor of the template, the configured workbook, and the destination through symlinks and junctions (and normalizes Windows drive-letter case, short names, and UNC/extended prefixes) before comparing. A destination that names the same file through an aliased directory or a different lexical form is rejected with `pack_in_place_overwrite` even when it does not exist yet.
 - `pack` operates only on closed workbook files. If a live xlflow session or an open workbook for the target is detected, `pack` fails with `pack_active_session` (exit 2) rather than reading possibly-dirty live state.
 - Document-module hosts (`ThisWorkbook`, sheet modules) come from the template. `pack` maps document-module source onto them only when the mapping is unambiguous.
+
+## Atomic publication
+
+`pack` never writes the destination directly. Publication goes through a temporary sibling artifact in the destination directory (same volume):
+
+1. Resolve the destination and, when it already exists, probe that it can be opened for replacement so a workbook that is locked or open elsewhere fails before staging work.
+2. Write, flush, and close a uniquely named temporary artifact in the destination directory.
+3. Perform lightweight structural validation on the closed temporary artifact: it must be a readable OOXML zip containing `xl/vbaProject.bin`.
+4. Publish atomically. When no destination exists the temporary artifact is moved with a no-clobber atomic create (`publication="atomic_create"`); when one exists it is installed with the platform atomic replace API (`publication="atomic_replace"`). There is no delete-then-copy fallback.
+5. The temporary artifact is removed on every failure path and after publication.
+
+If generation, validation, or publication fails, an existing destination is left byte-for-byte unchanged. A destination that is locked or cannot be replaced safely fails with `pack_output_busy` (exit 3); a publication that cannot be performed atomically fails with `pack_output_replace_failed` (exit 3); staging or structural-validation failures remain `pack_write_failed` (exit 3). When temporary cleanup fails after a successful publication the command still succeeds, reports `output.temporary_cleanup.status="failed"` with `residual_path`, and emits a `pack_temporary_cleanup_failed` warning.
 
 ## Supported source (MVP)
 
@@ -48,24 +61,28 @@ The plan records each component's primary source path, related UserForm artifact
 
 Each unsupported case is a specific, loud error. `pack` never falls back to best-effort behavior.
 
-| Case                                               | Error code                             | Exit |
-| -------------------------------------------------- | -------------------------------------- | ---- |
-| active xlflow session / live workbook              | `pack_active_session`                  | 2    |
-| in-place overwrite of the template/source workbook | `pack_in_place_overwrite`              | 2    |
-| protected VBA project                              | `pack_protected_project`               | 1    |
-| signed VBA project                                 | `pack_signed_project`                  | 1    |
-| creating a new UserForm / `.frx` generation        | `pack_userform_generation_unsupported` | 1    |
-| unknown or ambiguous VBA project layout            | `pack_ambiguous_layout`                | 1    |
-| missing `--out`, bad extension, other arg errors   | `pack_args_invalid`                    | 2    |
-| missing `--experimental`                           | `pack_experimental_required`           | 2    |
-| template/source workbook not found or unreadable   | `pack_template_not_found`              | 2    |
-| `.xlsb` template or configured workbook            | `workbook_format_unsupported`          | 2    |
+| Case                                                | Error code                                      | Exit |
+| --------------------------------------------------- | ----------------------------------------------- | ---- |
+| active xlflow session / live workbook               | `pack_active_session`                           | 2    |
+| in-place overwrite of the template/source workbook  | `pack_in_place_overwrite`                       | 2    |
+| aliased template/workbook path via symlink/junction | `pack_in_place_overwrite`                       | 2    |
+| output locked or open in another process            | `pack_output_busy`                              | 3    |
+| atomic publication impossible (no fallback)         | `pack_output_replace_failed`                    | 3    |
+| protected VBA project                               | `pack_protected_project`                        | 1    |
+| signed VBA project                                  | `pack_signed_project`                           | 1    |
+| creating a new UserForm / `.frx` generation         | `pack_userform_generation_unsupported`          | 1    |
+| unknown or ambiguous VBA project layout             | `pack_ambiguous_layout`                         | 1    |
+| missing `--out`, bad extension, other arg errors    | `pack_args_invalid`                             | 2    |
+| missing `--experimental`                            | `pack_experimental_required`                    | 2    |
+| template/source workbook not found or unreadable    | `pack_template_not_found`                       | 2    |
+| source inventory or artifact staging failure        | `pack_source_read_failed` / `pack_write_failed` | 3    |
+| `.xlsb` template or configured workbook             | `workbook_format_unsupported`                   | 2    |
 
 ## Output / JSON contract
 
 On success with `--json`, `pack` emits the standard envelope (`status`, `command = "pack"`, `error = null`, `logs`) plus two top-level fields:
 
-- `output`: the produced artifact, mirroring the `export-image` `output` object — `path`, `format` (`"xlsm"`), and optional `created_parent_dirs`.
+- `output`: the produced artifact, mirroring the `export-image` `output` object — `path`, `format` (`"xlsm"`), optional `created_parent_dirs`, and the publication contract shared with `build`: `replaced_existing` (bool), `publication` (`"atomic_create"` or `"atomic_replace"`), and `temporary_cleanup` (`{"status": "clean"|"failed", "residual_path"?, "error"?}`).
 - `pack`: identifies the backend and the validation posture.
 
 ```json
@@ -75,7 +92,10 @@ On success with `--json`, `pack` emits the standard envelope (`status`, `command
   "error": null,
   "output": {
     "path": "dist/Book.xlsm",
-    "format": "xlsm"
+    "format": "xlsm",
+    "replaced_existing": true,
+    "publication": "atomic_replace",
+    "temporary_cleanup": { "status": "clean" }
   },
   "pack": {
     "backend": "pure-go",
@@ -103,7 +123,7 @@ The backend identifier `pack.backend = "pure-go"` is deliberately distinct from 
 - `0`: success.
 - `1`: validation/content failure detected from the project or template — protected project, signed project, ambiguous layout, unsupported UserForm generation.
 - `2`: CLI argument or configuration error — missing `--out`, missing `--experimental`, bad extension, in-place overwrite, active session, template not found.
-- `3`: environment failure — I/O failure writing the artifact or reading the template after validation has passed.
+- `3`: environment failure — I/O failure reading sources or the template after validation has passed, staging the artifact, or publishing it (busy destination, non-atomic replace).
 
 ## No VBE validation contract
 
