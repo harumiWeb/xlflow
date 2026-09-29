@@ -1,3 +1,21 @@
+# PR #864 review follow-up (Issue #855)
+
+Verified against commit `b8d8a2e5`; both Devin comments are valid and in
+scope:
+
+1. Preserve the existing `pack` contract that configured absolute source
+   roots may live outside the project while keeping the containment contract
+   of ordinary encoding commands unchanged. Add a pack-only sourceencoding
+   option, retain managed-root symlink containment, and report external
+   diagnostic paths as absolute paths.
+2. Normalize configured source-root separators before discovery so Unix
+   preflight and `sourceinventory` consume the same paths instead of silently
+   skipping backslash-configured roots.
+3. Add sourceencoding and pack CLI regressions for valid/invalid external
+   roots and invalid source under a backslash-configured root. Run focused and
+   full tests, lint/docs/format checks, push the follow-up commit, and reply to
+   both review threads.
+
 # PR #863 review follow-up (Issue #854)
 
 Verified against commit `0e6c6145`; the six Devin observations and two

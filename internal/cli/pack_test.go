@@ -457,6 +457,98 @@ func TestPackCommandRunsSourceEncodingPreflightBeforeGeneration(t *testing.T) {
 	}
 }
 
+func TestPackCommandSupportsExternalAbsoluteSourceRoot(t *testing.T) {
+	t.Run("valid UTF-8", func(t *testing.T) {
+		dir := t.TempDir()
+		external := t.TempDir()
+		writePackConfig(t, dir)
+		writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+		writePackSourceTree(t, dir, false)
+
+		cfg, err := config.Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Src.Modules = filepath.Join(external, "modules")
+		if err := os.Remove(filepath.Join(dir, config.FileName)); err != nil {
+			t.Fatal(err)
+		}
+		if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+			t.Fatal(err)
+		}
+		writePackSourceModule(t, "", filepath.Join(cfg.Src.Modules, "Module1.bas"), readPackFixture(t, "testdata", "disk", "p1", "modules", "Module1.bas"))
+
+		stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+		if err != nil {
+			t.Fatalf("pack external source error = %v, exit = %d\n%s", err, output.ExitCode(err), stdout)
+		}
+	})
+
+	t.Run("invalid encoding", func(t *testing.T) {
+		dir := t.TempDir()
+		external := t.TempDir()
+		writePackConfig(t, dir)
+		writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p3_protected.bin"))
+
+		cfg, err := config.Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Src.Modules = filepath.Join(external, "modules")
+		if err := os.Remove(filepath.Join(dir, config.FileName)); err != nil {
+			t.Fatal(err)
+		}
+		if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(cfg.Src.Modules, "Bad.bas")
+		writePackSourceModule(t, "", path, []byte("Sub Broken()\r\n\xff\r\nEnd Sub\r\n"))
+
+		stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+		if err == nil || output.ExitCode(err) != output.ExitValidation {
+			t.Fatalf("pack external source error = %v, exit = %d, want validation failure\n%s", err, output.ExitCode(err), stdout)
+		}
+		var env output.Envelope
+		if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+			t.Fatal(err)
+		}
+		if env.Error == nil || env.Error.Code != "source_encoding_invalid" || env.Error.Source != filepath.ToSlash(path) {
+			t.Fatalf("unexpected external-root failure: %+v", env.Error)
+		}
+	})
+}
+
+func TestPackCommandValidatesBackslashConfiguredRoot(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p3_protected.bin"))
+
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Src.Modules = `src\modules`
+	if err := os.Remove(filepath.Join(dir, config.FileName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	writePackSourceModule(t, dir, filepath.Join("src", "modules", "Bad.bas"), []byte("Sub Broken()\r\n\xff\r\nEnd Sub\r\n"))
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("pack backslash source error = %v, exit = %d, want validation failure\n%s", err, output.ExitCode(err), stdout)
+	}
+	var env output.Envelope
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error == nil || env.Error.Code != "source_encoding_invalid" || env.Error.Source != "src/modules/Bad.bas" {
+		t.Fatalf("unexpected backslash-root failure: %+v", env.Error)
+	}
+}
+
 func TestPackCommandPublishesThroughOutputSymlink(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)

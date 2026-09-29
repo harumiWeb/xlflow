@@ -52,7 +52,17 @@ func (a *app) encodingCheckCommand() *cobra.Command {
 // files that a particular consumer may otherwise skip (for example a sidecar
 // form designer file).
 func (a *app) runSourceEncodingPreflight(ctx context.Context, command string, cfg config.Config) error {
-	result, err := sourceencoding.Check(ctx, sourceEncodingOptions(a.cwd, cfg, nil))
+	return a.runSourceEncodingPreflightWithOptions(ctx, command, sourceEncodingOptions(a.cwd, cfg, nil))
+}
+
+func (a *app) runPackSourceEncodingPreflight(ctx context.Context, cfg config.Config) error {
+	opts := sourceEncodingOptions(a.cwd, cfg, nil)
+	opts.AllowExternalRoots = true
+	return a.runSourceEncodingPreflightWithOptions(ctx, "pack", opts)
+}
+
+func (a *app) runSourceEncodingPreflightWithOptions(ctx context.Context, command string, opts sourceencoding.Options) error {
+	result, err := sourceencoding.Check(ctx, opts)
 	if err == nil {
 		return nil
 	}

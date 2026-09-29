@@ -144,6 +144,9 @@ type Options struct {
 	RootDir string
 	Roots   Roots
 	Paths   []string
+	// AllowExternalRoots permits configured roots outside RootDir while still
+	// requiring every discovered file to remain inside a configured root.
+	AllowExternalRoots bool
 }
 
 // Validate accepts only UTF-8 without a BOM. Unknown path extensions are
@@ -369,7 +372,7 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		path := raw
+		path := filepath.FromSlash(strings.ReplaceAll(raw, "\\", "/"))
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(rootAbs, path)
 		}
@@ -385,7 +388,7 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 		if evalErr != nil {
 			return nil, &ScopeError{Path: path, Reason: "managed source root could not be resolved", Cause: evalErr}
 		}
-		if !pathInside(rootCanonical, canonical) {
+		if !opts.AllowExternalRoots && !pathInside(rootCanonical, canonical) {
 			return nil, &ScopeError{Path: path, Reason: "managed source root escapes the project root"}
 		}
 		if info.IsDir() {
@@ -436,7 +439,7 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 					if evalErr != nil {
 						return &ScopeError{Path: candidate, Reason: "source link could not be resolved", Cause: evalErr}
 					}
-					if !pathInside(rootCanonical, canonical) || !pathManagedCanonical(canonical, managedCanonical) {
+					if (!opts.AllowExternalRoots && !pathInside(rootCanonical, canonical)) || !pathManagedCanonical(canonical, managedCanonical) {
 						return &ScopeError{Path: candidate, Reason: "source link escapes the configured project source roots"}
 					}
 				}
@@ -446,7 +449,7 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 				if !isSourceExtension(candidate) {
 					return nil
 				}
-				item, itemErr := discovered(rootAbs, rootCanonical, candidate, managedCanonical)
+				item, itemErr := discovered(rootAbs, rootCanonical, candidate, managedCanonical, opts.AllowExternalRoots)
 				if itemErr != nil {
 					return itemErr
 				}
@@ -460,7 +463,7 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 		if !isSourceExtension(path) {
 			return nil, &ScopeError{Path: raw, Reason: "path must have a .bas, .cls, or .frm extension"}
 		}
-		item, itemErr := discovered(rootAbs, rootCanonical, path, managedCanonical)
+		item, itemErr := discovered(rootAbs, rootCanonical, path, managedCanonical, opts.AllowExternalRoots)
 		if itemErr != nil {
 			return nil, itemErr
 		}
@@ -705,19 +708,24 @@ func pathLexicallyManaged(path string, managed []string) bool {
 	return false
 }
 
-func discovered(rootAbs, rootCanonical, path string, managedCanonical []string) (File, error) {
+func discovered(rootAbs, rootCanonical, path string, managedCanonical []string, allowExternalRoots bool) (File, error) {
 	canonical, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return File{}, &ScopeError{Path: path, Reason: "source path could not be resolved", Cause: err}
 	}
-	if !pathInside(rootCanonical, canonical) || !pathManagedCanonical(canonical, managedCanonical) {
+	if (!allowExternalRoots && !pathInside(rootCanonical, canonical)) || !pathManagedCanonical(canonical, managedCanonical) {
 		return File{}, &ScopeError{Path: path, Reason: "source path escapes the configured project source roots"}
 	}
+	displayPath := filepath.ToSlash(path)
 	relative, err := filepath.Rel(rootAbs, path)
 	if err != nil || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) || relative == ".." {
-		return File{}, &ScopeError{Path: path, Reason: "source path is outside the project root"}
+		if !allowExternalRoots {
+			return File{}, &ScopeError{Path: path, Reason: "source path is outside the project root"}
+		}
+	} else {
+		displayPath = filepath.ToSlash(relative)
 	}
-	return File{absolutePath: path, Path: filepath.ToSlash(relative), canonical: filepath.Clean(canonical)}, nil
+	return File{absolutePath: path, Path: displayPath, canonical: filepath.Clean(canonical)}, nil
 }
 
 func pathManagedCanonical(path string, managedCanonical []string) bool {
