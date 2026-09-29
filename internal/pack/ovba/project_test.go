@@ -22,13 +22,19 @@ func TestBuildProjectModulesMatchesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	di := ParseDir(plain)
+	di, err := ParseDir(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// The PROJECTMODULES portion of the golden = from just after ProjectInfoRaw + RefsRaw to the end.
-	got := BuildProjectModules([]ModuleSpec{
+	got, err := BuildProjectModules([]ModuleSpec{
 		{Name: "Sheet1", StreamName: "Sheet1", TypeID: 0x0022},
 		{Name: "ThisWorkbook", StreamName: "ThisWorkbook", TypeID: 0x0022},
 		{Name: "Spike", StreamName: "Spike", TypeID: 0x0021},
-	})
+	}, di.CodePage)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := plain[len(di.ProjectInfoRaw)+len(di.RefsRaw):]
 	if !bytes.Equal(got, want) {
 		t.Errorf("PROJECTMODULES mismatch\n got  %d bytes\n want %d bytes", len(got), len(want))
@@ -37,7 +43,10 @@ func TestBuildProjectModulesMatchesGolden(t *testing.T) {
 
 func TestModRecordDistinctStreamName(t *testing.T) {
 	// When Name != StreamName, both must appear verbatim.
-	r := modRecord("Long Module Name", "LongMod", 0x0021)
+	r, err := modRecord(ModuleSpec{Name: "Long Module Name", StreamName: "LongMod", TypeID: 0x0021}, 1252)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !bytes.Contains(r, []byte("Long Module Name")) {
 		t.Error("MODULENAME is missing")
 	}

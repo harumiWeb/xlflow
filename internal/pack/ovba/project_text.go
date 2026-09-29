@@ -1,6 +1,7 @@
 package ovba
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 )
@@ -12,18 +13,27 @@ type ProjectComponentSpec struct {
 	Name string
 }
 
+// projectLine is one physical line of the PROJECT stream. body and eol keep
+// the raw bytes so unchanged lines can be re-emitted byte-for-byte.
 type projectLine struct {
-	body string
-	eol  string
+	body []byte
+	eol  []byte
 }
 
 // RebuildProjectText replaces the component declarations in raw while
 // preserving all unrelated PROJECT content byte-for-byte. Document and
 // BaseClass declarations are template-owned and therefore must remain
 // unchanged; Module and Class declarations may be added, removed, or renamed.
-func RebuildProjectText(raw []byte, specs []ProjectComponentSpec) ([]byte, error) {
-	lines := splitProjectLines(string(raw))
-	original := ParseProjectText(raw).Components
+// The stream text is MBCS in the project code page: component names are
+// decoded for comparison and added lines are encoded back with the same
+// code page.
+func RebuildProjectText(raw []byte, specs []ProjectComponentSpec, codepage uint16) ([]byte, error) {
+	lines := splitProjectLines(raw)
+	parsed, err := ParseProjectText(raw, codepage)
+	if err != nil {
+		return nil, err
+	}
+	original := parsed.Components
 
 	desired := make(map[string]ProjectComponentSpec, len(specs))
 	for _, spec := range specs {
@@ -32,6 +42,13 @@ func RebuildProjectText(raw []byte, specs []ProjectComponentSpec) ([]byte, error
 		}
 		if !isProjectComponentKind(spec.Kind) {
 			return nil, fmt.Errorf("PROJECT component %q has unknown kind %q", spec.Name, spec.Kind)
+		}
+		// A name is written raw into a textual "Kind=Name" line and re-parsed
+		// with quotes and surrounding whitespace stripped, so anything that
+		// could inject or corrupt a line is rejected here regardless of what
+		// the caller validated.
+		if strings.ContainsAny(spec.Name, "\x00\r\n\"") || strings.TrimSpace(spec.Name) != spec.Name {
+			return nil, fmt.Errorf("PROJECT component %q contains characters a declaration line cannot carry", spec.Name)
 		}
 		key := projectComponentKey(spec.Name)
 		if prior, ok := desired[key]; ok {
@@ -77,12 +94,15 @@ func RebuildProjectText(raw []byte, specs []ProjectComponentSpec) ([]byte, error
 	lastComponent := -1
 	insertAfter := -1
 	for i, line := range lines {
-		_, ok := parseProjectComponentLine(line.body)
+		_, ok, err := parseProjectComponentLine(line.body, codepage)
+		if err != nil {
+			return nil, err
+		}
 		if ok {
 			lastComponent = i
 			continue
 		}
-		if strings.HasPrefix(line.body, "ID=") {
+		if bytes.HasPrefix(line.body, []byte("ID=")) {
 			insertAfter = i
 		}
 	}
@@ -106,59 +126,70 @@ func RebuildProjectText(raw []byte, specs []ProjectComponentSpec) ([]byte, error
 			additions = append(additions, spec)
 		}
 	}
+	// Added names must be representable in the project code page; validate
+	// before emitting so a failure cannot leave a partially encoded line.
+	for _, spec := range additions {
+		if _, err := EncodeMBCS(spec.Name, codepage); err != nil {
+			return nil, fmt.Errorf("PROJECT component %q: %w", spec.Name, err)
+		}
+	}
 
-	eol := "\r\n"
+	eol := []byte("\r\n")
 	for _, line := range lines {
-		if line.eol != "" {
+		if len(line.eol) != 0 {
 			eol = line.eol
 			break
 		}
 	}
-	var out strings.Builder
+	var out bytes.Buffer
 	appendAdditions := func() {
 		for _, spec := range additions {
+			enc, _ := EncodeMBCS(spec.Name, codepage) // pre-validated above
 			out.WriteString(spec.Kind)
 			out.WriteByte('=')
-			out.WriteString(spec.Name)
-			out.WriteString(eol)
+			out.Write(enc)
+			out.Write(eol)
 		}
 	}
 	if insertAfter < 0 {
 		appendAdditions()
 	}
 	for i, line := range lines {
-		component, isComponent := parseProjectComponentLine(line.body)
+		component, isComponent, err := parseProjectComponentLine(line.body, codepage)
+		if err != nil {
+			return nil, err
+		}
 		keep := true
 		if isComponent && component.Kind != "Document" && component.Kind != "BaseClass" {
 			spec, ok := desired[projectComponentKey(component.Name)]
 			keep = ok && spec.Name == component.Name && spec.Kind == component.Kind
 		}
 		if keep {
-			out.WriteString(line.body)
-			out.WriteString(line.eol)
+			out.Write(line.body)
+			out.Write(line.eol)
 		}
 		if i == insertAfter {
-			if keep && line.eol == "" && len(additions) > 0 {
-				out.WriteString(eol)
+			if keep && len(line.eol) == 0 && len(additions) > 0 {
+				out.Write(eol)
 			}
 			appendAdditions()
 		}
 	}
-	return []byte(out.String()), nil
+	return out.Bytes(), nil
 }
 
-func splitProjectLines(raw string) []projectLine {
+func splitProjectLines(raw []byte) []projectLine {
 	var lines []projectLine
 	for len(raw) > 0 {
-		i := strings.IndexByte(raw, '\n')
+		i := bytes.IndexByte(raw, '\n')
 		if i < 0 {
 			lines = append(lines, projectLine{body: raw})
 			break
 		}
-		body, eol := raw[:i], "\n"
-		if strings.HasSuffix(body, "\r") {
-			body = strings.TrimSuffix(body, "\r")
-			eol = "\r\n"
+		body, eol := raw[:i], []byte("\n")
+		if bytes.HasSuffix(body, []byte("\r")) {
+			body = body[:len(body)-1]
+			eol = []byte("\r\n")
 		}
 		lines = append(lines, projectLine{body: body, eol: eol})
 		raw = raw[i+1:]
@@ -166,17 +197,21 @@ func splitProjectLines(raw string) []projectLine {
 	return lines
 }
 
-func parseProjectComponentLine(line string) (ProjectComponent, bool) {
-	key, val, ok := strings.Cut(line, "=")
-	if !ok || !isProjectComponentKind(key) {
-		return ProjectComponent{}, false
+func parseProjectComponentLine(line []byte, codepage uint16) (ProjectComponent, bool, error) {
+	key, val, ok := bytes.Cut(line, []byte("="))
+	if !ok || !isProjectComponentKindBytes(key) {
+		return ProjectComponent{}, false, nil
 	}
 	name := val
-	if key == "Document" {
-		name, _, _ = strings.Cut(name, "/")
+	if string(key) == "Document" {
+		name, _, _ = bytes.Cut(name, []byte("/"))
 	}
-	name = strings.Trim(strings.TrimSpace(name), "\"")
-	return ProjectComponent{Kind: key, Name: name}, true
+	name = bytes.Trim(bytes.TrimSpace(name), "\"")
+	decoded, err := DecodeMBCS(name, codepage)
+	if err != nil {
+		return ProjectComponent{}, false, fmt.Errorf("PROJECT component %s: %w", key, err)
+	}
+	return ProjectComponent{Kind: string(key), Name: decoded}, true, nil
 }
 
 func isProjectComponentKind(kind string) bool {
@@ -186,6 +221,10 @@ func isProjectComponentKind(kind string) bool {
 	default:
 		return false
 	}
+}
+
+func isProjectComponentKindBytes(kind []byte) bool {
+	return isProjectComponentKind(string(kind))
 }
 
 func projectComponentKey(name string) string {

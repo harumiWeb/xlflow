@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	"github.com/harumiWeb/xlflow/internal/sourceinventory"
 )
@@ -54,7 +55,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 	}
 	templateByName := make(map[string]vbaproject.Module, len(project.Modules))
 	for _, module := range project.Modules {
-		if err := vbaproject.ValidateWritableComponentIdentity(module.Name, module.StreamName); err != nil {
+		if err := vbaproject.ValidateWritableComponentIdentity(module.Name, module.StreamName, project.Props.CodePage); err != nil {
 			return PackPlan{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 		}
 		key := strings.ToLower(module.Name)
@@ -70,7 +71,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 		if !sourceinventory.ValidComponentName(source.Name) {
 			return PackPlan{}, fmt.Errorf("%w: invalid VBA component name %q", ErrAmbiguousLayout, source.Name)
 		}
-		if err := vbaproject.ValidateWritableComponentIdentity(source.Name, source.Name); err != nil {
+		if err := vbaproject.ValidateWritableComponentIdentity(source.Name, source.Name, project.Props.CodePage); err != nil {
 			return PackPlan{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 		}
 		if _, err := toProjectModuleType(source.Type); err != nil {
@@ -174,6 +175,18 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 		setAuthorities(&planned)
 		plan.Components = append(plan.Components, planned)
 		incrementMeta(&plan.meta, source.Type)
+	}
+	// Stream names are CFB directory entries under the VBA storage, so their
+	// uniqueness is governed by the [MS-CFB] case-insensitive comparison, not
+	// by Unicode lowercase. Reject collisions (e.g. dotted/dotless I in a
+	// CP1254 project) before an ambiguous container could be assembled.
+	streams := make(map[string]string, len(plan.modules))
+	for _, module := range plan.modules {
+		key := cfb.DirectoryNameKey(module.StreamName)
+		if prior, exists := streams[key]; exists {
+			return PackPlan{}, fmt.Errorf("%w: module stream names %s and %s collide in the CFB directory", ErrAmbiguousLayout, prior, module.StreamName)
+		}
+		streams[key] = module.StreamName
 	}
 	return plan, nil
 }

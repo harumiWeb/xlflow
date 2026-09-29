@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Hardened experimental `xlflow pack` for non-ASCII VBA components: module and
+  stream names are now serialized in the project code page with matching
+  UTF-16 records, code pages 874, 932, 936, 949, 950, 1250-1258, and 65001 are
+  supported explicitly, and names the code page cannot represent fail loudly
+  instead of producing mojibake. Module doc string, help context, read-only
+  and private flags, stream name, module type, and unrecognized module records
+  are preserved across read/write/read; new components get deterministic
+  default metadata.
 - Added the shared managed-source encoding preflight to experimental `xlflow
 pack`. All `.bas`, `.cls`, and `.frm` source, including UserForm designer and
   sidecar code, must be UTF-8 without BOM before source planning or

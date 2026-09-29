@@ -54,7 +54,7 @@ func TestPlanProjectRejectsComprehensiveSourceIdentityFailures(t *testing.T) {
 	}{
 		{"case-insensitive duplicate", []SourceModule{{Name: "Thing", Type: ModuleTypeStandard, Source: standardSource("Thing")}, {Name: "thing", Type: ModuleTypeClass, Source: classSource(t, "thing")}}},
 		{"invalid name", []SourceModule{{Name: "1Bad", Type: ModuleTypeStandard, Source: standardSource("1Bad")}}},
-		{"non-ASCII writer name", []SourceModule{{Name: "標準", Type: ModuleTypeStandard, Source: standardSource("標準")}}},
+		{"unrepresentable writer name", []SourceModule{{Name: "Ābc", Type: ModuleTypeStandard, Source: standardSource("Ābc")}}},
 		{"filename identity mismatch", []SourceModule{{SourcePath: "src/modules/New.bas", Name: "New", Type: ModuleTypeStandard, Source: standardSource("Old")}}},
 		{"template-owned document case mismatch", []SourceModule{{Name: "thisworkbook", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"}}},
 		{"template-owned document type mismatch", []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeForm, Source: "Attribute VB_Name = \"ThisWorkbook\"\r\n"}}},
@@ -105,6 +105,33 @@ func TestPlanProjectSourceOwnedReplacementAllowsCaseAndTypeChange(t *testing.T) 
 	}
 }
 
+func TestPlanProjectAcceptsCodepageRepresentableNames(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// CP932 can represent Japanese component names; planning must allow them
+	// for source-owned standard/class modules.
+	sources := []SourceModule{
+		{Name: "標準モジュール", Type: ModuleTypeStandard, Source: standardSource("標準モジュール")},
+		{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"},
+		{Name: "Sheet1", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"},
+	}
+	plan, err := PlanProject(project, sources)
+	if err != nil {
+		t.Fatalf("PlanProject: %v", err)
+	}
+	var found bool
+	for _, component := range plan.Components {
+		if component.Name == "標準モジュール" && component.Action == PlanAdd {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Japanese module not planned for addition: %#v", plan.Components)
+	}
+}
+
 func TestPlanProjectRejectsSourceOnlyTemplateOwnedTopology(t *testing.T) {
 	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
 	if err != nil {
@@ -115,5 +142,23 @@ func TestPlanProjectRejectsSourceOnlyTemplateOwnedTopology(t *testing.T) {
 	}
 	if _, err := PlanProject(project, []SourceModule{{Name: "Form99", Type: ModuleTypeForm, Source: "Attribute VB_Name = \"Form99\"\r\n"}}); !errors.Is(err, ErrUserFormGenerationUnsupported) {
 		t.Fatalf("form err = %v", err)
+	}
+}
+
+func TestPlanProjectRejectsCFBEquivalentStreamNames(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Upcased UTF-16 code units are the CFB directory equivalence, so dotted
+	// "I" and dotless "\u0131" collide even though they are distinct lowercase
+	// keys. CP1254 can represent both.
+	project.Props.CodePage = 1254
+	sources := []SourceModule{
+		{Name: "I", Type: ModuleTypeStandard, Source: standardSource("I")},
+		{Name: "\u0131", Type: ModuleTypeStandard, Source: standardSource("\u0131")},
+	}
+	if _, err := PlanProject(project, sources); !errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("err = %v, want ErrAmbiguousLayout", err)
 	}
 }

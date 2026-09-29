@@ -333,6 +333,17 @@ func TestGenerateVBAProjectReconstructsSourceAuthoritativeComponentSet(t *testin
 			},
 			want: map[string]vbaproject.ModuleType{"NewModule": vbaproject.ModuleStd, "NewClass": vbaproject.ModuleClass},
 		},
+		{
+			// CP932 project: a Japanese component name is representable in both
+			// the MBCS and Unicode name records and the PROJECT stream.
+			name: "add module with codepage name",
+			sources: []SourceModule{
+				module1,
+				class1,
+				{Name: "標準モジュール", Type: ModuleTypeStandard, Source: standardSource("標準モジュール")},
+			},
+			want: map[string]vbaproject.ModuleType{"Module1": vbaproject.ModuleStd, "Class1": vbaproject.ModuleClass, "標準モジュール": vbaproject.ModuleStd},
+		},
 	}
 
 	for _, tc := range cases {
@@ -359,7 +370,10 @@ func TestGenerateVBAProjectReconstructsSourceAuthoritativeComponentSet(t *testin
 					t.Errorf("module %s type = %v, want %v", name, got[name], wantType)
 				}
 			}
-			projectText := ovba.ParseProjectText(project.ProjectStreamRaw)
+			projectText, err := ovba.ParseProjectText(project.ProjectStreamRaw, project.Props.CodePage)
+			if err != nil {
+				t.Fatalf("ParseProjectText: %v", err)
+			}
 			for name, wantType := range tc.want {
 				wantKind := "Module"
 				if wantType == vbaproject.ModuleClass {

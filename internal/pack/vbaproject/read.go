@@ -20,8 +20,6 @@ func Read(data []byte) (*Project, error) {
 	if !ok {
 		return nil, fmt.Errorf("vbaproject: missing PROJECT stream")
 	}
-	pt := ovba.ParseProjectText(projRaw)
-
 	dirComp, ok := c.Stream("VBA/dir")
 	if !ok {
 		return nil, fmt.Errorf("vbaproject: missing VBA/dir stream")
@@ -30,7 +28,14 @@ func Read(data []byte) (*Project, error) {
 	if err != nil {
 		return nil, fmt.Errorf("vbaproject: dir decompress: %w", err)
 	}
-	di := ovba.ParseDir(dirPlain)
+	di, err := ovba.ParseDir(dirPlain)
+	if err != nil {
+		return nil, fmt.Errorf("vbaproject: dir parse: %w", err)
+	}
+	pt, err := ovba.ParseProjectText(projRaw, di.CodePage)
+	if err != nil {
+		return nil, fmt.Errorf("vbaproject: PROJECT stream parse: %w", err)
+	}
 
 	protected, err := isProtected(pt.CMG)
 	if err != nil {
@@ -68,15 +73,20 @@ func Read(data []byte) (*Project, error) {
 		if err != nil {
 			return nil, fmt.Errorf("vbaproject: %s decompress: %w", dm.Name, err)
 		}
-		src, err := decodeMBCS(plain, di.CodePage)
+		src, err := ovba.DecodeMBCS(plain, di.CodePage)
 		if err != nil {
 			return nil, fmt.Errorf("vbaproject: %s decode: %w", dm.Name, err)
 		}
 		p.Modules = append(p.Modules, Module{
-			Name:       dm.Name,
-			StreamName: stream,
-			Type:       classify(dm.Name, pt.Kinds[dm.Name], c),
-			Source:     src,
+			Name:        dm.Name,
+			StreamName:  stream,
+			Type:        classify(dm.Name, pt.Kinds[dm.Name], stream, c),
+			Source:      src,
+			DocString:   dm.DocString,
+			HelpContext: dm.HelpContext,
+			ReadOnly:    dm.ReadOnly,
+			Private:     dm.Private,
+			Extra:       dm.Extra,
 		})
 	}
 
@@ -97,8 +107,9 @@ func Read(data []byte) (*Project, error) {
 	return p, nil
 }
 
-// classify decides the module type primarily from the PROJECT key, secondarily from the presence of a CFB sub-storage.
-func classify(name, projectKey string, c *cfb.Container) ModuleType {
+// classify decides the module type primarily from the PROJECT key, secondarily
+// from the presence of a CFB sub-storage named after the module stream.
+func classify(name, projectKey, streamName string, c *cfb.Container) ModuleType {
 	switch projectKey {
 	case "Module":
 		return ModuleStd
@@ -110,7 +121,7 @@ func classify(name, projectKey string, c *cfb.Container) ModuleType {
 		return ModuleForm
 	}
 	// Fallback when absent from PROJECT: if a same-named sub-storage exists, it is a form.
-	if _, ok := c.Stream(name + "/\x03VBFrame"); ok {
+	if _, ok := c.Stream(streamName + "/\x03VBFrame"); ok {
 		return ModuleForm
 	}
 	return ModuleClass

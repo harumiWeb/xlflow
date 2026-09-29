@@ -1,5 +1,7 @@
 package vbaproject
 
+import "github.com/harumiWeb/xlflow/internal/pack/ovba"
+
 // ModuleType is the kind of a module. It distinguishes the editable kinds
 // (Std/Class/Document) from Form, which is detected but not edited.
 type ModuleType int
@@ -12,12 +14,19 @@ const (
 )
 
 // Module is a single module. Source is the plain source after skipping the
-// p-code, decompressing, and decoding from the CODEPAGE.
+// p-code, decompressing, and decoding from the CODEPAGE. The remaining fields
+// carry the module-level metadata of the dir PROJECTMODULES record so a
+// read-modify-write round trip preserves them.
 type Module struct {
-	Name       string
-	StreamName string
-	Type       ModuleType
-	Source     string
+	Name        string
+	StreamName  string
+	Type        ModuleType
+	Source      string
+	DocString   string                   // MODULEDOCSTRING (module description)
+	HelpContext uint32                   // MODULEHELPCONTEXT
+	ReadOnly    bool                     // MODULEREADONLY record present
+	Private     bool                     // MODULEPRIVATE record present
+	Extra       []ovba.ModuleExtraRecord // uninterpreted module records, preserved verbatim
 }
 
 // Reference is best-effort display metadata for a project reference.
