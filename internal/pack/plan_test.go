@@ -1,0 +1,83 @@
+package pack
+
+import (
+	"errors"
+	"reflect"
+	"testing"
+
+	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+)
+
+func TestPlanProjectIsReadOnlyAndRecordsDeterministicAuthority(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := append([]vbaproject.Module(nil), project.Modules...)
+	sources := []SourceModule{
+		{SourcePath: "src/modules/Zed.bas", Name: "Zed", Type: ModuleTypeStandard, Source: standardSource("Zed")},
+		{Name: "ThisWorkbook", Type: ModuleTypeDocument, SourcePath: "src/workbook/ThisWorkbook.bas", Source: "Option Explicit\r\n"},
+		{SourcePath: "src/classes/Alpha.cls", Name: "Alpha", Type: ModuleTypeClass, Source: classSource(t, "Alpha")},
+	}
+	plan, err := PlanProject(project, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(project.Modules, before) {
+		t.Fatal("planner modified template project")
+	}
+	var additions []string
+	for _, component := range plan.Components {
+		if component.Action == PlanAdd {
+			additions = append(additions, component.Name)
+			if component.TopologyAuthority != AuthoritySource || component.CodeAuthority != AuthoritySource {
+				t.Fatalf("source-owned component authority = %+v", component)
+			}
+		}
+		if component.Name == "ThisWorkbook" && (component.TopologyAuthority != AuthorityTemplate || component.CodeAuthority != AuthoritySource) {
+			t.Fatalf("document authority = %+v", component)
+		}
+	}
+	if !reflect.DeepEqual(additions, []string{"Alpha", "Zed"}) {
+		t.Fatalf("additions = %#v", additions)
+	}
+}
+
+func TestPlanProjectRejectsComprehensiveSourceIdentityFailures(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		sources []SourceModule
+	}{
+		{"case-insensitive duplicate", []SourceModule{{Name: "Thing", Type: ModuleTypeStandard, Source: standardSource("Thing")}, {Name: "thing", Type: ModuleTypeClass, Source: classSource(t, "thing")}}},
+		{"invalid name", []SourceModule{{Name: "1Bad", Type: ModuleTypeStandard, Source: standardSource("1Bad")}}},
+		{"non-ASCII writer name", []SourceModule{{Name: "標準", Type: ModuleTypeStandard, Source: standardSource("標準")}}},
+		{"filename identity mismatch", []SourceModule{{SourcePath: "src/modules/New.bas", Name: "New", Type: ModuleTypeStandard, Source: standardSource("Old")}}},
+		{"template case mismatch", []SourceModule{{Name: "module1", Type: ModuleTypeStandard, Source: standardSource("module1")}}},
+		{"document attribute header", []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Attribute VB_Name = \"ThisWorkbook\"\r\nOption Explicit\r\n"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := PlanProject(project, tc.sources)
+			if !errors.Is(err, ErrAmbiguousLayout) {
+				t.Fatalf("err = %v, want ErrAmbiguousLayout", err)
+			}
+		})
+	}
+}
+
+func TestPlanProjectRejectsSourceOnlyTemplateOwnedTopology(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PlanProject(project, []SourceModule{{Name: "Sheet99", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"}}); !errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("document err = %v", err)
+	}
+	if _, err := PlanProject(project, []SourceModule{{Name: "Form99", Type: ModuleTypeForm, Source: "Attribute VB_Name = \"Form99\"\r\n"}}); !errors.Is(err, ErrUserFormGenerationUnsupported) {
+		t.Fatalf("form err = %v", err)
+	}
+}

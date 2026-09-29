@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added deterministic read-only source planning to experimental `xlflow pack`: `build` and `pack` now share strict source-tree discovery, while `pack` deliberately ignores `[build].exclude`; pack validates configured roots, extensions, names, UserForm artifacts, source/template identity, and topology before mutation, then applies an explicit authority/action plan in stable order.
 - Extended experimental `xlflow pack` so the source tree is authoritative for
   standard and class module topology. Packed projects can now add, remove, and
   rename those components while keeping `PROJECT`, `PROJECTMODULES`, and VBA

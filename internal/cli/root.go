@@ -44,6 +44,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/output"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/project"
+	"github.com/harumiWeb/xlflow/internal/sourceinventory"
 	staticpreflight "github.com/harumiWeb/xlflow/internal/staticanalysis/preflight"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/typedb"
@@ -6423,60 +6424,32 @@ func sameCLIPath(a, b string) bool {
 }
 
 func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceModule, error) {
-	var sources []packpkg.SourceModule
-	collect := func(dir string, typ packpkg.ModuleType, exts ...string) error {
-		base := workbookArgPath(root, dir)
-		if strings.TrimSpace(base) == "" {
-			return nil
+	components, err := sourceinventory.Discover(sourceinventory.Options{
+		Root: root, Config: cfg, ValidateFormArtifacts: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", packpkg.ErrAmbiguousLayout, err)
+	}
+	sources := make([]packpkg.SourceModule, 0, len(components))
+	for _, component := range components {
+		typ := packpkg.ModuleType(component.Type)
+		source := string(component.Source)
+		if component.Type == sourceinventory.ComponentForm && strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+			for _, artifact := range component.Related {
+				if strings.EqualFold(filepath.Ext(artifact.Path), ".bas") && strings.EqualFold(filepath.Base(artifact.Path), component.Name+".bas") {
+					source = forms.MergeUserFormCodeIntoFRM(source, string(artifact.Source))
+					break
+				}
+			}
 		}
-		if _, err := os.Stat(base); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		allowed := map[string]bool{}
-		for _, ext := range exts {
-			allowed[strings.ToLower(ext)] = true
-		}
-		return filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d == nil || d.IsDir() {
-				return nil
-			}
-			ext := strings.ToLower(filepath.Ext(d.Name()))
-			if !allowed[ext] {
-				return nil
-			}
-			body, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			name := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
-			sources = append(sources, packpkg.SourceModule{
-				Name:   name,
-				Type:   typ,
-				Source: string(body),
-			})
-			return nil
+		sources = append(sources, packpkg.SourceModule{
+			SourcePath:   component.SourcePath,
+			RelatedPaths: component.RelatedPaths(),
+			Name:         component.Name,
+			Type:         typ,
+			Source:       source,
 		})
 	}
-	if err := collect(cfg.Src.Modules, packpkg.ModuleTypeStandard, ".bas"); err != nil {
-		return nil, err
-	}
-	if err := collect(cfg.Src.Classes, packpkg.ModuleTypeClass, ".cls"); err != nil {
-		return nil, err
-	}
-	if err := collect(cfg.Src.Workbook, packpkg.ModuleTypeDocument, ".bas", ".cls"); err != nil {
-		return nil, err
-	}
-	formSources, err := collectFormSources(root, cfg)
-	if err != nil {
-		return nil, err
-	}
-	sources = append(sources, formSources...)
 	return sources, nil
 }
 

@@ -177,6 +177,7 @@ func TestCollectPackSourceModulesIncludesForms(t *testing.T) {
 	dir := t.TempDir()
 	writePackSourceTree(t, dir, true)
 	cfg := config.Default()
+	cfg.Build.Exclude = []string{"src/modules/**", "src/forms/**"}
 
 	sources, err := collectPackSourceModules(dir, cfg)
 	if err != nil {
@@ -195,6 +196,20 @@ func TestCollectPackSourceModulesIncludesForms(t *testing.T) {
 	}
 	if counts[packpkg.ModuleTypeStandard] != 1 || counts[packpkg.ModuleTypeClass] != 1 || counts[packpkg.ModuleTypeDocument] != 2 || counts[packpkg.ModuleTypeForm] != 1 {
 		t.Fatalf("source counts = %v", counts)
+	}
+}
+
+func TestCollectPackSourceModulesRejectsMissingConfiguredRoot(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	for _, sourceDir := range []string{cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(sourceDir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := collectPackSourceModules(dir, cfg)
+	if !errors.Is(err, packpkg.ErrAmbiguousLayout) || !strings.Contains(err.Error(), "read standard source root") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -377,6 +392,11 @@ func writePackConfig(t *testing.T, dir string) {
 	cfg := config.Default()
 	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
 		t.Fatal(err)
+	}
+	for _, sourceDir := range []string{cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(sourceDir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
