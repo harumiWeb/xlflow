@@ -9,8 +9,11 @@ All notable changes to xlflow will be documented in this file.
   with an atomic create/replace so a failed or interrupted pack cannot corrupt
   a previously valid output. `--out` now compares canonical filesystem
   identity and rejects destinations that alias the template or configured
-  workbook through symlinks or junctions. Locked destinations fail with the
-  new `pack_output_busy` error, non-atomic publication with
+  workbook through symlinks, junctions, or hard links. Existing output
+  symlinks publish through their referent, Unix replacements preserve file
+  permissions, and validation reads the VBA payload to verify its ZIP CRC.
+  Locked destinations fail with the new `pack_output_busy` error, non-atomic
+  publication with
   `pack_output_replace_failed`, and successful JSON reports
   `output.replaced_existing`, `output.publication`, and
   `output.temporary_cleanup`.

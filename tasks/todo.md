@@ -1,3 +1,30 @@
+# PR #863 review follow-up (Issue #854)
+
+Verified against commit `0e6c6145`; the six Devin observations and two
+CodeRabbit comments reduce to six valid in-scope fixes:
+
+1. Publish through the canonical output path so an existing output symlink is
+   preserved and its referent is replaced; retain both lexical and canonical
+   candidates for Office lock-file detection. Extend identity comparison with
+   `os.SameFile` for existing hard-link aliases.
+2. Create staging files exclusively with mode `0644` so Unix umask applies to
+   new outputs, and preserve an existing destination's permission bits during
+   replacement.
+3. Keep the exclusive replacement probe on Windows, where sharing modes are
+   meaningful, but do not require write access to the old file on Unix; final
+   rename errors remain the source of truth there.
+4. Use Linux `renameat2(RENAME_NOREPLACE)` for atomic create and retain hard
+   links only as the ENOSYS/EINVAL fallback and for other non-Windows systems.
+   Never classify create-time EPERM/EACCES as a busy destination.
+5. Surface cleanup failure together with pre-publication errors while keeping
+   `errors.Is` classification intact.
+6. Read the staged `xl/vbaProject.bin` entry fully so ZIP CRC/data corruption
+   is detected before publication.
+
+Add focused Windows/Unix/CLI regressions, run affected tests on Windows and
+WSL Linux, run lint/docs checks, commit, push to PR #863, and reply to each
+review thread with the disposition.
+
 # Final review pass 3 follow-ups (validate-static-rules-default, aa889dfc)
 
 Independent whole-branch review verdict: approve-with-notes. Remaining items:

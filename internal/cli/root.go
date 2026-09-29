@@ -2308,6 +2308,11 @@ func (a *app) packCommand() *cobra.Command {
 			if aliasesWorkbook {
 				return a.writeFailure("pack", output.ExitConfig, "pack_in_place_overwrite", fmt.Errorf("--out must differ from template and configured workbook: %s", resolvedOut))
 			}
+			outputIdentity, err := coordination.NewWorkbookIdentity(a.cwd, resolvedOut)
+			if err != nil {
+				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
+			}
+			publicationOut := outputIdentity.CanonicalPath
 			candidates := packCandidatePaths(a.cwd, resolvedTemplate, configuredWorkbook, resolvedOut)
 			for _, candidate := range candidates {
 				if lockPath, locked := officeLockFilePresent(candidate); locked {
@@ -2335,7 +2340,7 @@ func (a *app) packCommand() *cobra.Command {
 			if err != nil {
 				return a.writePackEngineFailure(err)
 			}
-			createdParentDirs, publication, err := writePackOutput(resolvedOut, workbookBytes)
+			createdParentDirs, publication, err := writePackOutput(publicationOut, workbookBytes)
 			if err != nil {
 				switch {
 				case errors.Is(err, coordination.ErrPublishTargetBusy):
@@ -6511,26 +6516,28 @@ func packOutputAliasesWorkbook(baseDir, outPath string, workbooks ...string) (bo
 	return false, nil
 }
 
-// packCandidatePaths returns one canonical path per distinct workbook identity
-// so open-workbook lock-file and session checks observe every candidate under
-// its resolved name.
+// packCandidatePaths retains both requested and canonical names. Office lock
+// files use the name Excel opened, while session matching needs canonical
+// identity, so discarding either representation can miss an active workbook.
 func packCandidatePaths(baseDir string, paths ...string) []string {
 	seen := map[string]bool{}
 	var out []string
+	appendPath := func(path string) {
+		key := filepath.Clean(path)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, path)
+	}
 	for _, path := range paths {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
-		resolved := path
+		appendPath(path)
 		if identity, err := coordination.NewWorkbookIdentity(baseDir, path); err == nil {
-			resolved = identity.CanonicalPath
+			appendPath(identity.CanonicalPath)
 		}
-		key := strings.ToLower(filepath.Clean(resolved))
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, resolved)
 	}
 	return out
 }
@@ -6577,9 +6584,25 @@ func validatePackArtifact(path string) error {
 	}
 	defer func() { _ = reader.Close() }()
 	for _, entry := range reader.File {
-		if entry.Name == "xl/vbaProject.bin" {
-			return nil
+		if entry.Name != "xl/vbaProject.bin" {
+			continue
 		}
+		stream, err := entry.Open()
+		if err != nil {
+			return fmt.Errorf("open staged xl/vbaProject.bin: %w", err)
+		}
+		size, readErr := io.Copy(io.Discard, stream)
+		closeErr := stream.Close()
+		if readErr != nil {
+			return fmt.Errorf("read staged xl/vbaProject.bin: %w", readErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close staged xl/vbaProject.bin: %w", closeErr)
+		}
+		if size == 0 {
+			return errors.New("staged xl/vbaProject.bin is empty")
+		}
+		return nil
 	}
 	return errors.New("staged artifact is missing xl/vbaProject.bin")
 }

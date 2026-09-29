@@ -1,6 +1,8 @@
 package coordination
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -49,14 +51,14 @@ type PublishResult struct {
 // unchanged. There is no delete-then-copy fallback: when the atomic move is
 // impossible the error wraps ErrPublishReplaceFailed (or ErrPublishTargetBusy
 // when the destination is in use).
-func PublishFile(target string, data []byte, validate func(path string) error) (PublishResult, error) {
+func PublishFile(target string, data []byte, validate func(path string) error) (result PublishResult, retErr error) {
 	target = filepath.Clean(target)
 	dir := filepath.Dir(target)
 	if dir == "" {
 		dir = "."
 	}
 
-	exists, err := statExists(target)
+	exists, existingMode, err := statPublishTarget(target)
 	if err != nil {
 		return PublishResult{}, fmt.Errorf("stat publish target: %w", err)
 	}
@@ -64,19 +66,38 @@ func PublishFile(target string, data []byte, validate func(path string) error) (
 		return PublishResult{}, err
 	}
 
-	tmp, err := os.CreateTemp(dir, ".xlflow-publish-*.tmp")
+	mode := os.FileMode(0o644)
+	if exists {
+		mode = existingMode
+	}
+	tmp, err := createPublishTemp(dir, mode)
 	if err != nil {
 		return PublishResult{}, fmt.Errorf("create temporary artifact: %w", err)
 	}
 	tmpPath := tmp.Name()
-	// On success the temporary artifact is consumed by the atomic move. The
-	// deferred remove is a no-op for the platform primitives that rename the
-	// file away, and covers every failure before that point.
-	defer func() { _ = os.Remove(tmpPath) }()
+	defer func() {
+		cleanup := cleanupTemporaryArtifact(tmpPath)
+		if retErr != nil {
+			if cleanup.Status == "failed" {
+				retErr = errors.Join(retErr, fmt.Errorf("cleanup temporary artifact %q: %s", cleanup.ResidualPath, cleanup.Error))
+			}
+			return
+		}
+		result.Cleanup = cleanup
+	}()
 
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return PublishResult{}, fmt.Errorf("write temporary artifact: %w", err)
+	}
+	if exists {
+		// OpenFile applies the process umask when creating the stage. A replace
+		// must retain the prior artifact's exact permission bits, so restore them
+		// explicitly before flushing and publishing the closed file.
+		if err := tmp.Chmod(existingMode); err != nil {
+			_ = tmp.Close()
+			return PublishResult{}, fmt.Errorf("preserve publish target permissions: %w", err)
+		}
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
@@ -97,12 +118,11 @@ func PublishFile(target string, data []byte, validate func(path string) error) (
 		// same-volume atomic create. A concurrent creator is a publication
 		// failure, never a fallback to overwrite.
 		if err := platformAtomicCreate(tmpPath, target); err != nil {
-			return PublishResult{}, classifyPublishMoveError(err)
+			return PublishResult{}, classifyPublishCreateError(err)
 		}
 		return PublishResult{
 			ReplacedExisting: false,
 			Publication:      "atomic_create",
-			Cleanup:          cleanupTemporaryArtifact(tmpPath),
 		}, nil
 	}
 
@@ -112,7 +132,6 @@ func PublishFile(target string, data []byte, validate func(path string) error) (
 	return PublishResult{
 		ReplacedExisting: true,
 		Publication:      "atomic_replace",
-		Cleanup:          cleanupTemporaryArtifact(tmpPath),
 	}, nil
 }
 
@@ -131,19 +150,24 @@ func SameFileIdentity(baseDir, left, right string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("resolve %q: %w", right, err)
 	}
+	if leftInfo, err := os.Stat(leftIdentity.CanonicalPath); err == nil {
+		if rightInfo, err := os.Stat(rightIdentity.CanonicalPath); err == nil && os.SameFile(leftInfo, rightInfo) {
+			return true, nil
+		}
+	}
 	return platformComparisonKey(leftIdentity.CanonicalPath) ==
 		platformComparisonKey(rightIdentity.CanonicalPath), nil
 }
 
-func statExists(path string) (bool, error) {
+func statPublishTarget(path string) (bool, os.FileMode, error) {
 	info, err := os.Stat(path)
 	if err == nil {
-		return !info.IsDir(), nil
+		return !info.IsDir(), info.Mode().Perm(), nil
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return false, 0, nil
 	}
-	return false, err
+	return false, 0, err
 }
 
 // probePublishTarget opens an existing destination exclusively to fail fast
@@ -154,14 +178,20 @@ func probePublishTarget(target string, exists bool) error {
 	if !exists {
 		return nil
 	}
-	file, err := os.OpenFile(target, os.O_RDWR, 0)
-	if err != nil {
+	if err := platformProbePublishTarget(target); err != nil {
 		if platformBusyError(err) {
 			return fmt.Errorf("%w: %w", ErrPublishTargetBusy, err)
 		}
 		return fmt.Errorf("%w: open existing output: %w", ErrPublishReplaceFailed, err)
 	}
-	return file.Close()
+	return nil
+}
+
+func classifyPublishCreateError(err error) error {
+	// The destination did not exist when staging began, so access and
+	// unsupported-filesystem failures describe publication capability rather
+	// than a busy workbook. A concurrent creator is likewise a replace failure.
+	return fmt.Errorf("%w: %w", ErrPublishReplaceFailed, err)
 }
 
 func classifyPublishMoveError(err error) error {
@@ -169,6 +199,24 @@ func classifyPublishMoveError(err error) error {
 		return fmt.Errorf("%w: %w", ErrPublishTargetBusy, err)
 	}
 	return fmt.Errorf("%w: %w", ErrPublishReplaceFailed, err)
+}
+
+func createPublishTemp(dir string, mode os.FileMode) (*os.File, error) {
+	var suffix [16]byte
+	for range 100 {
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return nil, err
+		}
+		path := filepath.Join(dir, ".xlflow-publish-"+hex.EncodeToString(suffix[:])+".tmp")
+		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, mode)
+		if err == nil {
+			return file, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+	}
+	return nil, errors.New("could not allocate a unique temporary artifact name")
 }
 
 func cleanupTemporaryArtifact(tmpPath string) CleanupResult {

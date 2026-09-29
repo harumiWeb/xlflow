@@ -140,6 +140,26 @@ func TestSameFileIdentityResolvesSymlinkAlias(t *testing.T) {
 	}
 }
 
+func TestSameFileIdentityResolvesHardLinkAlias(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "Book.xlsm")
+	alias := filepath.Join(dir, "Book-copy.xlsm")
+	if err := os.WriteFile(target, []byte("template"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(target, alias); err != nil {
+		t.Skipf("hard-link creation unavailable: %v", err)
+	}
+
+	same, err := SameFileIdentity(dir, target, alias)
+	if err != nil {
+		t.Fatalf("SameFileIdentity: %v", err)
+	}
+	if !same {
+		t.Fatal("hard-link alias was not recognized as the same file")
+	}
+}
+
 func TestSameFileIdentityRejectsMissingDistinctFiles(t *testing.T) {
 	dir := t.TempDir()
 	same, err := SameFileIdentity(dir,

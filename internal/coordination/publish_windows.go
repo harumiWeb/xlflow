@@ -23,6 +23,26 @@ func platformAtomicCreate(source, destination string) error {
 	return windows.MoveFileEx(from, to, windows.MOVEFILE_WRITE_THROUGH)
 }
 
+func platformProbePublishTarget(target string) error {
+	path, err := windows.UTF16PtrFromString(target)
+	if err != nil {
+		return err
+	}
+	handle, err := windows.CreateFile(
+		path,
+		windows.GENERIC_READ|windows.GENERIC_WRITE,
+		0,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		return err
+	}
+	return windows.CloseHandle(handle)
+}
+
 func platformBusyError(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) ||
 		errors.Is(err, windows.ERROR_ACCESS_DENIED) ||

@@ -34,13 +34,13 @@ xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm>] --experimental
 
 `pack` never writes the destination directly. Publication goes through a temporary sibling artifact in the destination directory (same volume):
 
-1. Resolve the destination and, when it already exists, probe that it can be opened for replacement so a workbook that is locked or open elsewhere fails before staging work.
-2. Write, flush, and close a uniquely named temporary artifact in the destination directory.
-3. Perform lightweight structural validation on the closed temporary artifact: it must be a readable OOXML zip containing `xl/vbaProject.bin`.
+1. Resolve the destination through existing symlinks and junctions. On Windows, when it already exists, probe it with exclusive sharing so a workbook that is locked or open elsewhere fails before staging work. Unix replacement relies on directory permissions and the final rename and therefore does not require the old file itself to be writable.
+2. Write, flush, and close a uniquely named temporary artifact in the destination directory. New outputs use mode `0644` subject to the process umask; replacements retain the existing destination's permission bits.
+3. Perform lightweight structural validation on the closed temporary artifact: it must be a readable OOXML zip with a non-empty, CRC-valid `xl/vbaProject.bin` entry.
 4. Publish atomically. When no destination exists the temporary artifact is moved with a no-clobber atomic create (`publication="atomic_create"`); when one exists it is installed with the platform atomic replace API (`publication="atomic_replace"`). There is no delete-then-copy fallback.
 5. The temporary artifact is removed on every failure path and after publication.
 
-If generation, validation, or publication fails, an existing destination is left byte-for-byte unchanged. A destination that is locked or cannot be replaced safely fails with `pack_output_busy` (exit 3); a publication that cannot be performed atomically fails with `pack_output_replace_failed` (exit 3); staging or structural-validation failures remain `pack_write_failed` (exit 3). When temporary cleanup fails after a successful publication the command still succeeds, reports `output.temporary_cleanup.status="failed"` with `residual_path`, and emits a `pack_temporary_cleanup_failed` warning.
+If generation, validation, or publication fails, an existing destination is left byte-for-byte unchanged. A destination that is locked or cannot be replaced safely fails with `pack_output_busy` (exit 3); a publication that cannot be performed atomically fails with `pack_output_replace_failed` (exit 3); staging or structural-validation failures remain `pack_write_failed` (exit 3). A cleanup failure before publication is joined to and returned with the primary failure. When temporary cleanup fails after a successful publication the command still succeeds, reports `output.temporary_cleanup.status="failed"` with `residual_path`, and emits a `pack_temporary_cleanup_failed` warning.
 
 ## Supported source (MVP)
 
