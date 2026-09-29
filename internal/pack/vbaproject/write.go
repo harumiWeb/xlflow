@@ -29,11 +29,8 @@ func Write(p *Project) ([]byte, error) {
 		// Module/stream names are assumed to be within ASCII. Only ASCII can be written losslessly to both
 		// the dir MBCS field (CODEPAGE written directly) and the UNICODE field (utf16le); for non-ASCII,
 		// utf16le would truncate non-BMP characters and MBCS would ignore the CODEPAGE, so it is rejected.
-		if !isASCII(m.Name) || !isASCII(m.StreamName) {
-			return nil, fmt.Errorf("vbaproject: non-ASCII module names are not supported in v1 (Name=%q StreamName=%q)", m.Name, m.StreamName)
-		}
-		if m.Name == "" || m.StreamName == "" {
-			return nil, fmt.Errorf("vbaproject: module and stream names must not be empty")
+		if err := ValidateWritableComponentIdentity(m.Name, m.StreamName); err != nil {
+			return nil, err
 		}
 		nameKey := strings.ToLower(m.Name)
 		if prior, ok := names[nameKey]; ok {
@@ -92,6 +89,18 @@ func Write(p *Project) ([]byte, error) {
 		w.AddStream([]string{"VBA", m.StreamName}, comp)
 	}
 	return w.Bytes()
+}
+
+// ValidateWritableComponentIdentity checks the name/stream-name restrictions
+// imposed by the current vbaProject.bin writer without mutating a project.
+func ValidateWritableComponentIdentity(name, streamName string) error {
+	if !isASCII(name) || !isASCII(streamName) {
+		return fmt.Errorf("vbaproject: non-ASCII module names are not supported in v1 (Name=%q StreamName=%q)", name, streamName)
+	}
+	if name == "" || streamName == "" {
+		return fmt.Errorf("vbaproject: module and stream names must not be empty")
+	}
+	return nil
 }
 
 // moduleTypeID maps the model's ModuleType to the dir MODULETYPE value.

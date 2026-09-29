@@ -41,9 +41,11 @@ const (
 // module. A UserForm's code-behind is replaced when the form already exists in the template; its
 // designer layout is preserved, not authored, and creating a new form is unsupported.
 type SourceModule struct {
-	Name   string
-	Type   ModuleType
-	Source string
+	SourcePath   string
+	RelatedPaths []string
+	Name         string
+	Type         ModuleType
+	Source       string
 }
 
 // PackMeta summarizes the modules and opaque streams handled during pack.
@@ -151,104 +153,12 @@ func generateVBAProject(template []byte, sources []SourceModule) ([]byte, PackMe
 }
 
 func applySources(project *vbaproject.Project, sources []SourceModule) (PackMeta, error) {
-	byKey := make(map[string]bool, len(project.Modules))
-	templateNames := make(map[string]string, len(project.Modules))
-	for _, m := range project.Modules {
-		nameKey := strings.ToLower(m.Name)
-		if prior, exists := templateNames[nameKey]; exists {
-			return PackMeta{}, fmt.Errorf("%w: duplicate template modules %s and %s", ErrAmbiguousLayout, prior, m.Name)
-		}
-		templateNames[nameKey] = m.Name
-		key := moduleKey(m.Name, fromProjectModuleType(m.Type))
-		byKey[key] = true
+	plan, err := PlanProject(project, sources)
+	if err != nil {
+		return PackMeta{}, err
 	}
-
-	var meta PackMeta
-	seen := make(map[string]string, len(sources))
-	sourceByKey := make(map[string]SourceModule, len(sources))
-	for _, source := range sources {
-		if source.Name == "" {
-			return PackMeta{}, fmt.Errorf("%w: source module name is empty", ErrAmbiguousLayout)
-		}
-		_, err := toProjectModuleType(source.Type)
-		if err != nil {
-			return PackMeta{}, err
-		}
-		nameKey := strings.ToLower(source.Name)
-		if prior, ok := seen[nameKey]; ok {
-			return PackMeta{}, fmt.Errorf("%w: duplicate source modules %s and %s", ErrAmbiguousLayout, prior, source.Name)
-		}
-		seen[nameKey] = source.Name
-		key := moduleKey(source.Name, source.Type)
-		sourceByKey[key] = source
-		ok := byKey[key]
-		if !ok && source.Type == ModuleTypeForm {
-			// A form's designer storage cannot be authored from source, so creating a
-			// form that is not already in the template is UserForm generation (Stage 3),
-			// not the generic "cannot add modules" limitation.
-			return PackMeta{}, fmt.Errorf("%w: form %q is not in the template; pack updates the code-behind of existing forms only and cannot create a new UserForm", ErrUserFormGenerationUnsupported, source.Name)
-		}
-		if !ok && source.Type == ModuleTypeDocument {
-			return PackMeta{}, fmt.Errorf("%w: document module %q is not in the template; document topology is template-owned", ErrAmbiguousLayout, source.Name)
-		}
-		switch source.Type {
-		case ModuleTypeStandard:
-			meta.Standard++
-		case ModuleTypeClass:
-			meta.Class++
-		case ModuleTypeDocument:
-			meta.Document++
-		case ModuleTypeForm:
-			meta.Form++
-		}
-	}
-
-	modules := make([]vbaproject.Module, 0, len(project.Modules)+len(sources))
-	consumed := make(map[string]bool, len(sources))
-	for _, module := range project.Modules {
-		typ := fromProjectModuleType(module.Type)
-		key := moduleKey(module.Name, typ)
-		source, supplied := sourceByKey[key]
-		if !supplied && (module.Type == vbaproject.ModuleStd || module.Type == vbaproject.ModuleClass) {
-			continue
-		}
-		if supplied {
-			normalized, err := vbaproject.NormalizeModuleSource(module.Type, source.Source, &module)
-			if err != nil {
-				return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
-			}
-			if module.Type == vbaproject.ModuleStd || module.Type == vbaproject.ModuleClass {
-				if err := vbaproject.ValidateModuleIdentity(module.Name, normalized); err != nil {
-					return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
-				}
-			}
-			module.Source = normalized
-			consumed[key] = true
-		}
-		modules = append(modules, module)
-	}
-	for _, source := range sources {
-		if source.Type != ModuleTypeStandard && source.Type != ModuleTypeClass {
-			continue
-		}
-		key := moduleKey(source.Name, source.Type)
-		if consumed[key] {
-			continue
-		}
-		targetType, _ := toProjectModuleType(source.Type)
-		normalized, err := vbaproject.NormalizeModuleSource(targetType, source.Source, nil)
-		if err != nil {
-			return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
-		}
-		if err := vbaproject.ValidateModuleIdentity(source.Name, normalized); err != nil {
-			return PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
-		}
-		modules = append(modules, vbaproject.Module{
-			Name: source.Name, StreamName: source.Name, Type: targetType, Source: normalized,
-		})
-	}
-	project.Modules = modules
-	return meta, nil
+	project.Modules = plan.modules
+	return plan.meta, nil
 }
 
 func toProjectModuleType(t ModuleType) (vbaproject.ModuleType, error) {
@@ -279,10 +189,6 @@ func fromProjectModuleType(t vbaproject.ModuleType) ModuleType {
 	default:
 		return ModuleType("")
 	}
-}
-
-func moduleKey(name string, typ ModuleType) string {
-	return string(typ) + "\x00" + name
 }
 
 func hasSignatureStream(template []byte) bool {

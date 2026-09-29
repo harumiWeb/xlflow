@@ -177,6 +177,7 @@ func TestCollectPackSourceModulesIncludesForms(t *testing.T) {
 	dir := t.TempDir()
 	writePackSourceTree(t, dir, true)
 	cfg := config.Default()
+	cfg.Build.Exclude = []string{"src/modules/**", "src/forms/**"}
 
 	sources, err := collectPackSourceModules(dir, cfg)
 	if err != nil {
@@ -195,6 +196,20 @@ func TestCollectPackSourceModulesIncludesForms(t *testing.T) {
 	}
 	if counts[packpkg.ModuleTypeStandard] != 1 || counts[packpkg.ModuleTypeClass] != 1 || counts[packpkg.ModuleTypeDocument] != 2 || counts[packpkg.ModuleTypeForm] != 1 {
 		t.Fatalf("source counts = %v", counts)
+	}
+}
+
+func TestCollectPackSourceModulesRejectsMissingConfiguredRoot(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	for _, sourceDir := range []string{cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(sourceDir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := collectPackSourceModules(dir, cfg)
+	if !errors.Is(err, packpkg.ErrAmbiguousLayout) || !strings.Contains(err.Error(), "read standard source root") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -378,6 +393,11 @@ func writePackConfig(t *testing.T, dir string) {
 	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
 		t.Fatal(err)
 	}
+	for _, sourceDir := range []string{cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(sourceDir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func writePackSourceTree(t *testing.T, dir string, includeForm bool) {
@@ -506,9 +526,37 @@ func errorCodeFromJSON(t *testing.T, stdout string) string {
 	return env.Error.Code
 }
 
-func TestCollectFormSourcesSidecarMergesBasIntoSource(t *testing.T) {
+// makePackSourceRoots creates the four configured source roots so shared
+// discovery does not fail on a missing directory before exercising UserForm
+// collection behavior.
+func makePackSourceRoots(t *testing.T, root string, cfg config.Config) {
+	t.Helper()
+	for _, sourceDir := range []string{cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(sourceDir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func packFormSources(t *testing.T, root string, cfg config.Config) []packpkg.SourceModule {
+	t.Helper()
+	sources, err := collectPackSourceModules(root, cfg)
+	if err != nil {
+		t.Fatalf("collectPackSourceModules: %v", err)
+	}
+	var forms []packpkg.SourceModule
+	for _, source := range sources {
+		if source.Type == packpkg.ModuleTypeForm {
+			forms = append(forms, source)
+		}
+	}
+	return forms
+}
+
+func TestCollectPackSourceModulesSidecarMergesBasIntoSource(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default() // code_source defaults to "sidecar"
+	makePackSourceRoots(t, root, cfg)
 	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
 	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
 		t.Fatal(err)
@@ -523,10 +571,7 @@ func TestCollectFormSourcesSidecarMergesBasIntoSource(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte(bas), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := collectFormSources(root, cfg)
-	if err != nil {
-		t.Fatalf("collectFormSources: %v", err)
-	}
+	got := packFormSources(t, root, cfg)
 	if len(got) != 1 || got[0].Name != "UserForm1" || got[0].Type != packpkg.ModuleTypeForm {
 		t.Fatalf("unexpected sources: %+v", got)
 	}
@@ -539,10 +584,11 @@ func TestCollectFormSourcesSidecarMergesBasIntoSource(t *testing.T) {
 	}
 }
 
-func TestCollectFormSourcesFrmModeReadsFrmVerbatim(t *testing.T) {
+func TestCollectPackSourceModulesFrmModeReadsFrmVerbatim(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
 	cfg.UserForm.CodeSource = "frm"
+	makePackSourceRoots(t, root, cfg)
 	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
 	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
 		t.Fatal(err)
@@ -555,38 +601,31 @@ func TestCollectFormSourcesFrmModeReadsFrmVerbatim(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte("Private Sub a()\r\n    Debug.Print \"SIDE\"\r\nEnd Sub\r\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := collectFormSources(root, cfg)
-	if err != nil {
-		t.Fatalf("collectFormSources: %v", err)
-	}
+	got := packFormSources(t, root, cfg)
 	if len(got) != 1 || got[0].Source != frm {
 		t.Errorf("frm mode should read .frm verbatim, got %+v", got)
 	}
 }
 
-func TestCollectFormSourcesSidecarFallsBackToFrmWhenNoBas(t *testing.T) {
+func TestCollectPackSourceModulesSidecarFallsBackToFrmWhenNoBas(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default() // sidecar
+	makePackSourceRoots(t, root, cfg)
 	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
-	if err := os.MkdirAll(formsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	frm := "Attribute VB_Name = \"UserForm1\"\r\nPrivate Sub a()\r\nEnd Sub\r\n"
 	if err := os.WriteFile(filepath.Join(formsDir, "UserForm1.frm"), []byte(frm), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := collectFormSources(root, cfg)
-	if err != nil {
-		t.Fatalf("collectFormSources: %v", err)
-	}
+	got := packFormSources(t, root, cfg)
 	if len(got) != 1 || got[0].Source != frm {
 		t.Errorf("missing sidecar should fall back to .frm, got %+v", got)
 	}
 }
 
-func TestCollectFormSourcesSidecarWithAttributeHeaderFailsLoud(t *testing.T) {
+func TestCollectPackSourceModulesSidecarWithAttributeHeaderFailsLoud(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
+	makePackSourceRoots(t, root, cfg)
 	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
 	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
 		t.Fatal(err)
@@ -598,15 +637,16 @@ func TestCollectFormSourcesSidecarWithAttributeHeaderFailsLoud(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(formsDir, "code", "UserForm1.bas"), []byte(bad), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := collectFormSources(root, cfg)
+	_, err := collectPackSourceModules(root, cfg)
 	if !errors.Is(err, packpkg.ErrAmbiguousLayout) {
 		t.Fatalf("want ErrAmbiguousLayout for attribute-bearing sidecar, got %v", err)
 	}
 }
 
-func TestCollectFormSourcesOrphanSidecarFailsLoud(t *testing.T) {
+func TestCollectPackSourceModulesOrphanSidecarFailsLoud(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
+	makePackSourceRoots(t, root, cfg)
 	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
 	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
 		t.Fatal(err)
@@ -615,15 +655,16 @@ func TestCollectFormSourcesOrphanSidecarFailsLoud(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(formsDir, "code", "Ghost.bas"), []byte("Private Sub a()\r\nEnd Sub\r\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := collectFormSources(root, cfg)
+	_, err := collectPackSourceModules(root, cfg)
 	if !errors.Is(err, packpkg.ErrAmbiguousLayout) {
 		t.Fatalf("want ErrAmbiguousLayout for orphan sidecar, got %v", err)
 	}
 }
 
-func TestCollectFormSourcesNestedSidecarFailsLoud(t *testing.T) {
+func TestCollectPackSourceModulesNestedSidecarFailsLoud(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
+	makePackSourceRoots(t, root, cfg)
 	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
 	if err := os.MkdirAll(filepath.Join(formsDir, "code", "nested"), 0o755); err != nil {
 		t.Fatal(err)
@@ -634,15 +675,16 @@ func TestCollectFormSourcesNestedSidecarFailsLoud(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(formsDir, "code", "nested", "Ghost.bas"), []byte("Option Explicit\r\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := collectFormSources(root, cfg)
+	_, err := collectPackSourceModules(root, cfg)
 	if !errors.Is(err, packpkg.ErrAmbiguousLayout) {
 		t.Fatalf("want ErrAmbiguousLayout for nested sidecar directory, got %v", err)
 	}
 }
 
-func TestCollectFormSourcesNestedFrmWithSidecarNotOrphan(t *testing.T) {
+func TestCollectPackSourceModulesNestedFrmWithSidecarNotOrphan(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default() // sidecar
+	makePackSourceRoots(t, root, cfg)
 	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
 	if err := os.MkdirAll(filepath.Join(formsDir, "sub"), 0o755); err != nil {
 		t.Fatal(err)
@@ -650,8 +692,8 @@ func TestCollectFormSourcesNestedFrmWithSidecarNotOrphan(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// A .frm kept in a subdirectory is discovered recursively by collectFormSources,
-	// so its sidecar must not be rejected as an orphan.
+	// A .frm kept in a subdirectory is discovered recursively by shared source
+	// inventory, so its sidecar must not be rejected as an orphan.
 	frm := "Attribute VB_Name = \"Nested\"\r\nPrivate Sub a()\r\nEnd Sub\r\n"
 	if err := os.WriteFile(filepath.Join(formsDir, "sub", "Nested.frm"), []byte(frm), 0o644); err != nil {
 		t.Fatal(err)
@@ -659,10 +701,7 @@ func TestCollectFormSourcesNestedFrmWithSidecarNotOrphan(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(formsDir, "code", "Nested.bas"), []byte("Private Sub a()\r\nEnd Sub\r\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := collectFormSources(root, cfg)
-	if err != nil {
-		t.Fatalf("nested .frm with a matching sidecar must not be an orphan: %v", err)
-	}
+	got := packFormSources(t, root, cfg)
 	var found bool
 	for _, m := range got {
 		if m.Name == "Nested" && m.Type == packpkg.ModuleTypeForm {
