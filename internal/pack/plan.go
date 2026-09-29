@@ -65,6 +65,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 	}
 
 	sourceByName := make(map[string]SourceModule, len(sources))
+	sourceByKey := make(map[string]SourceModule, len(sources))
 	for _, source := range sources {
 		if !sourceinventory.ValidComponentName(source.Name) {
 			return PackPlan{}, fmt.Errorf("%w: invalid VBA component name %q", ErrAmbiguousLayout, source.Name)
@@ -79,15 +80,23 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 		if prior, exists := sourceByName[key]; exists {
 			return PackPlan{}, fmt.Errorf("%w: duplicate source modules %s and %s", ErrAmbiguousLayout, prior.Name, source.Name)
 		}
+		sourceByName[key] = source
+		sourceByKey[moduleKey(source.Name, source.Type)] = source
 		if template, exists := templateByName[key]; exists {
-			if source.Name != template.Name {
-				return PackPlan{}, fmt.Errorf("%w: source component name %q differs in case from template component %q", ErrAmbiguousLayout, source.Name, template.Name)
-			}
-			if source.Type != fromProjectModuleType(template.Type) {
-				return PackPlan{}, fmt.Errorf("%w: source component %q has type %q but template type is %q", ErrAmbiguousLayout, source.Name, source.Type, fromProjectModuleType(template.Type))
+			sourceOwned := source.Type == ModuleTypeStandard || source.Type == ModuleTypeClass
+			templateOwned := template.Type == vbaproject.ModuleStd || template.Type == vbaproject.ModuleClass
+			if !sourceOwned || !templateOwned {
+				// Template-owned document/UserForm components must match the
+				// template component by exact name and type; a case-only rename or a
+				// type change is ambiguous, not a source-owned replacement.
+				if source.Name != template.Name {
+					return PackPlan{}, fmt.Errorf("%w: source component name %q differs in case from template component %q", ErrAmbiguousLayout, source.Name, template.Name)
+				}
+				if source.Type != fromProjectModuleType(template.Type) {
+					return PackPlan{}, fmt.Errorf("%w: source component %q has type %q but template type is %q", ErrAmbiguousLayout, source.Name, source.Type, fromProjectModuleType(template.Type))
+				}
 			}
 		}
-		sourceByName[key] = source
 	}
 
 	plan := PackPlan{
@@ -97,8 +106,8 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 	consumed := make(map[string]bool, len(sources))
 	for _, module := range project.Modules {
 		typ := fromProjectModuleType(module.Type)
-		key := strings.ToLower(module.Name)
-		source, supplied := sourceByName[key]
+		key := moduleKey(module.Name, typ)
+		source, supplied := sourceByKey[key]
 		planned := PlannedComponent{Name: module.Name, Type: typ}
 		setAuthorities(&planned)
 		if !supplied {
@@ -129,7 +138,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 
 	additions := make([]SourceModule, 0)
 	for _, source := range sources {
-		key := strings.ToLower(source.Name)
+		key := moduleKey(source.Name, source.Type)
 		if consumed[key] {
 			continue
 		}
@@ -167,6 +176,10 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 		incrementMeta(&plan.meta, source.Type)
 	}
 	return plan, nil
+}
+
+func moduleKey(name string, typ ModuleType) string {
+	return string(typ) + "\x00" + name
 }
 
 func normalizePlannedSource(module vbaproject.Module, source SourceModule) (string, error) {

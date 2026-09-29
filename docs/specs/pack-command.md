@@ -138,7 +138,7 @@ This is release-gate evidence for a representative build. It does not change `pa
 See ADR-0012 for the rationale. Summary:
 
 - **Stage 1 (implemented)**: carry existing template designer streams through untouched; never generate forms.
-- **Stage 2 (implemented)**: update the code-behind of a form already in the template, keeping the template's designer state. The code-behind source follows `[userform].code_source` — `frm` (code in the `.frm`) or `sidecar` (code in `src/forms/code/<FormName>.bas`, merged in memory); `pack` never writes the source tree. A `.frm` whose form is not in the template returns `pack_userform_generation_unsupported` (creating a form is Stage 3); `.frx` is not read.
+- **Stage 2 (implemented)**: update the code-behind of a form already in the template, keeping the template's designer state. The code-behind source follows `[userform].code_source` — `frm` (code in the `.frm`) or `sidecar` (code in `src/forms/code/<FormName>.bas`, merged in memory); `pack` never writes the source tree. A `.frm` whose form is not in the template returns `pack_userform_generation_unsupported` (creating a form is Stage 3). A matching `.frx` is inventoried and validated as a related source artifact but is not written into the packed project.
 - **Stage 3**: full reconstruction from exported `.frm`/`.frx` — a separate, higher-risk phase.
 
 The reference implementation has demonstrated the Stage 1 / Stage 2 round-trip against real Excel, including a nested Frame/MultiPage form whose designer sub-storages round-trip byte-for-byte. That informs the staging but is not part of the MVP.

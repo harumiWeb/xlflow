@@ -56,7 +56,8 @@ func TestPlanProjectRejectsComprehensiveSourceIdentityFailures(t *testing.T) {
 		{"invalid name", []SourceModule{{Name: "1Bad", Type: ModuleTypeStandard, Source: standardSource("1Bad")}}},
 		{"non-ASCII writer name", []SourceModule{{Name: "標準", Type: ModuleTypeStandard, Source: standardSource("標準")}}},
 		{"filename identity mismatch", []SourceModule{{SourcePath: "src/modules/New.bas", Name: "New", Type: ModuleTypeStandard, Source: standardSource("Old")}}},
-		{"template case mismatch", []SourceModule{{Name: "module1", Type: ModuleTypeStandard, Source: standardSource("module1")}}},
+		{"template-owned document case mismatch", []SourceModule{{Name: "thisworkbook", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"}}},
+		{"template-owned document type mismatch", []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeForm, Source: "Attribute VB_Name = \"ThisWorkbook\"\r\n"}}},
 		{"document attribute header", []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Attribute VB_Name = \"ThisWorkbook\"\r\nOption Explicit\r\n"}}},
 	}
 	for _, tc := range cases {
@@ -66,6 +67,41 @@ func TestPlanProjectRejectsComprehensiveSourceIdentityFailures(t *testing.T) {
 				t.Fatalf("err = %v, want ErrAmbiguousLayout", err)
 			}
 		})
+	}
+}
+
+func TestPlanProjectSourceOwnedReplacementAllowsCaseAndTypeChange(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Source-owned standard/class components need not preserve template case or
+	// type: a case-only rename and a class-to-standard conversion plan as
+	// removal plus addition rather than a rejection.
+	sources := []SourceModule{
+		{Name: "module1", Type: ModuleTypeStandard, Source: standardSource("module1")},
+		{Name: "Class1", Type: ModuleTypeStandard, Source: standardSource("Class1")},
+		{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"},
+		{Name: "Sheet1", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"},
+	}
+	plan, err := PlanProject(project, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := map[string]PlanAction{}
+	for _, component := range plan.Components {
+		actions[string(component.Type)+":"+component.Name] = component.Action
+	}
+	want := map[string]PlanAction{
+		"standard:Module1":      PlanRemove,
+		"class:Class1":          PlanRemove,
+		"standard:module1":      PlanAdd,
+		"standard:Class1":       PlanAdd,
+		"document:ThisWorkbook": PlanUpdate,
+		"document:Sheet1":       PlanUpdate,
+	}
+	if !reflect.DeepEqual(actions, want) {
+		t.Fatalf("actions = %#v, want %#v", actions, want)
 	}
 }
 
