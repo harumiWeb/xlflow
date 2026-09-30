@@ -210,7 +210,7 @@ func TestPublicCapabilitiesProjectEveryDescriptorWithoutBridgeMetadata(t *testin
 	}
 }
 
-func TestPublicCapabilitiesV1StableFields(t *testing.T) {
+func TestPublicCapabilitiesV2StableFields(t *testing.T) {
 	capabilities := PublicCapabilities()
 	if _, ok := capabilities.Commands["capabilities"]; !ok {
 		t.Fatal("capabilities command must publish its own coordination policy")
@@ -231,6 +231,16 @@ func TestPublicCapabilitiesV1StableFields(t *testing.T) {
 	}
 	if !reflect.DeepEqual(push, want) {
 		t.Fatalf("push capability = %#v, want %#v", push, want)
+	}
+}
+
+func TestPullCapabilityPublishesBackendRequirements(t *testing.T) {
+	pull := PublicCapabilities().Commands["pull"]
+	if pull.DefaultBackend != "excel" {
+		t.Fatalf("pull default_backend = %q, want excel", pull.DefaultBackend)
+	}
+	if !pull.RequiresExcel || !pull.Backends["excel"].RequiresExcel || pull.Backends["file"].RequiresExcel {
+		t.Fatalf("pull backend requirements = %#v, requires_excel=%t", pull.Backends, pull.RequiresExcel)
 	}
 }
 

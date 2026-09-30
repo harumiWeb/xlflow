@@ -29,6 +29,74 @@ func NormalizeModuleSource(mt ModuleType, disk string, existing *Module) (string
 	}
 }
 
+// ExportModuleSource converts the source stored in a vbaProject.bin module
+// stream into xlflow's tracked, UTF-8 disk representation. UserForms require
+// their separate Designer export and are intentionally rejected here.
+func ExportModuleSource(module Module) (string, error) {
+	source := toLF(module.Source)
+	switch module.Type {
+	case ModuleStd:
+		if err := ValidateModuleIdentity(module.Name, source); err != nil {
+			return "", err
+		}
+		return ensureFinalNewline(source), nil
+	case ModuleClass:
+		if err := ValidateModuleIdentity(module.Name, source); err != nil {
+			return "", err
+		}
+		body := removeInternalClassAttributes(source)
+		header := "VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  'True\nEND\n"
+		return header + ensureFinalNewline(body), nil
+	case ModuleDocument:
+		return exportDocumentSource(source)
+	case ModuleForm:
+		return "", fmt.Errorf("vbaproject: UserForm %q requires a Designer export", module.Name)
+	default:
+		return "", fmt.Errorf("vbaproject: unsupported ModuleType %d", module.Type)
+	}
+}
+
+func exportDocumentSource(source string) (string, error) {
+	lines := strings.Split(source, "\n")
+	firstBody := 0
+	for firstBody < len(lines) && strings.HasPrefix(lines[firstBody], "Attribute ") {
+		firstBody++
+	}
+	if firstBody == 0 {
+		return "", fmt.Errorf("vbaproject: document module has no Attribute header")
+	}
+	body := strings.Join(lines[firstBody:], "\n")
+	body = strings.TrimPrefix(body, "\n")
+	return ensureFinalNewline(body), nil
+}
+
+func removeInternalClassAttributes(source string) string {
+	lines := strings.Split(source, "\n")
+	out := lines[:0]
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "Attribute VB_Base "):
+		case strings.HasPrefix(line, "Attribute VB_TemplateDerived "):
+		case strings.HasPrefix(line, "Attribute VB_Customizable "):
+		default:
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func toLF(source string) string {
+	source = strings.ReplaceAll(source, "\r\n", "\n")
+	return strings.ReplaceAll(source, "\r", "\n")
+}
+
+func ensureFinalNewline(source string) string {
+	if strings.HasSuffix(source, "\n") {
+		return source
+	}
+	return source + "\n"
+}
+
 // ValidateModuleIdentity verifies that the in-bin Attribute VB_Name agrees
 // with the component identity used by PROJECT, dir, and the VBA stream. It is
 // used whenever pack updates or creates a standard or class component. The

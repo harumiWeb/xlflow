@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Accept xlflow capability schemas v1 and v2, including backend-specific Excel
+  requirements for the saved-workbook `pull --backend file` path.
+
 ## v0.10.2
 
 - Fixed inline-suppression Quick Fix discovery with the current v2 rule

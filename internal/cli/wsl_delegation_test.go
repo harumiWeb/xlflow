@@ -95,6 +95,23 @@ func TestShouldDelegateTestListCommand(t *testing.T) {
 	}
 }
 
+func TestShouldKeepFilePullLocalUnderWSL(t *testing.T) {
+	root := (&app{}).rootCommand()
+	pull, _, err := root.Find([]string{"pull"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !shouldDelegateCommand(pull, "pull") {
+		t.Fatal("default Excel pull should delegate")
+	}
+	if err := pull.Flags().Set("backend", "file"); err != nil {
+		t.Fatal(err)
+	}
+	if shouldDelegateCommand(pull, "pull") {
+		t.Fatal("file pull should remain local")
+	}
+}
+
 func TestShouldNotDelegateBackupSubcommands(t *testing.T) {
 	root := &cobra.Command{Use: "xlflow"}
 	backupCmd := &cobra.Command{Use: "backup"}

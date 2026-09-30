@@ -5,7 +5,7 @@ Export workbook VBA components and form artifacts into configured source directo
 ## Usage
 
 ```bash
-xlflow pull [--session] [--formulas]
+xlflow pull [--backend excel|file] [--session] [--formulas]
 ```
 
 ## Options and Arguments
@@ -15,6 +15,7 @@ xlflow pull [--session] [--formulas]
 | `--session`       | Pull from the managed live session workbook.                           | false   |
 | `--formulas`      | Also refresh worksheet formula snapshots under `formulas/` on success. | false   |
 | `--json`          | Report exported files and warnings.                                    | false   |
+| `--backend`       | Use `excel` or pure-Go saved-workbook `file` extraction.               | excel   |
 
 ## Examples
 
@@ -22,6 +23,7 @@ xlflow pull [--session] [--formulas]
 xlflow pull
 xlflow pull --session --json
 xlflow pull --formulas --json
+xlflow pull --backend file --json
 ```
 
 ## Notes
@@ -32,6 +34,8 @@ Pull before editing if the workbook may contain newer VBA than the source tree.
 
 > [!IMPORTANT]
 > UserForm Designer state and code-behind may be written to separate sidecar paths depending on project configuration.
+
+`--backend file` reads the saved configured `.xlsm` directly and never launches Excel, COM, VBIDE, or the bridge. It supports standard, class, and document modules. If the workbook contains any UserForm, the whole operation fails before modifying source; use the default Excel backend for complete `.frm` / `.frx` export. The file backend does not fall back to Excel and cannot be combined with `--session`. If a matching live session is recorded, the command still reads the saved workbook and warns that unsaved live state was ignored.
 
 With `[vba.line_numbers].enabled = true`, `pull` strips only xlflow-generated, fixed-width space-padded physical line labels from workbook exports, so tracked source remains unnumbered. It never treats colon labels as generated. xlflow stops safely rather than rewriting source when it encounters non-generated or mismatched numeric labels, or numeric `GoTo`, `GoSub`, or `Resume` targets. This is configuration-only behavior; `pull` has no line-number flag.
 
@@ -47,8 +51,14 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
 {
   "status": "ok",
   "command": "pull",
-  "workbook": "Book.xlsm",
-  "written": ["src/modules/Main.bas", "src/forms/specs/UserForm1.yaml"],
+  "workbook": { "path": "build/Book.xlsm" },
+  "pull": {
+    "backend": "file",
+    "source": "saved_workbook",
+    "code_page": 932,
+    "modules": { "standard": 1, "class": 1, "document": 2, "form": 0 }
+  },
+  "source": { "written": ["src/modules/Main.bas"] },
   "output": {
     "formulas": {
       "dir": "formulas",
@@ -80,7 +90,7 @@ Use `xlflow pull` when the task matches the command description above. For a goa
 
 ## Prerequisites
 
-Check the project configuration and run `xlflow doctor --json` before workbook-backed operations. Source-only commands can run without Excel; commands that read or mutate a workbook require Windows Excel and VBIDE access.
+For the default `--backend excel`, check the project configuration and run `xlflow doctor --json`; this path requires Windows Excel and VBIDE access. `--backend file` instead requires a readable configured saved `.xlsm` and does not require Excel or VBIDE.
 
 ## What this command reads and changes
 

@@ -83,6 +83,7 @@ type Envelope struct {
 	Output         any `json:"output,omitempty"`
 	Build          any `json:"build,omitempty"`
 	Pack           any `json:"pack,omitempty"`
+	Pull           any `json:"pull,omitempty"`
 	Spec           any `json:"spec,omitempty"`
 	Edit           any `json:"edit,omitempty"`
 	Project        any `json:"project,omitempty"`
@@ -2254,7 +2255,8 @@ func (r renderer) renderWorkbookSource(env Envelope) string {
 	workbook := objectMap(env.Workbook)
 	backup := objectMap(env.Backup)
 	source := objectMap(env.Source)
-	if len(workbook) == 0 && len(backup) == 0 && len(source) == 0 && env.PushDiagnostic == nil && env.Warnings == nil && env.Hints == nil {
+	pull := objectMap(env.Pull)
+	if len(workbook) == 0 && len(backup) == 0 && len(source) == 0 && len(pull) == 0 && env.PushDiagnostic == nil && env.Warnings == nil && env.Hints == nil {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
@@ -2267,6 +2269,12 @@ func (r renderer) renderWorkbookSource(env Envelope) string {
 	}
 	if path := stringValue(source, "path"); path != "" {
 		b.WriteString(kv("Source", path))
+	}
+	if backend := stringValue(pull, "backend"); backend != "" {
+		b.WriteString(kv("Backend", backend))
+	}
+	if authority := stringValue(pull, "source"); authority != "" {
+		b.WriteString(kv("Authority", authority))
 	}
 	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
 		b.WriteString(kv("Session", sessionSummary))

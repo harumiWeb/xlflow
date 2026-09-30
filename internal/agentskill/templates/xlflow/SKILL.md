@@ -32,6 +32,7 @@ the next decision.
 | Check source, workbook, and session state | `xlflow status --json`                                                                  | before workbook work or after a failure                                                               |
 | Diagnose Excel, COM, or VBIDE setup       | `xlflow doctor --json`                                                                  | automation cannot be trusted                                                                          |
 | Export workbook VBA into source           | `xlflow pull --session --json`                                                          | the workbook is authoritative or freshness is unclear                                                 |
+| Export saved `.xlsm` VBA without Excel    | `xlflow pull --backend file --json`                                                     | saved file is authoritative and the project has no UserForms                                          |
 | Find a runnable entrypoint                | `xlflow macros --session --json`                                                        | the macro name is not already proven                                                                  |
 | Check source before Excel import          | `xlflow lint --json` and `xlflow analyze --json`                                        | after source edits                                                                                    |
 | Estimate refactor blast radius            | `xlflow impact Module.Procedure --json`                                                 | changing existing behavior; load [code analysis](references/code-analysis.md)                         |
@@ -139,6 +140,10 @@ xlflow save --session --json
 xlflow session stop --json
 ```
 
+Use `pull --backend file --json` only when the saved `.xlsm` is explicitly the
+source of truth. It never reads unsaved session state and rejects workbooks
+containing UserForms before changing source; there is no fallback to Excel.
+
 Run `xlflow doctor --json` when Excel, COM, VBIDE access, or macro execution
 cannot be trusted. Do not run both session start and attach: choose attach for
 the user-open configured workbook and start for a new managed session. Omit pull
@@ -212,15 +217,15 @@ that Excel not stay open.
 
 ## Dispatch to Specialized References
 
-| Task or signal                                                             | Load this reference                             |
-| -------------------------------------------------------------------------- | ----------------------------------------------- |
-| Writing tests, selecting tests, test metadata, hooks, or test failures     | [testing.md](references/testing.md)             |
-| Formula-driven behavior, defined names, or sheet-layout formulas           | [formulas.md](references/formulas.md)           |
-| UserForm design, code-behind authority, inspection, snapshots, or rebuilds | [forms.md](references/forms.md)                 |
-| Dialogs, file pickers, headless UI, or interactive-vs-unattended behavior  | [xlflow-ui.md](references/xlflow-ui.md)         |
-| Runtime or compile diagnostics that do not identify the cause              | [debugging.md](references/debugging.md)         |
-| Recovery-required state or uncertain workbook termination                  | [recovery.md](references/recovery.md)           |
-| Callers, callees, dependencies, refactors, blast radius, or affected tests | [code-analysis.md](references/code-analysis.md) |
+| Task or signal                                                                                                                                                                   | Load this reference                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Writing tests, selecting tests, test metadata, hooks, or test failures                                                                                                           | [testing.md](references/testing.md)                       |
+| Formula-driven behavior, defined names, or sheet-layout formulas                                                                                                                 | [formulas.md](references/formulas.md)                     |
+| UserForm design, code-behind authority, inspection, snapshots, or rebuilds                                                                                                       | [forms.md](references/forms.md)                           |
+| Dialogs, file pickers, headless UI, or interactive-vs-unattended behavior                                                                                                        | [xlflow-ui.md](references/xlflow-ui.md)                   |
+| Runtime or compile diagnostics that do not identify the cause                                                                                                                    | [debugging.md](references/debugging.md)                   |
+| Recovery-required state or uncertain workbook termination                                                                                                                        | [recovery.md](references/recovery.md)                     |
+| Callers, callees, dependencies, refactors, blast radius, or affected tests                                                                                                       | [code-analysis.md](references/code-analysis.md)           |
 | Approximate lookups, criteria strings, `Insert`/`Delete` and partial shifts, merged cells under a shift, mixed-type sorting, or `WorksheetFunction` versus VBA (`Round`, `Trim`) | [object-model-traps.md](references/object-model-traps.md) |
 
 Use the reference before editing when its subject changes source authority,
