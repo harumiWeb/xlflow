@@ -2350,7 +2350,6 @@ func (a *app) packCommand() *cobra.Command {
 			if blank {
 				workbookBytes, meta, err = packpkg.BuildBlankWorkbook(sources, packpkg.BlankOptions{
 					CodePage: cfg.Pack.Blank.CodePage,
-					LCID:     cfg.Pack.Blank.LCID,
 				})
 			} else {
 				templateBytes, readErr := os.ReadFile(resolvedTemplate)

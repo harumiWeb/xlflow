@@ -608,8 +608,11 @@ func TestBuildBlankWorkbookCreatesFreshProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fresh project: %v", err)
 	}
-	if project.Props.CodePage != DefaultBlankCodePage || project.Props.LCID != DefaultBlankLCID {
+	if project.Props.CodePage != DefaultBlankCodePage || project.Props.LCID != ovba.CanonicalProjectLCID {
 		t.Fatalf("locale = cp%d/lcid%d", project.Props.CodePage, project.Props.LCID)
+	}
+	if project.Props.ProjectID != "{61CB3C72-4521-44A9-8538-FAE59C5B1642}" {
+		t.Fatalf("project ID = %q", project.Props.ProjectID)
 	}
 	wantTypes := map[string]vbaproject.ModuleType{
 		"ThisWorkbook": vbaproject.ModuleDocument,
@@ -637,7 +640,7 @@ func TestBuildBlankWorkbookJapaneseCodePage(t *testing.T) {
 		{Name: "ThisWorkbook", Type: ModuleTypeDocument},
 		{Name: "Sheet1", Type: ModuleTypeDocument},
 	}
-	out, _, err := BuildBlankWorkbook(sources, BlankOptions{CodePage: 932, LCID: 1041})
+	out, _, err := BuildBlankWorkbook(sources, BlankOptions{CodePage: 932})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,7 +648,7 @@ func TestBuildBlankWorkbookJapaneseCodePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if project.Props.CodePage != 932 || project.Props.LCID != 1041 {
+	if project.Props.CodePage != 932 || project.Props.LCID != ovba.CanonicalProjectLCID {
 		t.Fatalf("Japanese project props = %+v", project.Props)
 	}
 	var found bool

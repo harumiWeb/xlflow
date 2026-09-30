@@ -22,8 +22,13 @@ All notable changes to xlflow will be documented in this file.
   without a workbook template. The profile fixes document topology to
   `ThisWorkbook` plus `Sheet1`, authors a fresh source-only VBA project with
   deterministic Office references, supports configurable `[pack.blank]`
-  `code_page`/`lcid`, reports `pack.base = "blank"`, and rejects UserForms with
-  `pack_blank_userform_unsupported`.
+  `code_page`, reports `pack.base = "blank"`, and rejects UserForms with
+  `pack_blank_userform_unsupported`. Fresh projects always emit the canonical
+  MS-OVBA LCID `0x00000409`; the removed `pack.blank.lcid` key fails clearly.
+  The Windows release gate now checks CP932 Japanese content, unbroken VBA,
+  Excel, stdole, and Office references, concurrent execution of two generated
+  workbooks, and project-to-project references after resolving the shared
+  default `VBAProject` name.
 - Hardened `xlflow pack` VBA container handling: CFB v3 and v4
   templates now retain their original major version, large containers emit
   DIFAT sectors beyond the 109 header entries, and malformed allocation chains,

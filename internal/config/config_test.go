@@ -89,16 +89,23 @@ func TestDefaultBuildExcludesAreScaffoldOnly(t *testing.T) {
 	}
 }
 
-func TestBlankPackLocaleDefaultsAndRoundTrip(t *testing.T) {
+func TestBlankPackCodePageDefaultsAndRoundTrip(t *testing.T) {
 	cfg := Default()
-	if cfg.Pack.Blank.CodePage != 1252 || cfg.Pack.Blank.LCID != 1033 {
+	if cfg.Pack.Blank.CodePage != 1252 {
 		t.Fatalf("blank defaults = %+v", cfg.Pack.Blank)
 	}
 	cfg.Pack.Blank.CodePage = 932
-	cfg.Pack.Blank.LCID = 1041
 	dir := t.TempDir()
-	if err := Write(filepath.Join(dir, FileName), cfg); err != nil {
+	path := filepath.Join(dir, FileName)
+	if err := Write(path, cfg); err != nil {
 		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(written), "lcid") {
+		t.Fatalf("generated config retained removed blank LCID:\n%s", written)
 	}
 	loaded, err := Load(dir)
 	if err != nil {
@@ -106,6 +113,29 @@ func TestBlankPackLocaleDefaultsAndRoundTrip(t *testing.T) {
 	}
 	if loaded.Pack.Blank != cfg.Pack.Blank {
 		t.Fatalf("blank config = %+v, want %+v", loaded.Pack.Blank, cfg.Pack.Blank)
+	}
+}
+
+func TestLoadRejectsUnknownPackConfigurationKeys(t *testing.T) {
+	tests := map[string]struct {
+		body string
+		want string
+	}{
+		"removed LCID":      {body: "[pack.blank]\ncode_page = 932\nlcid = 1041\n", want: "unknown pack configuration key: pack.blank.lcid"},
+		"unknown blank key": {body: "[pack.blank]\nunknown = true\n", want: "unknown pack configuration key: pack.blank.unknown"},
+		"unknown pack key":  {body: "[pack]\nunknown = true\n", want: "unknown pack configuration key: pack.unknown"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, FileName), []byte(tt.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("unknown pack key error = %v", err)
+			}
+		})
 	}
 }
 

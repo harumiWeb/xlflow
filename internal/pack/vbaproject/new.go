@@ -16,14 +16,13 @@ const (
 type NewProjectSpec struct {
 	Name     string
 	CodePage uint16
-	LCID     uint32
 	Modules  []Module
 }
 
 // NewProject constructs a deterministic VBA project without template bytes.
 func NewProject(spec NewProjectSpec) (*Project, error) {
 	info, err := ovba.BuildProjectInformation(ovba.ProjectInformationSpec{
-		SysKind: 1, LCID: spec.LCID, CodePage: spec.CodePage, Name: spec.Name,
+		SysKind: 1, CodePage: spec.CodePage, Name: spec.Name,
 	})
 	if err != nil {
 		return nil, err
@@ -56,7 +55,7 @@ func NewProject(spec NewProjectSpec) (*Project, error) {
 		ProjectStreamRaw:        projectText,
 		GenerateProjectMetadata: true,
 		RawStreams:              map[string][]byte{},
-		Props:                   ProjectProps{Name: spec.Name, SysKind: 1, LCID: spec.LCID, CodePage: spec.CodePage},
+		Props:                   ProjectProps{Name: spec.Name, SysKind: 1, LCID: ovba.CanonicalProjectLCID, CodePage: spec.CodePage},
 		Protection:              Protection{CMG: "7577CB4035B139B139B139B139", DPB: "EAE854D3C8D4C8D4C8", GC: "5F5DE16E23969997999766"},
 	}, nil
 }

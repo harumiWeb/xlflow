@@ -9,10 +9,14 @@ import (
 // ProjectInformationSpec is the modeled PROJECTINFORMATION section of dir.
 type ProjectInformationSpec struct {
 	SysKind  uint32
-	LCID     uint32
 	CodePage uint16
 	Name     string
 }
+
+// CanonicalProjectLCID is required by MS-OVBA for PROJECTLCID and
+// PROJECTLCIDINVOKE. Source and project-name encoding is controlled separately
+// by PROJECTCODEPAGE.
+const CanonicalProjectLCID uint32 = 0x00000409
 
 // RegisteredReferenceSpec is one registered type-library reference.
 type RegisteredReferenceSpec struct {
@@ -28,9 +32,6 @@ func BuildProjectInformation(spec ProjectInformationSpec) ([]byte, error) {
 	if spec.SysKind == 0 {
 		return nil, fmt.Errorf("ovba: project SYSKIND must not be zero")
 	}
-	if spec.LCID == 0 {
-		return nil, fmt.Errorf("ovba: project LCID must not be zero")
-	}
 	name, err := EncodeMBCS(spec.Name, spec.CodePage)
 	if err != nil {
 		return nil, fmt.Errorf("ovba: project name: %w", err)
@@ -40,21 +41,21 @@ func BuildProjectInformation(spec ProjectInformationSpec) ([]byte, error) {
 	}
 
 	var out []byte
-	out = append(out, recU32(0x0001, 4, spec.SysKind)...)     // PROJECTSYSKIND
-	out = append(out, recU32(0x004A, 4, 0x00000005)...)       // PROJECTCOMPATVERSION
-	out = append(out, recU32(0x0002, 4, spec.LCID)...)        // PROJECTLCID
-	out = append(out, recU32(0x0014, 4, 0x00000409)...)       // PROJECTLCIDINVOKE
-	out = append(out, recU16(0x0003, 2, spec.CodePage)...)    // PROJECTCODEPAGE
-	out = append(out, sizedRecord(0x0004, name)...)           // PROJECTNAME
-	out = append(out, sizedRecord(0x0005, nil)...)            // PROJECTDOCSTRING
-	out = append(out, sizedRecord(0x0040, nil)...)            // PROJECTDOCSTRINGUNICODE
-	out = append(out, sizedRecord(0x0006, nil)...)            // PROJECTHELPFILEPATH
-	out = append(out, sizedRecord(0x003D, nil)...)            // PROJECTHELPFILEPATH unicode copy
-	out = append(out, recU32(0x0007, 4, 0)...)                // PROJECTHELPCONTEXT
-	out = append(out, recU32(0x0008, 4, 0)...)                // PROJECTLIBFLAGS
-	out = append(out, projectVersionRecord(0x6CDFF001, 7)...) // PROJECTVERSION
-	out = append(out, sizedRecord(0x000C, nil)...)            // PROJECTCONSTANTS
-	out = append(out, sizedRecord(0x003C, nil)...)            // PROJECTCONSTANTSUNICODE
+	out = append(out, recU32(0x0001, 4, spec.SysKind)...)         // PROJECTSYSKIND
+	out = append(out, recU32(0x004A, 4, 0x00000005)...)           // PROJECTCOMPATVERSION
+	out = append(out, recU32(0x0002, 4, CanonicalProjectLCID)...) // PROJECTLCID
+	out = append(out, recU32(0x0014, 4, CanonicalProjectLCID)...) // PROJECTLCIDINVOKE
+	out = append(out, recU16(0x0003, 2, spec.CodePage)...)        // PROJECTCODEPAGE
+	out = append(out, sizedRecord(0x0004, name)...)               // PROJECTNAME
+	out = append(out, sizedRecord(0x0005, nil)...)                // PROJECTDOCSTRING
+	out = append(out, sizedRecord(0x0040, nil)...)                // PROJECTDOCSTRINGUNICODE
+	out = append(out, sizedRecord(0x0006, nil)...)                // PROJECTHELPFILEPATH
+	out = append(out, sizedRecord(0x003D, nil)...)                // PROJECTHELPFILEPATH unicode copy
+	out = append(out, recU32(0x0007, 4, 0)...)                    // PROJECTHELPCONTEXT
+	out = append(out, recU32(0x0008, 4, 0)...)                    // PROJECTLIBFLAGS
+	out = append(out, projectVersionRecord(0x6CDFF001, 7)...)     // PROJECTVERSION
+	out = append(out, sizedRecord(0x000C, nil)...)                // PROJECTCONSTANTS
+	out = append(out, sizedRecord(0x003C, nil)...)                // PROJECTCONSTANTSUNICODE
 	return out, nil
 }
 

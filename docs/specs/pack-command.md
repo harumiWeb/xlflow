@@ -42,7 +42,9 @@ Blank mode has a fixed, fail-loud v1 topology: one workbook document module name
 
 The fresh project is named `VBAProject`, uses source-only module streams, and structurally authors the `PROJECT`, `PROJECTwm`, `dir`, `_VBA_PROJECT`, module, stdole, and Office reference records. The workbook and worksheet OOXML code names are `ThisWorkbook` and `Sheet1`, matching the VBA component identities. The output still uses atomic publication and must not alias the configured workbook.
 
-`[pack.blank].code_page` and `[pack.blank].lcid` control locale-sensitive project records. Defaults are code page `1252` and LCID `1033`; for Japanese projects use `932` and `1041`. Supported code pages are the same set as template mode. Values are project metadata, not source-file encodings: managed source remains UTF-8 without BOM.
+`[pack.blank].code_page` controls `PROJECTCODEPAGE` and therefore the MBCS encoding of project text and component names. It defaults to `1252`; Japanese projects use `932`. `PROJECTLCID` and `PROJECTLCIDINVOKE` are independently fixed to the MS-OVBA-required value `0x00000409`. The removed `pack.blank.lcid` key and every other unknown `[pack]` key are configuration errors rather than ignored compatibility settings. Managed source remains UTF-8 without BOM.
+
+Blank projects retain a deterministic Project CLSID and matching unprotected-project protection tuple. The Windows/Excel release gate opens two independently generated blank workbooks in one Excel instance, runs both projects, verifies all baseline references are unbroken, and confirms that one project can reference the other after assigning it a distinct VBA project name. Two projects named `VBAProject` cannot reference each other until one is renamed; that name-level ambiguity is independent of the shared deterministic CLSID.
 
 ### VBA container compatibility
 
