@@ -2268,7 +2268,7 @@ func (a *app) packCommand() *cobra.Command {
 			if strings.TrimSpace(outPath) == "" || !strings.EqualFold(filepath.Ext(outPath), ".xlsm") {
 				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", errors.New("--out is required and must end in .xlsm"))
 			}
-			if blank && strings.TrimSpace(templatePath) != "" {
+			if blank && cmd.Flags().Changed("template") {
 				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", errors.New("--blank and --template are mutually exclusive"))
 			}
 
@@ -2313,7 +2313,14 @@ func (a *app) packCommand() *cobra.Command {
 				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
 			}
 			publicationOut := outputIdentity.CanonicalPath
-			candidates := packCandidatePaths(a.cwd, resolvedTemplate, configuredWorkbook, resolvedOut)
+			// Blank mode never reads the configured workbook, so only workbooks
+			// actually read or replaced participate in lock/session checks; the
+			// alias guard above still rejects writing over it.
+			sessionCandidates := []string{resolvedTemplate, resolvedOut}
+			if !blank {
+				sessionCandidates = append(sessionCandidates, configuredWorkbook)
+			}
+			candidates := packCandidatePaths(a.cwd, sessionCandidates...)
 			for _, candidate := range candidates {
 				if lockPath, locked := officeLockFilePresent(candidate); locked {
 					return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("workbook appears to be open: %s", lockPath))
@@ -2327,6 +2334,14 @@ func (a *app) packCommand() *cobra.Command {
 
 			if err := a.runPackSourceEncodingPreflight(cmd.Context(), cfg); err != nil {
 				return err
+			}
+			if blank {
+				// Blank mode rejects every UserForm input. Detect form artifacts
+				// before full layout validation so a malformed artifact reports
+				// pack_blank_userform_unsupported rather than pack_ambiguous_layout.
+				if artifact := blankPackUserFormArtifact(a.cwd, cfg); artifact != "" {
+					return a.writePackEngineFailure(fmt.Errorf("%w: %s", packpkg.ErrBlankUserFormUnsupported, artifact))
+				}
 			}
 			sources, err := collectPackSourceModules(a.cwd, cfg)
 			if err != nil {
@@ -6516,6 +6531,47 @@ func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceM
 		})
 	}
 	return sources, nil
+}
+
+// blankPackUserFormArtifact reports the first UserForm artifact under the
+// configured forms root, or "" when there is none. Every artifact kind that
+// participates in UserForm inventory counts as form input: .frm/.frx files
+// anywhere under the root plus any file inside the reserved code/ or specs/
+// directories. Blank mode rejects forms before full layout validation so a
+// malformed artifact still surfaces the dedicated blank-mode error instead
+// of pack_ambiguous_layout. Walk failures are deferred to the inventory,
+// which reports missing or unreadable roots with its canonical error.
+func blankPackUserFormArtifact(root string, cfg config.Config) string {
+	formsRoot := workbookArgPath(root, cfg.Src.Forms)
+	if strings.TrimSpace(formsRoot) == "" {
+		return ""
+	}
+	found := ""
+	_ = filepath.WalkDir(formsRoot, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if found != "" {
+			return filepath.SkipAll
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		if ext == ".frm" || ext == ".frx" {
+			found = displayPath(root, path)
+			return filepath.SkipAll
+		}
+		if rel, err := filepath.Rel(formsRoot, path); err == nil {
+			first := strings.SplitN(filepath.ToSlash(rel), "/", 2)[0]
+			if strings.EqualFold(first, "code") || strings.EqualFold(first, "specs") {
+				found = displayPath(root, path)
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	return found
 }
 
 // packOutputAliasesWorkbook reports whether the --out destination resolves to

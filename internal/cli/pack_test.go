@@ -78,6 +78,64 @@ func TestPackCommandRejectsBlankWithTemplate(t *testing.T) {
 	}
 }
 
+func TestPackCommandRejectsBlankWithEmptyTemplateFlag(t *testing.T) {
+	dir := t.TempDir()
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--template", "", "--out", "dist/Fresh.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("err=%v exit=%d", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_args_invalid" {
+		t.Fatalf("error code = %q, want pack_args_invalid\n%s", got, stdout)
+	}
+}
+
+func TestPackCommandBlankIgnoresUnrelatedWorkbookLock(t *testing.T) {
+	dir := t.TempDir()
+	writePackProject(t, dir, false)
+	writePackSourceTree(t, dir, false)
+	// Blank mode never reads the configured workbook, so a stale Excel lock
+	// beside it must not block packing an unrelated destination.
+	if err := os.WriteFile(filepath.Join(dir, "build", "~$Book.xlsm"), []byte("lock"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--out", "dist/Fresh.xlsm")
+	if err != nil {
+		t.Fatalf("pack --blank: %v\n%s", err, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dist", "Fresh.xlsm")); err != nil {
+		t.Fatalf("expected blank output: %v", err)
+	}
+}
+
+func TestPackCommandBlankRejectsUserFormArtifacts(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "frm", path: filepath.Join("src", "forms", "Login.frm")},
+		{name: "orphan frx", path: filepath.Join("src", "forms", "Login.frx")},
+		{name: "orphan sidecar code", path: filepath.Join("src", "forms", "code", "Login.bas")},
+		{name: "orphan form spec", path: filepath.Join("src", "forms", "specs", "Login.yaml")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writePackConfig(t, dir)
+			writePackSourceTree(t, dir, false)
+			writePackSourceModule(t, dir, tc.path, []byte("artifact"))
+
+			stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--out", "dist/Fresh.xlsm")
+			if err == nil || output.ExitCode(err) != output.ExitValidation {
+				t.Fatalf("err=%v exit=%d, want validation failure", err, output.ExitCode(err))
+			}
+			if got := errorCodeFromJSON(t, stdout); got != "pack_blank_userform_unsupported" {
+				t.Fatalf("error code = %q, want pack_blank_userform_unsupported\n%s", got, stdout)
+			}
+		})
+	}
+}
+
 func TestPackCommandValidationFailures(t *testing.T) {
 	cases := []struct {
 		name string
