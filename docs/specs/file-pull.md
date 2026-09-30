@@ -55,6 +55,9 @@ publication.
 UserForms are not partially supported. Detection of any form rejects the whole
 operation with `pull_userform_unsupported` before source mutation. The forms
 root is otherwise unmanaged and is never deleted or rewritten.
+The configured forms root must not contain, or be contained by, the module,
+class, or workbook root; overlap fails before reconciliation so form artifacts
+cannot be mistaken for stale managed source.
 
 ## Publication contract
 

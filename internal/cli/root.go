@@ -2257,7 +2257,7 @@ func (a *app) pullFromFile(cfg config.Config) (output.Envelope, int, error) {
 		"backend": "file", "source": "saved_workbook", "code_page": result.CodePage,
 		"modules": map[string]any{"standard": result.Modules.Standard, "class": result.Modules.Class, "document": result.Modules.Document, "form": result.Modules.Form},
 	}
-	env.Target = map[string]any{"kind": "saved_workbook", "path": displayPath(a.cwd, workbookPath)}
+	env.Target = map[string]any{"kind": "file", "path": displayPath(a.cwd, workbookPath)}
 	env.Session = map[string]any{"active": false, "mode": "none", "source_of_truth": "saved_workbook"}
 	env.Logs = append(env.Logs, fmt.Sprintf("extracted %d VBA component(s) from saved workbook", len(result.Written)))
 	a.attachFilePullSessionWarning(&env, workbookPath)
@@ -2313,6 +2313,8 @@ func filePullExitCode(err error) int {
 func filePullErrorCode(err error) string {
 	var pathErr *os.PathError
 	switch {
+	case errors.Is(err, filepull.ErrPublish):
+		return "pull_source_publish_failed"
 	case errors.Is(err, os.ErrNotExist):
 		return "pull_file_not_found"
 	case errors.Is(err, os.ErrPermission):
@@ -2329,8 +2331,6 @@ func filePullErrorCode(err error) string {
 		return "pull_source_path_unsafe"
 	case errors.Is(err, filepull.ErrLineNumberSafety):
 		return "vba_line_number_safety_failed"
-	case errors.Is(err, filepull.ErrPublish):
-		return "pull_source_publish_failed"
 	default:
 		return "pull_vba_project_malformed"
 	}

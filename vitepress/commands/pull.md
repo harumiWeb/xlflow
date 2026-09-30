@@ -90,7 +90,7 @@ Use `xlflow pull` when the task matches the command description above. For a goa
 
 ## Prerequisites
 
-Check the project configuration and run `xlflow doctor --json` before workbook-backed operations. Source-only commands can run without Excel; commands that read or mutate a workbook require Windows Excel and VBIDE access.
+For the default `--backend excel`, check the project configuration and run `xlflow doctor --json`; this path requires Windows Excel and VBIDE access. `--backend file` instead requires a readable configured saved `.xlsm` and does not require Excel or VBIDE.
 
 ## What this command reads and changes
 

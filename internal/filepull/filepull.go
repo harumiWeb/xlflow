@@ -93,6 +93,9 @@ func buildPlan(root string, cfg config.Config, workbookPath string) (plan, error
 	}
 
 	roots := resolvedRoots(root, cfg)
+	if err := validateFormsRootSeparation(root, roots); err != nil {
+		return plan{}, err
+	}
 	result := Result{
 		WorkbookPath: workbookPath,
 		ModulesDir:   roots.modules,
@@ -104,7 +107,7 @@ func buildPlan(root string, cfg config.Config, workbookPath string) (plan, error
 	p := plan{result: result}
 	seenNames := map[string]string{}
 	seenPaths := map[string]string{}
-	desired := map[string]bool{}
+	desired := map[string]string{}
 	for _, module := range project.Modules {
 		if !sourceinventory.ValidComponentName(module.Name) {
 			return plan{}, fmt.Errorf("%w: invalid component name %q", ErrMalformedVBAProject, module.Name)
@@ -151,7 +154,7 @@ func buildPlan(root string, cfg config.Config, workbookPath string) (plan, error
 			return plan{}, fmt.Errorf("%w: %s and %s resolve to the same source path", ErrUnsafeSourcePath, prior, module.Name)
 		}
 		seenPaths[pathKey] = module.Name
-		desired[pathKey] = true
+		desired[pathKey] = target
 		p.files = append(p.files, plannedFile{path: target, body: []byte(disk)})
 		switch module.Type {
 		case vbaproject.ModuleStd:
@@ -176,7 +179,16 @@ func buildPlan(root string, cfg config.Config, workbookPath string) (plan, error
 			return plan{}, err
 		}
 		for _, path := range existing {
-			if !desired[strings.ToLower(filepath.Clean(path))] {
+			desiredPath, ok := desired[strings.ToLower(filepath.Clean(path))]
+			if !ok {
+				p.stale = append(p.stale, path)
+				continue
+			}
+			matches, err := matchesManagedTarget(managedRoot.path, path, desiredPath)
+			if err != nil {
+				return plan{}, err
+			}
+			if !matches {
 				p.stale = append(p.stale, path)
 			}
 		}
@@ -245,6 +257,83 @@ func resolvedRoots(root string, cfg config.Config) sourceRoots {
 		modules: resolve(cfg.Src.Modules), classes: resolve(cfg.Src.Classes),
 		forms: resolve(cfg.Src.Forms), workbook: resolve(cfg.Src.Workbook),
 	}
+}
+
+func validateFormsRootSeparation(projectRoot string, roots sourceRoots) error {
+	forms, err := coordination.NewWorkbookIdentity(projectRoot, roots.forms)
+	if err != nil {
+		return fmt.Errorf("%w: resolve forms root %s: %v", ErrUnsafeSourcePath, roots.forms, err)
+	}
+	for _, managed := range []string{roots.modules, roots.classes, roots.workbook} {
+		identity, err := coordination.NewWorkbookIdentity(projectRoot, managed)
+		if err != nil {
+			return fmt.Errorf("%w: resolve managed root %s: %v", ErrUnsafeSourcePath, managed, err)
+		}
+		if pathsOverlap(forms.CanonicalPath, identity.CanonicalPath) {
+			return fmt.Errorf("%w: forms root %s overlaps managed root %s", ErrUnsafeSourcePath, roots.forms, managed)
+		}
+	}
+	return nil
+}
+
+func pathsOverlap(left, right string) bool {
+	return pathWithin(left, right) || pathWithin(right, left)
+}
+
+func pathWithin(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+func matchesManagedTarget(root, existing, desired string) (bool, error) {
+	if filepath.Clean(existing) == filepath.Clean(desired) {
+		return true, nil
+	}
+	exact, err := hasExactRelativeSpelling(root, desired)
+	if err != nil || exact {
+		return false, err
+	}
+	existingInfo, err := os.Stat(existing)
+	if err != nil {
+		return false, err
+	}
+	desiredInfo, err := os.Stat(desired)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(existingInfo, desiredInfo), nil
+}
+
+func hasExactRelativeSpelling(root, target string) (bool, error) {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return false, fmt.Errorf("%w: target %s is outside managed root %s", ErrUnsafeSourcePath, target, root)
+	}
+	current := root
+	for _, segment := range strings.Split(rel, string(filepath.Separator)) {
+		entries, err := os.ReadDir(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		found := false
+		for _, entry := range entries {
+			if entry.Name() == segment {
+				found = true
+				current = filepath.Join(current, entry.Name())
+				break
+			}
+		}
+		if !found {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func moduleDestination(roots sourceRoots, typ vbaproject.ModuleType) (string, string, error) {

@@ -2,11 +2,13 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/harumiWeb/xlflow/internal/filepull"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
 
@@ -26,6 +28,9 @@ func TestPullFileBackendPublishesSavedWorkbookSource(t *testing.T) {
 	pull := cliObjectMap(env.Pull)
 	if pull["backend"] != "file" || pull["source"] != "saved_workbook" {
 		t.Fatalf("pull authority = %#v", pull)
+	}
+	if target := cliObjectMap(env.Target); target["kind"] != "file" {
+		t.Fatalf("target = %#v, want kind=file", target)
 	}
 	for _, path := range []string{
 		filepath.Join(dir, "src", "modules", "Module1.bas"),
@@ -88,6 +93,13 @@ func TestPullFileBackendRejectsSessionFlag(t *testing.T) {
 	stdout, err := runBuildCommandForTest(dir, "--json", "pull", "--backend", "file", "--session")
 	if err == nil || output.ExitCode(err) != output.ExitConfig || jsonErrorCode(t, stdout) != "pull_args_invalid" {
 		t.Fatalf("stdout=%s err=%v", stdout, err)
+	}
+}
+
+func TestFilePullPublicationFailureKeepsPublicationErrorCode(t *testing.T) {
+	err := errors.Join(filepull.ErrPublish, &os.PathError{Op: "write", Path: "src/modules/Main.bas", Err: os.ErrPermission})
+	if got := filePullErrorCode(err); got != "pull_source_publish_failed" {
+		t.Fatalf("filePullErrorCode() = %q", got)
 	}
 }
 

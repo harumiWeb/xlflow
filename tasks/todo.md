@@ -1,3 +1,20 @@
+# PR #874 review follow-up (Issue #871)
+
+Verified against commit `f5bef996`; the five inline findings and one
+documentation finding are valid and in scope. The generic docstring coverage
+warning does not identify a repository contract violation and needs no change.
+
+1. [x] Preserve case-only module rename semantics on case-sensitive filesystems
+       without deleting an aliased target on case-insensitive filesystems.
+2. [x] Classify wrapped publication failures as `pull_source_publish_failed`
+       before generic workbook-path errors.
+3. [x] Reject overlap in either direction between the forms root and each
+       managed source root before reconciliation.
+4. [x] Keep `target.kind` within the stable `file` vocabulary and make pull
+       prerequisites backend-specific.
+5. [x] Add focused regressions, run affected tests and lint/docs checks, commit,
+       push, and reply to each review thread with evidence.
+
 # PR #864 review follow-up (Issue #855)
 
 Verified against commit `b8d8a2e5`; both Devin comments are valid and in

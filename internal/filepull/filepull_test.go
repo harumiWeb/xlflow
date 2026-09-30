@@ -125,6 +125,60 @@ func TestPullUsesFolderAnnotation(t *testing.T) {
 	}
 }
 
+func TestPullReconcilesCaseOnlyModuleRename(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "src", "modules", "module1.bas"), "stale")
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	if _, err := Pull(root, testConfig(), workbook); err != nil {
+		t.Fatal(err)
+	}
+	var matches []string
+	err := filepath.WalkDir(filepath.Join(root, "src", "modules"), func(path string, entry os.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() && strings.EqualFold(entry.Name(), "Module1.bas") {
+			matches = append(matches, path)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("case-only reconciliation left %d module files: %v", len(matches), matches)
+	}
+	body, err := os.ReadFile(matches[0])
+	if err != nil || !strings.Contains(string(body), `Attribute VB_Name = "Module1"`) {
+		t.Fatalf("case-only target was not replaced: %q, %v", body, err)
+	}
+}
+
+func TestPullRejectsFormsRootOverlapBeforeMutation(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*config.Config)
+		formPath  string
+	}{
+		{"forms-inside-managed", func(cfg *config.Config) { cfg.Src.Forms = "src/modules/forms" }, filepath.Join("src", "modules", "forms", "keep.bas")},
+		{"managed-inside-forms", func(cfg *config.Config) { cfg.Src.Forms = "src" }, filepath.Join("src", "forms", "keep.bas")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			cfg := testConfig()
+			test.configure(&cfg)
+			form := filepath.Join(root, test.formPath)
+			writeTestFile(t, form, "keep")
+			workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+			if _, err := Pull(root, cfg, workbook); !errors.Is(err, ErrUnsafeSourcePath) {
+				t.Fatalf("error = %v, want unsafe source path", err)
+			}
+			body, err := os.ReadFile(form)
+			if err != nil || string(body) != "keep" {
+				t.Fatalf("forms root mutated after rejection: %q, %v", body, err)
+			}
+		})
+	}
+}
+
 func TestPublishRollsBackEarlierFiles(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "First.bas")
