@@ -34,6 +34,9 @@ function Invoke-XlflowJson {
         $ErrorActionPreference = $previousErrorActionPreference
         Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     }
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        throw "xlflow $($Arguments -join ' ') produced no JSON (exit $exitCode): $stderr"
+    }
     $json = $raw | ConvertFrom-Json
     if (-not $AllowFailure -and ($exitCode -ne 0 -or $json.status -ne 'ok')) {
         throw "xlflow $($Arguments -join ' ') failed: $raw$stderr"
