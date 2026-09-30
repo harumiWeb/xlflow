@@ -2,11 +2,14 @@ package pack
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
+
+	"golang.org/x/text/encoding/unicode"
 )
 
 const (
@@ -79,9 +82,26 @@ func zipXMLHasAttributeValue(entry *zip.File, attributeName string, matchesEleme
 	if err != nil {
 		return false, fmt.Errorf("%s: %w", entry.Name, err)
 	}
-	defer func() { _ = reader.Close() }()
+	data, readErr := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if readErr != nil {
+		return false, fmt.Errorf("%s: %w", entry.Name, readErr)
+	}
+	if closeErr != nil {
+		return false, fmt.Errorf("%s: %w", entry.Name, closeErr)
+	}
 
-	decoder := xml.NewDecoder(reader)
+	decoder := xml.NewDecoder(bytes.NewReader(xmlMetadataBytes(data)))
+	// OPC allows package metadata to be stored as UTF-16. The stream is already
+	// normalized to UTF-8, so an `encoding="utf-16"` declaration describes the
+	// original storage and the normalized input is used unchanged. Other declared
+	// encodings stay fail-closed instead of being guessed.
+	decoder.CharsetReader = func(encoding string, input io.Reader) (io.Reader, error) {
+		if strings.EqualFold(encoding, "utf-16") {
+			return input, nil
+		}
+		return nil, fmt.Errorf("%s: unsupported xml encoding %q", entry.Name, encoding)
+	}
 	for {
 		token, err := decoder.Token()
 		if errors.Is(err, io.EOF) {
@@ -100,4 +120,35 @@ func zipXMLHasAttributeValue(entry *zip.File, attributeName string, matchesEleme
 			}
 		}
 	}
+}
+
+// xmlMetadataBytes normalizes OPC XML metadata to UTF-8 for encoding/xml, which
+// only accepts UTF-8 input. Detection is bounded to a BOM or the leading `\x00`
+// next to `<` — every XML document starts with an element or the `<?xml`
+// prolog. All other bytes are parsed as UTF-8, so malformed input still fails
+// loudly in the XML decoder.
+func xmlMetadataBytes(data []byte) []byte {
+	switch {
+	case bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}):
+		return data[3:]
+	case bytes.HasPrefix(data, []byte{0xFE, 0xFF}):
+		return decodeUTF16XML(data, unicode.BigEndian, unicode.ExpectBOM)
+	case bytes.HasPrefix(data, []byte{0xFF, 0xFE}):
+		return decodeUTF16XML(data, unicode.LittleEndian, unicode.ExpectBOM)
+	case len(data) >= 2 && data[0] == '<' && data[1] == 0:
+		return decodeUTF16XML(data, unicode.LittleEndian, unicode.IgnoreBOM)
+	case len(data) >= 2 && data[0] == 0 && data[1] == '<':
+		return decodeUTF16XML(data, unicode.BigEndian, unicode.IgnoreBOM)
+	default:
+		return data
+	}
+}
+
+func decodeUTF16XML(data []byte, endianness unicode.Endianness, bomPolicy unicode.BOMPolicy) []byte {
+	decoded, err := unicode.UTF16(endianness, bomPolicy).NewDecoder().Bytes(data)
+	if err != nil {
+		// Malformed UTF-16 still fails loudly when the XML decoder sees the raw bytes.
+		return data
+	}
+	return decoded
 }

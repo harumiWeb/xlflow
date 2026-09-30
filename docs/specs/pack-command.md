@@ -65,10 +65,12 @@ OOXML package relationship part `xl/_rels/vbaProject.bin.rels` and
 `[Content_Types].xml`. The legacy VBA signature, Agile signature, and V3
 signature relationship/content types are all rejected with
 `pack_signed_project`. Detection is based on parsed relationship and content
-type metadata, not signature-like ZIP filenames. Signature streams inside the
-CFB container remain a defense-in-depth check. Either form aborts before
-generation and atomic publication, so a new destination is not created and an
-existing destination remains byte-for-byte unchanged.
+type metadata, not signature-like ZIP filenames. Metadata parts stored as
+UTF-8 or UTF-16 (little- or big-endian, with or without a BOM) are both
+inspected. Signature streams inside the CFB container remain a defense-in-depth
+check. Either form aborts before generation and atomic publication, so a new
+destination is not created and an existing destination remains byte-for-byte
+unchanged.
 
 ## Atomic publication
 
