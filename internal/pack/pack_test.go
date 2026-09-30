@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -583,5 +584,87 @@ func TestGenerateVBAProjectRejectsNewFormWithFormError(t *testing.T) {
 	}
 	if errors.Is(err, ErrAmbiguousLayout) {
 		t.Fatal("new form must not surface as ErrAmbiguousLayout")
+	}
+}
+
+func TestBuildBlankWorkbookCreatesFreshProject(t *testing.T) {
+	sources := []SourceModule{
+		{Name: "Module1", Type: ModuleTypeStandard, Source: standardSource("Module1") + "Public Sub Run()\r\n    Sheet1.Range(\"A1\").Value = \"ok\"\r\nEnd Sub\r\n"},
+		{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"},
+		{Name: "Sheet1", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"},
+	}
+	out, meta, err := BuildBlankWorkbook(sources, BlankOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Standard != 1 || meta.Document != 2 || meta.CarriedStreams != 0 {
+		t.Fatalf("meta = %+v", meta)
+	}
+	contentTypes := string(mustEntry(t, out, "[Content_Types].xml"))
+	if !strings.Contains(contentTypes, "application/vnd.ms-excel.sheet.macroEnabled.main+xml") {
+		t.Fatalf("blank workbook is not declared macro-enabled: %s", contentTypes)
+	}
+	project, err := vbaproject.Read(mustEntry(t, out, "xl/vbaProject.bin"))
+	if err != nil {
+		t.Fatalf("read fresh project: %v", err)
+	}
+	if project.Props.CodePage != DefaultBlankCodePage || project.Props.LCID != DefaultBlankLCID {
+		t.Fatalf("locale = cp%d/lcid%d", project.Props.CodePage, project.Props.LCID)
+	}
+	wantTypes := map[string]vbaproject.ModuleType{
+		"ThisWorkbook": vbaproject.ModuleDocument,
+		"Sheet1":       vbaproject.ModuleDocument,
+		"Module1":      vbaproject.ModuleStd,
+	}
+	for _, module := range project.Modules {
+		if want, ok := wantTypes[module.Name]; !ok || module.Type != want {
+			t.Fatalf("unexpected module %s type %d", module.Name, module.Type)
+		}
+		delete(wantTypes, module.Name)
+	}
+	if len(wantTypes) != 0 {
+		t.Fatalf("missing modules: %+v", wantTypes)
+	}
+	gotReferences := []string{project.References[0].Name, project.References[1].Name}
+	if !slices.Equal(gotReferences, []string{"stdole", "Office"}) {
+		t.Fatalf("references = %v", gotReferences)
+	}
+}
+
+func TestBuildBlankWorkbookJapaneseCodePage(t *testing.T) {
+	sources := []SourceModule{
+		{Name: "日本語", Type: ModuleTypeStandard, Source: standardSource("日本語") + "' 日本語\r\n"},
+		{Name: "ThisWorkbook", Type: ModuleTypeDocument},
+		{Name: "Sheet1", Type: ModuleTypeDocument},
+	}
+	out, _, err := BuildBlankWorkbook(sources, BlankOptions{CodePage: 932, LCID: 1041})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := vbaproject.Read(mustEntry(t, out, "xl/vbaProject.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.Props.CodePage != 932 || project.Props.LCID != 1041 {
+		t.Fatalf("Japanese project props = %+v", project.Props)
+	}
+	var found bool
+	for _, module := range project.Modules {
+		found = found || module.Name == "日本語" && strings.Contains(module.Source, "日本語")
+	}
+	if !found {
+		t.Fatal("Japanese module did not round-trip")
+	}
+}
+
+func TestBuildBlankWorkbookRejectsUnsupportedTopology(t *testing.T) {
+	documents := []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeDocument}, {Name: "Sheet1", Type: ModuleTypeDocument}}
+	_, _, err := BuildBlankWorkbook(append(documents, SourceModule{Name: "UserForm1", Type: ModuleTypeForm}), BlankOptions{})
+	if !errors.Is(err, ErrBlankUserFormUnsupported) {
+		t.Fatalf("form error = %v", err)
+	}
+	_, _, err = BuildBlankWorkbook(documents[:1], BlankOptions{})
+	if !errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("missing document error = %v", err)
 	}
 }

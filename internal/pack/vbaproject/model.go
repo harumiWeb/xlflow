@@ -63,6 +63,9 @@ type Project struct {
 	ReferencesRaw    []byte      // verbatim byte span of the dir references section (written back unchanged)
 	ProjectInfoRaw   []byte      // verbatim span of dir PROJECTINFORMATION (written back unchanged)
 	ProjectStreamRaw []byte      // template PROJECT stream; unrelated content is preserved while component declarations are rebuilt
+	// GenerateProjectMetadata marks a fresh project whose PROJECT and PROJECTwm
+	// streams must be rebuilt from the final component set at write time.
+	GenerateProjectMetadata bool
 	// RawStreams holds every stream the writer does not own, keyed by full
 	// "/"-separated path, captured verbatim at read time and re-emitted on write.
 	// Membership is structural: the first path segment is neither "VBA" (owned and

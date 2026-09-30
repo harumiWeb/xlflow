@@ -1,10 +1,15 @@
 # xlflow pack
 
-Build a release `.xlsm` artifact from source and a workbook template.
+Build a release `.xlsm` artifact from source, with either a workbook template or the fixed blank-workbook profile.
 
 ```bash
 xlflow pack --out build/Release.xlsm --experimental
+
+# No template: ThisWorkbook + one Sheet1
+xlflow pack --blank --out build/Release.xlsm --experimental
 ```
+
+`--blank` is mutually exclusive with `--template`. It requires `ThisWorkbook.bas` and `Sheet1.bas`, rejects UserForms and additional document modules, and uses `[pack.blank]` locale metadata (defaults: `code_page = 1252`, `lcid = 1033`).
 
 `pack` is intended for controlled release automation. It validates every managed `.bas`, `.cls`, and `.frm` file as UTF-8 without BOM before source planning or binary generation. Invalid input returns `source_encoding_invalid`; run `xlflow encoding check`, then use `xlflow encoding convert --from cp932` only for eligible CP932 source. Open the resulting artifact in real Excel to compile/run a sentinel macro before publishing. See the repository's [pack specification](https://github.com/harumiWeb/xlflow/blob/main/docs/specs/pack-command.md) for release-gate details.
 

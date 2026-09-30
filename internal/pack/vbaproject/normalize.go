@@ -80,6 +80,38 @@ func hasAttrLine(s, name string) bool {
 // matches the in-bin `Attribute VB_Base = "0{...}"` string byte-for-byte (reproducing exactly what VBE emits).
 const classVBBaseGUID = `0{FCFB3D2A-A0FA-1068-A738-08002B3371B5}`
 
+const (
+	workbookVBBaseGUID  = `0{00020819-0000-0000-C000-000000000046}`
+	worksheetVBBaseGUID = `0{00020820-0000-0000-C000-000000000046}`
+)
+
+// NewDocumentModule returns a canonical, source-only Excel document module.
+// worksheet selects the Excel Worksheet host class; false selects Workbook.
+// The disk source must contain code only, matching the source-tree contract.
+func NewDocumentModule(name, disk string, worksheet bool) (Module, error) {
+	base := workbookVBBaseGUID
+	if worksheet {
+		base = worksheetVBBaseGUID
+	}
+	header := strings.Join([]string{
+		`Attribute VB_Name = "` + name + `"`,
+		`Attribute VB_Base = "` + base + `"`,
+		"Attribute VB_GlobalNameSpace = False",
+		"Attribute VB_Creatable = False",
+		"Attribute VB_PredeclaredId = True",
+		"Attribute VB_Exposed = True",
+		"Attribute VB_TemplateDerived = False",
+		"Attribute VB_Customizable = True",
+	}, "\r\n") + "\r\n"
+	existing := Module{Name: name, StreamName: name, Type: ModuleDocument, Source: header}
+	source, err := NormalizeModuleSource(ModuleDocument, disk, &existing)
+	if err != nil {
+		return Module{}, err
+	}
+	existing.Source = source
+	return existing, nil
+}
+
 // normalizeClass removes the leading VERSION..END block of the disk .cls and injects the
 // VB_Base / VB_TemplateDerived / VB_Customizable that the in-bin form carries, at their proper positions.
 func normalizeClass(disk string) (string, error) {

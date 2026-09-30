@@ -56,7 +56,13 @@ func Write(p *Project) ([]byte, error) {
 		})
 		projectSpecs = append(projectSpecs, ovba.ProjectComponentSpec{Kind: kind, Name: m.Name})
 	}
-	projectStream, err := ovba.RebuildProjectText(p.ProjectStreamRaw, projectSpecs, p.Props.CodePage)
+	var projectStream []byte
+	var err error
+	if p.GenerateProjectMetadata {
+		projectStream, err = ovba.BuildProjectText(p.Props.Name, projectSpecs, p.Props.CodePage)
+	} else {
+		projectStream, err = ovba.RebuildProjectText(p.ProjectStreamRaw, projectSpecs, p.Props.CodePage)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vbaproject: rebuild PROJECT stream: %w", err)
 	}
@@ -84,7 +90,17 @@ func Write(p *Project) ([]byte, error) {
 	// PROJECT. RawStreams excludes the VBA/ and PROJECT namespaces, so there is no
 	// collision with the AddStream calls below.
 	for path, data := range p.RawStreams {
+		if p.GenerateProjectMetadata && path == "PROJECTwm" {
+			continue
+		}
 		w.AddStream(strings.Split(path, "/"), data)
+	}
+	if p.GenerateProjectMetadata {
+		projectWM, err := ovba.BuildProjectWM(projectSpecs, p.Props.CodePage)
+		if err != nil {
+			return nil, fmt.Errorf("vbaproject: build PROJECTwm: %w", err)
+		}
+		w.AddStream([]string{"PROJECTwm"}, projectWM)
 	}
 	w.AddStream([]string{"PROJECT"}, projectStream)
 	w.AddStream([]string{"VBA", "_VBA_PROJECT"}, ovba.VBAProjectStub())

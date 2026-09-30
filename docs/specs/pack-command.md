@@ -6,18 +6,19 @@ Experimental. This spec defines the contract for the pure-Go `pack` path, now im
 
 ## Scope
 
-`pack` builds a macro-enabled workbook artifact (`.xlsm`) from the xlflow source tree plus a workbook template, entirely in Go at the file level. It regenerates `xl/vbaProject.bin` from `.bas`/`.cls` sources and replaces that single entry inside the workbook zip. It never opens Excel and never uses COM or VBIDE, and it performs no VBE compile or runtime validation. `.xlsb` templates or configured workbooks are rejected with `workbook_format_unsupported` because this path expects an OOXML ZIP package.
+`pack` builds a macro-enabled workbook artifact (`.xlsm`) from the xlflow source tree, entirely in Go at the file level. Template mode regenerates `xl/vbaProject.bin` and replaces that entry inside a workbook zip. Blank mode creates a fresh one-sheet OOXML workbook and VBA project without a workbook template. It never opens Excel and never uses COM or VBIDE, and it performs no VBE compile or runtime validation. `.xlsb` templates are rejected with `workbook_format_unsupported` because template mode expects an OOXML ZIP package.
 
 `pack` does not change `push`. `push` remains the Excel/VBIDE-backed live-session path on Windows.
 
 ## Command
 
 ```text
-xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm>] --experimental
+xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm> | --blank] --experimental
 ```
 
 - `--out <path>` (required): destination artifact path. Must end in `.xlsm`. May overwrite an existing output file, but must not resolve to the template or the configured source workbook (see Template handling). A missing `--out` fails with `pack_args_invalid` (exit 2).
 - `--template <path>` (optional): the workbook template the artifact is based on. When omitted, `pack` uses the source workbook configured in `xlflow.toml` under `[excel].path`. The template provides workbook structure — sheets, document-module hosts, and any existing designer streams; `pack` replaces only `xl/vbaProject.bin`.
+- `--blank` (optional): create a fresh workbook without reading a template. It is mutually exclusive with an explicit `--template`; passing `--blank` together with `--template` — including an explicitly empty `--template ''` — fails with `pack_args_invalid` (exit 2). When neither flag is provided, template mode keeps the `[excel].path` fallback.
 - `--experimental` (required while experimental): without it, `pack` fails with `pack_experimental_required` (exit 2).
 - `--json`: persistent global flag; emits the standard envelope (see Output / JSON contract).
 
@@ -27,8 +28,16 @@ xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm>] --experimental
 
 - The template is read-only. `pack` never writes back into it. `--out` must resolve to a different path than both the template and the configured source workbook; otherwise `pack` fails with `pack_in_place_overwrite` (exit 2).
 - The identity comparison is canonical, not lexical. `pack` resolves the nearest existing ancestor of the template, the configured workbook, and the destination through symlinks and junctions (and normalizes Windows drive-letter case, short names, and UNC/extended prefixes) before comparing. A destination that names the same file through an aliased directory or a different lexical form is rejected with `pack_in_place_overwrite` even when it does not exist yet.
-- `pack` operates only on closed workbook files. If a live xlflow session or an open workbook for the target is detected, `pack` fails with `pack_active_session` (exit 2) rather than reading possibly-dirty live state.
+- `pack` operates only on closed workbook files. If a live xlflow session or an open workbook for the target is detected, `pack` fails with `pack_active_session` (exit 2) rather than reading possibly-dirty live state. The check covers the workbooks `pack` actually reads or replaces — the resolved template and the `--out` destination. When `--template` is omitted, the configured `[excel].path` workbook is the resolved template and is therefore covered. A session or lock file on any other workbook — including the configured workbook during a `--blank` or explicit `--template` pack — does not block packing; the in-place alias guard still applies to `--out`.
 - Document-module hosts (`ThisWorkbook`, sheet modules) come from the template. `pack` maps document-module source onto them only when the mapping is unambiguous.
+
+## Blank workbook profile
+
+Blank mode has a fixed, fail-loud v1 topology: one workbook document module named `ThisWorkbook` and one worksheet/document module named `Sheet1`. Both `src/workbook/ThisWorkbook.bas` and `src/workbook/Sheet1.bas` must be present. Any additional or differently named document module fails with `pack_ambiguous_layout`. Any UserForm input fails with `pack_blank_userform_unsupported`; blank mode does not author `.frm`/`.frx` designer state. UserForm input is detected before full source-layout validation — `.frm`/`.frx` files anywhere under `[src].forms` and any file under its reserved `code/` or `specs/` directories all count — so malformed form artifacts (for example an orphan `.frx` or an unmatched sidecar) still report `pack_blank_userform_unsupported` rather than `pack_ambiguous_layout`.
+
+The fresh project is named `VBAProject`, uses source-only module streams, and structurally authors the `PROJECT`, `PROJECTwm`, `dir`, `_VBA_PROJECT`, module, stdole, and Office reference records. The workbook and worksheet OOXML code names are `ThisWorkbook` and `Sheet1`, matching the VBA component identities. The output still uses atomic publication and must not alias the configured workbook.
+
+`[pack.blank].code_page` and `[pack.blank].lcid` control locale-sensitive project records. Defaults are code page `1252` and LCID `1033`; for Japanese projects use `932` and `1041`. Supported code pages are the same set as template mode. Values are project metadata, not source-file encodings: managed source remains UTF-8 without BOM.
 
 ### VBA container compatibility
 
@@ -65,11 +74,11 @@ If generation, validation, or publication fails, an existing destination is left
 - **UserForm code-behind**: a form already present in the template has its code-behind updated from source, honoring `[userform].code_source`. In `frm` mode the code is read from `src/forms/*.frm`; in `sidecar` mode (the default) the authoritative code-behind is `src/forms/code/<FormName>.bas`, merged into the form in memory (the on-disk `.frm`/`.bas` are never modified — `pack` does not write sources). `src/forms/code` is a flat reserved directory; sidecar subdirectories are unsupported. In both modes only the code-behind is applied; the form's designer storage is carried through byte-for-byte. A matching `.frx` is inventoried and validated as a related source artifact but is not written into the packed project; `pack` never authors or modifies form layout. A `.frm` whose form is not in the template fails with `pack_userform_generation_unsupported`; a sidecar carrying `Attribute VB_*` header lines, using a subdirectory, or with no matching `.frm`, fails with `pack_ambiguous_layout`.
 - **Existing UserForm designer streams in the template**: carried through byte-for-byte, untouched. `pack` does not generate or modify form layout.
 
-Document-module and UserForm topology remains template-authoritative. Omitting their source does not remove them; source may update code only when the component already exists in the template. A source-only document module is rejected as `pack_ambiguous_layout`, and a source-only UserForm is rejected as `pack_userform_generation_unsupported`.
+In template mode, document-module and UserForm topology remains template-authoritative. Omitting their source does not remove them; source may update code only when the component already exists in the template. A source-only document module is rejected as `pack_ambiguous_layout`, and a source-only UserForm is rejected as `pack_userform_generation_unsupported`. Blank mode instead follows the fixed document topology above and rejects every UserForm.
 
 ## Code pages and component names
 
-The template's `dir` stream declares a `PROJECTCODEPAGE`; every MBCS text field in the project — module names, stream names, module doc strings, reference names, and the textual `PROJECT` stream — is decoded and re-encoded with that code page. Supported values are the practically relevant Windows ANSI code pages `874`, `932`, `936`, `949`, `950`, `1250`–`1258`, and `65001` (UTF-8). Any other code page fails deterministically with `pack_ambiguous_layout`.
+In template mode, the template's `dir` stream declares a `PROJECTCODEPAGE`; in blank mode, `[pack.blank].code_page` supplies it. Every MBCS text field in the project — module names, stream names, module doc strings, reference names, and the textual `PROJECT` stream — is decoded and re-encoded with that code page. Supported values are the practically relevant Windows ANSI code pages `874`, `932`, `936`, `949`, `950`, `1250`–`1258`, and `65001` (UTF-8). Any other code page fails deterministically with `pack_ambiguous_layout`.
 
 Component names may contain any character representable in the project code page (for example, Japanese module names in a CP932 project). `pack` writes the paired MS-OVBA records (`MODULENAME`/`MODULENAMEUNICODE`, `MODULESTREAMNAME` and its embedded Unicode form, `MODULEDOCSTRING` and its embedded Unicode form) so the MBCS and UTF-16 forms always carry identical text. A name that the project code page cannot represent, a name containing NUL or line breaks, or a stream name longer than 31 UTF-16 code units fails loudly before any artifact is produced.
 
@@ -83,7 +92,7 @@ When regenerating `dir/PROJECTMODULES`, `pack` preserves the module-level metada
 
 Before building the source plan, `pack` validates the complete managed VBA source scope as UTF-8 without BOM. The scan covers configured module, class, form, and workbook roots plus the legacy top-level `tests/` root. Configured roots use the same separator normalization and absolute-path resolution as the pack source inventory, including absolute roots outside the project; external diagnostic paths remain absolute. This pack-only compatibility does not relax the project-containment rules for explicit `encoding check` or `encoding convert` paths. The scan includes `.frm` designer files even in sidecar mode and includes sidecar `.bas` files; binary `.frx` files are excluded. Invalid input returns `source_encoding_invalid` (exit 1) with the same source path, byte position, status, and remediation suggestions as `encoding check`. No source planning, template payload read, `vbaProject.bin` generation, or output publication occurs after this failure. `pack` never converts source implicitly; use `encoding convert --from cp932` explicitly for eligible CP932 input.
 
-After encoding validation, `pack` builds a deterministic, read-only plan. Source discovery is shared with `build`, but `[build].exclude` is deliberately not applied to `pack`. Every configured source root must exist and be readable. Unknown extensions, invalid component names, case-insensitive duplicate names across component types, incomplete or ambiguous UserForm artifacts, filename/`Attribute VB_Name` identity mismatches, source-only document modules, and source-only UserForms fail before project mutation or output publication.
+After encoding validation, `pack` builds a deterministic, read-only plan. Source discovery is shared with `build`, but `[build].exclude` is deliberately not applied to `pack`. Every configured source root must exist and be readable. Unknown extensions, invalid component names, case-insensitive duplicate names across component types, incomplete or ambiguous UserForm artifacts, and filename/`Attribute VB_Name` identity mismatches fail before project mutation or output publication. Template mode additionally rejects source-only document modules and source-only UserForms; blank mode applies its fixed topology contract.
 
 The plan records each component's primary source path, related UserForm artifact paths, component type, topology authority, code authority, and action (`add`, `update`, `remove`, or `preserve`). Existing template order is retained. Source-authoritative standard/class additions are appended in stable type/name/path order. Standard/class topology and code are source-authoritative; document topology is template-authoritative while its supplied code is source-authoritative; UserForm topology/designer state is template-authoritative while its code follows `[userform].code_source`. Source files, the template, and the output artifact are not modified while the plan is built.
 
@@ -102,12 +111,13 @@ Each unsupported case is a specific, loud error. `pack` never falls back to best
 | signed VBA project                                  | `pack_signed_project`                           | 1    |
 | managed source is not UTF-8 without BOM             | `source_encoding_invalid`                       | 1    |
 | creating a new UserForm / `.frx` generation         | `pack_userform_generation_unsupported`          | 1    |
+| any UserForm in blank mode                          | `pack_blank_userform_unsupported`               | 1    |
 | unknown or ambiguous VBA project layout             | `pack_ambiguous_layout`                         | 1    |
 | missing `--out`, bad extension, other arg errors    | `pack_args_invalid`                             | 2    |
 | missing `--experimental`                            | `pack_experimental_required`                    | 2    |
 | template/source workbook not found or unreadable    | `pack_template_not_found`                       | 2    |
 | source inventory or artifact staging failure        | `pack_source_read_failed` / `pack_write_failed` | 3    |
-| `.xlsb` template or configured workbook             | `workbook_format_unsupported`                   | 2    |
+| `.xlsb` template selected by template mode          | `workbook_format_unsupported`                   | 2    |
 
 ## Output / JSON contract
 
@@ -130,6 +140,7 @@ On success with `--json`, `pack` emits the standard envelope (`status`, `command
   },
   "pack": {
     "backend": "pure-go",
+    "base": "template",
     "experimental": true,
     "vbe_validation": "not_performed",
     "template": "build/Book.xlsm",
@@ -145,7 +156,7 @@ On success with `--json`, `pack` emits the standard envelope (`status`, `command
 }
 ```
 
-The backend identifier `pack.backend = "pure-go"` is deliberately distinct from the Excel-bridge `bridge` metadata defined in `cli-contract.md`, because `pack` uses no Excel bridge process. The `vbe_validation_skipped` warning is emitted on every successful run. Machine consumers must read `pack.vbe_validation` — not the absence of errors — to decide whether the artifact has been VBE-validated; it never is.
+The backend identifier `pack.backend = "pure-go"` is deliberately distinct from the Excel-bridge `bridge` metadata defined in `cli-contract.md`, because `pack` uses no Excel bridge process. `pack.base` is `template` or `blank`; `pack.template` is present only for template mode. The `vbe_validation_skipped` warning is emitted on every successful run. Machine consumers must read `pack.vbe_validation` — not the absence of errors — to decide whether the artifact has been VBE-validated; it never is.
 
 ## Exit codes
 
@@ -181,7 +192,7 @@ The pure-Go path cannot tell whether a generated workbook actually compiles and 
 This smoke is part of the repository's manual release-gate flow (the `xlflow-tmp-workspace-e2e` skill, "pack artifact smoke" section); the automated PR path remains Linux/pure-Go only. The procedure:
 
 1. Build a workspace with a known sentinel macro — a standard module that writes a fixed value to a cell.
-2. Produce the artifact at the file level: `xlflow pack --out dist/Book.xlsm --experimental`. Confirm the JSON reports `pack.vbe_validation = "not_performed"`.
+2. Produce the artifact at the file level without template bytes: `xlflow pack --blank --out dist/Book.xlsm --experimental`. Confirm the JSON reports `pack.base = "blank"` and `pack.vbe_validation = "not_performed"`.
 3. Open the produced `.xlsm` in Excel via COM, run the packed macro (which forces a VBE compile), and assert that the sentinel cell holds the expected value.
 
 The smoke passes only if `pack` exits `0`, the workbook opens without a compile error, and the macro's observable effect (the sentinel cell) matches. A compile error, a wrong sentinel value, or a non-zero exit blocks the release.

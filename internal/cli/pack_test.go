@@ -31,10 +31,128 @@ func TestRootCommandIncludesPackCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "pack" {
 		t.Fatalf("expected pack command, got %#v", cmd)
 	}
-	for _, name := range []string{"out", "template", "experimental"} {
+	for _, name := range []string{"out", "template", "blank", "experimental"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected pack command to define --%s", name)
 		}
+	}
+}
+
+func TestPackCommandBlankCreatesWorkbookWithoutTemplate(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackSourceTree(t, dir, false)
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--out", "dist/Fresh.xlsm")
+	if err != nil {
+		t.Fatalf("pack --blank: %v\n%s", err, stdout)
+	}
+	var env output.Envelope
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatal(err)
+	}
+	packOutput := cliObjectMap(env.Pack)
+	if packOutput["base"] != "blank" {
+		t.Fatalf("pack output = %+v", packOutput)
+	}
+	if _, ok := packOutput["template"]; ok {
+		t.Fatalf("blank output must omit template: %+v", packOutput)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "dist", "Fresh.xlsm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := vbaproject.Read(zipEntryBytes(t, body, "xl/vbaProject.bin")); err != nil {
+		t.Fatalf("fresh vbaProject.bin: %v", err)
+	}
+}
+
+func TestPackCommandRejectsBlankWithTemplate(t *testing.T) {
+	dir := t.TempDir()
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--template", "base.xlsm", "--out", "dist/Fresh.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("err=%v exit=%d", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_args_invalid" {
+		t.Fatalf("error code = %q", got)
+	}
+}
+
+func TestPackCommandRejectsBlankWithEmptyTemplateFlag(t *testing.T) {
+	dir := t.TempDir()
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--template", "", "--out", "dist/Fresh.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("err=%v exit=%d", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_args_invalid" {
+		t.Fatalf("error code = %q, want pack_args_invalid\n%s", got, stdout)
+	}
+}
+
+func TestPackCommandBlankIgnoresUnrelatedWorkbookLock(t *testing.T) {
+	dir := t.TempDir()
+	writePackProject(t, dir, false)
+	writePackSourceTree(t, dir, false)
+	// Blank mode never reads the configured workbook, so a stale Excel lock
+	// beside it must not block packing an unrelated destination.
+	if err := os.WriteFile(filepath.Join(dir, "build", "~$Book.xlsm"), []byte("lock"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--out", "dist/Fresh.xlsm")
+	if err != nil {
+		t.Fatalf("pack --blank: %v\n%s", err, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dist", "Fresh.xlsm")); err != nil {
+		t.Fatalf("expected blank output: %v", err)
+	}
+}
+
+func TestPackCommandExplicitTemplateIgnoresUnrelatedWorkbookLock(t *testing.T) {
+	dir := t.TempDir()
+	writePackProject(t, dir, false)
+	writePackSourceTree(t, dir, false)
+	writePackSourceModule(t, dir, filepath.Join("build", "Template.xlsm"), buildPackWorkbookFixture(t, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin")))
+	// With an explicit --template the configured workbook is never read or
+	// replaced, so its lock file must not block packing another destination.
+	if err := os.WriteFile(filepath.Join(dir, "build", "~$Book.xlsm"), []byte("lock"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--template", "build/Template.xlsm", "--out", "dist/Fresh.xlsm")
+	if err != nil {
+		t.Fatalf("pack --template: %v\n%s", err, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dist", "Fresh.xlsm")); err != nil {
+		t.Fatalf("expected template output: %v", err)
+	}
+}
+
+func TestPackCommandBlankRejectsUserFormArtifacts(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "frm", path: filepath.Join("src", "forms", "Login.frm")},
+		{name: "orphan frx", path: filepath.Join("src", "forms", "Login.frx")},
+		{name: "orphan sidecar code", path: filepath.Join("src", "forms", "code", "Login.bas")},
+		{name: "orphan form spec", path: filepath.Join("src", "forms", "specs", "Login.yaml")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writePackConfig(t, dir)
+			writePackSourceTree(t, dir, false)
+			writePackSourceModule(t, dir, tc.path, []byte("artifact"))
+
+			stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--out", "dist/Fresh.xlsm")
+			if err == nil || output.ExitCode(err) != output.ExitValidation {
+				t.Fatalf("err=%v exit=%d, want validation failure", err, output.ExitCode(err))
+			}
+			if got := errorCodeFromJSON(t, stdout); got != "pack_blank_userform_unsupported" {
+				t.Fatalf("error code = %q, want pack_blank_userform_unsupported\n%s", got, stdout)
+			}
+		})
 	}
 }
 

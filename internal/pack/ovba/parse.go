@@ -109,11 +109,15 @@ func ParseDir(plain []byte) (DirInfo, error) {
 				return di, err
 			}
 			di.SysKind = le32(r.payload)
-		case 0x0014:
+		case 0x0002:
 			if err := requirePayloadSize(r, 4); err != nil {
 				return di, err
 			}
 			di.LCID = le32(r.payload)
+		case 0x0014:
+			if err := requirePayloadSize(r, 4); err != nil {
+				return di, err
+			}
 		case 0x0003:
 			if err := requirePayloadSize(r, 2); err != nil {
 				return di, err
