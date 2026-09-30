@@ -60,6 +60,16 @@ stream, and malformed compressed chunks or truncated `dir` records are
 rejected. These failures are reported through `pack_ambiguous_layout`; `pack`
 does not publish a partial artifact.
 
+Before reading or regenerating `xl/vbaProject.bin`, template mode inspects the
+OOXML package relationship part `xl/_rels/vbaProject.bin.rels` and
+`[Content_Types].xml`. The legacy VBA signature, Agile signature, and V3
+signature relationship/content types are all rejected with
+`pack_signed_project`. Detection is based on parsed relationship and content
+type metadata, not signature-like ZIP filenames. Signature streams inside the
+CFB container remain a defense-in-depth check. Either form aborts before
+generation and atomic publication, so a new destination is not created and an
+existing destination remains byte-for-byte unchanged.
+
 ## Atomic publication
 
 `pack` never writes the destination directly. Publication goes through a temporary sibling artifact in the destination directory (same volume):
@@ -206,7 +216,11 @@ repository's `xlflow-tmp-workspace-e2e` skill. It covers:
 4. Run the separate blank-workbook profile through the same open/execute/
    sentinel check.
 5. Verify fail-loud protected, signed, unsupported-layout/code-page, and new
-   UserForm cases through committed fixture-backed tests.
+   UserForm cases through committed fixture-backed tests. Signed coverage
+   includes both CFB signature streams and OOXML legacy, Agile, and V3
+   signature relationships/content types. A real Excel certificate-signed
+   fixture is exercised when the release environment provides a maintainable
+   signing certificate; pure-Go CI uses deterministic structural fixtures.
 
 The gate passes only if `pack` exits `0`, both successful artifacts open without
 a compile error, the expected component and designer state is present, and the

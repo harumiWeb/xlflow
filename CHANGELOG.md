@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Hardened `xlflow pack` signed-project rejection to inspect OOXML VBA
+  signature relationships and content types before replacing
+  `xl/vbaProject.bin`. Legacy, Agile, and V3 package signatures now return
+  `pack_signed_project` without creating or replacing the output artifact;
+  CFB signature-stream detection remains in place as defense in depth.
 - Graduated `xlflow pack` to a stable, pure-Go, cross-platform artifact path.
   `--experimental` is no longer required, successful JSON no longer emits
   `pack.experimental`, and the first stable release accepts the old flag only
