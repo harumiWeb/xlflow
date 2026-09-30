@@ -89,6 +89,26 @@ func TestDefaultBuildExcludesAreScaffoldOnly(t *testing.T) {
 	}
 }
 
+func TestBlankPackLocaleDefaultsAndRoundTrip(t *testing.T) {
+	cfg := Default()
+	if cfg.Pack.Blank.CodePage != 1252 || cfg.Pack.Blank.LCID != 1033 {
+		t.Fatalf("blank defaults = %+v", cfg.Pack.Blank)
+	}
+	cfg.Pack.Blank.CodePage = 932
+	cfg.Pack.Blank.LCID = 1041
+	dir := t.TempDir()
+	if err := Write(filepath.Join(dir, FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Pack.Blank != cfg.Pack.Blank {
+		t.Fatalf("blank config = %+v, want %+v", loaded.Pack.Blank, cfg.Pack.Blank)
+	}
+}
+
 func TestDictionaryCollectionMisuseRulesDefaultEnabled(t *testing.T) {
 	cfg := Default()
 	for _, id := range []string{"VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235"} {

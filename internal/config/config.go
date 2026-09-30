@@ -33,6 +33,7 @@ type Config struct {
 	VBA       VBAConfig        `toml:"vba"`
 	UserForm  UserFormConfig   `toml:"userform"`
 	Build     BuildConfig      `toml:"build"`
+	Pack      PackConfig       `toml:"pack"`
 	Metrics   MetricsConfig    `toml:"metrics"`
 	Backup    BackupConfig     `toml:"backup"`
 	Fmt       FmtConfig        `toml:"fmt"`
@@ -82,6 +83,17 @@ type UserFormConfig struct {
 // separate from push, which always synchronizes the complete source tree.
 type BuildConfig struct {
 	Exclude []string `toml:"exclude"`
+}
+
+// PackConfig controls pure-Go workbook artifact generation.
+type PackConfig struct {
+	Blank BlankPackConfig `toml:"blank"`
+}
+
+// BlankPackConfig controls the locale records authored for template-free VBA projects.
+type BlankPackConfig struct {
+	CodePage uint16 `toml:"code_page"`
+	LCID     uint32 `toml:"lcid"`
 }
 
 // MetricsConfig controls procedure-complexity metric collection. It is kept
@@ -495,6 +507,7 @@ func Default() Config {
 		UserForm: UserFormConfig{
 			CodeSource: "sidecar",
 		},
+		Pack: PackConfig{Blank: BlankPackConfig{CodePage: 1252, LCID: 1033}},
 		Backup: BackupConfig{
 			Retention: BackupRetentionConfig{
 				Enabled:        false,
@@ -669,6 +682,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.UserForm.CodeSource == "" {
 		cfg.UserForm.CodeSource = defaults.UserForm.CodeSource
+	}
+	if cfg.Pack.Blank.CodePage == 0 {
+		cfg.Pack.Blank.CodePage = defaults.Pack.Blank.CodePage
+	}
+	if cfg.Pack.Blank.LCID == 0 {
+		cfg.Pack.Blank.LCID = defaults.Pack.Blank.LCID
 	}
 }
 
@@ -1370,6 +1389,10 @@ func renderBuildConfig(cfg BuildConfig) string {
 	return b.String()
 }
 
+func renderPackConfig(cfg PackConfig) string {
+	return fmt.Sprintf("# Locale metadata for `xlflow pack --blank`.\n[pack.blank]\ncode_page = %d\nlcid = %d\n", cfg.Blank.CodePage, cfg.Blank.LCID)
+}
+
 func renderMetricsConfig(cfg MetricsConfig) string {
 	var b strings.Builder
 	b.WriteString("# Procedure complexity metrics.\n")
@@ -1445,6 +1468,7 @@ func Write(path string, cfg Config) (err error) {
 	lintConfigText := renderLintConfig(cfg.Lint)
 	analyzeConfigText := renderAnalyzeConfig(analyzeConfig)
 	buildConfigText := renderBuildConfig(cfg.Build)
+	packConfigText := renderPackConfig(cfg.Pack)
 	metricsConfigText := renderMetricsConfig(metricsConfig)
 	preflightConfigText := renderPreflightConfig(preflightConfig)
 
@@ -1505,6 +1529,7 @@ code_source = %q
 
 %s
 %s
+%s
 # Automatic backup retention is disabled by default. Uncomment to prune old
 # metadata-backed backups for the configured workbook after successful backup-
 # producing push and rollback operations.
@@ -1545,6 +1570,7 @@ builtin_casing = %t
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
 		cfg.UserForm.CodeSource,
 		buildConfigText,
+		packConfigText,
 		metricsConfigText,
 		cfg.Fmt.OperatorSpacing, cfg.Fmt.DeclarationSpacing, cfg.Fmt.KeywordCasing, cfg.Fmt.BuiltinCasing,
 		preflightConfigText,

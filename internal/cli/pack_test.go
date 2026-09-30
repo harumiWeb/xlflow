@@ -31,10 +31,50 @@ func TestRootCommandIncludesPackCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "pack" {
 		t.Fatalf("expected pack command, got %#v", cmd)
 	}
-	for _, name := range []string{"out", "template", "experimental"} {
+	for _, name := range []string{"out", "template", "blank", "experimental"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected pack command to define --%s", name)
 		}
+	}
+}
+
+func TestPackCommandBlankCreatesWorkbookWithoutTemplate(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackSourceTree(t, dir, false)
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--out", "dist/Fresh.xlsm")
+	if err != nil {
+		t.Fatalf("pack --blank: %v\n%s", err, stdout)
+	}
+	var env output.Envelope
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatal(err)
+	}
+	packOutput := cliObjectMap(env.Pack)
+	if packOutput["base"] != "blank" {
+		t.Fatalf("pack output = %+v", packOutput)
+	}
+	if _, ok := packOutput["template"]; ok {
+		t.Fatalf("blank output must omit template: %+v", packOutput)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "dist", "Fresh.xlsm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := vbaproject.Read(zipEntryBytes(t, body, "xl/vbaProject.bin")); err != nil {
+		t.Fatalf("fresh vbaProject.bin: %v", err)
+	}
+}
+
+func TestPackCommandRejectsBlankWithTemplate(t *testing.T) {
+	dir := t.TempDir()
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--template", "base.xlsm", "--out", "dist/Fresh.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("err=%v exit=%d", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_args_invalid" {
+		t.Fatalf("error code = %q", got)
 	}
 }
 

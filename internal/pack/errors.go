@@ -12,6 +12,9 @@ var (
 	// ErrUserFormGenerationUnsupported reports that the requested source update would require UserForm or .frx generation.
 	ErrUserFormGenerationUnsupported = errors.New("pack: UserForm generation unsupported")
 
+	// ErrBlankUserFormUnsupported reports that blank mode cannot author a UserForm designer.
+	ErrBlankUserFormUnsupported = errors.New("pack: blank mode does not support UserForms")
+
 	// ErrAmbiguousLayout reports an unknown, unsupported, or ambiguous VBA project layout.
 	ErrAmbiguousLayout = errors.New("pack: ambiguous VBA project layout")
 )

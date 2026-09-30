@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added experimental `xlflow pack --blank` to create a fresh one-sheet `.xlsm`
+  without a workbook template. The profile fixes document topology to
+  `ThisWorkbook` plus `Sheet1`, authors a fresh source-only VBA project with
+  deterministic Office references, supports configurable `[pack.blank]`
+  `code_page`/`lcid`, reports `pack.base = "blank"`, and rejects UserForms with
+  `pack_blank_userform_unsupported`.
 - Hardened experimental `xlflow pack` VBA container handling: CFB v3 and v4
   templates now retain their original major version, large containers emit
   DIFAT sectors beyond the 109 header entries, and malformed allocation chains,

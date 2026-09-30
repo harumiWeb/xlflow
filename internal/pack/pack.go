@@ -12,6 +12,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+	"github.com/xuri/excelize/v2"
 )
 
 // ModuleType identifies the source-tree module kind supplied to GenerateVBAProject.
@@ -55,6 +56,92 @@ type PackMeta struct {
 	Document       int
 	Form           int
 	CarriedStreams int
+}
+
+// BlankOptions configures locale-sensitive records in a fresh VBA project.
+type BlankOptions struct {
+	CodePage uint16
+	LCID     uint32
+}
+
+const (
+	DefaultBlankCodePage uint16 = 1252
+	DefaultBlankLCID     uint32 = 1033
+)
+
+// BuildBlankWorkbook creates a one-sheet macro-enabled workbook without using
+// an existing workbook as a template. Its document topology is fixed to
+// ThisWorkbook and Sheet1; all other components are source-authoritative.
+func BuildBlankWorkbook(sources []SourceModule, opts BlankOptions) ([]byte, PackMeta, error) {
+	if opts.CodePage == 0 {
+		opts.CodePage = DefaultBlankCodePage
+	}
+	if opts.LCID == 0 {
+		opts.LCID = DefaultBlankLCID
+	}
+	seenDocuments := map[string]bool{}
+	for _, source := range sources {
+		switch source.Type {
+		case ModuleTypeForm:
+			return nil, PackMeta{}, fmt.Errorf("%w: %s", ErrBlankUserFormUnsupported, sourceLabel(source))
+		case ModuleTypeDocument:
+			if source.Name != "ThisWorkbook" && source.Name != "Sheet1" {
+				return nil, PackMeta{}, fmt.Errorf("%w: blank mode only supports document modules ThisWorkbook and Sheet1, got %q", ErrAmbiguousLayout, source.Name)
+			}
+			seenDocuments[source.Name] = true
+		}
+	}
+	for _, name := range []string{"ThisWorkbook", "Sheet1"} {
+		if !seenDocuments[name] {
+			return nil, PackMeta{}, fmt.Errorf("%w: blank mode requires document module %s", ErrAmbiguousLayout, name)
+		}
+	}
+	workbookModule, err := vbaproject.NewDocumentModule("ThisWorkbook", "", false)
+	if err != nil {
+		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+	}
+	sheetModule, err := vbaproject.NewDocumentModule("Sheet1", "", true)
+	if err != nil {
+		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+	}
+	project, err := vbaproject.NewProject(vbaproject.NewProjectSpec{
+		Name: "VBAProject", CodePage: opts.CodePage, LCID: opts.LCID,
+		Modules: []vbaproject.Module{workbookModule, sheetModule},
+	})
+	if err != nil {
+		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+	}
+	meta, err := applySources(project, sources)
+	if err != nil {
+		return nil, PackMeta{}, err
+	}
+	vbaProject, err := vbaproject.Write(project)
+	if err != nil {
+		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+	}
+
+	workbook := excelize.NewFile()
+	defer func() { _ = workbook.Close() }()
+	// Excelize selects the macro-enabled OOXML content type from File.Path when
+	// writing. BuildBlankWorkbook returns bytes rather than calling SaveAs, so
+	// set a synthetic .xlsm path before writing to the buffer.
+	workbook.Path = "Book.xlsm"
+	workbookCodeName := "ThisWorkbook"
+	sheetCodeName := "Sheet1"
+	if err := workbook.SetWorkbookProps(&excelize.WorkbookPropsOptions{CodeName: &workbookCodeName}); err != nil {
+		return nil, PackMeta{}, fmt.Errorf("pack: set workbook code name: %w", err)
+	}
+	if err := workbook.SetSheetProps("Sheet1", &excelize.SheetPropsOptions{CodeName: &sheetCodeName}); err != nil {
+		return nil, PackMeta{}, fmt.Errorf("pack: set sheet code name: %w", err)
+	}
+	if err := workbook.AddVBAProject(vbaProject); err != nil {
+		return nil, PackMeta{}, fmt.Errorf("pack: add VBA project: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := workbook.Write(&buf); err != nil {
+		return nil, PackMeta{}, fmt.Errorf("pack: write blank workbook: %w", err)
+	}
+	return buf.Bytes(), meta, nil
 }
 
 // GenerateVBAProject returns a regenerated vbaProject.bin based on template.

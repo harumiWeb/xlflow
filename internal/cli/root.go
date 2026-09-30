@@ -2255,10 +2255,11 @@ func attachFormulaPullError(env *output.Envelope, err error) {
 func (a *app) packCommand() *cobra.Command {
 	var outPath string
 	var templatePath string
+	var blank bool
 	var experimental bool
 	cmd := &cobra.Command{
 		Use:   "pack --out <path.xlsm> --experimental",
-		Short: "Build an .xlsm artifact from source and a workbook template",
+		Short: "Build an .xlsm artifact from source",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !experimental {
@@ -2267,37 +2268,36 @@ func (a *app) packCommand() *cobra.Command {
 			if strings.TrimSpace(outPath) == "" || !strings.EqualFold(filepath.Ext(outPath), ".xlsm") {
 				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", errors.New("--out is required and must end in .xlsm"))
 			}
+			if blank && strings.TrimSpace(templatePath) != "" {
+				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", errors.New("--blank and --template are mutually exclusive"))
+			}
 
 			cfg, err := a.loadConfig("pack")
 			if err != nil {
 				return err
 			}
 			configuredWorkbook := workbookArgPath(a.cwd, cfg.Excel.Path)
-			if err := workbookformat.ValidatePackTemplate(configuredWorkbook); err != nil {
-				var unsupported workbookformat.UnsupportedError
-				if errors.As(err, &unsupported) {
-					return a.writeUnsupportedWorkbookFormat("pack", unsupported)
+			resolvedTemplate := ""
+			if !blank {
+				resolvedTemplate = strings.TrimSpace(templatePath)
+				if resolvedTemplate == "" {
+					resolvedTemplate = configuredWorkbook
+				} else {
+					resolvedTemplate = workbookArgPath(a.cwd, resolvedTemplate)
 				}
-				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
-			}
-			resolvedTemplate := strings.TrimSpace(templatePath)
-			if resolvedTemplate == "" {
-				resolvedTemplate = configuredWorkbook
-			} else {
-				resolvedTemplate = workbookArgPath(a.cwd, resolvedTemplate)
-			}
-			if strings.TrimSpace(resolvedTemplate) == "" {
-				return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", errors.New("template workbook path is empty"))
-			}
-			if _, err := os.Stat(resolvedTemplate); err != nil {
-				return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", err)
-			}
-			if err := workbookformat.ValidatePackTemplate(resolvedTemplate); err != nil {
-				var unsupported workbookformat.UnsupportedError
-				if errors.As(err, &unsupported) {
-					return a.writeUnsupportedWorkbookFormat("pack", unsupported)
+				if strings.TrimSpace(resolvedTemplate) == "" {
+					return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", errors.New("template workbook path is empty"))
 				}
-				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
+				if err := workbookformat.ValidatePackTemplate(resolvedTemplate); err != nil {
+					var unsupported workbookformat.UnsupportedError
+					if errors.As(err, &unsupported) {
+						return a.writeUnsupportedWorkbookFormat("pack", unsupported)
+					}
+					return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
+				}
+				if _, err := os.Stat(resolvedTemplate); err != nil {
+					return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", err)
+				}
 			}
 
 			resolvedOut := workbookArgPath(a.cwd, outPath)
@@ -2335,11 +2335,20 @@ func (a *app) packCommand() *cobra.Command {
 				}
 				return a.writeFailure("pack", output.ExitEnvironment, "pack_source_read_failed", err)
 			}
-			templateBytes, err := os.ReadFile(resolvedTemplate)
-			if err != nil {
-				return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", err)
+			var workbookBytes []byte
+			var meta packpkg.PackMeta
+			if blank {
+				workbookBytes, meta, err = packpkg.BuildBlankWorkbook(sources, packpkg.BlankOptions{
+					CodePage: cfg.Pack.Blank.CodePage,
+					LCID:     cfg.Pack.Blank.LCID,
+				})
+			} else {
+				templateBytes, readErr := os.ReadFile(resolvedTemplate)
+				if readErr != nil {
+					return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", readErr)
+				}
+				workbookBytes, meta, err = packpkg.BuildWorkbook(templateBytes, sources)
 			}
-			workbookBytes, meta, err := packpkg.BuildWorkbook(templateBytes, sources)
 			if err != nil {
 				return a.writePackEngineFailure(err)
 			}
@@ -2372,11 +2381,15 @@ func (a *app) packCommand() *cobra.Command {
 			}
 			outputPayload["temporary_cleanup"] = cleanup
 			env.Output = outputPayload
-			env.Pack = map[string]any{
+			base := "template"
+			if blank {
+				base = "blank"
+			}
+			packOutput := map[string]any{
 				"backend":        "pure-go",
+				"base":           base,
 				"experimental":   true,
 				"vbe_validation": "not_performed",
-				"template":       displayPath(a.cwd, resolvedTemplate),
 				"modules": map[string]any{
 					"standard":        meta.Standard,
 					"class":           meta.Class,
@@ -2385,6 +2398,10 @@ func (a *app) packCommand() *cobra.Command {
 					"carried_streams": meta.CarriedStreams,
 				},
 			}
+			if !blank {
+				packOutput["template"] = displayPath(a.cwd, resolvedTemplate)
+			}
+			env.Pack = packOutput
 			warnings := []map[string]any{{
 				"code":    "vbe_validation_skipped",
 				"message": "pack did not open Excel; no VBE compile or runtime validation was performed.",
@@ -2402,6 +2419,7 @@ func (a *app) packCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&outPath, "out", "", "destination .xlsm artifact path")
 	cmd.Flags().StringVar(&templatePath, "template", "", "workbook template path")
+	cmd.Flags().BoolVar(&blank, "blank", false, "create a fresh one-sheet workbook without a template")
 	cmd.Flags().BoolVar(&experimental, "experimental", false, "enable experimental pure-Go pack")
 	return cmd
 }
@@ -2414,6 +2432,8 @@ func (a *app) writePackEngineFailure(err error) error {
 		return a.writeFailure("pack", output.ExitValidation, "pack_signed_project", err)
 	case errors.Is(err, packpkg.ErrUserFormGenerationUnsupported):
 		return a.writeFailure("pack", output.ExitValidation, "pack_userform_generation_unsupported", err)
+	case errors.Is(err, packpkg.ErrBlankUserFormUnsupported):
+		return a.writeFailure("pack", output.ExitValidation, "pack_blank_userform_unsupported", err)
 	case errors.Is(err, packpkg.ErrAmbiguousLayout):
 		return a.writeFailure("pack", output.ExitValidation, "pack_ambiguous_layout", err)
 	default:

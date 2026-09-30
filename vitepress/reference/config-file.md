@@ -73,6 +73,11 @@ default_component_folders = true
 #   "sidecar" – code is split into src/forms/code/<FormName>.bas.
 code_source = "sidecar"
 
+# Locale metadata for `xlflow pack --blank`.
+[pack.blank]
+code_page = 1252
+lcid = 1033
+
 # Automatic backup retention is disabled by default.
 # [backup.retention]
 # enabled = false
@@ -234,6 +239,17 @@ Each pattern is normalized to `/`; Windows and WSL separators match identically.
 `src/modules/Tests/**` and `src/modules/Xlflow/XlflowAssert.bas` files from
 release builds. Remove an entry or set `exclude = []` when those components are
 required by a release.
+
+### `[pack.blank]`
+
+| Key         | Type | Required | Default | Description                                                        |
+| ----------- | ---- | -------- | ------- | ------------------------------------------------------------------ |
+| `code_page` | int  | no       | `1252`  | MBCS code page authored into a fresh template-free VBA project.    |
+| `lcid`      | int  | no       | `1033`  | Locale identifier authored into a fresh template-free VBA project. |
+
+These values apply only to `xlflow pack --blank`; template mode preserves the
+template's locale records. Japanese projects normally use code page `932` and
+LCID `1041`. Source files remain UTF-8 without BOM regardless of this setting.
 
 ### `[preflight]`
 

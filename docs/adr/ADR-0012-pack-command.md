@@ -18,7 +18,7 @@ Feasibility is established. `ovba-writer` (https://github.com/kay-ws/ovba-writer
 
 ## Decision
 
-Introduce a new, experimental, cross-platform command `xlflow pack` that builds an `.xlsm` artifact from the source tree plus a workbook template, entirely in Go at the file level. It regenerates `xl/vbaProject.bin` from source and replaces that one entry inside the workbook zip.
+Introduce a new, experimental, cross-platform command `xlflow pack` that builds an `.xlsm` artifact from the source tree, entirely in Go at the file level. Template mode regenerates `xl/vbaProject.bin` and replaces that one entry inside an existing workbook package. Explicit `--blank` mode authors both a minimal OOXML workbook and a fresh source-only VBA project without reading template bytes.
 
 `pack` is a separate command, not a mode or backend of `push`:
 
@@ -31,6 +31,9 @@ The initial MVP boundary is deliberately narrow and fail-loud:
 - `--out` is required; `pack` never overwrites the template or configured source workbook in place;
 - `pack` operates only on closed workbook files, never on active sessions or live workbooks;
 - `--template` is optional and falls back to the source workbook configured in `xlflow.toml`;
+- `--blank` is mutually exclusive with an explicit `--template`; when neither is supplied, the configured source workbook remains the legacy template;
+- blank mode deliberately fixes host topology to `ThisWorkbook` plus one worksheet/code name `Sheet1`; both document sources must exist, additional document modules and all UserForms fail loudly;
+- blank mode authors deterministic VBA/Office reference records and takes its project code page and LCID from `[pack.blank]` (defaults `1252` and `1033`), rather than inferring locale from a host or template;
 - standard and class modules are supported first; document modules only where they map safely against the template;
 - JSON output identifies the backend as the experimental pure-Go packer and reports that VBE compile validation was not performed;
 - the pure-Go packaging path has Linux tests;
@@ -81,6 +84,7 @@ content validation failure and never produces a best-effort artifact.
 - Positive: a cross-platform path exists for CI, containers, release packaging, and headless or agent artifact generation, with no Windows-plus-Excel host.
 - Positive: keeping the backend independent of configuration means a command's meaning stays stable and legible in CI logs and to agents.
 - Positive: ownership in `internal/pack` keeps the artifact-generation path's maintenance and compatibility behavior inside xlflow.
+- Positive: explicit blank mode removes the last workbook-template dependency for the narrow one-sheet release profile without changing the legacy template fallback.
 - Positive: preserving CFB v3/v4 geometry and supporting DIFAT avoids silent
   template format conversion and removes the header-only FAT size ceiling.
 - Negative: `pack` output lacks VBE compile and runtime validation; consumers must treat it as unvalidated, and the contract must keep saying so.
@@ -89,6 +93,7 @@ content validation failure and never produces a best-effort artifact.
 - Negative: supporting both CFB geometries and bounded graph parsing adds more
   compatibility and adversarial-input cases to the internal implementation.
 - Negative: the experimental surface needs staged hardening — fixtures, detection, smoke tests — before it can be considered stable.
+- Negative: blank mode is intentionally not a general workbook-layout generator; projects needing sheets beyond `Sheet1` or UserForms still require a template.
 
 ## Alternatives Considered
 

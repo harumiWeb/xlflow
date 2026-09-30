@@ -181,6 +181,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `close_statement`
 - `closes_workbook`
 - `cmd_exe`
+- `code_page`
 - `code_path`
 - `code_source`
 - `code_source_after`
@@ -908,6 +909,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `pack_active_session`
 - `pack_ambiguous_layout`
 - `pack_args_invalid`
+- `pack_blank_userform_unsupported`
 - `pack_experimental_required`
 - `pack_failed`
 - `pack_in_place_overwrite`
