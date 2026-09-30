@@ -90,10 +90,9 @@ type PackConfig struct {
 	Blank BlankPackConfig `toml:"blank"`
 }
 
-// BlankPackConfig controls the locale records authored for template-free VBA projects.
+// BlankPackConfig controls text encoding for template-free VBA projects.
 type BlankPackConfig struct {
 	CodePage uint16 `toml:"code_page"`
-	LCID     uint32 `toml:"lcid"`
 }
 
 // MetricsConfig controls procedure-complexity metric collection. It is kept
@@ -507,7 +506,7 @@ func Default() Config {
 		UserForm: UserFormConfig{
 			CodeSource: "sidecar",
 		},
-		Pack: PackConfig{Blank: BlankPackConfig{CodePage: 1252, LCID: 1033}},
+		Pack: PackConfig{Blank: BlankPackConfig{CodePage: 1252}},
 		Backup: BackupConfig{
 			Retention: BackupRetentionConfig{
 				Enabled:        false,
@@ -599,6 +598,9 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 	}
 	for _, key := range meta.Undecoded() {
 		name := key.String()
+		if name == "pack" || strings.HasPrefix(name, "pack.") {
+			return cfg, fmt.Errorf("unknown pack configuration key: %s", name)
+		}
 		if name == "metrics" || strings.HasPrefix(name, "metrics.") {
 			return cfg, fmt.Errorf("unknown metrics configuration key: %s", name)
 		}
@@ -685,9 +687,6 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Pack.Blank.CodePage == 0 {
 		cfg.Pack.Blank.CodePage = defaults.Pack.Blank.CodePage
-	}
-	if cfg.Pack.Blank.LCID == 0 {
-		cfg.Pack.Blank.LCID = defaults.Pack.Blank.LCID
 	}
 }
 
@@ -1390,7 +1389,7 @@ func renderBuildConfig(cfg BuildConfig) string {
 }
 
 func renderPackConfig(cfg PackConfig) string {
-	return fmt.Sprintf("# Locale metadata for `xlflow pack --blank`.\n[pack.blank]\ncode_page = %d\nlcid = %d\n", cfg.Blank.CodePage, cfg.Blank.LCID)
+	return fmt.Sprintf("# VBA project text encoding for `xlflow pack --blank`.\n[pack.blank]\ncode_page = %d\n", cfg.Blank.CodePage)
 }
 
 func renderMetricsConfig(cfg MetricsConfig) string {

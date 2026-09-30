@@ -58,16 +58,12 @@ type PackMeta struct {
 	CarriedStreams int
 }
 
-// BlankOptions configures locale-sensitive records in a fresh VBA project.
+// BlankOptions configures text encoding in a fresh VBA project.
 type BlankOptions struct {
 	CodePage uint16
-	LCID     uint32
 }
 
-const (
-	DefaultBlankCodePage uint16 = 1252
-	DefaultBlankLCID     uint32 = 1033
-)
+const DefaultBlankCodePage uint16 = 1252
 
 // BuildBlankWorkbook creates a one-sheet macro-enabled workbook without using
 // an existing workbook as a template. Its document topology is fixed to
@@ -75,9 +71,6 @@ const (
 func BuildBlankWorkbook(sources []SourceModule, opts BlankOptions) ([]byte, PackMeta, error) {
 	if opts.CodePage == 0 {
 		opts.CodePage = DefaultBlankCodePage
-	}
-	if opts.LCID == 0 {
-		opts.LCID = DefaultBlankLCID
 	}
 	seenDocuments := map[string]bool{}
 	for _, source := range sources {
@@ -105,7 +98,7 @@ func BuildBlankWorkbook(sources []SourceModule, opts BlankOptions) ([]byte, Pack
 		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 	}
 	project, err := vbaproject.NewProject(vbaproject.NewProjectSpec{
-		Name: "VBAProject", CodePage: opts.CodePage, LCID: opts.LCID,
+		Name: "VBAProject", CodePage: opts.CodePage,
 		Modules: []vbaproject.Module{workbookModule, sheetModule},
 	})
 	if err != nil {

@@ -80,6 +80,39 @@ function Get-ReferenceSnapshot {
     return @($result | Sort-Object)
 }
 
+function Get-ReferenceDiagnostics {
+    param(
+        [Parameter(Mandatory)][object]$Project,
+        [Parameter(Mandatory)][string]$WorkbookName
+    )
+
+    $result = @()
+    $references = $Project.References
+    try {
+        for ($index = 1; $index -le $references.Count; $index++) {
+            $reference = $references.Item($index)
+            try {
+                $fullPath = $null
+                try { $fullPath = $reference.FullPath } catch { $fullPath = "<unavailable: $($_.Exception.Message)>" }
+                $result += [pscustomobject]@{
+                    Workbook = $WorkbookName
+                    Name = $reference.Name
+                    Guid = $reference.Guid
+                    Major = $reference.Major
+                    Minor = $reference.Minor
+                    IsBroken = $reference.IsBroken
+                    FullPath = $fullPath
+                }
+            } finally {
+                Release-ComObject $reference
+            }
+        }
+    } finally {
+        Release-ComObject $references
+    }
+    return @($result | Sort-Object Workbook, Name)
+}
+
 function Add-CodeComponent {
     param(
         [Parameter(Mandatory)][object]$Project,
@@ -439,6 +472,11 @@ function Test-BlankPack {
     Push-Location $blankWorkspace
     try {
         Invoke-XlflowJson @('new', 'BlankSource.xlsm', '--json') | Out-Null
+        $configPath = Join-Path $blankWorkspace 'xlflow.toml'
+        $configText = Get-Content -LiteralPath $configPath -Raw
+        $cp932Config = $configText -replace '(?m)^code_page = 1252$', 'code_page = 932'
+        if ($cp932Config -eq $configText) { throw 'blank pack config did not contain the expected code_page default' }
+        Write-Utf8NoBom $configPath $cp932Config
         Write-Utf8NoBom (Join-Path $blankWorkspace 'src\modules\Main.bas') @'
 Attribute VB_Name = "Main"
 Option Explicit
@@ -446,26 +484,114 @@ Public Sub Run()
     ThisWorkbook.Worksheets(1).Range("A1").Value = "pack blank ok"
 End Sub
 '@
-        $result = Invoke-XlflowJson @('pack', '--blank', '--out', 'dist/Blank.xlsm', '--json')
-        Write-Utf8NoBom (Join-Path $blankWorkspace 'dist\pack-result.json') $result.Raw
-        if ($result.Json.pack.base -ne 'blank' -or $result.Json.pack.backend -ne 'pure-go' -or $result.Json.pack.vbe_validation -ne 'not_performed') {
-            throw "blank pack JSON contract failed: $($result.Raw)"
+        Write-Utf8NoBom (Join-Path $blankWorkspace "src\modules\$japaneseModuleName.bas") @"
+Attribute VB_Name = "$japaneseModuleName"
+Option Explicit
+Public Function Marker() As String
+    Marker = "$japaneseModuleMarker"
+End Function
+"@
+        $artifacts = @('BlankA.xlsm', 'BlankB.xlsm')
+        foreach ($artifact in $artifacts) {
+            $result = Invoke-XlflowJson @('pack', '--blank', '--out', "dist/$artifact", '--json')
+            Write-Utf8NoBom (Join-Path $blankWorkspace "dist\$artifact.pack-result.json") $result.Raw
+            if ($result.Json.pack.base -ne 'blank' -or $result.Json.pack.backend -ne 'pure-go' -or $result.Json.pack.vbe_validation -ne 'not_performed') {
+                throw "blank pack JSON contract failed for ${artifact}: $($result.Raw)"
+            }
         }
         $excel = New-Object -ComObject Excel.Application
         $excel.Visible = $true
         $excel.DisplayAlerts = $false
         $excel.AutomationSecurity = 1
-        $workbook = $null
+        $workbookA = $null
+        $workbookB = $null
+        $projectA = $null
+        $projectB = $null
+        $addedReference = $null
         try {
-            $workbook = $excel.Workbooks.Open((Join-Path $blankWorkspace 'dist\Blank.xlsm'))
-            [void]$excel.Run("'$($workbook.Name)'!Main.Run")
-            $sentinel = $workbook.Worksheets.Item(1).Range('A1').Value2
-            if ($sentinel -ne 'pack blank ok') { throw "blank pack sentinel was '$sentinel'" }
-            Write-Output "pack blank E2E passed: workspace=$blankWorkspace sentinel=$sentinel"
+            $workbookA = $excel.Workbooks.Open((Join-Path $blankWorkspace 'dist\BlankA.xlsm'))
+            $workbookB = $excel.Workbooks.Open((Join-Path $blankWorkspace 'dist\BlankB.xlsm'))
+            $projectA = $workbookA.VBProject
+            $projectB = $workbookB.VBProject
+
+            $referenceDiagnostics = @(
+                Get-ReferenceDiagnostics $projectA $workbookA.Name
+                Get-ReferenceDiagnostics $projectB $workbookB.Name
+            )
+            foreach ($workbookName in @($workbookA.Name, $workbookB.Name)) {
+                $workbookReferences = @($referenceDiagnostics | Where-Object Workbook -eq $workbookName)
+                foreach ($requiredName in @('VBA', 'Excel', 'stdole', 'Office')) {
+                    if ($workbookReferences.Name -notcontains $requiredName) {
+                        throw "$workbookName is missing reference $requiredName"
+                    }
+                }
+                $broken = @($workbookReferences | Where-Object IsBroken)
+                if ($broken.Count -ne 0) {
+                    throw "$workbookName has broken references: $($broken.Name -join ', ')"
+                }
+            }
+
+            [void]$excel.Run("'$($workbookA.Name)'!Main.Run")
+            [void]$excel.Run("'$($workbookB.Name)'!Main.Run")
+            $sheetA = $workbookA.Worksheets.Item(1)
+            $sheetB = $workbookB.Worksheets.Item(1)
+            try {
+                $sentinelA = $sheetA.Range('A1').Value2
+                $sentinelB = $sheetB.Range('A1').Value2
+            } finally {
+                Release-ComObject $sheetB
+                Release-ComObject $sheetA
+            }
+            if ($sentinelA -ne 'pack blank ok' -or $sentinelB -ne 'pack blank ok') {
+                throw "blank pack sentinels were '$sentinelA' and '$sentinelB'"
+            }
+
+            $sameNameReferenceResult = $null
+            try {
+                $sameNameReference = $projectA.References.AddFromFile($workbookB.FullName)
+                try {
+                    $sameNameReferenceResult = "success:$($sameNameReference.Name)"
+                    $projectA.References.Remove($sameNameReference)
+                } finally {
+                    Release-ComObject $sameNameReference
+                }
+            } catch {
+                $sameNameReferenceResult = "error:$($_.Exception.Message)"
+            }
+
+            $projectB.Name = 'VBAProject2'
+            $addedReference = $projectA.References.AddFromFile($workbookB.FullName)
+            if ($addedReference.IsBroken -or $addedReference.Name -ne 'VBAProject2') {
+                throw "renamed blank project reference was invalid: name=$($addedReference.Name) broken=$($addedReference.IsBroken)"
+            }
+            $renamedReferenceResult = "success:$($addedReference.Name)|$($addedReference.FullPath)"
+            $projectA.References.Remove($addedReference)
+            Release-ComObject $addedReference
+            $addedReference = $null
+
+            $diagnostics = [pscustomobject]@{
+                ExcelVersion = $excel.Version
+                ExcelOperatingSystem = $excel.OperatingSystem
+                Projects = @(
+                    [pscustomobject]@{ Workbook = $workbookA.Name; Name = $projectA.Name; FileName = $projectA.FileName }
+                    [pscustomobject]@{ Workbook = $workbookB.Name; Name = $projectB.Name; FileName = $projectB.FileName }
+                )
+                References = $referenceDiagnostics
+                SameNameReference = $sameNameReferenceResult
+                RenamedReference = $renamedReferenceResult
+                Sentinels = @($sentinelA, $sentinelB)
+            }
+            Write-Utf8NoBom (Join-Path $blankWorkspace 'dist\blank-reference-diagnostics.json') ($diagnostics | ConvertTo-Json -Depth 5)
+            Write-Output "pack blank E2E passed: workspace=$blankWorkspace sentinels=$sentinelA,$sentinelB references=$($referenceDiagnostics.Count) same_name_reference=$sameNameReferenceResult renamed_reference=$renamedReferenceResult Excel=$($excel.Version) OS=$($excel.OperatingSystem)"
         } finally {
-            if ($null -ne $workbook) { $workbook.Close($false) }
+            if ($null -ne $addedReference) { Release-ComObject $addedReference }
+            if ($null -ne $workbookA) { $workbookA.Close($false) }
+            if ($null -ne $workbookB) { $workbookB.Close($false) }
             $excel.Quit()
-            Release-ComObject $workbook
+            Release-ComObject $projectB
+            Release-ComObject $projectA
+            Release-ComObject $workbookB
+            Release-ComObject $workbookA
             Release-ComObject $excel
             [GC]::Collect(); [GC]::WaitForPendingFinalizers()
         }

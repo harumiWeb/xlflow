@@ -9,7 +9,7 @@ xlflow pack --out build/Release.xlsm
 xlflow pack --blank --out build/Release.xlsm
 ```
 
-`--blank` is mutually exclusive with `--template`. It requires `ThisWorkbook.bas` and `Sheet1.bas`, rejects UserForms and additional document modules, and uses `[pack.blank]` locale metadata (defaults: `code_page = 1252`, `lcid = 1033`).
+`--blank` is mutually exclusive with `--template`. It requires `ThisWorkbook.bas` and `Sheet1.bas`, rejects UserForms and additional document modules, and uses `[pack.blank].code_page` for project text encoding (default `1252`; use `932` for Japanese). VBA project LCID records always use the MS-OVBA-required value `0x00000409`.
 
 `pack` is the stable, pure-Go release path. It is cross-platform and
 Excel-independent: standard/class topology comes from source, workbook and

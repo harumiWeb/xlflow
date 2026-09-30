@@ -33,7 +33,7 @@ The initial MVP boundary is deliberately narrow and fail-loud:
 - `--template` is optional and falls back to the source workbook configured in `xlflow.toml`;
 - `--blank` is mutually exclusive with an explicit `--template`; when neither is supplied, the configured source workbook remains the legacy template;
 - blank mode deliberately fixes host topology to `ThisWorkbook` plus one worksheet/code name `Sheet1`; both document sources must exist, additional document modules and all UserForms fail loudly;
-- blank mode authors deterministic VBA/Office reference records and takes its project code page and LCID from `[pack.blank]` (defaults `1252` and `1033`), rather than inferring locale from a host or template;
+- blank mode authors deterministic VBA/Office reference records, takes its project code page from `[pack.blank]` (default `1252`), and uses the canonical MS-OVBA LCID `0x00000409` rather than inferring locale from a host or template;
 - standard and class modules are supported first; document modules only where they map safely against the template;
 - JSON output identifies the backend as the experimental pure-Go packer and reports that VBE compile validation was not performed;
 - the pure-Go packaging path has Linux tests;
@@ -83,6 +83,23 @@ remain Excel-independent and report `vbe_validation = "not_performed"`.
 ### No VBE validation
 
 "No VBE validation" is a permanent semantic boundary, not a temporary limitation. `pack` never compiles or executes VBA. Its output is a file artifact whose correctness against the VBE has not been verified; Excel compiles it from source on first open. Every `pack` run reports this in its output. Consumers that need compile or runtime validation must use the Excel/VBIDE-backed `push` path on Windows.
+
+### Amendment: canonical blank-project identity metadata (Issue #870)
+
+Blank generation exposes only `code_page` as locale-sensitive configuration.
+MS-OVBA requires both `PROJECTLCID` and `PROJECTLCIDINVOKE` to be
+`0x00000409`, independently of `PROJECTCODEPAGE`, so `pack.blank.lcid` is
+removed and rejected as an unknown pack key. CP932 remains the supported way
+to encode Japanese project text and component names.
+
+The deterministic Project CLSID and its matching CMG/DPB/GC tuple remain
+fixed. The Windows/Excel release gate opens two independently generated blank
+workbooks concurrently and runs both macros. It records unbroken VBA, Excel,
+stdole, and Office references; a project-to-project reference succeeds after
+one default `VBAProject` name is changed. The observed ambiguity between two
+unchanged projects is therefore the normal duplicate project-name boundary,
+not a CLSID collision, and does not justify sacrificing byte-for-byte project
+metadata determinism.
 
 ### CFB and OVBA compatibility boundary
 
