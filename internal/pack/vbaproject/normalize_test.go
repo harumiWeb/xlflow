@@ -168,6 +168,39 @@ func TestNormalizeEndToEnd(t *testing.T) {
 	}
 }
 
+func TestExportModuleSourceRoundTrip(t *testing.T) {
+	p, err := Read(loadBin(t, "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range p.Modules {
+		module := &p.Modules[i]
+		if module.Type == ModuleForm {
+			continue
+		}
+		t.Run(module.Name, func(t *testing.T) {
+			disk, err := ExportModuleSource(*module)
+			if err != nil {
+				t.Fatal(err)
+			}
+			normalized, err := NormalizeModuleSource(module.Type, disk, module)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if normalized != module.Source {
+				t.Errorf("round trip mismatch\n--- got ---\n%s\n--- want ---\n%s", normalized, module.Source)
+			}
+		})
+	}
+}
+
+func TestExportModuleSourceRejectsForm(t *testing.T) {
+	_, err := ExportModuleSource(Module{Name: "UserForm1", Type: ModuleForm})
+	if err == nil {
+		t.Fatal("expected UserForm export error")
+	}
+}
+
 // Edit case: shows that replacing the code body preserves the 8 attribute-header lines from existing.
 func TestNormalizeDocumentEdited(t *testing.T) {
 	p, err := Read(loadBin(t, "p1_compiled.bin"))

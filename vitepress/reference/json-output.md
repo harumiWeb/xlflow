@@ -394,7 +394,7 @@ can run concurrently.
   "status": "ok",
   "command": "capabilities",
   "capabilities": {
-    "capability_version": 1,
+    "capability_version": 2,
     "commands": {
       "push": {
         "cli_paths": ["push"],
@@ -411,7 +411,11 @@ can run concurrently.
 }
 ```
 
-Version 1 keeps command IDs, `cli_paths`, and all listed field meanings stable.
+Version 1 keeps command IDs, `cli_paths`, and the original field meanings stable.
+Version 2 optionally adds `default_backend` and a `backends` map whose entries
+publish backend-specific `requires_excel`; `pull` defaults to `excel` and
+publishes `file.requires_excel=false`. Command-level `requires_excel` continues
+to describe the default invocation.
 New commands and fields may be added, so consumers must ignore entries or fields
 they do not recognize. Older xlflow versions may not support the command; an
 unavailable, malformed, failed, or unsupported-version response means the

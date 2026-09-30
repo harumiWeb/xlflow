@@ -19,16 +19,22 @@ type BridgeSelector struct {
 }
 
 type Descriptor struct {
-	ID            CommandID        `json:"id"`
-	Policy        Policy           `json:"policy"`
-	RequiresExcel bool             `json:"requires_excel"`
-	CLI           []CLISelector    `json:"cli,omitempty"`
-	Bridge        []BridgeSelector `json:"bridge,omitempty"`
+	ID             CommandID                    `json:"id"`
+	Policy         Policy                       `json:"policy"`
+	RequiresExcel  bool                         `json:"requires_excel"`
+	DefaultBackend string                       `json:"default_backend,omitempty"`
+	Backends       map[string]BackendCapability `json:"backends,omitempty"`
+	CLI            []CLISelector                `json:"cli,omitempty"`
+	Bridge         []BridgeSelector             `json:"bridge,omitempty"`
 }
 
 // CapabilityVersion is the current version of the public command capability
 // contract. Consumers must ignore fields and commands they do not recognize.
-const CapabilityVersion = 1
+const CapabilityVersion = 2
+
+type BackendCapability struct {
+	RequiresExcel bool `json:"requires_excel"`
+}
 
 // Capabilities is the machine-readable, integration-safe view of the command
 // coordination registry. It deliberately excludes bridge selectors and any
@@ -42,14 +48,16 @@ type Capabilities struct {
 // command. CLIPaths are command argv selectors without the root "xlflow"
 // token, so integrations do not need to infer them from command IDs.
 type CommandCapability struct {
-	CLIPaths          []string         `json:"cli_paths"`
-	ResourceScope     ResourceScope    `json:"resource_scope"`
-	OperationKind     OperationKind    `json:"operation_kind"`
-	ParallelSafe      bool             `json:"parallel_safe"`
-	RetryableWhenBusy bool             `json:"retryable_when_busy"`
-	DefaultWaitPolicy WaitPolicy       `json:"default_wait_policy"`
-	RecoveryBehavior  RecoveryBehavior `json:"recovery_behavior"`
-	RequiresExcel     bool             `json:"requires_excel"`
+	CLIPaths          []string                     `json:"cli_paths"`
+	ResourceScope     ResourceScope                `json:"resource_scope"`
+	OperationKind     OperationKind                `json:"operation_kind"`
+	ParallelSafe      bool                         `json:"parallel_safe"`
+	RetryableWhenBusy bool                         `json:"retryable_when_busy"`
+	DefaultWaitPolicy WaitPolicy                   `json:"default_wait_policy"`
+	RecoveryBehavior  RecoveryBehavior             `json:"recovery_behavior"`
+	RequiresExcel     bool                         `json:"requires_excel"`
+	DefaultBackend    string                       `json:"default_backend,omitempty"`
+	Backends          map[string]BackendCapability `json:"backends,omitempty"`
 }
 
 var descriptors = buildDescriptors()
@@ -137,6 +145,8 @@ func PublicCapabilities() Capabilities {
 			DefaultWaitPolicy: descriptor.Policy.DefaultWaitPolicy,
 			RecoveryBehavior:  descriptor.Policy.RecoveryBehavior,
 			RequiresExcel:     descriptor.RequiresExcel,
+			DefaultBackend:    descriptor.DefaultBackend,
+			Backends:          cloneBackends(descriptor.Backends),
 		}
 	}
 	return result
@@ -190,6 +200,7 @@ func bridgeDisplayValue(command string, args map[string]string) string {
 
 func cloneDescriptor(source Descriptor) Descriptor {
 	cloned := source
+	cloned.Backends = cloneBackends(source.Backends)
 	cloned.CLI = append([]CLISelector(nil), source.CLI...)
 	cloned.Bridge = make([]BridgeSelector, len(source.Bridge))
 	for i, selector := range source.Bridge {
@@ -200,6 +211,17 @@ func cloneDescriptor(source Descriptor) Descriptor {
 				cloned.Bridge[i].Args[key] = value
 			}
 		}
+	}
+	return cloned
+}
+
+func cloneBackends(source map[string]BackendCapability) map[string]BackendCapability {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string]BackendCapability, len(source))
+	for name, capability := range source {
+		cloned[name] = capability
 	}
 	return cloned
 }
@@ -221,6 +243,11 @@ func validateDescriptors(values []Descriptor) error {
 		}
 		if len(descriptor.CLI) == 0 && len(descriptor.Bridge) == 0 {
 			return fmt.Errorf("coordination command %q has no selector", descriptor.ID)
+		}
+		if descriptor.DefaultBackend != "" {
+			if _, ok := descriptor.Backends[descriptor.DefaultBackend]; !ok {
+				return fmt.Errorf("coordination command %q has unknown default backend %q", descriptor.ID, descriptor.DefaultBackend)
+			}
 		}
 		for _, selector := range descriptor.CLI {
 			key := normalizeCLIPath(selector.Path)

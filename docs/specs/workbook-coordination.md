@@ -27,6 +27,8 @@ The policy vocabulary is:
 | `default_wait_policy` | `fail`, `wait`                                  | Whether acquisition should fail immediately or wait by default.                |
 | `recovery_behavior`   | `not_applicable`, `block`, `observe`, `recover` | How the command behaves when workbook recovery is required.                    |
 | `requires_excel`      | boolean                                         | Whether normal command execution depends on Excel automation.                  |
+| `default_backend`     | backend name                                    | Default backend when one command has materially different host requirements.   |
+| `backends`            | backend capability map                          | Per-backend requirements for explicit backend selection.                       |
 
 All policies use `default_wait_policy: fail`. Callers may opt into bounded
 waiting through the public CLI contract below. A resource operation is retryable only when it is non-parallel-safe
@@ -64,7 +66,7 @@ cannot mutate the authoritative definitions.
 ### Public Capability Contract
 
 `xlflow capabilities --json` is a source-only, parallel-safe command that
-returns a v1, machine-readable projection of every registry descriptor in the
+returns a v2, machine-readable projection of every registry descriptor in the
 normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
 
 ```json
@@ -72,7 +74,7 @@ normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
   "status": "ok",
   "command": "capabilities",
   "capabilities": {
-    "capability_version": 1,
+    "capability_version": 2,
     "commands": {
       "push": {
         "cli_paths": ["push"],
@@ -89,14 +91,22 @@ normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
 }
 ```
 
-`capability_version` is an integer schema version. Version 1 stabilizes the
+The v2 `pull` entry additionally contains
+`"default_backend":"excel"` and
+`"backends":{"excel":{"requires_excel":true},"file":{"requires_excel":false}}`.
+Its command-level `requires_excel` remains `true` because the default path is
+Excel-backed.
+
+`capability_version` is an integer schema version. Version 1 stabilized the
 command-map keys (command IDs), each command's `cli_paths`, and the meanings and
 vocabularies of `resource_scope`, `operation_kind`, `parallel_safe`,
 `retryable_when_busy`, `default_wait_policy`, `recovery_behavior`, and
-`requires_excel`. The
+`requires_excel`. Version 2 adds optional `default_backend` and `backends`
+fields. Command-level `requires_excel` describes the default path; an explicit
+backend invocation uses its backend entry. The
 `capabilities` command itself is included with ID and path `capabilities`.
 
-`requires_excel` is an additive advisory field. `build` reports `true` for its
+`requires_excel` is an advisory field. `build` reports `true` for its
 normal mutating path; `build --dry-run` is explicitly documented as a local,
 Excel-free planning variant.
 

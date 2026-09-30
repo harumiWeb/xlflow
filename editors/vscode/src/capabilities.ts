@@ -2,7 +2,12 @@ import * as vscode from "vscode";
 import type { XlflowChannels } from "./logging";
 import { runXlflowJsonCommand } from "./xlflow";
 
-export const supportedCapabilityVersion = 1;
+export const supportedCapabilityVersion = 2;
+export const supportedCapabilityVersions = [1, 2] as const;
+
+export interface XlflowBackendCapability {
+  requires_excel: boolean;
+}
 
 export interface XlflowCommandCapability {
   cli_paths: string[];
@@ -12,6 +17,9 @@ export interface XlflowCommandCapability {
   retryable_when_busy: boolean;
   default_wait_policy: string;
   recovery_behavior: string;
+  requires_excel: boolean;
+  default_backend?: string;
+  backends?: Record<string, XlflowBackendCapability>;
 }
 
 export interface XlflowCapabilities {
@@ -165,17 +173,21 @@ export function parseCapabilitiesEnvelope(value: unknown): XlflowCapabilities | 
     return undefined;
   }
   const raw = value.capabilities;
-  if (raw.capability_version !== supportedCapabilityVersion || !isRecord(raw.commands)) {
+  if (
+    typeof raw.capability_version !== "number" ||
+    !supportedCapabilityVersions.includes(raw.capability_version as 1 | 2) ||
+    !isRecord(raw.commands)
+  ) {
     return undefined;
   }
   const commands: Record<string, XlflowCommandCapability> = {};
   for (const [id, descriptor] of Object.entries(raw.commands)) {
-    const parsed = parseCommandCapability(descriptor);
+    const parsed = parseCommandCapability(descriptor, raw.capability_version);
     if (parsed !== undefined) {
       commands[id] = parsed;
     }
   }
-  return { capability_version: supportedCapabilityVersion, commands };
+  return { capability_version: raw.capability_version, commands };
 }
 
 export function capabilityOperationForArgs(
@@ -201,7 +213,10 @@ export function isWorkbookExclusive(capability: XlflowCommandCapability): boolea
   return capability.resource_scope === "workbook" && capability.parallel_safe === false;
 }
 
-function parseCommandCapability(value: unknown): XlflowCommandCapability | undefined {
+function parseCommandCapability(
+  value: unknown,
+  capabilityVersion: number,
+): XlflowCommandCapability | undefined {
   if (
     !isRecord(value) ||
     !Array.isArray(value.cli_paths) ||
@@ -221,10 +236,14 @@ function parseCommandCapability(value: unknown): XlflowCommandCapability | undef
   ) {
     return undefined;
   }
-  if (typeof value.parallel_safe !== "boolean" || typeof value.retryable_when_busy !== "boolean") {
+  if (
+    typeof value.parallel_safe !== "boolean" ||
+    typeof value.retryable_when_busy !== "boolean" ||
+    typeof value.requires_excel !== "boolean"
+  ) {
     return undefined;
   }
-  return {
+  const result: XlflowCommandCapability = {
     cli_paths: value.cli_paths,
     resource_scope: resourceScope,
     operation_kind: operationKind,
@@ -232,7 +251,33 @@ function parseCommandCapability(value: unknown): XlflowCommandCapability | undef
     retryable_when_busy: value.retryable_when_busy,
     default_wait_policy: defaultWaitPolicy,
     recovery_behavior: recoveryBehavior,
+    requires_excel: value.requires_excel,
   };
+  if (
+    capabilityVersion >= 2 &&
+    (value.default_backend !== undefined || value.backends !== undefined)
+  ) {
+    if (!isNonEmptyString(value.default_backend) || !isRecord(value.backends)) {
+      return undefined;
+    }
+    const backends: Record<string, XlflowBackendCapability> = {};
+    for (const [name, backend] of Object.entries(value.backends)) {
+      if (
+        !isNonEmptyString(name) ||
+        !isRecord(backend) ||
+        typeof backend.requires_excel !== "boolean"
+      ) {
+        return undefined;
+      }
+      backends[name] = { requires_excel: backend.requires_excel };
+    }
+    if (backends[value.default_backend] === undefined) {
+      return undefined;
+    }
+    result.default_backend = value.default_backend;
+    result.backends = backends;
+  }
+  return result;
 }
 
 function matchedCliPathLength(args: string[], cliPaths: string[]): number | undefined {

@@ -547,6 +547,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `file_number_literal`
 - `file_operation`
 - `file_picker`
+- `file_pull_live_session_ignored`
+- `file_pull_session_state_unavailable`
 - `file_read`
 - `files_changed`
 - `files_to_change`
@@ -1031,7 +1033,15 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `public_procedure_count`
 - `published_runs`
 - `pull_args_invalid`
+- `pull_file_not_found`
+- `pull_file_unreadable`
 - `pull_formulas_failed`
+- `pull_protected_project`
+- `pull_source_path_unsafe`
+- `pull_source_publish_failed`
+- `pull_userform_unsupported`
+- `pull_vba_project_malformed`
+- `pull_vba_project_missing`
 - `push_20260101`
 - `push_args_invalid`
 - `push_diagnostic`

@@ -112,6 +112,12 @@ func shouldDelegateCommand(cmd *cobra.Command, topLevel string) bool {
 			if descriptor.ID == "encoding.convert" {
 				return false
 			}
+			if descriptor.ID == "pull" {
+				backend := cmd.Flags().Lookup("backend")
+				if backend != nil && strings.EqualFold(strings.TrimSpace(backend.Value.String()), "file") {
+					return false
+				}
+			}
 			if descriptor.Policy.ResourceScope == coordination.ResourceWorkbook && !descriptor.Policy.ParallelSafe {
 				return true
 			}

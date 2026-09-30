@@ -37,6 +37,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/excel"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
+	"github.com/harumiWeb/xlflow/internal/filepull"
 	formulaspkg "github.com/harumiWeb/xlflow/internal/formulas"
 	"github.com/harumiWeb/xlflow/internal/gui"
 	workbookinspect "github.com/harumiWeb/xlflow/internal/inspect"
@@ -2172,11 +2173,19 @@ func (a *app) attachCommand() *cobra.Command {
 func (a *app) pullCommand() *cobra.Command {
 	var session bool
 	var withFormulas bool
+	var backend string
 	cmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Export VBA components from the configured workbook",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			backend = strings.ToLower(strings.TrimSpace(backend))
+			if backend != "excel" && backend != "file" {
+				return a.writeFailure("pull", output.ExitConfig, "pull_args_invalid", fmt.Errorf("--backend must be excel or file, got %q", backend))
+			}
+			if backend == "file" && session {
+				return a.writeFailure("pull", output.ExitConfig, "pull_args_invalid", errors.New("--backend file and --session are mutually exclusive"))
+			}
 			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("pull")
 			if err != nil {
@@ -2184,11 +2193,18 @@ func (a *app) pullCommand() *cobra.Command {
 			}
 			var env output.Envelope
 			var code int
-			err = a.withExcelProgress("Exporting VBA source", commandOpts, func() error {
-				var runErr error
-				env, code, runErr = a.excelRunnerForConfig(cfg).PullWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
-				return runErr
-			})
+			if backend == "file" {
+				env, code, err = a.pullFromFile(cfg)
+			} else {
+				err = a.withExcelProgress("Exporting VBA source", commandOpts, func() error {
+					var runErr error
+					env, code, runErr = a.excelRunnerForConfig(cfg).PullWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
+					return runErr
+				})
+				if err == nil {
+					env.Pull = map[string]any{"backend": "excel", "source": excelPullAuthority(env)}
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -2201,7 +2217,7 @@ func (a *app) pullCommand() *cobra.Command {
 					attachFormulaPullResult(&env, formulaResult, a.cwd)
 					env.Logs = append(env.Logs, fmt.Sprintf("extracted %d formula region(s) from %d sheet(s)", formulaResult.FormulaRegionCount, len(formulaResult.Manifest.Sheets)))
 				}
-				if session && formulaErr == nil {
+				if backend == "excel" && session && formulaErr == nil {
 					env.Warnings = append(anySlice(env.Warnings), map[string]any{
 						"code":    "formula_snapshot_saved_file",
 						"message": "Formula snapshots were extracted from the saved workbook file. If the live session workbook has unsaved formula changes, run `xlflow save --json` and `xlflow formulas pull --json` again.",
@@ -2213,7 +2229,111 @@ func (a *app) pullCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().BoolVar(&withFormulas, "formulas", false, "also extract worksheet formula snapshots into formulas/")
+	cmd.Flags().StringVar(&backend, "backend", "excel", "VBA extraction backend: excel or file")
 	return cmd
+}
+
+func (a *app) pullFromFile(cfg config.Config) (output.Envelope, int, error) {
+	workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+	if !strings.EqualFold(filepath.Ext(workbookPath), workbookformat.ExtXLSM) {
+		unsupported := workbookformat.UnsupportedError{Capability: "pull --backend file", Extension: filepath.Ext(workbookPath)}
+		return output.Envelope{}, output.ExitConfig, a.writeUnsupportedWorkbookFormat("pull", unsupported)
+	}
+	result, err := filepull.Pull(a.cwd, cfg, workbookPath)
+	if err != nil {
+		return output.Envelope{}, filePullExitCode(err), a.writeFailure("pull", filePullExitCode(err), filePullErrorCode(err), err)
+	}
+	env := output.New("pull")
+	env.Workbook = map[string]any{
+		"path": displayPath(a.cwd, workbookPath), "session": false, "session_mode": "none",
+		"session_requested": false, "dirty": false, "needs_save": false,
+	}
+	env.Source = map[string]any{
+		"modules_dir": displayPath(a.cwd, result.ModulesDir), "classes_dir": displayPath(a.cwd, result.ClassesDir),
+		"forms_dir": displayPath(a.cwd, result.FormsDir), "workbook_dir": displayPath(a.cwd, result.WorkbookDir),
+		"written": displayPaths(a.cwd, result.Written), "removed": displayPaths(a.cwd, result.Removed), "updated": true,
+	}
+	env.Pull = map[string]any{
+		"backend": "file", "source": "saved_workbook", "code_page": result.CodePage,
+		"modules": map[string]any{"standard": result.Modules.Standard, "class": result.Modules.Class, "document": result.Modules.Document, "form": result.Modules.Form},
+	}
+	env.Target = map[string]any{"kind": "saved_workbook", "path": displayPath(a.cwd, workbookPath)}
+	env.Session = map[string]any{"active": false, "mode": "none", "source_of_truth": "saved_workbook"}
+	env.Logs = append(env.Logs, fmt.Sprintf("extracted %d VBA component(s) from saved workbook", len(result.Written)))
+	a.attachFilePullSessionWarning(&env, workbookPath)
+	return env, output.ExitSuccess, nil
+}
+
+func excelPullAuthority(env output.Envelope) string {
+	session := cliObjectMap(env.Session)
+	if source := strings.TrimSpace(fmt.Sprint(session["source_of_truth"])); source != "" && source != "<nil>" {
+		return source
+	}
+	workbook := cliObjectMap(env.Workbook)
+	if active, ok := workbook["session"].(bool); ok && active {
+		return "live_session"
+	}
+	return "saved_workbook"
+}
+
+func displayPaths(root string, paths []string) []string {
+	result := make([]string, len(paths))
+	for i, path := range paths {
+		result[i] = displayPath(root, path)
+	}
+	return result
+}
+
+func (a *app) attachFilePullSessionWarning(env *output.Envelope, workbookPath string) {
+	metadata, found, err := a.readSessionMetadata()
+	if err != nil {
+		env.Warnings = append(anySlice(env.Warnings), map[string]any{"code": "file_pull_session_state_unavailable", "message": "Could not inspect saved session metadata; file pull still used only the saved workbook: " + err.Error()})
+		return
+	}
+	if !found {
+		return
+	}
+	match, identityErr := coordination.SameFileIdentity(a.cwd, metadata.WorkbookPath, workbookPath)
+	if identityErr != nil {
+		match = samePath(metadata.WorkbookPath, workbookPath)
+	}
+	if match {
+		env.Warnings = append(anySlice(env.Warnings), map[string]any{"code": "file_pull_live_session_ignored", "message": "A matching live-session record exists, but --backend file reads only the saved workbook and ignores unsaved Excel/VBE state."})
+	}
+}
+
+func filePullExitCode(err error) int {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) || errors.Is(err, filepull.ErrPublish) {
+		return output.ExitEnvironment
+	}
+	return output.ExitValidation
+}
+
+func filePullErrorCode(err error) string {
+	var pathErr *os.PathError
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return "pull_file_not_found"
+	case errors.Is(err, os.ErrPermission):
+		return "pull_file_unreadable"
+	case errors.As(err, &pathErr):
+		return "pull_file_unreadable"
+	case errors.Is(err, filepull.ErrMissingVBAProject):
+		return "pull_vba_project_missing"
+	case errors.Is(err, filepull.ErrProtectedProject):
+		return "pull_protected_project"
+	case errors.Is(err, filepull.ErrUserFormUnsupported):
+		return "pull_userform_unsupported"
+	case errors.Is(err, filepull.ErrUnsafeSourcePath):
+		return "pull_source_path_unsafe"
+	case errors.Is(err, filepull.ErrLineNumberSafety):
+		return "vba_line_number_safety_failed"
+	case errors.Is(err, filepull.ErrPublish):
+		return "pull_source_publish_failed"
+	default:
+		return "pull_vba_project_malformed"
+	}
 }
 
 func attachFormulaPullResult(env *output.Envelope, result formulaspkg.Result, root string) {

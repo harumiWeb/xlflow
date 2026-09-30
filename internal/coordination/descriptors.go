@@ -40,7 +40,10 @@ func buildDescriptors() []Descriptor {
 		cli("init", "init", workbookRead),
 		both("doctor", "doctor", excelRead, bridge("doctor")),
 		both("attach", "attach", withRecovery(excelMutate, RecoveryBlock), bridge("attach")),
-		both("pull", "pull", workbookRead, bridge("pull")),
+		withBackends(both("pull", "pull", workbookRead, bridge("pull")), "excel", map[string]BackendCapability{
+			"excel": {RequiresExcel: true},
+			"file":  {RequiresExcel: false},
+		}),
 		both("build", "build", workbookMutate, bridge("build")),
 		cli("pack", "pack", workbookMutate),
 		both("push", "push", workbookMutate, bridge("push")),
@@ -102,6 +105,12 @@ func buildDescriptors() []Descriptor {
 func withRecovery(policy Policy, behavior RecoveryBehavior) Policy {
 	policy.RecoveryBehavior = behavior
 	return policy
+}
+
+func withBackends(descriptor Descriptor, defaultBackend string, backends map[string]BackendCapability) Descriptor {
+	descriptor.DefaultBackend = defaultBackend
+	descriptor.Backends = backends
+	return descriptor
 }
 
 func cli(id CommandID, path string, policy Policy) Descriptor {

@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `xlflow pull --backend file`, a pure-Go saved-`.xlsm` VBA extraction
+  path for standard, class, and document modules. It reports explicit
+  saved-workbook authority, publishes source transactionally, preserves the
+  forms tree, rejects UserForms before mutation, and never falls back to Excel.
+  Capabilities schema v2 now publishes the default backend and per-backend
+  Excel requirements while the VS Code extension remains compatible with v1.
+
 - Hardened `xlflow pack` signed-project rejection to inspect OOXML VBA
   signature relationships and content types before replacing
   `xl/vbaProject.bin`. Legacy, Agile, and V3 package signatures now return

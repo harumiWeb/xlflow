@@ -130,6 +130,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
           retryable_when_busy: true,
           default_wait_policy: "fail",
           recovery_behavior: "block",
+          requires_excel: true,
           future_field: "ignored",
         },
         formBuild: {
@@ -140,6 +141,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
           retryable_when_busy: true,
           default_wait_policy: "fail",
           recovery_behavior: "block",
+          requires_excel: true,
         },
         test: {
           cli_paths: ["test"],
@@ -149,6 +151,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
           retryable_when_busy: true,
           default_wait_policy: "fail",
           recovery_behavior: "block",
+          requires_excel: true,
         },
         lint: {
           cli_paths: ["lint"],
@@ -158,12 +161,39 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
           retryable_when_busy: false,
           default_wait_policy: "fail",
           recovery_behavior: "allow",
+          requires_excel: false,
         },
       },
       future_envelope_field: true,
     },
   });
-  assert.ok(capabilities, "v1 capability output should parse while ignoring unknown fields");
+  assert.ok(capabilities, "v2 capability output should parse while ignoring unknown fields");
+
+  const v1Capabilities = parseCapabilitiesEnvelope({
+    status: "ok",
+    capabilities: {
+      capability_version: 1,
+      commands: { push: { ...capabilities!.commands.push } },
+    },
+  });
+  assert.strictEqual(v1Capabilities?.capability_version, 1, "v1 remains supported");
+
+  const v2BackendCapabilities = parseCapabilitiesEnvelope({
+    status: "ok",
+    capabilities: {
+      capability_version: 2,
+      commands: {
+        pull: {
+          ...capabilities!.commands.push,
+          cli_paths: ["pull"],
+          operation_kind: "read",
+          default_backend: "excel",
+          backends: { excel: { requires_excel: true }, file: { requires_excel: false } },
+        },
+      },
+    },
+  });
+  assert.strictEqual(v2BackendCapabilities?.commands.pull.backends?.file.requires_excel, false);
   assert.strictEqual(
     capabilityOperationForArgs(capabilities!, ["--json", "push"])?.commandID,
     "push",
