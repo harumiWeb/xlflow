@@ -547,16 +547,23 @@ End Function
             }
 
             $sameNameReferenceResult = $null
+            $sameNameReference = $null
             try {
-                $sameNameReference = $projectA.References.AddFromFile($workbookB.FullName)
                 try {
+                    $sameNameReference = $projectA.References.AddFromFile($workbookB.FullName)
                     $sameNameReferenceResult = "success:$($sameNameReference.Name)"
-                    $projectA.References.Remove($sameNameReference)
-                } finally {
-                    Release-ComObject $sameNameReference
+                } catch {
+                    $sameNameReferenceResult = "error:$($_.Exception.Message)"
                 }
-            } catch {
-                $sameNameReferenceResult = "error:$($_.Exception.Message)"
+            } finally {
+                if ($null -ne $sameNameReference) {
+                    try {
+                        $projectA.References.Remove($sameNameReference)
+                    } finally {
+                        Release-ComObject $sameNameReference
+                        $sameNameReference = $null
+                    }
+                }
             }
 
             $projectB.Name = 'VBAProject2'
