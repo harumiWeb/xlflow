@@ -48,6 +48,10 @@ func TestCapabilitiesCommandWritesV1JSONEnvelope(t *testing.T) {
 	if !ok || len(convert.CLIPaths) != 1 || convert.CLIPaths[0] != "encoding convert" || convert.ResourceScope != coordination.ResourceWorkbook || convert.OperationKind != coordination.OperationMutate || convert.ParallelSafe || !convert.RetryableWhenBusy || convert.DefaultWaitPolicy != coordination.WaitFail || convert.RecoveryBehavior != coordination.RecoveryNotApplicable || convert.RequiresExcel {
 		t.Fatalf("encoding.convert capability = %#v", convert)
 	}
+	pack, ok := got.Capabilities.Commands["pack"]
+	if !ok || len(pack.CLIPaths) != 1 || pack.CLIPaths[0] != "pack" || pack.ResourceScope != coordination.ResourceWorkbook || pack.OperationKind != coordination.OperationMutate || pack.ParallelSafe || !pack.RetryableWhenBusy || pack.DefaultWaitPolicy != coordination.WaitFail || pack.RecoveryBehavior != coordination.RecoveryBlock || pack.RequiresExcel {
+		t.Fatalf("pack capability = %#v", pack)
+	}
 }
 
 func TestCapabilitiesCommandDoesNotRequireAWorkbook(t *testing.T) {

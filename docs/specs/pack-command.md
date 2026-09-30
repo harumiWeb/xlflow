@@ -1,8 +1,10 @@
-# xlflow `pack` Command (Experimental)
+# xlflow `pack` Command
 
 ## Status
 
-Experimental. This spec defines the contract for the pure-Go `pack` path, now implemented behind the required `--experimental` flag. When `pack` leaves experimental status, this contract folds into `docs/specs/cli-contract.md`. See `docs/adr/ADR-0012-pack-command.md` for the rationale and the `pack`/`push` boundary.
+Stable. This spec defines the detailed contract for the pure-Go `pack` path.
+See `docs/adr/ADR-0012-pack-command.md` for the rationale and
+`docs/specs/cli-contract.md` for the shared CLI envelope and exit-code rules.
 
 ## Scope
 
@@ -13,14 +15,17 @@ Experimental. This spec defines the contract for the pure-Go `pack` path, now im
 ## Command
 
 ```text
-xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm> | --blank] --experimental
+xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm> | --blank]
 ```
 
 - `--out <path>` (required): destination artifact path. Must end in `.xlsm`. May overwrite an existing output file, but must not resolve to the template or the configured source workbook (see Template handling). A missing `--out` fails with `pack_args_invalid` (exit 2).
 - `--template <path>` (optional): the workbook template the artifact is based on. When omitted, `pack` uses the source workbook configured in `xlflow.toml` under `[excel].path`. The template provides workbook structure — sheets, document-module hosts, and any existing designer streams; `pack` replaces only `xl/vbaProject.bin`.
 - `--blank` (optional): create a fresh workbook without reading a template. It is mutually exclusive with an explicit `--template`; passing `--blank` together with `--template` — including an explicitly empty `--template ''` — fails with `pack_args_invalid` (exit 2). When neither flag is provided, template mode keeps the `[excel].path` fallback.
-- `--experimental` (required while experimental): without it, `pack` fails with `pack_experimental_required` (exit 2).
 - `--json`: persistent global flag; emits the standard envelope (see Output / JSON contract).
+
+The first stable release accepts the former `--experimental` flag as a hidden,
+deprecated no-op for command-line compatibility. It does not appear in help and
+does not change output or behavior.
 
 `--bridge` does not apply to `pack`. `pack` uses no Excel bridge.
 
@@ -67,7 +72,7 @@ does not publish a partial artifact.
 
 If generation, validation, or publication fails, an existing destination is left byte-for-byte unchanged. A destination that is locked or cannot be replaced safely fails with `pack_output_busy` (exit 3); a publication that cannot be performed atomically fails with `pack_output_replace_failed` (exit 3); staging or structural-validation failures remain `pack_write_failed` (exit 3). A cleanup failure before publication is joined to and returned with the primary failure. When temporary cleanup fails after a successful publication the command still succeeds, reports `output.temporary_cleanup.status="failed"` with `residual_path`, and emits a `pack_temporary_cleanup_failed` warning.
 
-## Supported source (MVP)
+## Supported source
 
 - **Standard modules** (`.bas`) and **class modules** (`.cls`): the source tree is authoritative. Modules absent from the template are added, modules absent from source are removed, and renames are represented as removal of the old component plus addition of the new component. The textual `PROJECT` stream, `dir/PROJECTMODULES`, and `VBA/<stream>` entries are regenerated as one consistent component set.
 - **Document modules**: supported only where they map safely against the template's existing document modules.
@@ -114,7 +119,6 @@ Each unsupported case is a specific, loud error. `pack` never falls back to best
 | any UserForm in blank mode                          | `pack_blank_userform_unsupported`               | 1    |
 | unknown or ambiguous VBA project layout             | `pack_ambiguous_layout`                         | 1    |
 | missing `--out`, bad extension, other arg errors    | `pack_args_invalid`                             | 2    |
-| missing `--experimental`                            | `pack_experimental_required`                    | 2    |
 | template/source workbook not found or unreadable    | `pack_template_not_found`                       | 2    |
 | source inventory or artifact staging failure        | `pack_source_read_failed` / `pack_write_failed` | 3    |
 | `.xlsb` template selected by template mode          | `workbook_format_unsupported`                   | 2    |
@@ -141,7 +145,6 @@ On success with `--json`, `pack` emits the standard envelope (`status`, `command
   "pack": {
     "backend": "pure-go",
     "base": "template",
-    "experimental": true,
     "vbe_validation": "not_performed",
     "template": "build/Book.xlsm",
     "modules": { "standard": 3, "class": 2, "document": 1, "form": 1, "carried_streams": 4 }
@@ -164,7 +167,7 @@ The backend identifier `pack.backend = "pure-go"` is deliberately distinct from 
 
 - `0`: success.
 - `1`: validation/content failure detected from the project or template — protected project, signed project, ambiguous layout, unsupported UserForm generation.
-- `2`: CLI argument or configuration error — missing `--out`, missing `--experimental`, bad extension, in-place overwrite, active session, template not found.
+- `2`: CLI argument or configuration error — missing `--out`, bad extension, in-place overwrite, active session, template not found.
 - `3`: environment failure — I/O failure reading sources or the template after validation has passed, staging the artifact, or publishing it (busy destination, non-atomic replace).
 
 ## No VBE validation contract
@@ -183,21 +186,37 @@ The backend identifier `pack.backend = "pure-go"` is deliberately distinct from 
   `vbaProject.bin` reads. Successful CFB parses are rewritten and reparsed to
   check stream contents and major-version preservation.
 
-These run on the existing Linux PR CI lane; no Windows runner is required for the `pack` path, and the automated PR path stays Linux/pure-Go only. Windows/Excel smoke tests that open the artifact and run a macro are a pre-stable milestone performed in the release gate, not in PR CI; see _Release-gate Excel smoke_ below.
+These run on the existing Linux PR CI lane; no Windows runner is required for the `pack` path, and the automated PR path stays Linux/pure-Go only. Windows/Excel compatibility tests are a manual release gate, not PR CI; see _Release-gate Excel compatibility matrix_ below.
 
-## Release-gate Excel smoke (pre-stable)
+## Release-gate Excel compatibility matrix
 
-The pure-Go path cannot tell whether a generated workbook actually compiles and runs (see _No VBE validation contract_). To close that gap before `pack` leaves experimental status, a representative packed artifact is smoke-tested in real Excel at the release gate — not in PR CI.
+The pure-Go path cannot tell whether a generated workbook actually compiles and runs (see _No VBE validation contract_). Representative packed artifacts are therefore tested in real Excel at the release gate, not in PR CI.
 
-This smoke is part of the repository's manual release-gate flow (the `xlflow-tmp-workspace-e2e` skill, "pack artifact smoke" section); the automated PR path remains Linux/pure-Go only. The procedure:
+The matrix is implemented by `scripts/test-pack-e2e.ps1` and documented by the
+repository's `xlflow-tmp-workspace-e2e` skill. It covers:
 
-1. Build a workspace with a known sentinel macro — a standard module that writes a fixed value to a cell.
-2. Produce the artifact at the file level without template bytes: `xlflow pack --blank --out dist/Book.xlsm --experimental`. Confirm the JSON reports `pack.base = "blank"` and `pack.vbe_validation = "not_performed"`.
-3. Open the produced `.xlsm` in Excel via COM, run the packed macro (which forces a VBE compile), and assert that the sentinel cell holds the expected value.
+1. Create an Excel-authored template with multiple document modules, a sheet
+   whose visible name differs from its CodeName, standard/class topology, an
+   external reference, and an existing `.frx`-bearing nested UserForm.
+2. Pack standard/class updates, additions, removals, and renames; document and
+   UserForm code updates; Japanese text; and a non-ASCII module name.
+3. Open the packed artifact, inspect the VBA project and UserForm designer,
+   force compilation by running a representative macro, and assert its
+   sentinel output.
+4. Run the separate blank-workbook profile through the same open/execute/
+   sentinel check.
+5. Verify fail-loud protected, signed, unsupported-layout/code-page, and new
+   UserForm cases through committed fixture-backed tests.
 
-The smoke passes only if `pack` exits `0`, the workbook opens without a compile error, and the macro's observable effect (the sentinel cell) matches. A compile error, a wrong sentinel value, or a non-zero exit blocks the release.
+The gate passes only if `pack` exits `0`, both successful artifacts open without
+a compile error, the expected component and designer state is present, and the
+sentinel values match. A compile error, wrong topology/state, wrong sentinel,
+or unexpected error contract blocks the release.
 
-This is release-gate evidence for a representative build. It does not change `pack`'s permanent `vbe_validation = "not_performed"` contract: `pack` itself never validates, and artifacts produced in the field remain unvalidated until opened in Excel.
+This is release-gate evidence for representative builds. It does not change
+`pack`'s permanent `vbe_validation = "not_performed"` contract: `pack` itself
+never validates, and artifacts produced in the field remain unvalidated until
+opened in Excel.
 
 ## Staged UserForm plan
 

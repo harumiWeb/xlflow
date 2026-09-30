@@ -173,7 +173,7 @@ Run the repo-local `xlflow-tmp-workspace-e2e` skill against fresh `tmp_workspace
 - class module round-trip
 - UserForm round-trip including `.frm` and `.frx`
 - `init` from an existing workbook
-- pack artifact smoke (when the release touches `pack`): see `docs/specs/pack-command.md` ("Release-gate Excel smoke"); produce a `.xlsm` with `pack --experimental`, open it in Excel, run a packed macro, and assert a sentinel cell value; keep the automated PR path Linux/pure-Go only
+- pack compatibility matrix (when the release touches `pack`): see `docs/specs/pack-command.md` and run `scripts/test-pack-e2e.ps1`; verify template and blank artifacts, component/UserForm state, real Excel compile/run sentinels, and fail-loud cases while keeping the automated PR path Linux/pure-Go only
 
 If the release changes session behavior, also verify the session loop:
 

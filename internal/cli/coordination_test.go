@@ -762,7 +762,7 @@ func TestCoordinatedLeafReleasesAllTargetsWhenHandlerFails(t *testing.T) {
 	}
 	a := &app{
 		cwd:          rootDir,
-		rawArgs:      []string{"--json", "pack", "--experimental", "--out", "artifact.xlsm"},
+		rawArgs:      []string{"--json", "pack", "--out", "artifact.xlsm"},
 		stdout:       &bytes.Buffer{},
 		stderr:       &bytes.Buffer{},
 		coordination: manager,

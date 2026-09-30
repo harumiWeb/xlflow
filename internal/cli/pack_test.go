@@ -31,10 +31,14 @@ func TestRootCommandIncludesPackCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "pack" {
 		t.Fatalf("expected pack command, got %#v", cmd)
 	}
-	for _, name := range []string{"out", "template", "blank", "experimental"} {
+	for _, name := range []string{"out", "template", "blank"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected pack command to define --%s", name)
 		}
+	}
+	experimental := cmd.Flags().Lookup("experimental")
+	if experimental == nil || !experimental.Hidden || experimental.Deprecated == "" {
+		t.Fatalf("deprecated --experimental compatibility flag = %#v", experimental)
 	}
 }
 
@@ -43,7 +47,7 @@ func TestPackCommandBlankCreatesWorkbookWithoutTemplate(t *testing.T) {
 	writePackConfig(t, dir)
 	writePackSourceTree(t, dir, false)
 
-	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--out", "dist/Fresh.xlsm")
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--blank", "--out", "dist/Fresh.xlsm")
 	if err != nil {
 		t.Fatalf("pack --blank: %v\n%s", err, stdout)
 	}
@@ -163,9 +167,8 @@ func TestPackCommandValidationFailures(t *testing.T) {
 		code int
 		err  string
 	}{
-		{name: "experimental gate", args: []string{"--json", "pack", "--out", "dist/Book.xlsm"}, code: output.ExitConfig, err: "pack_experimental_required"},
-		{name: "missing out", args: []string{"--json", "pack", "--experimental"}, code: output.ExitConfig, err: "pack_args_invalid"},
-		{name: "bad out extension", args: []string{"--json", "pack", "--experimental", "--out", "dist/Book.xlsx"}, code: output.ExitConfig, err: "pack_args_invalid"},
+		{name: "missing out", args: []string{"--json", "pack"}, code: output.ExitConfig, err: "pack_args_invalid"},
+		{name: "bad out extension", args: []string{"--json", "pack", "--out", "dist/Book.xlsx"}, code: output.ExitConfig, err: "pack_args_invalid"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -185,7 +188,7 @@ func TestPackCommandTemplateNotFound(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)
 
-	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--out", "dist/Book.xlsm")
 	if err == nil || output.ExitCode(err) != output.ExitConfig {
 		t.Fatalf("err=%v exit=%d, want config failure", err, output.ExitCode(err))
 	}
@@ -396,8 +399,11 @@ func TestPackCommandEndToEndJSONAndWorkbook(t *testing.T) {
 	if env.Output["path"] != "dist/Book.xlsm" || env.Output["format"] != "xlsm" || env.Output["created_parent_dirs"] != true {
 		t.Fatalf("unexpected output payload: %#v", env.Output)
 	}
-	if env.Pack["backend"] != "pure-go" || env.Pack["vbe_validation"] != "not_performed" || env.Pack["experimental"] != true {
+	if env.Pack["backend"] != "pure-go" || env.Pack["vbe_validation"] != "not_performed" {
 		t.Fatalf("unexpected pack payload: %#v", env.Pack)
+	}
+	if _, ok := env.Pack["experimental"]; ok {
+		t.Fatalf("stable pack payload retained experimental marker: %#v", env.Pack)
 	}
 	modules, ok := env.Pack["modules"].(map[string]any)
 	if !ok {
@@ -421,7 +427,7 @@ func TestPackCommandEndToEndJSONAndWorkbook(t *testing.T) {
 
 	// A second pack over the same destination must publish through the atomic
 	// replace path and report it.
-	stdout, err = runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
+	stdout, err = runPackCommandForTest(dir, "--json", "pack", "--out", "dist/Book.xlsm")
 	if err != nil {
 		t.Fatalf("second pack command error = %v\n%s", err, stdout)
 	}
@@ -794,6 +800,32 @@ func TestPackCommandMapsProtectedProjectEngineError(t *testing.T) {
 	}
 	if got := errorCodeFromJSON(t, stdout); got != "pack_protected_project" {
 		t.Fatalf("error code = %q, want pack_protected_project\n%s", got, stdout)
+	}
+}
+
+func TestPackCommandMapsSignedProjectEngineError(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	project, err := vbaproject.Read(readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.RawStreams["_VBA_PROJECT_CUR/VBAProjectSignature"] = []byte("signature sentinel")
+	signed, err := vbaproject.Write(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePackTemplate(t, dir, signed)
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--out", "dist/Book.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("err=%v exit=%d, want validation failure", err, output.ExitCode(err))
+	}
+	if got := errorCodeFromJSON(t, stdout); got != "pack_signed_project" {
+		t.Fatalf("error code = %q, want pack_signed_project\n%s", got, stdout)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "dist", "Book.xlsm")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("signed project rejection published an artifact, stat error = %v", statErr)
 	}
 }
 

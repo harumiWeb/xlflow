@@ -910,7 +910,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `pack_ambiguous_layout`
 - `pack_args_invalid`
 - `pack_blank_userform_unsupported`
-- `pack_experimental_required`
 - `pack_failed`
 - `pack_in_place_overwrite`
 - `pack_output_busy`

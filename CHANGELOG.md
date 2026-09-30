@@ -4,19 +4,28 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added experimental `xlflow pack --blank` to create a fresh one-sheet `.xlsm`
+- Graduated `xlflow pack` to a stable, pure-Go, cross-platform artifact path.
+  `--experimental` is no longer required, successful JSON no longer emits
+  `pack.experimental`, and the first stable release accepts the old flag only
+  as a hidden deprecated no-op. The permanent
+  `pack.backend = "pure-go"` / `pack.vbe_validation = "not_performed"`
+  boundary remains explicit. The Windows release gate now covers component
+  topology, multiple document modules, non-ASCII source and names, preserved
+  nested UserForm/`.frx` state, project references, and real Excel compile/run
+  sentinels.
+- Added `xlflow pack --blank` to create a fresh one-sheet `.xlsm`
   without a workbook template. The profile fixes document topology to
   `ThisWorkbook` plus `Sheet1`, authors a fresh source-only VBA project with
   deterministic Office references, supports configurable `[pack.blank]`
   `code_page`/`lcid`, reports `pack.base = "blank"`, and rejects UserForms with
   `pack_blank_userform_unsupported`.
-- Hardened experimental `xlflow pack` VBA container handling: CFB v3 and v4
+- Hardened `xlflow pack` VBA container handling: CFB v3 and v4
   templates now retain their original major version, large containers emit
   DIFAT sectors beyond the 109 header entries, and malformed allocation chains,
   directory graphs, compressed chunks, and `dir` records fail loudly. OVBA
   decompression is capped at 64 MiB per stream, with native fuzz targets for
   the CFB, OVBA, and complete `vbaProject.bin` readers.
-- Hardened experimental `xlflow pack` for non-ASCII VBA components: module and
+- Hardened `xlflow pack` for non-ASCII VBA components: module and
   stream names are now serialized in the project code page with matching
   UTF-16 records, code pages 874, 932, 936, 949, 950, 1250-1258, and 65001 are
   supported explicitly, and names the code page cannot represent fail loudly
@@ -24,14 +33,14 @@ All notable changes to xlflow will be documented in this file.
   and private flags, stream name, module type, and unrecognized module records
   are preserved across read/write/read; new components get deterministic
   default metadata.
-- Added the shared managed-source encoding preflight to experimental `xlflow
+- Added the shared managed-source encoding preflight to `xlflow
 pack`. All `.bas`, `.cls`, and `.frm` source, including UserForm designer and
   sidecar code, must be UTF-8 without BOM before source planning or
   `vbaProject.bin` generation; failures now return the standard
   `source_encoding_invalid` diagnostics and remediation suggestions. Pack
   preflight uses the same separator normalization and external absolute-root
   support as pack source inventory.
-- Hardened experimental `xlflow pack` output publication: the artifact is
+- Hardened `xlflow pack` output publication: the artifact is
   staged as a temporary sibling file, structurally validated, and installed
   with an atomic create/replace so a failed or interrupted pack cannot corrupt
   a previously valid output. `--out` now compares canonical filesystem
@@ -44,8 +53,8 @@ pack`. All `.bas`, `.cls`, and `.frm` source, including UserForm designer and
   `pack_output_replace_failed`, and successful JSON reports
   `output.replaced_existing`, `output.publication`, and
   `output.temporary_cleanup`.
-- Added deterministic read-only source planning to experimental `xlflow pack`: `build` and `pack` now share strict source-tree discovery, while `pack` deliberately ignores `[build].exclude`; pack validates configured roots, extensions, names, UserForm artifacts, source/template identity, and topology before mutation, then applies an explicit authority/action plan in stable order.
-- Extended experimental `xlflow pack` so the source tree is authoritative for
+- Added deterministic read-only source planning to `xlflow pack`: `build` and `pack` now share strict source-tree discovery, while `pack` deliberately ignores `[build].exclude`; pack validates configured roots, extensions, names, UserForm artifacts, source/template identity, and topology before mutation, then applies an explicit authority/action plan in stable order.
+- Extended `xlflow pack` so the source tree is authoritative for
   standard and class module topology. Packed projects can now add, remove, and
   rename those components while keeping `PROJECT`, `PROJECTMODULES`, and VBA
   module streams consistent; document-module and UserForm topology remains

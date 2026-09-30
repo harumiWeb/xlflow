@@ -76,7 +76,7 @@ build to recreate the companion file.
 | ------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `build` | Publish a filtered release workbook without changing the development workbook.                       | Required on Windows.                                             |
 | `push`  | Synchronize the complete source tree, including development/test code, into the configured workbook. | Runs through Excel/VBIDE.                                        |
-| `pack`  | Produce an experimental `.xlsm` with the pure-Go file-level writer.                                  | Never performed by `pack`; release-gate Excel smoke is required. |
+| `pack`  | Produce a stable `.xlsm` with the cross-platform pure-Go file-level writer.                          | Never performed by `pack`; release-gate Excel smoke is required. |
 
 `[build].exclude` filters only `build`; it never changes `push` or `pack`.
 Projects created by `xlflow new` or `xlflow init` exclude the scaffold's

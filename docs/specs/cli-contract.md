@@ -706,6 +706,17 @@ TLS/certificate policy, sensitive constants, or download-and-launch findings.
 
 `[build].exclude` defines the source filtering policy used only by the Excel-backed `build` command; it never changes `push` or `pack` source selection. `build` and `pack` share the same read-only source inventory validation, but only `build` applies exclusions to that inventory. Each entry is a project-root-relative `doublestar` glob. Paths and patterns are normalized to `/`, so Windows and WSL separators match identically; absolute paths and patterns that traverse outside the project root are invalid. Matching is component-level: standard, class, and document components match their source file, while a UserForm matches its `.frm` and any associated `.frx`, sidecar code, or persisted spec path. A matching UserForm artifact excludes the whole form component. The resolver reports unmatched patterns as stable `build_exclude_unmatched` warnings, but malformed patterns, unreadable configured source roots or files, incomplete UserForm artifacts, duplicate included VBA component names (case-insensitive across component types), and equal resolved base/output paths are errors before Excel is opened. Included and excluded lists are sorted by normalized source path. `xlflow new` and `xlflow init` pre-populate this list with `src/modules/Tests/**` and `src/modules/Xlflow/XlflowAssert.bas`; these scaffold defaults can be removed when those components are part of a release.
 
+`pack --out <path.xlsm> [--template <path.xlsm> | --blank]` is the stable,
+pure-Go source-to-artifact path. It is cross-platform, never opens Excel, and
+never falls back to `build` or `push`. Standard/class topology is
+source-authoritative; document and UserForm topology is template-authoritative;
+existing UserForm code-behind can be updated while designer state is preserved;
+new UserForm generation remains unsupported. Successful JSON includes
+`pack.backend="pure-go"` and `pack.vbe_validation="not_performed"`; it does not
+include an experimental marker. The first stable release accepts the former
+`--experimental` option as a hidden deprecated no-op. Full source, output,
+error, and release-gate contracts are defined in `pack-command.md`.
+
 `build` defaults its base workbook to `[excel].path` and its output to `build/Release/<base filename>`. The base must exist and use `.xlsm`, `.xlam`, or `.xlsb`; the output uses the same format and is a complete project-local file path, not a directory. `build --dry-run` never opens Excel, creates directories, writes an artifact or manifest, acquires workbook coordination, or delegates from WSL. It returns a v1 `build` manifest with `schema_version=1`, `command="build"`, `backend="excel"`, resolved base/output, included/excluded components, and `validation.vbe_compile="not_run"`.
 
 A non-dry build acquires coordination for both the base and output workbook, rejects Office output locks, output ownership by a live xlflow session, unsafe output replacement, and a dirty matching base session before opening Excel. The bridge creates the output parent directory and a uniquely named, bridge-owned staging directory directly below that parent. It reconstructs the workbook there, requires VBE compilation, saves and closes the staged workbook, confirms Excel cleanup, and verifies the staged artifact is present, non-empty, and readable before publication. The bridge never changes an existing output before those gates pass.

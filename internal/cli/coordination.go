@@ -176,8 +176,7 @@ func (a *app) coordinationTargets(cmd *cobra.Command, args []string, commandID c
 		return nil, false
 	case "pack":
 		out, outOK := commandFlagString(cmd, "out")
-		experimental, experimentalErr := cmd.Flags().GetBool("experimental")
-		if !outOK || out == "" || experimentalErr != nil || !experimental {
+		if !outOK || out == "" {
 			return nil, false
 		}
 		cfg, ok := a.coordinationConfig()

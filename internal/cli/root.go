@@ -2256,15 +2256,11 @@ func (a *app) packCommand() *cobra.Command {
 	var outPath string
 	var templatePath string
 	var blank bool
-	var experimental bool
 	cmd := &cobra.Command{
-		Use:   "pack --out <path.xlsm> --experimental",
+		Use:   "pack --out <path.xlsm>",
 		Short: "Build an .xlsm artifact from source",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !experimental {
-				return a.writeFailure("pack", output.ExitConfig, "pack_experimental_required", errors.New("pack requires --experimental"))
-			}
 			if strings.TrimSpace(outPath) == "" || !strings.EqualFold(filepath.Ext(outPath), ".xlsm") {
 				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", errors.New("--out is required and must end in .xlsm"))
 			}
@@ -2402,7 +2398,6 @@ func (a *app) packCommand() *cobra.Command {
 			packOutput := map[string]any{
 				"backend":        "pure-go",
 				"base":           base,
-				"experimental":   true,
 				"vbe_validation": "not_performed",
 				"modules": map[string]any{
 					"standard":        meta.Standard,
@@ -2434,7 +2429,10 @@ func (a *app) packCommand() *cobra.Command {
 	cmd.Flags().StringVar(&outPath, "out", "", "destination .xlsm artifact path")
 	cmd.Flags().StringVar(&templatePath, "template", "", "workbook template path")
 	cmd.Flags().BoolVar(&blank, "blank", false, "create a fresh one-sheet workbook without a template")
-	cmd.Flags().BoolVar(&experimental, "experimental", false, "enable experimental pure-Go pack")
+	cmd.Flags().Bool("experimental", false, "deprecated no-op retained for command-line compatibility")
+	if err := cmd.Flags().MarkDeprecated("experimental", "pack is stable; remove --experimental"); err != nil {
+		panic(err)
+	}
 	return cmd
 }
 

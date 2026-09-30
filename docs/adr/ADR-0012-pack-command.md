@@ -57,6 +57,29 @@ The contract for command shape, the JSON envelope, and exit codes lives in `docs
 - **Before non-experimental status** — broader document-module fixtures; hardened signed/protected project detection beyond the MVP's baseline reject-on-detect; non-ASCII/Japanese source fixtures; Windows/Excel smoke tests that open the generated workbook and compile/run a minimal macro; a documented UserForm preservation/update strategy; and docs stating that `pack` does not compile or run VBA.
 - **UserForms, staged in three steps** — (1) preserve the template's existing designer streams unchanged, generating no forms; (2) update form code-behind while keeping the template's designer state; (3) full reconstruction from exported `.frm`/`.frx` as a separate, higher-risk phase. Only step (1)'s "carry existing designer streams through untouched" is compatible with the MVP, and only when the forms already exist in the template.
 
+### Amendment: stable graduation (Issue #858)
+
+The pre-stable stages are complete. `pack` is now a stable command and no
+longer requires `--experimental`. The first stable release accepts that flag as
+a hidden deprecated no-op so existing automation can migrate without changing
+artifact behavior; it is not part of the stable help, JSON, or error contract.
+
+The stable authority boundary is:
+
+- standard/class component topology and code are source-authoritative;
+- document topology is template-authoritative and matched document code is
+  source-authoritative;
+- existing UserForm topology and designer state are template-authoritative,
+  while code-behind follows `[userform].code_source`;
+- creating a new UserForm remains unsupported and fail-loud.
+
+Graduation is backed by the manual Windows/Excel release gate. It exercises
+standard/class add, update, remove, and rename; multiple document modules and
+CodeNames; non-ASCII source and component names; existing nested UserForm and
+`.frx` state; references and project metadata; and compile/run sentinel checks.
+This evidence does not change the runtime contract: ordinary `pack` executions
+remain Excel-independent and report `vbe_validation = "not_performed"`.
+
 ### No VBE validation
 
 "No VBE validation" is a permanent semantic boundary, not a temporary limitation. `pack` never compiles or executes VBA. Its output is a file artifact whose correctness against the VBE has not been verified; Excel compiles it from source on first open. Every `pack` run reports this in its output. Consumers that need compile or runtime validation must use the Excel/VBIDE-backed `push` path on Windows.
@@ -92,7 +115,9 @@ content validation failure and never produces a best-effort artifact.
 - Negative: xlflow takes on maintenance of MS-OVBA and OLE/CFB compatibility behavior in-repo rather than delegating it to an external module.
 - Negative: supporting both CFB geometries and bounded graph parsing adds more
   compatibility and adversarial-input cases to the internal implementation.
-- Negative: the experimental surface needs staged hardening — fixtures, detection, smoke tests — before it can be considered stable.
+- Negative: stable compatibility still depends on maintaining pure-Go fixtures
+  plus a manual Windows/Excel release gate; PR CI alone cannot prove VBE
+  compile/runtime compatibility.
 - Negative: blank mode is intentionally not a general workbook-layout generator; projects needing sheets beyond `Sheet1` or UserForms still require a template.
 
 ## Alternatives Considered

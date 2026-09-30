@@ -213,55 +213,49 @@ Even when the change is not primarily about session state, prefer the same sessi
 
 Do not report release readiness if one of these paths was skipped without calling it out explicitly.
 
-### 7. pack artifact smoke
+### 7. pack compatibility matrix
 
-Use this section when the release includes changes to the experimental `pack` command (`docs/specs/pack-command.md`, ADR-0012).
+Use this section for every release that changes `pack`, its MS-OVBA/CFB writer,
+source planning, or its public contract (`docs/specs/pack-command.md`, ADR-0012).
 
-`pack` is a pure-Go, file-level path: it regenerates `xl/vbaProject.bin` from source without opening Excel, so it always reports `pack.vbe_validation = "not_performed"`. This smoke exists to confirm, at the release gate, that a representative packed artifact actually compiles and runs in real Excel. It is release-gate evidence only; it does not run in PR CI and it does not change `pack`'s permanent no-validation contract.
+`pack` is stable, pure-Go, and file-level. It never opens Excel and always
+reports `pack.backend = "pure-go"` and
+`pack.vbe_validation = "not_performed"`. Real Excel remains a manual release
+gate; do not add Excel or COM steps to PR CI.
 
-Keep the automated PR path Linux/pure-Go only. Do not add Excel or COM steps to PR CI; the smoke is performed here, in the release gate, on Windows with Excel.
-
-In the primary workspace, make the standard `src/modules/Main.bas` macro from section 3 write a known sentinel value to `A1`. Keep the sentinel in a module that already exists in the template (for example `Main`): the experimental `pack` MVP updates existing modules only and rejects a brand-new module with `pack_ambiguous_layout`. Produce the artifact at the file level:
-
-```powershell
-xlflow pack --out dist/Book.xlsm --experimental --json
-```
-
-Confirm the JSON envelope reports `status = "ok"`, `pack.backend = "pure-go"`, and `pack.vbe_validation = "not_performed"`.
-
-Open the produced artifact, run the packed macro, and assert the sentinel cell:
+Build/install both xlflow binaries, then run the repository harness:
 
 ```powershell
-$path = 'C:\dev\go\xlflow\tmp_workspaces\<topic>-e2e\dist\Book.xlsm'
-$excel = New-Object -ComObject Excel.Application
-$excel.Visible = $true   # keep Excel visible: a hidden VBE compile-error dialog otherwise looks like a hang
-$excel.DisplayAlerts = $false
-$excel.AutomationSecurity = 1  # msoAutomationSecurityLow: allow the packed macros to run
-$wb = $excel.Workbooks.Open($path)
-try {
-  $excel.Run('Main.Run')                      # forces a VBE compile, then runs the packed macro
-  $sentinel = $wb.Worksheets.Item(1).Range('A1').Value2
-  if ($sentinel -ne 'xlflow ok') {            # the value Main.Run writes in section 3
-    throw "pack smoke failed: A1 was '$sentinel', expected 'xlflow ok'"
-  }
-  "pack smoke OK: A1 = $sentinel"             # surface the observed value for the release-gate report
-} finally {
-  $wb.Close($false)
-  $excel.Quit()
-  [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($wb)
-  [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel)
-  [gc]::Collect()
-  [gc]::WaitForPendingFinalizers()
-}
+task install
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-pack-e2e.ps1 -KeepWorkspace
 ```
 
-The smoke passes only when:
+The harness creates fresh template and blank workspaces under
+`tmp_workspaces`. The template matrix verifies:
 
-- `pack` exits `0` and produces the `.xlsm`
-- the packed workbook opens in Excel without a compile error
-- `Run` executes the packed macro and the sentinel cell holds the expected value
+- standard/class update, add, remove, and rename
+- `ThisWorkbook`, multiple worksheet modules, and differing visible sheet name/CodeName
+- Japanese text and a non-ASCII module name
+- an external VBA reference and project-name preservation
+- existing `.frx` state plus nested Frame/MultiPage controls
+- UserForm code-behind update without designer loss
+- exact component presence/absence, Excel open, forced compile/run, and sentinel output
+- fail-loud new UserForm generation with no published artifact
 
-A compile error on open, a missing or wrong sentinel value, or a non-zero `pack` exit is a release blocker. If `Run` appears to hang, a modal VBE compile-error dialog is the usual cause — bring the Excel window to the foreground to read and dismiss it. Record the `pack` JSON output and the observed sentinel value in the release-gate report.
+The blank matrix creates a fresh one-sheet artifact, opens it in Excel, runs its
+macro, and checks a separate sentinel. The JSON for both successful cases must
+omit `pack.experimental` while retaining the backend and validation posture.
+
+Protected, signed, unsupported-code-page/layout, and other fail-loud cases stay
+in the committed pure-Go/CLI fixture suite. A real signed fixture may supplement
+the synthetic signature stream when a signing certificate is available; lack
+of that optional fixture must be reported explicitly.
+
+A compile error, wrong topology/designer state, wrong sentinel, unexpected
+error code, or residual output from a rejected pack is a release blocker. If
+execution appears to hang, bring visible Excel to the foreground and inspect
+for a modal VBE compile dialog. Record the exact workspace paths, command,
+Excel version/architecture, JSON contract, and sentinel values.
 
 ## Failure Handling
 
