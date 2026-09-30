@@ -2313,14 +2313,13 @@ func (a *app) packCommand() *cobra.Command {
 				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
 			}
 			publicationOut := outputIdentity.CanonicalPath
-			// Blank mode never reads the configured workbook, so only workbooks
-			// actually read or replaced participate in lock/session checks; the
-			// alias guard above still rejects writing over it.
-			sessionCandidates := []string{resolvedTemplate, resolvedOut}
-			if !blank {
-				sessionCandidates = append(sessionCandidates, configuredWorkbook)
-			}
-			candidates := packCandidatePaths(a.cwd, sessionCandidates...)
+			// Lock and session checks cover only the workbooks pack reads or
+			// replaces: the resolved template and the --out destination. The
+			// configured workbook is covered implicitly whenever it is the
+			// template; an unrelated open workbook (--blank or explicit
+			// --template) does not block packing. The alias guard above still
+			// rejects writing over it.
+			candidates := packCandidatePaths(a.cwd, resolvedTemplate, resolvedOut)
 			for _, candidate := range candidates {
 				if lockPath, locked := officeLockFilePresent(candidate); locked {
 					return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("workbook appears to be open: %s", lockPath))

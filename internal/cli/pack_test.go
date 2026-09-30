@@ -108,6 +108,26 @@ func TestPackCommandBlankIgnoresUnrelatedWorkbookLock(t *testing.T) {
 	}
 }
 
+func TestPackCommandExplicitTemplateIgnoresUnrelatedWorkbookLock(t *testing.T) {
+	dir := t.TempDir()
+	writePackProject(t, dir, false)
+	writePackSourceTree(t, dir, false)
+	writePackSourceModule(t, dir, filepath.Join("build", "Template.xlsm"), buildPackWorkbookFixture(t, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin")))
+	// With an explicit --template the configured workbook is never read or
+	// replaced, so its lock file must not block packing another destination.
+	if err := os.WriteFile(filepath.Join(dir, "build", "~$Book.xlsm"), []byte("lock"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--template", "build/Template.xlsm", "--out", "dist/Fresh.xlsm")
+	if err != nil {
+		t.Fatalf("pack --template: %v\n%s", err, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dist", "Fresh.xlsm")); err != nil {
+		t.Fatalf("expected template output: %v", err)
+	}
+}
+
 func TestPackCommandBlankRejectsUserFormArtifacts(t *testing.T) {
 	cases := []struct {
 		name string
