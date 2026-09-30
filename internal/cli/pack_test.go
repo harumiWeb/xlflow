@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -803,7 +804,48 @@ func TestPackCommandMapsProtectedProjectEngineError(t *testing.T) {
 	}
 }
 
-func TestPackCommandMapsSignedProjectEngineError(t *testing.T) {
+func TestPackCommandRejectsPackageSignatureWithoutPublishing(t *testing.T) {
+	for _, existingOutput := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_output_%t", existingOutput), func(t *testing.T) {
+			dir := t.TempDir()
+			writePackConfig(t, dir)
+			template := buildPackWorkbookFixtureWithEntries(t, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"), map[string][]byte{
+				"xl/_rels/vbaProject.bin.rels": []byte(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2020/07/relationships/vbaProjectSignatureV3" Target="vbaProjectSignatureV3.bin"/></Relationships>`),
+			})
+			writePackTemplateBytes(t, dir, template)
+
+			outputPath := filepath.Join(dir, "dist", "Book.xlsm")
+			originalOutput := buildPackWorkbookFixture(t, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+			if existingOutput {
+				if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(outputPath, originalOutput, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			stdout, err := runPackCommandForTest(dir, "--json", "pack", "--out", "dist/Book.xlsm")
+			if err == nil || output.ExitCode(err) != output.ExitValidation {
+				t.Fatalf("err=%v exit=%d, want validation failure", err, output.ExitCode(err))
+			}
+			if got := errorCodeFromJSON(t, stdout); got != "pack_signed_project" {
+				t.Fatalf("error code = %q, want pack_signed_project\n%s", got, stdout)
+			}
+			if existingOutput {
+				if got := readFileForTest(t, outputPath); !bytes.Equal(got, originalOutput) {
+					t.Fatal("existing valid output changed")
+				}
+				return
+			}
+			if _, statErr := os.Stat(outputPath); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("signed project rejection published an artifact, stat error = %v", statErr)
+			}
+		})
+	}
+}
+
+func TestPackCommandRejectsCfbSignedProject(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)
 	project, err := vbaproject.Read(readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
@@ -1000,7 +1042,11 @@ func writePackSourceTree(t *testing.T, dir string, includeForm bool) {
 
 func writePackTemplate(t *testing.T, dir string, vbaProject []byte) {
 	t.Helper()
-	template := buildPackWorkbookFixture(t, vbaProject)
+	writePackTemplateBytes(t, dir, buildPackWorkbookFixture(t, vbaProject))
+}
+
+func writePackTemplateBytes(t *testing.T, dir string, template []byte) {
+	t.Helper()
 	path := filepath.Join(dir, "build", "Book.xlsm")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -1051,6 +1097,11 @@ func readFileForTest(t *testing.T, path string) []byte {
 
 func buildPackWorkbookFixture(t *testing.T, vbaProject []byte) []byte {
 	t.Helper()
+	return buildPackWorkbookFixtureWithEntries(t, vbaProject, nil)
+}
+
+func buildPackWorkbookFixtureWithEntries(t *testing.T, vbaProject []byte, extraEntries map[string][]byte) []byte {
+	t.Helper()
 	var buf bytes.Buffer
 	writer := zip.NewWriter(&buf)
 	add := func(name string, method uint16, body []byte) {
@@ -1067,6 +1118,9 @@ func buildPackWorkbookFixture(t *testing.T, vbaProject []byte) []byte {
 	add("[Content_Types].xml", zip.Deflate, []byte(`<Types></Types>`))
 	add("xl/workbook.xml", zip.Store, []byte(`<workbook/>`))
 	add("xl/vbaProject.bin", zip.Deflate, vbaProject)
+	for name, body := range extraEntries {
+		add(name, zip.Deflate, body)
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}

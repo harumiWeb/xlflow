@@ -168,6 +168,11 @@ func BuildWorkbook(templateXlsm []byte, sources []SourceModule) ([]byte, PackMet
 	if err != nil {
 		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 	}
+	if signed, err := hasPackageVBASignature(reader); err != nil {
+		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+	} else if signed {
+		return nil, PackMeta{}, ErrSignedProject
+	}
 
 	var vbaProject []byte
 	for _, entry := range reader.File {

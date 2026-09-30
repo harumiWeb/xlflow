@@ -6,7 +6,7 @@ var (
 	// ErrProtectedProject reports that the template contains a protected VBA project.
 	ErrProtectedProject = errors.New("pack: protected VBA project")
 
-	// ErrSignedProject reports that the template contains VBA signature streams.
+	// ErrSignedProject reports that the template contains VBA signature streams or OOXML parts.
 	ErrSignedProject = errors.New("pack: signed VBA project")
 
 	// ErrUserFormGenerationUnsupported reports that the requested source update would require UserForm or .frx generation.
