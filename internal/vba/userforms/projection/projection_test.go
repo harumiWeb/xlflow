@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
@@ -157,6 +158,79 @@ func TestProjectDoesNotExposeUnsupportedCommandButtonValue(t *testing.T) {
 	}
 	if issues := forms.ValidateFormSpecStrict(got); hasErrors(issues) {
 		t.Fatalf("projected CommandButton did not validate: %#v", issues)
+	}
+}
+
+func TestProjectTabStripSnapshotCanBeWrittenAndLoaded(t *testing.T) {
+	form := &oforms.Form{
+		Name:   "TabForm",
+		Levels: []*oforms.Level{{Record: emptyRecord("Form")}},
+		Controls: []*oforms.Control{{
+			Name: "TabStrip1", Kind: "MSForms.TabStrip",
+			Record: &oforms.Record{Type: "TabStrip", Values: map[string]int64{"ListIndex": 1}},
+		}},
+	}
+	projected, err := Project(form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projected.Controls[0].SelectedIndex != nil {
+		t.Fatalf("TabStrip selectedIndex = %#v, want omitted unsupported state", projected.Controls[0].SelectedIndex)
+	}
+	if !slices.Contains(projected.Controls[0].Unsupported, "selectedIndex") {
+		t.Fatalf("TabStrip unsupported = %q, want selectedIndex", projected.Controls[0].Unsupported)
+	}
+
+	path := filepath.Join(t.TempDir(), "TabForm.json")
+	if err := forms.WriteSnapshot(forms.SnapshotOutput{Path: path, DisplayPath: path, Format: "json"}, projected); err != nil {
+		t.Fatalf("WriteSnapshot: %v", err)
+	}
+	loaded, err := forms.LoadFormSpec(forms.SpecInput{Path: path, DisplayPath: path, Format: "json"})
+	if err != nil {
+		t.Fatalf("LoadFormSpec: %v", err)
+	}
+	if loaded.Controls[0].SelectedIndex != nil || !slices.Contains(loaded.Controls[0].Unsupported, "selectedIndex") {
+		t.Fatalf("loaded TabStrip = %#v, want selectedIndex recorded as unsupported", loaded.Controls[0])
+	}
+}
+
+func TestProjectReportsUnmodeledSiteStrings(t *testing.T) {
+	form := &oforms.Form{
+		Name:   "SiteForm",
+		Levels: []*oforms.Level{{Record: emptyRecord("Form")}},
+		Controls: []*oforms.Control{{
+			Name: "TextBox1", Kind: "MSForms.TextBox",
+			Site: &oforms.Site{Strings: map[string]oforms.StoredString{
+				"Name":           {Text: "TextBox1"},
+				"Tag":            {Text: "tag-value"},
+				"ControlTipText": {Text: "tip"},
+				"RuntimeLicKey":  {Text: "license"},
+				"ControlSource":  {Text: "Sheet1!A1"},
+				"RowSource":      {Text: "Sheet1!A1:A5"},
+			}},
+		}},
+	}
+	got, err := Project(form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"controlSource", "controlTipText", "rowSource", "runtimeLicKey", "tag"}
+	if !slices.Equal(got.Controls[0].Unsupported, want) {
+		t.Fatalf("unsupported = %q, want %q", got.Controls[0].Unsupported, want)
+	}
+	warnings := 0
+	for _, warning := range got.Warnings {
+		if warning.Code == "unsupported_properties" && warning.Control == "TextBox1" {
+			warnings++
+			for _, name := range want {
+				if !strings.Contains(warning.Message, name) {
+					t.Errorf("warning %q omits %q", warning.Message, name)
+				}
+			}
+		}
+	}
+	if warnings != 1 {
+		t.Fatalf("unsupported_properties warnings for TextBox1 = %d, want 1", warnings)
 	}
 }
 

@@ -240,6 +240,12 @@ ByVal parens) are covered by byref-parenthesized-variable (accepted) and
 property-signature-valid/invalid at compile level; runtime cases are out of
 scope for the current probe contract. Rules remain opt-in and fail open.
 
+# Issue #879 final-review follow-up
+
+- [x] Keep TabStrip `ListIndex` out of unsupported FormSpec fields and report it as unsupported; cover Project -> WriteSnapshot -> LoadFormSpec.
+- [x] Report non-empty ControlSource and RowSource site state as unsupported, and audit all decoded site strings so meaningful unprojected state cannot disappear silently; add focused warning regressions.
+- [x] Run focused userform projection/spec tests and the relevant package validation; review the complete diff.
+
 # PR #837 review follow-up (Issue #822, VBA257/VBA258)
 
 Review comments on internal/analyze/discarded_return.go. Verified against IR

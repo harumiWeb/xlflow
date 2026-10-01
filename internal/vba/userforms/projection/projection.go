@@ -238,7 +238,7 @@ func projectControl(source *oforms.Control, target *forms.FormSpecControl) {
 			target.Text = new(value.Text)
 		}
 	}
-	if selected, ok := record.Values["ListIndex"]; ok {
+	if selected, ok := record.Values["ListIndex"]; ok && supportsSelectedIndex(target.Type) {
 		target.SelectedIndex = new(int(selected))
 	}
 	if bits, ok := record.Values["VariousPropertyBits"]; ok {
@@ -254,7 +254,7 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 		if _, ok := control.Site.Values["HelpContextID"]; ok {
 			unsupported = append(unsupported, "helpContextId")
 		}
-		for _, name := range []string{"Tag", "ControlTipText"} {
+		for _, name := range []string{"Tag", "ControlTipText", "RuntimeLicKey", "ControlSource", "RowSource"} {
 			if value, ok := control.Site.Strings[name]; ok && value.Text != "" {
 				unsupported = append(unsupported, lowerFirst(name))
 			}
@@ -262,16 +262,24 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 	}
 	if control.Record != nil {
 		projected := map[string]bool{
-			"Caption": true, "DisplayedSize": true, "ListIndex": true,
+			"Caption": true, "DisplayedSize": true,
 			"Size": true, "VariousPropertyBits": true,
 		}
+		projected["ListIndex"] = supportsSelectedIndex(controlType)
 		projected["Value"] = supportsControlValue(controlType)
 		unsupported = append(unsupported, unsupportedRecordProperties(control.Record, projected)...)
+		if _, ok := control.Record.Values["ListIndex"]; ok && !supportsSelectedIndex(controlType) {
+			unsupported = append(unsupported, "selectedIndex")
+		}
 	}
 	if len(control.OpaqueRaw) > 0 {
 		unsupported = append(unsupported, "opaqueControlData")
 	}
 	return unsupported
+}
+
+func supportsSelectedIndex(controlType string) bool {
+	return controlType == "ComboBox" || controlType == "ListBox"
 }
 
 func supportsControlValue(controlType string) bool {

@@ -74,9 +74,9 @@ coordinates. HIMETRIC geometry is converted with `points = value * 72 / 2540`.
 Controls are flattened in persisted preorder. IDs use deterministic
 `control_NNN` values, `parentId` points at the containing control, and `zIndex`
 is the persisted sibling index. Known MSForms classes receive their canonical
-type and ProgID. Caption, text/value, size, position, tab index, selected index,
-enabled state, and visible state are projected when their binary meaning is
-known. File-format defaults are applied when the relevant MS-OFORMS property
+type and ProgID. Caption, text/value, size, position, tab index, ComboBox/ListBox
+selected index, enabled state, and visible state are projected when their binary
+meaning is known. File-format defaults are applied when the relevant MS-OFORMS property
 record is omitted.
 
 The root `DisplayedSize` is exposed through the best-effort form width/height
@@ -86,10 +86,19 @@ is compared directly; callers must retain the existing best-effort treatment of
 form-level dimensions. Boolean control values are normalized from persisted
 `1`/`0` spellings to Excel snapshot `True`/`False` spellings.
 
+TabStrip is structurally recognized by the binary reader, but its persisted
+`ListIndex` is not part of the current FormSpec control contract. Projection
+therefore records it as unsupported rather than emitting a snapshot the
+canonical loader would reject.
+
 Binary masks, padding, TextProps, class tables, opaque tails, stream extents,
 and internal site IDs never enter FormSpec. Semantically meaningful state that
 has no supported FormSpec field is listed in a control's sorted `unsupported`
 array and summarized by one `unsupported_properties` warning per control.
+Non-empty site strings without a FormSpec field—including `Tag`,
+`ControlTipText`, `RuntimeLicKey`, `ControlSource`, and `RowSource`—are named in
+that list rather than silently discarded. Site `Name` is already represented
+by the control's canonical `name` field.
 Form-level unsupported state is summarized by a form warning. Raw persistence
 details used only for lossless replay are not exposed as property-bag values.
 
