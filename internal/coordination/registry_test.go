@@ -210,7 +210,7 @@ func TestPublicCapabilitiesProjectEveryDescriptorWithoutBridgeMetadata(t *testin
 	}
 }
 
-func TestPublicCapabilitiesV2StableFields(t *testing.T) {
+func TestPublicCapabilitiesV3StableFields(t *testing.T) {
 	capabilities := PublicCapabilities()
 	if _, ok := capabilities.Commands["capabilities"]; !ok {
 		t.Fatal("capabilities command must publish its own coordination policy")
@@ -236,10 +236,10 @@ func TestPublicCapabilitiesV2StableFields(t *testing.T) {
 
 func TestPullCapabilityPublishesBackendRequirements(t *testing.T) {
 	pull := PublicCapabilities().Commands["pull"]
-	if pull.DefaultBackend != "excel" {
-		t.Fatalf("pull default_backend = %q, want excel", pull.DefaultBackend)
+	if pull.DefaultBackend != "auto" {
+		t.Fatalf("pull default_backend = %q, want auto", pull.DefaultBackend)
 	}
-	if !pull.RequiresExcel || !pull.Backends["excel"].RequiresExcel || pull.Backends["file"].RequiresExcel {
+	if !pull.RequiresExcel || !pull.Backends["auto"].RequiresExcel || pull.Backends["auto"].Selection != "dynamic" || !pull.Backends["excel"].RequiresExcel || pull.Backends["file"].RequiresExcel {
 		t.Fatalf("pull backend requirements = %#v, requires_excel=%t", pull.Backends, pull.RequiresExcel)
 	}
 }

@@ -55,11 +55,15 @@ var delegatedTopLevelCommands = map[string]struct{}{
 var errWSLDelegated = errors.New("wsl delegated command completed")
 
 func (a *app) delegateWSLCommand(cmd *cobra.Command) error {
+	return a.delegateWSLCommandMode(cmd, false)
+}
+
+func (a *app) delegateWSLCommandMode(cmd *cobra.Command, force bool) error {
 	if len(a.rawArgs) == 0 || !isWSL() || strings.TrimSpace(os.Getenv(wsl.EnvDelegated)) != "" {
 		return nil
 	}
 	topLevel := topLevelCommandName(cmd)
-	if !shouldDelegateCommand(cmd, topLevel) {
+	if !force && !shouldDelegateCommand(cmd, topLevel) {
 		return nil
 	}
 
@@ -114,8 +118,15 @@ func shouldDelegateCommand(cmd *cobra.Command, topLevel string) bool {
 			}
 			if descriptor.ID == "pull" {
 				backend := cmd.Flags().Lookup("backend")
-				if backend != nil && strings.EqualFold(strings.TrimSpace(backend.Value.String()), "file") {
-					return false
+				if backend != nil {
+					value := strings.TrimSpace(backend.Value.String())
+					if strings.EqualFold(value, "file") {
+						return false
+					}
+					if strings.EqualFold(value, "auto") {
+						session := cmd.Flags().Lookup("session")
+						return session != nil && strings.EqualFold(session.Value.String(), "true")
+					}
 				}
 			}
 			if descriptor.Policy.ResourceScope == coordination.ResourceWorkbook && !descriptor.Policy.ParallelSafe {

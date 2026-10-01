@@ -322,6 +322,59 @@ End Function
         $fileSnapshot = Get-SourceSnapshot $workspace
         Assert-SnapshotsEqual $baseline $fileSnapshot
 
+        foreach ($sourceRoot in @('src\modules', 'src\classes', 'src\workbook')) {
+            $path = Join-Path $workspace $sourceRoot
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+        }
+        $autoFilePull = Invoke-XlflowJson @('pull', '--json')
+        if ($autoFilePull.Json.pull.backend -ne 'file' -or
+            $autoFilePull.Json.pull.backend_selection -ne 'auto' -or
+            $autoFilePull.Json.pull.selection_reason -ne 'file_backend_supported' -or
+            $autoFilePull.Json.pull.source -ne 'saved_workbook') {
+            throw "closed-workbook auto pull did not select file: $($autoFilePull.Raw)"
+        }
+        Assert-SnapshotsEqual $baseline (Get-SourceSnapshot $workspace)
+
+        $liveExcel = New-Object -ComObject Excel.Application
+        $liveExcel.Visible = $true
+        $liveExcel.DisplayAlerts = $false
+        $liveWorkbook = $null
+        $liveProject = $null
+        $liveComponent = $null
+        $liveCode = $null
+        try {
+            $liveWorkbook = $liveExcel.Workbooks.Open((Join-Path $workspace 'build\FilePullGate.xlsm'))
+            $liveProject = $liveWorkbook.VBProject
+            $liveComponent = $liveProject.VBComponents.Item('Main')
+            $liveCode = $liveComponent.CodeModule
+            $liveCode.InsertLines($liveCode.CountOfLines + 1, "`r`nPublic Function AutoLiveMarker() As String`r`n    AutoLiveMarker = `"unsaved live marker`"`r`nEnd Function")
+            $autoLivePull = Invoke-XlflowJson @('pull', '--json')
+            if ($autoLivePull.Json.pull.backend -ne 'excel' -or
+                $autoLivePull.Json.pull.backend_selection -ne 'auto' -or
+                $autoLivePull.Json.pull.selection_reason -ne 'workbook_open_in_excel' -or
+                $autoLivePull.Json.pull.source -ne 'live_workbook') {
+                throw "open-workbook auto pull did not preserve live authority: $($autoLivePull.Raw)"
+            }
+            $liveSource = [IO.File]::ReadAllText((Join-Path $workspace 'src\modules\Domain\Core\Main.bas'))
+            if (-not $liveSource.Contains('AutoLiveMarker')) {
+                throw 'auto Excel pull did not export the unsaved live VBA marker'
+            }
+        } finally {
+            if ($null -ne $liveWorkbook) { $liveWorkbook.Close($false) }
+            $liveExcel.Quit()
+            Release-ComObject $liveCode
+            Release-ComObject $liveComponent
+            Release-ComObject $liveProject
+            Release-ComObject $liveWorkbook
+            Release-ComObject $liveExcel
+            [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+        }
+        $restoredFilePull = Invoke-XlflowJson @('pull', '--backend', 'file', '--json')
+        if ($restoredFilePull.Json.pull.backend_selection -ne 'explicit') {
+            throw "explicit file pull selection metadata was lost: $($restoredFilePull.Raw)"
+        }
+        Assert-SnapshotsEqual $baseline (Get-SourceSnapshot $workspace)
+
         $pack = Invoke-XlflowJson @('pack', '--out', 'dist/FilePullRoundTrip.xlsm', '--json')
         if ($pack.Json.pack.backend -ne 'pure-go' -or $pack.Json.pack.vbe_validation -ne 'not_performed') {
             throw "pack JSON contract failed: $($pack.Raw)"
@@ -338,11 +391,16 @@ End Function
     $rejectionWorkbook = Join-Path $rejectionWorkspace 'build\FilePullGate.xlsm'
     Copy-Item -LiteralPath (Join-Path $workspace 'build\FilePullGate.xlsm') -Destination $rejectionWorkbook
     Add-UserForm $rejectionWorkbook
-    $formsCanary = Join-Path $rejectionWorkspace 'src\forms\release-gate-canary.frx'
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $formsCanary) | Out-Null
-    [IO.File]::WriteAllBytes($formsCanary, [byte[]](0, 13, 10, 255, 128, 1))
     Push-Location $rejectionWorkspace
     try {
+        $autoFormPull = Invoke-XlflowJson @('pull', '--json')
+        if ($autoFormPull.Json.pull.backend -ne 'excel' -or
+            $autoFormPull.Json.pull.selection_reason -ne 'file_backend_unsupported_userform') {
+            throw "UserForm auto pull did not select Excel: $($autoFormPull.Raw)"
+        }
+        $formsCanary = Join-Path $rejectionWorkspace 'src\forms\release-gate-canary.frx'
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $formsCanary) | Out-Null
+        [IO.File]::WriteAllBytes($formsCanary, [byte[]](0, 13, 10, 255, 128, 1))
         $beforeRejection = Get-SourceByteSnapshot $rejectionWorkspace
         $rejected = Invoke-XlflowJson @('pull', '--backend', 'file', '--json') -AllowFailure
         if ($rejected.ExitCode -eq 0 -or $rejected.Json.error.code -ne 'pull_userform_unsupported') {

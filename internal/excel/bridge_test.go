@@ -2429,6 +2429,13 @@ func TestPullScriptArgsIncludeFolderConfig(t *testing.T) {
 	if args["LineNumbersEnabled"] != "false" {
 		t.Fatalf("LineNumbersEnabled = %q", args["LineNumbersEnabled"])
 	}
+	if args["AttachOpenWorkbook"] != "false" {
+		t.Fatalf("AttachOpenWorkbook = %q", args["AttachOpenWorkbook"])
+	}
+	attachArgs := buildPullScriptArgs(root, cfg, SessionCommandOptions{AttachOpen: true})
+	if attachArgs["AttachOpenWorkbook"] != "true" {
+		t.Fatalf("AttachOpenWorkbook = %q, want true", attachArgs["AttachOpenWorkbook"])
+	}
 }
 
 func TestVBALineNumberSafetyFailureIsValidationFailure(t *testing.T) {

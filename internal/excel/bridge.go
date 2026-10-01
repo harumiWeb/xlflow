@@ -270,9 +270,10 @@ type EditSheetAddOptions struct {
 }
 
 type SessionCommandOptions struct {
-	Session   bool
-	Discard   bool
-	Keepalive CommandOptions
+	Session    bool
+	Discard    bool
+	AttachOpen bool
+	Keepalive  CommandOptions
 }
 
 type MacrosOptions struct {
@@ -632,6 +633,7 @@ func buildPullScriptArgs(root string, cfg config.Config, opts SessionCommandOpti
 		"LineNumbersEnabled":      strconv.FormatBool(cfg.VBA.LineNumbers.Enabled),
 		"Visible":                 strconv.FormatBool(cfg.Excel.Visible),
 		"UseSession":              strconv.FormatBool(opts.Session),
+		"AttachOpenWorkbook":      strconv.FormatBool(opts.AttachOpen),
 		"MetadataPath":            filepath.Join(root, ".xlflow", "session.json"),
 	}
 }

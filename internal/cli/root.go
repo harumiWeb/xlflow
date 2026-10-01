@@ -58,6 +58,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 	"github.com/harumiWeb/xlflow/internal/workbookformat"
+	"github.com/harumiWeb/xlflow/internal/workbookuse"
 )
 
 type app struct {
@@ -90,6 +91,11 @@ type preflightWaiver struct {
 }
 
 var automaticBackupPrune = backup.Prune
+
+var (
+	detectWorkbookUse = workbookuse.Detect
+	probeFilePull     = filepull.Probe
+)
 
 var (
 	errFormMigrateArgs     = errors.New("userform migration arguments invalid")
@@ -2180,8 +2186,8 @@ func (a *app) pullCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			backend = strings.ToLower(strings.TrimSpace(backend))
-			if backend != "excel" && backend != "file" {
-				return a.writeFailure("pull", output.ExitConfig, "pull_args_invalid", fmt.Errorf("--backend must be excel or file, got %q", backend))
+			if backend != "auto" && backend != "excel" && backend != "file" {
+				return a.writeFailure("pull", output.ExitConfig, "pull_args_invalid", fmt.Errorf("--backend must be auto, excel, or file, got %q", backend))
 			}
 			if backend == "file" && session {
 				return a.writeFailure("pull", output.ExitConfig, "pull_args_invalid", errors.New("--backend file and --session are mutually exclusive"))
@@ -2191,20 +2197,27 @@ func (a *app) pullCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			selection, err := a.selectPullBackend(cfg, backend, session)
+			if err != nil {
+				return a.writeFilePullFailure(err)
+			}
+			if selection.Delegate {
+				return a.delegateAutoPullToWindows(cmd)
+			}
 			var env output.Envelope
 			var code int
-			if backend == "file" {
+			if selection.Backend == "file" {
 				pullCtx := cmd.Context()
 				stopSignal := func() {}
 				if a.wait {
 					pullCtx, stopSignal = signal.NotifyContext(pullCtx, os.Interrupt)
 				}
-				env, code, err = a.pullFromFile(pullCtx, cfg)
+				env, code, err = a.pullFromFile(pullCtx, cfg, selection.Mode == "explicit")
 				stopSignal()
 			} else {
 				err = a.withExcelProgress("Exporting VBA source", commandOpts, func() error {
 					var runErr error
-					env, code, runErr = a.excelRunnerForConfig(cfg).PullWithOptions(cfg, excel.SessionCommandOptions{Session: session, Keepalive: commandOpts})
+					env, code, runErr = a.excelRunnerForConfig(cfg).PullWithOptions(cfg, excel.SessionCommandOptions{Session: session, AttachOpen: selection.AttachOpen, Keepalive: commandOpts})
 					return runErr
 				})
 				if err == nil {
@@ -2213,6 +2226,15 @@ func (a *app) pullCommand() *cobra.Command {
 			}
 			if err != nil {
 				return err
+			}
+			pull := cliObjectMap(env.Pull)
+			pull["backend_selection"] = selection.Mode
+			pull["selection_reason"] = selection.Reason
+			env.Pull = pull
+			if selection.Warning != nil {
+				env.Warnings = append(anySlice(env.Warnings), map[string]any{
+					"code": "pull_auto_open_state_probe_failed", "message": "Could not determine whether Excel has the configured workbook open; auto selected the Excel backend: " + selection.Warning.Error(),
+				})
 			}
 			if code == output.ExitSuccess && withFormulas {
 				formulaResult, formulaErr := formulaspkg.Pull(workbookArgPath(a.cwd, cfg.Excel.Path), filepath.Join(a.cwd, "formulas"))
@@ -2223,7 +2245,7 @@ func (a *app) pullCommand() *cobra.Command {
 					attachFormulaPullResult(&env, formulaResult, a.cwd)
 					env.Logs = append(env.Logs, fmt.Sprintf("extracted %d formula region(s) from %d sheet(s)", formulaResult.FormulaRegionCount, len(formulaResult.Manifest.Sheets)))
 				}
-				if backend == "excel" && session && formulaErr == nil {
+				if selection.Backend == "excel" && boolValueForCLI(cliObjectMap(env.Workbook), "session") && formulaErr == nil {
 					env.Warnings = append(anySlice(env.Warnings), map[string]any{
 						"code":    "formula_snapshot_saved_file",
 						"message": "Formula snapshots were extracted from the saved workbook file. If the live session workbook has unsaved formula changes, run `xlflow save --json` and `xlflow formulas pull --json` again.",
@@ -2235,11 +2257,135 @@ func (a *app) pullCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().BoolVar(&withFormulas, "formulas", false, "also extract worksheet formula snapshots into formulas/")
-	cmd.Flags().StringVar(&backend, "backend", "excel", "VBA extraction backend: excel or file")
+	cmd.Flags().StringVar(&backend, "backend", "auto", "VBA extraction backend: auto, excel, or file")
 	return cmd
 }
 
-func (a *app) pullFromFile(ctx context.Context, cfg config.Config) (output.Envelope, int, error) {
+type pullBackendSelection struct {
+	Backend    string
+	Mode       string
+	Reason     string
+	AttachOpen bool
+	Warning    error
+	Delegate   bool
+}
+
+func (a *app) selectPullBackend(cfg config.Config, requested string, session bool) (pullBackendSelection, error) {
+	if requested != "auto" {
+		return pullBackendSelection{Backend: requested, Mode: "explicit", Reason: "explicit_backend"}, nil
+	}
+	if session {
+		return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "session_requested"}, nil
+	}
+	workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+	if _, err := os.Stat(workbookPath); err != nil {
+		return pullBackendSelection{}, err
+	}
+	if isWSL() {
+		matching, matchErr := a.matchingWSLLiveSession(context.Background(), workbookPath)
+		if matchErr != nil {
+			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "open_state_probe_failed", Warning: matchErr, Delegate: true}, nil
+		}
+		if matching {
+			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "matching_live_session", Delegate: true}, nil
+		}
+	}
+	if !strings.EqualFold(filepath.Ext(workbookPath), workbookformat.ExtXLSM) {
+		if runtime.GOOS == "windows" {
+			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "file_backend_unsupported_format"}, nil
+		}
+		return pullBackendSelection{}, workbookformat.UnsupportedError{Capability: "pull --backend auto", Extension: filepath.Ext(workbookPath)}
+	}
+	if runtime.GOOS == "windows" {
+		state, err := detectWorkbookUse(workbookPath)
+		if err != nil {
+			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "open_state_probe_failed", Warning: err}, nil
+		}
+		if a.matchingLiveSession(workbookPath, state.ExcelPIDs) {
+			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "matching_live_session"}, nil
+		}
+		if state.OpenInExcel {
+			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "workbook_open_in_excel", AttachOpen: true}, nil
+		}
+	}
+	probe, err := probeFilePull(a.cwd, cfg, workbookPath)
+	if err != nil {
+		return pullBackendSelection{}, err
+	}
+	if !probe.Supported {
+		if runtime.GOOS == "windows" && probe.Reason == "userform" {
+			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "file_backend_unsupported_userform"}, nil
+		}
+		if probe.Reason == "userform" {
+			return pullBackendSelection{}, filepull.ErrUserFormUnsupported
+		}
+		return pullBackendSelection{}, fmt.Errorf("file pull unsupported: %s", probe.Reason)
+	}
+	return pullBackendSelection{Backend: "file", Mode: "auto", Reason: "file_backend_supported"}, nil
+}
+
+func (a *app) matchingWSLLiveSession(ctx context.Context, workbookPath string) (bool, error) {
+	metadata, found, err := a.readSessionMetadata()
+	if err != nil {
+		return false, fmt.Errorf("read WSL session metadata: %w", err)
+	}
+	if !found || metadata.PID <= 0 {
+		return false, nil
+	}
+	windowsPath, err := translateWSLPath(ctx, workbookPath)
+	if err != nil {
+		return false, fmt.Errorf("translate workbook path for WSL session validation: %w", err)
+	}
+	if !samePath(metadata.WorkbookPath, windowsPath) {
+		return false, nil
+	}
+	executable, _, err := resolveWindowsExecutable(ctx)
+	if err != nil {
+		return false, fmt.Errorf("resolve Windows xlflow for session validation: %w", err)
+	}
+	child := newDelegatedCommand(ctx, executable, "--json", "session", "status")
+	child.Dir = a.cwd
+	child.Env = delegatedEnvironment()
+	var stdout bytes.Buffer
+	child.Stdout = &stdout
+	if err := child.Run(); err != nil {
+		return false, fmt.Errorf("query Windows xlflow session status: %w", err)
+	}
+	var env output.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		return false, fmt.Errorf("decode Windows xlflow session status: %w", err)
+	}
+	status := cliObjectMap(env.Session)
+	statusPath := stringValueForCLI(status, "workbook_path")
+	active := boolValueForCLI(status, "active") || (boolValueForCLI(status, "running") && boolValueForCLI(status, "workbook_open"))
+	return active && samePath(statusPath, windowsPath), nil
+}
+
+func (a *app) delegateAutoPullToWindows(cmd *cobra.Command) error {
+	return a.delegateWSLCommandMode(cmd, true)
+}
+
+func (a *app) matchingLiveSession(workbookPath string, excelPIDs []uint32) bool {
+	metadata, found, err := a.readSessionMetadata()
+	if err != nil || !found || metadata.PID <= 0 || !slices.Contains(excelPIDs, uint32(metadata.PID)) {
+		return false
+	}
+	match, identityErr := coordination.SameFileIdentity(a.cwd, metadata.WorkbookPath, workbookPath)
+	if identityErr != nil {
+		return samePath(metadata.WorkbookPath, workbookPath)
+	}
+	return match
+}
+
+func (a *app) writeFilePullFailure(err error) error {
+	if unsupported, ok := errors.AsType[workbookformat.UnsupportedError](err); ok {
+		return a.writeUnsupportedWorkbookFormat("pull", unsupported)
+	}
+	exitCode := filePullExitCode(err)
+	return a.writeFailure("pull", exitCode, filePullErrorCode(err), err)
+}
+
+func (a *app) pullFromFile(ctx context.Context, cfg config.Config, warnMatchingSession bool) (output.Envelope, int, error) {
 	workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 	if !strings.EqualFold(filepath.Ext(workbookPath), workbookformat.ExtXLSM) {
 		unsupported := workbookformat.UnsupportedError{Capability: "pull --backend file", Extension: filepath.Ext(workbookPath)}
@@ -2274,7 +2420,9 @@ func (a *app) pullFromFile(ctx context.Context, cfg config.Config) (output.Envel
 	env.Target = map[string]any{"kind": "file", "path": displayPath(a.cwd, workbookPath)}
 	env.Session = map[string]any{"active": false, "mode": "none", "source_of_truth": "saved_workbook"}
 	env.Logs = append(env.Logs, fmt.Sprintf("extracted %d VBA component(s) from saved workbook", len(result.Written)))
-	a.attachFilePullSessionWarning(&env, workbookPath)
+	if warnMatchingSession {
+		a.attachFilePullSessionWarning(&env, workbookPath)
+	}
 	return env, output.ExitSuccess, nil
 }
 

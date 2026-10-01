@@ -27,7 +27,7 @@ public sealed class ExcelPullService : IPullService
         {
             var (attachment, attached) = ExcelBridgeSupport.RunPhase(
                 "attach_or_open_workbook",
-                () => AttachOrOpenWorkbook(args.WorkbookPath, args.MetadataPath, args.UseSession, args.Visible));
+                () => AttachOrOpenWorkbook(args.WorkbookPath, args.MetadataPath, args.UseSession, args.AttachOpenWorkbook, args.Visible));
             excel = attachment.Excel;
             workbook = attachment.Workbook;
             sessionAttached = attached;
@@ -206,7 +206,7 @@ public sealed class ExcelPullService : IPullService
     }
 
     private static (ExcelSessionAttachment Attachment, bool SessionAttached) AttachOrOpenWorkbook(
-        string workbookPath, string metadataPath, bool useSession, bool visible)
+        string workbookPath, string metadataPath, bool useSession, bool attachOpenWorkbook, bool visible)
     {
         try
         {
@@ -225,6 +225,13 @@ public sealed class ExcelPullService : IPullService
             if (!ExcelBridgeSupport.IsExcelFile(ExcelBridgeSupport.NormalizePath(workbookPath)))
             {
                 throw new InvalidOperationException($"bridge_file_not_openable: File does not appear to be an Excel workbook: {workbookPath}");
+            }
+
+
+            if (attachOpenWorkbook)
+            {
+                var openAttachment = ExcelBridgeSupport.AttachToAlreadyOpenWorkbook(workbookPath);
+                return (openAttachment, true);
             }
 
             var attachment = ExcelBridgeSupport.OpenWorkbookDirect(workbookPath, visible);
