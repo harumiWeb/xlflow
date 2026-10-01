@@ -4,14 +4,28 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"unicode/utf16"
 )
 
-// Container holds every stream read from a CFB file, keyed by path.
+// StorageMeta is the metadata stored in a CFB storage directory entry. CLSID
+// preserves the 16 bytes exactly as they appear on disk; Created and Modified
+// are raw Windows FILETIME values.
+type StorageMeta struct {
+	CLSID     [16]byte
+	StateBits uint32
+	Created   uint64
+	Modified  uint64
+}
+
+// Container holds every stream and storage read from a CFB file, keyed by
+// path. The empty storage path identifies the root directory entry.
 type Container struct {
-	streams map[string][]byte
-	order   []string
-	format  Format
+	streams      map[string][]byte
+	order        []string
+	storages     map[string]StorageMeta
+	storageOrder []string
+	format       Format
 }
 
 // Stream returns the contents of the stream at path. The second result reports
@@ -20,9 +34,21 @@ func (c *Container) Stream(path string) ([]byte, bool) { d, ok := c.streams[path
 
 // Paths returns all stream paths in discovery order.
 func (c *Container) Paths() []string {
-	out := make([]string, len(c.order))
-	copy(out, c.order)
-	return out
+	return slices.Clone(c.order)
+}
+
+// Storage returns the metadata for the storage at path. The empty path
+// identifies the root directory entry. The second result reports whether the
+// storage exists.
+func (c *Container) Storage(path string) (StorageMeta, bool) {
+	meta, ok := c.storages[path]
+	return meta, ok
+}
+
+// StoragePaths returns all storage paths in discovery order, including the
+// empty root path as the first element.
+func (c *Container) StoragePaths() []string {
+	return slices.Clone(c.storageOrder)
 }
 
 // Format returns the CFB major version used by the container.
@@ -354,6 +380,7 @@ type dirEntry struct {
 	left, right, child uint32
 	start              uint32
 	size               uint64
+	meta               StorageMeta
 }
 
 func parseDirEntry(raw []byte, format Format) (dirEntry, error) {
@@ -378,7 +405,7 @@ func parseDirEntry(raw []byte, format Format) (dirEntry, error) {
 	if format == FormatV3 {
 		size &= uint64(^uint32(0))
 	}
-	return dirEntry{
+	entry := dirEntry{
 		name:    string(utf16.Decode(units)),
 		objType: raw[66],
 		left:    binary.LittleEndian.Uint32(raw[68:72]),
@@ -386,7 +413,25 @@ func parseDirEntry(raw []byte, format Format) (dirEntry, error) {
 		child:   binary.LittleEndian.Uint32(raw[76:80]),
 		start:   binary.LittleEndian.Uint32(raw[116:120]),
 		size:    size,
-	}, nil
+		meta: StorageMeta{
+			StateBits: binary.LittleEndian.Uint32(raw[96:100]),
+			Created:   binary.LittleEndian.Uint64(raw[100:108]),
+			Modified:  binary.LittleEndian.Uint64(raw[108:116]),
+		},
+	}
+	copy(entry.meta.CLSID[:], raw[80:96])
+	if entry.objType == objStream {
+		if entry.meta.CLSID != ([16]byte{}) {
+			return dirEntry{}, errors.New("cfb: stream directory entry has a nonzero CLSID")
+		}
+		if entry.meta.Created != 0 || entry.meta.Modified != 0 {
+			return dirEntry{}, errors.New("cfb: stream directory entry has a nonzero FILETIME")
+		}
+	}
+	if entry.objType == objRoot && entry.meta.Created != 0 {
+		return dirEntry{}, errors.New("cfb: root directory entry has a nonzero creation FILETIME")
+	}
+	return entry, nil
 }
 
 // Open parses a CFB container and reconstructs all streams.
@@ -469,7 +514,12 @@ func Open(data []byte) (*Container, error) {
 		}
 	}
 	miniOwners := make([]string, len(miniFAT))
-	c := &Container{streams: map[string][]byte{}, format: h.format}
+	c := &Container{
+		streams:      map[string][]byte{},
+		storages:     map[string]StorageMeta{"": root.meta},
+		storageOrder: []string{""},
+		format:       h.format,
+	}
 
 	type walkFrame struct {
 		index  uint32
@@ -507,7 +557,17 @@ func Open(data []byte) (*Container, error) {
 		}
 		switch entry.objType {
 		case objStorage:
-			stack = append(stack, walkFrame{index: entry.child, prefix: frame.prefix + entry.name + "/"})
+			path := frame.prefix + entry.name
+			pathBytes += len(path)
+			if pathBytes > pathBudget {
+				return nil, fmt.Errorf("cfb: aggregate directory paths exceed the %d-byte safety budget", pathBudget)
+			}
+			if _, exists := c.storages[path]; exists {
+				return nil, fmt.Errorf("cfb: duplicate storage path %q", path)
+			}
+			c.storages[path] = entry.meta
+			c.storageOrder = append(c.storageOrder, path)
+			stack = append(stack, walkFrame{index: entry.child, prefix: path + "/"})
 		case objStream:
 			path := frame.prefix + entry.name
 			pathBytes += len(path)

@@ -4,9 +4,9 @@
 // V3 sectors are 512 bytes and v4 sectors are 4096 bytes. Mini sectors are
 // always 64 bytes. Streams smaller than 4096 bytes (miniStreamCutoffSize) are
 // placed in the mini stream; larger streams use the regular FAT path. The
-// output is not byte-exact; instead
-// it aims for "semantic equivalence": when read back with richardlehane/mscfb,
-// the tree structure and the contents of every stream match.
+// output is not byte-exact; instead it aims for semantic equivalence: the tree
+// structure, storage directory metadata, and contents of every stream match
+// when read back. The header CLSID and physical sector layout are not preserved.
 package cfb
 
 import "fmt"

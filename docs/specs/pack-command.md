@@ -57,6 +57,12 @@ FAT limit.
 
 CFB sector chains, allocation tables, and directory references are validated
 for bounds, cycles, duplicate ownership, declared length, and version geometry.
+The root and every storage directory entry are preserved independently of
+their streams, including empty storages, CLSID, state bits, and raw creation
+and modification FILETIME values. `pack` therefore retains the directory
+metadata on UserForm, Frame, MultiPage, and Page container storages while
+regenerating the CFB sector layout. Metadata fields that MS-CFB requires to be
+zero for their directory object type are rejected rather than normalized.
 MS-OVBA compressed streams are limited to 64 MiB of decompressed data per
 stream, and malformed compressed chunks or truncated `dir` records are
 rejected. These failures are reported through `pack_ambiguous_layout`; `pack`
@@ -91,7 +97,7 @@ If generation, validation, or publication fails, an existing destination is left
 - **Standard modules** (`.bas`) and **class modules** (`.cls`): the source tree is authoritative. Modules absent from the template are added, modules absent from source are removed, and renames are represented as removal of the old component plus addition of the new component. The textual `PROJECT` stream, `dir/PROJECTMODULES`, and `VBA/<stream>` entries are regenerated as one consistent component set.
 - **Document modules**: supported only where they map safely against the template's existing document modules.
 - **UserForm code-behind**: a form already present in the template has its code-behind updated from source, honoring `[userform].code_source`. In `frm` mode the code is read from `src/forms/*.frm`; in `sidecar` mode (the default) the authoritative code-behind is `src/forms/code/<FormName>.bas`, merged into the form in memory (the on-disk `.frm`/`.bas` are never modified — `pack` does not write sources). `src/forms/code` is a flat reserved directory; sidecar subdirectories are unsupported. In both modes only the code-behind is applied; the form's designer storage is carried through byte-for-byte. A matching `.frx` is inventoried and validated as a related source artifact but is not written into the packed project; `pack` never authors or modifies form layout. A `.frm` whose form is not in the template fails with `pack_userform_generation_unsupported`; a sidecar carrying `Attribute VB_*` header lines, using a subdirectory, or with no matching `.frm`, fails with `pack_ambiguous_layout`.
-- **Existing UserForm designer streams in the template**: carried through byte-for-byte, untouched. `pack` does not generate or modify form layout.
+- **Existing UserForm designer streams in the template**: carried through byte-for-byte, untouched. Their containing storage directory metadata is preserved as described above. `pack` does not generate or modify form layout.
 
 In template mode, document-module and UserForm topology remains template-authoritative. Omitting their source does not remove them; source may update code only when the component already exists in the template. A source-only document module is rejected as `pack_ambiguous_layout`, and a source-only UserForm is rejected as `pack_userform_generation_unsupported`. Blank mode instead follows the fixed document topology above and rejects every UserForm.
 

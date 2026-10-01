@@ -105,6 +105,12 @@ func Read(data []byte) (*Project, error) {
 			}
 		}
 	}
+	p.StorageMetadata = make(map[string]cfb.StorageMeta)
+	for _, path := range c.StoragePaths() {
+		if meta, ok := c.Storage(path); ok {
+			p.StorageMetadata[path] = meta
+		}
+	}
 	return p, nil
 }
 
