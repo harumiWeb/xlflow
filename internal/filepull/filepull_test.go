@@ -86,6 +86,56 @@ func TestPullRejectsUserFormsBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestProbeInspectsOnlyWorkbookCapabilityWithoutPublishing(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	result, err := Probe(workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Supported || result.Reason != "supported" || result.CodePage != 932 || result.HasForms {
+		t.Fatalf("probe result = %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(root, "src", "modules", "Module1.bas")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("probe published source: %v", err)
+	}
+
+	formWorkbook := writeWorkbook(t, root, readFixture(t, "p4_form.bin"))
+	formResult, err := Probe(formWorkbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if formResult.Supported || formResult.Reason != "userform" || !formResult.HasForms {
+		t.Fatalf("form probe result = %+v", formResult)
+	}
+}
+
+func TestProbeLeavesSourceTreeValidationToPullContext(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	result, err := Probe(workbook)
+	if err != nil || !result.Supported {
+		t.Fatalf("workbook capability probe = %+v, %v", result, err)
+	}
+
+	cfg := testConfig()
+	cfg.Src.Forms = cfg.Src.Modules
+	if _, err := Pull(root, cfg, workbook); !errors.Is(err, ErrUnsafeSourcePath) {
+		t.Fatalf("Pull error = %v, want ErrUnsafeSourcePath", err)
+	}
+}
+
+func BenchmarkProbeClosedWorkbook(b *testing.B) {
+	root := b.TempDir()
+	workbook := writeWorkbook(b, root, readFixture(b, "p1_compiled.bin"))
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := Probe(workbook); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestPullRejectsProtectedAndMissingProjects(t *testing.T) {
 	root := t.TempDir()
 	protected := writeWorkbook(t, root, readFixture(t, "p3_protected.bin"))
@@ -285,7 +335,7 @@ func testConfig() config.Config {
 	return cfg
 }
 
-func readFixture(t *testing.T, name string) []byte {
+func readFixture(t testing.TB, name string) []byte {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join("..", "pack", "vbaproject", "testdata", "corpus", name))
 	if err != nil {
@@ -294,14 +344,14 @@ func readFixture(t *testing.T, name string) []byte {
 	return body
 }
 
-func writeWorkbook(t *testing.T, root string, project []byte) string {
+func writeWorkbook(t testing.TB, root string, project []byte) string {
 	t.Helper()
 	path := filepath.Join(root, "Book.xlsm")
 	writeZip(t, path, project)
 	return path
 }
 
-func writeZip(t *testing.T, path string, project []byte) {
+func writeZip(t testing.TB, path string, project []byte) {
 	t.Helper()
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
@@ -320,7 +370,7 @@ func writeZip(t *testing.T, path string, project []byte) {
 	writeTestFile(t, path, buf.String())
 }
 
-func writeTestFile(t *testing.T, path, body string) {
+func writeTestFile(t testing.TB, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)

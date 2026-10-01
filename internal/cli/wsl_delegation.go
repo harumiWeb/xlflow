@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -54,12 +56,18 @@ var delegatedTopLevelCommands = map[string]struct{}{
 
 var errWSLDelegated = errors.New("wsl delegated command completed")
 
+const envPullAutoProbeWarning = "XLFLOW_PULL_AUTO_PROBE_WARNING"
+
 func (a *app) delegateWSLCommand(cmd *cobra.Command) error {
+	return a.delegateWSLCommandMode(cmd, false, nil)
+}
+
+func (a *app) delegateWSLCommandMode(cmd *cobra.Command, force bool, extraEnvironment map[string]string) error {
 	if len(a.rawArgs) == 0 || !isWSL() || strings.TrimSpace(os.Getenv(wsl.EnvDelegated)) != "" {
 		return nil
 	}
 	topLevel := topLevelCommandName(cmd)
-	if !shouldDelegateCommand(cmd, topLevel) {
+	if !force && !shouldDelegateCommand(cmd, topLevel) {
 		return nil
 	}
 
@@ -92,7 +100,7 @@ func (a *app) delegateWSLCommand(cmd *cobra.Command) error {
 	if topLevel == "doctor" {
 		return a.runDelegatedDoctor(ctx, executable, windowsExecutable, windowsCWD, args)
 	}
-	return a.runDelegatedCommand(ctx, topLevel, executable, args)
+	return a.runDelegatedCommandWithEnvironment(ctx, topLevel, executable, args, delegatedEnvironment(extraEnvironment))
 }
 
 func shouldDelegateTopLevelCommand(name string) bool {
@@ -114,8 +122,15 @@ func shouldDelegateCommand(cmd *cobra.Command, topLevel string) bool {
 			}
 			if descriptor.ID == "pull" {
 				backend := cmd.Flags().Lookup("backend")
-				if backend != nil && strings.EqualFold(strings.TrimSpace(backend.Value.String()), "file") {
-					return false
+				if backend != nil {
+					value := strings.TrimSpace(backend.Value.String())
+					if strings.EqualFold(value, "file") {
+						return false
+					}
+					if strings.EqualFold(value, "auto") {
+						session := cmd.Flags().Lookup("session")
+						return session != nil && strings.EqualFold(session.Value.String(), "true")
+					}
 				}
 			}
 			if descriptor.Policy.ResourceScope == coordination.ResourceWorkbook && !descriptor.Policy.ParallelSafe {
@@ -161,13 +176,13 @@ func topLevelCommandName(cmd *cobra.Command) string {
 	return current.Name()
 }
 
-func (a *app) runDelegatedCommand(ctx context.Context, commandName string, executable string, args []string) error {
+func (a *app) runDelegatedCommandWithEnvironment(ctx context.Context, commandName string, executable string, args []string, environment []string) error {
 	child := newDelegatedCommand(ctx, executable, args...)
 	child.Dir = a.cwd
 	child.Stdin = os.Stdin
 	child.Stdout = a.stdoutWriter()
 	child.Stderr = a.stderrWriter()
-	child.Env = delegatedEnvironment()
+	child.Env = environment
 	err := child.Run()
 	if err == nil {
 		return output.WithExitCode(output.ExitSuccess, errWSLDelegated)
@@ -187,7 +202,7 @@ func (a *app) runDelegatedDoctor(ctx context.Context, executable string, windows
 	child.Stdin = os.Stdin
 	child.Stdout = &stdout
 	child.Stderr = a.stderrWriter()
-	child.Env = delegatedEnvironment()
+	child.Env = delegatedEnvironment(nil)
 	runErr := child.Run()
 	exitCode := output.ExitSuccess
 	if runErr != nil {
@@ -250,7 +265,7 @@ func (a *app) windowsVersion(ctx context.Context, executable string) string {
 	child.Dir = a.cwd
 	child.Stdout = &stdout
 	child.Stderr = a.stderrWriter()
-	child.Env = delegatedEnvironment()
+	child.Env = delegatedEnvironment(nil)
 	if err := child.Run(); err != nil {
 		return ""
 	}
@@ -309,15 +324,21 @@ func ensureJSONFlag(args []string) []string {
 	return append(result, "--json")
 }
 
-func delegatedEnvironment() []string {
+func delegatedEnvironment(extra map[string]string) []string {
 	env := append([]string{}, os.Environ()...)
 	env = setEnvironmentValue(env, wsl.EnvDelegated, "1")
-	env = setEnvironmentValue(env, "WSLENV", mergeWSLEnv(os.Getenv("WSLENV"),
+	forwarded := []string{
 		wsl.EnvDelegated,
 		"XLFLOW_EXCEL_BRIDGE",
 		"XLFLOW_MODE",
 		"XLFLOW_NO_UPDATE_CHECK",
-	))
+	}
+	for _, name := range slices.Sorted(maps.Keys(extra)) {
+		value := extra[name]
+		env = setEnvironmentValue(env, name, value)
+		forwarded = append(forwarded, name)
+	}
+	env = setEnvironmentValue(env, "WSLENV", mergeWSLEnv(os.Getenv("WSLENV"), forwarded...))
 	return env
 }
 

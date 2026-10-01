@@ -1,3 +1,43 @@
+# PR #893 review follow-up 2
+
+Verified against commit `4c57c077`; the stale delegated warning finding is
+valid and in scope:
+
+1. [x] Explicitly clear `XLFLOW_PULL_AUTO_PROBE_WARNING` for warning-free WSL
+       auto-pull delegation, even when the parent environment and `WSLENV`
+       contain a stale value.
+2. [x] Add focused delegation regression coverage, run repository validation,
+       push the fix, and reply to the review thread with evidence.
+
+# PR #893 review follow-up
+
+Verified against commit `bb327504`; three inline findings are valid and in
+scope, while WSL detection of arbitrary externally opened Excel workbooks is
+the approved local-auto boundary rather than a defect:
+
+1. [x] Skip workbook coordination before `auto` selection, then acquire the
+       workbook lease only when auto actually selects Excel. Keep file pulls
+       under source-tree coordination and preserve explicit backend behavior.
+2. [x] On an indeterminate Windows open-state probe, require attachment to an
+       already-open matching workbook instead of opening a separate saved copy.
+3. [x] Preserve the WSL session-probe failure warning in the delegated Windows
+       JSON result, with focused end-to-end delegation coverage.
+4. [x] Investigate the VS Code CI failure independently, run focused/full
+       validation, push the review fix, and reply to every inline thread with
+       evidence or the documented design disposition.
+
+# Issue #892 final-review pass 1 follow-up
+
+Independent review of commit `4e08cf77` confirmed one in-scope P2:
+
+1. [x] Restrict the auto backend capability probe to saved-workbook
+       properties (parse/protection/UserForm support) so it never reads managed
+       source trees before source-tree leases and `--wait` take effect.
+2. [x] Keep source-path, stale-file, and publication planning validation inside
+       `PullContext` while its leases are held; add focused regression coverage.
+3. [x] Run focused/full tests and lint, commit the fix, and request final-review
+       pass 2 on the exact fix commit.
+
 # Issue #877 final-review pass 1 follow-up
 
 Independent review of commit `d20ca701` confirmed one in-scope P1:

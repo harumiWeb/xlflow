@@ -101,14 +101,113 @@ func TestShouldKeepFilePullLocalUnderWSL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !shouldDelegateCommand(pull, "pull") {
-		t.Fatal("default Excel pull should delegate")
+	if shouldDelegateCommand(pull, "pull") {
+		t.Fatal("default auto pull should remain local until backend selection")
 	}
 	if err := pull.Flags().Set("backend", "file"); err != nil {
 		t.Fatal(err)
 	}
 	if shouldDelegateCommand(pull, "pull") {
 		t.Fatal("file pull should remain local")
+	}
+	if err := pull.Flags().Set("backend", "excel"); err != nil {
+		t.Fatal(err)
+	}
+	if !shouldDelegateCommand(pull, "pull") {
+		t.Fatal("explicit Excel pull should delegate")
+	}
+	if err := pull.Flags().Set("backend", "auto"); err != nil {
+		t.Fatal(err)
+	}
+	if err := pull.Flags().Set("session", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if !shouldDelegateCommand(pull, "pull") {
+		t.Fatal("auto pull with explicit session intent should delegate")
+	}
+}
+
+func TestMatchingWSLLiveSessionUsesWindowsStatusProof(t *testing.T) {
+	restore := stubWSLDelegationGlobals(t)
+	defer restore()
+	t.Setenv("GO_WANT_WSL_HELPER_PROCESS", "1")
+	t.Setenv("WSL_HELPER_MODE", "session-status")
+	isWSL = func() bool { return true }
+	translateWSLPath = func(context.Context, string) (string, error) { return `C:\dev\project\build\Book.xlsm`, nil }
+	resolveWindowsExecutable = func(context.Context) (string, string, error) { return "ignored.exe", `C:\tools\xlflow.exe`, nil }
+	newDelegatedCommand = delegatedHelperCommand
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".xlflow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".xlflow", "session.json"), []byte(`{"pid":42,"workbook_path":"C:\\dev\\project\\build\\Book.xlsm"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	matched, err := (&app{cwd: dir}).matchingWSLLiveSession(t.Context(), filepath.Join(dir, "build", "Book.xlsm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched {
+		t.Fatal("matching Windows session status was not accepted")
+	}
+}
+
+func TestDelegateAutoPullForwardsProbeWarning(t *testing.T) {
+	restore := stubWSLDelegationGlobals(t)
+	defer restore()
+	t.Setenv("GO_WANT_WSL_HELPER_PROCESS", "1")
+	t.Setenv("WSL_HELPER_MODE", "echo")
+	isWSL = func() bool { return true }
+	translateWSLPath = func(context.Context, string) (string, error) { return `C:\dev\project`, nil }
+	resolveWindowsExecutable = func(context.Context) (string, string, error) { return "ignored.exe", `C:\tools\xlflow.exe`, nil }
+	translateWSLArgs = func(_ context.Context, args []string) ([]string, error) { return append([]string{}, args...), nil }
+	newDelegatedCommand = delegatedHelperCommand
+	var stdout bytes.Buffer
+	a := &app{cwd: t.TempDir(), rawArgs: []string{"--json", "pull"}, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	pull, _, err := root.Find([]string{"pull"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = a.delegateAutoPullToWindows(pull, errors.New("session status unavailable"))
+	if !errors.Is(err, errWSLDelegated) {
+		t.Fatalf("delegation error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "PULL_WARNING=session status unavailable") {
+		t.Fatalf("probe warning was not forwarded:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), envPullAutoProbeWarning+"/w") {
+		t.Fatalf("WSLENV did not forward probe warning:\n%s", stdout.String())
+	}
+}
+
+func TestDelegateAutoPullClearsStaleProbeWarning(t *testing.T) {
+	restore := stubWSLDelegationGlobals(t)
+	defer restore()
+	t.Setenv("GO_WANT_WSL_HELPER_PROCESS", "1")
+	t.Setenv("WSL_HELPER_MODE", "echo")
+	t.Setenv(envPullAutoProbeWarning, "stale probe failure")
+	t.Setenv("WSLENV", envPullAutoProbeWarning+"/w")
+	isWSL = func() bool { return true }
+	translateWSLPath = func(context.Context, string) (string, error) { return `C:\dev\project`, nil }
+	resolveWindowsExecutable = func(context.Context) (string, string, error) { return "ignored.exe", `C:\tools\xlflow.exe`, nil }
+	translateWSLArgs = func(_ context.Context, args []string) ([]string, error) { return append([]string{}, args...), nil }
+	newDelegatedCommand = delegatedHelperCommand
+	var stdout bytes.Buffer
+	a := &app{cwd: t.TempDir(), rawArgs: []string{"--json", "pull"}, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	pull, _, err := root.Find([]string{"pull"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = a.delegateAutoPullToWindows(pull, nil)
+	if !errors.Is(err, errWSLDelegated) {
+		t.Fatalf("delegation error = %v", err)
+	}
+	if strings.Contains(stdout.String(), "PULL_WARNING=stale probe failure") || !strings.Contains(stdout.String(), "PULL_WARNING=\n") {
+		t.Fatalf("stale probe warning was not cleared:\n%s", stdout.String())
 	}
 }
 
@@ -542,10 +641,13 @@ func TestWSLDelegationHelperProcess(t *testing.T) {
 		os.Exit(output.ExitEnvironment)
 	case mode == "doctor-invalid":
 		fmt.Print(`not-json`)
+	case mode == "session-status":
+		fmt.Print(`{"status":"ok","command":"session status","session":{"active":true,"running":true,"workbook_open":true,"workbook_path":"C:\\dev\\project\\build\\Book.xlsm"}}`)
 	case mode == "echo":
 		fmt.Printf("ARGS=%s\n", strings.Join(args, "|"))
 		fmt.Printf("DELEGATED=%s\n", os.Getenv(wsl.EnvDelegated))
 		fmt.Printf("WSLENV=%s\n", os.Getenv("WSLENV"))
+		fmt.Printf("PULL_WARNING=%s\n", os.Getenv(envPullAutoProbeWarning))
 		cwd, _ := os.Getwd()
 		fmt.Printf("CWD=%s\n", cwd)
 		fmt.Fprintln(os.Stderr, "helper stderr")

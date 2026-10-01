@@ -40,7 +40,8 @@ func buildDescriptors() []Descriptor {
 		cli("init", "init", workbookRead),
 		both("doctor", "doctor", excelRead, bridge("doctor")),
 		both("attach", "attach", withRecovery(excelMutate, RecoveryBlock), bridge("attach")),
-		withBackends(both("pull", "pull", workbookRead, bridge("pull")), "excel", map[string]BackendCapability{
+		withBackends(both("pull", "pull", workbookRead, bridge("pull")), "auto", map[string]BackendCapability{
+			"auto":  {RequiresExcel: true, Selection: "dynamic"},
 			"excel": {RequiresExcel: true},
 			"file":  {RequiresExcel: false},
 		}),

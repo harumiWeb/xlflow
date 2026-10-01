@@ -2,11 +2,12 @@ import * as vscode from "vscode";
 import type { XlflowChannels } from "./logging";
 import { runXlflowJsonCommand } from "./xlflow";
 
-export const supportedCapabilityVersion = 2;
-export const supportedCapabilityVersions = [1, 2] as const;
+export const supportedCapabilityVersion = 3;
+export const supportedCapabilityVersions = [1, 2, 3] as const;
 
 export interface XlflowBackendCapability {
   requires_excel: boolean;
+  selection?: string;
 }
 
 export interface XlflowCommandCapability {
@@ -175,7 +176,7 @@ export function parseCapabilitiesEnvelope(value: unknown): XlflowCapabilities | 
   const raw = value.capabilities;
   if (
     typeof raw.capability_version !== "number" ||
-    !supportedCapabilityVersions.includes(raw.capability_version as 1 | 2) ||
+    !supportedCapabilityVersions.includes(raw.capability_version as 1 | 2 | 3) ||
     !isRecord(raw.commands)
   ) {
     return undefined;
@@ -269,7 +270,15 @@ function parseCommandCapability(
       ) {
         return undefined;
       }
-      backends[name] = { requires_excel: backend.requires_excel };
+      const selection = backend.selection;
+      const parsedBackend: XlflowBackendCapability = { requires_excel: backend.requires_excel };
+      if (capabilityVersion >= 3 && selection !== undefined) {
+        if (!isNonEmptyString(selection)) {
+          return undefined;
+        }
+        parsedBackend.selection = selection;
+      }
+      backends[name] = parsedBackend;
     }
     if (backends[value.default_backend] === undefined) {
       return undefined;

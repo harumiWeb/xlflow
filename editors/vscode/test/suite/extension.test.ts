@@ -167,7 +167,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
       future_envelope_field: true,
     },
   });
-  assert.ok(capabilities, "v2 capability output should parse while ignoring unknown fields");
+  assert.ok(capabilities, "latest capability output should parse while ignoring unknown fields");
 
   const v1Capabilities = parseCapabilitiesEnvelope({
     status: "ok",
@@ -194,6 +194,27 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     },
   });
   assert.strictEqual(v2BackendCapabilities?.commands.pull.backends?.file.requires_excel, false);
+  const v3BackendCapabilities = parseCapabilitiesEnvelope({
+    status: "ok",
+    capabilities: {
+      capability_version: 3,
+      commands: {
+        pull: {
+          ...capabilities!.commands.push,
+          cli_paths: ["pull"],
+          operation_kind: "read",
+          default_backend: "auto",
+          backends: {
+            auto: { requires_excel: true, selection: "dynamic" },
+            excel: { requires_excel: true },
+            file: { requires_excel: false },
+          },
+        },
+      },
+    },
+  });
+  assert.strictEqual(v3BackendCapabilities?.capability_version, 3);
+  assert.strictEqual(v3BackendCapabilities?.commands.pull.backends?.auto.selection, "dynamic");
   assert.strictEqual(
     capabilityOperationForArgs(capabilities!, ["--json", "push"])?.commandID,
     "push",

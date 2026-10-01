@@ -31,7 +31,8 @@ the next decision.
 | Discover available capabilities           | `xlflow --help`                                                                         | xlflow is unfamiliar or the needed feature is unknown                                                 |
 | Check source, workbook, and session state | `xlflow status --json`                                                                  | before workbook work or after a failure                                                               |
 | Diagnose Excel, COM, or VBIDE setup       | `xlflow doctor --json`                                                                  | automation cannot be trusted                                                                          |
-| Export workbook VBA into source           | `xlflow pull --session --json`                                                          | the workbook is authoritative or freshness is unclear                                                 |
+| Export workbook VBA into source           | `xlflow pull --json`                                                                    | let xlflow choose saved-file or live Excel authority safely                                           |
+| Force export from live Excel              | `xlflow pull --backend excel --session --json`                                          | the live workbook is explicitly authoritative                                                         |
 | Export saved `.xlsm` VBA without Excel    | `xlflow pull --backend file --json`                                                     | saved file is authoritative and the project has no UserForms                                          |
 | Find a runnable entrypoint                | `xlflow macros --session --json`                                                        | the macro name is not already proven                                                                  |
 | Check source before Excel import          | `xlflow lint --json` and `xlflow analyze --json`                                        | after source edits                                                                                    |
@@ -140,9 +141,12 @@ xlflow save --session --json
 xlflow session stop --json
 ```
 
-Use `pull --backend file --json` only when the saved `.xlsm` is explicitly the
-source of truth. It never reads unsaved session state and rejects workbooks
-containing UserForms before changing source; there is no fallback to Excel.
+The default `pull --json` selects the fastest safe backend and reports
+`backend`, `backend_selection`, `selection_reason`, and source authority. Use
+`pull --backend file --json` only when the saved `.xlsm` is explicitly the
+source of truth; it never reads unsaved session state and rejects workbooks
+containing UserForms before changing source. Use `--backend excel` to force
+Excel/VBIDE authority.
 
 Run `xlflow doctor --json` when Excel, COM, VBIDE access, or macro execution
 cannot be trusted. Do not run both session start and attach: choose attach for

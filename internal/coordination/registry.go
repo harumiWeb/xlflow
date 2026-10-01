@@ -30,10 +30,11 @@ type Descriptor struct {
 
 // CapabilityVersion is the current version of the public command capability
 // contract. Consumers must ignore fields and commands they do not recognize.
-const CapabilityVersion = 2
+const CapabilityVersion = 3
 
 type BackendCapability struct {
-	RequiresExcel bool `json:"requires_excel"`
+	RequiresExcel bool   `json:"requires_excel"`
+	Selection     string `json:"selection,omitempty"`
 }
 
 // Capabilities is the machine-readable, integration-safe view of the command

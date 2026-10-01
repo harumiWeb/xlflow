@@ -13,4 +13,5 @@ public sealed record PullCommandArguments(
     bool Visible,
     bool UseSession,
     string MetadataPath,
-    bool LineNumbersEnabled = false);
+    bool LineNumbersEnabled = false,
+    bool AttachOpenWorkbook = false);

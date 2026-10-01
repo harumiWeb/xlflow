@@ -17,4 +17,11 @@ xlflow save --session --json
 xlflow session stop --json
 ```
 
-Source-only commands stay in WSL. Excel-backed commands delegate to Windows. The session commands make this boundary invisible once they work: `push`, `run`, and `save` all act on the same Windows Excel session. If discovery fails, set `XLFLOW_WINDOWS_EXE` to the Windows executable path. WSL-only paths such as `/home/user/project` cannot be translated for Excel delegation; see [WSL troubleshooting](../help/troubleshooting#wsl).
+Source-only commands stay in WSL and Excel-backed commands delegate to Windows.
+`pull` is dynamic: its normal auto path and explicit file backend stay local,
+while `--backend excel`, `--session`, or a validated matching live session
+delegate. The session commands make this boundary invisible once they work:
+`push`, `run`, and `save` all act on the same Windows Excel session. If
+discovery fails, set `XLFLOW_WINDOWS_EXE` to the Windows executable path.
+WSL-only paths such as `/home/user/project` cannot be translated for Excel
+delegation; see [WSL troubleshooting](../help/troubleshooting#wsl).

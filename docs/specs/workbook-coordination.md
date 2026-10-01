@@ -66,7 +66,7 @@ cannot mutate the authoritative definitions.
 ### Public Capability Contract
 
 `xlflow capabilities --json` is a source-only, parallel-safe command that
-returns a v2, machine-readable projection of every registry descriptor in the
+returns a v3, machine-readable projection of every registry descriptor in the
 normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
 
 ```json
@@ -74,7 +74,7 @@ normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
   "status": "ok",
   "command": "capabilities",
   "capabilities": {
-    "capability_version": 2,
+    "capability_version": 3,
     "commands": {
       "push": {
         "cli_paths": ["push"],
@@ -91,19 +91,20 @@ normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
 }
 ```
 
-The v2 `pull` entry additionally contains
-`"default_backend":"excel"` and
-`"backends":{"excel":{"requires_excel":true},"file":{"requires_excel":false}}`.
-Its command-level `requires_excel` remains `true` because the default path is
-Excel-backed.
+The v3 `pull` entry contains `"default_backend":"auto"` and
+`"backends":{"auto":{"requires_excel":true,"selection":"dynamic"},"excel":{"requires_excel":true},"file":{"requires_excel":false}}`.
+Command-level and auto `requires_excel` remain conservatively `true` because
+runtime state can select Excel; `selection=dynamic` prevents consumers from
+mistaking auto for a fixed Excel requirement.
 
 `capability_version` is an integer schema version. Version 1 stabilized the
 command-map keys (command IDs), each command's `cli_paths`, and the meanings and
 vocabularies of `resource_scope`, `operation_kind`, `parallel_safe`,
 `retryable_when_busy`, `default_wait_policy`, `recovery_behavior`, and
 `requires_excel`. Version 2 adds optional `default_backend` and `backends`
-fields. Command-level `requires_excel` describes the default path; an explicit
-backend invocation uses its backend entry. The
+fields. Version 3 adds the optional backend `selection` field and changes pull's
+default to dynamic auto selection. Command-level `requires_excel` describes the
+safest host requirement; an explicit backend invocation uses its backend entry. The
 `capabilities` command itself is included with ID and path `capabilities`.
 
 `requires_excel` is an advisory field. `build` reports `true` for its
@@ -686,8 +687,8 @@ and never replaces the OS lock as ownership authority.
 for module, class, and document-module roots, promotes duplicate identities to
 exclusive mode, and acquires the result in stable LockID order before reading
 the saved workbook. It holds the set through planning, publication, rollback,
-and cleanup. It deliberately skips the workbook lease. The default Excel
-backend retains its historical workbook coordination contract.
+and cleanup. It deliberately skips the workbook lease. The Excel backend
+retains its historical workbook coordination contract.
 
 Global acquisition order is resource kind first (`workbook`, then
 `source_tree`) and LockID second. Release order is reversed. A future command

@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.34.0
+
+- Changed `xlflow pull` to default to `--backend auto`: closed, supported
+  `.xlsm` workbooks use the pure-Go backend, while live/open workbooks,
+  UserForms, and unsupported file-backend formats safely use Excel. Structured
+  output now reports the actual backend, selection mode, reason, and source
+  authority; capabilities schema v3 describes the dynamic default.
 - Preserved CFB storage directory metadata across pure-Go VBA project
   rewrites, including root and empty storages, CLSIDs, state bits, and raw
   FILETIME values. Existing nested UserForm Frame and MultiPage container

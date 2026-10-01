@@ -2,8 +2,10 @@
 
 ## Unreleased
 
-- Accept xlflow capability schemas v1 and v2, including backend-specific Excel
-  requirements for the saved-workbook `pull --backend file` path.
+## v0.11.0
+
+- Accept xlflow capability schemas v1 through v3, including backend-specific
+  Excel requirements and dynamic `pull --backend auto` selection metadata.
 
 ## v0.10.2
 
