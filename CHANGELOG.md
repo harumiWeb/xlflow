@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.34.0
+
 - Changed `xlflow pull` to default to `--backend auto`: closed, supported
   `.xlsm` workbooks use the pure-Go backend, while live/open workbooks,
   UserForms, and unsupported file-backend formats safely use Excel. Structured
