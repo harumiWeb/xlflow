@@ -202,24 +202,46 @@ func TestWriterStorageDefinitionConflicts(t *testing.T) {
 	meta := StorageMeta{Modified: 1}
 	w := NewWriter()
 	w.AddStorage([]string{"form"}, meta)
-	w.AddStorage([]string{"form"}, meta)
-	w.AddStream([]string{"form", "f"}, []byte("x"))
-	if _, err := w.Bytes(); err != nil {
+	w.AddStorage([]string{"Form"}, meta)
+	w.AddStream([]string{"FORM", "f"}, []byte("x"))
+	first, err := w.Bytes()
+	if err != nil {
 		t.Fatalf("identical storage definitions: %v", err)
+	}
+	second, err := w.Bytes()
+	if err != nil {
+		t.Fatalf("repeated Bytes: %v", err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("repeated Bytes output changed")
+	}
+	c, err := Open(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.StoragePaths(), []string{"", "form"}) {
+		t.Fatalf("storage paths = %q, want first spelling only", c.StoragePaths())
 	}
 
 	w = NewWriter()
 	w.AddStorage([]string{"form"}, meta)
-	w.AddStorage([]string{"form"}, StorageMeta{Modified: 2})
+	w.AddStorage([]string{"Form"}, StorageMeta{Modified: 2})
 	if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "conflicting metadata") {
 		t.Fatalf("conflicting storage metadata error = %v", err)
 	}
 
 	w = NewWriter()
-	w.AddStream([]string{"form"}, []byte("x"))
+	w.AddStream([]string{"Form"}, []byte("x"))
 	w.AddStorage([]string{"form"}, meta)
 	if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "storage") {
 		t.Fatalf("stream/storage collision error = %v", err)
+	}
+
+	w = NewWriter()
+	w.AddStream([]string{"Form"}, []byte("x"))
+	w.AddStream([]string{"form"}, []byte("y"))
+	if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "duplicate stream") {
+		t.Fatalf("duplicate stream identity error = %v", err)
 	}
 }
 

@@ -60,7 +60,7 @@ type node struct {
 	name     string
 	objType  byte
 	data     []byte           // stream only
-	children map[string]*node // storage / root only
+	children map[string]*node // storage / root only, keyed by DirectoryNameKey
 	meta     StorageMeta      // storage / root only
 	metaSet  bool
 
@@ -117,10 +117,11 @@ func (w *Writer) buildTree() (*node, []*node, error) {
 		}
 		cur := root
 		for i, part := range s.path {
-			ch, ok := cur.children[part]
+			identity := DirectoryNameKey(part)
+			ch, ok := cur.children[identity]
 			if !ok {
 				ch = newNode(part, objStorage)
-				cur.children[part] = ch
+				cur.children[identity] = ch
 			} else if ch.objType != objStorage {
 				return nil, nil, fmt.Errorf("cfb: %q already exists as a stream but was registered as a storage", part)
 			}
@@ -142,7 +143,8 @@ func (w *Writer) buildTree() (*node, []*node, error) {
 		cur := root
 		for i, part := range s.path {
 			last := i == len(s.path)-1
-			ch, ok := cur.children[part]
+			identity := DirectoryNameKey(part)
+			ch, ok := cur.children[identity]
 			if !ok {
 				if last {
 					ch = newNode(part, objStream)
@@ -150,7 +152,7 @@ func (w *Writer) buildTree() (*node, []*node, error) {
 				} else {
 					ch = newNode(part, objStorage)
 				}
-				cur.children[part] = ch
+				cur.children[identity] = ch
 			} else {
 				// Detect a type conflict with an existing element.
 				if last && ch.objType != objStream {

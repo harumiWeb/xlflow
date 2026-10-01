@@ -61,8 +61,11 @@ The root and every storage directory entry are preserved independently of
 their streams, including empty storages, CLSID, state bits, and raw creation
 and modification FILETIME values. `pack` therefore retains the directory
 metadata on UserForm, Frame, MultiPage, and Page container storages while
-regenerating the CFB sector layout. Metadata fields that MS-CFB requires to be
-zero for their directory object type are rejected rather than normalized.
+regenerating the CFB sector layout. Storage and stream sibling identities use
+the same MS-CFB case-insensitive comparison; conflicting case variants and
+storage/stream collisions are rejected on both read and write. Metadata fields
+that MS-CFB requires to be zero for their directory object type are rejected
+rather than normalized.
 MS-OVBA compressed streams are limited to 64 MiB of decompressed data per
 stream, and malformed compressed chunks or truncated `dir` records are
 rejected. These failures are reported through `pack_ambiguous_layout`; `pack`

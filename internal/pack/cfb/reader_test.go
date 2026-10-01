@@ -199,6 +199,52 @@ func TestOpenRejectsMetadataForbiddenForObjectType(t *testing.T) {
 	}
 }
 
+func TestOpenRejectsDuplicateDirectoryIdentity(t *testing.T) {
+	cases := []struct {
+		name  string
+		build func(*Writer)
+	}{
+		{
+			name: "storage-storage",
+			build: func(w *Writer) {
+				w.AddStorage([]string{"Form"}, StorageMeta{})
+				w.AddStorage([]string{"Forn"}, StorageMeta{})
+			},
+		},
+		{
+			name: "storage-stream",
+			build: func(w *Writer) {
+				w.AddStorage([]string{"Form"}, StorageMeta{})
+				w.AddStream([]string{"Forn"}, []byte("x"))
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := NewWriter()
+			tc.build(w)
+			data, err := w.Bytes()
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstDir := binary.LittleEndian.Uint32(data[48:52])
+			dirOffset := headerSize + int(firstDir)*512
+			dirSector := data[dirOffset : dirOffset+512]
+			needle := []byte{'F', 0, 'o', 0, 'r', 0, 'n', 0, 0, 0}
+			nameOffset := bytes.Index(dirSector, needle)
+			if nameOffset < 0 {
+				t.Fatal("precondition: Forn directory entry not found")
+			}
+			dirSector[nameOffset] = 'f'
+			dirSector[nameOffset+6] = 'm'
+
+			if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "duplicate directory identity") {
+				t.Fatalf("Open duplicate identity error = %v", err)
+			}
+		})
+	}
+}
+
 func loadBin(t *testing.T, book string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "corpus", book+".bin"))

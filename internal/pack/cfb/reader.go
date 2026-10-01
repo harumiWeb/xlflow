@@ -529,6 +529,11 @@ func Open(data []byte) (*Container, error) {
 	states := make([]byte, len(entries))
 	states[0] = 2
 	stack := []walkFrame{{index: root.child}}
+	type childIdentity struct {
+		name    string
+		objType byte
+	}
+	childrenByParent := map[string]map[string]childIdentity{}
 	pathBytes := 0
 	pathBudget := max(len(data)*8, 1<<20)
 	for len(stack) > 0 {
@@ -555,6 +560,19 @@ func Open(data []byte) (*Container, error) {
 		if entry.name == "" {
 			return nil, fmt.Errorf("cfb: referenced directory entry %d has an empty name", frame.index)
 		}
+		children := childrenByParent[frame.prefix]
+		if children == nil {
+			children = map[string]childIdentity{}
+			childrenByParent[frame.prefix] = children
+		}
+		identity := DirectoryNameKey(entry.name)
+		if previous, exists := children[identity]; exists {
+			return nil, fmt.Errorf(
+				"cfb: duplicate directory identity %q (type %d) and %q (type %d) under %q",
+				previous.name, previous.objType, entry.name, entry.objType, frame.prefix,
+			)
+		}
+		children[identity] = childIdentity{name: entry.name, objType: entry.objType}
 		switch entry.objType {
 		case objStorage:
 			path := frame.prefix + entry.name
