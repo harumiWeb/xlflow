@@ -1,4 +1,4 @@
-# MS-OFORMS reader contract
+# MS-OFORMS reader and projection contract
 
 This document defines xlflow's internal, pure-Go reader contract for Microsoft
 Forms designer state stored in `vbaProject.bin`. The architectural rationale
@@ -48,9 +48,10 @@ An unsupported class remains an opaque control only when its site record and
 inside a known record are accepted only when its declared record boundary still
 reconciles exactly; otherwise parsing fails.
 
-This package does not project into FormSpec, publish files during `pull`, edit
-records, or serialize streams. Those are separate stages covered by the
-follow-up UserForm issues.
+This package does not publish files during `pull`, edit records, or serialize
+streams. Projection is owned by the separate
+`internal/vba/userforms/projection` adapter so the lossless model does not
+depend on the user-facing schema.
 
 ## Encoding and geometry
 
@@ -62,6 +63,55 @@ also retained.
 
 Control positions and sizes remain signed HIMETRIC integers in the binary
 model. Conversion to FormSpec points belongs to the projection layer.
+
+## FormSpec projection
+
+`projection.Project` converts one parsed `oforms.Form` to the canonical
+`internal/vba/userforms/spec.FormSpec`. The result uses schema version 1,
+`kind: xlflow.userform`, `basis: designer`, and parent-relative point
+coordinates. HIMETRIC geometry is converted with `points = value * 72 / 2540`.
+
+Controls are flattened in persisted preorder. IDs use deterministic
+`control_NNN` values, `parentId` points at the containing control, and `zIndex`
+is the persisted sibling index. Known MSForms classes receive their canonical
+type and ProgID. Caption, text/value, size, position, tab index, ComboBox/ListBox
+selected index, enabled state, and visible state are projected when their binary
+meaning is known. File-format defaults are applied when the relevant MS-OFORMS property
+record is omitted.
+
+The root `DisplayedSize` is exposed through the best-effort form width/height
+fields. It is the persisted client/display area and can differ from Excel
+VBIDE's outer Designer width/height because of window chrome. Control geometry
+is compared directly; callers must retain the existing best-effort treatment of
+form-level dimensions. Boolean control values are normalized from persisted
+`1`/`0` spellings to Excel snapshot `True`/`False` spellings.
+
+TabStrip is structurally recognized by the binary reader, but its persisted
+`ListIndex` is not part of the current FormSpec control contract. Projection
+therefore records it as unsupported rather than emitting a snapshot the
+canonical loader would reject.
+
+Binary masks, padding, TextProps, class tables, opaque tails, stream extents,
+and internal site IDs never enter FormSpec. Semantically meaningful state that
+has no supported FormSpec field is listed in a control's sorted `unsupported`
+array and summarized by one `unsupported_properties` warning per control.
+Non-empty site strings without a FormSpec field—including `Tag`,
+`ControlTipText`, `RuntimeLicKey`, `ControlSource`, and `RowSource`—are named in
+that list rather than silently discarded. Site `Name` is already represented
+by the control's canonical `name` field.
+Unmodeled `BooleanProperties`, control flag bits outside the projected
+`Enabled` bit, and site flags that differ from the persisted default are also
+reported. For nested containers, their level-specific font, picture, mouse icon,
+and extra streams are attached to the owning control's unsupported list and
+warning.
+Form-level unsupported state is summarized by a form warning. Raw persistence
+details used only for lossless replay are not exposed as property-bag values.
+
+A structurally bounded control whose type or ProgID cannot be recovered is
+retained as `type: Control` with `unsupported: [controlType]`. `UFV015` accepts
+that shape only as a snapshot-only placeholder. `form build` and `form apply`
+reject it with `UFV006` before opening Excel; callers must replace it with a
+supported type or the real custom ProgID before authoring.
 
 ## Structural validation
 
@@ -93,3 +143,12 @@ Page, and nested container storages. Focused corruption tests cover missing and
 mis-sized `o` streams, inconsistent depth runs, orphan storages, unsupported
 code pages, and structurally bounded opaque controls. Native Go fuzz targets
 exercise both the public CFB-to-form reader and the `f` stream parser.
+Projection tests cover common properties, nested parent relationships,
+snapshot-only opaque controls, validation boundaries, and repeated byte-stable
+JSON output. `TestProjectMatchesExcelBackedSnapshot` can additionally compare
+the canonical supported control state from an Excel-authored snapshot with the
+pure-Go projection of the same workbook. Set
+`XLFLOW_PROJECTION_PARITY_WORKBOOK` and
+`XLFLOW_PROJECTION_PARITY_SNAPSHOT` to run this Windows/Excel integration test.
+Root form dimensions are excluded because the binary stores client dimensions
+while Excel reports outer Designer dimensions.

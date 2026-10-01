@@ -1,4 +1,4 @@
-package forms
+package spec
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -110,6 +111,11 @@ type FormSpecWarning struct {
 	Message string `json:"message,omitempty" yaml:"message,omitempty"`
 	Control string `json:"control,omitempty" yaml:"control,omitempty"`
 }
+
+const (
+	UnsupportedControlPlaceholderType = "Control"
+	UnsupportedControlTypeProperty    = "controlType"
+)
 
 type SpecError struct {
 	Code       string
@@ -301,6 +307,30 @@ func ValidateFormSpec(spec FormSpec) error {
 	return nil
 }
 
+// ValidateFormSpecForAuthoring rejects snapshot-only control placeholders that
+// cannot be created safely by an Excel or pure-Go writer.
+func ValidateFormSpecForAuthoring(input SpecInput, spec FormSpec) error {
+	issues := make([]ValidationIssue, 0)
+	for i, control := range spec.Controls {
+		if !IsUnsupportedControlPlaceholder(control) {
+			continue
+		}
+		path := fmt.Sprintf("controls[%d]", i)
+		issues = append(issues, validationIssue(
+			"UFV006",
+			SeverityError,
+			fmt.Sprintf("%s.type %q is a snapshot-only placeholder and cannot be authored.", path, control.Type),
+			path+".type",
+			"Replace the placeholder with a supported built-in type or provide the control's real custom progId.",
+			"",
+		))
+	}
+	if hasValidationErrors(issues) {
+		return newSpecValidationIssuesError(input, issues)
+	}
+	return nil
+}
+
 func ValidateFormSpecSource(input SpecInput, body []byte) ([]ValidationIssue, error) {
 	value, err := decodeSpecSource(input, body)
 	if err != nil {
@@ -387,7 +417,9 @@ func ValidateFormSpecControlIssues(control FormSpecControl, path string) []Valid
 	if strings.TrimSpace(control.Type) == "" {
 		issues = append(issues, requiredFieldIssue(path+".type"))
 	}
-	if _, err := ControlProgID(control); err != nil {
+	if IsUnsupportedControlPlaceholder(control) {
+		issues = append(issues, unsupportedControlPlaceholderIssue(path))
+	} else if _, err := ControlProgID(control); err != nil {
 		issues = append(issues, validationIssue("UFV006", SeverityError, fmt.Sprintf("%s: %v.", path, err), path+".type", "Use a supported built-in type or provide a custom progId.", ""))
 	}
 	if strings.TrimSpace(control.Type) != "" && strings.TrimSpace(control.ProgID) != "" {
@@ -396,6 +428,25 @@ func ValidateFormSpecControlIssues(control FormSpecControl, path string) []Valid
 		}
 	}
 	return issues
+}
+
+// IsUnsupportedControlPlaceholder reports whether a control is a loss-aware
+// snapshot placeholder rather than an authorable control definition.
+func IsUnsupportedControlPlaceholder(control FormSpecControl) bool {
+	return strings.EqualFold(strings.TrimSpace(control.Type), UnsupportedControlPlaceholderType) &&
+		strings.TrimSpace(control.ProgID) == "" &&
+		slices.Contains(control.Unsupported, UnsupportedControlTypeProperty)
+}
+
+func unsupportedControlPlaceholderIssue(path string) ValidationIssue {
+	return validationIssue(
+		"UFV015",
+		SeverityWarning,
+		fmt.Sprintf("%s is a snapshot-only placeholder for a control whose type could not be recovered.", path),
+		path+".type",
+		"Preserve it for review, or replace it with a supported type and real progId before building.",
+		SupportLevelSnapshotOnly,
+	)
 }
 
 func ControlProgID(control FormSpecControl) (string, error) {
@@ -554,13 +605,23 @@ func validateRawControlProperties(controlMap map[string]any, controlType, progID
 		}
 	}
 	if strings.TrimSpace(controlType) != "" && !builtInType {
-		if strings.TrimSpace(progID) == "" {
+		if isRawUnsupportedControlPlaceholder(controlMap, controlType, progID) {
+			issues = append(issues, unsupportedControlPlaceholderIssue(path))
+		} else if strings.TrimSpace(progID) == "" {
 			issues = append(issues, validationIssue("UFV006", SeverityError, fmt.Sprintf("%s.type %q is not a supported built-in control type.", path, controlType), path+".type", "Use a supported built-in type or provide a custom progId.", ""))
 		} else if _, knownProgID := LookupControlContractByProgID(progID); !knownProgID {
 			issues = append(issues, validationIssue("UFV014", SeverityWarning, fmt.Sprintf("%s uses custom control type %q with unchecked ProgID %q.", path, controlType, progID), path+".progId", "Only common structural fields and the properties bag are validated for custom controls.", SupportLevelCustomUnchecked))
 		}
 	}
 	return issues
+}
+
+func isRawUnsupportedControlPlaceholder(controlMap map[string]any, controlType, progID string) bool {
+	if !strings.EqualFold(strings.TrimSpace(controlType), UnsupportedControlPlaceholderType) || strings.TrimSpace(progID) != "" {
+		return false
+	}
+	unsupported, ok := stringSliceField(controlMap, "unsupported")
+	return ok && slices.Contains(unsupported, UnsupportedControlTypeProperty)
 }
 
 func validateRawObservedControlProperties(controlMap map[string]any, controlType, progID, path string) []ValidationIssue {
@@ -1322,8 +1383,19 @@ func formSpecControl(root map[string]any, parentID string, index int, unnamedCou
 	if text, ok := stringField(root, "text"); ok {
 		control.Text = &text
 	}
-	if value, ok := root["value"]; ok {
-		control.Value = value
+	if value, ok := root["value"]; ok && value != nil {
+		_, knownType := LookupControlContract(controlType)
+		_, supportsValue := LookupControlProperty(controlType, "value")
+		if supportsValue || (!knownType && strings.TrimSpace(control.ProgID) != "") {
+			control.Value = value
+		} else {
+			control.Unsupported = append(control.Unsupported, "value")
+			warnings = append(warnings, FormSpecWarning{
+				Code:    "unsupported_properties",
+				Message: "Unsupported Designer properties were omitted from the FormSpec snapshot: value.",
+				Control: control.Name,
+			})
+		}
 	}
 	if left, ok := optionalFloatField(root, "left"); ok {
 		control.Left = &left
@@ -1353,7 +1425,9 @@ func formSpecControl(root map[string]any, parentID string, index int, unnamedCou
 		control.List = list
 	}
 	if unsupported, ok := stringSliceField(root, "unsupported"); ok {
-		control.Unsupported = unsupported
+		control.Unsupported = append(control.Unsupported, unsupported...)
+		slices.Sort(control.Unsupported)
+		control.Unsupported = slices.Compact(control.Unsupported)
 	}
 	if properties, ok := asObjectMap(root["properties"]); ok && len(properties) > 0 {
 		control.Properties = properties

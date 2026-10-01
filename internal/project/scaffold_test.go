@@ -10,9 +10,9 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 )
 

@@ -21,12 +21,12 @@ import (
 	"github.com/harumiWeb/xlflow/internal/backup"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel"
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	formulaspkg "github.com/harumiWeb/xlflow/internal/formulas"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 	"github.com/xuri/excelize/v2"
 )
@@ -3237,6 +3237,23 @@ func TestBuildFormWriteOptionsRejectsInvalidRequirements(t *testing.T) {
 	}
 	if _, err := buildFormWriteOptions("noop", "missing.form.yaml", false, false, false, excel.CommandOptions{}, root); err == nil || !strings.Contains(err.Error(), "unsupported form action") {
 		t.Fatalf("expected action error, got %v", err)
+	}
+}
+
+func TestBuildFormWriteOptionsRejectsSnapshotOnlyControlPlaceholder(t *testing.T) {
+	root := t.TempDir()
+	specPath := filepath.Join(root, "UserForm1.yaml")
+	body := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: UserForm1\ncontrols:\n  - id: control_001\n    name: VendorControl1\n    type: Control\n    unsupported: [controlType]\nwarnings: []\n"
+	if err := os.WriteFile(specPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := buildFormWriteOptions("build", specPath, false, false, false, excel.CommandOptions{}, root)
+	var specErr *forms.SpecError
+	if !errors.As(err, &specErr) {
+		t.Fatalf("error = %#v, want SpecError", err)
+	}
+	if specErr.Code != "spec_validation_failed" || specErr.Field != "controls[0].type" || len(specErr.Issues) != 1 || specErr.Issues[0].Code != "UFV006" {
+		t.Fatalf("error = %#v", specErr)
 	}
 }
 

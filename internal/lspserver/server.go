@@ -29,7 +29,6 @@ import (
 	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/analyze/semanticquery"
 	"github.com/harumiWeb/xlflow/internal/config"
-	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/typedb"
@@ -42,6 +41,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
+	formsintel "github.com/harumiWeb/xlflow/internal/vba/userforms/spec/intel"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 )

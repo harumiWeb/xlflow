@@ -9,7 +9,7 @@ import (
 )
 
 func TestBuildFormWriteOptionsAcceptsRepresentativeUserFormFixture(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "excel", "forms", "intel", "testdata", "representative-userform.yaml"))
+	body, err := os.ReadFile(filepath.Join("..", "vba", "userforms", "spec", "intel", "testdata", "representative-userform.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -223,6 +223,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `const_declarator`
 - `constant_assignment`
 - `constant_name`
+- `control_001`
 - `control_count`
 - `control_enumeration_failed`
 - `control_failed`
@@ -1345,6 +1346,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unresolved_call_count`
 - `unsafe_backup_file_path`
 - `unsafe_original_workbook_path`
+- `unsupported_control_type`
 - `unsupported_form_control`
 - `unsupported_formula_syntax`
 - `unsupported_host`
@@ -1353,6 +1355,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unsupported_literal`
 - `unsupported_parameter_type`
 - `unsupported_project_layout`
+- `unsupported_properties`
 - `unsupported_property`
 - `unsupported_test_isolation`
 - `unsupported_test_rerun`

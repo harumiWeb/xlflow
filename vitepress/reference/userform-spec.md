@@ -102,7 +102,7 @@ The LSP also provides context-aware completion and Hover for known UserForm YAML
 | `UFY001`          | YAML parse error.                                                                                                             |
 | `UFV001`–`UFV005` | Unknown field, invalid value type/fixed value, missing required field, or unsupported property.                               |
 | `UFV006`–`UFV012` | Unsupported control type, duplicate ID, invalid parent reference, parent cycle, invalid parent type, or type/ProgID mismatch. |
-| `UFV013`–`UFV014` | Support-level warning or custom-control validation warning.                                                                   |
+| `UFV013`–`UFV015` | Support-level, custom-control, or snapshot-only unresolved-control warning.                                                   |
 
 For a Designer capture, use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml`. Captured `warnings`, `observed`, and other snapshot fields are preserved for review, but new authoring should begin with the minimal form above. Keep authored specs directly in `src/forms/specs/` so the LSP recognizes them; files outside that configured location are intentionally ignored.
 

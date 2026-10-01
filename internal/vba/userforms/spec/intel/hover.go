@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 // Hover is protocol-neutral documentation for a UserForm YAML token.
