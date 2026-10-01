@@ -5,6 +5,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$directorySeparators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+if ($WorkspaceSuffix.IndexOfAny($directorySeparators) -ge 0) {
+    throw 'WorkspaceSuffix must not contain directory separators.'
+}
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'tmp_workspaces'))
 $workspace = [IO.Path]::GetFullPath((Join-Path $workspaceRoot ("file-pull-release-e2e$WorkspaceSuffix")))
@@ -80,6 +84,22 @@ function Get-SourceSnapshot {
             $relative = $file.FullName.Substring($fullRoot.Length).TrimStart('\', '/').Replace('\', '/')
             $snapshot[$relative] = $text.Replace("`r`n", "`n").Replace("`r", "`n")
         }
+    }
+    return $snapshot
+}
+
+function Get-SourceByteSnapshot {
+    param([Parameter(Mandatory)][string]$Root)
+
+    $snapshot = [ordered]@{}
+    $sourceRoot = [IO.Path]::GetFullPath((Join-Path $Root 'src')).TrimEnd('\', '/')
+    if (-not (Test-Path -LiteralPath $sourceRoot)) { return $snapshot }
+    foreach ($file in Get-ChildItem -LiteralPath $sourceRoot -File -Recurse | Sort-Object FullName) {
+        if (-not $file.FullName.StartsWith($sourceRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "source escaped byte snapshot root: $($file.FullName)"
+        }
+        $relative = $file.FullName.Substring($sourceRoot.Length).TrimStart('\', '/').Replace('\', '/')
+        $snapshot[$relative] = [Convert]::ToBase64String([IO.File]::ReadAllBytes($file.FullName))
     }
     return $snapshot
 }
@@ -188,8 +208,9 @@ if (-not (Get-Command xlflow -ErrorAction SilentlyContinue)) {
 }
 
 New-Item -ItemType Directory -Force -Path $workspaceRoot | Out-Null
+$workspaceBoundary = $workspaceRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
 foreach ($candidate in @($workspace, $rejectionWorkspace)) {
-    if (-not $candidate.StartsWith($workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $candidate.StartsWith($workspaceBoundary, [StringComparison]::OrdinalIgnoreCase)) {
         throw "unsafe release-gate workspace path: $candidate"
     }
     if (Test-Path -LiteralPath $candidate) {
@@ -317,14 +338,17 @@ End Function
     $rejectionWorkbook = Join-Path $rejectionWorkspace 'build\FilePullGate.xlsm'
     Copy-Item -LiteralPath (Join-Path $workspace 'build\FilePullGate.xlsm') -Destination $rejectionWorkbook
     Add-UserForm $rejectionWorkbook
+    $formsCanary = Join-Path $rejectionWorkspace 'src\forms\release-gate-canary.frx'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $formsCanary) | Out-Null
+    [IO.File]::WriteAllBytes($formsCanary, [byte[]](0, 13, 10, 255, 128, 1))
     Push-Location $rejectionWorkspace
     try {
-        $beforeRejection = Get-SourceSnapshot $rejectionWorkspace
+        $beforeRejection = Get-SourceByteSnapshot $rejectionWorkspace
         $rejected = Invoke-XlflowJson @('pull', '--backend', 'file', '--json') -AllowFailure
         if ($rejected.ExitCode -eq 0 -or $rejected.Json.error.code -ne 'pull_userform_unsupported') {
             throw "UserForm rejection contract failed: $($rejected.Raw)$($rejected.Stderr)"
         }
-        $afterRejection = Get-SourceSnapshot $rejectionWorkspace
+        $afterRejection = Get-SourceByteSnapshot $rejectionWorkspace
         Assert-SnapshotsEqual $beforeRejection $afterRejection
     } finally {
         Pop-Location

@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -65,6 +66,7 @@ type plan struct {
 type PullOptions struct {
 	Coordination *coordination.Manager
 	Wait         bool
+	WaitTimeout  time.Duration
 }
 
 var folderAnnotationPattern = regexp.MustCompile(`(?i)^'?@Folder\(\s*"([^"]*)"\s*\)`)
@@ -94,6 +96,9 @@ func PullContext(ctx context.Context, root string, cfg config.Config, workbookPa
 }
 
 func acquireSourceTrees(ctx context.Context, root string, cfg config.Config, opts PullOptions) (func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	manager := opts.Coordination
 	if manager == nil {
 		var err error
@@ -102,33 +107,56 @@ func acquireSourceTrees(ctx context.Context, root string, cfg config.Config, opt
 			return nil, fmt.Errorf("initialize source-tree coordination: %w", err)
 		}
 	}
+	type lockTarget struct {
+		identity coordination.ResourceIdentity
+		shared   bool
+	}
 	roots := resolvedRoots(root, cfg)
-	identities := map[string]coordination.ResourceIdentity{}
+	targets := map[string]lockTarget{}
 	for _, path := range []string{roots.modules, roots.classes, roots.workbook} {
 		identity, err := coordination.NewSourceTreeIdentity(root, path)
 		if err != nil {
 			return nil, fmt.Errorf("resolve source-tree identity %s: %w", path, err)
 		}
-		identities[identity.LockID] = identity
+		for index, hierarchyIdentity := range coordination.SourceTreeLockHierarchy(identity) {
+			target := lockTarget{identity: hierarchyIdentity, shared: index != 0}
+			if current, exists := targets[hierarchyIdentity.LockID]; !exists || current.shared {
+				targets[hierarchyIdentity.LockID] = target
+			}
+		}
 	}
-	lockIDs := slices.Sorted(maps.Keys(identities))
+	lockIDs := slices.Sorted(maps.Keys(targets))
 	leases := make([]*coordination.Lease, 0, len(lockIDs))
 	release := func() {
 		for i := len(leases) - 1; i >= 0; i-- {
 			_ = leases[i].Release()
 		}
 	}
+	acquireCtx := ctx
+	waitStarted := false
 	for _, lockID := range lockIDs {
+		target := targets[lockID]
 		request := coordination.AcquireRequest{
-			Identity:      identities[lockID],
+			Identity:      target.identity,
 			Command:       "pull",
 			OperationKind: coordination.OperationMutate,
 			ResourceScope: coordination.ResourceSourceTree,
+			Shared:        target.shared,
 		}
-		lease, err := manager.Acquire(ctx, request)
+		lease, err := manager.Acquire(acquireCtx, request)
 		if opts.Wait && errors.Is(err, coordination.ErrSourceTreeBusy) {
+			if !waitStarted && opts.WaitTimeout > 0 {
+				var cancelWait context.CancelFunc
+				acquireCtx, cancelWait = context.WithTimeout(ctx, opts.WaitTimeout)
+				defer cancelWait()
+				waitStarted = true
+			}
 			request.Wait = true
-			lease, err = manager.Acquire(ctx, request)
+			lease, err = manager.Acquire(acquireCtx, request)
+		}
+		if err == nil && waitStarted && acquireCtx.Err() != nil {
+			_ = lease.Release()
+			err = acquireCtx.Err()
 		}
 		if err != nil {
 			release()

@@ -84,16 +84,22 @@ Do not describe this contract as an unqualified atomic source-tree update.
 
 The file backend derives one `source_tree` resource identity for each managed
 module, class, and document-module root. Identities canonicalize the nearest
-existing ancestor, use a source-tree-specific hash domain, and are acquired in
-stable LockID order. The lease covers workbook parsing, planning, publication,
-rollback, and cleanup. The forms root is not acquired because this backend
-rejects UserForms and never mutates form artifacts.
+existing ancestor and use a source-tree-specific hash domain. Each managed root
+is acquired exclusively and every canonical ancestor is acquired as a shared
+intent; duplicate identities are promoted to exclusive mode and the complete
+set is acquired in stable LockID order. This makes ancestor/descendant roots
+contend while disjoint siblings remain concurrent. The leases cover workbook
+parsing, planning, publication, rollback, and cleanup. The forms root is not
+acquired because this backend rejects UserForms and never mutates form artifacts.
 
-Source-tree locks use crash-released operating-system byte-range locks on
-Windows and Unix. The explicit file backend does not acquire a workbook lock;
+Source-tree locks use crash-released, descriptor-owned operating-system file
+locks with shared and exclusive modes on Windows and Unix. The explicit file
+backend does not acquire a workbook lock;
 therefore it works without Excel and remains local under WSL. Two pulls sharing
 a managed root fail with `source_tree_busy` by default or wait under the normal
-`--wait`/`--wait-timeout` contract. Disjoint managed roots do not contend.
+`--wait`/`--wait-timeout` contract. The timeout starts only after the first
+authoritative contention result; uncontended lock setup does not consume the
+wait budget. Disjoint managed roots do not contend.
 
 If a future command requires both resource kinds, it must acquire all workbook
 identities first, then all source-tree identities, sorting each group by LockID

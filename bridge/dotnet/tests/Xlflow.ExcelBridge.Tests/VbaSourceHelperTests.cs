@@ -153,6 +153,23 @@ public sealed class VbaSourceHelperTests
     }
 
     [Fact]
+    public void NormalizeDocumentModuleExport_ClassAndAttributeHeadersOnlyHasNoLeadingBlankLine()
+    {
+        var exported = string.Join(Environment.NewLine, new[]
+        {
+            "VERSION 1.0 CLASS",
+            "BEGIN",
+            "  MultiUse = -1  'True",
+            "END",
+            "Attribute VB_Name = \"ThisWorkbook\"",
+            "Attribute VB_PredeclaredId = True",
+            "",
+        });
+
+        Assert.Equal("Option Explicit" + Environment.NewLine, VbaSourceHelper.NormalizeDocumentModuleExport(exported));
+    }
+
+    [Fact]
     public void FindDuplicateModuleNames_IgnoresUserFormCodeSidecars()
     {
         var files = new List<DiscoveredSourceFile>

@@ -2196,13 +2196,10 @@ func (a *app) pullCommand() *cobra.Command {
 			if backend == "file" {
 				pullCtx := cmd.Context()
 				stopSignal := func() {}
-				cancelTimeout := func() {}
 				if a.wait {
 					pullCtx, stopSignal = signal.NotifyContext(pullCtx, os.Interrupt)
-					pullCtx, cancelTimeout = context.WithTimeout(pullCtx, a.waitTimeout)
 				}
 				env, code, err = a.pullFromFile(pullCtx, cfg)
-				cancelTimeout()
 				stopSignal()
 			} else {
 				err = a.withExcelProgress("Exporting VBA source", commandOpts, func() error {
@@ -2252,7 +2249,11 @@ func (a *app) pullFromFile(ctx context.Context, cfg config.Config) (output.Envel
 	if err != nil {
 		return output.Envelope{}, output.ExitEnvironment, a.writeFailure("pull", output.ExitEnvironment, "coordination_init_failed", err)
 	}
-	result, err := filepull.PullContext(ctx, a.cwd, cfg, workbookPath, filepull.PullOptions{Coordination: manager, Wait: a.wait})
+	result, err := filepull.PullContext(ctx, a.cwd, cfg, workbookPath, filepull.PullOptions{
+		Coordination: manager,
+		Wait:         a.wait,
+		WaitTimeout:  a.waitTimeout,
+	})
 	if err != nil {
 		return output.Envelope{}, filePullExitCode(err), a.writeFailure("pull", filePullExitCode(err), filePullErrorCode(err), err)
 	}

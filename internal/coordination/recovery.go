@@ -178,12 +178,12 @@ func (m *Manager) Observe(ctx context.Context, identity WorkbookIdentity) (Obser
 	}
 	defer func() { _ = file.Close() }()
 
-	if err := m.lockContext(ctx, file, publicationByte); err != nil {
+	if err := m.lockContext(ctx, file, publicationByte, false); err != nil {
 		return Observation{}, err
 	}
 	defer func() { _ = platformUnlock(file, publicationByte) }()
 
-	acquired, err := platformTryLock(file, operationByte)
+	acquired, err := platformTryLock(file, operationByte, false)
 	if err != nil {
 		return Observation{}, fmt.Errorf("observe workbook lock: %w", err)
 	}
@@ -296,7 +296,7 @@ func (l *Lease) ClearRecovery(expectedGeneration string) (bool, error) {
 func (l *Lease) withPublicationGuard(run func() error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := l.manager.lockContext(ctx, l.file, publicationByte); err != nil {
+	if err := l.manager.lockContext(ctx, l.file, publicationByte, false); err != nil {
 		return fmt.Errorf("acquire recovery publication guard: %w", err)
 	}
 	runErr := run()

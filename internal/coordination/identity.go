@@ -39,6 +39,30 @@ func NewSourceTreeIdentity(baseDir, sourceRoot string) (ResourceIdentity, error)
 	return newPathIdentity(baseDir, sourceRoot, sourceTreeLockIDPrefix, sourceTreeHashDomain, "source root")
 }
 
+// SourceTreeLockHierarchy returns the source root followed by each canonical
+// ancestor up to the filesystem root. Callers take the first identity
+// exclusively and the ancestors in shared mode so ancestor/descendant trees
+// contend without serializing disjoint siblings.
+func SourceTreeLockHierarchy(identity ResourceIdentity) []ResourceIdentity {
+	hierarchy := make([]ResourceIdentity, 0, 8)
+	for path := identity.CanonicalPath; ; path = filepath.Dir(path) {
+		hierarchy = append(hierarchy, sourceTreeIdentityFromCanonical(path))
+		if parent := filepath.Dir(path); parent == path {
+			break
+		}
+	}
+	return hierarchy
+}
+
+func sourceTreeIdentityFromCanonical(path string) ResourceIdentity {
+	comparisonKey := platformComparisonKey(path)
+	sum := sha256.Sum256([]byte(sourceTreeHashDomain + comparisonKey))
+	return ResourceIdentity{
+		CanonicalPath: path,
+		LockID:        sourceTreeLockIDPrefix + hex.EncodeToString(sum[:]),
+	}
+}
+
 func newPathIdentity(baseDir, resourcePath, prefix, domain, label string) (ResourceIdentity, error) {
 	if strings.TrimSpace(baseDir) == "" {
 		return ResourceIdentity{}, fmt.Errorf("base directory is required")

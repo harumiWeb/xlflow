@@ -42,9 +42,12 @@ lightweight file-backend hardening change.
 
 Before planning or publication, the file backend acquires source-tree leases
 for the configured module, class, and document-module roots. The identities
-are path-canonical, domain-separated from workbook identities, and acquired in
-stable LockID order on Windows and Unix. An explicit file pull does not acquire
-the configured workbook lease because it never mutates workbook state.
+are path-canonical and domain-separated from workbook identities. Each root is
+exclusive while every canonical ancestor is held with a shared intent lease;
+the complete set is acquired in stable LockID order on Windows and Unix. This
+makes overlapping ancestor/descendant roots contend across projects without
+serializing disjoint siblings. An explicit file pull does not acquire the
+configured workbook lease because it never mutates workbook state.
 
 If any UserForm is present, the complete pull fails before source mutation
 with `pull_userform_unsupported`. Protected or malformed projects also fail

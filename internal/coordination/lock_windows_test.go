@@ -126,7 +126,7 @@ func TestAcquireWithoutWaitDoesNotBlockOnPublicationGuard(t *testing.T) {
 		t.Fatalf("openLock: %v", err)
 	}
 	defer func() { _ = file.Close() }()
-	acquired, err := platformTryLock(file, publicationByte)
+	acquired, err := platformTryLock(file, publicationByte, false)
 	if err != nil || !acquired {
 		t.Fatalf("lock publication guard = %v, %v", acquired, err)
 	}

@@ -81,12 +81,14 @@ The detailed policy and identity contracts live in
 The saved-workbook file-pull backend extends this model with
 `resource_scope: source_tree`. Each configured managed module, class, and
 document-module root receives its own canonical, domain-separated identity.
-Acquiring every root in LockID order serializes shared configured roots while
-leaving disjoint source trees independent. Source-tree leases use the same
-crash-released OS-lock authority on Windows and Unix; they do not require Excel
-and are not delegated from WSL. A command requiring both resource kinds
-acquires workbook identities first and source-tree identities second, sorting
-by LockID within each kind, and releases in reverse order.
+To make ancestor and descendant roots conflict without serializing sibling
+trees, a root takes a shared intent lease on every canonical ancestor and an
+exclusive lease on the root itself. All intent and root identities are acquired
+in stable LockID order. Source-tree leases use crash-released, descriptor-owned
+OS-lock authority on Windows and Unix; they do not require Excel and are not
+delegated from WSL. A command requiring both resource kinds acquires workbook
+identities first and the complete source-tree lock set second, sorting by LockID
+within each kind, and releases in reverse order.
 
 ## Consequences
 
@@ -102,6 +104,8 @@ by LockID within each kind, and releases in reverse order.
   existing workbook file.
 - Positive: pure-Go source publication is coordinated on Windows and Unix
   without coupling source-tree ownership to workbook or Excel identity.
+- Positive: hierarchical shared intents prevent ancestor/descendant races while
+  preserving concurrency between disjoint sibling trees.
 - Positive: editors and external integrations can discover stable command
   safety metadata without maintaining a duplicate classification table.
 - Negative: every executable command and multiplexed bridge action must be kept

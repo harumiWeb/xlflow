@@ -669,21 +669,25 @@ the bridge rather than probing Excel through COM.
 Pure-Go commands that destructively reconcile tracked source use
 `resource_scope: source_tree`. A source-tree identity uses the same canonical
 path algorithm as workbook identity but a distinct hash domain and LockID
-prefix. Commands acquire one identity per managed root rather than one identity
-for the whole project, so projects with disjoint roots remain independent and
-projects sharing a configured root contend.
+prefix. Commands acquire an exclusive identity for each managed root plus shared
+intent identities for every canonical ancestor. An exclusive root conflicts
+with a descendant operation's shared intent, while sibling roots share their
+common ancestor intents. Projects with disjoint sibling roots therefore remain
+independent, and exact or ancestor/descendant overlaps contend.
 
-Source-tree leases use byte-range file locks on Windows and Unix. They are
-process-safe, released by process termination, and do not depend on Excel,
-VBIDE, workbook sessions, or Windows delegation. Owner metadata records
-`resource_path` and `resource_scope: source_tree`; it remains diagnostic and
-never replaces the OS lock as ownership authority.
+Source-tree leases use descriptor-owned operating-system file locks on Windows
+and Unix, with shared and exclusive modes. They are process-safe, released by
+process termination, and do not depend on Excel, VBIDE, workbook sessions, or
+Windows delegation. Owner metadata is published only for exclusive roots and
+records `resource_path` and `resource_scope: source_tree`; it remains diagnostic
+and never replaces the OS lock as ownership authority.
 
-`pull --backend file` acquires module, class, and document-module roots in
-stable LockID order before reading the saved workbook and holds them through
-planning, publication, rollback, and cleanup. It deliberately skips the
-workbook lease. The default Excel backend retains its historical workbook
-coordination contract.
+`pull --backend file` builds the complete shared-intent/exclusive-root lock set
+for module, class, and document-module roots, promotes duplicate identities to
+exclusive mode, and acquires the result in stable LockID order before reading
+the saved workbook. It holds the set through planning, publication, rollback,
+and cleanup. It deliberately skips the workbook lease. The default Excel
+backend retains its historical workbook coordination contract.
 
 Global acquisition order is resource kind first (`workbook`, then
 `source_tree`) and LockID second. Release order is reversed. A future command

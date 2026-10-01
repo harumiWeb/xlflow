@@ -55,6 +55,7 @@ type AcquireRequest struct {
 	Command       CommandID
 	OperationKind OperationKind
 	ResourceScope ResourceScope
+	Shared        bool
 	Wait          bool
 }
 
@@ -151,13 +152,16 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (*Lease, erro
 			_ = file.Close()
 		}
 	}()
+	if req.Shared {
+		return m.acquireShared(ctx, file, req, &keepFile)
+	}
 
 	for {
 		// Observe the operation byte before entering the publication handshake.
 		// A free observation is released immediately; authoritative acquisition
 		// is then repeated while holding the publication guard so readers can
 		// never see a new owner paired with stale metadata.
-		observedFree, observeErr := platformTryLock(file, operationByte)
+		observedFree, observeErr := platformTryLock(file, operationByte, false)
 		if observeErr != nil {
 			return nil, fmt.Errorf("observe resource lock: %w", observeErr)
 		}
@@ -167,11 +171,11 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (*Lease, erro
 			}
 		}
 		if req.Wait {
-			if err := m.lockContext(ctx, file, publicationByte); err != nil {
+			if err := m.lockContext(ctx, file, publicationByte, false); err != nil {
 				return nil, err
 			}
 		} else {
-			guardAcquired, guardErr := platformTryLock(file, publicationByte)
+			guardAcquired, guardErr := platformTryLock(file, publicationByte, false)
 			if guardErr != nil {
 				return nil, fmt.Errorf("acquire metadata publication guard: %w", guardErr)
 			}
@@ -180,7 +184,7 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (*Lease, erro
 			}
 		}
 
-		acquired, lockErr := platformTryLock(file, operationByte)
+		acquired, lockErr := platformTryLock(file, operationByte, false)
 		if lockErr != nil {
 			_ = platformUnlock(file, publicationByte)
 			return nil, fmt.Errorf("acquire resource lock: %w", lockErr)
@@ -213,6 +217,25 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (*Lease, erro
 	}
 }
 
+func (m *Manager) acquireShared(ctx context.Context, file *os.File, req AcquireRequest, keepFile *bool) (*Lease, error) {
+	for {
+		acquired, err := platformTryLock(file, operationByte, true)
+		if err != nil {
+			return nil, fmt.Errorf("acquire shared resource lock: %w", err)
+		}
+		if acquired {
+			*keepFile = true
+			return &Lease{manager: m, file: file, identity: req.Identity, shared: true}, nil
+		}
+		if !req.Wait {
+			return nil, &BusyError{Identity: req.Identity, ResourceScope: req.ResourceScope}
+		}
+		if err := waitContext(ctx, m.pollInterval); err != nil {
+			return nil, err
+		}
+	}
+}
+
 // Probe reports whether identity is currently locked. Stale metadata is
 // removed only after successfully acquiring the authoritative operation byte.
 func (m *Manager) Probe(ctx context.Context, identity WorkbookIdentity) (ProbeResult, error) {
@@ -231,12 +254,12 @@ func (m *Manager) Probe(ctx context.Context, identity WorkbookIdentity) (ProbeRe
 	}
 	defer func() { _ = file.Close() }()
 
-	if err := m.lockContext(ctx, file, publicationByte); err != nil {
+	if err := m.lockContext(ctx, file, publicationByte, false); err != nil {
 		return ProbeResult{}, err
 	}
 	defer func() { _ = platformUnlock(file, publicationByte) }()
 
-	acquired, err := platformTryLock(file, operationByte)
+	acquired, err := platformTryLock(file, operationByte, false)
 	if err != nil {
 		return ProbeResult{}, fmt.Errorf("probe workbook lock: %w", err)
 	}
@@ -267,6 +290,7 @@ type Lease struct {
 	file       *os.File
 	identity   WorkbookIdentity
 	generation string
+	shared     bool
 	once       sync.Once
 	err        error
 }
@@ -311,9 +335,12 @@ func (l *Lease) Release() error {
 }
 
 func (l *Lease) release() error {
+	if l.shared {
+		return errors.Join(platformUnlock(l.file, operationByte), l.file.Close())
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	guardErr := l.manager.lockContext(ctx, l.file, publicationByte)
+	guardErr := l.manager.lockContext(ctx, l.file, publicationByte, false)
 	if guardErr != nil {
 		unlockErr := platformUnlock(l.file, operationByte)
 		closeErr := l.file.Close()
@@ -342,6 +369,9 @@ func validateRequest(req AcquireRequest) error {
 	if req.ResourceScope != ResourceWorkbook && req.ResourceScope != ResourceSourceTree {
 		return fmt.Errorf("filesystem lock requires resource scope %q or %q, got %q", ResourceWorkbook, ResourceSourceTree, req.ResourceScope)
 	}
+	if req.Shared && req.ResourceScope != ResourceSourceTree {
+		return fmt.Errorf("shared filesystem locks require resource scope %q", ResourceSourceTree)
+	}
 	return nil
 }
 
@@ -364,12 +394,12 @@ func (m *Manager) openLock(identity WorkbookIdentity) (*os.File, error) {
 	return file, nil
 }
 
-func (m *Manager) lockContext(ctx context.Context, file *os.File, offset int64) error {
+func (m *Manager) lockContext(ctx context.Context, file *os.File, offset int64, shared bool) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		acquired, err := platformTryLock(file, offset)
+		acquired, err := platformTryLock(file, offset, shared)
 		if err != nil {
 			return err
 		}

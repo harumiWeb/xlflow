@@ -223,7 +223,6 @@ internal static partial class VbaSourceHelper
         if (!hasOptionExplicit && !hasNonHeaderCode)
         {
             filtered.Clear();
-            filtered.Add("");
             filtered.Add("Option Explicit");
         }
 
