@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added a lossless pure-Go MS-OFORMS reader for existing UserForm designer
+  storages. It decodes code-page-aware properties and TextProps, reconstructs
+  nested container ownership, preserves opaque and raw persistence bytes, and
+  fails deterministically on inconsistent `f`/`o` lengths, site counts, or
+  child storages without requiring Excel, COM, or VBIDE.
+
 ## v0.34.0
 
 - Changed `xlflow pull` to default to `--backend auto`: closed, supported
