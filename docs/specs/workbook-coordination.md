@@ -664,6 +664,32 @@ be enumerated or contains an invalid marker whose affected PID cannot be trusted
 `process list` fails with `coordination_recovery_check_failed` before invoking
 the bridge rather than probing Excel through COM.
 
+## Source-Tree Resource Extension
+
+Pure-Go commands that destructively reconcile tracked source use
+`resource_scope: source_tree`. A source-tree identity uses the same canonical
+path algorithm as workbook identity but a distinct hash domain and LockID
+prefix. Commands acquire one identity per managed root rather than one identity
+for the whole project, so projects with disjoint roots remain independent and
+projects sharing a configured root contend.
+
+Source-tree leases use byte-range file locks on Windows and Unix. They are
+process-safe, released by process termination, and do not depend on Excel,
+VBIDE, workbook sessions, or Windows delegation. Owner metadata records
+`resource_path` and `resource_scope: source_tree`; it remains diagnostic and
+never replaces the OS lock as ownership authority.
+
+`pull --backend file` acquires module, class, and document-module roots in
+stable LockID order before reading the saved workbook and holds them through
+planning, publication, rollback, and cleanup. It deliberately skips the
+workbook lease. The default Excel backend retains its historical workbook
+coordination contract.
+
+Global acquisition order is resource kind first (`workbook`, then
+`source_tree`) and LockID second. Release order is reversed. A future command
+that needs both kinds must follow this order instead of acquiring source roots
+before entering workbook coordination.
+
 ## Out of Scope for This Version
 
 This contract does not add:

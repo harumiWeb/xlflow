@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/filepull"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
@@ -101,6 +103,61 @@ func TestFilePullPublicationFailureKeepsPublicationErrorCode(t *testing.T) {
 	if got := filePullErrorCode(err); got != "pull_source_publish_failed" {
 		t.Fatalf("filePullErrorCode() = %q", got)
 	}
+}
+
+func TestPullFileBackendCoordinatesSourceTreeInsteadOfWorkbook(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+	manager, err := coordination.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	workbookIdentity, err := coordination.NewWorkbookIdentity(dir, filepath.Join(dir, "build", "Book.xlsm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbookLease, err := manager.Acquire(t.Context(), coordination.AcquireRequest{
+		Identity: workbookIdentity, Command: "push", OperationKind: coordination.OperationMutate,
+		ResourceScope: coordination.ResourceWorkbook,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, runErr := runPullCommandWithManager(dir, manager, "--json", "pull", "--backend", "file")
+	if releaseErr := workbookLease.Release(); releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
+	if runErr != nil {
+		t.Fatalf("file pull contended on workbook lease: %v\n%s", runErr, stdout)
+	}
+
+	sourceIdentity, err := coordination.NewSourceTreeIdentity(dir, filepath.Join(dir, "src", "modules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceLease, err := manager.Acquire(t.Context(), coordination.AcquireRequest{
+		Identity: sourceIdentity, Command: "pull", OperationKind: coordination.OperationMutate,
+		ResourceScope: coordination.ResourceSourceTree,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sourceLease.Release() }()
+	stdout, runErr = runPullCommandWithManager(dir, manager, "--json", "pull", "--backend", "file")
+	if runErr == nil || output.ExitCode(runErr) != output.ExitEnvironment || jsonErrorCode(t, stdout) != coordination.SourceTreeBusyCode {
+		t.Fatalf("source-tree contention stdout=%s err=%v", stdout, runErr)
+	}
+}
+
+func runPullCommandWithManager(dir string, manager *coordination.Manager, args ...string) (string, error) {
+	stdout := new(bytes.Buffer)
+	a := &app{cwd: dir, stdout: stdout, stderr: new(bytes.Buffer), stdoutTerminal: func() bool { return false }, coordination: manager}
+	root := a.rootCommand()
+	root.SetArgs(args)
+	err := root.Execute()
+	return stdout.String(), err
 }
 
 func jsonErrorCode(t *testing.T, body string) string {

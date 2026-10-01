@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -220,6 +221,47 @@ func TestPublishRollbackRemovesNewDirectories(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "src")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("new source directories remain after rollback: %v", err)
+	}
+}
+
+func TestPublishRollbackRestoresRemovedStaleFilesAndModes(t *testing.T) {
+	root := t.TempDir()
+	updated := filepath.Join(root, "Updated.bas")
+	staleFirst := filepath.Join(root, "StaleFirst.bas")
+	staleSecond := filepath.Join(root, "StaleSecond.bas")
+	for path, body := range map[string]string{updated: "old updated", staleFirst: "old first", staleSecond: "old second"} {
+		writeTestFile(t, path, body)
+	}
+	if err := os.Chmod(updated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	originalRemove := removeArtifact
+	t.Cleanup(func() { removeArtifact = originalRemove })
+	removeArtifact = func(path string) error {
+		if path == staleSecond {
+			return errors.New("injected stale removal failure")
+		}
+		return originalRemove(path)
+	}
+	p := plan{
+		files: []plannedFile{{path: updated, body: []byte("new updated")}},
+		stale: []string{staleFirst, staleSecond},
+	}
+	if err := publish(p); !errors.Is(err, ErrPublish) {
+		t.Fatalf("error = %v", err)
+	}
+	for path, want := range map[string]string{updated: "old updated", staleFirst: "old first", staleSecond: "old second"} {
+		body, err := os.ReadFile(path)
+		if err != nil || string(body) != want {
+			t.Fatalf("rollback %s = %q, %v", path, body, err)
+		}
+	}
+	info, err := os.Stat(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); runtime.GOOS != "windows" && got != 0o600 {
+		t.Fatalf("restored mode = %v, want 0600", got)
 	}
 }
 

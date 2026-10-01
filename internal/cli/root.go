@@ -2194,7 +2194,16 @@ func (a *app) pullCommand() *cobra.Command {
 			var env output.Envelope
 			var code int
 			if backend == "file" {
-				env, code, err = a.pullFromFile(cfg)
+				pullCtx := cmd.Context()
+				stopSignal := func() {}
+				cancelTimeout := func() {}
+				if a.wait {
+					pullCtx, stopSignal = signal.NotifyContext(pullCtx, os.Interrupt)
+					pullCtx, cancelTimeout = context.WithTimeout(pullCtx, a.waitTimeout)
+				}
+				env, code, err = a.pullFromFile(pullCtx, cfg)
+				cancelTimeout()
+				stopSignal()
 			} else {
 				err = a.withExcelProgress("Exporting VBA source", commandOpts, func() error {
 					var runErr error
@@ -2233,13 +2242,17 @@ func (a *app) pullCommand() *cobra.Command {
 	return cmd
 }
 
-func (a *app) pullFromFile(cfg config.Config) (output.Envelope, int, error) {
+func (a *app) pullFromFile(ctx context.Context, cfg config.Config) (output.Envelope, int, error) {
 	workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 	if !strings.EqualFold(filepath.Ext(workbookPath), workbookformat.ExtXLSM) {
 		unsupported := workbookformat.UnsupportedError{Capability: "pull --backend file", Extension: filepath.Ext(workbookPath)}
 		return output.Envelope{}, output.ExitConfig, a.writeUnsupportedWorkbookFormat("pull", unsupported)
 	}
-	result, err := filepull.Pull(a.cwd, cfg, workbookPath)
+	manager, err := a.coordinationManager()
+	if err != nil {
+		return output.Envelope{}, output.ExitEnvironment, a.writeFailure("pull", output.ExitEnvironment, "coordination_init_failed", err)
+	}
+	result, err := filepull.PullContext(ctx, a.cwd, cfg, workbookPath, filepull.PullOptions{Coordination: manager, Wait: a.wait})
 	if err != nil {
 		return output.Envelope{}, filePullExitCode(err), a.writeFailure("pull", filePullExitCode(err), filePullErrorCode(err), err)
 	}
@@ -2304,7 +2317,7 @@ func (a *app) attachFilePullSessionWarning(env *output.Envelope, workbookPath st
 
 func filePullExitCode(err error) int {
 	var pathErr *os.PathError
-	if errors.As(err, &pathErr) || errors.Is(err, filepull.ErrPublish) {
+	if errors.As(err, &pathErr) || errors.Is(err, filepull.ErrPublish) || errors.Is(err, coordination.ErrSourceTreeBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return output.ExitEnvironment
 	}
 	return output.ExitValidation
@@ -2313,6 +2326,12 @@ func filePullExitCode(err error) int {
 func filePullErrorCode(err error) string {
 	var pathErr *os.PathError
 	switch {
+	case errors.Is(err, coordination.ErrSourceTreeBusy):
+		return coordination.SourceTreeBusyCode
+	case errors.Is(err, context.DeadlineExceeded):
+		return "source_tree_busy_timeout"
+	case errors.Is(err, context.Canceled):
+		return "source_tree_busy_cancelled"
 	case errors.Is(err, filepull.ErrPublish):
 		return "pull_source_publish_failed"
 	case errors.Is(err, os.ErrNotExist):

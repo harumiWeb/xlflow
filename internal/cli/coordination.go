@@ -90,6 +90,12 @@ func (a *app) wrapCoordinatedLeaves(root *cobra.Command) {
 			if descriptor.ID == "build" && buildDryRun(cmd) {
 				return original(cmd, args)
 			}
+			if descriptor.ID == "pull" {
+				backend, _ := commandFlagString(cmd, "backend")
+				if strings.EqualFold(backend, "file") {
+					return original(cmd, args)
+				}
+			}
 			targets, resolved := a.coordinationTargets(cmd, args, descriptor.ID)
 			if !resolved {
 				return original(cmd, args)

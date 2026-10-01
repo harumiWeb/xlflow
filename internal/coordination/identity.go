@@ -9,39 +9,54 @@ import (
 )
 
 const (
-	workbookLockIDPrefix = "xlflow-workbook-v1-"
-	workbookHashDomain   = "xlflow/workbook-coordination/v1\x00"
+	workbookLockIDPrefix   = "xlflow-workbook-v1-"
+	workbookHashDomain     = "xlflow/workbook-coordination/v1\x00"
+	sourceTreeLockIDPrefix = "xlflow-source-tree-v1-"
+	sourceTreeHashDomain   = "xlflow/source-tree-coordination/v1\x00"
 )
 
-// WorkbookIdentity identifies a workbook for process-wide coordination.
+// ResourceIdentity identifies a filesystem resource for process-wide coordination.
 // CanonicalPath is retained for diagnostics. LockID is the opaque value that
 // should be used when naming an operating-system synchronization primitive.
-type WorkbookIdentity struct {
+type ResourceIdentity struct {
 	CanonicalPath string
 	LockID        string
 }
+
+// WorkbookIdentity retains the workbook-specific API name while coordination
+// uses the same identity shape for other filesystem resources.
+type WorkbookIdentity = ResourceIdentity
 
 // NewWorkbookIdentity returns a stable coordination identity for workbookPath.
 // baseDir must be absolute and is used to resolve relative workbook paths. The
 // workbook does not need to exist.
 func NewWorkbookIdentity(baseDir, workbookPath string) (WorkbookIdentity, error) {
+	return newPathIdentity(baseDir, workbookPath, workbookLockIDPrefix, workbookHashDomain, "workbook")
+}
+
+// NewSourceTreeIdentity returns a stable identity for one managed source root.
+func NewSourceTreeIdentity(baseDir, sourceRoot string) (ResourceIdentity, error) {
+	return newPathIdentity(baseDir, sourceRoot, sourceTreeLockIDPrefix, sourceTreeHashDomain, "source root")
+}
+
+func newPathIdentity(baseDir, resourcePath, prefix, domain, label string) (ResourceIdentity, error) {
 	if strings.TrimSpace(baseDir) == "" {
-		return WorkbookIdentity{}, fmt.Errorf("base directory is required")
+		return ResourceIdentity{}, fmt.Errorf("base directory is required")
 	}
-	if strings.TrimSpace(workbookPath) == "" {
-		return WorkbookIdentity{}, fmt.Errorf("workbook path is required")
+	if strings.TrimSpace(resourcePath) == "" {
+		return ResourceIdentity{}, fmt.Errorf("%s path is required", label)
 	}
 
 	baseDir = normalizePlatformPath(baseDir)
 	if !filepath.IsAbs(baseDir) {
-		return WorkbookIdentity{}, fmt.Errorf("base directory must be absolute: %q", baseDir)
+		return ResourceIdentity{}, fmt.Errorf("base directory must be absolute: %q", baseDir)
 	}
 
-	workbookPath = normalizePlatformPath(workbookPath)
-	if !filepath.IsAbs(workbookPath) {
-		workbookPath = filepath.Join(baseDir, workbookPath)
+	resourcePath = normalizePlatformPath(resourcePath)
+	if !filepath.IsAbs(resourcePath) {
+		resourcePath = filepath.Join(baseDir, resourcePath)
 	}
-	canonicalPath := normalizePlatformPath(filepath.Clean(workbookPath))
+	canonicalPath := normalizePlatformPath(filepath.Clean(resourcePath))
 
 	// A real operating-system lock, rather than path metadata, is the eventual
 	// source of truth. Resolve the nearest existing ancestor so a workbook that
@@ -53,11 +68,11 @@ func NewWorkbookIdentity(baseDir, workbookPath string) (WorkbookIdentity, error)
 	}
 
 	comparisonKey := platformComparisonKey(canonicalPath)
-	sum := sha256.Sum256([]byte(workbookHashDomain + comparisonKey))
+	sum := sha256.Sum256([]byte(domain + comparisonKey))
 
-	return WorkbookIdentity{
+	return ResourceIdentity{
 		CanonicalPath: canonicalPath,
-		LockID:        workbookLockIDPrefix + hex.EncodeToString(sum[:]),
+		LockID:        prefix + hex.EncodeToString(sum[:]),
 	}, nil
 }
 

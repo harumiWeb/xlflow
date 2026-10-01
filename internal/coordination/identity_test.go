@@ -155,3 +155,29 @@ func TestNewWorkbookIdentityRejectsInvalidInput(t *testing.T) {
 		})
 	}
 }
+
+func TestNewSourceTreeIdentityUsesIndependentDeterministicNamespace(t *testing.T) {
+	baseDir := t.TempDir()
+	root := filepath.Join("src", "modules")
+	first, err := NewSourceTreeIdentity(baseDir, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewSourceTreeIdentity(baseDir, filepath.Join("src", ".", "modules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbook, err := NewWorkbookIdentity(baseDir, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("equivalent source roots differ: %#v != %#v", first, second)
+	}
+	if !regexp.MustCompile(`^xlflow-source-tree-v1-[0-9a-f]{64}$`).MatchString(first.LockID) {
+		t.Fatalf("source-tree LockID = %q", first.LockID)
+	}
+	if first.LockID == workbook.LockID {
+		t.Fatal("source tree and workbook shared a digest namespace")
+	}
+}

@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Hardened `pull --backend file` with cross-platform source-tree leases,
+  shared Go/.NET normalization fixtures, stronger publication rollback tests,
+  explicit non-crash-safe whole-tree semantics, and a repeatable real-Excel
+  file-pull-to-pack release gate.
 - Added `xlflow pull --backend file`, a pure-Go saved-`.xlsm` VBA extraction
   path for standard, class, and document modules. It reports explicit
   saved-workbook authority, publishes source transactionally, preserves the

@@ -13,12 +13,13 @@ type ResourceScope string
 const (
 	ResourceNone          ResourceScope = "none"
 	ResourceWorkbook      ResourceScope = "workbook"
+	ResourceSourceTree    ResourceScope = "source_tree"
 	ResourceExcelInstance ResourceScope = "excel_instance"
 )
 
 func (v ResourceScope) Valid() bool {
 	switch v {
-	case ResourceNone, ResourceWorkbook, ResourceExcelInstance:
+	case ResourceNone, ResourceWorkbook, ResourceSourceTree, ResourceExcelInstance:
 		return true
 	default:
 		return false

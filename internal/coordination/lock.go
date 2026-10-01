@@ -19,24 +19,27 @@ const (
 	WorkbookBusyCode          = "workbook_busy"
 	WorkbookBusyTimeoutCode   = "workbook_busy_timeout"
 	WorkbookBusyCancelledCode = "workbook_busy_cancelled"
+	SourceTreeBusyCode        = "source_tree_busy"
 	ownerSchemaV1             = 1
 	operationByte             = int64(0)
 	publicationByte           = int64(1)
 )
 
 var (
-	ErrWorkbookBusy = errors.New(WorkbookBusyCode)
-	validLockID     = regexp.MustCompile(`^[a-z0-9-]+$`)
-	validGeneration = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	ErrWorkbookBusy   = errors.New(WorkbookBusyCode)
+	ErrSourceTreeBusy = errors.New(SourceTreeBusyCode)
+	validLockID       = regexp.MustCompile(`^[a-z0-9-]+$`)
+	validGeneration   = regexp.MustCompile(`^[0-9a-f]{32}$`)
 )
 
-// OwnerMetadata describes the xlflow process that currently owns a workbook
+// OwnerMetadata describes the xlflow process that currently owns a resource
 // lease. It is diagnostic only: the operating-system byte-range lock remains
 // the authority for ownership.
 type OwnerMetadata struct {
 	SchemaVersion int           `json:"schema_version"`
 	Generation    string        `json:"generation"`
-	Workbook      string        `json:"workbook"`
+	Workbook      string        `json:"workbook,omitempty"`
+	ResourcePath  string        `json:"resource_path,omitempty"`
 	PID           int           `json:"pid"`
 	Command       CommandID     `json:"command"`
 	OperationKind OperationKind `json:"operation_kind"`
@@ -44,7 +47,7 @@ type OwnerMetadata struct {
 	StartedAt     time.Time     `json:"started_at"`
 }
 
-// AcquireRequest identifies the workbook operation to coordinate. Wait=false
+// AcquireRequest identifies the filesystem operation to coordinate. Wait=false
 // performs one authoritative acquisition attempt. Wait=true retries until the
 // context is canceled.
 type AcquireRequest struct {
@@ -58,16 +61,31 @@ type AcquireRequest struct {
 // BusyError reports authoritative lock contention. Owner may be nil when the
 // owner crashed while publishing metadata or the metadata is unavailable.
 type BusyError struct {
-	Identity WorkbookIdentity
-	Owner    *OwnerMetadata
+	Identity      WorkbookIdentity
+	ResourceScope ResourceScope
+	Owner         *OwnerMetadata
 }
 
 func (e *BusyError) Error() string {
+	if e.ResourceScope == ResourceSourceTree {
+		return fmt.Sprintf("%s: source tree %q is in use", SourceTreeBusyCode, e.Identity.CanonicalPath)
+	}
 	return fmt.Sprintf("%s: workbook %q is in use", WorkbookBusyCode, e.Identity.CanonicalPath)
 }
 
-func (e *BusyError) Unwrap() error { return ErrWorkbookBusy }
-func (e *BusyError) Code() string  { return WorkbookBusyCode }
+func (e *BusyError) Unwrap() error {
+	if e.ResourceScope == ResourceSourceTree {
+		return ErrSourceTreeBusy
+	}
+	return ErrWorkbookBusy
+}
+
+func (e *BusyError) Code() string {
+	if e.ResourceScope == ResourceSourceTree {
+		return SourceTreeBusyCode
+	}
+	return WorkbookBusyCode
+}
 
 // ProbeResult is a point-in-time view of authoritative workbook ownership.
 type ProbeResult struct {
@@ -110,7 +128,7 @@ func NewDefaultManager() (*Manager, error) {
 // StateDir returns the shared state directory used by the manager.
 func (m *Manager) StateDir() string { return m.dir }
 
-// Acquire obtains the authoritative exclusive workbook lease and publishes
+// Acquire obtains the authoritative exclusive resource lease and publishes
 // ownership metadata before returning it to the caller.
 func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (*Lease, error) {
 	if err := validateRequest(req); err != nil {
@@ -141,11 +159,11 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (*Lease, erro
 		// never see a new owner paired with stale metadata.
 		observedFree, observeErr := platformTryLock(file, operationByte)
 		if observeErr != nil {
-			return nil, fmt.Errorf("observe workbook lock: %w", observeErr)
+			return nil, fmt.Errorf("observe resource lock: %w", observeErr)
 		}
 		if observedFree {
 			if err := platformUnlock(file, operationByte); err != nil {
-				return nil, fmt.Errorf("release workbook lock observation: %w", err)
+				return nil, fmt.Errorf("release resource lock observation: %w", err)
 			}
 		}
 		if req.Wait {
@@ -158,14 +176,14 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (*Lease, erro
 				return nil, fmt.Errorf("acquire metadata publication guard: %w", guardErr)
 			}
 			if !guardAcquired {
-				return nil, &BusyError{Identity: req.Identity}
+				return nil, &BusyError{Identity: req.Identity, ResourceScope: req.ResourceScope}
 			}
 		}
 
 		acquired, lockErr := platformTryLock(file, operationByte)
 		if lockErr != nil {
 			_ = platformUnlock(file, publicationByte)
-			return nil, fmt.Errorf("acquire workbook lock: %w", lockErr)
+			return nil, fmt.Errorf("acquire resource lock: %w", lockErr)
 		}
 		if acquired {
 			owner, metadataErr := newOwnerMetadata(req)
@@ -187,7 +205,7 @@ func (m *Manager) Acquire(ctx context.Context, req AcquireRequest) (*Lease, erro
 			return nil, fmt.Errorf("release metadata publication guard: %w", guardErr)
 		}
 		if !req.Wait {
-			return nil, &BusyError{Identity: req.Identity, Owner: owner}
+			return nil, &BusyError{Identity: req.Identity, ResourceScope: req.ResourceScope, Owner: owner}
 		}
 		if err := waitContext(ctx, m.pollInterval); err != nil {
 			return nil, err
@@ -321,18 +339,18 @@ func validateRequest(req AcquireRequest) error {
 	if !req.OperationKind.Valid() {
 		return fmt.Errorf("invalid operation kind %q", req.OperationKind)
 	}
-	if req.ResourceScope != ResourceWorkbook {
-		return fmt.Errorf("workbook lock requires resource scope %q, got %q", ResourceWorkbook, req.ResourceScope)
+	if req.ResourceScope != ResourceWorkbook && req.ResourceScope != ResourceSourceTree {
+		return fmt.Errorf("filesystem lock requires resource scope %q or %q, got %q", ResourceWorkbook, ResourceSourceTree, req.ResourceScope)
 	}
 	return nil
 }
 
 func validateIdentity(identity WorkbookIdentity) error {
 	if identity.CanonicalPath == "" {
-		return fmt.Errorf("canonical workbook path is required")
+		return fmt.Errorf("canonical resource path is required")
 	}
 	if identity.LockID == "" || !validLockID.MatchString(identity.LockID) {
-		return fmt.Errorf("invalid workbook lock ID %q", identity.LockID)
+		return fmt.Errorf("invalid resource lock ID %q", identity.LockID)
 	}
 	return nil
 }
@@ -341,7 +359,7 @@ func (m *Manager) openLock(identity WorkbookIdentity) (*os.File, error) {
 	path := filepath.Join(m.dir, identity.LockID+".lock")
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("open workbook lock file: %w", err)
+		return nil, fmt.Errorf("open resource lock file: %w", err)
 	}
 	return file, nil
 }
@@ -380,16 +398,21 @@ func newOwnerMetadata(req AcquireRequest) (*OwnerMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &OwnerMetadata{
+	owner := &OwnerMetadata{
 		SchemaVersion: ownerSchemaV1,
 		Generation:    generation,
-		Workbook:      req.Identity.CanonicalPath,
 		PID:           os.Getpid(),
 		Command:       req.Command,
 		OperationKind: req.OperationKind,
 		ResourceScope: req.ResourceScope,
 		StartedAt:     time.Now().UTC(),
-	}, nil
+	}
+	if req.ResourceScope == ResourceSourceTree {
+		owner.ResourcePath = req.Identity.CanonicalPath
+	} else {
+		owner.Workbook = req.Identity.CanonicalPath
+	}
+	return owner, nil
 }
 
 func (m *Manager) ownerPath(identity WorkbookIdentity) string {
@@ -417,12 +440,18 @@ func (m *Manager) readOwnerBestEffort(identity WorkbookIdentity) *OwnerMetadata 
 	if json.Unmarshal(data, &owner) != nil ||
 		owner.SchemaVersion != ownerSchemaV1 ||
 		!validGeneration.MatchString(owner.Generation) ||
-		!SamePath(owner.Workbook, identity.CanonicalPath) ||
 		owner.PID <= 0 ||
 		owner.Command == "" ||
 		!owner.OperationKind.Valid() ||
-		owner.ResourceScope != ResourceWorkbook ||
+		(owner.ResourceScope != ResourceWorkbook && owner.ResourceScope != ResourceSourceTree) ||
 		owner.StartedAt.IsZero() {
+		return nil
+	}
+	resourcePath := owner.Workbook
+	if owner.ResourceScope == ResourceSourceTree {
+		resourcePath = owner.ResourcePath
+	}
+	if !SamePath(resourcePath, identity.CanonicalPath) {
 		return nil
 	}
 	return &owner

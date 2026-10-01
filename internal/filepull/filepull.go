@@ -4,10 +4,12 @@ package filepull
 
 import (
 	"archive/zip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -60,10 +62,27 @@ type plan struct {
 	stale  []string
 }
 
+type PullOptions struct {
+	Coordination *coordination.Manager
+	Wait         bool
+}
+
 var folderAnnotationPattern = regexp.MustCompile(`(?i)^'?@Folder\(\s*"([^"]*)"\s*\)`)
 
 // Pull parses, validates, and publishes one complete saved-workbook snapshot.
 func Pull(root string, cfg config.Config, workbookPath string) (Result, error) {
+	return PullContext(context.Background(), root, cfg, workbookPath, PullOptions{})
+}
+
+// PullContext parses, validates, and publishes one complete saved-workbook
+// snapshot while holding leases for every managed source root.
+func PullContext(ctx context.Context, root string, cfg config.Config, workbookPath string, opts PullOptions) (Result, error) {
+	release, err := acquireSourceTrees(ctx, root, cfg, opts)
+	if err != nil {
+		return Result{}, err
+	}
+	defer release()
+
 	p, err := buildPlan(root, cfg, workbookPath)
 	if err != nil {
 		return Result{}, err
@@ -72,6 +91,52 @@ func Pull(root string, cfg config.Config, workbookPath string) (Result, error) {
 		return Result{}, err
 	}
 	return p.result, nil
+}
+
+func acquireSourceTrees(ctx context.Context, root string, cfg config.Config, opts PullOptions) (func(), error) {
+	manager := opts.Coordination
+	if manager == nil {
+		var err error
+		manager, err = coordination.NewDefaultManager()
+		if err != nil {
+			return nil, fmt.Errorf("initialize source-tree coordination: %w", err)
+		}
+	}
+	roots := resolvedRoots(root, cfg)
+	identities := map[string]coordination.ResourceIdentity{}
+	for _, path := range []string{roots.modules, roots.classes, roots.workbook} {
+		identity, err := coordination.NewSourceTreeIdentity(root, path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve source-tree identity %s: %w", path, err)
+		}
+		identities[identity.LockID] = identity
+	}
+	lockIDs := slices.Sorted(maps.Keys(identities))
+	leases := make([]*coordination.Lease, 0, len(lockIDs))
+	release := func() {
+		for i := len(leases) - 1; i >= 0; i-- {
+			_ = leases[i].Release()
+		}
+	}
+	for _, lockID := range lockIDs {
+		request := coordination.AcquireRequest{
+			Identity:      identities[lockID],
+			Command:       "pull",
+			OperationKind: coordination.OperationMutate,
+			ResourceScope: coordination.ResourceSourceTree,
+		}
+		lease, err := manager.Acquire(ctx, request)
+		if opts.Wait && errors.Is(err, coordination.ErrSourceTreeBusy) {
+			request.Wait = true
+			lease, err = manager.Acquire(ctx, request)
+		}
+		if err != nil {
+			release()
+			return nil, err
+		}
+		leases = append(leases, lease)
+	}
+	return release, nil
 }
 
 func buildPlan(root string, cfg config.Config, workbookPath string) (plan, error) {
