@@ -90,6 +90,13 @@ func TestProjectNestedFixturePreservesParentsAndSiblingOrder(t *testing.T) {
 	if issues := forms.ValidateFormSpecStrict(got); hasErrors(issues) {
 		t.Fatalf("projected nested fixture did not validate: %#v", issues)
 	}
+	path := filepath.Join(t.TempDir(), "NestedForm.json")
+	if err := forms.WriteSnapshot(forms.SnapshotOutput{Path: path, DisplayPath: path, Format: "json"}, got); err != nil {
+		t.Fatalf("WriteSnapshot: %v", err)
+	}
+	if _, err := forms.LoadFormSpec(forms.SpecInput{Path: path, DisplayPath: path, Format: "json"}); err != nil {
+		t.Fatalf("LoadFormSpec: %v", err)
+	}
 }
 
 func TestProjectOpaqueControlUsesSnapshotOnlyPlaceholder(t *testing.T) {
@@ -231,6 +238,96 @@ func TestProjectReportsUnmodeledSiteStrings(t *testing.T) {
 	}
 	if warnings != 1 {
 		t.Fatalf("unsupported_properties warnings for TextBox1 = %d, want 1", warnings)
+	}
+}
+
+func TestProjectReportsUnmodeledControlFlags(t *testing.T) {
+	form := &oforms.Form{
+		Name:   "FlagsForm",
+		Levels: []*oforms.Level{{Record: emptyRecord("Form")}},
+		Controls: []*oforms.Control{{
+			Name: "TextBox1", Kind: "MSForms.TextBox",
+			Site:   &oforms.Site{Values: map[string]int64{"BitFlags": 0x35}},
+			Record: &oforms.Record{Type: "TextBox", Values: map[string]int64{"VariousPropertyBits": 0x6}},
+		}},
+	}
+	got, err := Project(form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"siteFlags", "variousPropertyBits"}
+	if !slices.Equal(got.Controls[0].Unsupported, want) {
+		t.Fatalf("unsupported = %q, want %q", got.Controls[0].Unsupported, want)
+	}
+}
+
+func TestProjectReportsNestedLevelAndFormBooleanProperties(t *testing.T) {
+	nestedLevel := &oforms.Level{
+		Record:       &oforms.Record{Type: "Form", Values: map[string]int64{"BooleanProperties": 2}},
+		MouseIconRaw: []byte{1}, FontRaw: []byte{2}, PictureRaw: []byte{3},
+		ExtraStreams: map[string][]byte{"custom": {4}},
+	}
+	form := &oforms.Form{
+		Name: "NestedForm",
+		Levels: []*oforms.Level{{Record: &oforms.Record{
+			Type: "Form", Values: map[string]int64{"BooleanProperties": 1},
+		}}},
+		Controls: []*oforms.Control{{
+			Name: "Frame1", Kind: "MSForms.Frame",
+			Record: nestedLevel.Record, Level: nestedLevel,
+		}},
+	}
+	got, err := Project(form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Warnings) != 2 {
+		t.Fatalf("warnings = %#v, want form and Frame warnings", got.Warnings)
+	}
+	if !strings.Contains(got.Warnings[0].Message, "booleanProperties") {
+		t.Fatalf("form warning = %#v, want booleanProperties", got.Warnings[0])
+	}
+	frame := got.Controls[0]
+	want := []string{"booleanProperties", "extraStream:custom", "font", "mouseIcon", "picture"}
+	if !slices.Equal(frame.Unsupported, want) {
+		t.Fatalf("Frame unsupported = %q, want %q", frame.Unsupported, want)
+	}
+	if got.Warnings[1].Control != "Frame1" || !strings.Contains(got.Warnings[1].Message, "picture") {
+		t.Fatalf("Frame warning = %#v", got.Warnings[1])
+	}
+}
+
+func TestProjectDoesNotReportPersistedBitfieldDefaults(t *testing.T) {
+	form := &oforms.Form{
+		Name: "DefaultsForm",
+		Levels: []*oforms.Level{{Record: &oforms.Record{
+			Type: "Form", Values: map[string]int64{"BooleanProperties": 0x4004},
+		}}},
+		Controls: []*oforms.Control{
+			{
+				Name: "Frame1", Kind: "MSForms.Frame",
+				Site:   &oforms.Site{Values: map[string]int64{"BitFlags": 0x40023}},
+				Record: &oforms.Record{Type: "Frame", Values: map[string]int64{"BooleanProperties": 0x8004}},
+			},
+			{
+				Name: "TextBox1", Kind: "MSForms.TextBox",
+				Site:   &oforms.Site{Values: map[string]int64{"BitFlags": 0x33}},
+				Record: &oforms.Record{Type: "TextBox", Values: map[string]int64{"VariousPropertyBits": 0x2c80481b}},
+			},
+		},
+	}
+
+	got, err := Project(form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Warnings) != 0 {
+		t.Fatalf("warnings = %#v, want no warnings for persisted defaults", got.Warnings)
+	}
+	for _, control := range got.Controls {
+		if len(control.Unsupported) != 0 {
+			t.Errorf("%s unsupported = %q, want none for persisted defaults", control.Name, control.Unsupported)
+		}
 	}
 }
 

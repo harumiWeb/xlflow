@@ -1383,8 +1383,19 @@ func formSpecControl(root map[string]any, parentID string, index int, unnamedCou
 	if text, ok := stringField(root, "text"); ok {
 		control.Text = &text
 	}
-	if value, ok := root["value"]; ok {
-		control.Value = value
+	if value, ok := root["value"]; ok && value != nil {
+		_, knownType := LookupControlContract(controlType)
+		_, supportsValue := LookupControlProperty(controlType, "value")
+		if supportsValue || (!knownType && strings.TrimSpace(control.ProgID) != "") {
+			control.Value = value
+		} else {
+			control.Unsupported = append(control.Unsupported, "value")
+			warnings = append(warnings, FormSpecWarning{
+				Code:    "unsupported_properties",
+				Message: "Unsupported Designer properties were omitted from the FormSpec snapshot: value.",
+				Control: control.Name,
+			})
+		}
 	}
 	if left, ok := optionalFloatField(root, "left"); ok {
 		control.Left = &left
@@ -1414,7 +1425,9 @@ func formSpecControl(root map[string]any, parentID string, index int, unnamedCou
 		control.List = list
 	}
 	if unsupported, ok := stringSliceField(root, "unsupported"); ok {
-		control.Unsupported = unsupported
+		control.Unsupported = append(control.Unsupported, unsupported...)
+		slices.Sort(control.Unsupported)
+		control.Unsupported = slices.Compact(control.Unsupported)
 	}
 	if properties, ok := asObjectMap(root["properties"]); ok && len(properties) > 0 {
 		control.Properties = properties

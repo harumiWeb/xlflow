@@ -39,6 +39,7 @@ var unsupportedScalarProperties = map[string]string{
 	"BackColor":          "backColor",
 	"BorderColor":        "borderColor",
 	"BorderStyle":        "borderStyle",
+	"BooleanProperties":  "booleanProperties",
 	"BoundColumn":        "boundColumn",
 	"ColumnCount":        "columnCount",
 	"Cycle":              "cycle",
@@ -150,6 +151,7 @@ func (s *projectionState) projectControls(controls []*oforms.Control, parentID s
 
 		projectControl(source, &control)
 		unsupported := unsupportedControlProperties(source, control.Type)
+		unsupported = append(unsupported, unsupportedLevelProperties(source.Level)...)
 		if !known {
 			unsupported = append(unsupported, forms.UnsupportedControlTypeProperty)
 		}
@@ -179,20 +181,10 @@ func projectForm(level *oforms.Level, result *forms.FormSpec) {
 		result.Form.Height = new(points(size.Height))
 	}
 	unsupported := unsupportedRecordProperties(record, map[string]bool{
-		"Caption": true, "DisplayedSize": true,
+		"BooleanProperties": isDefaultBooleanProperties("Form", record.Values["BooleanProperties"]),
+		"Caption":           true, "DisplayedSize": true,
 	})
-	if len(level.MouseIconRaw) > 0 {
-		unsupported = append(unsupported, "mouseIcon")
-	}
-	if len(level.FontRaw) > 0 {
-		unsupported = append(unsupported, "font")
-	}
-	if len(level.PictureRaw) > 0 {
-		unsupported = append(unsupported, "picture")
-	}
-	for name := range level.ExtraStreams {
-		unsupported = append(unsupported, "extraStream:"+name)
-	}
+	unsupported = append(unsupported, unsupportedLevelProperties(level)...)
 	slices.Sort(unsupported)
 	unsupported = slices.Compact(unsupported)
 	if len(unsupported) > 0 {
@@ -254,6 +246,12 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 		if _, ok := control.Site.Values["HelpContextID"]; ok {
 			unsupported = append(unsupported, "helpContextId")
 		}
+		if flags, ok := control.Site.Values["BitFlags"]; ok {
+			defaultFlags := defaultSiteFlags(controlType)
+			if flags&^int64(1<<1) != defaultFlags&^int64(1<<1) {
+				unsupported = append(unsupported, "siteFlags")
+			}
+		}
 		for _, name := range []string{"Tag", "ControlTipText", "RuntimeLicKey", "ControlSource", "RowSource"} {
 			if value, ok := control.Site.Strings[name]; ok && value.Text != "" {
 				unsupported = append(unsupported, lowerFirst(name))
@@ -267,7 +265,13 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 		}
 		projected["ListIndex"] = supportsSelectedIndex(controlType)
 		projected["Value"] = supportsControlValue(controlType)
+		projected["BooleanProperties"] = isDefaultBooleanProperties(controlType, control.Record.Values["BooleanProperties"])
 		unsupported = append(unsupported, unsupportedRecordProperties(control.Record, projected)...)
+		if bits, ok := control.Record.Values["VariousPropertyBits"]; ok {
+			if defaultBits, known := defaultVariousPropertyBits(controlType); !known || bits&^int64(1<<1) != defaultBits&^int64(1<<1) {
+				unsupported = append(unsupported, "variousPropertyBits")
+			}
+		}
 		if _, ok := control.Record.Values["ListIndex"]; ok && !supportsSelectedIndex(controlType) {
 			unsupported = append(unsupported, "selectedIndex")
 		}
@@ -280,6 +284,57 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 
 func supportsSelectedIndex(controlType string) bool {
 	return controlType == "ComboBox" || controlType == "ListBox"
+}
+
+func defaultSiteFlags(controlType string) int64 {
+	switch controlType {
+	case "Frame", "MultiPage", "Page":
+		return 0x40023
+	case "Label":
+		return 0x32
+	default:
+		return 0x33
+	}
+}
+
+func defaultVariousPropertyBits(controlType string) (int64, bool) {
+	if controlType == "TextBox" {
+		return 0x2c80481b, true
+	}
+	return 0, false
+}
+
+func isDefaultBooleanProperties(controlType string, value int64) bool {
+	switch controlType {
+	case "Form":
+		return value == 0x4004
+	case "Frame", "Page":
+		return value == 0x8004
+	case "MultiPage":
+		return value == 0xc004
+	default:
+		return false
+	}
+}
+
+func unsupportedLevelProperties(level *oforms.Level) []string {
+	if level == nil {
+		return nil
+	}
+	unsupported := make([]string, 0)
+	if len(level.MouseIconRaw) > 0 {
+		unsupported = append(unsupported, "mouseIcon")
+	}
+	if len(level.FontRaw) > 0 {
+		unsupported = append(unsupported, "font")
+	}
+	if len(level.PictureRaw) > 0 {
+		unsupported = append(unsupported, "picture")
+	}
+	for name := range level.ExtraStreams {
+		unsupported = append(unsupported, "extraStream:"+name)
+	}
+	return unsupported
 }
 
 func supportsControlValue(controlType string) bool {

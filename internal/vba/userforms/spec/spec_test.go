@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -118,6 +119,36 @@ func TestFormSpecFromInspectSnapshotConvertsDesignerPayload(t *testing.T) {
 	}
 	if len(spec.Warnings) != 1 || spec.Warnings[0].Code != "unsupported_property" {
 		t.Fatalf("warnings = %#v", spec.Warnings)
+	}
+}
+
+func TestFormSpecFromInspectSnapshotOmitsUnsupportedBuiltInValue(t *testing.T) {
+	spec, err := FormSpecFromInspectSnapshot(map[string]any{
+		"name": "SnapshotForm",
+		"controls": []any{map[string]any{
+			"name": "Button1", "type": "CommandButton", "value": "False",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := spec.Controls[0]
+	if control.Value != nil {
+		t.Fatalf("CommandButton value = %#v, want omitted", control.Value)
+	}
+	if !slices.Contains(control.Unsupported, "value") {
+		t.Fatalf("unsupported = %q, want value", control.Unsupported)
+	}
+	if len(spec.Warnings) != 1 || spec.Warnings[0].Code != "unsupported_properties" {
+		t.Fatalf("warnings = %#v, want one unsupported_properties warning", spec.Warnings)
+	}
+
+	path := filepath.Join(t.TempDir(), "SnapshotForm.json")
+	if err := WriteSnapshot(SnapshotOutput{Path: path, DisplayPath: path, Format: "json"}, spec); err != nil {
+		t.Fatalf("WriteSnapshot: %v", err)
+	}
+	if _, err := LoadFormSpec(SpecInput{Path: path, DisplayPath: path, Format: "json"}); err != nil {
+		t.Fatalf("LoadFormSpec: %v", err)
 	}
 }
 

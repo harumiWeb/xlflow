@@ -99,6 +99,11 @@ Non-empty site strings without a FormSpec field—including `Tag`,
 `ControlTipText`, `RuntimeLicKey`, `ControlSource`, and `RowSource`—are named in
 that list rather than silently discarded. Site `Name` is already represented
 by the control's canonical `name` field.
+Unmodeled `BooleanProperties`, control flag bits outside the projected
+`Enabled` bit, and site flags that differ from the persisted default are also
+reported. For nested containers, their level-specific font, picture, mouse icon,
+and extra streams are attached to the owning control's unsupported list and
+warning.
 Form-level unsupported state is summarized by a form warning. Raw persistence
 details used only for lossless replay are not exposed as property-bag values.
 
@@ -140,4 +145,10 @@ code pages, and structurally bounded opaque controls. Native Go fuzz targets
 exercise both the public CFB-to-form reader and the `f` stream parser.
 Projection tests cover common properties, nested parent relationships,
 snapshot-only opaque controls, validation boundaries, and repeated byte-stable
-JSON output.
+JSON output. `TestProjectMatchesExcelBackedSnapshot` can additionally compare
+the canonical supported control state from an Excel-authored snapshot with the
+pure-Go projection of the same workbook. Set
+`XLFLOW_PROJECTION_PARITY_WORKBOOK` and
+`XLFLOW_PROJECTION_PARITY_SNAPSHOT` to run this Windows/Excel integration test.
+Root form dimensions are excluded because the binary stores client dimensions
+while Excel reports outer Designer dimensions.

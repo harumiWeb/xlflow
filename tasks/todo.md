@@ -246,6 +246,13 @@ scope for the current probe contract. Rules remain opt-in and fail open.
 - [x] Report non-empty ControlSource and RowSource site state as unsupported, and audit all decoded site strings so meaningful unprojected state cannot disappear silently; add focused warning regressions.
 - [x] Run focused userform projection/spec tests and the relevant package validation; review the complete diff.
 
+# PR #897 review follow-up
+
+- [x] Report non-default unsupported nested `Level` state on its owning container, and report unmodeled non-default site/control bitfield state without flagging file-format defaults; cover root and nested fixtures.
+- [x] Surface non-default form `BooleanProperties` through the existing unsupported warning contract and add a regression.
+- [x] Correct the YAML parentId completion test cursor offset; confirm Page/MultiPage remain projection/snapshot types rather than additions to the built-in authoring contract, and production CLI wiring belongs to parent issue #876.
+- [x] Add and run same-workbook Excel snapshot versus pure-Go projection parity verification; run focused and affected package tests. Commit/push fixes and reply to review threads with evidence.
+
 # PR #837 review follow-up (Issue #822, VBA257/VBA258)
 
 Review comments on internal/analyze/discarded_return.go. Verified against IR
