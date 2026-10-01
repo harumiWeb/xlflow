@@ -28,6 +28,12 @@ func TestReadFormSimpleFixture(t *testing.T) {
 	if form.DesignerSource.Text == "" || form.CompObj.UserType.Text != "Microsoft Forms 2.0 Form" {
 		t.Fatalf("designer/CompObj not decoded: source=%q userType=%q", form.DesignerSource.Text, form.CompObj.UserType.Text)
 	}
+	if len(form.CompObj.Raw) == 0 || len(form.Levels[0].CompObjRaw) == 0 {
+		t.Fatal("CompObj raw bytes are empty")
+	}
+	if &form.CompObj.Raw[0] != &form.Levels[0].CompObjRaw[0] {
+		t.Fatal("level and parsed CompObj do not share their retained raw bytes")
+	}
 	if len(form.Controls) == 0 {
 		t.Fatal("simple fixture has no controls")
 	}
@@ -212,6 +218,18 @@ func TestReadFormRejectsUnsupportedCodePage(t *testing.T) {
 	_, err := ReadForm(openFixture(t, "p4_form.bin"), "UserForm1", 42)
 	if !errors.Is(err, ErrMalformed) {
 		t.Fatalf("ReadForm error = %v, want ErrMalformed", err)
+	}
+}
+
+func TestParseCompObjRejectsOversizedStream(t *testing.T) {
+	data := make([]byte, maxDesignerStreamSize+1)
+	_, err := parseCompObj(data, "UserForm1", 932)
+	if !errors.Is(err, ErrMalformed) {
+		t.Fatalf("parseCompObj error = %v, want ErrMalformed", err)
+	}
+	var parseErr *ParseError
+	if !errors.As(err, &parseErr) || parseErr.Stream != "\x01CompObj" {
+		t.Fatalf("parseCompObj error = %#v, want CompObj ParseError", err)
 	}
 }
 

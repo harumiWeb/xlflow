@@ -116,12 +116,14 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 		level.XRaw = bytes.Clone(xRaw)
 	}
 	if compObj, found := s.container.Stream(path + "/\x01CompObj"); found {
-		level.CompObjRaw = bytes.Clone(compObj)
 		parsed, err := parseCompObj(compObj, path, s.codePage)
 		if err != nil {
 			return nil, nil, err
 		}
 		level.CompObj = &parsed
+		// parseCompObj enforces the stream cap before cloning. Share that
+		// retained clone rather than allocating a second raw copy for the level.
+		level.CompObjRaw = parsed.Raw
 	} else if root {
 		return nil, nil, parseError(path, "\x01CompObj", 0, "CompObj", "required stream is missing")
 	}
