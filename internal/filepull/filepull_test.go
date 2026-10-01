@@ -86,10 +86,10 @@ func TestPullRejectsUserFormsBeforeMutation(t *testing.T) {
 	}
 }
 
-func TestProbeUsesPullInspectionWithoutPublishing(t *testing.T) {
+func TestProbeInspectsOnlyWorkbookCapabilityWithoutPublishing(t *testing.T) {
 	root := t.TempDir()
 	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
-	result, err := Probe(root, testConfig(), workbook)
+	result, err := Probe(workbook)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestProbeUsesPullInspectionWithoutPublishing(t *testing.T) {
 	}
 
 	formWorkbook := writeWorkbook(t, root, readFixture(t, "p4_form.bin"))
-	formResult, err := Probe(root, testConfig(), formWorkbook)
+	formResult, err := Probe(formWorkbook)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,13 +110,27 @@ func TestProbeUsesPullInspectionWithoutPublishing(t *testing.T) {
 	}
 }
 
+func TestProbeLeavesSourceTreeValidationToPullContext(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	result, err := Probe(workbook)
+	if err != nil || !result.Supported {
+		t.Fatalf("workbook capability probe = %+v, %v", result, err)
+	}
+
+	cfg := testConfig()
+	cfg.Src.Forms = cfg.Src.Modules
+	if _, err := Pull(root, cfg, workbook); !errors.Is(err, ErrUnsafeSourcePath) {
+		t.Fatalf("Pull error = %v, want ErrUnsafeSourcePath", err)
+	}
+}
+
 func BenchmarkProbeClosedWorkbook(b *testing.B) {
 	root := b.TempDir()
 	workbook := writeWorkbook(b, root, readFixture(b, "p1_compiled.bin"))
-	cfg := testConfig()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := Probe(root, cfg, workbook); err != nil {
+		if _, err := Probe(workbook); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -2308,7 +2308,7 @@ func (a *app) selectPullBackend(cfg config.Config, requested string, session boo
 			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "workbook_open_in_excel", AttachOpen: true}, nil
 		}
 	}
-	probe, err := probeFilePull(a.cwd, cfg, workbookPath)
+	probe, err := probeFilePull(workbookPath)
 	if err != nil {
 		return pullBackendSelection{}, err
 	}

@@ -85,10 +85,10 @@ func Pull(root string, cfg config.Config, workbookPath string) (Result, error) {
 	return PullContext(context.Background(), root, cfg, workbookPath, PullOptions{})
 }
 
-// Probe parses and validates the saved VBA project without acquiring source
-// leases or publishing source. PullContext repeats the same inspection while
-// holding its leases so the probe cannot weaken the publication contract.
-func Probe(root string, cfg config.Config, workbookPath string) (ProbeResult, error) {
+// Probe inspects only saved-workbook properties needed for backend selection.
+// Source-tree validation remains in PullContext, where leases and wait policy
+// protect reads of the managed source roots.
+func Probe(workbookPath string) (ProbeResult, error) {
 	project, err := inspectProject(workbookPath)
 	if err != nil {
 		return ProbeResult{}, err
@@ -101,9 +101,6 @@ func Probe(root string, cfg config.Config, workbookPath string) (ProbeResult, er
 			result.HasForms = true
 			return result, nil
 		}
-	}
-	if err := validateProjectPlan(root, cfg, project); err != nil {
-		return ProbeResult{}, err
 	}
 	return result, nil
 }
@@ -225,11 +222,6 @@ func inspectProject(workbookPath string) (*vbaproject.Project, error) {
 		return nil, ErrProtectedProject
 	}
 	return project, nil
-}
-
-func validateProjectPlan(root string, cfg config.Config, project *vbaproject.Project) error {
-	_, err := buildProjectPlan(root, cfg, "", project)
-	return err
 }
 
 func buildProjectPlan(root string, cfg config.Config, workbookPath string, project *vbaproject.Project) (plan, error) {

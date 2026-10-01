@@ -1,3 +1,15 @@
+# Issue #892 final-review pass 1 follow-up
+
+Independent review of commit `4e08cf77` confirmed one in-scope P2:
+
+1. [x] Restrict the auto backend capability probe to saved-workbook
+       properties (parse/protection/UserForm support) so it never reads managed
+       source trees before source-tree leases and `--wait` take effect.
+2. [x] Keep source-path, stale-file, and publication planning validation inside
+       `PullContext` while its leases are held; add focused regression coverage.
+3. [x] Run focused/full tests and lint, commit the fix, and request final-review
+       pass 2 on the exact fix commit.
+
 # Issue #877 final-review pass 1 follow-up
 
 Independent review of commit `d20ca701` confirmed one in-scope P1:
