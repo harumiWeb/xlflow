@@ -50,8 +50,8 @@ Client-side uses of this metadata are advisory. The CLI lock remains the sole
 authority for acquisition, contention, waiting, and exclusion because another
 process may start a conflicting operation at any time.
 
-Coordination is keyed by canonical workbook identity rather than session ID. An
-identity contains:
+Coordination is keyed by canonical resource identity rather than session ID. A
+workbook identity contains:
 
 - a canonical Windows path retained for human-readable diagnostics; and
 - an opaque, domain-separated SHA-256 lock identifier that does not contain the
@@ -78,6 +78,18 @@ never become the source of truth for ownership.
 The detailed policy and identity contracts live in
 `docs/specs/workbook-coordination.md`.
 
+The saved-workbook file-pull backend extends this model with
+`resource_scope: source_tree`. Each configured managed module, class, and
+document-module root receives its own canonical, domain-separated identity.
+To make ancestor and descendant roots conflict without serializing sibling
+trees, a root takes a shared intent lease on every canonical ancestor and an
+exclusive lease on the root itself. All intent and root identities are acquired
+in stable LockID order. Source-tree leases use crash-released, descriptor-owned
+OS-lock authority on Windows and Unix; they do not require Excel and are not
+delegated from WSL. A command requiring both resource kinds acquires workbook
+identities first and the complete source-tree lock set second, sorting by LockID
+within each kind, and releases in reverse order.
+
 ## Consequences
 
 - Positive: CLI dispatch, bridge invocation, and future integrations can reason
@@ -90,12 +102,18 @@ The detailed policy and identity contracts live in
   workbook paths in synchronization primitive names.
 - Positive: identity generation does not require Excel, an open workbook, or an
   existing workbook file.
+- Positive: pure-Go source publication is coordinated on Windows and Unix
+  without coupling source-tree ownership to workbook or Excel identity.
+- Positive: hierarchical shared intents prevent ancestor/descendant races while
+  preserving concurrency between disjoint sibling trees.
 - Positive: editors and external integrations can discover stable command
   safety metadata without maintaining a duplicate classification table.
 - Negative: every executable command and multiplexed bridge action must be kept
   registered as the command surface evolves.
 - Negative: conservative policies can serialize operations that might eventually
   prove safe to run together.
+- Negative: commands that mutate source roots must declare and acquire every
+  affected root; a whole-project identity would preserve less parallelism.
 - Negative: lexical normalization cannot reliably unify mapped drives with UNC
   paths, DFS or DNS aliases, hard links, 8.3 names, or every network alias.
 - Negative: the initial case-insensitive identity contract does not distinguish

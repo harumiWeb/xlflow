@@ -9,14 +9,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const lockFlags = windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY
-
-func platformTryLock(file *os.File, offset int64) (bool, error) {
+func platformTryLock(file *os.File, offset int64, shared bool) (bool, error) {
+	flags := uint32(windows.LOCKFILE_FAIL_IMMEDIATELY)
+	if !shared {
+		flags |= windows.LOCKFILE_EXCLUSIVE_LOCK
+	}
 	overlapped := windows.Overlapped{
 		Offset:     uint32(offset),
 		OffsetHigh: uint32(uint64(offset) >> 32),
 	}
-	err := windows.LockFileEx(windows.Handle(file.Fd()), lockFlags, 0, 1, 0, &overlapped)
+	err := windows.LockFileEx(windows.Handle(file.Fd()), flags, 0, 1, 0, &overlapped)
 	if err == nil {
 		return true, nil
 	}

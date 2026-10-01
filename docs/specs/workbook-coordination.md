@@ -664,6 +664,36 @@ be enumerated or contains an invalid marker whose affected PID cannot be trusted
 `process list` fails with `coordination_recovery_check_failed` before invoking
 the bridge rather than probing Excel through COM.
 
+## Source-Tree Resource Extension
+
+Pure-Go commands that destructively reconcile tracked source use
+`resource_scope: source_tree`. A source-tree identity uses the same canonical
+path algorithm as workbook identity but a distinct hash domain and LockID
+prefix. Commands acquire an exclusive identity for each managed root plus shared
+intent identities for every canonical ancestor. An exclusive root conflicts
+with a descendant operation's shared intent, while sibling roots share their
+common ancestor intents. Projects with disjoint sibling roots therefore remain
+independent, and exact or ancestor/descendant overlaps contend.
+
+Source-tree leases use descriptor-owned operating-system file locks on Windows
+and Unix, with shared and exclusive modes. They are process-safe, released by
+process termination, and do not depend on Excel, VBIDE, workbook sessions, or
+Windows delegation. Owner metadata is published only for exclusive roots and
+records `resource_path` and `resource_scope: source_tree`; it remains diagnostic
+and never replaces the OS lock as ownership authority.
+
+`pull --backend file` builds the complete shared-intent/exclusive-root lock set
+for module, class, and document-module roots, promotes duplicate identities to
+exclusive mode, and acquires the result in stable LockID order before reading
+the saved workbook. It holds the set through planning, publication, rollback,
+and cleanup. It deliberately skips the workbook lease. The default Excel
+backend retains its historical workbook coordination contract.
+
+Global acquisition order is resource kind first (`workbook`, then
+`source_tree`) and LockID second. Release order is reversed. A future command
+that needs both kinds must follow this order instead of acquiring source roots
+before entering workbook coordination.
+
 ## Out of Scope for This Version
 
 This contract does not add:

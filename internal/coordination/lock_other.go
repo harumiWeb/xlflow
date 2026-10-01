@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !unix
 
 package coordination
 
@@ -9,7 +9,7 @@ import (
 
 var errPlatformLockUnsupported = errors.New("workbook coordination locks are supported only on Windows")
 
-func platformTryLock(_ *os.File, _ int64) (bool, error) {
+func platformTryLock(_ *os.File, _ int64, _ bool) (bool, error) {
 	return false, errPlatformLockUnsupported
 }
 

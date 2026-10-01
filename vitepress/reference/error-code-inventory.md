@@ -1224,6 +1224,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `source_preflight_failed`
 - `source_state`
 - `source_synced`
+- `source_tree`
+- `source_tree_busy`
+- `source_tree_busy_cancelled`
+- `source_tree_busy_timeout`
 - `source_workbook`
 - `spec_parse_failed`
 - `spec_path`

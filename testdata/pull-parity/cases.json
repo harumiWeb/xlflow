@@ -1,0 +1,63 @@
+{
+  "sourceCases": [
+    {
+      "id": "standard-mixed-lines-unicode",
+      "kind": "standard",
+      "name": "Main",
+      "goSource": "Attribute VB_Name = \"Main\"\r\nOption Explicit\n' 日本語コメント\rPublic Sub Run()\r\n    Debug.Print \"日本語\"\r\nEnd Sub\r\n",
+      "excelExport": "Attribute VB_Name = \"Main\"\r\nOption Explicit\r\n' 日本語コメント\r\nPublic Sub Run()\r\n    Debug.Print \"日本語\"\r\nEnd Sub\r\n",
+      "expected": "Attribute VB_Name = \"Main\"\nOption Explicit\n' 日本語コメント\nPublic Sub Run()\n    Debug.Print \"日本語\"\nEnd Sub\n"
+    },
+    {
+      "id": "class-internal-attributes",
+      "kind": "class",
+      "name": "Greeting",
+      "goSource": "Attribute VB_Name = \"Greeting\"\r\nAttribute VB_Base = \"0{FCFB3D2A-A0FA-1068-A738-08002B3371B5}\"\r\nAttribute VB_GlobalNameSpace = False\r\nAttribute VB_Creatable = False\r\nAttribute VB_PredeclaredId = False\r\nAttribute VB_Exposed = False\r\nAttribute VB_TemplateDerived = False\r\nAttribute VB_Customizable = False\r\n'@Folder(\"Domain.Services\")\r\nOption Explicit\r\nPublic Function Message() As String\r\n    Message = \"こんにちは\"\r\nEnd Function\r\n",
+      "excelExport": "VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  'True\r\nEND\r\nAttribute VB_Name = \"Greeting\"\r\nAttribute VB_GlobalNameSpace = False\r\nAttribute VB_Creatable = False\r\nAttribute VB_PredeclaredId = False\r\nAttribute VB_Exposed = False\r\n'@Folder(\"Domain.Services\")\r\nOption Explicit\r\nPublic Function Message() As String\r\n    Message = \"こんにちは\"\r\nEnd Function\r\n",
+      "expected": "VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  'True\nEND\nAttribute VB_Name = \"Greeting\"\nAttribute VB_GlobalNameSpace = False\nAttribute VB_Creatable = False\nAttribute VB_PredeclaredId = False\nAttribute VB_Exposed = False\n'@Folder(\"Domain.Services\")\nOption Explicit\nPublic Function Message() As String\n    Message = \"こんにちは\"\nEnd Function\n"
+    },
+    {
+      "id": "document-body-and-vbe-blank",
+      "kind": "document",
+      "name": "Sheet1",
+      "goSource": "Attribute VB_Name = \"Sheet1\"\r\nAttribute VB_Base = \"0{00020820-0000-0000-C000-000000000046}\"\r\nAttribute VB_GlobalNameSpace = False\r\nAttribute VB_Creatable = False\r\nAttribute VB_PredeclaredId = True\r\nAttribute VB_Exposed = True\r\nOption Explicit\r\nPrivate Sub Worksheet_Activate()\r\nEnd Sub\r\n",
+      "excelExport": "VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  'True\r\nEND\r\nAttribute VB_Name = \"Sheet1\"\r\nAttribute VB_GlobalNameSpace = False\r\nAttribute VB_Creatable = False\r\nAttribute VB_PredeclaredId = True\r\nAttribute VB_Exposed = True\r\nOption Explicit\r\nPrivate Sub Worksheet_Activate()\r\nEnd Sub\r\n\r\n",
+      "expected": "Option Explicit\nPrivate Sub Worksheet_Activate()\nEnd Sub\n"
+    },
+    {
+      "id": "empty-document",
+      "kind": "document",
+      "name": "ThisWorkbook",
+      "goSource": "Attribute VB_Name = \"ThisWorkbook\"\r\nAttribute VB_Base = \"0{00020819-0000-0000-C000-000000000046}\"\r\nAttribute VB_GlobalNameSpace = False\r\nAttribute VB_Creatable = False\r\nAttribute VB_PredeclaredId = True\r\nAttribute VB_Exposed = True\r\n",
+      "excelExport": "VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  'True\r\nEND\r\nAttribute VB_Name = \"ThisWorkbook\"\r\nAttribute VB_GlobalNameSpace = False\r\nAttribute VB_Creatable = False\r\nAttribute VB_PredeclaredId = True\r\nAttribute VB_Exposed = True\r\nOption Explicit\r\n\r\n",
+      "expected": "Option Explicit\n"
+    },
+    {
+      "id": "empty-document-stored-option",
+      "kind": "document",
+      "name": "Sheet1",
+      "goSource": "Attribute VB_Name = \"Sheet1\"\r\nAttribute VB_Base = \"0{00020820-0000-0000-C000-000000000046}\"\r\nAttribute VB_GlobalNameSpace = False\r\nAttribute VB_Creatable = False\r\nAttribute VB_PredeclaredId = True\r\nAttribute VB_Exposed = True\r\nOption Explicit\r\n\r\n",
+      "excelExport": "VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  'True\r\nEND\r\nAttribute VB_Name = \"Sheet1\"\r\nAttribute VB_GlobalNameSpace = False\r\nAttribute VB_Creatable = False\r\nAttribute VB_PredeclaredId = True\r\nAttribute VB_Exposed = True\r\nOption Explicit\r\n\r\n",
+      "expected": "Option Explicit\n"
+    }
+  ],
+  "folderCases": [
+    {
+      "id": "nested-unicode",
+      "source": "Attribute VB_Name = \"Main\"\n'@Folder(\"Domain.日本語.Services\")\nOption Explicit\n",
+      "expectedSegments": ["Domain", "日本語", "Services"]
+    },
+    {
+      "id": "no-annotation",
+      "source": "Attribute VB_Name = \"Main\"\nOption Explicit\n",
+      "expectedSegments": []
+    }
+  ],
+  "lineNumberCases": [
+    {
+      "id": "generated-erl",
+      "numbered": "Public Sub Run()\n2      Debug.Print \"日本語\"\nEnd Sub\n",
+      "expected": "Public Sub Run()\n    Debug.Print \"日本語\"\nEnd Sub\n"
+    }
+  ]
+}

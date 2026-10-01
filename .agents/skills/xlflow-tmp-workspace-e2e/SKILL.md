@@ -200,6 +200,20 @@ When the release includes `pack` changes, also cover the pack artifact smoke des
 - open the produced artifact in Excel and run a packed macro
 - assert an observable effect, such as a sentinel cell value, to confirm the packed VBA compiled and ran
 
+When the release includes `pull --backend file` changes, run the maintained
+file-pull gate after `task install`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-file-pull-e2e.ps1 -KeepWorkspace
+```
+
+The gate creates a representative Excel workbook with multiple standard,
+class, and document modules, nested folders, CP932/Japanese source, and a
+non-ASCII component name. It compares an Excel-backend baseline with the file
+backend, packs the file-pulled tree, executes the packed sentinel in real Excel,
+and verifies that a separate UserForm-bearing workbook is rejected without
+source mutation. Record both absolute workspace paths in the release report.
+
 When the release includes session-related changes, also cover:
 
 - `session start`

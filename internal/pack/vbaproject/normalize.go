@@ -67,7 +67,14 @@ func exportDocumentSource(source string) (string, error) {
 	}
 	body := strings.Join(lines[firstBody:], "\n")
 	body = strings.TrimPrefix(body, "\n")
-	return ensureFinalNewline(body), nil
+	if strings.TrimSpace(body) == "" {
+		return "Option Explicit\n", nil
+	}
+	body = ensureFinalNewline(body)
+	if strings.HasSuffix(body, "\n\n") {
+		body = strings.TrimSuffix(body, "\n")
+	}
+	return body, nil
 }
 
 func removeInternalClassAttributes(source string) string {

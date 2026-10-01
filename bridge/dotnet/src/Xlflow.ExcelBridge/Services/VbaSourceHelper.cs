@@ -222,7 +222,7 @@ internal static partial class VbaSourceHelper
 
         if (!hasOptionExplicit && !hasNonHeaderCode)
         {
-            filtered.Add("");
+            filtered.Clear();
             filtered.Add("Option Explicit");
         }
 
@@ -244,7 +244,12 @@ internal static partial class VbaSourceHelper
             lines.RemoveAt(lines.Count - 1);
         }
 
-        return string.Join(Environment.NewLine, lines);
+        var result = string.Join(Environment.NewLine, lines);
+        if (!result.EndsWith(Environment.NewLine, StringComparison.Ordinal))
+        {
+            result += Environment.NewLine;
+        }
+        return result;
     }
 
     public static string GetCodeModuleText(object codeModule)

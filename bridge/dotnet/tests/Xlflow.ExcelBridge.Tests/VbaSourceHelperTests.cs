@@ -1,10 +1,42 @@
 using System.Text;
+using System.Text.Json;
 using Xlflow.ExcelBridge.Services;
 
 namespace Xlflow.ExcelBridge.Tests;
 
 public sealed class VbaSourceHelperTests
 {
+    [Fact]
+    public void PullParityFixturesMatchTrackedSourceContract()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "pull-parity.json")));
+        var root = document.RootElement;
+        foreach (var test in root.GetProperty("sourceCases").EnumerateArray())
+        {
+            var exported = test.GetProperty("excelExport").GetString()!;
+            var kind = test.GetProperty("kind").GetString();
+            var normalized = kind == "document"
+                ? VbaSourceHelper.NormalizeDocumentModuleExport(exported)
+                : VbaSourceHelper.ConvertToUtf8(exported);
+            Assert.Equal(test.GetProperty("expected").GetString(), NormalizeToLf(normalized));
+        }
+        foreach (var test in root.GetProperty("folderCases").EnumerateArray())
+        {
+            var annotation = VbaSourceHelper.ParseFolderAnnotation(test.GetProperty("source").GetString()!);
+            var actual = VbaSourceHelper.ParseFolderAnnotationSegments(annotation);
+            var expected = test.GetProperty("expectedSegments").EnumerateArray().Select(value => value.GetString()).ToArray();
+            Assert.Equal(expected, actual);
+        }
+        foreach (var test in root.GetProperty("lineNumberCases").EnumerateArray())
+        {
+            Assert.True(ErlLineNumberTransformer.TryRemove(test.GetProperty("numbered").GetString()!, out var actual, out var issue, excelExported: true));
+            Assert.Null(issue);
+            Assert.Equal(test.GetProperty("expected").GetString(), NormalizeToLf(actual));
+        }
+    }
+
+    private static string NormalizeToLf(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+
     [Fact]
     public void GetVbaInteropEncoding_UsesSystemAnsiCodePage()
     {
@@ -118,6 +150,23 @@ public sealed class VbaSourceHelperTests
         Assert.Equal(source, VbaSourceHelper.NormalizeDocumentModuleExport(exportedWithVbeBlankLine));
         Assert.Equal(source, VbaSourceHelper.NormalizeDocumentModuleExport(
             VbaSourceHelper.NormalizeDocumentModuleExport(exportedWithVbeBlankLine)));
+    }
+
+    [Fact]
+    public void NormalizeDocumentModuleExport_ClassAndAttributeHeadersOnlyHasNoLeadingBlankLine()
+    {
+        var exported = string.Join(Environment.NewLine, new[]
+        {
+            "VERSION 1.0 CLASS",
+            "BEGIN",
+            "  MultiUse = -1  'True",
+            "END",
+            "Attribute VB_Name = \"ThisWorkbook\"",
+            "Attribute VB_PredeclaredId = True",
+            "",
+        });
+
+        Assert.Equal("Option Explicit" + Environment.NewLine, VbaSourceHelper.NormalizeDocumentModuleExport(exported));
     }
 
     [Fact]

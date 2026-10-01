@@ -4,15 +4,18 @@ package filepull
 
 import (
 	"archive/zip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -60,10 +63,28 @@ type plan struct {
 	stale  []string
 }
 
+type PullOptions struct {
+	Coordination *coordination.Manager
+	Wait         bool
+	WaitTimeout  time.Duration
+}
+
 var folderAnnotationPattern = regexp.MustCompile(`(?i)^'?@Folder\(\s*"([^"]*)"\s*\)`)
 
 // Pull parses, validates, and publishes one complete saved-workbook snapshot.
 func Pull(root string, cfg config.Config, workbookPath string) (Result, error) {
+	return PullContext(context.Background(), root, cfg, workbookPath, PullOptions{})
+}
+
+// PullContext parses, validates, and publishes one complete saved-workbook
+// snapshot while holding leases for every managed source root.
+func PullContext(ctx context.Context, root string, cfg config.Config, workbookPath string, opts PullOptions) (Result, error) {
+	release, err := acquireSourceTrees(ctx, root, cfg, opts)
+	if err != nil {
+		return Result{}, err
+	}
+	defer release()
+
 	p, err := buildPlan(root, cfg, workbookPath)
 	if err != nil {
 		return Result{}, err
@@ -72,6 +93,78 @@ func Pull(root string, cfg config.Config, workbookPath string) (Result, error) {
 		return Result{}, err
 	}
 	return p.result, nil
+}
+
+func acquireSourceTrees(ctx context.Context, root string, cfg config.Config, opts PullOptions) (func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	manager := opts.Coordination
+	if manager == nil {
+		var err error
+		manager, err = coordination.NewDefaultManager()
+		if err != nil {
+			return nil, fmt.Errorf("initialize source-tree coordination: %w", err)
+		}
+	}
+	type lockTarget struct {
+		identity coordination.ResourceIdentity
+		shared   bool
+	}
+	roots := resolvedRoots(root, cfg)
+	targets := map[string]lockTarget{}
+	for _, path := range []string{roots.modules, roots.classes, roots.workbook} {
+		identity, err := coordination.NewSourceTreeIdentity(root, path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve source-tree identity %s: %w", path, err)
+		}
+		for index, hierarchyIdentity := range coordination.SourceTreeLockHierarchy(identity) {
+			target := lockTarget{identity: hierarchyIdentity, shared: index != 0}
+			if current, exists := targets[hierarchyIdentity.LockID]; !exists || current.shared {
+				targets[hierarchyIdentity.LockID] = target
+			}
+		}
+	}
+	lockIDs := slices.Sorted(maps.Keys(targets))
+	leases := make([]*coordination.Lease, 0, len(lockIDs))
+	release := func() {
+		for i := len(leases) - 1; i >= 0; i-- {
+			_ = leases[i].Release()
+		}
+	}
+	acquireCtx := ctx
+	waitStarted := false
+	for _, lockID := range lockIDs {
+		target := targets[lockID]
+		request := coordination.AcquireRequest{
+			Identity:      target.identity,
+			Command:       "pull",
+			OperationKind: coordination.OperationMutate,
+			ResourceScope: coordination.ResourceSourceTree,
+			Shared:        target.shared,
+		}
+		lease, err := manager.Acquire(acquireCtx, request)
+		if opts.Wait && errors.Is(err, coordination.ErrSourceTreeBusy) {
+			if !waitStarted && opts.WaitTimeout > 0 {
+				var cancelWait context.CancelFunc
+				acquireCtx, cancelWait = context.WithTimeout(ctx, opts.WaitTimeout)
+				defer cancelWait()
+				waitStarted = true
+			}
+			request.Wait = true
+			lease, err = manager.Acquire(acquireCtx, request)
+		}
+		if err == nil && waitStarted && acquireCtx.Err() != nil {
+			_ = lease.Release()
+			err = acquireCtx.Err()
+		}
+		if err != nil {
+			release()
+			return nil, err
+		}
+		leases = append(leases, lease)
+	}
+	return release, nil
 }
 
 func buildPlan(root string, cfg config.Config, workbookPath string) (plan, error) {
