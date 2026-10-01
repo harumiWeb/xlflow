@@ -92,7 +92,7 @@ func (a *app) wrapCoordinatedLeaves(root *cobra.Command) {
 			}
 			if descriptor.ID == "pull" {
 				backend, _ := commandFlagString(cmd, "backend")
-				if strings.EqualFold(backend, "file") {
+				if strings.EqualFold(backend, "file") || strings.EqualFold(backend, "auto") {
 					return original(cmd, args)
 				}
 			}

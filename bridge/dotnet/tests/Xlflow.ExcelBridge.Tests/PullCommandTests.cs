@@ -25,6 +25,7 @@ public sealed class PullCommandTests
             Assert.True(args.DefaultComponentFolders);
             Assert.False(args.Visible);
             Assert.True(args.UseSession);
+            Assert.True(args.AttachOpenWorkbook);
             Assert.Equal(@"C:\work\.xlflow\session.json", args.MetadataPath);
 
             return BridgeResponse.Ok(request, new Dictionary<string, object?>
@@ -82,6 +83,7 @@ public sealed class PullCommandTests
                   "DefaultComponentFolders": "true",
                   "Visible": "false",
                   "UseSession": "true",
+                  "AttachOpenWorkbook": "true",
                   "MetadataPath": "C:\\work\\.xlflow\\session.json"
                 }
                 """).RootElement.Clone(),

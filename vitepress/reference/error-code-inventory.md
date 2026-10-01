@@ -70,6 +70,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `auto_open`
 - `auto_session`
 - `automation_security`
+- `backend_selection`
 - `backup_cleanup_failed`
 - `backup_delete`
 - `backup_delete_args_invalid`
@@ -528,6 +529,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `expected_closer`
 - `expected_context`
 - `expected_error`
+- `explicit_backend`
 - `explicit_call_requires_parentheses`
 - `export_image_args_invalid`
 - `expression_count`
@@ -542,6 +544,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `fail_fast_with_max_failures`
 - `failed_entries`
 - `field_count`
+- `file_backend_supported`
+- `file_backend_unsupported_format`
+- `file_backend_unsupported_userform`
 - `file_count`
 - `file_input`
 - `file_number_literal`
@@ -772,6 +777,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `manifest_missing`
 - `manifest_path`
 - `manual_quoting`
+- `matching_live_session`
 - `max_age_days`
 - `max_calls_per_file`
 - `max_cfg_blocks_per_procedure`
@@ -877,6 +883,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `on_error_resume_next`
 - `on_error_statement`
 - `on_goto_statement`
+- `open_state_probe_failed`
 - `open_statement`
 - `open_workbook`
 - `opening_column`
@@ -1033,6 +1040,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `public_procedure_count`
 - `published_runs`
 - `pull_args_invalid`
+- `pull_auto_open_state_probe_failed`
 - `pull_file_not_found`
 - `pull_file_unreadable`
 - `pull_formulas_failed`
@@ -1151,6 +1159,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `selected_bridge`
 - `selected_by`
 - `selected_index`
+- `selection_reason`
 - `semantic_kernel_runs`
 - `semantic_query_hits`
 - `semantic_query_invalidated_procedures`
@@ -1424,6 +1433,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `workbook_last_modified_at`
 - `workbook_name`
 - `workbook_open`
+- `workbook_open_in_excel`
 - `workbook_openable`
 - `workbook_path`
 - `workbook_recovery_clear_failed`

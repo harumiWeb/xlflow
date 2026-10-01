@@ -3,11 +3,31 @@
 ## Command
 
 ```text
-xlflow pull --backend file [--formulas] [--json]
+xlflow pull [--backend auto|file|excel] [--formulas] [--json]
 ```
 
-`excel` is the default backend. Backend selection is explicit; failure of one
-backend never invokes the other. `--backend file --session` is invalid.
+`auto` is the default backend. Explicit `file` and `excel` selections never
+invoke the other backend. `--backend file --session` is invalid.
+
+On Windows, auto selects Excel for explicit session intent, a valid matching
+xlflow session, a workbook reported open by Restart Manager, an indeterminate
+open-state probe, UserForms, and Excel-supported project formats outside the
+file backend. A closed, supported `.xlsm` selects file. Missing, unreadable,
+malformed, protected, and unsafe projects fail with their existing validation
+codes instead of falling through to Excel. On non-Windows hosts auto uses file
+when supported and otherwise returns the deterministic file-backend error.
+
+Stable selection reasons are `explicit_backend`, `session_requested`,
+`matching_live_session`, `workbook_open_in_excel`, `open_state_probe_failed`,
+`file_backend_supported`, `file_backend_unsupported_userform`, and
+`file_backend_unsupported_format`. An open-state failure selects Excel, requires
+attachment to an already-open matching workbook instead of opening another
+saved copy, and adds warning `pull_auto_open_state_probe_failed` with the
+original failure detail. WSL forwards a failed live-session probe to the
+delegated Windows selection so the same attachment and warning contract is
+preserved.
+Explicit selections report `backend_selection=explicit`; omitted or explicit
+`--backend auto` reports `backend_selection=auto`.
 
 ## Authority and host requirements
 
@@ -18,8 +38,9 @@ or attaches to Excel, COM, VBIDE, or the bridge. A matching
 Unreadable session metadata produces `file_pull_session_state_unavailable`
 without changing saved-file authority.
 
-Under WSL, this explicit pure-Go backend remains local; the default Excel
-backend continues to delegate to Windows xlflow.
+Under WSL, explicit file and the normal auto pure-Go path remain local.
+Explicit Excel, `--session`, and a validated matching live session delegate to
+Windows xlflow.
 
 Successful JSON includes:
 
@@ -27,6 +48,8 @@ Successful JSON includes:
 {
   "pull": {
     "backend": "file",
+    "backend_selection": "auto",
+    "selection_reason": "file_backend_supported",
     "source": "saved_workbook",
     "code_page": 932,
     "modules": {

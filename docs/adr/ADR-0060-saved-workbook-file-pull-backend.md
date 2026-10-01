@@ -19,8 +19,11 @@ would therefore hide both freshness and fidelity changes.
 
 ## Decision
 
-Add `xlflow pull --backend file` while retaining `excel` as the default. The
-backend is explicit and there is no automatic fallback in either direction.
+Add `xlflow pull --backend file` and, after the file reader has passed its
+production hardening gates, make `auto` the default. Explicit `file` and
+`excel` requests never fall back. `auto` selects saved-file authority only
+after proving that no matching live session or local Excel process owns the
+workbook and that the file backend can produce a complete snapshot.
 The file backend supports saved `.xlsm` workbooks and reads only
 `xl/vbaProject.bin`; it does not launch Excel, COM, the .NET bridge, or VBIDE.
 
@@ -56,18 +59,44 @@ saved file is read and `file_pull_live_session_ignored` warns that unsaved
 live state was ignored. `--backend file` and `--session` are mutually
 exclusive.
 
-Capabilities schema version 2 publishes `default_backend` and per-backend
-`requires_excel`. The command-level `requires_excel` remains `true` because it
-describes the default command path. Consumers must use backend metadata when
-planning an explicit non-default invocation.
+On Windows, automatic selection first honors `--session`, then validates a
+matching session record against canonical workbook identity and the Excel PID
+reported by Restart Manager. It registers only the configured workbook with
+Restart Manager and identifies `EXCEL.EXE` without COM or external commands.
+An open workbook, a valid live session, an indeterminate open-state probe, a
+UserForm, or an Excel-supported non-`.xlsm` project selects the Excel backend.
+Automatic Excel selection retains workbook coordination, while automatic file
+selection acquires only the source-tree leases used by the file backend. An
+indeterminate open-state probe is attach-only: xlflow must find and attach to an
+already-open matching workbook and must not open a second copy from saved state.
+Malformed, protected, missing, unreadable, or unsafe saved projects retain
+their deterministic validation failures rather than being hidden by an Excel
+automation attempt. Non-Windows hosts use the file capability probe and fail
+deterministically when it is unsupported; WSL remains local unless explicit or
+validated live-session intent requires Windows delegation. When the WSL live
+session probe itself fails, delegation preserves that failure as the same
+attach-only selection and structured warning on Windows.
+
+Successful output reports the actual backend, `auto` or `explicit` selection,
+the stable selection reason, and source authority. Capabilities schema v3
+publishes `default_backend=auto`; the auto backend keeps
+`requires_excel=true` as a conservative advisory and adds
+`selection=dynamic`.
+
+Capabilities schema version 3 retains per-backend `requires_excel` and adds
+dynamic-selection metadata. Consumers should use the selected backend reported
+by command output rather than infer runtime authority from capability metadata.
 
 ## Consequences
 
-- Ordinary VBA source can be refreshed deterministically without Excel on any
-  host supported by the pure-Go reader.
+- Ordinary closed-workbook VBA source is refreshed deterministically without
+  paying Excel startup cost, while live or incomplete projects retain Excel
+  fidelity.
 - Callers can distinguish `saved_workbook` from live-session authority in JSON.
 - Concurrent file pulls cannot reconcile the same managed source roots at the
   same time, while disjoint roots remain independent.
+- An unrelated workbook lease does not block an automatic file pull, while an
+  automatic Excel pull still participates in workbook coordination.
 - A process crash releases source-tree ownership but does not roll back source
   files already published before the crash.
 - Workbooks containing UserForms continue to require the Excel backend, even
@@ -78,15 +107,16 @@ planning an explicit non-default invocation.
 
 ## Alternatives Considered
 
-1. **Automatically fall back to Excel.** Rejected because backend selection
-   changes host requirements and may change which workbook state is read.
+1. **Silently fall back after an explicit backend request.** Rejected because
+   it changes host requirements and source authority. Only `auto` owns the
+   documented selection policy.
 2. **Export ordinary modules while skipping UserForms.** Rejected because a
    successful result would look complete while preserving stale form source.
 3. **Block when a matching session record exists.** Rejected because explicit
    `--backend file` intentionally selects saved-file authority; a structured
    warning makes that boundary visible without making stale metadata fatal.
-4. **Make the file backend the default.** Rejected because the existing Excel
-   path supports more workbook formats and complete UserForm artifacts.
+4. **Make `file` the fixed default.** Rejected because Excel remains necessary
+   for open/live state, other workbook formats, and complete UserForm artifacts.
 5. **Add a durable recovery journal now.** Deferred because a trustworthy
    automatic restore needs its own crash, corruption, and operator-recovery
    contract. The current guarantee remains explicit operation-level rollback
@@ -94,6 +124,7 @@ planning an explicit non-default invocation.
 
 ## Related
 
+- Issue #892
 - Issue #871
 - ADR-0012
 - `docs/specs/file-pull.md`

@@ -5,7 +5,7 @@ Export workbook VBA components and form artifacts into configured source directo
 ## Usage
 
 ```bash
-xlflow pull [--backend excel|file] [--session] [--formulas]
+xlflow pull [--backend auto|excel|file] [--session] [--formulas]
 ```
 
 ## Options and Arguments
@@ -15,7 +15,7 @@ xlflow pull [--backend excel|file] [--session] [--formulas]
 | `--session`       | Pull from the managed live session workbook.                           | false   |
 | `--formulas`      | Also refresh worksheet formula snapshots under `formulas/` on success. | false   |
 | `--json`          | Report exported files and warnings.                                    | false   |
-| `--backend`       | Use `excel` or pure-Go saved-workbook `file` extraction.               | excel   |
+| `--backend`       | Select `auto`, Excel/VBIDE `excel`, or pure-Go saved-workbook `file`.  | auto    |
 
 ## Examples
 
@@ -35,7 +35,15 @@ Pull before editing if the workbook may contain newer VBA than the source tree.
 > [!IMPORTANT]
 > UserForm Designer state and code-behind may be written to separate sidecar paths depending on project configuration.
 
-`--backend file` reads the saved configured `.xlsm` directly and never launches Excel, COM, VBIDE, or the bridge. It supports standard, class, and document modules. If the workbook contains any UserForm, the whole operation fails before modifying source; use the default Excel backend for complete `.frm` / `.frx` export. The file backend does not fall back to Excel and cannot be combined with `--session`. If a matching live session is recorded, the command still reads the saved workbook and warns that unsaved live state was ignored.
+`--backend file` reads the saved configured `.xlsm` directly and never launches Excel, COM, VBIDE, or the bridge. It supports standard, class, and document modules. If the workbook contains any UserForm, the whole operation fails before modifying source; use `--backend excel` for complete `.frm` / `.frx` export. The file backend does not fall back to Excel and cannot be combined with `--session`. If a matching live session is recorded, the command still reads the saved workbook and warns that unsaved live state was ignored.
+
+The default `auto` mode chooses the fastest safe authority. A closed, supported
+`.xlsm` uses the file backend. `--session`, a valid matching session, a workbook
+open in local Excel, UserForms, or an Excel-supported format outside the file
+backend selects Excel. If Windows cannot determine open state, auto fails safe
+to an already-open matching Excel workbook and reports a warning; it does not
+open another copy from saved state. Use explicit `--backend file` or
+`--backend excel` when the authority must not be selected dynamically.
 
 With `[vba.line_numbers].enabled = true`, `pull` strips only xlflow-generated, fixed-width space-padded physical line labels from workbook exports, so tracked source remains unnumbered. It never treats colon labels as generated. xlflow stops safely rather than rewriting source when it encounters non-generated or mismatched numeric labels, or numeric `GoTo`, `GoSub`, or `Resume` targets. This is configuration-only behavior; `pull` has no line-number flag.
 
@@ -54,6 +62,8 @@ Successful `--json` output uses the xlflow envelope plus command-specific fields
   "workbook": { "path": "build/Book.xlsm" },
   "pull": {
     "backend": "file",
+    "backend_selection": "auto",
+    "selection_reason": "file_backend_supported",
     "source": "saved_workbook",
     "code_page": 932,
     "modules": { "standard": 1, "class": 1, "document": 2, "form": 0 }
@@ -90,7 +100,7 @@ Use `xlflow pull` when the task matches the command description above. For a goa
 
 ## Prerequisites
 
-For the default `--backend excel`, check the project configuration and run `xlflow doctor --json`; this path requires Windows Excel and VBIDE access. `--backend file` instead requires a readable configured saved `.xlsm` and does not require Excel or VBIDE.
+The default auto path does not require Excel for a closed, supported `.xlsm`, but may select it when live state or complete export requires it. Run `xlflow doctor --json` before forcing `--backend excel`. Explicit `--backend file` requires a readable configured saved `.xlsm` and does not require Excel or VBIDE.
 
 ## What this command reads and changes
 

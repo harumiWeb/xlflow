@@ -45,7 +45,8 @@ public sealed class PullCommand : ICommandHandler
             Visible: BridgePayload.GetBool(request.Payload, "Visible"),
             UseSession: BridgePayload.GetBool(request.Payload, "UseSession"),
             MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "",
-            LineNumbersEnabled: BridgePayload.GetBool(request.Payload, "LineNumbersEnabled"));
+            LineNumbersEnabled: BridgePayload.GetBool(request.Payload, "LineNumbersEnabled"),
+            AttachOpenWorkbook: BridgePayload.GetBool(request.Payload, "AttachOpenWorkbook"));
 
         return _service.Execute(request, args, cancellationToken);
     }

@@ -52,6 +52,15 @@ type Result struct {
 	CodePage     uint16
 }
 
+// ProbeResult describes whether the saved-workbook backend can produce a
+// complete source snapshot without publishing any files.
+type ProbeResult struct {
+	Supported bool
+	Reason    string
+	CodePage  uint16
+	HasForms  bool
+}
+
 type plannedFile struct {
 	path string
 	body []byte
@@ -74,6 +83,26 @@ var folderAnnotationPattern = regexp.MustCompile(`(?i)^'?@Folder\(\s*"([^"]*)"\s
 // Pull parses, validates, and publishes one complete saved-workbook snapshot.
 func Pull(root string, cfg config.Config, workbookPath string) (Result, error) {
 	return PullContext(context.Background(), root, cfg, workbookPath, PullOptions{})
+}
+
+// Probe inspects only saved-workbook properties needed for backend selection.
+// Source-tree validation remains in PullContext, where leases and wait policy
+// protect reads of the managed source roots.
+func Probe(workbookPath string) (ProbeResult, error) {
+	project, err := inspectProject(workbookPath)
+	if err != nil {
+		return ProbeResult{}, err
+	}
+	result := ProbeResult{Supported: true, Reason: "supported", CodePage: project.Props.CodePage}
+	for _, module := range project.Modules {
+		if module.Type == vbaproject.ModuleForm {
+			result.Supported = false
+			result.Reason = "userform"
+			result.HasForms = true
+			return result, nil
+		}
+	}
+	return result, nil
 }
 
 // PullContext parses, validates, and publishes one complete saved-workbook
@@ -168,23 +197,34 @@ func acquireSourceTrees(ctx context.Context, root string, cfg config.Config, opt
 }
 
 func buildPlan(root string, cfg config.Config, workbookPath string) (plan, error) {
-	projectBytes, err := readVBAProject(workbookPath)
+	project, err := inspectProject(workbookPath)
 	if err != nil {
 		return plan{}, err
-	}
-	project, err := vbaproject.Read(projectBytes)
-	if err != nil {
-		return plan{}, fmt.Errorf("%w: %v", ErrMalformedVBAProject, err)
-	}
-	if project.Protection.IsProtected {
-		return plan{}, ErrProtectedProject
 	}
 	for _, module := range project.Modules {
 		if module.Type == vbaproject.ModuleForm {
 			return plan{}, fmt.Errorf("%w: %s", ErrUserFormUnsupported, module.Name)
 		}
 	}
+	return buildProjectPlan(root, cfg, workbookPath, project)
+}
 
+func inspectProject(workbookPath string) (*vbaproject.Project, error) {
+	projectBytes, err := readVBAProject(workbookPath)
+	if err != nil {
+		return nil, err
+	}
+	project, err := vbaproject.Read(projectBytes)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrMalformedVBAProject, err)
+	}
+	if project.Protection.IsProtected {
+		return nil, ErrProtectedProject
+	}
+	return project, nil
+}
+
+func buildProjectPlan(root string, cfg config.Config, workbookPath string, project *vbaproject.Project) (plan, error) {
 	roots := resolvedRoots(root, cfg)
 	if err := validateFormsRootSeparation(root, roots); err != nil {
 		return plan{}, err
