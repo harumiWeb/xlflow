@@ -1,22 +1,31 @@
 package cfb
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 	"unicode"
 	"unicode/utf16"
 )
 
 // Writer assembles the streams registered via AddStream into a single CFB file.
 type Writer struct {
-	streams []streamSpec
-	format  Format
+	streams  []streamSpec
+	storages []storageSpec
+	format   Format
 }
 
 type streamSpec struct {
 	path []string
 	data []byte
+}
+
+type storageSpec struct {
+	path []string
+	meta StorageMeta
 }
 
 // NewWriter returns an empty v3 Writer.
@@ -35,11 +44,15 @@ func NewWriterForFormat(format Format) (*Writer, error) {
 // an intermediate storage produce only one storage. The arguments are copied,
 // so the caller may reuse them.
 func (w *Writer) AddStream(path []string, data []byte) {
-	cp := make([]string, len(path))
-	copy(cp, path)
-	cd := make([]byte, len(data))
-	copy(cd, data)
-	w.streams = append(w.streams, streamSpec{cp, cd})
+	w.streams = append(w.streams, streamSpec{slices.Clone(path), bytes.Clone(data)})
+}
+
+// AddStorage registers a storage and its directory metadata. An empty path
+// identifies the root directory entry. Repeating an identical definition is
+// allowed; conflicting definitions are rejected when Bytes is called. The
+// path is copied, so the caller may reuse it.
+func (w *Writer) AddStorage(path []string, meta StorageMeta) {
+	w.storages = append(w.storages, storageSpec{slices.Clone(path), meta})
 }
 
 // node is one element of the directory tree (root / storage / stream).
@@ -47,7 +60,9 @@ type node struct {
 	name     string
 	objType  byte
 	data     []byte           // stream only
-	children map[string]*node // storage / root only
+	children map[string]*node // storage / root only, keyed by DirectoryNameKey
+	meta     StorageMeta      // storage / root only
+	metaSet  bool
 
 	id          uint32 // index in the directory array
 	left, right uint32 // sibling red-black tree links (all black)
@@ -85,29 +100,51 @@ func (w *Writer) Bytes() ([]byte, error) {
 func (w *Writer) buildTree() (*node, []*node, error) {
 	root := newNode("Root Entry", objRoot)
 
-	for _, s := range w.streams {
-		if len(s.path) == 0 {
-			return nil, nil, fmt.Errorf("cfb: empty stream path is not allowed")
+	for _, s := range w.storages {
+		if err := validatePath(s.path, true); err != nil {
+			return nil, nil, err
 		}
-		for _, part := range s.path {
-			if part == "" {
-				return nil, nil, fmt.Errorf("cfb: directory name must not be empty")
+		if len(s.path) == 0 {
+			if s.meta.Created != 0 {
+				return nil, nil, fmt.Errorf("cfb: root storage has a nonzero creation FILETIME")
 			}
-			// The name must fit in the 64B field (UTF-16 + NUL terminator).
-			units := utf16.Encode([]rune(part))
-			if len(units) > 31 {
-				return nil, nil, fmt.Errorf("cfb: name %q is too long (must fit in 31 UTF-16 code units)", part)
+			if root.metaSet && root.meta != s.meta {
+				return nil, nil, fmt.Errorf("cfb: conflicting metadata for root storage")
 			}
-			for _, unit := range units {
-				if forbiddenDirectoryNameUnit(unit) {
-					return nil, nil, fmt.Errorf("cfb: name %q contains forbidden character %q", part, rune(unit))
+			root.meta = s.meta
+			root.metaSet = true
+			continue
+		}
+		cur := root
+		for i, part := range s.path {
+			identity := DirectoryNameKey(part)
+			ch, ok := cur.children[identity]
+			if !ok {
+				ch = newNode(part, objStorage)
+				cur.children[identity] = ch
+			} else if ch.objType != objStorage {
+				return nil, nil, fmt.Errorf("cfb: %q already exists as a stream but was registered as a storage", part)
+			}
+			if i == len(s.path)-1 {
+				if ch.metaSet && ch.meta != s.meta {
+					return nil, nil, fmt.Errorf("cfb: conflicting metadata for storage %q", strings.Join(s.path, "/"))
 				}
+				ch.meta = s.meta
+				ch.metaSet = true
 			}
+			cur = ch
+		}
+	}
+
+	for _, s := range w.streams {
+		if err := validatePath(s.path, false); err != nil {
+			return nil, nil, err
 		}
 		cur := root
 		for i, part := range s.path {
 			last := i == len(s.path)-1
-			ch, ok := cur.children[part]
+			identity := DirectoryNameKey(part)
+			ch, ok := cur.children[identity]
 			if !ok {
 				if last {
 					ch = newNode(part, objStream)
@@ -115,7 +152,7 @@ func (w *Writer) buildTree() (*node, []*node, error) {
 				} else {
 					ch = newNode(part, objStorage)
 				}
-				cur.children[part] = ch
+				cur.children[identity] = ch
 			} else {
 				// Detect a type conflict with an existing element.
 				if last && ch.objType != objStream {
@@ -159,6 +196,27 @@ func (w *Writer) buildTree() (*node, []*node, error) {
 	link(root)
 
 	return root, all, nil
+}
+
+func validatePath(path []string, allowRoot bool) error {
+	if len(path) == 0 && !allowRoot {
+		return fmt.Errorf("cfb: empty stream path is not allowed")
+	}
+	for _, part := range path {
+		if part == "" {
+			return fmt.Errorf("cfb: directory name must not be empty")
+		}
+		units := utf16.Encode([]rune(part))
+		if len(units) > 31 {
+			return fmt.Errorf("cfb: name %q is too long (must fit in 31 UTF-16 code units)", part)
+		}
+		for _, unit := range units {
+			if forbiddenDirectoryNameUnit(unit) {
+				return fmt.Errorf("cfb: name %q contains forbidden character %q", part, rune(unit))
+			}
+		}
+	}
+	return nil
 }
 
 // sortedChildren returns the child elements sorted by the [MS-CFB] §2.6.4 name order.
@@ -517,7 +575,10 @@ func writeDirEntry(e []byte, n *node) {
 	binary.LittleEndian.PutUint32(e[68:], n.left)
 	binary.LittleEndian.PutUint32(e[72:], n.right)
 	binary.LittleEndian.PutUint32(e[76:], n.child)
-	// CLSID(80..96) / stateBits(96..100) / 2x FILETIME(100..116) zero
+	copy(e[80:96], n.meta.CLSID[:])
+	binary.LittleEndian.PutUint32(e[96:], n.meta.StateBits)
+	binary.LittleEndian.PutUint64(e[100:], n.meta.Created)
+	binary.LittleEndian.PutUint64(e[108:], n.meta.Modified)
 	binary.LittleEndian.PutUint32(e[116:], n.startSector)
 	binary.LittleEndian.PutUint64(e[120:], uint64(n.size)) // upper 4 bytes are 0 (v3)
 }

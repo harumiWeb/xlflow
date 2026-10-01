@@ -3,7 +3,9 @@ package cfb
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -145,6 +147,109 @@ func TestNestedStreams(t *testing.T) {
 		if len(got[k]) != n {
 			t.Errorf("%s len = %d, want %d", k, len(got[k]), n)
 		}
+	}
+}
+
+func TestStorageMetadataRoundTrip(t *testing.T) {
+	root := StorageMeta{StateBits: 1, Modified: 0x01DCFD81AB636A60}
+	form := StorageMeta{
+		CLSID:     [16]byte{0x20, 0x20, 0x18, 0x6e, 0x60, 0xf4, 0xce, 0x11, 0x9b, 0xcd, 0x00, 0xaa, 0x00, 0x60, 0x8e, 0x01},
+		StateBits: 2,
+		Created:   0x01DCFD81AB631C40,
+		Modified:  0x01DCFD81AB636A60,
+	}
+	empty := StorageMeta{CLSID: [16]byte{1, 2, 3}, Modified: 42}
+
+	for _, format := range []Format{FormatV3, FormatV4} {
+		t.Run(fmt.Sprintf("v%d", format), func(t *testing.T) {
+			w, err := NewWriterForFormat(format)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.AddStorage(nil, root)
+			w.AddStorage([]string{"UserForm1", "i02"}, form)
+			w.AddStorage([]string{"UserForm1", "empty"}, empty)
+			w.AddStream([]string{"UserForm1", "i02", "f"}, []byte("form"))
+
+			data, err := w.Bytes()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Open(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]StorageMeta{
+				"":                root,
+				"UserForm1":       {},
+				"UserForm1/empty": empty,
+				"UserForm1/i02":   form,
+			}
+			if !slices.Equal(got.StoragePaths(), []string{"", "UserForm1", "UserForm1/i02", "UserForm1/empty"}) {
+				t.Fatalf("storage paths = %q", got.StoragePaths())
+			}
+			for path, wantMeta := range want {
+				gotMeta, ok := got.Storage(path)
+				if !ok || gotMeta != wantMeta {
+					t.Errorf("Storage(%q) = (%+v, %v), want (%+v, true)", path, gotMeta, ok, wantMeta)
+				}
+			}
+		})
+	}
+}
+
+func TestWriterStorageDefinitionConflicts(t *testing.T) {
+	meta := StorageMeta{Modified: 1}
+	w := NewWriter()
+	w.AddStorage([]string{"form"}, meta)
+	w.AddStorage([]string{"Form"}, meta)
+	w.AddStream([]string{"FORM", "f"}, []byte("x"))
+	first, err := w.Bytes()
+	if err != nil {
+		t.Fatalf("identical storage definitions: %v", err)
+	}
+	second, err := w.Bytes()
+	if err != nil {
+		t.Fatalf("repeated Bytes: %v", err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("repeated Bytes output changed")
+	}
+	c, err := Open(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.StoragePaths(), []string{"", "form"}) {
+		t.Fatalf("storage paths = %q, want first spelling only", c.StoragePaths())
+	}
+
+	w = NewWriter()
+	w.AddStorage([]string{"form"}, meta)
+	w.AddStorage([]string{"Form"}, StorageMeta{Modified: 2})
+	if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "conflicting metadata") {
+		t.Fatalf("conflicting storage metadata error = %v", err)
+	}
+
+	w = NewWriter()
+	w.AddStream([]string{"Form"}, []byte("x"))
+	w.AddStorage([]string{"form"}, meta)
+	if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "storage") {
+		t.Fatalf("stream/storage collision error = %v", err)
+	}
+
+	w = NewWriter()
+	w.AddStream([]string{"Form"}, []byte("x"))
+	w.AddStream([]string{"form"}, []byte("y"))
+	if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "duplicate stream") {
+		t.Fatalf("duplicate stream identity error = %v", err)
+	}
+}
+
+func TestWriterRejectsInvalidRootMetadata(t *testing.T) {
+	w := NewWriter()
+	w.AddStorage(nil, StorageMeta{Created: 1})
+	if _, err := w.Bytes(); err == nil || !strings.Contains(err.Error(), "root storage") {
+		t.Fatalf("root creation FILETIME error = %v", err)
 	}
 }
 

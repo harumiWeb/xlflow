@@ -1,3 +1,16 @@
+# Issue #877 final-review pass 1 follow-up
+
+Independent review of commit `d20ca701` confirmed one in-scope P1:
+
+1. [x] Key every CFB sibling tree by `DirectoryNameKey` so case-variant
+       storage definitions deduplicate only when metadata matches, conflicting
+       metadata and storage/stream collisions fail deterministically, and the
+       first spelling remains the serialized display name.
+2. [x] Reject case-insensitive storage/storage and storage/stream duplicates
+       while reading malformed CFB directory trees.
+3. [x] Add writer, reader, determinism, and malformed-input regressions; run
+       focused/full tests, lint, format checks, and the real-Excel pack gate.
+
 # PR #874 review follow-up (Issue #871)
 
 Verified against commit `f5bef996`; the five inline findings and one

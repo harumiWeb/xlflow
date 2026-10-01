@@ -2,6 +2,8 @@ package vbaproject
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"unicode/utf16"
 
@@ -84,6 +86,13 @@ func Write(p *Project) ([]byte, error) {
 	w, err := cfb.NewWriterForFormat(format)
 	if err != nil {
 		return nil, fmt.Errorf("vbaproject: create CFB writer: %w", err)
+	}
+	for _, path := range slices.Sorted(maps.Keys(p.StorageMetadata)) {
+		parts := []string(nil)
+		if path != "" {
+			parts = strings.Split(path, "/")
+		}
+		w.AddStorage(parts, p.StorageMetadata[path])
 	}
 	// Pass through every stream the writer does not own (root-level designer
 	// storages, PROJECTwm, ...) verbatim before adding the regenerated VBA/* and

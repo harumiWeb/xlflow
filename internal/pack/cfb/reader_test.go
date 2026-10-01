@@ -170,6 +170,81 @@ func TestParseDirEntryRejectsForbiddenNameCharacters(t *testing.T) {
 	}
 }
 
+func TestOpenRejectsMetadataForbiddenForObjectType(t *testing.T) {
+	w := NewWriter()
+	w.AddStream([]string{"PROJECT"}, []byte("x"))
+	data, err := w.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDir := binary.LittleEndian.Uint32(data[48:52])
+	dirOffset := headerSize + int(firstDir)*512
+
+	nonzeroStreamCLSID := bytes.Clone(data)
+	nonzeroStreamCLSID[dirOffset+dirEntrySize+80] = 1
+	if _, err := Open(nonzeroStreamCLSID); err == nil || !strings.Contains(err.Error(), "nonzero CLSID") {
+		t.Fatalf("stream CLSID error = %v", err)
+	}
+
+	nonzeroStreamTime := bytes.Clone(data)
+	binary.LittleEndian.PutUint64(nonzeroStreamTime[dirOffset+dirEntrySize+100:], 1)
+	if _, err := Open(nonzeroStreamTime); err == nil || !strings.Contains(err.Error(), "nonzero FILETIME") {
+		t.Fatalf("stream FILETIME error = %v", err)
+	}
+
+	nonzeroRootCreation := bytes.Clone(data)
+	binary.LittleEndian.PutUint64(nonzeroRootCreation[dirOffset+100:], 1)
+	if _, err := Open(nonzeroRootCreation); err == nil || !strings.Contains(err.Error(), "root directory entry") {
+		t.Fatalf("root creation FILETIME error = %v", err)
+	}
+}
+
+func TestOpenRejectsDuplicateDirectoryIdentity(t *testing.T) {
+	cases := []struct {
+		name  string
+		build func(*Writer)
+	}{
+		{
+			name: "storage-storage",
+			build: func(w *Writer) {
+				w.AddStorage([]string{"Form"}, StorageMeta{})
+				w.AddStorage([]string{"Forn"}, StorageMeta{})
+			},
+		},
+		{
+			name: "storage-stream",
+			build: func(w *Writer) {
+				w.AddStorage([]string{"Form"}, StorageMeta{})
+				w.AddStream([]string{"Forn"}, []byte("x"))
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := NewWriter()
+			tc.build(w)
+			data, err := w.Bytes()
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstDir := binary.LittleEndian.Uint32(data[48:52])
+			dirOffset := headerSize + int(firstDir)*512
+			dirSector := data[dirOffset : dirOffset+512]
+			needle := []byte{'F', 0, 'o', 0, 'r', 0, 'n', 0, 0, 0}
+			nameOffset := bytes.Index(dirSector, needle)
+			if nameOffset < 0 {
+				t.Fatal("precondition: Forn directory entry not found")
+			}
+			dirSector[nameOffset] = 'f'
+			dirSector[nameOffset+6] = 'm'
+
+			if _, err := Open(data); err == nil || !strings.Contains(err.Error(), "duplicate directory identity") {
+				t.Fatalf("Open duplicate identity error = %v", err)
+			}
+		})
+	}
+}
+
 func loadBin(t *testing.T, book string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "corpus", book+".bin"))
@@ -187,6 +262,15 @@ func TestPathsReturnsCopy(t *testing.T) {
 	got[0] = "MUTATED"
 	if c.Paths()[0] != "PROJECT" {
 		t.Errorf("Paths() exposed internal slice: got %q after caller mutation", c.Paths()[0])
+	}
+}
+
+func TestStoragePathsReturnsCopy(t *testing.T) {
+	c := &Container{storageOrder: []string{"", "VBA"}}
+	got := c.StoragePaths()
+	got[0] = "MUTATED"
+	if c.StoragePaths()[0] != "" {
+		t.Errorf("StoragePaths() exposed internal slice: got %q after caller mutation", c.StoragePaths()[0])
 	}
 }
 

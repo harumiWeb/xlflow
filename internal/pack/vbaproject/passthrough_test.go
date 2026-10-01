@@ -2,6 +2,7 @@ package vbaproject
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
@@ -155,8 +156,8 @@ func TestWriteFormEditCodeBehindKeepsDesigner(t *testing.T) {
 // in sub-storages of the designer storage, several levels deep (e.g.
 // UserForm1/i05/i07/o). Every stream in that subtree must round-trip
 // byte-for-byte: the writer rebuilds the nested storages from their stream paths
-// and never models the controls. The control class survives in each storage's
-// \x01CompObj ProgID even though the writer zeroes the storage's directory CLSID.
+// and never models the controls. Directory metadata is preserved separately so
+// container CLSIDs and timestamps survive alongside the opaque streams.
 func TestWriteNestedFormPreservesDesignerStorages(t *testing.T) {
 	in := loadBin(t, "p6_nested_form.bin")
 	orig, err := cfb.Open(in)
@@ -200,5 +201,26 @@ func TestWriteNestedFormPreservesDesignerStorages(t *testing.T) {
 	}
 	if !deepSeen {
 		t.Fatal("precondition: fixture has no >=3-level nested designer storage")
+	}
+
+	if !slices.Equal(got.StoragePaths(), orig.StoragePaths()) {
+		t.Fatalf("storage paths changed:\n got=%q\nwant=%q", got.StoragePaths(), orig.StoragePaths())
+	}
+	nonzeroCLSID := 0
+	for _, path := range orig.StoragePaths() {
+		wantMeta, ok := orig.Storage(path)
+		if !ok {
+			t.Fatalf("precondition: missing metadata for storage %q", path)
+		}
+		haveMeta, ok := got.Storage(path)
+		if !ok || haveMeta != wantMeta {
+			t.Errorf("storage metadata %q changed: got=(%+v, %v) want=%+v", path, haveMeta, ok, wantMeta)
+		}
+		if wantMeta.CLSID != ([16]byte{}) {
+			nonzeroCLSID++
+		}
+	}
+	if nonzeroCLSID == 0 {
+		t.Fatal("precondition: fixture has no storage with a nonzero CLSID")
 	}
 }

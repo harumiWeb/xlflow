@@ -55,6 +55,7 @@ func NewProject(spec NewProjectSpec) (*Project, error) {
 		ProjectStreamRaw:        projectText,
 		GenerateProjectMetadata: true,
 		RawStreams:              map[string][]byte{},
+		StorageMetadata:         map[string]cfb.StorageMeta{},
 		Props:                   ProjectProps{Name: spec.Name, SysKind: 1, LCID: ovba.CanonicalProjectLCID, CodePage: spec.CodePage},
 		Protection:              Protection{CMG: "7577CB4035B139B139B139B139", DPB: "EAE854D3C8D4C8D4C8", GC: "5F5DE16E23969997999766"},
 	}, nil

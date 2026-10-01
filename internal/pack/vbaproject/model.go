@@ -73,6 +73,10 @@ type Project struct {
 	// designer storages (UserForm1/f, o, \x01CompObj, \x03VBFrame), PROJECTwm, and
 	// any other opaque payload through a round-trip without modeling it.
 	RawStreams map[string][]byte
-	Props      ProjectProps
-	Protection Protection
+	// StorageMetadata holds every CFB storage directory entry, including the
+	// root under the empty path. It preserves storage CLSIDs, state bits, and
+	// raw FILETIME values independently of the streams below each storage.
+	StorageMetadata map[string]cfb.StorageMeta
+	Props           ProjectProps
+	Protection      Protection
 }

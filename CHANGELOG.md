@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Preserved CFB storage directory metadata across pure-Go VBA project
+  rewrites, including root and empty storages, CLSIDs, state bits, and raw
+  FILETIME values. Existing nested UserForm Frame and MultiPage container
+  metadata now survives `pack` instead of being zeroed.
 - Hardened `pull --backend file` with cross-platform source-tree leases,
   shared Go/.NET normalization fixtures, stronger publication rollback tests,
   explicit non-crash-safe whole-tree semantics, and a repeatable real-Excel
