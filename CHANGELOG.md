@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added a lossless pure-Go MS-OFORMS reader for existing UserForm designer
+  storages. It decodes code-page-aware properties and TextProps, reconstructs
+  nested container ownership, preserves opaque and raw persistence bytes, and
+  fails deterministically on inconsistent `f`/`o` lengths, site counts, or
+  child storages without requiring Excel, COM, or VBIDE.
 - Preserved CFB storage directory metadata across pure-Go VBA project
   rewrites, including root and empty storages, CLSIDs, state bits, and raw
   FILETIME values. Existing nested UserForm Frame and MultiPage container
