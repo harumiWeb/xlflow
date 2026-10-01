@@ -1,3 +1,14 @@
+# PR #893 review follow-up 2
+
+Verified against commit `4c57c077`; the stale delegated warning finding is
+valid and in scope:
+
+1. [x] Explicitly clear `XLFLOW_PULL_AUTO_PROBE_WARNING` for warning-free WSL
+       auto-pull delegation, even when the parent environment and `WSLENV`
+       contain a stale value.
+2. [x] Add focused delegation regression coverage, run repository validation,
+       push the fix, and reply to the review thread with evidence.
+
 # PR #893 review follow-up
 
 Verified against commit `bb327504`; three inline findings are valid and in

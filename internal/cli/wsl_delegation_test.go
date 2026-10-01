@@ -182,6 +182,35 @@ func TestDelegateAutoPullForwardsProbeWarning(t *testing.T) {
 	}
 }
 
+func TestDelegateAutoPullClearsStaleProbeWarning(t *testing.T) {
+	restore := stubWSLDelegationGlobals(t)
+	defer restore()
+	t.Setenv("GO_WANT_WSL_HELPER_PROCESS", "1")
+	t.Setenv("WSL_HELPER_MODE", "echo")
+	t.Setenv(envPullAutoProbeWarning, "stale probe failure")
+	t.Setenv("WSLENV", envPullAutoProbeWarning+"/w")
+	isWSL = func() bool { return true }
+	translateWSLPath = func(context.Context, string) (string, error) { return `C:\dev\project`, nil }
+	resolveWindowsExecutable = func(context.Context) (string, string, error) { return "ignored.exe", `C:\tools\xlflow.exe`, nil }
+	translateWSLArgs = func(_ context.Context, args []string) ([]string, error) { return append([]string{}, args...), nil }
+	newDelegatedCommand = delegatedHelperCommand
+	var stdout bytes.Buffer
+	a := &app{cwd: t.TempDir(), rawArgs: []string{"--json", "pull"}, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	pull, _, err := root.Find([]string{"pull"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = a.delegateAutoPullToWindows(pull, nil)
+	if !errors.Is(err, errWSLDelegated) {
+		t.Fatalf("delegation error = %v", err)
+	}
+	if strings.Contains(stdout.String(), "PULL_WARNING=stale probe failure") || !strings.Contains(stdout.String(), "PULL_WARNING=\n") {
+		t.Fatalf("stale probe warning was not cleared:\n%s", stdout.String())
+	}
+}
+
 func TestShouldNotDelegateBackupSubcommands(t *testing.T) {
 	root := &cobra.Command{Use: "xlflow"}
 	backupCmd := &cobra.Command{Use: "backup"}

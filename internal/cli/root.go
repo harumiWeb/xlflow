@@ -2377,7 +2377,7 @@ func (a *app) matchingWSLLiveSession(ctx context.Context, workbookPath string) (
 }
 
 func (a *app) delegateAutoPullToWindows(cmd *cobra.Command, warning error) error {
-	extraEnvironment := map[string]string{}
+	extraEnvironment := map[string]string{envPullAutoProbeWarning: ""}
 	if warning != nil {
 		extraEnvironment[envPullAutoProbeWarning] = warning.Error()
 	}
