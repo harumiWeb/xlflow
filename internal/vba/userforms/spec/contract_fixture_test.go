@@ -1,4 +1,4 @@
-package forms
+package spec
 
 import (
 	"encoding/json"
@@ -74,7 +74,7 @@ func TestContractSnapshotMatchesGoContractAndSpecTags(t *testing.T) {
 	assertJSONFields(t, reflect.TypeOf(FormSpecForm{}), snapshot.Bridge.FormFields)
 	assertJSONFields(t, reflect.TypeOf(FormSpecControl{}), snapshot.Bridge.ControlFields)
 
-	doc, err := os.ReadFile(filepath.Join("..", "..", "..", "vitepress", "reference", "userform-spec.md"))
+	doc, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "vitepress", "reference", "userform-spec.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

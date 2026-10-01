@@ -36,7 +36,6 @@ import (
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/filepull"
 	formulaspkg "github.com/harumiWeb/xlflow/internal/formulas"
 	"github.com/harumiWeb/xlflow/internal/gui"
@@ -56,6 +55,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 	"github.com/harumiWeb/xlflow/internal/workbookformat"
 	"github.com/harumiWeb/xlflow/internal/workbookuse"
@@ -6084,6 +6084,9 @@ func buildFormWriteOptions(action, specPath string, overwrite, session, noSave b
 	}
 	spec, err := forms.LoadFormSpec(specInput)
 	if err != nil {
+		return formWriteCommandOptions{}, err
+	}
+	if err := forms.ValidateFormSpecForAuthoring(specInput, spec); err != nil {
 		return formWriteCommandOptions{}, err
 	}
 	return formWriteCommandOptions{

@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added a pure-Go projection from lossless MS-OFORMS UserForm state to the
+  canonical `xlflow.userform` specification. Common controls, nested parent
+  relationships, point-based geometry, captions, values, tab order, and
+  visibility state are projected deterministically; unsupported valid state
+  is retained in the binary model and reported through stable snapshot
+  warnings. The shared FormSpec model and editor intelligence now live under
+  the host-neutral VBA UserForm package.
 - Added a lossless pure-Go MS-OFORMS reader for existing UserForm designer
   storages. It decodes code-page-aware properties and TextProps, reconstructs
   nested container ownership, preserves opaque and raw persistence bytes, and

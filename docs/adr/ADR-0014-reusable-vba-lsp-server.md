@@ -34,7 +34,8 @@ xlflow-owned source formats.
 - Classify documents before analysis. VBA documents retain tree-sitter snapshots;
   UserForm specifications under the configured `src.forms/specs` root retain raw
   source and use protocol-neutral YAML syntax helpers under
-  `internal/excel/forms/intel`. Unrelated YAML and JSON documents are ignored.
+  `internal/vba/userforms/spec/intel`. Unrelated YAML and JSON documents are
+  ignored.
 - Keep the practical VBA/COM metadata database in `internal/vbadb`.
 - Represent analysis results with xlflow-owned structures such as `Range`,
   `Diagnostic`, `Symbol`, `Location`, and `Hover`; convert them to LSP protocol

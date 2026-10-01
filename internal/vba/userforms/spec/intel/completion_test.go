@@ -106,7 +106,7 @@ func TestCompleteYAMLParentReferencesAreSafeAndCasePreserving(t *testing.T) {
   - id: Current
     name: Current control
     type: Label
-    parentId: 
+    parentId:
 `
 	items := CompleteYAML(source, Position{Line: 27, Character: len("    parentId: ")})
 	if !hasLabel(items, "Frame_Main") || !hasLabel(items, "Custom_Container") {
