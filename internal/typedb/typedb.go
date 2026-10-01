@@ -15,14 +15,16 @@ import (
 )
 
 const (
-	GeneratorName = "xlflow"
-	EnvDir        = "XLFLOW_TYPE_DB_DIR"
+	GeneratorName         = "xlflow"
+	EnvDir                = "XLFLOW_TYPE_DB_DIR"
+	TypeDBCatalogRevision = 4
 )
 
 type Manifest struct {
 	SchemaVersion    int               `json:"schema_version"`
 	Generator        string            `json:"generator"`
 	GeneratorVersion string            `json:"generator_version"`
+	CatalogRevision  int               `json:"catalog_revision"`
 	GeneratedAt      string            `json:"generated_at"`
 	Platform         string            `json:"platform"`
 	Arch             string            `json:"arch"`
@@ -51,6 +53,7 @@ type Status struct {
 	SchemaVersion    int             `json:"schema_version"`
 	Generator        string          `json:"generator"`
 	GeneratorVersion string          `json:"generator_version"`
+	CatalogRevision  int             `json:"catalog_revision"`
 	Dir              string          `json:"dir"`
 	ManifestPath     string          `json:"manifest_path"`
 	ManifestExists   bool            `json:"manifest_exists"`
@@ -65,8 +68,7 @@ type Status struct {
 }
 
 type Options struct {
-	Dir              string
-	GeneratorVersion string
+	Dir string
 }
 
 type LoadResult struct {
@@ -117,6 +119,9 @@ func WriteManifest(dir string, manifest Manifest) error {
 	if manifest.Generator == "" {
 		manifest.Generator = GeneratorName
 	}
+	if manifest.CatalogRevision == 0 {
+		manifest.CatalogRevision = TypeDBCatalogRevision
+	}
 	if manifest.GeneratedAt == "" {
 		manifest.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 	}
@@ -143,13 +148,12 @@ func StatusFor(opts Options) (Status, error) {
 		return Status{}, err
 	}
 	status := Status{
-		SchemaVersion:    vbadb.SchemaVersion,
-		Generator:        GeneratorName,
-		GeneratorVersion: opts.GeneratorVersion,
-		Dir:              dir,
-		ManifestPath:     ManifestPath(dir),
-		Platform:         runtime.GOOS,
-		Arch:             runtime.GOARCH,
+		SchemaVersion: vbadb.SchemaVersion,
+		Generator:     GeneratorName,
+		Dir:           dir,
+		ManifestPath:  ManifestPath(dir),
+		Platform:      runtime.GOOS,
+		Arch:          runtime.GOARCH,
 		SearchOrder: []string{
 			"embedded built-in core DB",
 			"global generated TypeLib DB",
@@ -172,7 +176,8 @@ func StatusFor(opts Options) (Status, error) {
 	status.Platform = manifest.Platform
 	status.Arch = manifest.Arch
 	status.Generator = firstNonEmpty(manifest.Generator, status.Generator)
-	status.GeneratorVersion = firstNonEmpty(manifest.GeneratorVersion, status.GeneratorVersion)
+	status.GeneratorVersion = manifest.GeneratorVersion
+	status.CatalogRevision = manifest.CatalogRevision
 	if manifest.SchemaVersion != vbadb.SchemaVersion {
 		status.Stale = true
 		status.Reason = "schema_version_changed"
@@ -183,16 +188,10 @@ func StatusFor(opts Options) (Status, error) {
 			status.Reason = "generator_changed"
 		}
 	}
-	if strings.TrimSpace(manifest.GeneratorVersion) == "" {
+	if manifest.CatalogRevision != TypeDBCatalogRevision {
 		status.Stale = true
 		if status.Reason == "" {
-			status.Reason = "generator_version_missing"
-		}
-	}
-	if opts.GeneratorVersion != "" && strings.TrimSpace(manifest.GeneratorVersion) != opts.GeneratorVersion {
-		status.Stale = true
-		if status.Reason == "" {
-			status.Reason = "generator_version_changed"
+			status.Reason = "catalog_revision_changed"
 		}
 	}
 	for _, library := range manifest.Libraries {
@@ -257,18 +256,10 @@ func LoadGenerated(dir string) (*vbadb.DB, error) {
 }
 
 func LoadForRuntime(dir string) (LoadResult, error) {
-	return loadForRuntime(dir, "")
+	return loadForRuntime(dir)
 }
 
-// LoadForRuntimeWithGeneratorVersion loads the generated TypeLib database and
-// marks it incomplete when its manifest was produced by a different xlflow
-// build. An empty expected version preserves the version-agnostic runtime
-// behavior used by callers that do not carry build metadata.
-func LoadForRuntimeWithGeneratorVersion(dir, generatorVersion string) (LoadResult, error) {
-	return loadForRuntime(dir, strings.TrimSpace(generatorVersion))
-}
-
-func loadForRuntime(dir, expectedGeneratorVersion string) (LoadResult, error) {
+func loadForRuntime(dir string) (LoadResult, error) {
 	resolved, err := ResolveDir(dir)
 	if err != nil {
 		return LoadResult{}, err
@@ -285,7 +276,7 @@ func loadForRuntime(dir, expectedGeneratorVersion string) (LoadResult, error) {
 			result.Complete = false
 			result.Warnings = append(result.Warnings, "generated TypeLib manifest contains no libraries; unresolved type-name diagnostics are disabled")
 		}
-		for _, warning := range manifestCompatibilityWarnings(manifest, expectedGeneratorVersion) {
+		for _, warning := range manifestCompatibilityWarnings(manifest) {
 			result.Complete = false
 			result.Warnings = append(result.Warnings, warning)
 		}
@@ -316,7 +307,7 @@ func loadForRuntime(dir, expectedGeneratorVersion string) (LoadResult, error) {
 	return result, nil
 }
 
-func manifestCompatibilityWarnings(manifest Manifest, expectedGeneratorVersion string) []string {
+func manifestCompatibilityWarnings(manifest Manifest) []string {
 	const suffix = "; unresolved type-name diagnostics are disabled"
 	var warnings []string
 	if manifest.SchemaVersion != vbadb.SchemaVersion {
@@ -325,11 +316,8 @@ func manifestCompatibilityWarnings(manifest Manifest, expectedGeneratorVersion s
 	if strings.TrimSpace(manifest.Generator) != GeneratorName {
 		warnings = append(warnings, fmt.Sprintf("generated TypeLib manifest generator %q is incompatible with %q%s", strings.TrimSpace(manifest.Generator), GeneratorName, suffix))
 	}
-	manifestVersion := strings.TrimSpace(manifest.GeneratorVersion)
-	if manifestVersion == "" {
-		warnings = append(warnings, "generated TypeLib manifest generator version is missing; unresolved type-name diagnostics are disabled")
-	} else if expectedGeneratorVersion != "" && manifestVersion != expectedGeneratorVersion {
-		warnings = append(warnings, fmt.Sprintf("generated TypeLib manifest generator version %q is stale; expected %q%s", manifestVersion, expectedGeneratorVersion, suffix))
+	if manifest.CatalogRevision != TypeDBCatalogRevision {
+		warnings = append(warnings, fmt.Sprintf("generated TypeLib manifest catalog revision %d is stale; expected %d%s", manifest.CatalogRevision, TypeDBCatalogRevision, suffix))
 	}
 	return warnings
 }

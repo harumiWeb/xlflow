@@ -20,13 +20,13 @@ xlflow type db clean
 | `--library` | TypeLib library to import. Repeat, comma-separated, or use `all` for every known library present on this machine. | `excel`             |
 | `--force`   | Deprecated compatibility flag; `refresh` always regenerates.                                                      | `false`             |
 
-`status` reports manifest presence, generated files, library LIBID/version metadata, stale state, and the LSP database search order.
+`status` reports manifest presence, the TypeDB catalog revision, generated files, library LIBID/version metadata, stale state, and the LSP database search order. The manifest's `generator_version` is informational; catalog revision changes control automatic regeneration.
 
 `init` generates the database only when it does not already exist. `refresh` always regenerates the generated database, so it is the one-command equivalent of `clean` followed by `init`. `clean` deletes the generated database directory.
 
-The default importer target is Excel. Use `--library all` to generate databases for every known library present on the machine, including Office, MSForms, Scripting, ADODB, VBIDE, and Outlook when available. You can also request Outlook directly with `--library outlook`. Generated entries include TypeLib-derived ProgID mappings when registry metadata can be matched to TypeLib CoClass GUIDs, so the LSP can infer common late-bound expressions such as `CreateObject("Excel.Application")`, `CreateObject("Scripting.FileSystemObject")`, `CreateObject("ADODB.Connection")`, and `CreateObject("Outlook.Application")`.
+The default manual importer target is Excel. Use `--library all` to generate databases for every known library present on the machine, including Office, MSForms, Scripting, ADODB, VBIDE, Outlook, DAO/ACE DAO, MSXML, WinHTTP, Word, PowerPoint, Access, Windows Script Host, WMI Scripting, and VBScript RegExp. Direct keys for the expanded catalog are `dao`, `msxml`, `winhttp`, `word`, `powerpoint`, `access`, `wsh`, `wmi`, and `vbscript-regexp`. DAO prefers ACE DAO and falls back to DAO 3.6. Missing known libraries are skipped during `all`; arbitrary registered TypeLibs are not imported. Generated entries include TypeLib-derived ProgID mappings when registry metadata can be matched to TypeLib CoClass GUIDs, so the LSP can infer common late-bound expressions such as `CreateObject("Excel.Application")`, `CreateObject("Scripting.FileSystemObject")`, `CreateObject("ADODB.Connection")`, and `CreateObject("Outlook.Application")`.
 
-Generated entries are loaded by `xlflow lsp` when present; if no generated DB exists, the LSP continues with the embedded built-in database.
+Generated entries are loaded by `xlflow lsp` when present. Missing or stale databases are automatically reconciled against the supported catalog on LSP startup; failures do not prevent fallback to the embedded built-in database.
 
 <!-- xlflow-command-guidance -->
 

@@ -6280,8 +6280,7 @@ End Sub
 	}
 }
 
-func TestVBA252UsesGeneratorVersionForBatchAndStandaloneRealtime(t *testing.T) {
-	const expectedVersion = "current"
+func TestVBA252UsesCatalogRevisionForBatchAndStandaloneRealtime(t *testing.T) {
 	source := []byte(`Option Explicit
 Public Sub Run()
     Dim value As Double
@@ -6292,13 +6291,14 @@ End Sub
 `)
 
 	for _, test := range []struct {
-		name            string
-		manifestVersion string
-		wantVBA252      int
-		wantWarning     bool
+		name             string
+		catalogRevision  int
+		generatorVersion string
+		wantVBA252       int
+		wantWarning      bool
 	}{
-		{name: "matching", manifestVersion: expectedVersion, wantVBA252: 1},
-		{name: "stale", manifestVersion: "old", wantWarning: true},
+		{name: "matching catalog with old generator", catalogRevision: typedb.TypeDBCatalogRevision, generatorVersion: "old", wantVBA252: 1},
+		{name: "stale catalog", catalogRevision: typedb.TypeDBCatalogRevision - 1, generatorVersion: "current", wantWarning: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -6317,12 +6317,13 @@ End Sub
 				t.Fatal(err)
 			}
 			if err := typedb.WriteManifest(typeDBDir, typedb.Manifest{
-				GeneratorVersion: test.manifestVersion,
+				GeneratorVersion: test.generatorVersion,
+				CatalogRevision:  test.catalogRevision,
 				Libraries:        []typedb.ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
 			}); err != nil {
 				t.Fatal(err)
 			}
-			loaded, err := typedb.LoadForRuntimeWithGeneratorVersion(typeDBDir, expectedVersion)
+			loaded, err := typedb.LoadForRuntime(typeDBDir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -6334,7 +6335,7 @@ End Sub
 			}
 			warningFound := false
 			for _, warning := range loaded.Warnings {
-				if strings.Contains(warning, "generator version") && strings.Contains(warning, "stale") {
+				if strings.Contains(warning, "catalog revision") && strings.Contains(warning, "stale") {
 					warningFound = true
 					break
 				}
@@ -6347,15 +6348,11 @@ End Sub
 			path := filepath.Join(dir, "Main.bas")
 			writeModule(t, dir, "Main.bas", string(source))
 			cfg := config.Default()
-			batchResult, err := (Analyzer{
-				RootDir:                dir,
-				Config:                 cfg,
-				TypeDBGeneratorVersion: expectedVersion,
-			}).RunResultContext(t.Context())
+			batchResult, err := (Analyzer{RootDir: dir, Config: cfg}).RunResultContext(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
-			realtime, err := SourceRealtimeFindingsWithGeneratorVersion(dir, path, cfg, source, expectedVersion)
+			realtime, err := SourceRealtimeFindings(dir, path, cfg, source)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -6369,7 +6366,7 @@ End Sub
 			}
 			batchWarningFound := false
 			for _, warning := range batchResult.Warnings {
-				if warning["code"] == "type_db_load_warning" && strings.Contains(fmt.Sprint(warning["message"]), "generator version") {
+				if warning["code"] == "type_db_load_warning" && strings.Contains(fmt.Sprint(warning["message"]), "catalog revision") {
 					batchWarningFound = true
 					break
 				}

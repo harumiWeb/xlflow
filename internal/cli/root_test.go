@@ -664,12 +664,13 @@ func TestVersionCommandUsesDefaultBuildInfo(t *testing.T) {
 	}
 }
 
-func TestAnalyzerCarriesBuildGeneratorVersion(t *testing.T) {
+func TestAnalyzerUsesApplicationRootAndConfig(t *testing.T) {
 	a := &app{cwd: t.TempDir(), buildInfo: BuildInfo{Version: "1.2.3"}}
+	cfg := config.Default()
 
-	got := a.analyzer(config.Default(), nil)
-	if got.TypeDBGeneratorVersion != "1.2.3" {
-		t.Fatalf("TypeDBGeneratorVersion = %q, want 1.2.3", got.TypeDBGeneratorVersion)
+	got := a.analyzer(cfg, nil)
+	if got.RootDir != a.cwd || got.Config.Project.Entry != cfg.Project.Entry {
+		t.Fatalf("unexpected analyzer configuration: %+v", got)
 	}
 }
 
