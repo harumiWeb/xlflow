@@ -20,8 +20,12 @@ when supported and otherwise returns the deterministic file-backend error.
 Stable selection reasons are `explicit_backend`, `session_requested`,
 `matching_live_session`, `workbook_open_in_excel`, `open_state_probe_failed`,
 `file_backend_supported`, `file_backend_unsupported_userform`, and
-`file_backend_unsupported_format`. An open-state failure selects Excel and adds
-warning `pull_auto_open_state_probe_failed` with the original failure detail.
+`file_backend_unsupported_format`. An open-state failure selects Excel, requires
+attachment to an already-open matching workbook instead of opening another
+saved copy, and adds warning `pull_auto_open_state_probe_failed` with the
+original failure detail. WSL forwards a failed live-session probe to the
+delegated Windows selection so the same attachment and warning contract is
+preserved.
 Explicit selections report `backend_selection=explicit`; omitted or explicit
 `--backend auto` reports `backend_selection=auto`.
 

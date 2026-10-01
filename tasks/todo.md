@@ -1,3 +1,20 @@
+# PR #893 review follow-up
+
+Verified against commit `bb327504`; three inline findings are valid and in
+scope, while WSL detection of arbitrary externally opened Excel workbooks is
+the approved local-auto boundary rather than a defect:
+
+1. [x] Skip workbook coordination before `auto` selection, then acquire the
+       workbook lease only when auto actually selects Excel. Keep file pulls
+       under source-tree coordination and preserve explicit backend behavior.
+2. [x] On an indeterminate Windows open-state probe, require attachment to an
+       already-open matching workbook instead of opening a separate saved copy.
+3. [x] Preserve the WSL session-probe failure warning in the delegated Windows
+       JSON result, with focused end-to-end delegation coverage.
+4. [x] Investigate the VS Code CI failure independently, run focused/full
+       validation, push the review fix, and reply to every inline thread with
+       evidence or the documented design disposition.
+
 # Issue #892 final-review pass 1 follow-up
 
 Independent review of commit `4e08cf77` confirmed one in-scope P2:

@@ -65,11 +65,17 @@ reported by Restart Manager. It registers only the configured workbook with
 Restart Manager and identifies `EXCEL.EXE` without COM or external commands.
 An open workbook, a valid live session, an indeterminate open-state probe, a
 UserForm, or an Excel-supported non-`.xlsm` project selects the Excel backend.
+Automatic Excel selection retains workbook coordination, while automatic file
+selection acquires only the source-tree leases used by the file backend. An
+indeterminate open-state probe is attach-only: xlflow must find and attach to an
+already-open matching workbook and must not open a second copy from saved state.
 Malformed, protected, missing, unreadable, or unsafe saved projects retain
 their deterministic validation failures rather than being hidden by an Excel
 automation attempt. Non-Windows hosts use the file capability probe and fail
 deterministically when it is unsupported; WSL remains local unless explicit or
-validated live-session intent requires Windows delegation.
+validated live-session intent requires Windows delegation. When the WSL live
+session probe itself fails, delegation preserves that failure as the same
+attach-only selection and structured warning on Windows.
 
 Successful output reports the actual backend, `auto` or `explicit` selection,
 the stable selection reason, and source authority. Capabilities schema v3
@@ -89,6 +95,8 @@ by command output rather than infer runtime authority from capability metadata.
 - Callers can distinguish `saved_workbook` from live-session authority in JSON.
 - Concurrent file pulls cannot reconcile the same managed source roots at the
   same time, while disjoint roots remain independent.
+- An unrelated workbook lease does not block an automatic file pull, while an
+  automatic Excel pull still participates in workbook coordination.
 - A process crash releases source-tree ownership but does not roll back source
   files already published before the crash.
 - Workbooks containing UserForms continue to require the Excel backend, even

@@ -15,6 +15,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/filepull"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/workbookuse"
+	"github.com/harumiWeb/xlflow/internal/wsl"
 )
 
 func TestPullDefaultsToAutoFileBackend(t *testing.T) {
@@ -61,7 +62,7 @@ func TestAutoPullSelectionMatrix(t *testing.T) {
 	restore = stubWorkbookUseDetectorError(t, errors.New("restart manager unavailable"))
 	selection, err = a.selectPullBackend(cfg, "auto", false)
 	restore()
-	if err != nil || selection.Backend != "excel" || selection.Reason != "open_state_probe_failed" || selection.Warning == nil {
+	if err != nil || selection.Backend != "excel" || selection.Reason != "open_state_probe_failed" || !selection.AttachOpen || selection.Warning == nil {
 		t.Fatalf("failed probe selection = %+v, %v", selection, err)
 	}
 
@@ -72,6 +73,29 @@ func TestAutoPullSelectionMatrix(t *testing.T) {
 	selection, err = a.selectPullBackend(cfg, "file", false)
 	if err != nil || selection.Mode != "explicit" || selection.Reason != "explicit_backend" {
 		t.Fatalf("explicit selection = %+v, %v", selection, err)
+	}
+}
+
+func TestDelegatedAutoPullPreservesWSLProbeFailure(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("delegated auto selection runs in Windows xlflow")
+	}
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+	t.Setenv(wsl.EnvDelegated, "1")
+	t.Setenv(envPullAutoProbeWarning, "WSL session status unavailable")
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	selection, err := (&app{cwd: dir}).selectPullBackend(cfg, "auto", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Backend != "excel" || selection.Reason != "open_state_probe_failed" || !selection.AttachOpen || selection.Warning == nil || selection.Warning.Error() != "WSL session status unavailable" {
+		t.Fatalf("selection = %+v", selection)
 	}
 }
 
@@ -284,11 +308,15 @@ func TestPullFileBackendCoordinatesSourceTreeInsteadOfWorkbook(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, runErr := runPullCommandWithManager(dir, manager, "--json", "pull", "--backend", "file")
+	if runErr != nil {
+		t.Fatalf("file pull contended on workbook lease: %v\n%s", runErr, stdout)
+	}
+	stdout, runErr = runPullCommandWithManager(dir, manager, "--json", "pull")
 	if releaseErr := workbookLease.Release(); releaseErr != nil {
 		t.Fatal(releaseErr)
 	}
 	if runErr != nil {
-		t.Fatalf("file pull contended on workbook lease: %v\n%s", runErr, stdout)
+		t.Fatalf("auto file pull contended on workbook lease: %v\n%s", runErr, stdout)
 	}
 
 	sourceIdentity, err := coordination.NewSourceTreeIdentity(dir, filepath.Join(dir, "src", "modules"))
@@ -306,6 +334,38 @@ func TestPullFileBackendCoordinatesSourceTreeInsteadOfWorkbook(t *testing.T) {
 	stdout, runErr = runPullCommandWithManager(dir, manager, "--json", "pull", "--backend", "file")
 	if runErr == nil || output.ExitCode(runErr) != output.ExitEnvironment || jsonErrorCode(t, stdout) != coordination.SourceTreeBusyCode {
 		t.Fatalf("source-tree contention stdout=%s err=%v", stdout, runErr)
+	}
+}
+
+func TestAutoExcelPullRetainsWorkbookCoordination(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows workbook coordination and Excel fallback")
+	}
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p4_form.bin"))
+	manager, err := coordination.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := coordination.NewWorkbookIdentity(dir, filepath.Join(dir, "build", "Book.xlsm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := manager.Acquire(t.Context(), coordination.AcquireRequest{
+		Identity: identity, Command: "push", OperationKind: coordination.OperationMutate,
+		ResourceScope: coordination.ResourceWorkbook,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lease.Release() }()
+	restore := stubWorkbookUseDetector(t, workbookuse.State{})
+	defer restore()
+
+	stdout, runErr := runPullCommandWithManager(dir, manager, "--json", "pull")
+	if runErr == nil || output.ExitCode(runErr) != output.ExitEnvironment || jsonErrorCode(t, stdout) != coordination.WorkbookBusyCode {
+		t.Fatalf("auto Excel contention stdout=%s err=%v", stdout, runErr)
 	}
 }
 

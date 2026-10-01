@@ -152,6 +152,36 @@ func TestMatchingWSLLiveSessionUsesWindowsStatusProof(t *testing.T) {
 	}
 }
 
+func TestDelegateAutoPullForwardsProbeWarning(t *testing.T) {
+	restore := stubWSLDelegationGlobals(t)
+	defer restore()
+	t.Setenv("GO_WANT_WSL_HELPER_PROCESS", "1")
+	t.Setenv("WSL_HELPER_MODE", "echo")
+	isWSL = func() bool { return true }
+	translateWSLPath = func(context.Context, string) (string, error) { return `C:\dev\project`, nil }
+	resolveWindowsExecutable = func(context.Context) (string, string, error) { return "ignored.exe", `C:\tools\xlflow.exe`, nil }
+	translateWSLArgs = func(_ context.Context, args []string) ([]string, error) { return append([]string{}, args...), nil }
+	newDelegatedCommand = delegatedHelperCommand
+	var stdout bytes.Buffer
+	a := &app{cwd: t.TempDir(), rawArgs: []string{"--json", "pull"}, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	pull, _, err := root.Find([]string{"pull"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = a.delegateAutoPullToWindows(pull, errors.New("session status unavailable"))
+	if !errors.Is(err, errWSLDelegated) {
+		t.Fatalf("delegation error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "PULL_WARNING=session status unavailable") {
+		t.Fatalf("probe warning was not forwarded:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), envPullAutoProbeWarning+"/w") {
+		t.Fatalf("WSLENV did not forward probe warning:\n%s", stdout.String())
+	}
+}
+
 func TestShouldNotDelegateBackupSubcommands(t *testing.T) {
 	root := &cobra.Command{Use: "xlflow"}
 	backupCmd := &cobra.Command{Use: "backup"}
@@ -588,6 +618,7 @@ func TestWSLDelegationHelperProcess(t *testing.T) {
 		fmt.Printf("ARGS=%s\n", strings.Join(args, "|"))
 		fmt.Printf("DELEGATED=%s\n", os.Getenv(wsl.EnvDelegated))
 		fmt.Printf("WSLENV=%s\n", os.Getenv("WSLENV"))
+		fmt.Printf("PULL_WARNING=%s\n", os.Getenv(envPullAutoProbeWarning))
 		cwd, _ := os.Getwd()
 		fmt.Printf("CWD=%s\n", cwd)
 		fmt.Fprintln(os.Stderr, "helper stderr")

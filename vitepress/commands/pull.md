@@ -41,7 +41,8 @@ The default `auto` mode chooses the fastest safe authority. A closed, supported
 `.xlsm` uses the file backend. `--session`, a valid matching session, a workbook
 open in local Excel, UserForms, or an Excel-supported format outside the file
 backend selects Excel. If Windows cannot determine open state, auto fails safe
-to Excel and reports a warning. Use explicit `--backend file` or
+to an already-open matching Excel workbook and reports a warning; it does not
+open another copy from saved state. Use explicit `--backend file` or
 `--backend excel` when the authority must not be selected dynamically.
 
 With `[vba.line_numbers].enabled = true`, `pull` strips only xlflow-generated, fixed-width space-padded physical line labels from workbook exports, so tracked source remains unnumbered. It never treats colon labels as generated. xlflow stops safely rather than rewriting source when it encounters non-generated or mismatched numeric labels, or numeric `GoTo`, `GoSub`, or `Resume` targets. This is configuration-only behavior; `pull` has no line-number flag.
