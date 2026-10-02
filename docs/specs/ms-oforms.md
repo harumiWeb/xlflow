@@ -295,9 +295,11 @@ reference section. Reference creation remains Issue #886. Declaration,
 module and PROJECTwm bookkeeping are completed by the project writer;
 generation does not connect the pack CLI or change source authority (#887).
 
-Reference identity must come from a canonical Forms LIBID or the original
-TypeLib GUID at its declared position in the raw reference record. A display
-name or a twiddled LIBID alone is insufficient, including a GUID appearing
+REGISTERED reference identity must come from a canonical Forms LIBID in a
+complete sized record. CONTROL reference identity must come from the original
+TypeLib GUID at its declared position in the complete extended record. A
+REFERENCEORIGINAL, display name, or twiddled/extended LIBID alone is insufficient,
+including a Forms LIBID paired with a foreign OriginalTypeLib or a GUID appearing
 only in a file path or description. Project addition independently rejects
 equal component GUIDs in `VB_Base`, comparing them case-insensitively even
 when the caller constructs the module without `NewUserFormModule`.

@@ -89,6 +89,46 @@ MSForms-reference mutation or full release gate is claimed by this evidence.
 
 Local verification commands:
 
+PR #903 review follow-up adds explicit runtime expectations under
+`observed.properties`: SpinButton `Delay=50`, and ScrollBar `Delay=50` plus
+`ProportionalThumb=true`. These non-null values are recorded in the existing
+Excel-authored `baseline.json`; SpinButton has no ProportionalThumb property.
+The opt-in artifact helper adds the same expectations without extending build
+intent. The harness compares both generic observations and explicitly supplied
+lowercase fields, rejects missing observations, and requires both generated
+forms in ExpectedPath before starting Excel. Successful verify runs now write
+`<binaryOutput>.json` with before-save/reopened snapshots and confirmed cleanup.
+
+Review follow-up validation on 2026-10-03 passed the affected Go packages,
+CLI/LSP focused tests, vet, all 484 .NET tests, 54 pure PowerShell contract checks,
+repository lint/docs, and staged formatting. The ordinary normalized binary
+readback test passed with the augmented expected fixture. A fresh artifact and
+expected file were generated at
+`C:\Users\HARUMI\orca\workspaces\xlflow\dolphin\tmp_workspaces\issue-883-review-20261003`.
+Its live verify command was:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-userform-generation-e2e.ps1 -Phase verify -WorkbookPath tmp_workspaces/issue-883-review-20261003/generated.xlsm -ExpectedPath tmp_workspaces/issue-883-review-20261003/expected.json -NormalizedWorkbookPath tmp_workspaces/issue-883-review-20261003/normalized.xlsm
+```
+
+The first invocation was rejected before starting Excel because another
+automation session (PID 356720) was active. That process was left untouched.
+After it exited, the identical command passed: both generated forms matched,
+SpinButton and ScrollBar Delay were 50, ScrollBar ProportionalThumb was true
+before save and after reopening, and `issue-883-ok` succeeded. Owned Excel PID
+204972 exited with cleanup confirmed. The new binary readback test passed
+using `normalized.xlsm.bin` and `expected.json`. The durable observation is
+`normalized.xlsm.bin.json` in that fresh workspace and includes environment,
+both snapshots, binary SHA-256 and cleanup confirmation. Blank scaffold,
+standard/class round-trip, and init were not rerun for this focused review fix.
+
+```powershell
+rtk dotnet test bridge/dotnet/Xlflow.ExcelBridge.sln --no-restore
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-userform-generation-contract.ps1
+rtk task lint
+rtk pnpm format:check
+```
+
 ```powershell
 rtk powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/go.ps1 test ./... -count=1
 rtk powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/go.ps1 test ./internal/excel ./internal/vba/userforms/... ./internal/pack/... -count=1

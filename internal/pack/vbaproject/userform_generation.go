@@ -334,10 +334,10 @@ func hasMSFormsReferenceRaw(raw []byte) bool {
 	}
 
 	// References is display metadata only. The dir reference records are the
-	// authoritative source. Excel-authored Forms references use either a
-	// canonical LIBID in REFERENCEORIGINAL or the original TypeLib GUID at
-	// the declared position in REFERENCECONTROL. Names and twiddled LIBIDs
-	// alone cannot identify the referenced library.
+	// authoritative source. REGISTERED references identify the library by
+	// LIBID; CONTROL references identify it by OriginalTypeLib in the extended
+	// record. REFERENCEORIGINAL and twiddled/extended LIBIDs alone do not
+	// establish a CONTROL reference's identity.
 	for offset := 0; offset+6 <= len(raw); {
 		id := binary.LittleEndian.Uint16(raw[offset:])
 		size := binary.LittleEndian.Uint32(raw[offset+2:])
@@ -347,11 +347,7 @@ func hasMSFormsReferenceRaw(raw []byte) bool {
 		end := offset + 6 + int(size)
 		payload := raw[offset+6 : end]
 		switch id {
-		case 0x0033: // REFERENCEORIGINAL
-			if hasMSFormsLIBID(payload) {
-				return true
-			}
-		case 0x000D, 0x002F, 0x0030: // REGISTERED / CONTROL LIBID records
+		case 0x000D, 0x0030: // REFERENCEREGISTERED / REFERENCECONTROL extended
 			if hasMSFormsSizedLIBID(payload, id == 0x0030) {
 				return true
 			}
@@ -374,8 +370,9 @@ func hasMSFormsSizedLIBID(payload []byte, extended bool) bool {
 		return false
 	}
 	end := 4 + int(size)
-	if hasMSFormsLIBID(payload[4:end]) {
-		return true
+	if !extended {
+		// Reserved1 (4), Reserved2 (2).
+		return len(payload)-end == 6 && hasMSFormsLIBID(payload[4:end])
 	}
 	// Reserved1 (4), Reserved2 (2), OriginalTypeLib GUID (16), Cookie (4).
 	return extended && len(payload)-end == 26 && bytes.Equal(payload[end+6:end+22], userFormMSFormsReferenceGUIDWire[:])

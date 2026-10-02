@@ -250,7 +250,10 @@
             "height": 36,
             "tabIndex": 8,
             "enabled": false,
-            "visible": true
+            "visible": true,
+            "properties": {
+              "Delay": 50
+            }
           }
         },
         {
@@ -275,7 +278,11 @@
             "height": 18,
             "tabIndex": 9,
             "enabled": false,
-            "visible": true
+            "visible": true,
+            "properties": {
+              "Delay": 50,
+              "ProportionalThumb": true
+            }
           }
         },
         {

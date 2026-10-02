@@ -9,7 +9,9 @@ All notable changes to xlflow will be documented in this file.
   generated code-behind attributes, and project addition using an existing
   Microsoft Forms reference. FormSpec now supports explicit client dimensions
   through `form.build.clientWidth` / `clientHeight`; Excel-backed form build
-  rejects these inputs before mutation. First-Forms reference creation and
+  rejects these inputs before mutation, including direct bridge requests.
+  CONTROL reference admission checks the original TypeLib GUID instead of
+  trusting twiddled LIBIDs. First-Forms reference creation and
   blank/template `pack` CLI integration remain separate follow-ups.
 
 - Added an internal pure-Go compiler for supported FormSpec edits to existing

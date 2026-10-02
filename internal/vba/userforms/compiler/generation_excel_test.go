@@ -128,6 +128,25 @@ End Function
 		if err != nil {
 			t.Fatal(err)
 		}
+		// These runtime defaults were observed in the saved/reopened Excel
+		// baseline. Keep them in the generic observation bag, not build intent:
+		// neither property is part of the supported generation input surface.
+		for i := range result.Controls {
+			control := &result.Controls[i]
+			if control.Type != "SpinButton" && control.Type != "ScrollBar" {
+				continue
+			}
+			if control.Observed == nil {
+				control.Observed = &spec.FormSpecObservedControl{}
+			}
+			if control.Observed.Properties == nil {
+				control.Observed.Properties = make(map[string]any)
+			}
+			control.Observed.Properties["Delay"] = 50
+			if control.Type == "ScrollBar" {
+				control.Observed.Properties["ProportionalThumb"] = true
+			}
+		}
 		results = append(results, result)
 	}
 	newProject, err := vbaproject.Write(project)

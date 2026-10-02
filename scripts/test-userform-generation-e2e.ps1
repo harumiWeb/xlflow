@@ -159,7 +159,7 @@ function Get-ControlSnapshot([object]$Control) {
         Add-ObservedField $row $Control $property
     }
     $properties = [ordered]@{}
-    foreach ($property in @('MaxLength', 'Tag', 'ControlTipText', 'GroupName', 'BackColor', 'ForeColor', 'BorderColor')) {
+    foreach ($property in @('MaxLength', 'Tag', 'ControlTipText', 'GroupName', 'BackColor', 'ForeColor', 'BorderColor', 'Delay', 'ProportionalThumb')) {
         $propertyValue = Get-OptionalProperty $Control $property
         if ($propertyValue.found) { $properties[$property] = Convert-ObservedValue $propertyValue.value }
     }
@@ -372,26 +372,31 @@ function Get-ExpectedFormMap([object]$Expected) {
         $form = Get-PropertyOrNull $Candidate 'form'
         $name = if ($null -ne $form) { [string](Get-PropertyOrNull $form 'name') } else { [string](Get-PropertyOrNull $Candidate 'name') }
         if (-not $name) { $name = $FallbackName }
-        if ($name) { $map[$name] = $Candidate }
+        if (-not $name) { throw 'ExpectedPath form has no name' }
+        if ($map.Contains($name)) { throw "ExpectedPath contains duplicate form $name" }
+        $map[$name] = $Candidate
     }
     if ($Expected -is [System.Array]) {
         foreach ($candidate in $Expected) { & $add $candidate '' }
-        return $map
-    }
-    $forms = Get-PropertyOrNull $Expected 'forms'
-    if ($null -ne $forms) {
-        if ($forms.PSObject.Properties.Count -gt 0 -and $forms -isnot [System.Array] -and $null -eq (Get-PropertyOrNull $forms 'form')) {
-            foreach ($property in $forms.PSObject.Properties) { & $add $property.Value $property.Name }
+    } else {
+        $forms = Get-PropertyOrNull $Expected 'forms'
+        if ($null -ne $forms) {
+            if (@($forms.PSObject.Properties).Count -gt 0 -and $forms -isnot [System.Array] -and $null -eq (Get-PropertyOrNull $forms 'form')) {
+                foreach ($property in $forms.PSObject.Properties) { & $add $property.Value $property.Name }
+            } else {
+                foreach ($candidate in @($forms)) { & $add $candidate '' }
+            }
         } else {
-            foreach ($candidate in @($forms)) { & $add $candidate '' }
+            foreach ($name in $script:generatedFormNames) {
+                $candidate = Get-PropertyOrNull $Expected $name
+                if ($null -ne $candidate) { & $add $candidate $name }
+            }
+            if ($map.Count -eq 0) { & $add $Expected '' }
         }
-        return $map
     }
     foreach ($name in $script:generatedFormNames) {
-        $candidate = Get-PropertyOrNull $Expected $name
-        if ($null -ne $candidate) { & $add $candidate $name }
+        if (-not $map.Contains($name)) { throw "ExpectedPath must provide $name" }
     }
-    if ($map.Count -eq 0) { & $add $Expected '' }
     return $map
 }
 
@@ -402,6 +407,7 @@ function Assert-ExpectedFields([string]$Path, [object]$Actual, [object]$Expected
             # MSForms.Image has no public TabIndex property. Its persisted site
             # TabIndex is asserted by the normalized pure-Go readback gate.
             if ($field -eq 'tabIndex' -and $Actual.type -eq 'Image' -and $null -eq $Actual.PSObject.Properties[$field]) { continue }
+            if ($null -eq $Actual.PSObject.Properties[$field]) { throw "${Path}: missing expected property $field" }
             Assert-Value "$Path.$field" (Get-PropertyOrNull $Actual $field) $expectedValue
         }
     }
@@ -439,14 +445,17 @@ function Assert-ExpectedForm([object]$Snapshot, [object]$Expected) {
         if (-not $expectedName) { throw "Expected control has no name in $($Snapshot.name)" }
         $actual = @($Snapshot.controls | Where-Object { $_.name -ceq $expectedName })
         if ($actual.Count -ne 1) { throw "Missing or duplicate control $($Snapshot.name).$expectedName" }
-        Assert-ExpectedFields "$($Snapshot.name).$expectedName" $actual[0] $expectedControl @('type', 'caption', 'text', 'value', 'left', 'top', 'width', 'height', 'tabIndex', 'enabled', 'visible', 'min', 'max', 'smallChange', 'largeChange', 'orientation', 'columnCount', 'boundColumn', 'listRows', 'matchEntry', 'style', 'pictureSizeMode', 'pictureAlignment', 'specialEffect', 'borderStyle', 'autoSize', 'backStyle')
+        Assert-ExpectedFields "$($Snapshot.name).$expectedName" $actual[0] $expectedControl @('type', 'caption', 'text', 'value', 'left', 'top', 'width', 'height', 'tabIndex', 'enabled', 'visible', 'min', 'max', 'smallChange', 'largeChange', 'orientation', 'delay', 'proportionalThumb', 'columnCount', 'boundColumn', 'listRows', 'matchEntry', 'style', 'pictureSizeMode', 'pictureAlignment', 'specialEffect', 'borderStyle', 'autoSize', 'backStyle')
         $observed = Get-PropertyOrNull $expectedControl 'observed'
         if ($null -ne $observed) {
-            Assert-ExpectedFields "$($Snapshot.name).$expectedName.observed" $actual[0] $observed @('caption', 'text', 'value', 'left', 'top', 'width', 'height', 'tabIndex', 'enabled', 'visible', 'min', 'max', 'smallChange', 'largeChange', 'orientation', 'columnCount', 'boundColumn', 'listRows', 'matchEntry', 'style', 'pictureSizeMode', 'pictureAlignment', 'specialEffect', 'borderStyle', 'autoSize', 'backStyle')
+            Assert-ExpectedFields "$($Snapshot.name).$expectedName.observed" $actual[0] $observed @('caption', 'text', 'value', 'left', 'top', 'width', 'height', 'tabIndex', 'enabled', 'visible', 'min', 'max', 'smallChange', 'largeChange', 'orientation', 'delay', 'proportionalThumb', 'columnCount', 'boundColumn', 'listRows', 'matchEntry', 'style', 'pictureSizeMode', 'pictureAlignment', 'specialEffect', 'borderStyle', 'autoSize', 'backStyle')
             $observedProperties = Get-PropertyOrNull $observed 'properties'
             if ($null -ne $observedProperties) {
                 $actualProperties = Get-PropertyOrNull $actual[0] 'properties'
                 foreach ($property in $observedProperties.PSObject.Properties) {
+                    if ($null -eq $actualProperties -or $null -eq $actualProperties.PSObject.Properties[$property.Name]) {
+                        throw "$($Snapshot.name).$expectedName.observed.properties: missing expected property $($property.Name)"
+                    }
                     Assert-Value "$($Snapshot.name).$expectedName.observed.properties.$($property.Name)" (Get-PropertyOrNull $actualProperties $property.Name) $property.Value
                 }
             }
@@ -455,6 +464,9 @@ function Assert-ExpectedForm([object]$Snapshot, [object]$Expected) {
         if ($null -ne $expectedProperties) {
             $actualProperties = Get-PropertyOrNull $actual[0] 'properties'
             foreach ($property in $expectedProperties.PSObject.Properties) {
+                if ($null -eq $actualProperties -or $null -eq $actualProperties.PSObject.Properties[$property.Name]) {
+                    throw "$($Snapshot.name).$expectedName.properties: missing expected property $($property.Name)"
+                }
                 Assert-Value "$($Snapshot.name).$expectedName.properties.$($property.Name)" (Get-PropertyOrNull $actualProperties $property.Name) $property.Value
             }
         }
@@ -540,12 +552,18 @@ if ($Phase -eq 'create') {
     if (-not $WorkbookPath -or -not (Test-Path -LiteralPath $WorkbookPath)) { throw 'verify requires an existing -WorkbookPath' }
     $WorkbookPath = [IO.Path]::GetFullPath($WorkbookPath)
     if ($ExpectedPath -and -not (Test-Path -LiteralPath $ExpectedPath)) { throw 'ExpectedPath does not exist' }
+    if ($ExpectedPath) {
+        $expected = Get-Content -LiteralPath $ExpectedPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $expectedMap = Get-ExpectedFormMap $expected
+    }
     if ($NormalizedWorkbookPath) {
         $NormalizedWorkbookPath = [IO.Path]::GetFullPath($NormalizedWorkbookPath)
         if ((Test-Path -LiteralPath $NormalizedWorkbookPath) -or $NormalizedWorkbookPath -eq $WorkbookPath) { throw 'NormalizedWorkbookPath must be a new output path' }
     }
     $binaryOutput = if ($NormalizedWorkbookPath) { "$NormalizedWorkbookPath.bin" } else { "$WorkbookPath.bin" }
     if (Test-Path -LiteralPath $binaryOutput) { throw "Refusing to overwrite binary evidence: $binaryOutput" }
+    $observationOutput = "$binaryOutput.json"
+    if (Test-Path -LiteralPath $observationOutput) { throw "Refusing to overwrite observation evidence: $observationOutput" }
 }
 
 $failure = $null
@@ -553,6 +571,7 @@ $environment = $null
 $baselinePath = $null
 $baselineBinaryPath = $null
 $phaseOutput = $null
+$verifyObservation = $null
 
 try {
     $script:excel = New-Object -ComObject Excel.Application
@@ -612,15 +631,16 @@ try {
         $generated = Get-FormSnapshot 'GeneratedForm'
         $empty = Get-FormSnapshot 'GeneratedEmptyForm'
         Assert-GeneratedFormShape $generated $empty
+        $verifyObservation = [ordered]@{
+            workbook = $WorkbookPath
+            beforeSave = @($generated, $empty)
+            reopened = $null
+        }
         Release-Children
         if ($ExpectedPath) {
-            $expected = Get-Content -LiteralPath $ExpectedPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            $expectedMap = Get-ExpectedFormMap $expected
             foreach ($name in $script:generatedFormNames) {
-                if ($expectedMap.Contains($name)) {
-                    $snapshot = if ($name -eq 'GeneratedForm') { $generated } else { $empty }
-                    Assert-ExpectedForm $snapshot $expectedMap[$name]
-                }
+                $snapshot = if ($name -eq 'GeneratedForm') { $generated } else { $empty }
+                Assert-ExpectedForm $snapshot $expectedMap[$name]
             }
         }
         Invoke-GenerationSentinel
@@ -635,13 +655,12 @@ try {
             $generated = Get-FormSnapshot 'GeneratedForm'
             $empty = Get-FormSnapshot 'GeneratedEmptyForm'
             Assert-GeneratedFormShape $generated $empty
+            $verifyObservation.reopened = @($generated, $empty)
             Release-Children
             if ($ExpectedPath) {
                 foreach ($name in $script:generatedFormNames) {
-                    if ($expectedMap.Contains($name)) {
-                        $snapshot = if ($name -eq 'GeneratedForm') { $generated } else { $empty }
-                        Assert-ExpectedForm $snapshot $expectedMap[$name]
-                    }
+                    $snapshot = if ($name -eq 'GeneratedForm') { $generated } else { $empty }
+                    Assert-ExpectedForm $snapshot $expectedMap[$name]
                 }
             }
             $sourceForBinary = $NormalizedWorkbookPath
@@ -697,6 +716,13 @@ if ($Phase -eq 'create') {
     $environment | Add-Member -PassThru -NotePropertyName baselineBinary -NotePropertyValue $baselineBinaryPath | Out-Null
     Write-Json (Join-Path $WorkspacePath 'environment.json') $environment
     Publish-Fixture
+} else {
+    $environment | Add-Member -NotePropertyName cleanupConfirmed -NotePropertyValue $true
+    $verifyObservation.environment = $environment
+    $verifyObservation.binary = Get-BinaryEvidence $binaryOutput
+    $verifyObservation.normalizedWorkbook = $NormalizedWorkbookPath
+    Write-Json $observationOutput ([pscustomobject]$verifyObservation)
+    $phaseOutput = "$phaseOutput observation=$observationOutput"
 }
 
 Write-Output $phaseOutput

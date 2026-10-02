@@ -188,6 +188,17 @@ func TestWithNewUserFormRejectsWithoutMutation(t *testing.T) {
 			code: UserFormFormsReferenceRequired,
 		},
 		{
+			name: "Forms twiddled LIBID with foreign OriginalTypeLib",
+			book: "p4_form",
+			setup: func(project *Project, _ *oforms.Form, _ *Module) {
+				libid := []byte(`*\G{` + userFormMSFormsReferenceGUID + `}#2.0#0#FM20.DLL#Microsoft Forms`)
+				project.ReferencesRaw = appendReferenceRecord(nil, 0x0033, libid)
+				project.ReferencesRaw = appendReferenceRecord(project.ReferencesRaw, 0x002F, sizedReferencePayload(libid, 6))
+				project.ReferencesRaw = appendReferenceRecord(project.ReferencesRaw, 0x0030, sizedReferencePayload(libid, 26))
+			},
+			code: UserFormFormsReferenceRequired,
+		},
+		{
 			name: "duplicate component GUIDs",
 			book: "p4_form",
 			setup: func(_ *Project, _ *oforms.Form, module *Module) {
@@ -285,16 +296,29 @@ func TestHasMSFormsReferenceUsesRawDirRecords(t *testing.T) {
 		t.Fatal("unrelated twiddled GUID named MSForms was accepted")
 	}
 	libid := []byte(`*\G{` + userFormMSFormsReferenceGUID + `}#2.0#0#FM20.DLL#Microsoft Forms`)
-	if !hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x0033, libid)) {
-		t.Fatal("original Forms LIBID was rejected")
+	if hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x0033, libid)) {
+		t.Fatal("incomplete CONTROL reference was accepted from REFERENCEORIGINAL alone")
+	}
+	if !hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x000D, sizedReferencePayload(libid, 6))) {
+		t.Fatal("registered Forms LIBID was rejected")
+	}
+	for _, id := range []uint16{0x002F, 0x0030} {
+		reservedSize := 6
+		if id == 0x0030 {
+			reservedSize = 26
+		}
+		if hasMSFormsReferenceRaw(appendReferenceRecord(nil, id, sizedReferencePayload(libid, reservedSize))) {
+			t.Fatalf("CONTROL record %#x accepted Forms LIBID without original Forms GUID", id)
+		}
+	}
+	if hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x000D, sizedReferencePayload(libid, 0))) {
+		t.Fatal("truncated registered reference was accepted")
 	}
 	foreign := []byte(`*\G{00000000-0000-0000-0000-000000000000}#0.0#0#` + userFormMSFormsReferenceGUID)
 	if hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x0033, foreign)) {
 		t.Fatal("GUID in an unrelated LIBID description was accepted")
 	}
-	control := make([]byte, 4+len(foreign)+26)
-	binary.LittleEndian.PutUint32(control, uint32(len(foreign)))
-	copy(control[4:], foreign)
+	control := sizedReferencePayload(foreign, 26)
 	if hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x0030, control)) {
 		t.Fatal("extended reference description was accepted without original GUID")
 	}
@@ -302,6 +326,16 @@ func TestHasMSFormsReferenceUsesRawDirRecords(t *testing.T) {
 	if !hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x0030, control)) {
 		t.Fatal("extended reference original TypeLib GUID was rejected")
 	}
+	if hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x0030, control[:len(control)-1])) {
+		t.Fatal("truncated CONTROL cookie was accepted")
+	}
+}
+
+func sizedReferencePayload(libid []byte, trailingSize int) []byte {
+	payload := make([]byte, 4+len(libid)+trailingSize)
+	binary.LittleEndian.PutUint32(payload, uint32(len(libid)))
+	copy(payload[4:], libid)
+	return payload
 }
 
 func generatedTestForm(t *testing.T, name string, codePage uint16) *oforms.Form {

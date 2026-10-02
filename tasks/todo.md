@@ -491,3 +491,12 @@ source; all valid. Plan:
 - [x] Validate `Attribute VB_Name` for existing standard and class component updates before assigning normalized source.
 - [x] Add regression coverage for mismatched existing standard and class modules while preserving document/UserForm header behavior.
 - [x] Run focused and full validation, then push the fix and reply to the review thread.
+
+# PR #903 review follow-up
+
+- [x] Require REFERENCECONTROL OriginalTypeLib identity rather than trusting a twiddled LIBID; cover conflicting identities and atomic rejection.
+- [x] Reject incomplete generated-form expected maps before Excel starts; compare SpinButton Delay and ScrollBar Delay/ProportionalThumb with regression coverage.
+- [x] Align .NET builtin control contracts with the canonical registry and fix the failing Windows/Linux CI test.
+- [x] Verify focused Go/.NET/PowerShell tests, lint/docs, and staged formatting.
+- [x] Rerun the fresh Excel generation gate after the concurrent session finishes: Delay/ScrollBar ProportionalThumb, both forms, save/reopen, sentinel, and normalized binary readback passed; owned PID 204972 cleanup confirmed. Evidence and command recorded in the fixture README.
+- [ ] Push the fixes and reply to the three review comments.
