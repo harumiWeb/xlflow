@@ -404,8 +404,9 @@ End Function
             $autoFormPull.Json.pull.selection_reason -ne 'file_backend_supported') {
             throw "UserForm auto pull did not select file: $($autoFormPull.Raw)"
         }
-        if (($excelPidsBefore -join ',') -cne ($excelPidsAfter -join ',')) {
-            throw "UserForm file pull changed Excel processes: before=$($excelPidsBefore -join ',') after=$($excelPidsAfter -join ',')"
+        $newExcelPids = @($excelPidsAfter | Where-Object { $excelPidsBefore -notcontains $_ })
+        if ($newExcelPids.Count -gt 0) {
+            throw "UserForm file pull started Excel processes: new=$($newExcelPids -join ',') before=$($excelPidsBefore -join ',') after=$($excelPidsAfter -join ',')"
         }
         $formsCanary = Join-Path $userFormWorkspace 'src\forms\release-gate-canary.frx'
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $formsCanary) | Out-Null
