@@ -1,3 +1,17 @@
+# Issue #882 final-review follow-up
+
+Independent review of `d63cde3a` confirmed one in-scope P3: seven new
+snake-case test labels are incorrectly extracted as structured error codes.
+Keep this fix local to the new test labels rather than changing the existing
+inventory generator's repository-wide extraction contract.
+
+1. [x] Rename the seven test labels and regenerate the reference inventory.
+2. [x] Run focused userforms/pack tests and docs/format/lint checks; confirm
+       only the four real `userform_edit_*` codes remain newly inventoried.
+
+Publication follows verification: commit the review fix, push the feature
+branch, create the PR, and validate its GitHub read-back.
+
 # PR #901 review follow-up (Issue #881)
 
 Verified against commit `7396d1fe`; all three Devin bug reports are valid and

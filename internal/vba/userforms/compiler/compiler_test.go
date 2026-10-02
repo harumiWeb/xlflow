@@ -177,22 +177,22 @@ func TestCompileRejectsEditsAtomically(t *testing.T) {
 		name, code string
 		change     func(*spec.FormSpec, *spec.FormSpec)
 	}{
-		{"root_size", Unsupported, func(_, a *spec.FormSpec) { a.Form.Width = new(300.0) }},
+		{"root-size", Unsupported, func(_, a *spec.FormSpec) { a.Form.Width = new(300.0) }},
 		{"rename", Unsupported, func(_, a *spec.FormSpec) { a.Controls[0].Name = "Renamed" }},
 		{"remove", Unsupported, func(_, a *spec.FormSpec) { a.Controls = a.Controls[1:] }},
 		{"stale", Stale, func(b, a *spec.FormSpec) {
 			b.Controls[0].Caption = new("wrong baseline")
 			a.Controls[0].Caption = new("requested")
 		}},
-		{"property_reset", Unsupported, func(_, a *spec.FormSpec) { a.Controls[0].Caption = nil }},
-		{"unknown_property", Unsupported, func(_, a *spec.FormSpec) { a.Controls[0].Properties = map[string]any{"UnmappedProperty": 1} }},
-		{"invalid_property", Invalid, func(_, a *spec.FormSpec) { a.Controls[0].Properties = map[string]any{"BackColor": -1} }},
-		{"alias_conflict", Conflict, func(_, a *spec.FormSpec) {
+		{"property-reset", Unsupported, func(_, a *spec.FormSpec) { a.Controls[0].Caption = nil }},
+		{"unknown-property", Unsupported, func(_, a *spec.FormSpec) { a.Controls[0].Properties = map[string]any{"UnmappedProperty": 1} }},
+		{"invalid-property", Invalid, func(_, a *spec.FormSpec) { a.Controls[0].Properties = map[string]any{"BackColor": -1} }},
+		{"alias-conflict", Conflict, func(_, a *spec.FormSpec) {
 			a.Controls[0].Caption = new("one")
 			a.Controls[0].Properties = map[string]any{"Caption": "two"}
 		}},
-		{"tab_range", Invalid, func(_, a *spec.FormSpec) { a.Controls[0].TabIndex = new(32768) }},
-		{"geometry_range", Invalid, func(_, a *spec.FormSpec) { a.Controls[0].Left = new(1e20) }},
+		{"tab-range", Invalid, func(_, a *spec.FormSpec) { a.Controls[0].TabIndex = new(32768) }},
+		{"geometry-range", Invalid, func(_, a *spec.FormSpec) { a.Controls[0].Left = new(1e20) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			form, before := fixture(t, "p4_form.bin")
