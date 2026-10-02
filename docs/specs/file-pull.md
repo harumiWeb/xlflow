@@ -86,7 +86,12 @@ MS-OFORMS Designer state becomes the canonical
 projected parent relationships. Code sidecars are omitted when the form has no
 code body. The file backend reconciles only these reserved `code` and `specs`
 directories; compatibility `.frm` / `.frx` artifacts elsewhere under the
-forms root are retained and are not claimed to be current.
+forms root are retained and are not claimed to be current. Each generated spec
+contains warning code `compatibility_artifact_unsynchronized`. The shared push
+preflight rejects that marker for both Excel and file backends, including when
+a same-named stale `.frm` remains. Apply the spec with `xlflow form build`, then
+use `xlflow pull --backend excel` to refresh compatibility artifacts before a
+later push. Direct pure-Go FormSpec writing is tracked by parent Issue #876.
 
 Compatibility `frm` code authority is not supported by the file backend and
 fails with `pull_userform_code_source_unsupported` before source mutation.

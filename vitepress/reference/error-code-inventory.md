@@ -203,6 +203,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `command_text`
 - `commit_error`
 - `comparison_expression`
+- `compatibility_artifact_unsynchronized`
 - `compile_equivalent`
 - `compile_equivalent_diagnostics`
 - `compile_invoked`

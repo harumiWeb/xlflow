@@ -1,3 +1,18 @@
+# PR #900 review follow-up
+
+Verified against commit `c4ed68d8`; the stale compatibility artifact portion
+of the Devin finding is valid and in scope. Direct FormSpec-to-MS-OFORMS push
+remains assigned to parent Issue #876.
+
+1. [x] Mark specs emitted by `pull --backend file` as having unsynchronized
+       compatibility `.frm` / `.frx` artifacts.
+2. [x] Make the shared Excel/file push preflight reject that persistent marker
+       even when a same-named stale `.frm` exists; keep the artifacts
+       non-destructive and unmanaged.
+3. [x] Add focused fresh/stale artifact regressions, update ADR/spec/docs and
+       the real-Excel gate, and run validation. The review reply must preserve
+       the Issue #876 scope boundary.
+
 # PR #893 review follow-up 2
 
 Verified against commit `4c57c077`; the stale delegated warning finding is

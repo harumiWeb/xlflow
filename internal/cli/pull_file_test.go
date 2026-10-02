@@ -294,6 +294,31 @@ func TestPullFileBackendPublishesUserFormSidecars(t *testing.T) {
 	}
 }
 
+func TestFilePulledUserFormSpecsBlockBothPushBackends(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p4_form.bin"))
+	if stdout, err := runBuildCommandForTest(dir, "--json", "pull", "--backend", "file"); err != nil {
+		t.Fatalf("pull --backend file: %v\n%s", err, stdout)
+	}
+	staleFRM := "VERSION 5.00\nBegin {GUID} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"), []byte(staleFRM), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, backend := range []string{"file", "excel"} {
+		t.Run(backend, func(t *testing.T) {
+			stdout, err := runBuildCommandForTest(dir, "--json", "push", "--backend", backend)
+			if err == nil || output.ExitCode(err) != output.ExitValidation || jsonErrorCode(t, stdout) != "source_preflight_failed" {
+				t.Fatalf("push --backend %s stdout=%s err=%v", backend, stdout, err)
+			}
+			if !strings.Contains(stdout, "not synchronized") || !strings.Contains(stdout, "FRM201") {
+				t.Fatalf("push --backend %s did not report unsynchronized compatibility artifact: %s", backend, stdout)
+			}
+		})
+	}
+}
+
 func TestPullFileBackendRejectsFrmUserFormBeforeMutation(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)

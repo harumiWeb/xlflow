@@ -147,7 +147,9 @@ The default `pull --json` selects the fastest safe backend and reports
 `pull --backend file --json` only when the saved `.xlsm` is explicitly the
 source of truth; it never reads unsaved session state. It can publish canonical
 UserForm Designer YAML and code sidecars when `code_source = "sidecar"`, but it
-does not generate compatibility `.frm` / `.frx` exports. Use `--backend excel`
+does not generate compatibility `.frm` / `.frx` exports. File-pulled specs mark
+those artifacts unsynchronized, so push fails safely until `form build` applies
+the spec and an Excel pull refreshes compatibility source. Use `--backend excel`
 to force Excel/VBIDE authority or preserve `frm` code authority.
 
 `push` has no auto backend: the default `excel` path mutates the live project

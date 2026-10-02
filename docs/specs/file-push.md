@@ -109,6 +109,12 @@ VB_*` lines stripped; an empty body becomes `Option Explicit`), matching
   before the workbook is read.
 - In sidecar mode a UserForm's `code/<Name>.bas` is merged into its `.frm` in
   memory; the tracked `.frm` on disk is never rewritten by this backend.
+  A FormSpec carrying the file-pull marker
+  `compatibility_artifact_unsynchronized` fails shared source preflight with
+  `FRM201`, even when a same-name `.frm` exists, because that compatibility
+  artifact may contain stale Designer state. Apply the spec with `form build`
+  and refresh compatibility artifacts with an Excel-backed pull before either
+  push backend is used.
   Creating a new UserForm (no designer storage in the template) fails with
   `push_userform_generation_unsupported`; existing forms update code-behind
   and carry `.frx` storage byte-for-byte.

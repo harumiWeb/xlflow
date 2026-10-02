@@ -20,7 +20,9 @@ All notable changes to xlflow will be documented in this file.
   projects. Saved MS-OFORMS Designer state is published as canonical YAML with
   code-behind sidecars in the same rollback-capable source transaction as
   ordinary modules; closed supported UserForm workbooks now use the file
-  backend in auto mode without launching Excel.
+  backend in auto mode without launching Excel. File-pulled specs persist an
+  unsynchronized compatibility-artifact marker so both push backends fail
+  safely instead of importing a same-named stale `.frm` Designer.
 - Added a pure-Go projection from lossless MS-OFORMS UserForm state to the
   canonical `xlflow.userform` specification. Common controls, nested parent
   relationships, point-based geometry, captions, values, tab order, and

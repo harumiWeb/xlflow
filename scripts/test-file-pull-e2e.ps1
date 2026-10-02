@@ -422,6 +422,21 @@ End Function
         if (-not ([IO.File]::ReadAllText($formSpecPath).Contains('name: FilePullForm'))) {
             throw 'UserForm Designer YAML did not contain the workbook form identity'
         }
+        if (-not ([IO.File]::ReadAllText($formSpecPath).Contains('compatibility_artifact_unsynchronized'))) {
+            throw 'UserForm Designer YAML did not mark compatibility artifacts as unsynchronized'
+        }
+        foreach ($backend in @('file', 'excel')) {
+            $pushExcelPidsBefore = @((Get-Process -Name EXCEL -ErrorAction SilentlyContinue).Id | Sort-Object)
+            $rejectedPush = Invoke-XlflowJson @('push', '--backend', $backend, '--json') -AllowFailure
+            $pushExcelPidsAfter = @((Get-Process -Name EXCEL -ErrorAction SilentlyContinue).Id | Sort-Object)
+            if ($rejectedPush.ExitCode -eq 0 -or $rejectedPush.Json.error.code -ne 'source_preflight_failed') {
+                throw "UserForm push --backend $backend did not reject the unsynchronized compatibility artifact: $($rejectedPush.Raw)$($rejectedPush.Stderr)"
+            }
+            $newPushExcelPids = @($pushExcelPidsAfter | Where-Object { $pushExcelPidsBefore -notcontains $_ })
+            if ($newPushExcelPids.Count -gt 0) {
+                throw "Rejected UserForm push --backend $backend started Excel processes: new=$($newPushExcelPids -join ',')"
+            }
+        }
         $beforeRepeat = Get-SourceByteSnapshot $userFormWorkspace
         $explicitFormPull = Invoke-XlflowJson @('pull', '--backend', 'file', '--json')
         if ($explicitFormPull.Json.pull.backend_selection -ne 'explicit') {

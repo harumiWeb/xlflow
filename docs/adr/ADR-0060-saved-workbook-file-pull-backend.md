@@ -34,7 +34,14 @@ publishes code-behind to `src/forms/code/<Name>.bas`. It decodes the project
 code page, publishes UTF-8 source without BOM, applies configured folder
 annotations and line-number removal, and transactionally reconciles all
 managed source artifacts. Compatibility `.frm` / `.frx` artifacts remain
-unmanaged because the pure-Go reader does not reproduce VBE exports.
+unmanaged because the pure-Go reader does not reproduce VBE exports. Every
+file-pulled FormSpec therefore persists a
+`compatibility_artifact_unsynchronized` warning. The shared Excel/file push
+preflight rejects that marker even when a same-named `.frm` remains, so stale
+Designer state cannot replace the canonical snapshot. Users must apply the
+spec with `form build` and refresh compatibility artifacts through an Excel
+pull before a later push; direct pure-Go FormSpec writing remains part of
+parent Issue #876.
 
 "Transactional" here means that the complete plan is validated before the
 first mutation, each file replacement is atomic, and every affected managed
@@ -110,6 +117,10 @@ by command output rather than infer runtime authority from capability metadata.
 - Closed sidecar UserForm projects can be refreshed without Excel while still
   producing a complete canonical Designer/code snapshot. Compatibility
   `.frm` / `.frx` exports continue to require Excel.
+- A file-pulled UserForm snapshot is reviewable and buildable but is not a
+  direct push artifact until compatibility state is refreshed or the pure-Go
+  FormSpec writer from Issue #876 is available. Both push backends fail loudly
+  instead of trusting retained stale `.frm` / `.frx` files.
 - `.xlam` and `.xlsb` remain available through the Excel backend but are not
   accepted by the initial file backend.
 

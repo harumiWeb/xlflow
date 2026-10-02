@@ -212,8 +212,9 @@ class, and document modules, nested folders, CP932/Japanese source, and a
 non-ASCII component name. It compares an Excel-backend baseline with the file
 backend, packs the file-pulled tree, executes the packed sentinel in real Excel,
 and verifies canonical sidecar extraction from a separate UserForm-bearing
-workbook without starting another Excel process. Record both absolute workspace
-paths in the release report.
+workbook without starting another Excel process. It also verifies that the
+unsynchronized compatibility-artifact marker blocks both push backends before
+Excel starts. Record both absolute workspace paths in the release report.
 
 When the release includes session-related changes, also cover:
 

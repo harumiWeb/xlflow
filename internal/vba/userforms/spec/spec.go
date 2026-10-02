@@ -113,8 +113,9 @@ type FormSpecWarning struct {
 }
 
 const (
-	UnsupportedControlPlaceholderType = "Control"
-	UnsupportedControlTypeProperty    = "controlType"
+	UnsupportedControlPlaceholderType              = "Control"
+	UnsupportedControlTypeProperty                 = "controlType"
+	CompatibilityArtifactUnsynchronizedWarningCode = "compatibility_artifact_unsynchronized"
 )
 
 type SpecError struct {

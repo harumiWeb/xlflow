@@ -89,6 +89,21 @@ func ValidateUserFormArtifactsAgainstSpecs(formsDir string, targetForms map[stri
 		if len(targetForms) > 0 && !targetForms[formName] && !targetForms[specFileBase] {
 			return nil
 		}
+		for _, warning := range spec.Warnings {
+			if warning.Code != CompatibilityArtifactUnsynchronizedWarningCode {
+				continue
+			}
+			issues = append(issues, UserFormArtifactIssue{
+				FormName: formName,
+				Path:     path,
+				Message: fmt.Sprintf(
+					"UserForm spec %q was extracted by pull --backend file, so its compatibility .frm/.frx artifact is not synchronized. Push would ignore the canonical Designer spec or import stale Designer state.",
+					d.Name(),
+				),
+				Suggestion: "Apply the spec with xlflow form build, then refresh compatibility artifacts with xlflow pull --backend excel before a later push. Pure-Go FormSpec writing is tracked by Issue #876.",
+			})
+			return nil
+		}
 
 		if specFileBase != "" && !strings.EqualFold(specFileBase, formName) {
 			issues = append(issues, UserFormArtifactIssue{

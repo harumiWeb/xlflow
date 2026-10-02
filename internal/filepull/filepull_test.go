@@ -13,6 +13,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 func TestPullExtractsSupportedModulesAndReconcilesManagedFiles(t *testing.T) {
@@ -94,7 +95,7 @@ func TestPullExtractsUserFormSidecarsAndSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"kind: xlflow.userform", "name: UserForm1", "controls:"} {
+	for _, want := range []string{"kind: xlflow.userform", "name: UserForm1", "controls:", forms.CompatibilityArtifactUnsynchronizedWarningCode} {
 		if !bytes.Contains(specBody, []byte(want)) {
 			t.Fatalf("spec missing %q:\n%s", want, specBody)
 		}
