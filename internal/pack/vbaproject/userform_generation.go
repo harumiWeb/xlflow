@@ -231,7 +231,8 @@ func validUserFormBaseAttribute(line string) bool {
 	if close != 36 || len(value) != 74 || value[close+1] != '{' {
 		return false
 	}
-	return validCanonicalGUID(value[:close]) && validCanonicalGUID(value[close+2:])
+	return validCanonicalGUID(value[:close]) && validCanonicalGUID(value[close+2:]) &&
+		!strings.EqualFold(value[:close], value[close+2:])
 }
 
 func validCanonicalGUID(value string) bool {
@@ -334,9 +335,9 @@ func hasMSFormsReferenceRaw(raw []byte) bool {
 
 	// References is display metadata only. The dir reference records are the
 	// authoritative source. Excel-authored Forms references use either a
-	// canonical GUID in the original-reference record or a REFERENCECONTROL
-	// record whose twiddled LIBID proves the Forms reference.
-	msFormsName := false
+	// canonical LIBID in REFERENCEORIGINAL or the original TypeLib GUID at
+	// the declared position in REFERENCECONTROL. Names and twiddled LIBIDs
+	// alone cannot identify the referenced library.
 	for offset := 0; offset+6 <= len(raw); {
 		id := binary.LittleEndian.Uint16(raw[offset:])
 		size := binary.LittleEndian.Uint32(raw[offset+2:])
@@ -346,14 +347,12 @@ func hasMSFormsReferenceRaw(raw []byte) bool {
 		end := offset + 6 + int(size)
 		payload := raw[offset+6 : end]
 		switch id {
-		case 0x0016: // REFERENCENAME
-			msFormsName = bytes.EqualFold(payload, []byte("MSForms"))
 		case 0x0033: // REFERENCEORIGINAL
-			if hasMSFormsGUID(payload) {
+			if hasMSFormsLIBID(payload) {
 				return true
 			}
-		case 0x002F, 0x0030: // REFERENCECONTROL variants
-			if hasMSFormsGUID(payload) || msFormsName && hasTwiddledFormsLIBID(payload) {
+		case 0x000D, 0x002F, 0x0030: // REGISTERED / CONTROL LIBID records
+			if hasMSFormsSizedLIBID(payload, id == 0x0030) {
 				return true
 			}
 		}
@@ -362,14 +361,24 @@ func hasMSFormsReferenceRaw(raw []byte) bool {
 	return false
 }
 
-func hasMSFormsGUID(payload []byte) bool {
-	rawUpper := bytes.ToUpper(payload)
-	return bytes.Contains(rawUpper, []byte(userFormMSFormsReferenceGUID)) ||
-		bytes.Contains(payload, userFormMSFormsReferenceGUIDWire[:])
+func hasMSFormsLIBID(libid []byte) bool {
+	return bytes.HasPrefix(bytes.ToUpper(libid), []byte(`*\G{`+userFormMSFormsReferenceGUID+`}#`))
 }
 
-func hasTwiddledFormsLIBID(payload []byte) bool {
-	return bytes.Contains(payload, []byte(`*\G{`))
+func hasMSFormsSizedLIBID(payload []byte, extended bool) bool {
+	if len(payload) < 4 {
+		return false
+	}
+	size := binary.LittleEndian.Uint32(payload)
+	if uint64(size) > uint64(len(payload)-4) {
+		return false
+	}
+	end := 4 + int(size)
+	if hasMSFormsLIBID(payload[4:end]) {
+		return true
+	}
+	// Reserved1 (4), Reserved2 (2), OriginalTypeLib GUID (16), Cookie (4).
+	return extended && len(payload)-end == 26 && bytes.Equal(payload[end+6:end+22], userFormMSFormsReferenceGUIDWire[:])
 }
 
 func moduleNameConflict(p *Project, name string) bool {

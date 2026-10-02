@@ -179,6 +179,31 @@ func TestWithNewUserFormRejectsWithoutMutation(t *testing.T) {
 			code: UserFormFormsReferenceRequired,
 		},
 		{
+			name: "unrelated reference named MSForms",
+			book: "p4_form",
+			setup: func(project *Project, _ *oforms.Form, _ *Module) {
+				project.ReferencesRaw = appendReferenceRecord(nil, 0x0016, []byte("MSForms"))
+				project.ReferencesRaw = appendReferenceRecord(project.ReferencesRaw, 0x002F, []byte("1\x00\x00\x00*\\G{00000000-0000-0000-0000-000000000000}"))
+			},
+			code: UserFormFormsReferenceRequired,
+		},
+		{
+			name: "duplicate component GUIDs",
+			book: "p4_form",
+			setup: func(_ *Project, _ *oforms.Form, module *Module) {
+				module.Source = strings.Replace(module.Source, "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", "11111111-2222-4333-8444-555555555555", 1)
+			},
+			code: UserFormGenerationInvalid,
+		},
+		{
+			name: "case varied duplicate component GUIDs",
+			book: "p4_form",
+			setup: func(_ *Project, _ *oforms.Form, module *Module) {
+				module.Source = strings.Replace(module.Source, "11111111-2222-4333-8444-555555555555", "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", 1)
+			},
+			code: UserFormGenerationInvalid,
+		},
+		{
 			name: "protected project",
 			book: "p3_protected",
 			code: UserFormGenerationInvalid,
@@ -256,8 +281,26 @@ func TestHasMSFormsReferenceUsesRawDirRecords(t *testing.T) {
 
 	raw := appendReferenceRecord(nil, 0x0016, []byte("MSForms"))
 	raw = appendReferenceRecord(raw, 0x002F, []byte("1\x00\x00\x00*\\G{00000000-0000-0000-0000-000000000000}"))
-	if !hasMSFormsReferenceRaw(raw) {
-		t.Fatal("REFERENCECONTROL Forms evidence was not accepted")
+	if hasMSFormsReferenceRaw(raw) {
+		t.Fatal("unrelated twiddled GUID named MSForms was accepted")
+	}
+	libid := []byte(`*\G{` + userFormMSFormsReferenceGUID + `}#2.0#0#FM20.DLL#Microsoft Forms`)
+	if !hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x0033, libid)) {
+		t.Fatal("original Forms LIBID was rejected")
+	}
+	foreign := []byte(`*\G{00000000-0000-0000-0000-000000000000}#0.0#0#` + userFormMSFormsReferenceGUID)
+	if hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x0033, foreign)) {
+		t.Fatal("GUID in an unrelated LIBID description was accepted")
+	}
+	control := make([]byte, 4+len(foreign)+26)
+	binary.LittleEndian.PutUint32(control, uint32(len(foreign)))
+	copy(control[4:], foreign)
+	if hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x0030, control)) {
+		t.Fatal("extended reference description was accepted without original GUID")
+	}
+	copy(control[4+len(foreign)+6:], userFormMSFormsReferenceGUIDWire[:])
+	if !hasMSFormsReferenceRaw(appendReferenceRecord(nil, 0x0030, control)) {
+		t.Fatal("extended reference original TypeLib GUID was rejected")
 	}
 }
 

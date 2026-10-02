@@ -295,6 +295,13 @@ reference section. Reference creation remains Issue #886. Declaration,
 module and PROJECTwm bookkeeping are completed by the project writer;
 generation does not connect the pack CLI or change source authority (#887).
 
+Reference identity must come from a canonical Forms LIBID or the original
+TypeLib GUID at its declared position in the raw reference record. A display
+name or a twiddled LIBID alone is insufficient, including a GUID appearing
+only in a file path or description. Project addition independently rejects
+equal component GUIDs in `VB_Base`, comparing them case-insensitively even
+when the caller constructs the module without `NewUserFormModule`.
+
 ## Structural validation
 
 The reader and serializer return `oforms.ErrMalformed`, wrapped by an `oforms.ParseError`

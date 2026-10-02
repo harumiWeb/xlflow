@@ -1,3 +1,17 @@
+# Issue #883 final-review Pass 1 follow-up
+
+Validated against `76cae6b8`: both P2 findings are in scope.
+
+1. [x] Require canonical MSForms LIBID evidence in raw reference records;
+       reject an unrelated twiddled GUID even if its display name is MSForms.
+2. [x] Reject equal VB_Base GUIDs at the project-addition boundary, including
+       case variants, without mutating the input project.
+3. [x] Add regressions and run focused userforms/pack/excel tests, vet and docs
+       checks; commit hooks run lint and staged formatting checks.
+4. [ ] Obtain Pass 2 with gpt-6-luna xhigh. Preserve #886/#887 scope and do not
+       push. The admission checks do not change generated Designer bytes;
+       committed Excel normalization evidence still passes in ordinary tests.
+
 # PR #902 review follow-up (Issue #882)
 
 Verified against `40267db2`: both Devin findings are valid. The two CodeQL
