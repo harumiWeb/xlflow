@@ -106,6 +106,13 @@ and extra streams are attached to the owning control's unsupported list and
 warning.
 Form-level unsupported state is summarized by a form warning. Raw persistence
 details used only for lossless replay are not exposed as property-bag values.
+The file-pull publisher additionally appends the operational warning
+`compatibility_artifact_unsynchronized` to every emitted FormSpec. This marker
+does not describe a projection loss: it records that pure-Go pull deliberately
+did not regenerate compatibility `.frm` / `.frx` artifacts. Shared source
+preflight rejects the marker with `FRM201` before either push backend can import
+a missing or stale `.frm`; `form build` followed by an Excel-backed pull clears
+the unsafe state by applying the spec and refreshing those artifacts.
 
 A structurally bounded control whose type or ProgID cannot be recovered is
 retained as `type: Control` with `unsupported: [controlType]`. `UFV015` accepts

@@ -203,6 +203,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `command_text`
 - `commit_error`
 - `comparison_expression`
+- `compatibility_artifact_unsynchronized`
 - `compile_equivalent`
 - `compile_equivalent_diagnostics`
 - `compile_invoked`
@@ -551,7 +552,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `field_count`
 - `file_backend_supported`
 - `file_backend_unsupported_format`
-- `file_backend_unsupported_userform`
+- `file_backend_unsupported_userform_code_source`
 - `file_count`
 - `file_input`
 - `file_number_literal`
@@ -1053,7 +1054,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `pull_protected_project`
 - `pull_source_path_unsafe`
 - `pull_source_publish_failed`
-- `pull_userform_unsupported`
+- `pull_userform_code_source_unsupported`
+- `pull_userform_designer_malformed`
+- `pull_userform_designer_unsupported`
+- `pull_userform_identity_mismatch`
 - `pull_vba_project_malformed`
 - `pull_vba_project_missing`
 - `push_20260101`
@@ -1394,6 +1398,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `use_interactive`
 - `used_range`
 - `user_form`
+- `userform_code_source`
 - `userform_code_sync_failed`
 - `userform_control_metadata`
 - `userform_count`

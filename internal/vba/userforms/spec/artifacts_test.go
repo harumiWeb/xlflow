@@ -29,6 +29,32 @@ func TestValidateUserFormArtifactsAgainstSpecsRejectsMissingFRM(t *testing.T) {
 	}
 }
 
+func TestValidateUserFormArtifactsAgainstSpecsRejectsUnsynchronizedCompatibilityArtifact(t *testing.T) {
+	formsDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(formsDir, "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: RegistrationForm\ncontrols: []\nwarnings:\n  - code: " + CompatibilityArtifactUnsynchronizedWarningCode + "\n    message: compatibility artifacts are not synchronized\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "specs", "RegistrationForm.yaml"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frm := "VERSION 5.00\nBegin {GUID} RegistrationForm\nEnd\nAttribute VB_Name = \"RegistrationForm\"\nAttribute VB_GlobalNameSpace = False\n\nOption Explicit\n"
+	if err := os.WriteFile(filepath.Join(formsDir, "RegistrationForm.frm"), []byte(frm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, err := ValidateUserFormArtifactsAgainstSpecs(formsDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %#v, want 1 unsynchronized artifact issue", issues)
+	}
+	if !strings.Contains(issues[0].Message, "not synchronized") || !strings.Contains(issues[0].Message, "stale Designer state") {
+		t.Fatalf("unexpected issue: %+v", issues[0])
+	}
+}
+
 func TestValidateUserFormArtifactsAgainstSpecsRejectsVBNameMismatch(t *testing.T) {
 	formsDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(formsDir, "specs"), 0o755); err != nil {

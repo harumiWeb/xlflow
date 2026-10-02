@@ -12,7 +12,7 @@ if ($WorkspaceSuffix.IndexOfAny($directorySeparators) -ge 0) {
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'tmp_workspaces'))
 $workspace = [IO.Path]::GetFullPath((Join-Path $workspaceRoot ("file-pull-release-e2e$WorkspaceSuffix")))
-$rejectionWorkspace = [IO.Path]::GetFullPath((Join-Path $workspaceRoot ("file-pull-userform-rejection-e2e$WorkspaceSuffix")))
+$userFormWorkspace = [IO.Path]::GetFullPath((Join-Path $workspaceRoot ("file-pull-userform-e2e$WorkspaceSuffix")))
 $utf8NoBom = [Text.UTF8Encoding]::new($false, $true)
 $japaneseModuleName = (-join [char[]](0x65E5, 0x672C, 0x8A9E)) + 'Module'
 $japaneseMarker = -join [char[]](0x65E5, 0x672C, 0x8A9E, 0x78BA, 0x8A8D)
@@ -154,15 +154,19 @@ function Add-UserForm {
     $workbook = $null
     $project = $null
     $component = $null
+    $codeModule = $null
     try {
         $workbook = $excel.Workbooks.Open($WorkbookPath)
         $project = $workbook.VBProject
         $component = $project.VBComponents.Add(3)
-        $component.Name = 'RejectedForm'
+        $component.Name = 'FilePullForm'
+        $codeModule = $component.CodeModule
+        $codeModule.AddFromString("Private Sub UserForm_Initialize()`r`n    Debug.Print `"FILE_PULL_USERFORM`"`r`nEnd Sub")
         $workbook.Save()
     } finally {
         if ($null -ne $workbook) { $workbook.Close($false) }
         $excel.Quit()
+        Release-ComObject $codeModule
         Release-ComObject $component
         Release-ComObject $project
         Release-ComObject $workbook
@@ -209,7 +213,7 @@ if (-not (Get-Command xlflow -ErrorAction SilentlyContinue)) {
 
 New-Item -ItemType Directory -Force -Path $workspaceRoot | Out-Null
 $workspaceBoundary = $workspaceRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-foreach ($candidate in @($workspace, $rejectionWorkspace)) {
+foreach ($candidate in @($workspace, $userFormWorkspace)) {
     if (-not $candidate.StartsWith($workspaceBoundary, [StringComparison]::OrdinalIgnoreCase)) {
         throw "unsafe release-gate workspace path: $candidate"
     }
@@ -384,38 +388,73 @@ End Function
         Pop-Location
     }
 
-    New-Item -ItemType Directory -Path $rejectionWorkspace | Out-Null
-    Copy-Item -LiteralPath (Join-Path $workspace 'xlflow.toml') -Destination $rejectionWorkspace
-    Copy-Item -LiteralPath (Join-Path $workspace 'src') -Destination $rejectionWorkspace -Recurse
-    New-Item -ItemType Directory -Path (Join-Path $rejectionWorkspace 'build') | Out-Null
-    $rejectionWorkbook = Join-Path $rejectionWorkspace 'build\FilePullGate.xlsm'
-    Copy-Item -LiteralPath (Join-Path $workspace 'build\FilePullGate.xlsm') -Destination $rejectionWorkbook
-    Add-UserForm $rejectionWorkbook
-    Push-Location $rejectionWorkspace
+    New-Item -ItemType Directory -Path $userFormWorkspace | Out-Null
+    Copy-Item -LiteralPath (Join-Path $workspace 'xlflow.toml') -Destination $userFormWorkspace
+    Copy-Item -LiteralPath (Join-Path $workspace 'src') -Destination $userFormWorkspace -Recurse
+    New-Item -ItemType Directory -Path (Join-Path $userFormWorkspace 'build') | Out-Null
+    $userFormWorkbook = Join-Path $userFormWorkspace 'build\FilePullGate.xlsm'
+    Copy-Item -LiteralPath (Join-Path $workspace 'build\FilePullGate.xlsm') -Destination $userFormWorkbook
+    Add-UserForm $userFormWorkbook
+    Push-Location $userFormWorkspace
     try {
+        $excelPidsBefore = @((Get-Process -Name EXCEL -ErrorAction SilentlyContinue).Id | Sort-Object)
         $autoFormPull = Invoke-XlflowJson @('pull', '--json')
-        if ($autoFormPull.Json.pull.backend -ne 'excel' -or
-            $autoFormPull.Json.pull.selection_reason -ne 'file_backend_unsupported_userform') {
-            throw "UserForm auto pull did not select Excel: $($autoFormPull.Raw)"
+        $excelPidsAfter = @((Get-Process -Name EXCEL -ErrorAction SilentlyContinue).Id | Sort-Object)
+        if ($autoFormPull.Json.pull.backend -ne 'file' -or
+            $autoFormPull.Json.pull.selection_reason -ne 'file_backend_supported') {
+            throw "UserForm auto pull did not select file: $($autoFormPull.Raw)"
         }
-        $formsCanary = Join-Path $rejectionWorkspace 'src\forms\release-gate-canary.frx'
+        $newExcelPids = @($excelPidsAfter | Where-Object { $excelPidsBefore -notcontains $_ })
+        if ($newExcelPids.Count -gt 0) {
+            throw "UserForm file pull started Excel processes: new=$($newExcelPids -join ',') before=$($excelPidsBefore -join ',') after=$($excelPidsAfter -join ',')"
+        }
+        $formsCanary = Join-Path $userFormWorkspace 'src\forms\release-gate-canary.frx'
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $formsCanary) | Out-Null
         [IO.File]::WriteAllBytes($formsCanary, [byte[]](0, 13, 10, 255, 128, 1))
-        $beforeRejection = Get-SourceByteSnapshot $rejectionWorkspace
-        $rejected = Invoke-XlflowJson @('pull', '--backend', 'file', '--json') -AllowFailure
-        if ($rejected.ExitCode -eq 0 -or $rejected.Json.error.code -ne 'pull_userform_unsupported') {
-            throw "UserForm rejection contract failed: $($rejected.Raw)$($rejected.Stderr)"
+        $formSpecPath = Join-Path $userFormWorkspace 'src\forms\specs\FilePullForm.yaml'
+        $formCodePath = Join-Path $userFormWorkspace 'src\forms\code\FilePullForm.bas'
+        if (-not (Test-Path -LiteralPath $formSpecPath) -or -not (Test-Path -LiteralPath $formCodePath)) {
+            throw "UserForm file pull did not publish canonical artifacts: spec=$formSpecPath code=$formCodePath"
         }
-        $afterRejection = Get-SourceByteSnapshot $rejectionWorkspace
-        Assert-SnapshotsEqual $beforeRejection $afterRejection
+        if (-not ([IO.File]::ReadAllText($formCodePath).Contains('FILE_PULL_USERFORM'))) {
+            throw 'UserForm code-behind sidecar did not contain the workbook marker'
+        }
+        if (-not ([IO.File]::ReadAllText($formSpecPath).Contains('name: FilePullForm'))) {
+            throw 'UserForm Designer YAML did not contain the workbook form identity'
+        }
+        if (-not ([IO.File]::ReadAllText($formSpecPath).Contains('compatibility_artifact_unsynchronized'))) {
+            throw 'UserForm Designer YAML did not mark compatibility artifacts as unsynchronized'
+        }
+        foreach ($backend in @('file', 'excel')) {
+            $pushExcelPidsBefore = @((Get-Process -Name EXCEL -ErrorAction SilentlyContinue).Id | Sort-Object)
+            $rejectedPush = Invoke-XlflowJson @('push', '--backend', $backend, '--json') -AllowFailure
+            $pushExcelPidsAfter = @((Get-Process -Name EXCEL -ErrorAction SilentlyContinue).Id | Sort-Object)
+            if ($rejectedPush.ExitCode -eq 0 -or $rejectedPush.Json.error.code -ne 'source_preflight_failed') {
+                throw "UserForm push --backend $backend did not reject the unsynchronized compatibility artifact: $($rejectedPush.Raw)$($rejectedPush.Stderr)"
+            }
+            $newPushExcelPids = @($pushExcelPidsAfter | Where-Object { $pushExcelPidsBefore -notcontains $_ })
+            if ($newPushExcelPids.Count -gt 0) {
+                throw "Rejected UserForm push --backend $backend started Excel processes: new=$($newPushExcelPids -join ',')"
+            }
+        }
+        $beforeRepeat = Get-SourceByteSnapshot $userFormWorkspace
+        $explicitFormPull = Invoke-XlflowJson @('pull', '--backend', 'file', '--json')
+        if ($explicitFormPull.Json.pull.backend_selection -ne 'explicit') {
+            throw "explicit UserForm file pull selection metadata was lost: $($explicitFormPull.Raw)"
+        }
+        $afterRepeat = Get-SourceByteSnapshot $userFormWorkspace
+        Assert-SnapshotsEqual $beforeRepeat $afterRepeat
+        if (-not (Test-Path -LiteralPath $formsCanary)) {
+            throw 'file pull removed an unmanaged compatibility .frx artifact'
+        }
     } finally {
         Pop-Location
     }
 
-    Write-Output "file pull release gate passed: workspace=$workspace rejection_workspace=$rejectionWorkspace sentinel=$($excelResult.Sentinel) Excel=$($excelResult.ExcelVersion) OS=$($excelResult.ExcelOperatingSystem)"
+    Write-Output "file pull release gate passed: workspace=$workspace userform_workspace=$userFormWorkspace sentinel=$($excelResult.Sentinel) Excel=$($excelResult.ExcelVersion) OS=$($excelResult.ExcelOperatingSystem)"
 } finally {
     if (-not $KeepWorkspace) {
-        foreach ($candidate in @($workspace, $rejectionWorkspace)) {
+        foreach ($candidate in @($workspace, $userFormWorkspace)) {
             if (Test-Path -LiteralPath $candidate) { Remove-Item -LiteralPath $candidate -Recurse -Force }
         }
     }

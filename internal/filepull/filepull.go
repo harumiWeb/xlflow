@@ -20,17 +20,24 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
+	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	"github.com/harumiWeb/xlflow/internal/sourceinventory"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/projection"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 var (
-	ErrMissingVBAProject   = errors.New("file pull: workbook has no xl/vbaProject.bin")
-	ErrMalformedVBAProject = errors.New("file pull: malformed VBA project")
-	ErrProtectedProject    = errors.New("file pull: protected VBA project")
-	ErrUserFormUnsupported = errors.New("file pull: UserForm extraction unsupported")
-	ErrUnsafeSourcePath    = errors.New("file pull: unsafe source path")
-	ErrPublish             = errors.New("file pull: source publication failed")
+	ErrMissingVBAProject             = errors.New("file pull: workbook has no xl/vbaProject.bin")
+	ErrMalformedVBAProject           = errors.New("file pull: malformed VBA project")
+	ErrProtectedProject              = errors.New("file pull: protected VBA project")
+	ErrUserFormCodeSourceUnsupported = errors.New("file pull: UserForm code source unsupported")
+	ErrUserFormDesignerMalformed     = errors.New("file pull: malformed UserForm Designer storage")
+	ErrUserFormDesignerUnsupported   = errors.New("file pull: unsupported UserForm Designer structure")
+	ErrUserFormIdentityMismatch      = errors.New("file pull: inconsistent UserForm module and storage identity")
+	ErrUnsafeSourcePath              = errors.New("file pull: unsafe source path")
+	ErrPublish                       = errors.New("file pull: source publication failed")
 )
 
 type ModuleCounts struct {
@@ -72,6 +79,17 @@ type plan struct {
 	stale  []string
 }
 
+type inspectedProject struct {
+	project   *vbaproject.Project
+	container *cfb.Container
+}
+
+type extractedForm struct {
+	name string
+	code string
+	spec forms.FormSpec
+}
+
 type PullOptions struct {
 	Coordination *coordination.Manager
 	Wait         bool
@@ -85,22 +103,28 @@ func Pull(root string, cfg config.Config, workbookPath string) (Result, error) {
 	return PullContext(context.Background(), root, cfg, workbookPath, PullOptions{})
 }
 
-// Probe inspects only saved-workbook properties needed for backend selection.
-// Source-tree validation remains in PullContext, where leases and wait policy
-// protect reads of the managed source roots.
-func Probe(workbookPath string) (ProbeResult, error) {
-	project, err := inspectProject(workbookPath)
+// Probe validates the saved-workbook snapshot needed for backend selection
+// without reading or publishing the source tree. Source-tree validation remains
+// in PullContext, where leases and wait policy protect managed source roots.
+func Probe(workbookPath string, cfg config.Config) (ProbeResult, error) {
+	inspection, err := inspectProject(workbookPath)
 	if err != nil {
 		return ProbeResult{}, err
 	}
-	result := ProbeResult{Supported: true, Reason: "supported", CodePage: project.Props.CodePage}
-	for _, module := range project.Modules {
+	result := ProbeResult{Supported: true, Reason: "supported", CodePage: inspection.project.Props.CodePage}
+	for _, module := range inspection.project.Modules {
 		if module.Type == vbaproject.ModuleForm {
-			result.Supported = false
-			result.Reason = "userform"
 			result.HasForms = true
-			return result, nil
+			break
 		}
+	}
+	if result.HasForms && !strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+		result.Supported = false
+		result.Reason = "userform_code_source"
+		return result, nil
+	}
+	if _, err := extractForms(inspection, cfg); err != nil {
+		return ProbeResult{}, err
 	}
 	return result, nil
 }
@@ -142,7 +166,11 @@ func acquireSourceTrees(ctx context.Context, root string, cfg config.Config, opt
 	}
 	roots := resolvedRoots(root, cfg)
 	targets := map[string]lockTarget{}
-	for _, path := range []string{roots.modules, roots.classes, roots.workbook} {
+	managedRoots := []string{roots.modules, roots.classes, roots.workbook}
+	if strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+		managedRoots = append(managedRoots, roots.forms)
+	}
+	for _, path := range managedRoots {
 		identity, err := coordination.NewSourceTreeIdentity(root, path)
 		if err != nil {
 			return nil, fmt.Errorf("resolve source-tree identity %s: %w", path, err)
@@ -197,19 +225,14 @@ func acquireSourceTrees(ctx context.Context, root string, cfg config.Config, opt
 }
 
 func buildPlan(root string, cfg config.Config, workbookPath string) (plan, error) {
-	project, err := inspectProject(workbookPath)
+	inspection, err := inspectProject(workbookPath)
 	if err != nil {
 		return plan{}, err
 	}
-	for _, module := range project.Modules {
-		if module.Type == vbaproject.ModuleForm {
-			return plan{}, fmt.Errorf("%w: %s", ErrUserFormUnsupported, module.Name)
-		}
-	}
-	return buildProjectPlan(root, cfg, workbookPath, project)
+	return buildProjectPlan(root, cfg, workbookPath, inspection)
 }
 
-func inspectProject(workbookPath string) (*vbaproject.Project, error) {
+func inspectProject(workbookPath string) (*inspectedProject, error) {
 	projectBytes, err := readVBAProject(workbookPath)
 	if err != nil {
 		return nil, err
@@ -221,10 +244,15 @@ func inspectProject(workbookPath string) (*vbaproject.Project, error) {
 	if project.Protection.IsProtected {
 		return nil, ErrProtectedProject
 	}
-	return project, nil
+	container, err := cfb.Open(projectBytes)
+	if err != nil {
+		return nil, fmt.Errorf("%w: reopen CFB container: %v", ErrMalformedVBAProject, err)
+	}
+	return &inspectedProject{project: project, container: container}, nil
 }
 
-func buildProjectPlan(root string, cfg config.Config, workbookPath string, project *vbaproject.Project) (plan, error) {
+func buildProjectPlan(root string, cfg config.Config, workbookPath string, inspection *inspectedProject) (plan, error) {
+	project := inspection.project
 	roots := resolvedRoots(root, cfg)
 	if err := validateFormsRootSeparation(root, roots); err != nil {
 		return plan{}, err
@@ -238,6 +266,10 @@ func buildProjectPlan(root string, cfg config.Config, workbookPath string, proje
 		CodePage:     project.Props.CodePage,
 	}
 	p := plan{result: result}
+	extractedForms, err := extractForms(inspection, cfg)
+	if err != nil {
+		return plan{}, err
+	}
 	seenNames := map[string]string{}
 	seenPaths := map[string]string{}
 	desired := map[string]string{}
@@ -250,6 +282,10 @@ func buildProjectPlan(root string, cfg config.Config, workbookPath string, proje
 			return plan{}, fmt.Errorf("%w: duplicate components %q and %q", ErrMalformedVBAProject, prior, module.Name)
 		}
 		seenNames[nameKey] = module.Name
+
+		if module.Type == vbaproject.ModuleForm {
+			continue
+		}
 
 		disk, err := vbaproject.ExportModuleSource(module)
 		if err != nil {
@@ -299,14 +335,51 @@ func buildProjectPlan(root string, cfg config.Config, workbookPath string, proje
 		}
 	}
 
-	for _, managedRoot := range []struct {
+	for _, form := range extractedForms {
+		specBody, err := forms.MarshalSnapshot("yaml", form.spec)
+		if err != nil {
+			return plan{}, fmt.Errorf("%w: form %q: %v", ErrUserFormDesignerUnsupported, form.name, err)
+		}
+		specTarget, err := safeTarget(roots.forms, filepath.Join("specs", form.name+".yaml"))
+		if err != nil {
+			return plan{}, err
+		}
+		if err := addPlannedFile(&p, seenPaths, desired, form.name, specTarget, specBody); err != nil {
+			return plan{}, err
+		}
+		if form.code != "" {
+			codeTarget, err := safeTarget(roots.forms, filepath.Join("code", form.name+".bas"))
+			if err != nil {
+				return plan{}, err
+			}
+			if err := addPlannedFile(&p, seenPaths, desired, form.name, codeTarget, []byte(form.code)); err != nil {
+				return plan{}, err
+			}
+		}
+		p.result.Modules.Form++
+	}
+
+	managedRoots := []struct {
 		path string
 		exts map[string]bool
 	}{
 		{roots.modules, map[string]bool{".bas": true}},
 		{roots.classes, map[string]bool{".cls": true}},
 		{roots.workbook, map[string]bool{".bas": true, ".cls": true}},
-	} {
+	}
+	if strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+		managedRoots = append(managedRoots,
+			struct {
+				path string
+				exts map[string]bool
+			}{filepath.Join(roots.forms, "specs"), map[string]bool{".yaml": true, ".yml": true, ".json": true}},
+			struct {
+				path string
+				exts map[string]bool
+			}{filepath.Join(roots.forms, "code"), map[string]bool{".bas": true}},
+		)
+	}
+	for _, managedRoot := range managedRoots {
 		existing, err := managedFiles(managedRoot.path, managedRoot.exts)
 		if err != nil {
 			return plan{}, err
@@ -333,6 +406,119 @@ func buildProjectPlan(root string, cfg config.Config, workbookPath string, proje
 	}
 	p.result.Removed = append(p.result.Removed, p.stale...)
 	return p, nil
+}
+
+func addPlannedFile(p *plan, seenPaths, desired map[string]string, component, target string, body []byte) error {
+	pathKey := strings.ToLower(filepath.Clean(target))
+	if prior, ok := seenPaths[pathKey]; ok {
+		return fmt.Errorf("%w: %s and %s resolve to the same source path", ErrUnsafeSourcePath, prior, component)
+	}
+	seenPaths[pathKey] = component
+	desired[pathKey] = target
+	p.files = append(p.files, plannedFile{path: target, body: body})
+	return nil
+}
+
+func extractForms(inspection *inspectedProject, cfg config.Config) ([]extractedForm, error) {
+	formModules := make([]vbaproject.Module, 0)
+	for _, module := range inspection.project.Modules {
+		if module.Type == vbaproject.ModuleForm {
+			formModules = append(formModules, module)
+		}
+	}
+	storages := oforms.DiscoverForms(inspection.container)
+	if len(formModules) == 0 && len(storages) == 0 {
+		return nil, nil
+	}
+	if !strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+		return nil, fmt.Errorf("%w: configured code_source %q", ErrUserFormCodeSourceUnsupported, cfg.UserForm.CodeSource)
+	}
+
+	storageByName := make(map[string]string, len(storages))
+	for _, storage := range storages {
+		key := strings.ToLower(storage)
+		if prior, exists := storageByName[key]; exists {
+			return nil, fmt.Errorf("%w: duplicate Designer storages %q and %q", ErrUserFormIdentityMismatch, prior, storage)
+		}
+		storageByName[key] = storage
+	}
+
+	formsByName := make(map[string]extractedForm, len(formModules))
+	for _, module := range formModules {
+		storageIdentity := module.StreamName
+		if storageIdentity == "" {
+			storageIdentity = module.Name
+		}
+		storage, ok := storageByName[strings.ToLower(storageIdentity)]
+		if !ok {
+			return nil, fmt.Errorf("%w: form module %q has no Designer storage %q", ErrUserFormIdentityMismatch, module.Name, storageIdentity)
+		}
+		if !strings.EqualFold(module.Name, storage) {
+			return nil, fmt.Errorf("%w: form module %q maps to Designer storage %q", ErrUserFormIdentityMismatch, module.Name, storage)
+		}
+		delete(storageByName, strings.ToLower(storageIdentity))
+
+		parsed, err := oforms.ReadForm(inspection.container, storage, inspection.project.Props.CodePage)
+		if err != nil {
+			return nil, fmt.Errorf("%w: form %q: %v", ErrUserFormDesignerMalformed, module.Name, err)
+		}
+		spec, err := projection.Project(parsed)
+		if err != nil {
+			return nil, fmt.Errorf("%w: form %q: %v", ErrUserFormDesignerUnsupported, module.Name, err)
+		}
+		spec.Form.Name = module.Name
+		spec.Warnings = append(spec.Warnings, forms.FormSpecWarning{
+			Code:    forms.CompatibilityArtifactUnsynchronizedWarningCode,
+			Message: "Compatibility .frm/.frx artifacts were not generated by pull --backend file and must not be used as Designer authority.",
+		})
+		spec = forms.NormalizeFormSpec(spec)
+		code, err := exportFormCode(module)
+		if err != nil {
+			return nil, fmt.Errorf("%w: form %q code: %v", ErrUserFormIdentityMismatch, module.Name, err)
+		}
+		if cfg.VBA.LineNumbers.Enabled && code != "" {
+			code, err = removeGeneratedLineNumbers(code)
+			if err != nil {
+				return nil, err
+			}
+		}
+		key := strings.ToLower(module.Name)
+		if _, exists := formsByName[key]; exists {
+			return nil, fmt.Errorf("%w: duplicate form module %q", ErrUserFormIdentityMismatch, module.Name)
+		}
+		formsByName[key] = extractedForm{name: module.Name, code: code, spec: spec}
+	}
+	if len(storageByName) > 0 {
+		return nil, fmt.Errorf("%w: Designer storage %q has no form module", ErrUserFormIdentityMismatch, slices.Sorted(maps.Values(storageByName))[0])
+	}
+	result := make([]extractedForm, 0, len(formsByName))
+	for _, key := range slices.Sorted(maps.Keys(formsByName)) {
+		result = append(result, formsByName[key])
+	}
+	return result, nil
+}
+
+func exportFormCode(module vbaproject.Module) (string, error) {
+	source := strings.ReplaceAll(strings.ReplaceAll(module.Source, "\r\n", "\n"), "\r", "\n")
+	if err := vbaproject.ValidateModuleIdentity(module.Name, source); err != nil {
+		return "", err
+	}
+	lines := strings.Split(source, "\n")
+	start := 0
+	for start < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[start]), "Attribute VB_") {
+		start++
+	}
+	for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+		start++
+	}
+	code := strings.TrimRight(strings.Join(lines[start:], "\n"), "\n")
+	if code == "" {
+		return "", nil
+	}
+	if !utf8.ValidString(code) {
+		return "", fmt.Errorf("code-behind is not valid UTF-8")
+	}
+	return code + "\n", nil
 }
 
 func readVBAProject(workbookPath string) ([]byte, error) {

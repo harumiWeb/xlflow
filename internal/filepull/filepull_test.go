@@ -13,6 +13,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 func TestPullExtractsSupportedModulesAndReconcilesManagedFiles(t *testing.T) {
@@ -71,25 +72,166 @@ func TestPullExtractsSupportedModulesAndReconcilesManagedFiles(t *testing.T) {
 	}
 }
 
-func TestPullRejectsUserFormsBeforeMutation(t *testing.T) {
+func TestPullExtractsUserFormSidecarsAndSpecs(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, readFixture(t, "p4_form.bin"))
+	result, err := Pull(root, testConfig(), workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Modules.Form != 1 {
+		t.Fatalf("form count = %d, want 1", result.Modules.Form)
+	}
+	codePath := filepath.Join(root, "src", "forms", "code", "UserForm1.bas")
+	code, err := os.ReadFile(codePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(code), "Attribute VB_") || !bytes.HasSuffix(code, []byte("\n")) {
+		t.Fatalf("unexpected code sidecar:\n%s", code)
+	}
+	specPath := filepath.Join(root, "src", "forms", "specs", "UserForm1.yaml")
+	specBody, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"kind: xlflow.userform", "name: UserForm1", "controls:", forms.CompatibilityArtifactUnsynchronizedWarningCode} {
+		if !bytes.Contains(specBody, []byte(want)) {
+			t.Fatalf("spec missing %q:\n%s", want, specBody)
+		}
+	}
+}
+
+func TestPullExtractsNestedUserFormAndReconcilesManagedArtifacts(t *testing.T) {
+	root := t.TempDir()
+	formsRoot := filepath.Join(root, "src", "forms")
+	for path, body := range map[string]string{
+		filepath.Join(formsRoot, "specs", "OldForm.json"):   "stale",
+		filepath.Join(formsRoot, "specs", "UserForm1.json"): "stale format",
+		filepath.Join(formsRoot, "code", "OldForm.bas"):     "stale",
+		filepath.Join(formsRoot, "Keep.frm"):                "generated compatibility artifact",
+		filepath.Join(formsRoot, "specs", "README.md"):      "unmanaged",
+	} {
+		writeTestFile(t, path, body)
+	}
+	workbook := writeWorkbook(t, root, readFixture(t, "p6_nested_form.bin"))
+	result, err := Pull(root, testConfig(), workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Modules.Form != 1 {
+		t.Fatalf("form count = %d, want 1", result.Modules.Form)
+	}
+	specPath := filepath.Join(formsRoot, "specs", "UserForm1.yaml")
+	specBody, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"type: Frame", "type: MultiPage", "parentId:"} {
+		if !bytes.Contains(specBody, []byte(want)) {
+			t.Fatalf("nested spec missing %q:\n%s", want, specBody)
+		}
+	}
+	for _, stale := range []string{
+		filepath.Join(formsRoot, "specs", "OldForm.json"),
+		filepath.Join(formsRoot, "specs", "UserForm1.json"),
+		filepath.Join(formsRoot, "code", "OldForm.bas"),
+	} {
+		if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stale managed form artifact remains: %s: %v", stale, err)
+		}
+	}
+	for _, kept := range []string{filepath.Join(formsRoot, "Keep.frm"), filepath.Join(formsRoot, "specs", "README.md")} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Fatalf("unmanaged form artifact changed: %s: %v", kept, err)
+		}
+	}
+}
+
+func TestPullRejectsFrmUserFormBeforeMutation(t *testing.T) {
 	root := t.TempDir()
 	existing := filepath.Join(root, "src", "modules", "Existing.bas")
 	writeTestFile(t, existing, "keep")
 	workbook := writeWorkbook(t, root, readFixture(t, "p4_form.bin"))
-	_, err := Pull(root, testConfig(), workbook)
-	if !errors.Is(err, ErrUserFormUnsupported) {
+	cfg := testConfig()
+	cfg.UserForm.CodeSource = "frm"
+	_, err := Pull(root, cfg, workbook)
+	if !errors.Is(err, ErrUserFormCodeSourceUnsupported) {
 		t.Fatalf("error = %v", err)
 	}
 	body, readErr := os.ReadFile(existing)
 	if readErr != nil || string(body) != "keep" {
-		t.Fatalf("source mutated after rejected form: %q, %v", body, readErr)
+		t.Fatalf("source mutated after rejected frm mode: %q, %v", body, readErr)
+	}
+}
+
+func TestPullFrmWithoutUserFormsDoesNotManageSidecars(t *testing.T) {
+	root := t.TempDir()
+	existingSpec := filepath.Join(root, "src", "forms", "specs", "Existing.yaml")
+	existingCode := filepath.Join(root, "src", "forms", "code", "Existing.bas")
+	writeTestFile(t, existingSpec, "keep spec")
+	writeTestFile(t, existingCode, "keep code")
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	cfg := testConfig()
+	cfg.UserForm.CodeSource = "frm"
+
+	if _, err := Pull(root, cfg, workbook); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{existingSpec: "keep spec", existingCode: "keep code"} {
+		body, err := os.ReadFile(path)
+		if err != nil || string(body) != want {
+			t.Fatalf("frm sidecar changed: %s = %q, %v", path, body, err)
+		}
+	}
+}
+
+func TestPullRejectsMalformedUserFormBeforeMutation(t *testing.T) {
+	root := t.TempDir()
+	existing := filepath.Join(root, "src", "modules", "Existing.bas")
+	writeTestFile(t, existing, "keep")
+	project, err := vbaproject.Read(readFixture(t, "p4_form.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.RawStreams["UserForm1/o"] = nil
+	malformed, err := vbaproject.Write(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbook := writeWorkbook(t, root, malformed)
+	_, err = Pull(root, testConfig(), workbook)
+	if !errors.Is(err, ErrUserFormDesignerMalformed) {
+		t.Fatalf("error = %v", err)
+	}
+	body, readErr := os.ReadFile(existing)
+	if readErr != nil || string(body) != "keep" {
+		t.Fatalf("source mutated after malformed Designer: %q, %v", body, readErr)
+	}
+}
+
+func TestExtractFormsRejectsUserFormIdentityMismatch(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, readFixture(t, "p4_form.bin"))
+	inspection, err := inspectProject(workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range inspection.project.Modules {
+		if inspection.project.Modules[i].Type == vbaproject.ModuleForm {
+			inspection.project.Modules[i].Name = "RenamedForm"
+		}
+	}
+	_, err = extractForms(inspection, testConfig())
+	if !errors.Is(err, ErrUserFormIdentityMismatch) {
+		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestProbeInspectsOnlyWorkbookCapabilityWithoutPublishing(t *testing.T) {
 	root := t.TempDir()
 	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
-	result, err := Probe(workbook)
+	result, err := Probe(workbook, testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,19 +243,28 @@ func TestProbeInspectsOnlyWorkbookCapabilityWithoutPublishing(t *testing.T) {
 	}
 
 	formWorkbook := writeWorkbook(t, root, readFixture(t, "p4_form.bin"))
-	formResult, err := Probe(formWorkbook)
+	formResult, err := Probe(formWorkbook, testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if formResult.Supported || formResult.Reason != "userform" || !formResult.HasForms {
+	if !formResult.Supported || formResult.Reason != "supported" || !formResult.HasForms {
 		t.Fatalf("form probe result = %+v", formResult)
+	}
+	frmConfig := testConfig()
+	frmConfig.UserForm.CodeSource = "frm"
+	frmResult, err := Probe(formWorkbook, frmConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frmResult.Supported || frmResult.Reason != "userform_code_source" || !frmResult.HasForms {
+		t.Fatalf("frm probe result = %+v", frmResult)
 	}
 }
 
 func TestProbeLeavesSourceTreeValidationToPullContext(t *testing.T) {
 	root := t.TempDir()
 	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
-	result, err := Probe(workbook)
+	result, err := Probe(workbook, testConfig())
 	if err != nil || !result.Supported {
 		t.Fatalf("workbook capability probe = %+v, %v", result, err)
 	}
@@ -130,7 +281,7 @@ func BenchmarkProbeClosedWorkbook(b *testing.B) {
 	workbook := writeWorkbook(b, root, readFixture(b, "p1_compiled.bin"))
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := Probe(workbook); err != nil {
+		if _, err := Probe(workbook, testConfig()); err != nil {
 			b.Fatal(err)
 		}
 	}
