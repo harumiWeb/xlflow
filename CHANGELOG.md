@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added first-UserForm Microsoft Forms reference creation and pure-Go
+  `pack --blank` generation from canonical UserForm specs and code. Empty
+  forms and eleven common controls need no `.frx` or Excel at build time.
+  Existing Forms and unrelated reference records remain byte-preserved;
+  template Designer generation remains a separate follow-up.
+
 - Added the internal pure-Go generation foundation for new empty UserForms
   and eleven common MSForms controls, with validated Designer streams,
   generated code-behind attributes, and project addition using an existing
@@ -11,8 +17,8 @@ All notable changes to xlflow will be documented in this file.
   through `form.build.clientWidth` / `clientHeight`; Excel-backed form build
   rejects these inputs before mutation, including direct bridge requests.
   CONTROL reference admission checks the original TypeLib GUID instead of
-  trusting twiddled LIBIDs. First-Forms reference creation and
-  blank/template `pack` CLI integration remain separate follow-ups.
+  trusting twiddled LIBIDs. Template `pack` Designer integration remains
+  a separate follow-up.
 
 - Added an internal pure-Go compiler for supported FormSpec edits to existing
   UserForm Designer records, with atomic failure, structured edit errors,

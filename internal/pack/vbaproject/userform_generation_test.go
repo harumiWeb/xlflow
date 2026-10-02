@@ -171,12 +171,12 @@ func TestWithNewUserFormRejectsWithoutMutation(t *testing.T) {
 		code  string
 	}{
 		{
-			name: "forms reference required",
+			name: "forms reference added",
 			book: "p2_refs",
 			setup: func(project *Project, _ *oforms.Form, _ *Module) {
 				project.References = append(project.References, Reference{Name: "MSForms"})
 			},
-			code: UserFormFormsReferenceRequired,
+			code: "",
 		},
 		{
 			name: "unrelated reference named MSForms",
@@ -185,7 +185,7 @@ func TestWithNewUserFormRejectsWithoutMutation(t *testing.T) {
 				project.ReferencesRaw = appendReferenceRecord(nil, 0x0016, []byte("MSForms"))
 				project.ReferencesRaw = appendReferenceRecord(project.ReferencesRaw, 0x002F, []byte("1\x00\x00\x00*\\G{00000000-0000-0000-0000-000000000000}"))
 			},
-			code: UserFormFormsReferenceRequired,
+			code: UserFormGenerationInvalid,
 		},
 		{
 			name: "Forms twiddled LIBID with foreign OriginalTypeLib",
@@ -196,7 +196,7 @@ func TestWithNewUserFormRejectsWithoutMutation(t *testing.T) {
 				project.ReferencesRaw = appendReferenceRecord(project.ReferencesRaw, 0x002F, sizedReferencePayload(libid, 6))
 				project.ReferencesRaw = appendReferenceRecord(project.ReferencesRaw, 0x0030, sizedReferencePayload(libid, 26))
 			},
-			code: UserFormFormsReferenceRequired,
+			code: "",
 		},
 		{
 			name: "duplicate component GUIDs",
@@ -272,7 +272,16 @@ func TestWithNewUserFormRejectsWithoutMutation(t *testing.T) {
 				test.setup(project, form, &module)
 			}
 			before := cloneProject(project)
-			_, err = WithNewUserForm(project, form, module)
+			result, err := WithNewUserForm(project, form, module)
+			if test.code == "" {
+				if err != nil || !hasMSFormsReference(result) {
+					t.Fatalf("Forms addition failed: %v", err)
+				}
+				if !reflect.DeepEqual(project, before) {
+					t.Fatal("addition mutated input")
+				}
+				return
+			}
 			detail, ok := errors.AsType[*UserFormGenerationError](err)
 			if !ok || detail.Code != test.code {
 				t.Fatalf("error = %v, want code %q", err, test.code)

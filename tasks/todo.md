@@ -500,3 +500,11 @@ source; all valid. Plan:
 - [x] Verify focused Go/.NET/PowerShell tests, lint/docs, and staged formatting.
 - [x] Rerun the fresh Excel generation gate after the concurrent session finishes: Delay/ScrollBar ProportionalThumb, both forms, save/reopen, sentinel, and normalized binary readback passed; owned PID 204972 cleanup confirmed. Evidence and command recorded in the fixture README.
 - [x] Push the fixes (`4e735e72`) and reply to the three review comments with focused regression and fresh Excel evidence; verify the updated PR body on GitHub.
+
+# Issue #886
+
+- [x] Parse complete references and ensure first-UserForm Forms reference atomically.
+- [x] Enable canonical spec/code discovery and common-control generation in blank pack.
+- [x] Cover reference preservation, code modes, capability failures and publication safety.
+- [x] Validate generated artifacts in Excel, retain fixtures and run release gates.
+- [x] Update contracts/docs, run checks and independent review. Reference reviewer found no confirmed defects and independently passed pack/fuzz tests; blank-input reviewer found no confirmed defects. Case-variant directory spelling remains an unconfirmed follow-up, not a changed contract. Evidence: `internal/pack/vbaproject/testdata/forms-reference-excel/README.md`.

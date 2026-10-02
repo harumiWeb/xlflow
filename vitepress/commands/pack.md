@@ -9,13 +9,21 @@ xlflow pack --out build/Release.xlsm
 xlflow pack --blank --out build/Release.xlsm
 ```
 
-`--blank` is mutually exclusive with `--template`. It requires `ThisWorkbook.bas` and `Sheet1.bas`, rejects UserForms and additional document modules, and uses `[pack.blank].code_page` for project text encoding (default `1252`; use `932` for Japanese). VBA project LCID records always use the MS-OVBA-required value `0x00000409`.
+`--blank` is mutually exclusive with `--template`. It requires `ThisWorkbook.bas` and `Sheet1.bas`, rejects additional document modules, and uses `[pack.blank].code_page` for project text encoding (default `1252`; use `932` for Japanese). VBA project LCID records always use the MS-OVBA-required value `0x00000409`.
+
+Blank mode can create empty UserForms and common controls from canonical
+`src/forms/specs/<Name>.yaml` (or JSON/YML) specs. In the default sidecar mode,
+code comes from `src/forms/code/<Name>.bas`, falling back to matching `.frm`
+code or empty code. In `frm` mode, matching `.frm` code is required. Designer
+state always comes from the spec; `.frx` is not required. Forms references are
+added automatically. Frame/MultiPage, custom ActiveX, embedded pictures and
+unsupported persisted list state fail before publication.
 
 `pack` is the stable, pure-Go release path. It is cross-platform and
 Excel-independent: standard/class topology comes from source, workbook and
 document topology comes from the template, and existing UserForm designers are
-preserved while their code-behind can be updated. Creating a new UserForm is
-not supported. `pack` does not compile or execute VBA, so successful JSON keeps
+preserved while their code-behind can be updated. Creating a new UserForm in
+template mode remains unsupported. `pack` does not compile or execute VBA, so successful JSON keeps
 `pack.backend = "pure-go"` and `pack.vbe_validation = "not_performed"`.
 
 It validates every managed `.bas`, `.cls`, and `.frm` file as UTF-8 without BOM before source planning or binary generation. Invalid input returns `source_encoding_invalid`; run `xlflow encoding check`, then use `xlflow encoding convert --from cp932` only for eligible CP932 source. Open the resulting artifact in real Excel to compile/run a sentinel macro before publishing. See the repository's [pack specification](https://github.com/harumiWeb/xlflow/blob/main/docs/specs/pack-command.md) for release-gate details.

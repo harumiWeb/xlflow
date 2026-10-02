@@ -1,0 +1,656 @@
+{
+  "stage": "first-form",
+  "workbook": "C:\\Users\\HARUMI\\orca\\workspaces\\xlflow\\acornworm\\tmp_workspaces\\issue-886-reference-observe-20261003-r1\\first-form.xlsm",
+  "beforeSave": {
+    "forms": [
+      {
+        "name": "GenerationBaseline",
+        "form": {
+          "name": "GenerationBaseline",
+          "caption": "issue883-generation-baseline",
+          "width": null,
+          "height": null
+        },
+        "root": {
+          "insideWidth": 229.19999694824219,
+          "insideHeight": 147.25
+        },
+        "controls": [
+          {
+            "name": "LabelMain",
+            "type": "Label",
+            "left": 6,
+            "top": 6,
+            "width": 72,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 0,
+            "caption": null,
+            "specialEffect": 0,
+            "borderStyle": 0,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630,
+              "BorderColor": -2147483642
+            }
+          },
+          {
+            "name": "TextBoxMain",
+            "type": "TextBox",
+            "left": 114,
+            "top": 6,
+            "width": 120,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 1,
+            "text": null,
+            "value": null,
+            "specialEffect": 2,
+            "borderStyle": 0,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "MaxLength": 0,
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483643,
+              "ForeColor": -2147483640,
+              "BorderColor": -2147483642
+            }
+          },
+          {
+            "name": "CommandButtonMain",
+            "type": "CommandButton",
+            "left": 6,
+            "top": 30,
+            "width": 72,
+            "height": 24,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 2,
+            "caption": null,
+            "value": false,
+            "text": false,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630
+            }
+          },
+          {
+            "name": "CheckBoxMain",
+            "type": "CheckBox",
+            "left": 114,
+            "top": 30,
+            "width": 72,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 3,
+            "caption": null,
+            "value": false,
+            "text": false,
+            "specialEffect": 2,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "GroupName": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630
+            }
+          },
+          {
+            "name": "OptionButtonMain",
+            "type": "OptionButton",
+            "left": 6,
+            "top": 54,
+            "width": 72,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 4,
+            "caption": null,
+            "value": false,
+            "text": false,
+            "specialEffect": 2,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "GroupName": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630
+            }
+          },
+          {
+            "name": "ToggleButtonMain",
+            "type": "ToggleButton",
+            "left": 114,
+            "top": 54,
+            "width": 72,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 5,
+            "caption": null,
+            "value": false,
+            "text": false,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630
+            }
+          },
+          {
+            "name": "ComboBoxMain",
+            "type": "ComboBox",
+            "left": 6,
+            "top": 78,
+            "width": 120,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 6,
+            "text": null,
+            "value": null,
+            "columnCount": 1,
+            "boundColumn": 1,
+            "listRows": 8,
+            "matchEntry": 1,
+            "style": 0,
+            "specialEffect": 2,
+            "borderStyle": 0,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "MaxLength": 0,
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483643,
+              "ForeColor": -2147483640,
+              "BorderColor": -2147483642
+            }
+          },
+          {
+            "name": "ListBoxMain",
+            "type": "ListBox",
+            "left": 6,
+            "top": 102,
+            "width": 120,
+            "height": 72,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 7,
+            "text": null,
+            "value": null,
+            "columnCount": 1,
+            "boundColumn": 1,
+            "matchEntry": 0,
+            "specialEffect": 2,
+            "borderStyle": 0,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483643,
+              "ForeColor": -2147483640,
+              "BorderColor": -2147483642
+            }
+          },
+          {
+            "name": "SpinButtonMain",
+            "type": "SpinButton",
+            "left": 216,
+            "top": 6,
+            "width": 18,
+            "height": 36,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 8,
+            "value": 0,
+            "text": 0,
+            "min": 0,
+            "max": 100,
+            "smallChange": 1,
+            "orientation": -1,
+            "delay": 50,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630,
+              "Delay": 50
+            }
+          },
+          {
+            "name": "ScrollBarMain",
+            "type": "ScrollBar",
+            "left": 114,
+            "top": 78,
+            "width": 120,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 9,
+            "value": 0,
+            "text": 0,
+            "min": 0,
+            "max": 32767,
+            "smallChange": 1,
+            "largeChange": 1,
+            "orientation": -1,
+            "delay": 50,
+            "proportionalThumb": true,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630,
+              "Delay": 50,
+              "ProportionalThumb": true
+            }
+          },
+          {
+            "name": "ImageMain",
+            "type": "Image",
+            "left": 162,
+            "top": 108,
+            "width": 72,
+            "height": 72,
+            "enabled": true,
+            "visible": true,
+            "pictureSizeMode": 0,
+            "pictureAlignment": 2,
+            "specialEffect": 0,
+            "borderStyle": 1,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "BorderColor": -2147483642
+            }
+          }
+        ]
+      }
+    ],
+    "references": [
+      {
+        "name": "VBA",
+        "guid": "{000204EF-0000-0000-C000-000000000046}",
+        "major": 4,
+        "minor": 2,
+        "isBroken": false
+      },
+      {
+        "name": "Excel",
+        "guid": "{00020813-0000-0000-C000-000000000046}",
+        "major": 1,
+        "minor": 9,
+        "isBroken": false
+      },
+      {
+        "name": "stdole",
+        "guid": "{00020430-0000-0000-C000-000000000046}",
+        "major": 2,
+        "minor": 0,
+        "isBroken": false
+      },
+      {
+        "name": "Office",
+        "guid": "{2DF8D04C-5BFA-101B-BDE5-00AA0044DE52}",
+        "major": 2,
+        "minor": 8,
+        "isBroken": false
+      },
+      {
+        "name": "MSForms",
+        "guid": "{0D452EE1-E08F-101A-852E-02608C4D0BB4}",
+        "major": 2,
+        "minor": 0,
+        "isBroken": false
+      }
+    ]
+  },
+  "reopened": {
+    "forms": [
+      {
+        "name": "GenerationBaseline",
+        "form": {
+          "name": "GenerationBaseline",
+          "caption": "issue883-generation-baseline",
+          "width": null,
+          "height": null
+        },
+        "root": {
+          "insideWidth": 229.19999694824219,
+          "insideHeight": 147.25
+        },
+        "controls": [
+          {
+            "name": "LabelMain",
+            "type": "Label",
+            "left": 6,
+            "top": 6,
+            "width": 72,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 0,
+            "caption": null,
+            "specialEffect": 0,
+            "borderStyle": 0,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630,
+              "BorderColor": -2147483642
+            }
+          },
+          {
+            "name": "TextBoxMain",
+            "type": "TextBox",
+            "left": 114,
+            "top": 6,
+            "width": 120,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 1,
+            "text": null,
+            "value": null,
+            "specialEffect": 2,
+            "borderStyle": 0,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "MaxLength": 0,
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483643,
+              "ForeColor": -2147483640,
+              "BorderColor": -2147483642
+            }
+          },
+          {
+            "name": "CommandButtonMain",
+            "type": "CommandButton",
+            "left": 6,
+            "top": 30,
+            "width": 72,
+            "height": 24,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 2,
+            "caption": null,
+            "value": false,
+            "text": false,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630
+            }
+          },
+          {
+            "name": "CheckBoxMain",
+            "type": "CheckBox",
+            "left": 114,
+            "top": 30,
+            "width": 72,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 3,
+            "caption": null,
+            "value": false,
+            "text": false,
+            "specialEffect": 2,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "GroupName": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630
+            }
+          },
+          {
+            "name": "OptionButtonMain",
+            "type": "OptionButton",
+            "left": 6,
+            "top": 54,
+            "width": 72,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 4,
+            "caption": null,
+            "value": false,
+            "text": false,
+            "specialEffect": 2,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "GroupName": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630
+            }
+          },
+          {
+            "name": "ToggleButtonMain",
+            "type": "ToggleButton",
+            "left": 114,
+            "top": 54,
+            "width": 72,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 5,
+            "caption": null,
+            "value": false,
+            "text": false,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630
+            }
+          },
+          {
+            "name": "ComboBoxMain",
+            "type": "ComboBox",
+            "left": 6,
+            "top": 78,
+            "width": 120,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 6,
+            "text": null,
+            "value": null,
+            "columnCount": 1,
+            "boundColumn": 1,
+            "listRows": 8,
+            "matchEntry": 1,
+            "style": 0,
+            "specialEffect": 2,
+            "borderStyle": 0,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "MaxLength": 0,
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483643,
+              "ForeColor": -2147483640,
+              "BorderColor": -2147483642
+            }
+          },
+          {
+            "name": "ListBoxMain",
+            "type": "ListBox",
+            "left": 6,
+            "top": 102,
+            "width": 120,
+            "height": 72,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 7,
+            "text": null,
+            "value": null,
+            "columnCount": 1,
+            "boundColumn": 1,
+            "matchEntry": 0,
+            "specialEffect": 2,
+            "borderStyle": 0,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483643,
+              "ForeColor": -2147483640,
+              "BorderColor": -2147483642
+            }
+          },
+          {
+            "name": "SpinButtonMain",
+            "type": "SpinButton",
+            "left": 216,
+            "top": 6,
+            "width": 18,
+            "height": 36,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 8,
+            "value": 0,
+            "text": 0,
+            "min": 0,
+            "max": 100,
+            "smallChange": 1,
+            "orientation": -1,
+            "delay": 50,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630,
+              "Delay": 50
+            }
+          },
+          {
+            "name": "ScrollBarMain",
+            "type": "ScrollBar",
+            "left": 114,
+            "top": 78,
+            "width": 120,
+            "height": 18,
+            "enabled": true,
+            "visible": true,
+            "tabIndex": 9,
+            "value": 0,
+            "text": 0,
+            "min": 0,
+            "max": 32767,
+            "smallChange": 1,
+            "largeChange": 1,
+            "orientation": -1,
+            "delay": 50,
+            "proportionalThumb": true,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "ForeColor": -2147483630,
+              "Delay": 50,
+              "ProportionalThumb": true
+            }
+          },
+          {
+            "name": "ImageMain",
+            "type": "Image",
+            "left": 162,
+            "top": 108,
+            "width": 72,
+            "height": 72,
+            "enabled": true,
+            "visible": true,
+            "pictureSizeMode": 0,
+            "pictureAlignment": 2,
+            "specialEffect": 0,
+            "borderStyle": 1,
+            "autoSize": false,
+            "backStyle": 1,
+            "properties": {
+              "Tag": null,
+              "ControlTipText": null,
+              "BackColor": -2147483633,
+              "BorderColor": -2147483642
+            }
+          }
+        ]
+      }
+    ],
+    "references": [
+      {
+        "name": "VBA",
+        "guid": "{000204EF-0000-0000-C000-000000000046}",
+        "major": 4,
+        "minor": 2,
+        "isBroken": false
+      },
+      {
+        "name": "Excel",
+        "guid": "{00020813-0000-0000-C000-000000000046}",
+        "major": 1,
+        "minor": 9,
+        "isBroken": false
+      },
+      {
+        "name": "stdole",
+        "guid": "{00020430-0000-0000-C000-000000000046}",
+        "major": 2,
+        "minor": 0,
+        "isBroken": false
+      },
+      {
+        "name": "Office",
+        "guid": "{2DF8D04C-5BFA-101B-BDE5-00AA0044DE52}",
+        "major": 2,
+        "minor": 8,
+        "isBroken": false
+      },
+      {
+        "name": "MSForms",
+        "guid": "{0D452EE1-E08F-101A-852E-02608C4D0BB4}",
+        "major": 2,
+        "minor": 0,
+        "isBroken": false
+      }
+    ]
+  }
+}

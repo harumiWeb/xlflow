@@ -6,12 +6,16 @@ package pack
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/compiler"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -28,9 +32,8 @@ const (
 	// ModuleTypeDocument is an Excel host document module, such as ThisWorkbook or a sheet module.
 	ModuleTypeDocument ModuleType = "document"
 
-	// ModuleTypeForm is a UserForm module. Its code-behind is updated from a .frm when the form
-	// already exists in the template; the form's designer storage is carried verbatim and never
-	// authored, so creating a new form is unsupported.
+	// ModuleTypeForm updates existing template code or creates a blank-mode
+	// Designer from canonical FormSpec.
 	ModuleTypeForm ModuleType = "form"
 )
 
@@ -40,13 +43,16 @@ const (
 // and class modules is authoritative: missing template modules are removed and new modules are added.
 // Document modules are replaced by exact module name match against an existing template document
 // module. A UserForm's code-behind is replaced when the form already exists in the template; its
-// designer layout is preserved, not authored, and creating a new form is unsupported.
+// designer layout is preserved. Blank mode creates new Designers from FormSpec
+// and interprets Source as code-only text for those forms.
 type SourceModule struct {
 	SourcePath   string
 	RelatedPaths []string
 	Name         string
 	Type         ModuleType
 	Source       string
+	// FormSpec is authoring intent used only for new blank-mode Designers.
+	FormSpec *spec.FormSpec
 }
 
 // PackMeta summarizes the modules and opaque streams handled during pack.
@@ -73,15 +79,31 @@ func BuildBlankWorkbook(sources []SourceModule, opts BlankOptions) ([]byte, Pack
 		opts.CodePage = DefaultBlankCodePage
 	}
 	seenDocuments := map[string]bool{}
+	var codeSources, formSources []SourceModule
+	seenNames := map[string]bool{}
 	for _, source := range sources {
+		key := strings.ToLower(source.Name)
+		if seenNames[key] {
+			return nil, PackMeta{}, fmt.Errorf("%w: duplicate source component %s", ErrAmbiguousLayout, source.Name)
+		}
+		seenNames[key] = true
 		switch source.Type {
 		case ModuleTypeForm:
-			return nil, PackMeta{}, fmt.Errorf("%w: %s", ErrBlankUserFormUnsupported, sourceLabel(source))
+			if source.FormSpec == nil {
+				return nil, PackMeta{}, fmt.Errorf("%w: canonical spec required for %s", ErrBlankUserFormUnsupported, sourceLabel(source))
+			}
+			if source.FormSpec.Form.Name != source.Name {
+				return nil, PackMeta{}, fmt.Errorf("%w: spec/module identity mismatch for %s", ErrAmbiguousLayout, sourceLabel(source))
+			}
+			formSources = append(formSources, source)
 		case ModuleTypeDocument:
 			if source.Name != "ThisWorkbook" && source.Name != "Sheet1" {
 				return nil, PackMeta{}, fmt.Errorf("%w: blank mode only supports document modules ThisWorkbook and Sheet1, got %q", ErrAmbiguousLayout, source.Name)
 			}
 			seenDocuments[source.Name] = true
+		}
+		if source.Type != ModuleTypeForm {
+			codeSources = append(codeSources, source)
 		}
 	}
 	for _, name := range []string{"ThisWorkbook", "Sheet1"} {
@@ -104,13 +126,36 @@ func BuildBlankWorkbook(sources []SourceModule, opts BlankOptions) ([]byte, Pack
 	if err != nil {
 		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 	}
-	meta, err := applySources(project, sources)
+	meta, err := applySources(project, codeSources)
 	if err != nil {
 		return nil, PackMeta{}, err
+	}
+	slices.SortFunc(formSources, func(a, b SourceModule) int { return strings.Compare(a.Name, b.Name) })
+	for _, source := range formSources {
+		form, err := compiler.CompileNew(*source.FormSpec, project.Props.CodePage)
+		if err != nil {
+			category := ErrAmbiguousLayout
+			if detail, ok := errors.AsType[*compiler.Error](err); ok && detail.Code == compiler.GenerationUnsupported {
+				category = ErrUserFormGenerationUnsupported
+			}
+			return nil, PackMeta{}, fmt.Errorf("%w: %s: %v", category, sourceLabel(source), err)
+		}
+		module, err := vbaproject.NewUserFormModule(form, source.Source, project.Props.CodePage)
+		if err != nil {
+			return nil, PackMeta{}, fmt.Errorf("%w: %s: %v", ErrAmbiguousLayout, sourceLabel(source), err)
+		}
+		project, err = vbaproject.WithNewUserForm(project, form, module)
+		if err != nil {
+			return nil, PackMeta{}, fmt.Errorf("%w: %s: %v", ErrAmbiguousLayout, sourceLabel(source), err)
+		}
+		meta.Form++
 	}
 	vbaProject, err := vbaproject.Write(project)
 	if err != nil {
 		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+	}
+	if _, err := vbaproject.Read(vbaProject); err != nil {
+		return nil, PackMeta{}, fmt.Errorf("%w: blank project readback: %v", ErrAmbiguousLayout, err)
 	}
 
 	workbook := excelize.NewFile()

@@ -154,8 +154,8 @@ func TestPackCommandBlankRejectsUserFormArtifacts(t *testing.T) {
 			if err == nil || output.ExitCode(err) != output.ExitValidation {
 				t.Fatalf("err=%v exit=%d, want validation failure", err, output.ExitCode(err))
 			}
-			if got := errorCodeFromJSON(t, stdout); got != "pack_blank_userform_unsupported" {
-				t.Fatalf("error code = %q, want pack_blank_userform_unsupported\n%s", got, stdout)
+			if got := errorCodeFromJSON(t, stdout); got != "pack_ambiguous_layout" {
+				t.Fatalf("error code = %q, want pack_ambiguous_layout\n%s", got, stdout)
 			}
 		})
 	}

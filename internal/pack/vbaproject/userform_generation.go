@@ -107,8 +107,8 @@ func NewUserFormModule(designer *oforms.Form, codeOnly string, codePage uint16, 
 
 // WithNewUserForm returns a project containing one new UserForm Designer and
 // its code-behind module. All validation happens before the input project or
-// form is touched. The project must already contain the MSForms reference;
-// reference mutation belongs to the separate reference-mutation boundary.
+// form is touched. A missing MSForms reference is added atomically through
+// the explicit reference-mutation boundary.
 func WithNewUserForm(p *Project, form *oforms.Form, module Module) (*Project, error) {
 	if p == nil {
 		return nil, userFormGenerationError(UserFormGenerationInvalid, "", "project is nil", nil)
@@ -118,9 +118,6 @@ func WithNewUserForm(p *Project, form *oforms.Form, module Module) (*Project, er
 	}
 	if p.Protection.IsProtected {
 		return nil, userFormGenerationError(UserFormGenerationInvalid, form.Name, "protected projects cannot add UserForms", nil)
-	}
-	if !hasMSFormsReference(p) {
-		return nil, userFormGenerationError(UserFormFormsReferenceRequired, form.Name, "project does not contain an MSForms reference", nil)
 	}
 	if err := validateNewUserFormInputs(p, form, module); err != nil {
 		return nil, err
@@ -138,7 +135,10 @@ func WithNewUserForm(p *Project, form *oforms.Form, module Module) (*Project, er
 		return nil, userFormGenerationError(UserFormGenerationInvalid, form.Name, "clone Designer for project result", err)
 	}
 
-	result := cloneProject(p)
+	result, err := EnsureMSFormsReference(p)
+	if err != nil {
+		return nil, userFormGenerationError(UserFormGenerationInvalid, form.Name, "ensure Forms reference", err)
+	}
 	result.ProjectStreamRaw = projectStream
 	result.Modules = append(result.Modules, module)
 	result.Forms = append(result.Forms, clonedForm)

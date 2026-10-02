@@ -40,6 +40,7 @@ type Component struct {
 	Type         ComponentType
 	Source       []byte
 	Related      []Artifact
+	FormSpec     *forms.FormSpec
 }
 
 func (c Component) RelatedPaths() []string {
@@ -64,6 +65,8 @@ type Options struct {
 	Config                config.Config
 	RestrictToRoot        bool
 	ValidateFormArtifacts bool
+	// CanonicalFormSpecs is reserved for blank pack: specs own Designers.
+	CanonicalFormSpecs bool
 	// AllowLooseFormModules tolerates .bas/.cls files directly under the forms
 	// root (outside the reserved code/ and specs/ directories) instead of
 	// rejecting them as unsupported UserForm sources. The Excel bridge imports
@@ -199,6 +202,9 @@ func collectForms(root string, opts Options) ([]Component, error) {
 		return nil, layoutError("form source root %s is not a directory", displayPath(root, base))
 	}
 
+	if opts.CanonicalFormSpecs {
+		return collectCanonicalForms(root, base, opts)
+	}
 	sidecar := strings.EqualFold(opts.Config.UserForm.CodeSource, "sidecar")
 	if sidecar {
 		issues, validateErr := forms.ValidateUserFormCodeSidecars(base, nil)

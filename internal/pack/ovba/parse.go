@@ -30,6 +30,15 @@ func walkRecords(buf []byte) ([]record, error) {
 			continue
 		}
 		size := uint64(binary.LittleEndian.Uint32(buf[i+2:]))
+		if id == 0x002F || id == 0x0030 {
+			if len(buf)-i < 10 {
+				return nil, fmt.Errorf("ovba: truncated CONTROL length at %d", i)
+			}
+			size = 4 + uint64(binary.LittleEndian.Uint32(buf[i+6:])) + 6
+			if id == 0x0030 {
+				size += 20
+			}
+		}
 		end := uint64(i) + 6 + size
 		if end > uint64(len(buf)) {
 			return nil, fmt.Errorf("ovba: record 0x%04X at offset %d declares %d bytes beyond the stream", id, i, size)
@@ -123,6 +132,10 @@ func ParseDir(plain []byte) (DirInfo, error) {
 				return di, err
 			}
 			di.CodePage = le16(r.payload)
+		case 0x0033, 0x002F, 0x000D, 0x000E:
+			if refStart < 0 {
+				refStart = r.start
+			}
 		case 0x0016: // REFERENCENAME (duplicate names inside REFERENCECONTROL are folded by dedup)
 			if refStart < 0 {
 				refStart = r.start

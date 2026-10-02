@@ -2646,15 +2646,7 @@ func (a *app) packCommand() *cobra.Command {
 			if err := a.runPackSourceEncodingPreflight(cmd.Context(), cfg); err != nil {
 				return err
 			}
-			if blank {
-				// Blank mode rejects every UserForm input. Detect form artifacts
-				// before full layout validation so a malformed artifact reports
-				// pack_blank_userform_unsupported rather than pack_ambiguous_layout.
-				if artifact := blankPackUserFormArtifact(a.cwd, cfg); artifact != "" {
-					return a.writePackEngineFailure(fmt.Errorf("%w: %s", packpkg.ErrBlankUserFormUnsupported, artifact))
-				}
-			}
-			sources, err := collectPackSourceModules(a.cwd, cfg)
+			sources, err := collectPackSourceModulesForMode(a.cwd, cfg, blank)
 			if err != nil {
 				if errors.Is(err, packpkg.ErrAmbiguousLayout) {
 					return a.writePackEngineFailure(err)
@@ -7060,8 +7052,13 @@ func sameCLIPath(a, b string) bool {
 }
 
 func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceModule, error) {
+	return collectPackSourceModulesForMode(root, cfg, false)
+}
+
+func collectPackSourceModulesForMode(root string, cfg config.Config, blank bool) ([]packpkg.SourceModule, error) {
 	components, err := sourceinventory.Discover(sourceinventory.Options{
 		Root: root, Config: cfg, ValidateFormArtifacts: true,
+		CanonicalFormSpecs: blank,
 	})
 	if err != nil {
 		var layoutErr *sourceinventory.LayoutError
@@ -7076,7 +7073,7 @@ func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceM
 	for _, component := range components {
 		typ := packpkg.ModuleType(component.Type)
 		source := string(component.Source)
-		if component.Type == sourceinventory.ComponentForm && strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+		if !blank && component.Type == sourceinventory.ComponentForm && strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
 			for _, artifact := range component.Related {
 				if strings.EqualFold(filepath.Ext(artifact.Path), ".bas") && strings.EqualFold(filepath.Base(artifact.Path), component.Name+".bas") {
 					source = forms.MergeUserFormCodeIntoFRM(source, string(artifact.Source))
@@ -7090,50 +7087,10 @@ func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceM
 			Name:         component.Name,
 			Type:         typ,
 			Source:       source,
+			FormSpec:     component.FormSpec,
 		})
 	}
 	return sources, nil
-}
-
-// blankPackUserFormArtifact reports the first UserForm artifact under the
-// configured forms root, or "" when there is none. Every artifact kind that
-// participates in UserForm inventory counts as form input: .frm/.frx files
-// anywhere under the root plus any file inside the reserved code/ or specs/
-// directories. Blank mode rejects forms before full layout validation so a
-// malformed artifact still surfaces the dedicated blank-mode error instead
-// of pack_ambiguous_layout. Walk failures are deferred to the inventory,
-// which reports missing or unreadable roots with its canonical error.
-func blankPackUserFormArtifact(root string, cfg config.Config) string {
-	formsRoot := workbookArgPath(root, cfg.Src.Forms)
-	if strings.TrimSpace(formsRoot) == "" {
-		return ""
-	}
-	found := ""
-	_ = filepath.WalkDir(formsRoot, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if found != "" {
-			return filepath.SkipAll
-		}
-		if d.IsDir() {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(d.Name()))
-		if ext == ".frm" || ext == ".frx" {
-			found = displayPath(root, path)
-			return filepath.SkipAll
-		}
-		if rel, err := filepath.Rel(formsRoot, path); err == nil {
-			first := strings.SplitN(filepath.ToSlash(rel), "/", 2)[0]
-			if strings.EqualFold(first, "code") || strings.EqualFold(first, "specs") {
-				found = displayPath(root, path)
-				return filepath.SkipAll
-			}
-		}
-		return nil
-	})
-	return found
 }
 
 // packOutputAliasesWorkbook reports whether the --out destination resolves to
