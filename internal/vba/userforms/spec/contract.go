@@ -214,6 +214,10 @@ func newUserFormContract() Contract {
 			"commandbutton": control("CommandButton", "Forms.CommandButton.1", false, typeProperties("caption", "Button caption.")),
 			"checkbox":      control("CheckBox", "Forms.CheckBox.1", false, typeProperties("caption", "CheckBox caption.", "value", "CheckBox checked state or tri-state value.")),
 			"optionbutton":  control("OptionButton", "Forms.OptionButton.1", false, typeProperties("caption", "OptionButton caption.", "value", "OptionButton selected state.")),
+			"togglebutton":  control("ToggleButton", "Forms.ToggleButton.1", false, typeProperties("caption", "ToggleButton caption.", "value", "ToggleButton selected state.")),
+			"spinbutton":    control("SpinButton", "Forms.SpinButton.1", false, integerValueProperties("SpinButton value.")),
+			"scrollbar":     control("ScrollBar", "Forms.ScrollBar.1", false, integerValueProperties("ScrollBar value.")),
+			"image":         control("Image", "Forms.Image.1", false, map[string]PropertyContract{}),
 			"frame":         control("Frame", "Forms.Frame.1", true, typeProperties("caption", "Frame caption.")),
 		},
 	}
@@ -255,6 +259,12 @@ func typeProperties(entries ...string) map[string]PropertyContract {
 		properties[name] = property(controlPropertyValueType(name), false, SupportLevelSupported, entries[i+1], true)
 	}
 	return properties
+}
+
+func integerValueProperties(description string) map[string]PropertyContract {
+	return map[string]PropertyContract{
+		"value": property(ValueTypeInteger, false, SupportLevelSupported, description, true),
+	}
 }
 
 func listControlProperties() map[string]PropertyContract {

@@ -27,8 +27,14 @@ func TestProjectSimpleFixture(t *testing.T) {
 	if got.CoordinateSystem != "parent-relative" || got.Form.Name != "UserForm1" {
 		t.Fatalf("form identity = %#v", got.Form)
 	}
-	if got.Form.Width == nil || got.Form.Height == nil || *got.Form.Width <= 0 || *got.Form.Height <= 0 {
-		t.Fatalf("form dimensions = %#v", got.Form)
+	if got.Form.Width != nil || got.Form.Height != nil {
+		t.Fatalf("legacy form dimensions should remain absent, got %#v/%#v", got.Form.Width, got.Form.Height)
+	}
+	if got.Form.Observed == nil || got.Form.Observed.Width != nil || got.Form.Observed.Height != nil || got.Form.Observed.InsideWidth != nil || got.Form.Observed.InsideHeight != nil || got.Form.Observed.ClientWidth == nil || got.Form.Observed.ClientHeight == nil || *got.Form.Observed.ClientWidth <= 0 || *got.Form.Observed.ClientHeight <= 0 {
+		t.Fatalf("observed form dimensions = %#v", got.Form.Observed)
+	}
+	if got.Form.Build == nil || got.Form.Build.Width != nil || got.Form.Build.Height != nil || got.Form.Build.ClientWidth == nil || got.Form.Build.ClientHeight == nil || *got.Form.Build.ClientWidth <= 0 || *got.Form.Build.ClientHeight <= 0 {
+		t.Fatalf("build form dimensions = %#v", got.Form.Build)
 	}
 	if len(got.Controls) == 0 {
 		t.Fatal("projected form has no controls")
@@ -165,6 +171,63 @@ func TestProjectDoesNotExposeUnsupportedCommandButtonValue(t *testing.T) {
 	}
 	if issues := forms.ValidateFormSpecStrict(got); hasErrors(issues) {
 		t.Fatalf("projected CommandButton did not validate: %#v", issues)
+	}
+}
+
+func TestProjectNewControlValuesAndDefaultFlags(t *testing.T) {
+	spin := emptyRecord("SpinButton")
+	spin.Values["Position"] = 7
+	spin.Values["VariousPropertyBits"] = 0x1b
+	scroll := emptyRecord("ScrollBar")
+	scroll.Values["Position"] = 42
+	scroll.Values["VariousPropertyBits"] = 0x1b
+	toggle := emptyRecord("ToggleButton")
+	toggle.Strings["Value"] = oforms.StoredString{Text: "1"}
+	toggle.Values["VariousPropertyBits"] = 0x2c80081b
+	image := emptyRecord("Image")
+	image.Values["VariousPropertyBits"] = 0x1b
+	form := &oforms.Form{
+		Name:   "NewControlsForm",
+		Levels: []*oforms.Level{{Record: emptyRecord("Form")}},
+		Controls: []*oforms.Control{
+			{Name: "ToggleButton1", Kind: "MSForms.ToggleButton", Record: toggle},
+			{Name: "SpinButton1", Kind: "MSForms.SpinButton", Record: spin},
+			{Name: "ScrollBar1", Kind: "MSForms.ScrollBar", Record: scroll},
+			{Name: "Image1", Kind: "MSForms.Image", Record: image},
+		},
+	}
+
+	got, err := Project(form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := make(map[string]forms.FormSpecControl, len(got.Controls))
+	for _, control := range got.Controls {
+		byName[control.Name] = control
+	}
+	if value := byName["ToggleButton1"].Value; value != "True" {
+		t.Fatalf("ToggleButton value = %#v, want True", value)
+	}
+	for _, test := range []struct {
+		name string
+		want int
+	}{
+		{name: "SpinButton1", want: 7},
+		{name: "ScrollBar1", want: 42},
+	} {
+		control := byName[test.name]
+		if control.Value != test.want {
+			t.Fatalf("%s value = %#v, want %d", test.name, control.Value, test.want)
+		}
+		if control.Enabled == nil || !*control.Enabled {
+			t.Fatalf("%s enabled = %#v, want true", test.name, control.Enabled)
+		}
+		if slices.Contains(control.Unsupported, "position") || slices.Contains(control.Unsupported, "variousPropertyBits") {
+			t.Fatalf("%s unsupported = %q, want Position and default bits projected", test.name, control.Unsupported)
+		}
+	}
+	if imageControl := byName["Image1"]; imageControl.Enabled == nil || !*imageControl.Enabled || slices.Contains(imageControl.Unsupported, "variousPropertyBits") {
+		t.Fatalf("Image projection = %#v, want enabled with default bits", imageControl)
 	}
 }
 

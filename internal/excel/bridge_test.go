@@ -2553,6 +2553,29 @@ func TestFormWriteScriptArgsIncludeSpecPayloadAndSessionFlags(t *testing.T) {
 	}
 }
 
+func TestFormWriteScriptArgsRejectClientDimensionsBeforeBridge(t *testing.T) {
+	_, err := buildFormWriteScriptArgs(t.TempDir(), config.Default(), FormWriteOptions{
+		Action:   "build",
+		SpecPath: "src/forms/UserForm1.form.yaml",
+		Spec: forms.FormSpec{
+			SchemaVersion: 1,
+			Kind:          "xlflow.userform",
+			Basis:         "designer",
+			Form: forms.FormSpecForm{
+				Name:  "UserForm1",
+				Build: &forms.FormSpecBuildForm{ClientWidth: new(280.0)},
+			},
+		},
+	})
+	var argErr formWriteArgError
+	if !errors.As(err, &argErr) {
+		t.Fatalf("error = %v, want formWriteArgError", err)
+	}
+	if argErr.code != "form_build_args_invalid" || argErr.exitCode != output.ExitValidation || !strings.Contains(argErr.message, "refusing it instead of ignoring it") {
+		t.Fatalf("client dimension guard error = %#v", argErr)
+	}
+}
+
 func TestBuildUIButtonAddScriptArgsIncludesSessionMetadata(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()

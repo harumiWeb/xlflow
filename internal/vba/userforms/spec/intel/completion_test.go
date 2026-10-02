@@ -18,6 +18,14 @@ func TestCompleteYAMLRootFormAndControlProperties(t *testing.T) {
 			t.Fatalf("form items = %#v", labels(items))
 		}
 	})
+	t.Run("form build exposes client dimensions", func(t *testing.T) {
+		items := CompleteYAML("form:\n  build:\n    \n", Position{Line: 2, Character: 4})
+		for _, label := range []string{"caption", "width", "height", "clientWidth", "clientHeight"} {
+			if !hasLabel(items, label) {
+				t.Fatalf("form.build items = %#v, missing %s", labels(items), label)
+			}
+		}
+	})
 	t.Run("known control only offers applicable properties", func(t *testing.T) {
 		items := CompleteYAML("controls:\n  - type: Label\n    \n", Position{Line: 2, Character: 4})
 		if !hasLabel(items, "caption") || hasLabel(items, "text") || hasLabel(items, "list") || hasLabel(items, "selectedIndex") {

@@ -102,11 +102,11 @@ selected index, enabled state, and visible state are projected when their binary
 meaning is known. File-format defaults are applied when the relevant MS-OFORMS property
 record is omitted.
 
-The root `DisplayedSize` is exposed through the best-effort form width/height
-fields. It is the persisted client/display area and can differ from Excel
-VBIDE's outer Designer width/height because of window chrome. Control geometry
-is compared directly; callers must retain the existing best-effort treatment of
-form-level dimensions. Boolean control values are normalized from persisted
+The root `DisplayedSize` is exposed through `form.build.clientWidth` /
+`clientHeight` and the matching observed client fields. It is the persisted
+client/display area and can differ from Excel VBIDE's outer Designer width/height
+because of window chrome. Projection does not label it as outer dimensions.
+Control geometry is compared directly. Boolean control values are normalized from persisted
 `1`/`0` spellings to Excel snapshot `True`/`False` spellings.
 
 TabStrip is structurally recognized by the binary reader, but its persisted
@@ -229,6 +229,80 @@ MS-OFORMS class-specific default, independently of flags Excel explicitly
 stores for a new control. Every other flag bit is preserved. The committed
 baseline/all-disabled fixtures bind these changes to saved/reopened Excel
 Designer state, including nested TextBox and Frame.
+
+## New Designer generation (Issue #883)
+
+`compiler.CompileNew(spec, codePage)` authors a new flat Designer without a
+template, `.frm`, `.frx`, Excel, COM, or VBIDE. `oforms.NewForm` accepts a
+separate persistence-unit definition and reuses the existing property tables,
+record encoders and CFB writer. It emits required `f`, `o`, `\x01CompObj`, and
+`\x03VBFrame` streams, then reparses them before returning a signed model.
+No arbitrary caller-created model is accepted by the lossless serializer.
+
+The supported classes are Label, TextBox, CommandButton, CheckBox,
+OptionButton, ToggleButton, ComboBox, ListBox, SpinButton, ScrollBar, and
+Image without Picture data. Frame and all nested/container structures,
+custom ActiveX, resources, list/selectedIndex state, and unimplemented
+properties fail loudly. ListBox text/value is rejected because it depends on
+unpersisted list state. SpinButton/ScrollBar value is an integer in the
+initial supported range 0..100; their binary Position is used instead of a
+MorphData Value string. Boolean controls include ToggleButton and accept the
+same two-state spellings as the existing compiler.
+
+Geometry uses points converted to the nearest signed-int32 HIMETRIC value.
+Root `form.build.clientWidth` / `clientHeight` address client dimensions,
+with defaults of 240 by 180 points. Outer width/height input is unsupported,
+and supplying both dimension families is invalid. Snapshot observations
+alone are not root authoring intent.
+
+These fields mean the persisted MS-OFORMS `DisplayedSize` / VBFrame
+`ClientWidth` and `ClientHeight`, not the runtime MSForms `InsideWidth` and
+`InsideHeight` properties. The focused Excel gate observed a 4.55-point
+height difference on both Excel-authored and generated forms. No constant
+offset or outer-to-client estimate is applied. The gate compares exported
+VBFrame client dimensions and reads the normalized binary after saving.
+
+The default control sizes are:
+
+| Classes                                     | Width x height (points) |
+| ------------------------------------------- | ----------------------- |
+| Label, CheckBox, OptionButton, ToggleButton | 72 x 18                 |
+| TextBox, ComboBox                           | 120 x 18                |
+| CommandButton                               | 72 x 24                 |
+| ListBox                                     | 120 x 72                |
+| SpinButton                                  | 18 x 36                 |
+| ScrollBar                                   | 120 x 18                |
+| Image                                       | 72 x 72                 |
+
+Position defaults to zero. Controls are ordered by normalized zIndex with
+stable input-order ties. Site IDs start at 1 in that order; NextAvailableID
+is one past the maximum (1 for an empty form). Default tab order follows
+the same order and explicit indices are retained. Site counts, byte counts,
+record lengths, and object extents are computed from encoded bytes.
+MS-OFORMS captions and values use compressed low-byte UTF-16 or full UTF-16,
+independent of the project code page. VBFrame remains code-page text and
+does not duplicate Unicode captions from the authoritative FormControl.
+
+Errors retain form/control/property context and use
+`userform_generation_invalid`, `userform_generation_unsupported`, or
+`userform_generation_conflict`. Rejected input returns no partial Designer.
+Caller input is never mutated.
+
+New code-behind is generated from code-only text with form attributes and
+two new component GUIDs in VB_Base; class identities are fixed constants.
+Project addition requires a Microsoft Forms reference and preserves its raw
+reference section. Reference creation remains Issue #886. Declaration,
+module and PROJECTwm bookkeeping are completed by the project writer;
+generation does not connect the pack CLI or change source authority (#887).
+
+REGISTERED reference identity must come from a canonical Forms LIBID in a
+complete sized record. CONTROL reference identity must come from the original
+TypeLib GUID at its declared position in the complete extended record. A
+REFERENCEORIGINAL, display name, or twiddled/extended LIBID alone is insufficient,
+including a Forms LIBID paired with a foreign OriginalTypeLib or a GUID appearing
+only in a file path or description. Project addition independently rejects
+equal component GUIDs in `VB_Base`, comparing them case-insensitively even
+when the caller constructs the module without `NewUserFormModule`.
 
 ## Structural validation
 

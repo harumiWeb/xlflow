@@ -177,8 +177,18 @@ func projectForm(level *oforms.Level, result *forms.FormSpec) {
 		result.Form.Caption = new(caption.Text)
 	}
 	if size, ok := record.Sizes["DisplayedSize"]; ok {
-		result.Form.Width = new(points(size.Width))
-		result.Form.Height = new(points(size.Height))
+		clientWidth := points(size.Width)
+		clientHeight := points(size.Height)
+		result.Form.Observed = &forms.FormSpecObservedForm{
+			ClientWidth:  &clientWidth,
+			ClientHeight: &clientHeight,
+		}
+		buildClientWidth := clientWidth
+		buildClientHeight := clientHeight
+		result.Form.Build = &forms.FormSpecBuildForm{
+			ClientWidth:  &buildClientWidth,
+			ClientHeight: &buildClientHeight,
+		}
 	}
 	unsupported := unsupportedRecordProperties(record, map[string]bool{
 		"BooleanProperties": isDefaultBooleanProperties("Form", record.Values["BooleanProperties"]),
@@ -230,6 +240,9 @@ func projectControl(source *oforms.Control, target *forms.FormSpecControl) {
 			target.Text = new(value.Text)
 		}
 	}
+	if position, ok := record.Values["Position"]; ok && supportsNumericControlValue(target.Type) {
+		target.Value = int(position)
+	}
 	if selected, ok := record.Values["ListIndex"]; ok && supportsSelectedIndex(target.Type) {
 		target.SelectedIndex = new(int(selected))
 	}
@@ -273,6 +286,7 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 		}
 		projected["ListIndex"] = supportsSelectedIndex(controlType)
 		projected["Value"] = supportsControlValue(controlType)
+		projected["Position"] = supportsNumericControlValue(controlType)
 		projected["BooleanProperties"] = isDefaultBooleanProperties(controlType, control.Record.Values["BooleanProperties"])
 		unsupported = append(unsupported, unsupportedRecordProperties(control.Record, projected)...)
 		if bits, ok := control.Record.Values["VariousPropertyBits"]; ok {
@@ -314,6 +328,8 @@ func defaultVariousPropertyBits(controlType string) (int64, bool) {
 		return 0x2c80481b, true
 	case "ComboBox", "ListBox", "CheckBox", "OptionButton", "ToggleButton":
 		return oforms.DefaultVariousPropertyBits(23)
+	case "Image", "SpinButton", "ScrollBar":
+		return 0x1b, true
 	case "Label":
 		return oforms.DefaultVariousPropertyBits(21)
 	case "CommandButton":
@@ -357,11 +373,15 @@ func unsupportedLevelProperties(level *oforms.Level) []string {
 
 func supportsControlValue(controlType string) bool {
 	switch controlType {
-	case "TextBox", "ComboBox", "ListBox", "CheckBox", "OptionButton", "ToggleButton":
+	case "TextBox", "ComboBox", "ListBox", "CheckBox", "OptionButton", "ToggleButton", "SpinButton", "ScrollBar":
 		return true
 	default:
 		return false
 	}
+}
+
+func supportsNumericControlValue(controlType string) bool {
+	return controlType == "SpinButton" || controlType == "ScrollBar"
 }
 
 func projectedControlValue(controlType, value string) any {

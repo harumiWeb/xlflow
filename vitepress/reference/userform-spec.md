@@ -32,15 +32,23 @@ Do not add snapshot-oriented fields such as `warnings` to a new spec unless they
 
 ## Form Fields
 
-| Field             | Type   | Required | Support                                                                                    |
-| ----------------- | ------ | -------- | ------------------------------------------------------------------------------------------ |
-| `name`            | string | Yes      | Supported. VBA UserForm component name.                                                    |
-| `caption`         | string | No       | Supported.                                                                                 |
-| `width`, `height` | number | No       | Best-effort. Verify the rebuilt form in Excel.                                             |
-| `build`           | object | No       | Supported build intent: `caption`, `width`, `height`.                                      |
-| `observed`        | object | No       | Snapshot-only captured state: `caption`, `width`, `height`, `insideWidth`, `insideHeight`. |
+| Field             | Type   | Required | Support                                                                                                                   |
+| ----------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `name`            | string | Yes      | Supported. VBA UserForm component name.                                                                                   |
+| `caption`         | string | No       | Supported.                                                                                                                |
+| `width`, `height` | number | No       | Best-effort. Verify the rebuilt form in Excel.                                                                            |
+| `build`           | object | No       | Build intent: `caption`, outer `width` / `height`, or explicit client `clientWidth` / `clientHeight`.                     |
+| `observed`        | object | No       | Snapshot-only captured state: `caption`, `width`, `height`, `insideWidth`, `insideHeight`, `clientWidth`, `clientHeight`. |
 
 ## Controls
+
+`form.build.clientWidth` / `clientHeight` are client-area dimensions in points
+for the internal pure-Go new-form compiler. Do not combine them with outer
+width/height inputs. These are persisted `DisplayedSize` / VBFrame client
+dimensions; runtime MSForms `InsideWidth` / `InsideHeight` can differ.
+Excel-backed `form build` rejects client-size input
+before changing a workbook. New-form generation is not yet connected to the
+`pack` CLI; Forms reference creation and CLI integration are separate stages.
 
 Every authored control requires `id`, `name`, and `type`. Controls are a flat list; use `parentId` to place a child inside a container.
 
@@ -70,6 +78,10 @@ Every authored control requires `id`, `name`, and `type`. Controls are a flat li
 | `CommandButton` | `Forms.CommandButton.1` | `caption` (string)                                                               |
 | `CheckBox`      | `Forms.CheckBox.1`      | `caption` (string), `value` (any)                                                |
 | `OptionButton`  | `Forms.OptionButton.1`  | `caption` (string), `value` (any)                                                |
+| `ToggleButton`  | `Forms.ToggleButton.1`  | `caption` (string), `value` (any)                                                |
+| `SpinButton`    | `Forms.SpinButton.1`    | `value` (integer)                                                                |
+| `ScrollBar`     | `Forms.ScrollBar.1`     | `value` (integer)                                                                |
+| `Image`         | `Forms.Image.1`         | Common fields; pure-Go generation does not support embedded Picture data         |
 | `Frame`         | `Forms.Frame.1`         | `caption` (string); the built-in container type                                  |
 
 `ComboBox` and `ListBox` `list` and `selectedIndex` are observed-only: xlflow attempts to apply them, but round-trip fidelity is not guaranteed.
@@ -103,6 +115,9 @@ The LSP also provides context-aware completion and Hover for known UserForm YAML
 | `UFV001`–`UFV005` | Unknown field, invalid value type/fixed value, missing required field, or unsupported property.                               |
 | `UFV006`–`UFV012` | Unsupported control type, duplicate ID, invalid parent reference, parent cycle, invalid parent type, or type/ProgID mismatch. |
 | `UFV013`–`UFV015` | Support-level, custom-control, or snapshot-only unresolved-control warning.                                                   |
+| `UFV016`          | Invalid form dimension (finite, non-negative, representable HIMETRIC required).                                               |
+| `UFV017`          | Outer and client build dimensions were specified together.                                                                    |
+| `UFV018`          | Excel-backed form build cannot apply explicit pure-Go client dimensions.                                                      |
 
 For a Designer capture, use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml`. Captured `warnings`, `observed`, and other snapshot fields are preserved for review, but new authoring should begin with the minimal form above. Keep authored specs directly in `src/forms/specs/` so the LSP recognizes them; files outside that configured location are intentionally ignored.
 

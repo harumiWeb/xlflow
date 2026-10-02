@@ -22,6 +22,10 @@ public sealed class ExcelFormWriteService : IFormWriteService
         ["commandbutton"] = "Forms.CommandButton.1",
         ["checkbox"] = "Forms.CheckBox.1",
         ["optionbutton"] = "Forms.OptionButton.1",
+        ["togglebutton"] = "Forms.ToggleButton.1",
+        ["spinbutton"] = "Forms.SpinButton.1",
+        ["scrollbar"] = "Forms.ScrollBar.1",
+        ["image"] = "Forms.Image.1",
         ["frame"] = "Forms.Frame.1",
     };
 
@@ -245,6 +249,10 @@ public sealed class ExcelFormWriteService : IFormWriteService
             if (spec is null)
             {
                 throw new InvalidOperationException("decoded form spec was empty");
+            }
+            if (spec.Form.Build?.ClientWidth is not null || spec.Form.Build?.ClientHeight is not null)
+            {
+                throw new InvalidOperationException("form.build.clientWidth/clientHeight are supported only by pure-Go generation, not Excel Designer authoring.");
             }
             return spec;
         }
@@ -1221,6 +1229,18 @@ public sealed class ExcelFormWriteService : IFormWriteService
 
         [JsonPropertyName("height")]
         public double? Height { get; init; }
+
+        [JsonPropertyName("insideWidth")]
+        public double? InsideWidth { get; init; }
+
+        [JsonPropertyName("insideHeight")]
+        public double? InsideHeight { get; init; }
+
+        [JsonPropertyName("clientWidth")]
+        public double? ClientWidth { get; init; }
+
+        [JsonPropertyName("clientHeight")]
+        public double? ClientHeight { get; init; }
     }
 
     private sealed class FormWriteBuildFormSpec
@@ -1233,6 +1253,12 @@ public sealed class ExcelFormWriteService : IFormWriteService
 
         [JsonPropertyName("height")]
         public double? Height { get; init; }
+
+        [JsonPropertyName("clientWidth")]
+        public double? ClientWidth { get; init; }
+
+        [JsonPropertyName("clientHeight")]
+        public double? ClientHeight { get; init; }
     }
 
     private sealed class FormWriteControlSpec

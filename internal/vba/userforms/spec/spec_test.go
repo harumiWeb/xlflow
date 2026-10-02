@@ -123,6 +123,77 @@ func TestFormSpecFromInspectSnapshotConvertsDesignerPayload(t *testing.T) {
 	}
 }
 
+func TestNormalizeFormSpecPreservesObservedOuterDimensionsForClientBuild(t *testing.T) {
+	outerWidth, outerHeight := 308.0, 372.0
+	clientWidth, clientHeight := 280.0, 344.0
+	spec := NormalizeFormSpec(FormSpec{
+		Form: FormSpecForm{
+			Name: "UserForm1",
+			Observed: &FormSpecObservedForm{
+				Width:  &outerWidth,
+				Height: &outerHeight,
+			},
+			Build: &FormSpecBuildForm{
+				ClientWidth:  &clientWidth,
+				ClientHeight: &clientHeight,
+			},
+		},
+	})
+	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != outerWidth || spec.Form.Observed.Height == nil || *spec.Form.Observed.Height != outerHeight {
+		t.Fatalf("observed dimensions = %#v, want outer dimensions", spec.Form.Observed)
+	}
+	if spec.Form.Width != nil || spec.Form.Height != nil {
+		t.Fatalf("normalization synthesized legacy top-level dimensions: %#v/%#v", spec.Form.Width, spec.Form.Height)
+	}
+	if spec.Form.Build == nil || spec.Form.Build.Width != nil || spec.Form.Build.Height != nil {
+		t.Fatalf("client build inherited legacy outer dimensions: %#v", spec.Form.Build)
+	}
+	if spec.Form.Build.ClientWidth == nil || *spec.Form.Build.ClientWidth != clientWidth || spec.Form.Build.ClientHeight == nil || *spec.Form.Build.ClientHeight != clientHeight {
+		t.Fatalf("client build dimensions = %#v", spec.Form.Build)
+	}
+
+	validSpec := spec
+	validSpec.SchemaVersion = 1
+	validSpec.Kind = "xlflow.userform"
+	validSpec.Basis = "designer"
+	if err := ValidateFormSpec(validSpec); err != nil {
+		t.Fatalf("client build with observed outer dimensions should validate: %v", err)
+	}
+	jsonBody, err := MarshalSnapshot("json", spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"\"clientWidth\"", "\"clientHeight\""} {
+		if !strings.Contains(string(jsonBody), field) {
+			t.Fatalf("JSON snapshot missing %s: %s", field, jsonBody)
+		}
+	}
+}
+
+func TestValidateFormSpecRejectsConflictingBuildDimensions(t *testing.T) {
+	spec := FormSpec{
+		SchemaVersion: 1,
+		Kind:          "xlflow.userform",
+		Basis:         "designer",
+		Form: FormSpecForm{
+			Name: "UserForm1",
+			Build: &FormSpecBuildForm{
+				Width:       ptrFloat(308),
+				ClientWidth: ptrFloat(280),
+			},
+		},
+	}
+	if !hasValidationIssue(ValidateFormSpecStrict(spec), "UFV017", "form.build") {
+		t.Fatalf("missing build dimension conflict: %+v", ValidateFormSpecStrict(spec))
+	}
+
+	spec.Form.Width = ptrFloat(308)
+	spec.Form.Build.Width = nil
+	if !hasValidationIssue(ValidateFormSpecStrict(spec), "UFV017", "form.build") {
+		t.Fatalf("missing top-level legacy/build client dimension conflict: %+v", ValidateFormSpecStrict(spec))
+	}
+}
+
 func TestFormSpecFromInspectSnapshotOmitsUnsupportedBuiltInValue(t *testing.T) {
 	spec, err := FormSpecFromInspectSnapshot(map[string]any{
 		"name": "SnapshotForm",
@@ -374,6 +445,52 @@ func TestLoadFormSpecRejectsDuplicateExplicitControlIDs(t *testing.T) {
 	}
 }
 
+func TestValidateFormSpecSourceRejectsNonFiniteAndOutOfRangeDimensions(t *testing.T) {
+	body := []byte(`schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form:
+  name: UserForm1
+  build:
+    clientWidth: .nan
+    clientHeight: .inf
+    height: -1
+controls: []
+warnings: []
+`)
+	issues, err := ValidateFormSpecSource(SpecInput{Format: "yaml", DisplayPath: "UserForm1.yaml"}, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasValidationIssue(issues, "UFV002", "form.build.clientWidth") || !hasValidationIssue(issues, "UFV002", "form.build.clientHeight") {
+		t.Fatalf("non-finite dimensions were not rejected as invalid numbers: %+v", issues)
+	}
+	if hasValidationIssue(issues, "UFV016", "form.build.clientWidth") || hasValidationIssue(issues, "UFV016", "form.build.clientHeight") || !hasValidationIssue(issues, "UFV016", "form.build.height") {
+		t.Fatalf("dimension range issues = %+v", issues)
+	}
+}
+
+func TestValidateFormSpecSourceRejectsOuterAndClientBuildDimensionsTogether(t *testing.T) {
+	body := []byte(`schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form:
+  name: UserForm1
+  width: 308
+  build:
+    clientWidth: 280
+controls: []
+warnings: []
+`)
+	issues, err := ValidateFormSpecSource(SpecInput{Format: "yaml", DisplayPath: "UserForm1.yaml"}, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasValidationIssue(issues, "UFV017", "form.build") {
+		t.Fatalf("missing top-level/build client dimension conflict: %+v", issues)
+	}
+}
+
 func TestValidateFormSpecSourceReportsStrictStructuralIssues(t *testing.T) {
 	body := []byte(`schemaVersion: 2
 kind: xlflow.userform
@@ -600,6 +717,26 @@ func TestValidateFormSpecForAuthoringRejectsUnsupportedSnapshotPlaceholder(t *te
 	}
 	if specErr.Code != "spec_validation_failed" || specErr.Field != "controls[0].type" || len(specErr.Issues) != 1 || specErr.Issues[0].Code != "UFV006" {
 		t.Fatalf("authoring error = %#v", specErr)
+	}
+}
+
+func TestValidateFormSpecForAuthoringRejectsClientDimensions(t *testing.T) {
+	spec := FormSpec{
+		SchemaVersion: 1,
+		Kind:          "xlflow.userform",
+		Basis:         "designer",
+		Form: FormSpecForm{
+			Name:  "UserForm1",
+			Build: &FormSpecBuildForm{ClientWidth: ptrFloat(280)},
+		},
+	}
+	err := ValidateFormSpecForAuthoring(SpecInput{Format: "yaml", DisplayPath: "UserForm1.yaml"}, spec)
+	var specErr *SpecError
+	if !errors.As(err, &specErr) {
+		t.Fatalf("authoring error = %#v, want SpecError", err)
+	}
+	if specErr.Field != "form.build.clientWidth" || len(specErr.Issues) != 1 || specErr.Issues[0].Code != "UFV018" || !strings.Contains(specErr.Message, "refusing it instead of ignoring it") {
+		t.Fatalf("authoring client dimension error = %#v", specErr)
 	}
 }
 

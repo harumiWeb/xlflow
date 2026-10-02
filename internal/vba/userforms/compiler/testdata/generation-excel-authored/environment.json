@@ -1,0 +1,13 @@
+{
+  "harness": "test-userform-generation-e2e.ps1",
+  "issue": 883,
+  "phase": "create",
+  "version": "16.0",
+  "build": "17932",
+  "operatingSystem": "Windows (64-bit) NT 10.00",
+  "processId": 104640,
+  "trustedVbideRequired": true,
+  "cleanupConfirmed": true,
+  "baselineWorkbook": "C:\\Users\\HARUMI\\orca\\workspaces\\xlflow\\dolphin\\tmp_workspaces\\issue-883-observe-20261002-final\\baseline.xlsm",
+  "baselineBinary": "C:\\Users\\HARUMI\\orca\\workspaces\\xlflow\\dolphin\\tmp_workspaces\\issue-883-observe-20261002-final\\baseline.bin"
+}

@@ -106,7 +106,7 @@ func Write(p *Project) ([]byte, error) {
 	// PROJECT. RawStreams excludes the VBA/ and PROJECT namespaces, so there is no
 	// collision with the AddStream calls below.
 	for _, path := range slices.Sorted(maps.Keys(p.RawStreams)) {
-		if p.GenerateProjectMetadata && path == "PROJECTwm" {
+		if (p.GenerateProjectMetadata || p.rebuildProjectWM) && cfb.DirectoryNameKey(path) == cfb.DirectoryNameKey("PROJECTwm") {
 			continue
 		}
 		w.AddStream(strings.Split(path, "/"), p.RawStreams[path])
@@ -119,7 +119,7 @@ func Write(p *Project) ([]byte, error) {
 			w.AddStream(strings.Split(path, "/"), form.Streams[path])
 		}
 	}
-	if p.GenerateProjectMetadata {
+	if p.GenerateProjectMetadata || p.rebuildProjectWM {
 		projectWM, err := ovba.BuildProjectWM(projectSpecs, p.Props.CodePage)
 		if err != nil {
 			return nil, fmt.Errorf("vbaproject: build PROJECTwm: %w", err)

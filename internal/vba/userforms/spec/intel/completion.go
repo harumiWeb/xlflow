@@ -146,6 +146,8 @@ func propertyCompletions(doc *Document, parent string, context CursorContext, li
 		properties = contract.DocumentProperties
 	case parent == "form":
 		properties = contract.FormProperties
+	case parent == "form.build":
+		properties = formBuildProperties()
 	case isControlPath(parent):
 		properties = controlProperties(contract, controlAtPath(doc.Source, parent))
 	default:
@@ -187,12 +189,22 @@ func controlProperties(contract forms.Contract, control controlInfo) map[string]
 	return properties
 }
 
+func formBuildProperties() map[string]forms.PropertyContract {
+	properties := make(map[string]forms.PropertyContract, 5)
+	for _, name := range []string{"caption", "width", "height", "clientWidth", "clientHeight"} {
+		if property, ok := forms.LookupFormBuildProperty(name); ok {
+			properties[name] = property
+		}
+	}
+	return properties
+}
+
 func offerProperty(name string, property forms.PropertyContract, parent, prefix string) bool {
 	if property.IncludeInAuthoring {
 		return true
 	}
 	// Structural and explicitly authorable contract fields are normal candidates.
-	if parent == "" && name != "warnings" || parent == "form" && name == "build" || isControlPath(parent) && name == "progId" {
+	if parent == "" && name != "warnings" || parent == "form" && name == "build" || parent == "form.build" || isControlPath(parent) && name == "progId" {
 		return true
 	}
 	// Snapshot and unchecked escape-hatch fields remain discoverable only after a

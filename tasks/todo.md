@@ -1,3 +1,18 @@
+# Issue #883 final-review Pass 1 follow-up
+
+Validated against `76cae6b8`: both P2 findings are in scope.
+
+1. [x] Require canonical MSForms LIBID evidence in raw reference records;
+       reject an unrelated twiddled GUID even if its display name is MSForms.
+2. [x] Reject equal VB_Base GUIDs at the project-addition boundary, including
+       case variants, without mutating the input project.
+3. [x] Add regressions and run focused userforms/pack/excel tests, vet and docs
+       checks; commit hooks run lint and staged formatting checks.
+4. [x] Obtain Pass 2 with gpt-6-luna xhigh: `ace0f284` passed with both P2 fixes
+       verified and no new findings. Preserve #886/#887 scope. The admission
+       checks do not change generated Designer bytes;
+       committed Excel normalization evidence still passes in ordinary tests.
+
 # PR #902 review follow-up (Issue #882)
 
 Verified against `40267db2`: both Devin findings are valid. The two CodeQL
@@ -476,3 +491,12 @@ source; all valid. Plan:
 - [x] Validate `Attribute VB_Name` for existing standard and class component updates before assigning normalized source.
 - [x] Add regression coverage for mismatched existing standard and class modules while preserving document/UserForm header behavior.
 - [x] Run focused and full validation, then push the fix and reply to the review thread.
+
+# PR #903 review follow-up
+
+- [x] Require REFERENCECONTROL OriginalTypeLib identity rather than trusting a twiddled LIBID; cover conflicting identities and atomic rejection.
+- [x] Reject incomplete generated-form expected maps before Excel starts; compare SpinButton Delay and ScrollBar Delay/ProportionalThumb with regression coverage.
+- [x] Align .NET builtin control contracts with the canonical registry and fix the failing Windows/Linux CI test.
+- [x] Verify focused Go/.NET/PowerShell tests, lint/docs, and staged formatting.
+- [x] Rerun the fresh Excel generation gate after the concurrent session finishes: Delay/ScrollBar ProportionalThumb, both forms, save/reopen, sentinel, and normalized binary readback passed; owned PID 204972 cleanup confirmed. Evidence and command recorded in the fixture README.
+- [x] Push the fixes (`4e735e72`) and reply to the three review comments with focused regression and fresh Excel evidence; verify the updated PR body on GitHub.

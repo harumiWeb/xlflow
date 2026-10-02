@@ -1,0 +1,352 @@
+{
+  "forms": [
+    {
+      "schemaVersion": 1,
+      "kind": "xlflow.userform",
+      "basis": "designer",
+      "coordinateSystem": "parent-relative",
+      "form": {
+        "name": "GeneratedForm",
+        "caption": "issue883-日本語😀",
+        "observed": {
+          "caption": "issue883-日本語😀",
+          "clientWidth": 324,
+          "clientHeight": 281.9905511811024
+        },
+        "build": {
+          "caption": "issue883-日本語😀",
+          "clientWidth": 324,
+          "clientHeight": 281.9905511811024
+        }
+      },
+      "controls": [
+        {
+          "id": "control_001",
+          "zIndex": 0,
+          "type": "Label",
+          "name": "LabelMain",
+          "progId": "Forms.Label.1",
+          "caption": "LabelMain-日本語😀",
+          "left": 11.990551181102362,
+          "top": 11.990551181102362,
+          "width": 72,
+          "height": 18,
+          "tabIndex": 0,
+          "enabled": false,
+          "visible": true,
+          "observed": {
+            "caption": "LabelMain-日本語😀",
+            "left": 11.990551181102362,
+            "top": 11.990551181102362,
+            "width": 72,
+            "height": 18,
+            "tabIndex": 0,
+            "enabled": false,
+            "visible": true
+          }
+        },
+        {
+          "id": "control_002",
+          "zIndex": 1,
+          "type": "TextBox",
+          "name": "TextBoxMain",
+          "progId": "Forms.TextBox.1",
+          "text": "text-日本語😀",
+          "value": "text-日本語😀",
+          "left": 172.00629921259844,
+          "top": 11.990551181102362,
+          "width": 119.99055118110236,
+          "height": 18,
+          "tabIndex": 1,
+          "enabled": false,
+          "visible": true,
+          "observed": {
+            "text": "text-日本語😀",
+            "value": "text-日本語😀",
+            "left": 172.00629921259844,
+            "top": 11.990551181102362,
+            "width": 119.99055118110236,
+            "height": 18,
+            "tabIndex": 1,
+            "enabled": false,
+            "visible": true
+          }
+        },
+        {
+          "id": "control_003",
+          "zIndex": 2,
+          "type": "CommandButton",
+          "name": "CommandButtonMain",
+          "progId": "Forms.CommandButton.1",
+          "caption": "CommandButtonMain-日本語😀",
+          "left": 11.990551181102362,
+          "top": 56.01259842519685,
+          "width": 72,
+          "height": 24.00944881889764,
+          "tabIndex": 2,
+          "enabled": false,
+          "visible": true,
+          "observed": {
+            "caption": "CommandButtonMain-日本語😀",
+            "left": 11.990551181102362,
+            "top": 56.01259842519685,
+            "width": 72,
+            "height": 24.00944881889764,
+            "tabIndex": 2,
+            "enabled": false,
+            "visible": true
+          }
+        },
+        {
+          "id": "control_004",
+          "zIndex": 3,
+          "type": "CheckBox",
+          "name": "CheckBoxMain",
+          "progId": "Forms.CheckBox.1",
+          "caption": "CheckBoxMain-日本語😀",
+          "value": "True",
+          "left": 172.00629921259844,
+          "top": 56.01259842519685,
+          "width": 72,
+          "height": 18,
+          "tabIndex": 3,
+          "enabled": false,
+          "visible": true,
+          "observed": {
+            "caption": "CheckBoxMain-日本語😀",
+            "value": "True",
+            "left": 172.00629921259844,
+            "top": 56.01259842519685,
+            "width": 72,
+            "height": 18,
+            "tabIndex": 3,
+            "enabled": false,
+            "visible": true
+          }
+        },
+        {
+          "id": "control_005",
+          "zIndex": 4,
+          "type": "OptionButton",
+          "name": "OptionButtonMain",
+          "progId": "Forms.OptionButton.1",
+          "caption": "OptionButtonMain-日本語😀",
+          "value": "True",
+          "left": 11.990551181102362,
+          "top": 100.00629921259842,
+          "width": 72,
+          "height": 18,
+          "tabIndex": 4,
+          "enabled": false,
+          "visible": true,
+          "observed": {
+            "caption": "OptionButtonMain-日本語😀",
+            "value": "True",
+            "left": 11.990551181102362,
+            "top": 100.00629921259842,
+            "width": 72,
+            "height": 18,
+            "tabIndex": 4,
+            "enabled": false,
+            "visible": true
+          }
+        },
+        {
+          "id": "control_006",
+          "zIndex": 5,
+          "type": "ToggleButton",
+          "name": "ToggleButtonMain",
+          "progId": "Forms.ToggleButton.1",
+          "caption": "ToggleButtonMain-日本語😀",
+          "value": "True",
+          "left": 172.00629921259844,
+          "top": 100.00629921259842,
+          "width": 72,
+          "height": 18,
+          "tabIndex": 5,
+          "enabled": false,
+          "visible": true,
+          "observed": {
+            "caption": "ToggleButtonMain-日本語😀",
+            "value": "True",
+            "left": 172.00629921259844,
+            "top": 100.00629921259842,
+            "width": 72,
+            "height": 18,
+            "tabIndex": 5,
+            "enabled": false,
+            "visible": true
+          }
+        },
+        {
+          "id": "control_007",
+          "zIndex": 6,
+          "type": "ComboBox",
+          "name": "ComboBoxMain",
+          "progId": "Forms.ComboBox.1",
+          "value": "combo-text",
+          "left": 11.990551181102362,
+          "top": 144,
+          "width": 119.99055118110236,
+          "height": 18,
+          "tabIndex": 6,
+          "enabled": false,
+          "visible": true,
+          "unsupported": ["variousPropertyBits"],
+          "observed": {
+            "value": "combo-text",
+            "left": 11.990551181102362,
+            "top": 144,
+            "width": 119.99055118110236,
+            "height": 18,
+            "tabIndex": 6,
+            "enabled": false,
+            "visible": true,
+            "unsupported": ["variousPropertyBits"]
+          }
+        },
+        {
+          "id": "control_008",
+          "zIndex": 7,
+          "type": "ListBox",
+          "name": "ListBoxMain",
+          "progId": "Forms.ListBox.1",
+          "left": 172.00629921259844,
+          "top": 144,
+          "width": 119.99055118110236,
+          "height": 72,
+          "tabIndex": 7,
+          "enabled": false,
+          "visible": true,
+          "observed": {
+            "left": 172.00629921259844,
+            "top": 144,
+            "width": 119.99055118110236,
+            "height": 72,
+            "tabIndex": 7,
+            "enabled": false,
+            "visible": true
+          }
+        },
+        {
+          "id": "control_009",
+          "zIndex": 8,
+          "type": "SpinButton",
+          "name": "SpinButtonMain",
+          "progId": "Forms.SpinButton.1",
+          "value": 12,
+          "left": 11.990551181102362,
+          "top": 187.99370078740156,
+          "width": 18,
+          "height": 36,
+          "tabIndex": 8,
+          "enabled": false,
+          "visible": true,
+          "observed": {
+            "value": 12,
+            "left": 11.990551181102362,
+            "top": 187.99370078740156,
+            "width": 18,
+            "height": 36,
+            "tabIndex": 8,
+            "enabled": false,
+            "visible": true,
+            "properties": {
+              "Delay": 50
+            }
+          }
+        },
+        {
+          "id": "control_010",
+          "zIndex": 9,
+          "type": "ScrollBar",
+          "name": "ScrollBarMain",
+          "progId": "Forms.ScrollBar.1",
+          "value": 34,
+          "left": 172.00629921259844,
+          "top": 187.99370078740156,
+          "width": 119.99055118110236,
+          "height": 18,
+          "tabIndex": 9,
+          "enabled": false,
+          "visible": true,
+          "observed": {
+            "value": 34,
+            "left": 172.00629921259844,
+            "top": 187.99370078740156,
+            "width": 119.99055118110236,
+            "height": 18,
+            "tabIndex": 9,
+            "enabled": false,
+            "visible": true,
+            "properties": {
+              "Delay": 50,
+              "ProportionalThumb": true
+            }
+          }
+        },
+        {
+          "id": "control_011",
+          "zIndex": 10,
+          "type": "Image",
+          "name": "ImageMain",
+          "progId": "Forms.Image.1",
+          "left": 11.990551181102362,
+          "top": 231.98740157480316,
+          "width": 72,
+          "height": 72,
+          "tabIndex": 10,
+          "enabled": false,
+          "visible": true,
+          "observed": {
+            "left": 11.990551181102362,
+            "top": 231.98740157480316,
+            "width": 72,
+            "height": 72,
+            "tabIndex": 10,
+            "enabled": false,
+            "visible": true
+          }
+        }
+      ],
+      "warnings": [
+        {
+          "code": "unsupported_properties",
+          "message": "Unsupported form Designer properties were preserved only in the binary model: logicalSize."
+        },
+        {
+          "code": "unsupported_properties",
+          "message": "Unsupported Designer properties were preserved only in the binary model: variousPropertyBits.",
+          "control": "ComboBoxMain"
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "kind": "xlflow.userform",
+      "basis": "designer",
+      "coordinateSystem": "parent-relative",
+      "form": {
+        "name": "GeneratedEmptyForm",
+        "caption": "GeneratedEmptyForm",
+        "observed": {
+          "caption": "GeneratedEmptyForm",
+          "clientWidth": 240.00944881889762,
+          "clientHeight": 180
+        },
+        "build": {
+          "caption": "GeneratedEmptyForm",
+          "clientWidth": 240.00944881889762,
+          "clientHeight": 180
+        }
+      },
+      "controls": [],
+      "warnings": [
+        {
+          "code": "unsupported_properties",
+          "message": "Unsupported form Designer properties were preserved only in the binary model: logicalSize."
+        }
+      ]
+    }
+  ]
+}
