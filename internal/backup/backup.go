@@ -38,6 +38,10 @@ type Metadata struct {
 	Reason               string    `json:"reason"`
 	OriginalWorkbookPath string    `json:"original_workbook_path"`
 	BackupFilePath       string    `json:"backup_file_path"`
+	// Backend records which push backend created the backup ("excel" or
+	// "file"). Empty for backups written before the field existed or by
+	// operations that do not carry a backend.
+	Backend string `json:"backend,omitempty"`
 }
 
 type Record struct {
@@ -688,6 +692,12 @@ func codeForDeleteError(err error) string {
 }
 
 func Create(rootDir, workbookPath, reason string, now time.Time) (Record, error) {
+	return CreateForBackend(rootDir, workbookPath, reason, "", now)
+}
+
+// CreateForBackend behaves like Create and additionally records the backend
+// that produced the backup in metadata.json.
+func CreateForBackend(rootDir, workbookPath, reason, backend string, now time.Time) (Record, error) {
 	if strings.TrimSpace(reason) == "" {
 		return Record{}, errors.New("backup reason is required")
 	}
@@ -714,6 +724,7 @@ func Create(rootDir, workbookPath, reason string, now time.Time) (Record, error)
 		Reason:               reason,
 		OriginalWorkbookPath: workbookAbs,
 		BackupFilePath:       backupName,
+		Backend:              backend,
 	}
 	if err := writeMetadata(filepath.Join(dir, metadataFileName), metadata); err != nil {
 		return Record{}, cleanupCreateDir(dir, err)

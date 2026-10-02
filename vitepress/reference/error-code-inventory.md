@@ -24,6 +24,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `analyze_total`
 - `application_state`
 - `application_state_candidate_procedures`
+- `applied_to`
 - `args_invalid`
 - `argument_count`
 - `argument_diagnostics`
@@ -510,6 +511,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `excel_loop_symbols`
 - `excel_pid`
 - `excel_state_uncertain`
+- `excel_vbide`
 - `exceptional_exit`
 - `excluded_components`
 - `executable_path`
@@ -580,6 +582,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `form_already_exists`
 - `form_apply_args_invalid`
 - `form_build_args_invalid`
+- `form_code`
 - `form_export_image_args_invalid`
 - `form_initializer_failed`
 - `form_migrate_args_invalid`
@@ -718,6 +721,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `known_reject`
 - `label_statement`
 - `last_stage`
+- `last_write_time_utc_ticks`
 - `latest_source_modified_at`
 - `launches_process`
 - `lbl_child`
@@ -735,6 +739,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `line_number_literal`
 - `line_number_statement`
 - `line_numbers`
+- `line_numbers_enabled`
 - `lines_added`
 - `lines_removed`
 - `lines_renumbered`
@@ -1051,11 +1056,24 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `pull_vba_project_malformed`
 - `pull_vba_project_missing`
 - `push_20260101`
+- `push_active_session`
+- `push_ambiguous_layout`
 - `push_args_invalid`
+- `push_backup_failed`
 - `push_diagnostic`
 - `push_failed`
+- `push_output_busy`
+- `push_output_replace_failed`
+- `push_protected_project`
+- `push_signed_project`
 - `push_source`
+- `push_source_read_failed`
 - `push_state_last_modified_at`
+- `push_state_persist_failed`
+- `push_temporary_cleanup_failed`
+- `push_userform_generation_unsupported`
+- `push_workbook_open`
+- `push_write_failed`
 - `qualified_member_expression`
 - `qualified_name`
 - `quoted_name`
@@ -1147,6 +1165,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `save_required`
 - `save_session`
 - `save_session_before_file_inspect`
+- `saved_file`
 - `saved_workbook`
 - `schema_version`
 - `schema_version_changed`
@@ -1170,7 +1189,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `session_args_invalid`
 - `session_dirty`
 - `session_failed`
+- `session_hwnd`
+- `session_id`
 - `session_mode`
+- `session_pid`
 - `session_requested`
 - `session_required`
 - `session_rerun_failed`

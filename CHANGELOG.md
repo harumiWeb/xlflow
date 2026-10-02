@@ -4,6 +4,18 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `xlflow push --backend file`, a pure-Go saved-workbook push for
+  `.xlsm` that rebuilds `xl/vbaProject.bin` from the tracked source tree and
+  atomically replaces the workbook without Excel, COM, VBIDE, or the bridge.
+  It supports Linux, containers, CI, WSL, and remote agents; refuses to run
+  while the workbook is open or owned by a recorded session; preserves
+  existing UserForm designer storage and sidecar code-behind; and shares the
+  Excel backend's fingerprint and `push.json` schema so `--changed-only`
+  interoperates across backends. A successful file push reports
+  `push.backend="file"`, `vbe_validation="not_performed"`, and warning
+  `vbe_validation_skipped` because no VBE compile ran. Capabilities schema v3
+  now advertises `push` backends (`default_backend="excel"`, `file` with
+  `requires_excel=false`), and backup metadata records the producing backend.
 - Added a lossless pure-Go MS-OFORMS reader for existing UserForm designer
   storages. It decodes code-page-aware properties and TextProps, reconstructs
   nested container ownership, preserves opaque and raw persistence bytes, and

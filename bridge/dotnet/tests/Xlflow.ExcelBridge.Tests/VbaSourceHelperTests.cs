@@ -35,6 +35,42 @@ public sealed class VbaSourceHelperTests
         }
     }
 
+    [Fact]
+    public void PushParityFixturesMatchBridgeSourceContract()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "push-parity.json")));
+        var root = document.RootElement;
+        foreach (var test in root.GetProperty("annotationCases").EnumerateArray())
+        {
+            var actual = VbaSourceHelper.UpdateFolderAnnotationText(
+                test.GetProperty("source").GetString()!,
+                test.GetProperty("mode").GetString()!,
+                test.GetProperty("annotation").GetString());
+            Assert.Equal(test.GetProperty("expected").GetString(), NormalizeToLf(actual));
+        }
+        foreach (var test in root.GetProperty("lineNumberAddCases").EnumerateArray())
+        {
+            var applied = ErlLineNumberTransformer.TryAdd(test.GetProperty("source").GetString()!, out var actual, out var issue);
+            if (test.TryGetProperty("unsafe", out var unsafeFlag) && unsafeFlag.GetBoolean())
+            {
+                Assert.False(applied, $"case {test.GetProperty("id")} should be rejected");
+                Assert.NotNull(issue);
+                if (test.TryGetProperty("issueLine", out var issueLine))
+                {
+                    Assert.Equal(issueLine.GetInt32(), issue!.Line);
+                }
+                continue;
+            }
+            Assert.True(applied, $"case {test.GetProperty("id")} rejected: {issue?.Message}");
+            Assert.Equal(test.GetProperty("expected").GetString(), NormalizeToLf(actual));
+        }
+        foreach (var test in root.GetProperty("documentCases").EnumerateArray())
+        {
+            var actual = VbaSourceHelper.NormalizeDocumentModuleContent(test.GetProperty("source").GetString()!);
+            Assert.Equal(test.GetProperty("expected").GetString(), NormalizeToLf(actual));
+        }
+    }
+
     private static string NormalizeToLf(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
     [Fact]

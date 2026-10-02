@@ -38,6 +38,7 @@ import (
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/filepull"
+	"github.com/harumiWeb/xlflow/internal/filepush"
 	formulaspkg "github.com/harumiWeb/xlflow/internal/formulas"
 	"github.com/harumiWeb/xlflow/internal/gui"
 	workbookinspect "github.com/harumiWeb/xlflow/internal/inspect"
@@ -2761,6 +2762,7 @@ func (a *app) writePackEngineFailure(err error) error {
 
 func (a *app) pushCommand() *cobra.Command {
 	var backupMode string
+	var backend string
 	var fast bool
 	var changedOnly bool
 	var session bool
@@ -2771,6 +2773,13 @@ func (a *app) pushCommand() *cobra.Command {
 		Short: "Import source VBA components into the configured workbook",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			backend = strings.ToLower(strings.TrimSpace(backend))
+			if backend != "excel" && backend != "file" {
+				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", fmt.Errorf("--backend must be excel or file, got %q", backend))
+			}
+			if backend == "file" && (session || noSave) {
+				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", errors.New("--backend file cannot be combined with --session or --no-save"))
+			}
 			commandOpts := buildCommandOptions(a.stderrWriter())
 			cfg, err := a.loadConfig("push")
 			if err != nil {
@@ -2780,16 +2789,25 @@ func (a *app) pushCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", err)
 			}
+			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+			if backend == "file" {
+				env, code, err := a.pushViaFile(cmd.Context(), cfg, pushOpts)
+				if err != nil {
+					return err
+				}
+				a.applyAutomaticBackupRetention(cfg, workbookPath, &env, code == output.ExitSuccess && env.Backup != nil)
+				return a.write(env, code)
+			}
 			env, code, err := a.pushSource(cmd.Context(), "push", cfg, pushOpts, "Importing VBA source")
 			if err != nil {
 				return err
 			}
-			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 			a.applyAutomaticBackupRetention(cfg, workbookPath, &env, code == output.ExitSuccess && env.Backup != nil)
 			return a.write(env, code)
 		},
 	}
 	cmd.Flags().StringVar(&backupMode, "backup", "always", "backup policy: always or never")
+	cmd.Flags().StringVar(&backend, "backend", "excel", "push backend: excel or file")
 	cmd.Flags().BoolVar(&fast, "fast", false, "use development-oriented fast push defaults")
 	cmd.Flags().BoolVar(&changedOnly, "changed-only", false, "skip workbook updates when source state has not changed")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
@@ -3049,7 +3067,224 @@ func (a *app) pushSource(ctx context.Context, command string, cfg config.Config,
 	if err != nil {
 		return output.Envelope{}, 0, err
 	}
+	if env.Push == nil {
+		env.Push = map[string]any{"backend": "excel", "target": "excel_vbide", "vbe_validation": "performed"}
+	}
 	return env, code, nil
+}
+
+// filePushBlockedError carries a stable error code for safety-gate rejections
+// so filePushErrorCode can map them without string matching.
+type filePushBlockedError struct {
+	code    string
+	message string
+}
+
+func (e *filePushBlockedError) Error() string { return e.message }
+
+// pushViaFile runs the pure-Go file backend: it rebuilds xl/vbaProject.bin
+// from the tracked source tree and atomically replaces the saved workbook.
+// No Excel, COM, or VBIDE is involved, so the run works headless on any
+// platform; VBE compile validation is explicitly not performed.
+func (a *app) pushViaFile(ctx context.Context, cfg config.Config, pushOpts excel.PushOptions) (output.Envelope, int, error) {
+	workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
+	if !strings.EqualFold(filepath.Ext(workbookPath), workbookformat.ExtXLSM) {
+		unsupported := workbookformat.UnsupportedError{Capability: "push --backend file", Extension: filepath.Ext(workbookPath)}
+		return output.Envelope{}, output.ExitConfig, a.writeUnsupportedWorkbookFormat("push", unsupported)
+	}
+	if err := a.runSourceEncodingPreflight(ctx, "push", cfg); err != nil {
+		return output.Envelope{}, 0, err
+	}
+	if err := a.runUserFormCodeSourceValidation("push", cfg); err != nil {
+		return output.Envelope{}, 0, err
+	}
+	if err := a.runUserFormArtifactPreflight("push", cfg, nil); err != nil {
+		return output.Envelope{}, 0, err
+	}
+	if err := a.runSourcePreflightAfterEncoding(ctx, "push", cfg, "pushing to the saved workbook", nil, nil); err != nil {
+		return output.Envelope{}, 0, err
+	}
+	manager, err := a.coordinationManager()
+	if err != nil {
+		return output.Envelope{}, output.ExitEnvironment, a.writeFailure("push", output.ExitEnvironment, "coordination_init_failed", err)
+	}
+	result, err := filepush.PushContext(ctx, a.cwd, cfg, workbookPath, filepush.Options{
+		BackupMode:   pushOpts.BackupMode,
+		ChangedOnly:  pushOpts.ChangedOnly,
+		Coordination: manager,
+		Wait:         a.wait,
+		WaitTimeout:  a.waitTimeout,
+		Guard:        a.guardFilePushWorkbook,
+	})
+	if err != nil {
+		code := filePushExitCode(err)
+		return output.Envelope{}, code, a.writeFailure("push", code, filePushErrorCode(err), err)
+	}
+
+	env := output.New("push")
+	env.Workbook = map[string]any{
+		"path": displayPath(a.cwd, workbookPath), "session": false, "session_mode": "none",
+		"session_requested": false, "saved": true, "dirty": false, "needs_save": false,
+	}
+	env.Push = map[string]any{"backend": "file", "target": "saved_workbook", "vbe_validation": "not_performed"}
+	env.Target = map[string]any{"kind": "file", "path": displayPath(a.cwd, workbookPath)}
+	env.Session = map[string]any{"active": false, "mode": "none", "source_of_truth": "saved_workbook"}
+	env.Source = map[string]any{
+		"changed": !result.Skipped, "changed_only": pushOpts.ChangedOnly,
+		"state": displayPath(a.cwd, result.StatePath), "files": result.SourceFiles,
+	}
+	if result.Backup != nil {
+		env.Backup = map[string]any{
+			"id": result.Backup.ID, "path": displayPath(a.cwd, result.Backup.BackupFileAbsPath),
+			"reason": result.Backup.Reason, "mode": pushOpts.BackupMode,
+		}
+	}
+	if !result.Skipped {
+		cleanup := map[string]any{"status": result.Publication.Cleanup.Status}
+		if result.Publication.Cleanup.Status == "failed" {
+			cleanup["residual_path"] = displayPath(a.cwd, result.Publication.Cleanup.ResidualPath)
+			cleanup["error"] = result.Publication.Cleanup.Error
+		}
+		env.Output = map[string]any{
+			"publication":       result.Publication.Publication,
+			"replaced_existing": result.Publication.ReplacedExisting,
+			"temporary_cleanup": cleanup,
+		}
+	}
+	warnings := []map[string]any{{
+		"code":    "vbe_validation_skipped",
+		"message": "file push did not open Excel; no VBE compile or runtime validation was performed.",
+	}}
+	if result.Publication.Cleanup.Status == "failed" {
+		warnings = append(warnings, map[string]any{
+			"code":    "push_temporary_cleanup_failed",
+			"message": "push published the workbook but could not remove the temporary artifact: " + result.Publication.Cleanup.ResidualPath,
+		})
+	}
+	if result.StateError != nil {
+		warnings = append(warnings, map[string]any{
+			"code":    "push_state_persist_failed",
+			"message": "the workbook was published, but push state could not be persisted: " + result.StateError.Error(),
+		})
+	}
+	env.Warnings = warnings
+	if result.Skipped {
+		env.Logs = append(env.Logs, "source tree unchanged; workbook left as-is")
+	} else {
+		env.Logs = append(env.Logs, fmt.Sprintf("pushed %d source file(s) into %s", result.SourceFiles, displayPath(a.cwd, workbookPath)))
+	}
+	return env, output.ExitSuccess, nil
+}
+
+// guardFilePushWorkbook is the file backend's safety gate. A file push
+// overwrites the saved workbook without consulting any live Excel/VBE state,
+// so it refuses to run when the workbook looks open, a matching xlflow session
+// is recorded, or an open-state probe cannot give a definitive answer.
+func (a *app) guardFilePushWorkbook(workbookPath string) error {
+	candidates := packCandidatePaths(a.cwd, workbookPath)
+	for _, candidate := range candidates {
+		if lockPath, locked := officeLockFilePresent(candidate); locked {
+			return &filePushBlockedError{
+				code:    "push_workbook_open",
+				message: fmt.Sprintf("workbook appears to be open in Excel (lock file %s); close it or use --backend excel", displayPath(a.cwd, lockPath)),
+			}
+		}
+	}
+	if wb, active, err := a.packActiveSession(candidates); err != nil {
+		return &filePushBlockedError{
+			code:    "push_active_session",
+			message: fmt.Sprintf("could not check for an active session; refusing file push: %v", err),
+		}
+	} else if active {
+		return &filePushBlockedError{
+			code:    "push_active_session",
+			message: fmt.Sprintf("an xlflow session is active for %s; save/close it or use --backend excel", displayPath(a.cwd, wb)),
+		}
+	}
+	if runtime.GOOS == "windows" {
+		state, err := detectWorkbookUse(workbookPath)
+		if err != nil {
+			return &filePushBlockedError{
+				code:    "push_workbook_open",
+				message: fmt.Sprintf("could not determine whether the workbook is open in Excel; refusing file push: %v", err),
+			}
+		}
+		if state.OpenInExcel {
+			return &filePushBlockedError{
+				code:    "push_workbook_open",
+				message: "workbook is open in Excel; close it or use --backend excel",
+			}
+		}
+	}
+	if isWSL() {
+		matching, matchErr := a.matchingWSLLiveSession(context.Background(), workbookPath)
+		if matchErr != nil {
+			return &filePushBlockedError{
+				code:    "push_active_session",
+				message: fmt.Sprintf("could not probe Windows for a matching live session; refusing file push: %v", matchErr),
+			}
+		}
+		if matching {
+			return &filePushBlockedError{
+				code:    "push_active_session",
+				message: "a live xlflow session owns this workbook on Windows; file push refuses to overwrite it",
+			}
+		}
+	}
+	return nil
+}
+
+func filePushExitCode(err error) int {
+	var blocked *filePushBlockedError
+	switch {
+	case errors.As(err, &blocked):
+		return output.ExitConfig
+	case errors.Is(err, filepush.ErrDuplicateModule), errors.Is(err, filepush.ErrLineNumberSafety),
+		errors.Is(err, packpkg.ErrProtectedProject), errors.Is(err, packpkg.ErrSignedProject),
+		errors.Is(err, packpkg.ErrUserFormGenerationUnsupported), errors.Is(err, packpkg.ErrAmbiguousLayout):
+		return output.ExitValidation
+	default:
+		return output.ExitEnvironment
+	}
+}
+
+func filePushErrorCode(err error) string {
+	var blocked *filePushBlockedError
+	var pathErr *os.PathError
+	switch {
+	case errors.As(err, &blocked):
+		return blocked.code
+	case errors.Is(err, coordination.ErrSourceTreeBusy):
+		return coordination.SourceTreeBusyCode
+	case errors.Is(err, context.DeadlineExceeded):
+		return "source_tree_busy_timeout"
+	case errors.Is(err, context.Canceled):
+		return "source_tree_busy_cancelled"
+	case errors.Is(err, filepush.ErrDuplicateModule):
+		return "duplicate_module_name"
+	case errors.Is(err, filepush.ErrLineNumberSafety):
+		return "vba_line_number_safety_failed"
+	case errors.Is(err, packpkg.ErrProtectedProject):
+		return "push_protected_project"
+	case errors.Is(err, packpkg.ErrSignedProject):
+		return "push_signed_project"
+	case errors.Is(err, packpkg.ErrUserFormGenerationUnsupported):
+		return "push_userform_generation_unsupported"
+	case errors.Is(err, packpkg.ErrAmbiguousLayout):
+		return "push_ambiguous_layout"
+	case errors.Is(err, filepush.ErrBackup):
+		return "push_backup_failed"
+	case errors.Is(err, coordination.ErrPublishTargetBusy):
+		return "push_output_busy"
+	case errors.Is(err, coordination.ErrPublishReplaceFailed):
+		return "push_output_replace_failed"
+	case errors.Is(err, filepush.ErrPublish):
+		return "push_write_failed"
+	case errors.As(err, &pathErr):
+		return "push_source_read_failed"
+	default:
+		return "push_failed"
+	}
 }
 
 type rollbackTarget struct {
@@ -8163,6 +8398,17 @@ func isPathInsideRoot(path string, root string) bool {
 }
 
 func (a *app) runUserFormCodeSourcePreflight(command string, cfg config.Config, targetForms map[string]bool) error {
+	return a.runUserFormCodeSourceCheck(command, cfg, targetForms, true)
+}
+
+// runUserFormCodeSourceValidation runs only the sidecar shape validation. The
+// file backend merges sidecar code in memory, so it must not rewrite tracked
+// .frm files the way the Excel import path does.
+func (a *app) runUserFormCodeSourceValidation(command string, cfg config.Config) error {
+	return a.runUserFormCodeSourceCheck(command, cfg, nil, false)
+}
+
+func (a *app) runUserFormCodeSourceCheck(command string, cfg config.Config, targetForms map[string]bool, syncSidecars bool) error {
 	if cfg.UserForm.CodeSource != "sidecar" {
 		return nil
 	}
@@ -8182,8 +8428,11 @@ func (a *app) runUserFormCodeSourcePreflight(command string, cfg config.Config, 
 			Phase:   "preflight",
 		})
 		env.Issues = rendered
-		env.Logs = []string{"blocked before Excel automation because a UserForm sidecar contains Attribute VB_* header lines"}
+		env.Logs = []string{"blocked before push because a UserForm sidecar contains Attribute VB_* header lines"}
 		return a.write(env, output.ExitValidation)
+	}
+	if !syncSidecars {
+		return nil
 	}
 	updated, err := forms.SyncUserFormCodeSidecars(filepath.Join(a.cwd, cfg.Src.Forms), targetForms)
 	if err != nil {
@@ -8217,7 +8466,7 @@ func (a *app) runUserFormArtifactPreflight(command string, cfg config.Config, ta
 		Phase:   "preflight",
 	})
 	env.Issues = rendered
-	env.Logs = []string{"blocked before Excel automation because spec-driven UserForm artifacts are missing or inconsistent with src/forms/specs"}
+	env.Logs = []string{"blocked before push because spec-driven UserForm artifacts are missing or inconsistent with src/forms/specs"}
 	return a.write(env, output.ExitValidation)
 }
 

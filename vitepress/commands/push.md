@@ -5,13 +5,14 @@ Import edited source files back into the configured workbook.
 ## Usage
 
 ```bash
-xlflow push [--backup <always|never>] [--fast] [--changed-only] [--session] [--no-save]
+xlflow push [--backend <excel|file>] [--backup <always|never>] [--fast] [--changed-only] [--session] [--no-save]
 ```
 
 ## Options and Arguments
 
 | Option / argument          | Description                                                                                | Default |
 | -------------------------- | ------------------------------------------------------------------------------------------ | ------- |
+| `--backend <excel\|file>`  | Select the Excel/VBIDE `excel` backend or the pure-Go saved-workbook `file` backend.       | excel   |
 | `--backup <always\|never>` | Choose whether to create a rollback-capable workbook backup before modifying the workbook. | always  |
 | `--fast`                   | Use the faster import path when supported.                                                 | false   |
 | `--changed-only`           | Import only changed source files.                                                          | false   |
@@ -24,7 +25,34 @@ xlflow push [--backup <always|never>] [--fast] [--changed-only] [--session] [--n
 ```bash
 xlflow push --backup always --json
 xlflow push --session --fast --no-save --json
+xlflow push --backend file --json
 ```
+
+## File backend
+
+`--backend file` rebuilds the saved `.xlsm` directly from the tracked source
+tree — no Excel, COM, VBIDE, or bridge process — so it works on Linux,
+containers, CI runners, WSL, and remote coding agents. It preserves existing
+UserForm designer storage and updates form code-behind (including `sidecar`
+mode sidecars), but it cannot author a brand-new UserForm; use `--backend
+excel` when a form does not yet exist in the workbook.
+
+Because the backend replaces the saved workbook beneath any live Excel/VBE
+state, it refuses to run — before changing anything — when the workbook looks
+open (`~$` lock file, Windows open-state probe), when a matching xlflow
+session is recorded, or when a matching WSL-side live session is detected.
+Close Excel or stop the session first, or use `--backend excel`.
+
+A successful file push means the workbook artifact was rebuilt and
+structurally validated — it does not mean the VBA compiled. JSON reports
+`push.backend="file"`, `push.target="saved_workbook"`,
+`push.vbe_validation="not_performed"`, and warning `vbe_validation_skipped`.
+Compile/run validation still requires opening the workbook in Excel (for
+example through `xlflow run` or `xlflow test`).
+
+`--changed-only` interoperates across both backends: state written by either
+backend satisfies the other. `--backend file` cannot be combined with
+`--session` or `--no-save`.
 
 ## Notes
 

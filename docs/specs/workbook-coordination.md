@@ -93,6 +93,10 @@ normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
 
 The v3 `pull` entry contains `"default_backend":"auto"` and
 `"backends":{"auto":{"requires_excel":true,"selection":"dynamic"},"excel":{"requires_excel":true},"file":{"requires_excel":false}}`.
+The v3 `push` entry contains `"default_backend":"excel"` and
+`"backends":{"excel":{"requires_excel":true},"file":{"requires_excel":false}}`.
+Push offers no `auto` backend: writing to the workbook is always an explicit
+authority choice between the Excel/VBIDE path and the pure-Go saved-file path.
 Command-level and auto `requires_excel` remain conservatively `true` because
 runtime state can select Excel; `selection=dynamic` prevents consumers from
 mistaking auto for a fixed Excel requirement.
@@ -689,6 +693,16 @@ exclusive mode, and acquires the result in stable LockID order before reading
 the saved workbook. It holds the set through planning, publication, rollback,
 and cleanup. It deliberately skips the workbook lease. The Excel backend
 retains its historical workbook coordination contract.
+
+`push --backend file` uses the same lock-set construction over all four
+managed roots (module, class, forms, and document-module roots — the forms
+root participates because this backend reads and rewrites UserForm artifacts).
+It holds the set through source discovery, transformation, artifact staging,
+validation, and atomic workbook replacement. It likewise skips the workbook
+lease: the staged artifact is fully built and validated before a single atomic
+publish, so live-state ordering belongs to the file-push safety gate (Office
+lock files, recorded sessions, open-workbook probes) rather than to a
+long-held workbook lock.
 
 Global acquisition order is resource kind first (`workbook`, then
 `source_tree`) and LockID second. Release order is reversed. A future command
