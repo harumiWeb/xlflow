@@ -1,0 +1,297 @@
+{
+  "controls": [
+    {
+      "boolean": "0x00000000",
+      "booleanPresent": false,
+      "kind": "MSForms.Label",
+      "mask": "0x2c",
+      "name": "LabelMain",
+      "siteMask": "0x1f5",
+      "siteValues": {
+        "BitFlags": 50,
+        "ClsidCacheIndex": 21,
+        "ID": 1,
+        "NameData": 2147483657,
+        "ObjectStreamSize": 72,
+        "TabIndex": 0,
+        "_Depth": 0,
+        "_Type": 1
+      },
+      "strings": {
+        "Caption": {
+          "Text": "before-Label",
+          "Compressed": true,
+          "Raw": "YmVmb3JlLUxhYmVs"
+        }
+      },
+      "values": {
+        "Caption": 2147483660,
+        "VariousPropertyBits": 8388633
+      },
+      "various": "0x00800019",
+      "variousPresent": true
+    },
+    {
+      "boolean": "0x00000000",
+      "booleanPresent": false,
+      "kind": "MSForms.TextBox",
+      "mask": "0x80400101",
+      "name": "TextMain",
+      "siteMask": "0x1e5",
+      "siteValues": {
+        "ClsidCacheIndex": 23,
+        "ID": 2,
+        "NameData": 2147483656,
+        "ObjectStreamSize": 80,
+        "TabIndex": 1,
+        "_Depth": 0,
+        "_Type": 1
+      },
+      "strings": {
+        "Value": {
+          "Text": "before-TextBox",
+          "Compressed": true,
+          "Raw": "YmVmb3JlLVRleHRCb3g="
+        }
+      },
+      "values": {
+        "Value": 2147483662,
+        "VariousPropertyBits": 746604569
+      },
+      "various": "0x2c804819",
+      "variousPresent": true
+    },
+    {
+      "boolean": "0x00000000",
+      "booleanPresent": false,
+      "kind": "MSForms.CommandButton",
+      "mask": "0x2c",
+      "name": "ButtonMain",
+      "siteMask": "0x1e5",
+      "siteValues": {
+        "ClsidCacheIndex": 17,
+        "ID": 3,
+        "NameData": 2147483658,
+        "ObjectStreamSize": 80,
+        "TabIndex": 2,
+        "_Depth": 0,
+        "_Type": 1
+      },
+      "strings": {
+        "Caption": {
+          "Text": "before-CommandButton",
+          "Compressed": true,
+          "Raw": "YmVmb3JlLUNvbW1hbmRCdXR0b24="
+        }
+      },
+      "values": {
+        "Caption": 2147483668,
+        "VariousPropertyBits": 25
+      },
+      "various": "0x00000019",
+      "variousPresent": true
+    },
+    {
+      "boolean": "0x00000000",
+      "booleanPresent": false,
+      "kind": "MSForms.CheckBox",
+      "mask": "0x80c00147",
+      "name": "CheckMain",
+      "siteMask": "0x1e5",
+      "siteValues": {
+        "ClsidCacheIndex": 26,
+        "ID": 4,
+        "NameData": 2147483657,
+        "ObjectStreamSize": 100,
+        "TabIndex": 3,
+        "_Depth": 0,
+        "_Type": 1
+      },
+      "strings": {
+        "Caption": {
+          "Text": "before-CheckBox",
+          "Compressed": true,
+          "Raw": "YmVmb3JlLUNoZWNrQm94"
+        },
+        "Value": {
+          "Text": "0",
+          "Compressed": true,
+          "Raw": "MA=="
+        }
+      },
+      "values": {
+        "BackColor": 2147483663,
+        "Caption": 2147483663,
+        "DisplayStyle": 4,
+        "ForeColor": 2147483666,
+        "Value": 2147483649,
+        "VariousPropertyBits": 746588185
+      },
+      "various": "0x2c800819",
+      "variousPresent": true
+    },
+    {
+      "boolean": "0x00000000",
+      "booleanPresent": false,
+      "kind": "MSForms.OptionButton",
+      "mask": "0x80c00147",
+      "name": "OptionMain",
+      "siteMask": "0x1e5",
+      "siteValues": {
+        "ClsidCacheIndex": 27,
+        "ID": 5,
+        "NameData": 2147483658,
+        "ObjectStreamSize": 104,
+        "TabIndex": 4,
+        "_Depth": 0,
+        "_Type": 1
+      },
+      "strings": {
+        "Caption": {
+          "Text": "before-OptionButton",
+          "Compressed": true,
+          "Raw": "YmVmb3JlLU9wdGlvbkJ1dHRvbg=="
+        },
+        "Value": {
+          "Text": "0",
+          "Compressed": true,
+          "Raw": "MA=="
+        }
+      },
+      "values": {
+        "BackColor": 2147483663,
+        "Caption": 2147483667,
+        "DisplayStyle": 5,
+        "ForeColor": 2147483666,
+        "Value": 2147483649,
+        "VariousPropertyBits": 746588185
+      },
+      "various": "0x2c800819",
+      "variousPresent": true
+    },
+    {
+      "boolean": "0x00000000",
+      "booleanPresent": false,
+      "kind": "MSForms.ComboBox",
+      "mask": "0x80450141",
+      "name": "ComboMain",
+      "siteMask": "0x1e5",
+      "siteValues": {
+        "ClsidCacheIndex": 25,
+        "ID": 6,
+        "NameData": 2147483657,
+        "ObjectStreamSize": 72,
+        "TabIndex": 5,
+        "_Depth": 0,
+        "_Type": 1
+      },
+      "strings": {
+        "Value": {
+          "Text": "beta",
+          "Compressed": true,
+          "Raw": "YmV0YQ=="
+        }
+      },
+      "values": {
+        "DisplayStyle": 3,
+        "MatchEntry": 1,
+        "ShowDropButtonWhen": 2,
+        "Value": 2147483652,
+        "VariousPropertyBits": 746604569
+      },
+      "various": "0x2c804819",
+      "variousPresent": true
+    },
+    {
+      "boolean": "0x00008000",
+      "booleanPresent": true,
+      "kind": "MSForms.Frame",
+      "mask": "0xc0a0c48",
+      "name": "FrameMain",
+      "siteMask": "0x1d5",
+      "siteValues": {
+        "BitFlags": 262179,
+        "ClsidCacheIndex": 14,
+        "ID": 8,
+        "NameData": 2147483657,
+        "TabIndex": 7,
+        "_Depth": 0,
+        "_Type": 1
+      },
+      "strings": {
+        "Caption": {
+          "Text": "before-Frame",
+          "Compressed": true,
+          "Raw": "YmVmb3JlLUZyYW1l"
+        }
+      },
+      "values": {
+        "BooleanProperties": 32768,
+        "Caption": 2147483660,
+        "DrawBuffer": 32000,
+        "NextAvailableID": 9,
+        "ShapeCookie": 1,
+        "SpecialEffect": 3
+      },
+      "various": "0x00000000",
+      "variousPresent": false
+    },
+    {
+      "boolean": "0x00000000",
+      "booleanPresent": false,
+      "kind": "MSForms.TextBox",
+      "mask": "0x80400101",
+      "name": "NestedText",
+      "siteMask": "0x1e5",
+      "siteValues": {
+        "ClsidCacheIndex": 23,
+        "ID": 9,
+        "NameData": 2147483658,
+        "ObjectStreamSize": 84,
+        "TabIndex": 0,
+        "_Depth": 0,
+        "_Type": 1
+      },
+      "strings": {
+        "Value": {
+          "Text": "before-NestedText",
+          "Compressed": true,
+          "Raw": "YmVmb3JlLU5lc3RlZFRleHQ="
+        }
+      },
+      "values": {
+        "Value": 2147483665,
+        "VariousPropertyBits": 746604569
+      },
+      "various": "0x2c804819",
+      "variousPresent": true
+    },
+    {
+      "boolean": "0x00000000",
+      "booleanPresent": false,
+      "kind": "MSForms.ListBox",
+      "mask": "0x80010161",
+      "name": "ListMain",
+      "siteMask": "0x1e5",
+      "siteValues": {
+        "ClsidCacheIndex": 24,
+        "ID": 7,
+        "NameData": 2147483656,
+        "ObjectStreamSize": 60,
+        "TabIndex": 6,
+        "_Depth": 0,
+        "_Type": 1
+      },
+      "strings": {},
+      "values": {
+        "DisplayStyle": 2,
+        "MatchEntry": 0,
+        "ScrollBars": 3,
+        "VariousPropertyBits": 746588185
+      },
+      "various": "0x2c800819",
+      "variousPresent": true
+    }
+  ],
+  "workbook": "04-all-disabled.xlsm"
+}

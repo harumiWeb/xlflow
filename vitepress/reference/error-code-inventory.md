@@ -10,6 +10,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `active_workbook_mismatch`
 - `affected_module_count`
 - `affected_modules`
+- `alias_conflict`
 - `allowed_diagnostics`
 - `alternative_body`
 - `ambiguous_call_count`
@@ -633,6 +634,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generator_version`
 - `generic_dataflow_cfg_walks`
 - `generic_dataflow_kernel_runs`
+- `geometry_range`
 - `get_statement`
 - `global_values`
 - `gosub_statement`
@@ -703,6 +705,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invalid_me_context`
 - `invalid_metadata_json`
 - `invalid_project_config`
+- `invalid_property`
 - `invalid_public_object_member`
 - `invalid_range`
 - `invalid_reference`
@@ -1038,6 +1041,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `property_index_type`
 - `property_let`
 - `property_let_declaration`
+- `property_reset`
 - `property_set`
 - `property_set_declaration`
 - `property_value_type`
@@ -1148,6 +1152,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `rollback_session_check_failed`
 - `root_count`
 - `root_path`
+- `root_size`
 - `row_count`
 - `row_height`
 - `row_range`
@@ -1296,6 +1301,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `systemprofile_desktop`
 - `systemprofile_desktop_missing`
 - `tab_index`
+- `tab_range`
 - `tag_name`
 - `tainted_command_text`
 - `target_dir`
@@ -1365,6 +1371,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unknown_inline_suppression_rule`
 - `unknown_origin`
 - `unknown_path`
+- `unknown_property`
 - `unknown_transformation`
 - `unnamed_control_placeholder`
 - `unparenthesized_argument_list`
@@ -1403,6 +1410,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `userform_control_metadata`
 - `userform_count`
 - `userform_detection_unavailable`
+- `userform_edit_conflict`
+- `userform_edit_invalid`
+- `userform_edit_stale_input`
+- `userform_edit_unsupported`
 - `userform_image_export_experimental`
 - `userform_inspect_saved_file`
 - `userform_planned_commands`
