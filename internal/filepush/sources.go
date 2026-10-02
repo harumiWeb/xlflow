@@ -20,6 +20,7 @@ import (
 func collectSources(root string, cfg config.Config) ([]packpkg.SourceModule, error) {
 	components, err := sourceinventory.Discover(sourceinventory.Options{
 		Root: root, Config: cfg, ValidateFormArtifacts: true, AllowLooseFormModules: true,
+		AllowMissingRoots: true,
 	})
 	if err != nil {
 		var layoutErr *sourceinventory.LayoutError

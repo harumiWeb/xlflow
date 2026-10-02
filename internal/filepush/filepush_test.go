@@ -3,6 +3,7 @@ package filepush
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 )
 
@@ -42,7 +44,7 @@ func TestPushAppliesSourceTreeAndWritesState(t *testing.T) {
 		t.Fatalf("backup not created: %v", err)
 	}
 	state := readState(t, result.StatePath)
-	current := computeFingerprint(workbook, discoverSourceFiles(resolvedRoots(root, cfg), cfg.UserForm.CodeSource), false)
+	current := computeFingerprint(workbook, discoverSourceFiles(resolvedRoots(root, cfg), cfg.UserForm.CodeSource), false, cfg.VBA.FolderAnnotation)
 	if !fingerprintEquals(state.Fingerprint, current) {
 		t.Fatal("recorded fingerprint does not match the pushed source tree")
 	}
@@ -114,7 +116,7 @@ func TestPushGuardRejectsBeforeMutation(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "src", "modules", "Module1.bas"), moduleSource("Module1", "Option Explicit\n"))
 	guardErr := errors.New("workbook is open")
 	_, err := Push(root, testConfig(), workbook, Options{
-		Guard: func(string) error { return guardErr },
+		Guard: func(context.Context, string) error { return guardErr },
 	})
 	if !errors.Is(err, guardErr) {
 		t.Fatalf("error = %v, want guard error", err)
@@ -235,7 +237,7 @@ func TestPushStateUsesDotNetShape(t *testing.T) {
 		}
 	}
 	fingerprint := raw["fingerprint"].(map[string]any)
-	for _, key := range []string{"workbook_path", "files", "line_numbers_enabled"} {
+	for _, key := range []string{"workbook_path", "files", "line_numbers_enabled", "folder_annotation"} {
 		if _, ok := fingerprint[key]; !ok {
 			t.Fatalf("fingerprint missing %q", key)
 		}
@@ -432,7 +434,7 @@ func TestPushStatePathsCanonicalAcrossHosts(t *testing.T) {
 		}
 	}
 
-	left := computeFingerprint(`/mnt/c/proj/build/Book.xlsm`, nil, false)
+	left := computeFingerprint(`/mnt/c/proj/build/Book.xlsm`, nil, false, "")
 	right := sourceFingerprint{WorkbookPath: `C:\proj\build\Book.xlsm`}
 	if !fingerprintEquals(left, right) {
 		t.Fatal("cross-host workbook paths broke fingerprint equality")
@@ -444,5 +446,125 @@ func TestPushStatePathsCanonicalAcrossHosts(t *testing.T) {
 	runningOnWSL = func() bool { return false }
 	if got := normalizeFingerprintPath(`/mnt/c/proj/Book.xlsm`); got == `C:\proj\Book.xlsm` {
 		t.Fatalf("non-WSL /mnt path was rewritten: %q", got)
+	}
+}
+
+// A configured source root that does not exist contributes no files: the
+// Excel bridge skips missing directories, so the file backend must tolerate
+// them too instead of failing the push with a layout error.
+func TestPushToleratesMissingSourceRoots(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src", "modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	writeTestFile(t, filepath.Join(root, "src", "modules", "Module1.bas"), moduleSource("Module1", "Option Explicit\n"))
+
+	result, err := Push(root, testConfig(), workbook, Options{})
+	if err != nil {
+		t.Fatalf("push with missing source roots: %v", err)
+	}
+	if result.Meta.Standard != 1 {
+		t.Fatalf("meta = %+v, want 1 standard module", result.Meta)
+	}
+}
+
+// The mutation window holds the workbook lease so a concurrent rollback, pack,
+// or other mutator cannot race the atomic replace. Contention fails fast with
+// the shared busy contract; a changed-only skip still never touches the lease.
+func TestPushFailsBusyWhenWorkbookLeaseHeld(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	writeTestFile(t, filepath.Join(root, "src", "modules", "Module1.bas"), moduleSource("Module1", "Option Explicit\n"))
+	before := mustRead(t, workbook)
+
+	manager, err := coordination.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := coordination.NewWorkbookIdentity(root, workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := manager.Acquire(context.Background(), coordination.AcquireRequest{
+		Identity: identity, Command: "rollback", OperationKind: coordination.OperationMutate,
+		ResourceScope: coordination.ResourceWorkbook,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Release() }()
+
+	_, err = Push(root, testConfig(), workbook, Options{Coordination: manager})
+	var busy *coordination.BusyError
+	if !errors.Is(err, ErrWorkbookLease) || !errors.As(err, &busy) {
+		t.Fatalf("error = %v, want ErrWorkbookLease wrapping BusyError", err)
+	}
+	if !bytes.Equal(mustRead(t, workbook), before) {
+		t.Fatal("workbook changed despite lease contention")
+	}
+}
+
+// A recovery marker records an indeterminate Excel operation; the file backend
+// must honor it even when the lock file and session record have cleared, just
+// like lease-coordinated commands do.
+func TestPushRejectsWorkbookRequiringRecovery(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	writeTestFile(t, filepath.Join(root, "src", "modules", "Module1.bas"), moduleSource("Module1", "Option Explicit\n"))
+	before := mustRead(t, workbook)
+
+	manager, err := coordination.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := coordination.NewWorkbookIdentity(root, workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := manager.Acquire(context.Background(), coordination.AcquireRequest{
+		Identity: identity, Command: "push", OperationKind: coordination.OperationMutate,
+		ResourceScope: coordination.ResourceWorkbook,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lease.PublishRecovery(coordination.RecoveryPublication{
+		Reason: "save timed out", Operation: "save",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Push(root, testConfig(), workbook, Options{Coordination: manager})
+	var required *coordination.RecoveryRequiredError
+	if !errors.Is(err, ErrRecoveryCheck) || !errors.As(err, &required) {
+		t.Fatalf("error = %v, want ErrRecoveryCheck wrapping RecoveryRequiredError", err)
+	}
+	if !bytes.Equal(mustRead(t, workbook), before) {
+		t.Fatal("workbook changed despite recovery requirement")
+	}
+}
+
+// Folder-annotation mode participates in the fingerprint: changing the mode
+// without touching sources must invalidate a recorded changed-only state.
+func TestPushChangedOnlyDetectsFolderAnnotationModeChange(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	writeTestFile(t, filepath.Join(root, "src", "modules", "Module1.bas"), moduleSource("Module1", "Option Explicit\n"))
+	cfg := testConfig()
+	cfg.VBA.FolderAnnotation = "ignore"
+	if _, err := Push(root, cfg, workbook, Options{ChangedOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	cfg.VBA.FolderAnnotation = "update"
+	result, err := Push(root, cfg, workbook, Options{ChangedOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Skipped {
+		t.Fatal("annotation mode change did not invalidate changed-only state")
 	}
 }

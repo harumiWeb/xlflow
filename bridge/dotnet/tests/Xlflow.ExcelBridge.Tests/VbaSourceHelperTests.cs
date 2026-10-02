@@ -387,6 +387,47 @@ public sealed class VbaSourceHelperTests
     }
 
     [Fact]
+    public void Fingerprint_IgnoresFileEnumerationOrder()
+    {
+        var entryA = new SourceFileEntry { Kind = "module", Path = "Main.bas", Hash = "aaa" };
+        var entryB = new SourceFileEntry { Kind = "module", Path = "Sub/Text.bas", Hash = "bbb" };
+        var forward = new SourceFingerprint { WorkbookPath = "Book.xlsm", Files = [entryA, entryB], FolderAnnotation = "ignore" };
+        var reversed = new SourceFingerprint { WorkbookPath = "Book.xlsm", Files = [entryB, entryA], FolderAnnotation = "ignore" };
+        var different = new SourceFingerprint { WorkbookPath = "Book.xlsm", Files = [entryA], FolderAnnotation = "ignore" };
+
+        Assert.True(VbaSourceHelper.FingerprintEquals(forward, reversed));
+        Assert.False(VbaSourceHelper.FingerprintEquals(forward, different));
+    }
+
+    [Fact]
+    public void Fingerprint_ChangesWhenFolderAnnotationModeChanges()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-fingerprint-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var modules = Path.Combine(root, "modules");
+            Directory.CreateDirectory(modules);
+            File.WriteAllText(Path.Combine(modules, "Main.bas"), "Attribute VB_Name = \"Main\"\r\n");
+
+            var ignored = VbaSourceHelper.ComputeFingerprint("Book.xlsm", modules, "", "", "", "", folderAnnotation: "ignore");
+            var updated = VbaSourceHelper.ComputeFingerprint("Book.xlsm", modules, "", "", "", "", folderAnnotation: "update");
+            var statePath = Path.Combine(root, "state", "push.json");
+            VbaSourceHelper.WriteFingerprintState(ignored, statePath);
+
+            Assert.NotEqual(ignored.FolderAnnotation, updated.FolderAnnotation);
+            Assert.True(VbaSourceHelper.FingerprintMatchesState(ignored, statePath));
+            Assert.False(VbaSourceHelper.FingerprintMatchesState(updated, statePath));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
     public void PushState_RoundTripsFingerprintAndAppliedTo()
     {
         var root = Path.Combine(Path.GetTempPath(), "xlflow-pushstate-" + Guid.NewGuid().ToString("N"));

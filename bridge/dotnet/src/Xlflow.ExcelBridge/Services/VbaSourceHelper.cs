@@ -25,11 +25,6 @@ internal static partial class VbaSourceHelper
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
 
-    private static readonly JsonSerializerOptions CompactJsonOptions = new()
-    {
-        WriteIndented = false,
-    };
-
     public static bool IsSidecarMode(string? codeSource)
     {
         return string.Equals(codeSource?.Trim(), "sidecar", StringComparison.OrdinalIgnoreCase);
@@ -296,7 +291,8 @@ internal static partial class VbaSourceHelper
         string formsDir,
         string workbookDir,
         string? codeSource,
-        bool lineNumbersEnabled = false)
+        bool lineNumbersEnabled = false,
+        string? folderAnnotation = null)
     {
         var files = new List<SourceFileEntry>();
         foreach (var file in DiscoverSourceFiles(modulesDir, classesDir, formsDir, workbookDir, codeSource))
@@ -313,6 +309,7 @@ internal static partial class VbaSourceHelper
             WorkbookPath = Path.GetFullPath(workbookPath),
             Files = files.ToArray(),
             LineNumbersEnabled = lineNumbersEnabled,
+            FolderAnnotation = folderAnnotation ?? "",
         };
     }
 
@@ -325,9 +322,34 @@ internal static partial class VbaSourceHelper
 
     public static bool FingerprintEquals(SourceFingerprint left, SourceFingerprint right)
     {
-        var leftNorm = NormalizeFingerprintJson(JsonSerializer.Serialize(left, FingerprintJsonOptions));
-        var rightNorm = NormalizeFingerprintJson(JsonSerializer.Serialize(right, FingerprintJsonOptions));
-        return leftNorm == rightNorm;
+        // Compare file entries as a multiset of (kind, path, hash) rather than
+        // a serialized array: enumeration order differs between this bridge
+        // (Directory.GetFiles traversal) and the pure-Go file backend (sorted
+        // by relative path), and order alone must never force a re-push.
+        if (!ExcelBridgeSupport.PathsEqual(left.WorkbookPath, right.WorkbookPath)
+            || left.LineNumbersEnabled != right.LineNumbersEnabled
+            || !string.Equals(left.FolderAnnotation, right.FolderAnnotation, StringComparison.Ordinal)
+            || left.Files.Length != right.Files.Length)
+        {
+            return false;
+        }
+
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var file in left.Files)
+        {
+            var key = file.Kind + "\0" + file.Path + "\0" + file.Hash;
+            counts[key] = counts.TryGetValue(key, out var count) ? count + 1 : 1;
+        }
+        foreach (var file in right.Files)
+        {
+            var key = file.Kind + "\0" + file.Path + "\0" + file.Hash;
+            if (!counts.TryGetValue(key, out var count) || count == 0)
+            {
+                return false;
+            }
+            counts[key] = count - 1;
+        }
+        return true;
     }
 
     public static bool TryReadPushState(string statePath, out PushState? state)
@@ -735,19 +757,6 @@ internal static partial class VbaSourceHelper
         }
     }
 
-    private static string NormalizeFingerprintJson(string json)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            return JsonSerializer.Serialize(doc.RootElement, CompactJsonOptions);
-        }
-        catch
-        {
-            return json;
-        }
-    }
-
     private static (bool Found, int LineIndex) FindFolderAnnotationLine(List<string> lines)
     {
         for (var i = 0; i < lines.Count; i++)
@@ -807,6 +816,7 @@ internal sealed record SourceFingerprint
     public string WorkbookPath { get; init; } = "";
     public SourceFileEntry[] Files { get; init; } = [];
     public bool LineNumbersEnabled { get; init; }
+    public string FolderAnnotation { get; init; } = "";
 }
 
 internal sealed record PushState

@@ -223,10 +223,11 @@ func TestFilePushErrorCodeMapping(t *testing.T) {
 	}
 }
 
-// The file backend must not take the workbook coordination lease: its ordering
-// guarantee comes from the safety gate plus atomic publication (ADR-0061), and
-// source-tree leases still serialize concurrent pushes.
-func TestPushFileBackendSkipsWorkbookLease(t *testing.T) {
+// The file backend does not hold the workbook lease for the whole command —
+// only for the publish window — but the mutation itself is serialized with
+// other workbook writers: a held lease fails the push with workbook_busy
+// instead of racing a rollback or restore (ADR-0061).
+func TestPushFileBackendFailsBusyOnWorkbookLease(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)
 	writePushSourceTree(t, dir)
@@ -251,8 +252,8 @@ func TestPushFileBackendSkipsWorkbookLease(t *testing.T) {
 	if releaseErr := workbookLease.Release(); releaseErr != nil {
 		t.Fatal(releaseErr)
 	}
-	if runErr != nil {
-		t.Fatalf("file push contended on workbook lease: %v\n%s", runErr, stdout)
+	if runErr == nil || output.ExitCode(runErr) != output.ExitEnvironment || jsonErrorCode(t, stdout) != "workbook_busy" {
+		t.Fatalf("file push under held workbook lease: stdout=%s err=%v", stdout, runErr)
 	}
 }
 

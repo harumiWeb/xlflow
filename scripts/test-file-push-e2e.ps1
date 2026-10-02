@@ -274,13 +274,16 @@ End Function
         }
 
         # Cross-backend interop: an Excel push --changed-only inside a live
-        # session must read the file backend's push.json schema without
-        # crashing. (Whether it re-imports depends on transform parity; the
-        # release gate asserts the command succeeds, then save --session and
-        # session stop leave the workbook closed for the next file push.)
+        # session must read the file backend's push.json and skip; the
+        # recorded saved_file stamp still describes the on-disk workbook the
+        # session opened, so a re-import would mean the shared state schema
+        # broke.
         Invoke-XlflowJson @('session', 'start', '--json') | Out-Null
         try {
-            Invoke-XlflowJson @('push', '--session', '--changed-only', '--json') | Out-Null
+            $excelPush = Invoke-XlflowJson @('push', '--session', '--changed-only', '--json')
+            if ($excelPush.Json.source.changed -ne $false) {
+                throw "Excel backend ignored file push state: $($excelPush.Raw)"
+            }
             Invoke-XlflowJson @('save', '--session', '--json') | Out-Null
         } finally {
             Invoke-XlflowJson @('session', 'stop', '--json') | Out-Null

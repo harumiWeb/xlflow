@@ -31,6 +31,11 @@ type sourceFingerprint struct {
 	WorkbookPath       string            `json:"workbook_path"`
 	Files              []sourceFileEntry `json:"files"`
 	LineNumbersEnabled bool              `json:"line_numbers_enabled"`
+	// FolderAnnotation records the effective [vba.folder_annotation] mode so
+	// a mode change without source edits invalidates --changed-only. States
+	// written before this field existed compare unequal and re-push, which
+	// is the safe direction.
+	FolderAnnotation string `json:"folder_annotation"`
 }
 
 type pushSavedFile struct {
@@ -126,9 +131,9 @@ func isASCIILetter(b byte) bool {
 }
 
 // computeFingerprint ports ComputeFingerprint: one entry per discovered file,
-// the normalized workbook path, and the line-number toggle that changes the
-// effective imported text.
-func computeFingerprint(workbookPath string, files []discoveredFile, lineNumbers bool) sourceFingerprint {
+// the normalized workbook path, and the transform toggles (line numbers,
+// folder annotation mode) that change the effective imported text.
+func computeFingerprint(workbookPath string, files []discoveredFile, lineNumbers bool, folderAnnotation string) sourceFingerprint {
 	entries := make([]sourceFileEntry, 0, len(files))
 	for _, file := range files {
 		entries = append(entries, sourceFileEntry{
@@ -141,6 +146,7 @@ func computeFingerprint(workbookPath string, files []discoveredFile, lineNumbers
 		WorkbookPath:       normalizeFingerprintPath(workbookPath),
 		Files:              entries,
 		LineNumbersEnabled: lineNumbers,
+		FolderAnnotation:   folderAnnotation,
 	}
 }
 
@@ -164,6 +170,9 @@ func fingerprintEquals(left, right sourceFingerprint) bool {
 		return false
 	}
 	if left.LineNumbersEnabled != right.LineNumbersEnabled {
+		return false
+	}
+	if left.FolderAnnotation != right.FolderAnnotation {
 		return false
 	}
 	if len(left.Files) != len(right.Files) {

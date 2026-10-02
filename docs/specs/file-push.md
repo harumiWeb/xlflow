@@ -140,8 +140,9 @@ does not roll back the already-published workbook.
 still hold:
 
 1. the source fingerprint (workbook path, per-file kind/path/hash entries,
-   `line_numbers_enabled`) matches the current tree — compared
-   order-insensitively so bridge and file enumeration order both match;
+   `line_numbers_enabled`, and the effective `folder_annotation` mode)
+   matches the current tree — compared order-insensitively so bridge and
+   file enumeration order both match;
 2. `applied_to.saved_file` still describes the workbook: normalized path,
    last-write timestamp in .NET ticks, and byte length.
 
@@ -156,14 +157,29 @@ their native form — Windows cannot see them, so no interop is claimed.
 A state file in the legacy bare-fingerprint shape has no delivery evidence and
 never justifies a skip. A skip is a successful no-op.
 
-## Source-tree coordination
+## Coordination
 
 The file backend acquires the same source-tree leases as file pull: each
 managed module/class/forms/workbook root exclusively, every canonical ancestor
-as shared intent, in stable LockID order. The workbook lease is not held — the
-artifact is fully staged and validated before a single atomic replace, so
-ordering belongs to the safety gate rather than to a long-held lock. Contended
-roots fail with `source_tree_busy` or wait under `--wait`/`--wait-timeout`.
+as shared intent, in stable LockID order. Contended roots fail with
+`source_tree_busy` or wait under `--wait`/`--wait-timeout`.
+
+The workbook lease is not held for the command's lifetime — a changed-only
+skip, the safety gate, source collection, and the rebuild never touch it. Only
+the mutation window takes it: immediately before the template read, the
+backend acquires the same workbook identity lease other mutating commands use
+and holds it through the atomic replace and the `push.json` write. The
+acquisition is non-blocking — the source-tree leases are already held, and
+waiting on the workbook lease there could deadlock against a command that
+holds the workbook lease and waits on the source tree — so contention fails
+fast with `workbook_busy` even under `--wait`.
+
+Under the lease the backend applies the same recovery gate as coordinated
+workbook commands: a workbook carrying a recovery marker fails with
+`workbook_recovery_required`, and an unreadable marker fails closed with
+`coordination_recovery_check_failed`. This closes the window where a lock
+file and session record have cleared but a timed-out Excel operation still
+requires explicit recovery.
 
 ## Cross-backend parity corpus
 
@@ -232,6 +248,10 @@ for release evidence.
 | `push_output_replace_failed`           | Atomic replacement of the workbook failed.                             |
 | `push_write_failed`                    | Publication failed for an uncategorized reason.                        |
 | `push_state_persist_failed` (warning)  | Workbook published but `push.json` could not be written.               |
+| `workbook_busy`                        | Another xlflow operation holds the workbook lease for the push window. |
+| `workbook_recovery_required`           | The workbook carries a recovery marker requiring explicit recovery.    |
+| `coordination_recovery_check_failed`   | The workbook's recovery state could not be read safely.                |
+| `coordination_acquire_failed`          | The publish-window workbook lease could not be acquired.               |
 | `source_tree_busy`                     | Another process owns a managed source root.                            |
 | `source_tree_busy_timeout`             | Waiting for a managed source root timed out.                           |
 | `source_tree_busy_cancelled`           | Waiting for a managed source root was cancelled.                       |

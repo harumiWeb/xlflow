@@ -94,8 +94,9 @@ func (a *app) wrapCoordinatedLeaves(root *cobra.Command) {
 				backend, _ := commandFlagString(cmd, "backend")
 				// The file backends never touch live workbook state: pull
 				// only reads the saved file and push replaces it atomically,
-				// so neither holds the workbook lease. push --backend file's
-				// ordering is owned by its safety gate, per ADR-0061.
+				// so neither holds the command-wide workbook lease. push
+				// --backend file still takes the lease non-blockingly inside
+				// its publish window, per ADR-0061.
 				if strings.EqualFold(backend, "file") ||
 					(descriptor.ID == "pull" && strings.EqualFold(backend, "auto")) {
 					return original(cmd, args)

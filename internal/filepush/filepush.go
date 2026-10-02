@@ -51,7 +51,7 @@ type Options struct {
 	// Guard rejects the mutation when the workbook appears open or owned by a
 	// recorded session. It runs only when the push would actually modify the
 	// workbook — a changed-only skip is evaluated first and never reaches it.
-	Guard func(workbookPath string) error
+	Guard func(ctx context.Context, workbookPath string) error
 }
 
 // Result describes a completed file-backend push.
@@ -91,7 +91,15 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	release, err := acquireSourceTrees(ctx, root, cfg, opts)
+	manager := opts.Coordination
+	if manager == nil {
+		var err error
+		manager, err = coordination.NewDefaultManager()
+		if err != nil {
+			return Result{}, fmt.Errorf("initialize source-tree coordination: %w", err)
+		}
+	}
+	release, err := acquireSourceTrees(ctx, manager, root, cfg, opts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -103,7 +111,7 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 	}
 
 	files := discoverSourceFiles(resolvedRoots(root, cfg), cfg.UserForm.CodeSource)
-	fingerprint := computeFingerprint(workbookPath, files, cfg.VBA.LineNumbers.Enabled)
+	fingerprint := computeFingerprint(workbookPath, files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation)
 	if cfg.VBA.LineNumbers.Enabled {
 		if err := validateLineNumberSources(files); err != nil {
 			return Result{}, err
@@ -127,12 +135,45 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 	}
 
 	if opts.Guard != nil {
-		if err := opts.Guard(workbookPath); err != nil {
+		if err := opts.Guard(ctx, workbookPath); err != nil {
 			return Result{}, err
 		}
 	}
 
+	identity, err := coordination.NewWorkbookIdentity(root, workbookPath)
+	if err != nil {
+		return Result{}, fmt.Errorf("resolve workbook identity: %w", err)
+	}
+	// The mutation window is serialized with other workbook writers — a
+	// concurrent rollback, pack, or session holding the workbook lease fails
+	// this push fast instead of racing the atomic replace. The acquisition is
+	// deliberately non-blocking: the source-tree leases are already held, and
+	// waiting here while an Excel-backend push holds the workbook lease and
+	// waits on the source tree would deadlock.
+	lease, err := manager.Acquire(ctx, coordination.AcquireRequest{
+		Identity:      identity,
+		Command:       "push",
+		OperationKind: coordination.OperationMutate,
+		ResourceScope: coordination.ResourceWorkbook,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrWorkbookLease, err)
+	}
+	defer func() { _ = lease.Release() }()
+	if err := lease.RequireRecoveryAllowed(coordination.RecoveryBlock, false); err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrRecoveryCheck, err)
+	}
+
 	template, err := os.ReadFile(workbookPath)
+	if err != nil {
+		return Result{}, err
+	}
+
+	sources, err := collectSources(root, cfg)
+	if err != nil {
+		return Result{}, err
+	}
+	built, meta, err := packpkg.BuildWorkbook(template, sources)
 	if err != nil {
 		return Result{}, err
 	}
@@ -146,19 +187,6 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 		record = &created
 	}
 
-	sources, err := collectSources(root, cfg)
-	if err != nil {
-		return Result{}, err
-	}
-	built, meta, err := packpkg.BuildWorkbook(template, sources)
-	if err != nil {
-		return Result{}, err
-	}
-
-	identity, err := coordination.NewWorkbookIdentity(root, workbookPath)
-	if err != nil {
-		return Result{}, fmt.Errorf("resolve workbook identity: %w", err)
-	}
 	publication, err := coordination.PublishFile(identity.CanonicalPath, built, validateWorkbookArtifact)
 	if err != nil {
 		// Double %w keeps both the filepush sentinel and any typed
@@ -184,15 +212,7 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 // acquireSourceTrees mirrors filepull's lease acquisition: every managed
 // source root is taken exclusively while its ancestors are shared, so source
 // mutations cannot interleave with the read of the tree being pushed.
-func acquireSourceTrees(ctx context.Context, root string, cfg config.Config, opts Options) (func(), error) {
-	manager := opts.Coordination
-	if manager == nil {
-		var err error
-		manager, err = coordination.NewDefaultManager()
-		if err != nil {
-			return nil, fmt.Errorf("initialize source-tree coordination: %w", err)
-		}
-	}
+func acquireSourceTrees(ctx context.Context, manager *coordination.Manager, root string, cfg config.Config, opts Options) (func(), error) {
 	type lockTarget struct {
 		identity coordination.ResourceIdentity
 		shared   bool

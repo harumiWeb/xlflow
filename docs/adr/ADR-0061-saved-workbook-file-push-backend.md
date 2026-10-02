@@ -56,9 +56,12 @@ matching `.xlflow/session.json` record (regardless of PID liveness, matching
 the pack contract), a Restart Manager open-workbook report on Windows, an
 indeterminate probe, or a matching WSL-side live session all abort before any
 mutation with `push_workbook_open`/`push_active_session`. Source-tree leases
-are acquired exclusively (shared on ancestors) exactly as in file pull; the
-workbook lease is not held because publication is atomic and ordering belongs
-to the safety gate, not to a long-held lock.
+are acquired exclusively (shared on ancestors) exactly as in file pull. The
+workbook lease is held only for the mutation window — template read through
+atomic replace and `push.json` write — and under it the same recovery-marker
+gate as other workbook mutators applies; a held lease fails fast with
+`workbook_busy` because waiting there could deadlock against a command holding
+the workbook lease while waiting on the source tree.
 
 A successful file push means the artifact was reconstructed and structurally
 validated — not that VBA compiled. Output reports `push.backend="file"`,
@@ -92,10 +95,11 @@ push backend. Backups record `backend="file"` in metadata.
 2. **Warn-and-continue past a live session like file pull.** Rejected: pull
    only reads; overwriting a file beneath an open dirty session destroys user
    work. Write authority must be stricter than read authority.
-3. **Hold the workbook lease for the whole push.** Rejected: the lease guards
-   long-lived mutation windows; file push has none — the artifact is fully
-   staged and validated before a single atomic replace. The safety gate
-   (locks, session records, Restart Manager) owns liveness checking.
+3. **Hold the workbook lease for the whole push.** Rejected: preflight,
+   changed-only skips, and the rebuild must not contend on the workbook. The
+   publish window still takes the lease non-blockingly — review of the
+   merged PR showed skipping it entirely bypassed the recovery quarantine
+   and let a concurrent rollback race the atomic replace.
 4. **Offer `--backend auto` for push.** Deferred: auto-selection for a
    _writing_ operation needs a defensible policy for preferring saved-file
    over live Excel authority, which is a product decision rather than an

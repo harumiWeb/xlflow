@@ -22,4 +22,14 @@ var (
 	// validated, or atomically published. The existing workbook is left
 	// unchanged when this error is returned.
 	ErrPublish = errors.New("file push: workbook publication failed")
+
+	// ErrWorkbookLease reports that the publish window's workbook lease could
+	// not be acquired. A typed coordination.BusyError stays reachable through
+	// errors.As so callers can distinguish contention from I/O failures.
+	ErrWorkbookLease = errors.New("file push: workbook lease acquisition failed")
+
+	// ErrRecoveryCheck reports that the workbook's recovery state could not be
+	// confirmed safe under the lease. A typed
+	// coordination.RecoveryRequiredError stays reachable through errors.As.
+	ErrRecoveryCheck = errors.New("file push: workbook recovery check failed")
 )

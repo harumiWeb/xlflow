@@ -3180,7 +3180,7 @@ func (a *app) pushViaFile(ctx context.Context, cfg config.Config, pushOpts excel
 // overwrites the saved workbook without consulting any live Excel/VBE state,
 // so it refuses to run when the workbook looks open, a matching xlflow session
 // is recorded, or an open-state probe cannot give a definitive answer.
-func (a *app) guardFilePushWorkbook(workbookPath string) error {
+func (a *app) guardFilePushWorkbook(ctx context.Context, workbookPath string) error {
 	candidates := packCandidatePaths(a.cwd, workbookPath)
 	for _, candidate := range candidates {
 		if lockPath, locked := officeLockFilePresent(candidate); locked {
@@ -3217,7 +3217,7 @@ func (a *app) guardFilePushWorkbook(workbookPath string) error {
 		}
 	}
 	if isWSL() {
-		matching, matchErr := a.matchingWSLLiveSession(context.Background(), workbookPath)
+		matching, matchErr := a.matchingWSLLiveSession(ctx, workbookPath)
 		if matchErr != nil {
 			return &filePushBlockedError{
 				code:    "push_active_session",
@@ -3236,9 +3236,14 @@ func (a *app) guardFilePushWorkbook(workbookPath string) error {
 
 func filePushExitCode(err error) int {
 	var blocked *filePushBlockedError
+	var busy *coordination.BusyError
+	var recoveryRequired *coordination.RecoveryRequiredError
 	switch {
 	case errors.As(err, &blocked):
 		return output.ExitConfig
+	case errors.As(err, &busy), errors.As(err, &recoveryRequired),
+		errors.Is(err, filepush.ErrWorkbookLease), errors.Is(err, filepush.ErrRecoveryCheck):
+		return output.ExitEnvironment
 	case errors.Is(err, filepush.ErrDuplicateModule), errors.Is(err, filepush.ErrLineNumberSafety),
 		errors.Is(err, packpkg.ErrProtectedProject), errors.Is(err, packpkg.ErrSignedProject),
 		errors.Is(err, packpkg.ErrUserFormGenerationUnsupported), errors.Is(err, packpkg.ErrAmbiguousLayout):
@@ -3250,10 +3255,20 @@ func filePushExitCode(err error) int {
 
 func filePushErrorCode(err error) string {
 	var blocked *filePushBlockedError
+	var busy *coordination.BusyError
+	var recoveryRequired *coordination.RecoveryRequiredError
 	var pathErr *os.PathError
 	switch {
 	case errors.As(err, &blocked):
 		return blocked.code
+	case errors.As(err, &busy):
+		return coordination.WorkbookBusyCode
+	case errors.As(err, &recoveryRequired):
+		return coordination.WorkbookRecoveryRequiredCode
+	case errors.Is(err, filepush.ErrRecoveryCheck):
+		return coordination.RecoveryCheckFailedCode
+	case errors.Is(err, filepush.ErrWorkbookLease):
+		return "coordination_acquire_failed"
 	case errors.Is(err, coordination.ErrSourceTreeBusy):
 		return coordination.SourceTreeBusyCode
 	case errors.Is(err, context.DeadlineExceeded):
