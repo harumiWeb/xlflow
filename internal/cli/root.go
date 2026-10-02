@@ -2325,16 +2325,16 @@ func (a *app) selectPullBackend(cfg config.Config, requested string, session boo
 			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "workbook_open_in_excel", AttachOpen: true}, nil
 		}
 	}
-	probe, err := probeFilePull(workbookPath)
+	probe, err := probeFilePull(workbookPath, cfg)
 	if err != nil {
 		return pullBackendSelection{}, err
 	}
 	if !probe.Supported {
-		if runtime.GOOS == "windows" && probe.Reason == "userform" {
-			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "file_backend_unsupported_userform"}, nil
+		if runtime.GOOS == "windows" && probe.Reason == "userform_code_source" {
+			return pullBackendSelection{Backend: "excel", Mode: "auto", Reason: "file_backend_unsupported_userform_code_source"}, nil
 		}
-		if probe.Reason == "userform" {
-			return pullBackendSelection{}, filepull.ErrUserFormUnsupported
+		if probe.Reason == "userform_code_source" {
+			return pullBackendSelection{}, filepull.ErrUserFormCodeSourceUnsupported
 		}
 		return pullBackendSelection{}, fmt.Errorf("file pull unsupported: %s", probe.Reason)
 	}
@@ -2440,7 +2440,8 @@ func (a *app) pullFromFile(ctx context.Context, cfg config.Config, warnMatchingS
 	}
 	env.Target = map[string]any{"kind": "file", "path": displayPath(a.cwd, workbookPath)}
 	env.Session = map[string]any{"active": false, "mode": "none", "source_of_truth": "saved_workbook"}
-	env.Logs = append(env.Logs, fmt.Sprintf("extracted %d VBA component(s) from saved workbook", len(result.Written)))
+	componentCount := result.Modules.Standard + result.Modules.Class + result.Modules.Document + result.Modules.Form
+	env.Logs = append(env.Logs, fmt.Sprintf("extracted %d VBA component(s) from saved workbook", componentCount))
 	if warnMatchingSession {
 		a.attachFilePullSessionWarning(&env, workbookPath)
 	}
@@ -2514,8 +2515,14 @@ func filePullErrorCode(err error) string {
 		return "pull_vba_project_missing"
 	case errors.Is(err, filepull.ErrProtectedProject):
 		return "pull_protected_project"
-	case errors.Is(err, filepull.ErrUserFormUnsupported):
-		return "pull_userform_unsupported"
+	case errors.Is(err, filepull.ErrUserFormCodeSourceUnsupported):
+		return "pull_userform_code_source_unsupported"
+	case errors.Is(err, filepull.ErrUserFormDesignerMalformed):
+		return "pull_userform_designer_malformed"
+	case errors.Is(err, filepull.ErrUserFormDesignerUnsupported):
+		return "pull_userform_designer_unsupported"
+	case errors.Is(err, filepull.ErrUserFormIdentityMismatch):
+		return "pull_userform_identity_mismatch"
 	case errors.Is(err, filepull.ErrUnsafeSourcePath):
 		return "pull_source_path_unsafe"
 	case errors.Is(err, filepull.ErrLineNumberSafety):

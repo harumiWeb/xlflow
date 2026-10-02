@@ -35,12 +35,13 @@ Pull before editing if the workbook may contain newer VBA than the source tree.
 > [!IMPORTANT]
 > UserForm Designer state and code-behind may be written to separate sidecar paths depending on project configuration.
 
-`--backend file` reads the saved configured `.xlsm` directly and never launches Excel, COM, VBIDE, or the bridge. It supports standard, class, and document modules. If the workbook contains any UserForm, the whole operation fails before modifying source; use `--backend excel` for complete `.frm` / `.frx` export. The file backend does not fall back to Excel and cannot be combined with `--session`. If a matching live session is recorded, the command still reads the saved workbook and warns that unsaved live state was ignored.
+`--backend file` reads the saved configured `.xlsm` directly and never launches Excel, COM, VBIDE, or the bridge. It supports standard, class, and document modules plus UserForms in `sidecar` mode. UserForm Designer state is written to `src/forms/specs/<Name>.yaml`, and code-behind is written to `src/forms/code/<Name>.bas`. Compatibility `.frm` / `.frx` files are not generated or reconciled. `frm` mode and Designer structures that cannot be parsed completely fail before modifying source. The file backend does not fall back to Excel and cannot be combined with `--session`. If a matching live session is recorded, the command still reads the saved workbook and warns that unsaved live state was ignored.
 
 The default `auto` mode chooses the fastest safe authority. A closed, supported
-`.xlsm` uses the file backend. `--session`, a valid matching session, a workbook
-open in local Excel, UserForms, or an Excel-supported format outside the file
-backend selects Excel. If Windows cannot determine open state, auto fails safe
+`.xlsm` uses the file backend, including supported sidecar UserForms. `--session`,
+a valid matching session, a workbook open in local Excel, compatibility `frm`
+UserForm authority, or an Excel-supported format outside the file backend
+selects Excel. If Windows cannot determine open state, auto fails safe
 to an already-open matching Excel workbook and reports a warning; it does not
 open another copy from saved state. Use explicit `--backend file` or
 `--backend excel` when the authority must not be selected dynamically.

@@ -190,11 +190,20 @@ func WriteSnapshot(output SnapshotOutput, spec FormSpec) error {
 	if err := os.MkdirAll(filepath.Dir(output.Path), 0o755); err != nil {
 		return err
 	}
-	var (
-		body []byte
-		err  error
-	)
-	switch output.Format {
+	body, err := MarshalSnapshot(output.Format, spec)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(output.Path, body, 0o644)
+}
+
+// MarshalSnapshot serializes a canonical UserForm snapshot without touching
+// the filesystem. Transactional callers use it to finish validation and
+// serialization before publishing any source artifact.
+func MarshalSnapshot(format string, spec FormSpec) ([]byte, error) {
+	var body []byte
+	var err error
+	switch format {
 	case "json":
 		body, err = json.MarshalIndent(spec, "", "  ")
 		if err == nil {
@@ -203,12 +212,12 @@ func WriteSnapshot(output SnapshotOutput, spec FormSpec) error {
 	case "yaml":
 		body, err = yaml.Marshal(spec)
 	default:
-		err = fmt.Errorf("unsupported snapshot format %q", output.Format)
+		err = fmt.Errorf("unsupported snapshot format %q", format)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return os.WriteFile(output.Path, body, 0o644)
+	return body, nil
 }
 
 func ResolveSpecInput(root, specPath string) (SpecInput, error) {

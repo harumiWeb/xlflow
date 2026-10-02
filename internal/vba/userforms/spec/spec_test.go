@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -202,6 +203,10 @@ func TestWriteSnapshotWritesJSONAndYAML(t *testing.T) {
 	if err := json.Unmarshal(jsonBody, &decoded); err != nil {
 		t.Fatalf("json snapshot should remain valid: %v\n%s", err, string(jsonBody))
 	}
+	marshaledJSON, err := MarshalSnapshot("json", spec)
+	if err != nil || !bytes.Equal(marshaledJSON, jsonBody) {
+		t.Fatalf("MarshalSnapshot JSON mismatch: err=%v\n%s", err, marshaledJSON)
+	}
 
 	yamlOutput, err := ResolveSnapshotOutput(root, "artifacts\\UserForm1.form.yaml")
 	if err != nil {
@@ -218,6 +223,13 @@ func TestWriteSnapshotWritesJSONAndYAML(t *testing.T) {
 		if !strings.Contains(string(yamlBody), want) {
 			t.Fatalf("yaml snapshot missing %q:\n%s", want, string(yamlBody))
 		}
+	}
+	marshaledYAML, err := MarshalSnapshot("yaml", spec)
+	if err != nil || !bytes.Equal(marshaledYAML, yamlBody) {
+		t.Fatalf("MarshalSnapshot YAML mismatch: err=%v\n%s", err, marshaledYAML)
+	}
+	if _, err := MarshalSnapshot("toml", spec); err == nil {
+		t.Fatal("MarshalSnapshot accepted unsupported format")
 	}
 }
 

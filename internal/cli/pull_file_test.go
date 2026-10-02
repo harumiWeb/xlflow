@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -163,10 +164,7 @@ func TestAutoPullPreservesProtectedProjectValidation(t *testing.T) {
 	}
 }
 
-func TestAutoPullSelectsExcelForUserForm(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows UserForm fallback")
-	}
+func TestAutoPullSelectsFileForSidecarUserForm(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)
 	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p4_form.bin"))
@@ -177,7 +175,27 @@ func TestAutoPullSelectsExcelForUserForm(t *testing.T) {
 	restore := stubWorkbookUseDetector(t, workbookuse.State{})
 	defer restore()
 	selection, err := (&app{cwd: dir}).selectPullBackend(cfg, "auto", false)
-	if err != nil || selection.Backend != "excel" || selection.Reason != "file_backend_unsupported_userform" {
+	if err != nil || selection.Backend != "file" || selection.Reason != "file_backend_supported" {
+		t.Fatalf("selection = %+v, %v", selection, err)
+	}
+}
+
+func TestAutoPullSelectsExcelForFrmUserForm(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows UserForm compatibility selection")
+	}
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p4_form.bin"))
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.UserForm.CodeSource = "frm"
+	restore := stubWorkbookUseDetector(t, workbookuse.State{})
+	defer restore()
+	selection, err := (&app{cwd: dir}).selectPullBackend(cfg, "auto", false)
+	if err != nil || selection.Backend != "excel" || selection.Reason != "file_backend_unsupported_userform_code_source" {
 		t.Fatalf("selection = %+v, %v", selection, err)
 	}
 }
@@ -249,21 +267,53 @@ func TestPullFileBackendWarnsWhenMatchingSessionIsIgnored(t *testing.T) {
 	}
 }
 
-func TestPullFileBackendRejectsUserFormBeforeMutation(t *testing.T) {
+func TestPullFileBackendPublishesUserFormSidecars(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p4_form.bin"))
+
+	stdout, err := runBuildCommandForTest(dir, "--json", "pull", "--backend", "file")
+	if err != nil {
+		t.Fatalf("pull --backend file: %v\n%s", err, stdout)
+	}
+	var env output.Envelope
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatal(err)
+	}
+	modules := cliObjectMap(cliObjectMap(env.Pull)["modules"])
+	if modules["form"] != float64(1) {
+		t.Fatalf("pull modules = %#v", modules)
+	}
+	for _, path := range []string{
+		filepath.Join(dir, "src", "forms", "specs", "UserForm1.yaml"),
+		filepath.Join(dir, "src", "forms", "code", "UserForm1.bas"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("missing UserForm artifact %s: %v", path, err)
+		}
+	}
+}
+
+func TestPullFileBackendRejectsFrmUserFormBeforeMutation(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.UserForm.CodeSource = "frm"
+	if err := config.UpdateUserFormCodeSource(filepath.Join(dir, config.FileName), cfg.UserForm.CodeSource); err != nil {
+		t.Fatal(err)
+	}
 	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p4_form.bin"))
 	existing := filepath.Join(dir, "src", "modules", "keep.bas")
 	if err := os.WriteFile(existing, []byte("keep"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	stdout, err := runBuildCommandForTest(dir, "--json", "pull", "--backend", "file")
-	if err == nil || output.ExitCode(err) != output.ExitValidation {
-		t.Fatalf("error = %v, exit = %d; want validation failure", err, output.ExitCode(err))
-	}
-	if jsonErrorCode(t, stdout) != "pull_userform_unsupported" {
-		t.Fatalf("unexpected failure: %s", stdout)
+	stdout, runErr := runBuildCommandForTest(dir, "--json", "pull", "--backend", "file")
+	if runErr == nil || output.ExitCode(runErr) != output.ExitValidation || jsonErrorCode(t, stdout) != "pull_userform_code_source_unsupported" {
+		t.Fatalf("stdout=%s err=%v", stdout, runErr)
 	}
 	body, readErr := os.ReadFile(existing)
 	if readErr != nil || string(body) != "keep" {
@@ -284,6 +334,23 @@ func TestFilePullPublicationFailureKeepsPublicationErrorCode(t *testing.T) {
 	err := errors.Join(filepull.ErrPublish, &os.PathError{Op: "write", Path: "src/modules/Main.bas", Err: os.ErrPermission})
 	if got := filePullErrorCode(err); got != "pull_source_publish_failed" {
 		t.Fatalf("filePullErrorCode() = %q", got)
+	}
+}
+
+func TestFilePullUserFormErrorCodes(t *testing.T) {
+	tests := []struct {
+		err  error
+		code string
+	}{
+		{filepull.ErrUserFormCodeSourceUnsupported, "pull_userform_code_source_unsupported"},
+		{filepull.ErrUserFormDesignerMalformed, "pull_userform_designer_malformed"},
+		{filepull.ErrUserFormDesignerUnsupported, "pull_userform_designer_unsupported"},
+		{filepull.ErrUserFormIdentityMismatch, "pull_userform_identity_mismatch"},
+	}
+	for _, test := range tests {
+		if got := filePullErrorCode(fmt.Errorf("context: %w", test.err)); got != test.code {
+			t.Errorf("filePullErrorCode(%v) = %q, want %q", test.err, got, test.code)
+		}
 	}
 }
 
@@ -319,21 +386,25 @@ func TestPullFileBackendCoordinatesSourceTreeInsteadOfWorkbook(t *testing.T) {
 		t.Fatalf("auto file pull contended on workbook lease: %v\n%s", runErr, stdout)
 	}
 
-	sourceIdentity, err := coordination.NewSourceTreeIdentity(dir, filepath.Join(dir, "src", "modules"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sourceLease, err := manager.Acquire(t.Context(), coordination.AcquireRequest{
-		Identity: sourceIdentity, Command: "pull", OperationKind: coordination.OperationMutate,
-		ResourceScope: coordination.ResourceSourceTree,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = sourceLease.Release() }()
-	stdout, runErr = runPullCommandWithManager(dir, manager, "--json", "pull", "--backend", "file")
-	if runErr == nil || output.ExitCode(runErr) != output.ExitEnvironment || jsonErrorCode(t, stdout) != coordination.SourceTreeBusyCode {
-		t.Fatalf("source-tree contention stdout=%s err=%v", stdout, runErr)
+	for _, sourceRoot := range []string{filepath.Join(dir, "src", "modules"), filepath.Join(dir, "src", "forms")} {
+		sourceIdentity, err := coordination.NewSourceTreeIdentity(dir, sourceRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sourceLease, err := manager.Acquire(t.Context(), coordination.AcquireRequest{
+			Identity: sourceIdentity, Command: "pull", OperationKind: coordination.OperationMutate,
+			ResourceScope: coordination.ResourceSourceTree,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout, runErr = runPullCommandWithManager(dir, manager, "--json", "pull", "--backend", "file")
+		if releaseErr := sourceLease.Release(); releaseErr != nil {
+			t.Fatal(releaseErr)
+		}
+		if runErr == nil || output.ExitCode(runErr) != output.ExitEnvironment || jsonErrorCode(t, stdout) != coordination.SourceTreeBusyCode {
+			t.Fatalf("source-tree contention for %s stdout=%s err=%v", sourceRoot, stdout, runErr)
+		}
 	}
 }
 
@@ -343,6 +414,14 @@ func TestAutoExcelPullRetainsWorkbookCoordination(t *testing.T) {
 	}
 	dir := t.TempDir()
 	writePackConfig(t, dir)
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.UserForm.CodeSource = "frm"
+	if err := config.UpdateUserFormCodeSource(filepath.Join(dir, config.FileName), cfg.UserForm.CodeSource); err != nil {
+		t.Fatal(err)
+	}
 	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p4_form.bin"))
 	manager, err := coordination.NewManager(t.TempDir())
 	if err != nil {

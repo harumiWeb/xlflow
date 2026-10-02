@@ -11,15 +11,17 @@ invoke the other backend. `--backend file --session` is invalid.
 
 On Windows, auto selects Excel for explicit session intent, a valid matching
 xlflow session, a workbook reported open by Restart Manager, an indeterminate
-open-state probe, UserForms, and Excel-supported project formats outside the
-file backend. A closed, supported `.xlsm` selects file. Missing, unreadable,
-malformed, protected, and unsafe projects fail with their existing validation
-codes instead of falling through to Excel. On non-Windows hosts auto uses file
-when supported and otherwise returns the deterministic file-backend error.
+open-state probe, compatibility `frm` UserForm code authority, and
+Excel-supported project formats outside the file backend. A closed, supported
+`.xlsm` selects file, including projects with UserForms when
+`[userform].code_source = "sidecar"`. Missing, unreadable, malformed,
+protected, and unsafe projects fail with their existing validation codes
+instead of falling through to Excel. On non-Windows hosts auto uses file when
+supported and otherwise returns the deterministic file-backend error.
 
 Stable selection reasons are `explicit_backend`, `session_requested`,
 `matching_live_session`, `workbook_open_in_excel`, `open_state_probe_failed`,
-`file_backend_supported`, `file_backend_unsupported_userform`, and
+`file_backend_supported`, `file_backend_unsupported_userform_code_source`, and
 `file_backend_unsupported_format`. An open-state failure selects Excel, requires
 attachment to an already-open matching workbook instead of opening another
 saved copy, and adds warning `pull_auto_open_state_probe_failed` with the
@@ -77,9 +79,20 @@ equally to file and Excel pulls. Unsafe names, path escapes, duplicate target
 paths, malformed projects, and unsafe line-number transformations fail before
 publication.
 
-UserForms are not partially supported. Detection of any form rejects the whole
-operation with `pull_userform_unsupported` before source mutation. The forms
-root is otherwise unmanaged and is never deleted or rewritten.
+In sidecar mode, each UserForm module is matched one-to-one with its root
+Designer storage. Code-behind becomes `src/forms/code/<FormName>.bas`, and
+MS-OFORMS Designer state becomes the canonical
+`src/forms/specs/<FormName>.yaml`. Nested supported controls retain their
+projected parent relationships. Code sidecars are omitted when the form has no
+code body. The file backend reconciles only these reserved `code` and `specs`
+directories; compatibility `.frm` / `.frx` artifacts elsewhere under the
+forms root are retained and are not claimed to be current.
+
+Compatibility `frm` code authority is not supported by the file backend and
+fails with `pull_userform_code_source_unsupported` before source mutation.
+Malformed Designer data, unsupported Designer structure, and inconsistent
+module/storage identities also fail before publication and never trigger an
+Excel fallback.
 The configured forms root must not contain, or be contained by, the module,
 class, or workbook root; overlap fails before reconciliation so form artifacts
 cannot be mistaken for stale managed source.
@@ -87,10 +100,12 @@ cannot be mistaken for stale managed source.
 ## Publication contract
 
 Planning and validation complete before publication. Publication reconciles
-managed `.bas` and `.cls` files under the module, class, and workbook roots.
-Unrelated files and the forms root are retained. If writing or stale-file
-removal fails, xlflow restores every affected prior file and reports
-`pull_source_publish_failed`.
+managed `.bas` and `.cls` files under the module, class, and workbook roots,
+plus sidecar `.bas` and canonical `.yaml` form artifacts. Stale `.json` and
+`.yml` form specs are also removed when canonical YAML replaces them.
+Unrelated files and compatibility `.frm` / `.frx` artifacts are retained. If
+writing or stale-file removal fails, xlflow restores every affected prior file
+and reports `pull_source_publish_failed`.
 
 The guarantees are deliberately distinct:
 
@@ -106,14 +121,14 @@ Do not describe this contract as an unqualified atomic source-tree update.
 ## Source-tree coordination
 
 The file backend derives one `source_tree` resource identity for each managed
-module, class, and document-module root. Identities canonicalize the nearest
-existing ancestor and use a source-tree-specific hash domain. Each managed root
-is acquired exclusively and every canonical ancestor is acquired as a shared
-intent; duplicate identities are promoted to exclusive mode and the complete
-set is acquired in stable LockID order. This makes ancestor/descendant roots
-contend while disjoint siblings remain concurrent. The leases cover workbook
-parsing, planning, publication, rollback, and cleanup. The forms root is not
-acquired because this backend rejects UserForms and never mutates form artifacts.
+module, class, and document-module root, plus the form root in sidecar mode.
+Identities canonicalize the nearest existing ancestor and use a
+source-tree-specific hash domain. Each managed root is acquired exclusively and
+every canonical ancestor is acquired as a shared intent; duplicate identities
+are promoted to exclusive mode and the complete set is acquired in stable
+LockID order. This makes ancestor/descendant roots contend while disjoint
+siblings remain concurrent. The leases cover workbook parsing, planning,
+publication, rollback, and cleanup.
 
 Source-tree locks use crash-released, descriptor-owned operating-system file
 locks with shared and exclusive modes on Windows and Unix. The explicit file
@@ -149,28 +164,32 @@ The gate maintains the Excel pull baseline → file pull → normalized comparis
 → pack → real Excel execution chain. Its fixture includes multiple standard,
 class, and document modules, nested folders, CP932/Japanese text, a non-ASCII
 component name, cross-module execution, and ordinary project references. A
-separate UserForm-bearing copy must fail without changing the tracked source.
+separate UserForm-bearing copy verifies sidecar code and Designer YAML
+publication without launching or attaching to Excel during the file pull.
 The script prints both absolute workspace paths, the sentinel, and the Excel/OS
 identity needed for release evidence.
 
 ## Stable failures
 
-| Error code                      | Meaning                                                |
-| ------------------------------- | ------------------------------------------------------ |
-| `pull_args_invalid`             | Unknown backend or incompatible `--session`.           |
-| `workbook_format_unsupported`   | File backend was requested for a non-`.xlsm` workbook. |
-| `pull_file_not_found`           | The configured workbook does not exist.                |
-| `pull_file_unreadable`          | The saved workbook cannot be read.                     |
-| `pull_vba_project_missing`      | The package has no `xl/vbaProject.bin`.                |
-| `pull_vba_project_malformed`    | The package or VBA project is malformed.               |
-| `pull_protected_project`        | The saved VBA project is protected.                    |
-| `pull_userform_unsupported`     | At least one UserForm is present.                      |
-| `pull_source_path_unsafe`       | A component cannot be mapped inside its managed root.  |
-| `vba_line_number_safety_failed` | Generated line numbers cannot be removed safely.       |
-| `pull_source_publish_failed`    | Transactional source publication failed.               |
-| `source_tree_busy`              | Another process owns a managed source root.            |
-| `source_tree_busy_timeout`      | Waiting for a managed source root timed out.           |
-| `source_tree_busy_cancelled`    | Waiting for a managed source root was cancelled.       |
+| Error code                              | Meaning                                                 |
+| --------------------------------------- | ------------------------------------------------------- |
+| `pull_args_invalid`                     | Unknown backend or incompatible `--session`.            |
+| `workbook_format_unsupported`           | File backend was requested for a non-`.xlsm` workbook.  |
+| `pull_file_not_found`                   | The configured workbook does not exist.                 |
+| `pull_file_unreadable`                  | The saved workbook cannot be read.                      |
+| `pull_vba_project_missing`              | The package has no `xl/vbaProject.bin`.                 |
+| `pull_vba_project_malformed`            | The package or VBA project is malformed.                |
+| `pull_protected_project`                | The saved VBA project is protected.                     |
+| `pull_userform_code_source_unsupported` | A UserForm requires compatibility `frm` code authority. |
+| `pull_userform_designer_malformed`      | MS-OFORMS Designer data is structurally malformed.      |
+| `pull_userform_designer_unsupported`    | A valid Designer structure cannot be projected.         |
+| `pull_userform_identity_mismatch`       | Form module and Designer storage identities disagree.   |
+| `pull_source_path_unsafe`               | A component cannot be mapped inside its managed root.   |
+| `vba_line_number_safety_failed`         | Generated line numbers cannot be removed safely.        |
+| `pull_source_publish_failed`            | Transactional source publication failed.                |
+| `source_tree_busy`                      | Another process owns a managed source root.             |
+| `source_tree_busy_timeout`              | Waiting for a managed source root timed out.            |
+| `source_tree_busy_cancelled`            | Waiting for a managed source root was cancelled.        |
 
 `--formulas` runs only after successful VBA publication and retains its
 existing saved-workbook formula authority and partial-failure contract.

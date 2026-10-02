@@ -33,7 +33,7 @@ the next decision.
 | Diagnose Excel, COM, or VBIDE setup       | `xlflow doctor --json`                                                                  | automation cannot be trusted                                                                          |
 | Export workbook VBA into source           | `xlflow pull --json`                                                                    | let xlflow choose saved-file or live Excel authority safely                                           |
 | Force export from live Excel              | `xlflow pull --backend excel --session --json`                                          | the live workbook is explicitly authoritative                                                         |
-| Export saved `.xlsm` VBA without Excel    | `xlflow pull --backend file --json`                                                     | saved file is authoritative and the project has no UserForms                                          |
+| Export saved `.xlsm` VBA without Excel    | `xlflow pull --backend file --json`                                                     | saved file is authoritative and any UserForms use sidecar code authority                              |
 | Find a runnable entrypoint                | `xlflow macros --session --json`                                                        | the macro name is not already proven                                                                  |
 | Check source before Excel import          | `xlflow lint --json` and `xlflow analyze --json`                                        | after source edits                                                                                    |
 | Estimate refactor blast radius            | `xlflow impact Module.Procedure --json`                                                 | changing existing behavior; load [code analysis](references/code-analysis.md)                         |
@@ -145,9 +145,10 @@ xlflow session stop --json
 The default `pull --json` selects the fastest safe backend and reports
 `backend`, `backend_selection`, `selection_reason`, and source authority. Use
 `pull --backend file --json` only when the saved `.xlsm` is explicitly the
-source of truth; it never reads unsaved session state and rejects workbooks
-containing UserForms before changing source. Use `--backend excel` to force
-Excel/VBIDE authority.
+source of truth; it never reads unsaved session state. It can publish canonical
+UserForm Designer YAML and code sidecars when `code_source = "sidecar"`, but it
+does not generate compatibility `.frm` / `.frx` exports. Use `--backend excel`
+to force Excel/VBIDE authority or preserve `frm` code authority.
 
 `push` has no auto backend: the default `excel` path mutates the live project
 through VBE and compiles it, while `push --backend file --json` rebuilds the
