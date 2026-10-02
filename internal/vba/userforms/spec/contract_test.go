@@ -15,6 +15,10 @@ func TestUserFormContractBuiltInControlsAndProgIDs(t *testing.T) {
 		{"CommandButton", "Forms.CommandButton.1", false},
 		{"CheckBox", "Forms.CheckBox.1", false},
 		{"OptionButton", "Forms.OptionButton.1", false},
+		{"ToggleButton", "Forms.ToggleButton.1", false},
+		{"SpinButton", "Forms.SpinButton.1", false},
+		{"ScrollBar", "Forms.ScrollBar.1", false},
+		{"Image", "Forms.Image.1", false},
 		{"Frame", "Forms.Frame.1", true},
 	}
 
@@ -111,6 +115,24 @@ func TestUserFormContractDocumentAndCommonProperties(t *testing.T) {
 			assertProperty(t, property, tc.valueType, tc.required, tc.supportLevel)
 		})
 	}
+	for _, name := range []string{"clientWidth", "clientHeight"} {
+		t.Run("form_build_"+name, func(t *testing.T) {
+			property, ok := LookupFormBuildProperty(name)
+			if !ok {
+				t.Fatalf("form.build property %q missing", name)
+			}
+			assertProperty(t, property, ValueTypeNumber, false, SupportLevelSupported)
+		})
+	}
+	for _, name := range []string{"insideWidth", "insideHeight", "clientWidth", "clientHeight"} {
+		t.Run("form_observed_"+name, func(t *testing.T) {
+			property, ok := LookupFormObservedProperty(name)
+			if !ok {
+				t.Fatalf("form.observed property %q missing", name)
+			}
+			assertProperty(t, property, ValueTypeNumber, false, SupportLevelSnapshotOnly)
+		})
+	}
 }
 
 func TestUserFormContractTypeSpecificProperties(t *testing.T) {
@@ -129,6 +151,10 @@ func TestUserFormContractTypeSpecificProperties(t *testing.T) {
 		{"CommandButton", "caption", ValueTypeString, SupportLevelSupported},
 		{"CheckBox", "value", ValueTypeAny, SupportLevelSupported},
 		{"OptionButton", "value", ValueTypeAny, SupportLevelSupported},
+		{"ToggleButton", "caption", ValueTypeString, SupportLevelSupported},
+		{"ToggleButton", "value", ValueTypeAny, SupportLevelSupported},
+		{"SpinButton", "value", ValueTypeInteger, SupportLevelSupported},
+		{"ScrollBar", "value", ValueTypeInteger, SupportLevelSupported},
 		{"Frame", "caption", ValueTypeString, SupportLevelSupported},
 	}
 	for _, tc := range tests {
@@ -146,6 +172,12 @@ func TestUserFormContractTypeSpecificProperties(t *testing.T) {
 
 	if property, ok := LookupControlProperty("Label", "list"); ok {
 		t.Fatalf("Label.list should not be applicable, got %#v", property)
+	}
+	if property, ok := LookupControlProperty("Image", "value"); ok {
+		t.Fatalf("Image.value should not be a type-specific property, got %#v", property)
+	}
+	if property, ok := LookupControlProperty("Image", "caption"); ok {
+		t.Fatalf("Image.caption should not be a type-specific property, got %#v", property)
 	}
 	if property, ok := LookupControlProperty("UnknownControl", "caption"); ok {
 		t.Fatalf("unknown type-specific property should not be claimed, got %#v", property)

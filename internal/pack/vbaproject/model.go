@@ -70,6 +70,10 @@ type Project struct {
 	// GenerateProjectMetadata marks a fresh project whose PROJECT and PROJECTwm
 	// streams must be rebuilt from the final component set at write time.
 	GenerateProjectMetadata bool
+	// rebuildProjectWM marks a template project whose component topology was
+	// extended by WithNewUserForm. PROJECT text remains template-preserving;
+	// only the module-name mapping is rebuilt from the final component set.
+	rebuildProjectWM bool
 	// RawStreams holds every stream the writer does not own, keyed by full
 	// "/"-separated path, captured verbatim at read time and re-emitted on write.
 	// Membership is structural: the first path segment is neither "VBA" (owned and

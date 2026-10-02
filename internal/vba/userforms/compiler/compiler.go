@@ -288,7 +288,7 @@ func (c *compilation) formEdits() error {
 	if next.Build != nil {
 		nextBuild = *next.Build
 	}
-	if !reflect.DeepEqual(old.Width, next.Width) || !reflect.DeepEqual(old.Height, next.Height) || !reflect.DeepEqual(oldBuild.Width, nextBuild.Width) || !reflect.DeepEqual(oldBuild.Height, nextBuild.Height) {
+	if !reflect.DeepEqual(old.Width, next.Width) || !reflect.DeepEqual(old.Height, next.Height) || !reflect.DeepEqual(oldBuild.Width, nextBuild.Width) || !reflect.DeepEqual(oldBuild.Height, nextBuild.Height) || !reflect.DeepEqual(oldBuild.ClientWidth, nextBuild.ClientWidth) || !reflect.DeepEqual(oldBuild.ClientHeight, nextBuild.ClientHeight) {
 		return c.fail(Unsupported, "", "form", "root dimensions are client dimensions, not Excel outer dimensions")
 	}
 	oldCaption, nextCaption := old.Caption, next.Caption

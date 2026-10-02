@@ -601,6 +601,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `form_snapshot_args_invalid`
 - `form_snapshot_write_failed`
 - `forms_dir`
+- `forms_reference_required`
 - `formula_cell_count`
 - `formula_mode`
 - `formula_r1c1`
@@ -1407,6 +1408,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `userform_edit_invalid`
 - `userform_edit_stale_input`
 - `userform_edit_unsupported`
+- `userform_generation_conflict`
+- `userform_generation_invalid`
+- `userform_generation_unsupported`
 - `userform_image_export_experimental`
 - `userform_inspect_saved_file`
 - `userform_planned_commands`

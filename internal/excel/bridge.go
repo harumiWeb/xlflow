@@ -1050,6 +1050,13 @@ func buildFormWriteScriptArgs(root string, cfg config.Config, opts FormWriteOpti
 			exitCode: output.ExitConfig,
 		}
 	}
+	if err := forms.ValidateFormSpecForAuthoring(forms.SpecInput{DisplayPath: opts.SpecPath}, opts.Spec); err != nil {
+		return nil, formWriteArgError{
+			code:     formWriteArgsCode(action),
+			message:  err.Error(),
+			exitCode: output.ExitValidation,
+		}
+	}
 	specJSON, err := json.Marshal(opts.Spec)
 	if err != nil {
 		return nil, formWriteArgError{

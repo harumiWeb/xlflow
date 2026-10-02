@@ -17,8 +17,10 @@ type contractSnapshot struct {
 		ProgID string `json:"progId"`
 	} `json:"builtInControls"`
 	Bridge struct {
-		FormFields    []string `json:"formFields"`
-		ControlFields []string `json:"controlFields"`
+		FormFields         []string `json:"formFields"`
+		FormBuildFields    []string `json:"formBuildFields"`
+		ObservedFormFields []string `json:"observedFormFields"`
+		ControlFields      []string `json:"controlFields"`
 	} `json:"bridge"`
 }
 
@@ -72,6 +74,8 @@ func TestContractSnapshotMatchesGoContractAndSpecTags(t *testing.T) {
 		}
 	}
 	assertJSONFields(t, reflect.TypeOf(FormSpecForm{}), snapshot.Bridge.FormFields)
+	assertJSONFields(t, reflect.TypeOf(FormSpecBuildForm{}), snapshot.Bridge.FormBuildFields)
+	assertJSONFields(t, reflect.TypeOf(FormSpecObservedForm{}), snapshot.Bridge.ObservedFormFields)
 	assertJSONFields(t, reflect.TypeOf(FormSpecControl{}), snapshot.Bridge.ControlFields)
 
 	doc, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "vitepress", "reference", "userform-spec.md"))

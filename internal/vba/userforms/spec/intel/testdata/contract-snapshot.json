@@ -7,10 +7,24 @@
     { "type": "CommandButton", "progId": "Forms.CommandButton.1" },
     { "type": "CheckBox", "progId": "Forms.CheckBox.1" },
     { "type": "OptionButton", "progId": "Forms.OptionButton.1" },
+    { "type": "ToggleButton", "progId": "Forms.ToggleButton.1" },
+    { "type": "SpinButton", "progId": "Forms.SpinButton.1" },
+    { "type": "ScrollBar", "progId": "Forms.ScrollBar.1" },
+    { "type": "Image", "progId": "Forms.Image.1" },
     { "type": "Frame", "progId": "Forms.Frame.1" }
   ],
   "bridge": {
     "formFields": ["name", "caption", "width", "height", "observed", "build"],
+    "formBuildFields": ["caption", "width", "height", "clientWidth", "clientHeight"],
+    "observedFormFields": [
+      "caption",
+      "width",
+      "height",
+      "insideWidth",
+      "insideHeight",
+      "clientWidth",
+      "clientHeight"
+    ],
     "controlFields": [
       "id",
       "parentId",

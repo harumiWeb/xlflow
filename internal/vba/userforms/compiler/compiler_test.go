@@ -177,7 +177,7 @@ func TestCompileRejectsEditsAtomically(t *testing.T) {
 		name, code string
 		change     func(*spec.FormSpec, *spec.FormSpec)
 	}{
-		{"root-size", Unsupported, func(_, a *spec.FormSpec) { a.Form.Width = new(300.0) }},
+		{"root-size", Invalid, func(_, a *spec.FormSpec) { a.Form.Width = new(300.0) }},
 		{"rename", Unsupported, func(_, a *spec.FormSpec) { a.Controls[0].Name = "Renamed" }},
 		{"remove", Unsupported, func(_, a *spec.FormSpec) { a.Controls = a.Controls[1:] }},
 		{"stale", Stale, func(b, a *spec.FormSpec) {

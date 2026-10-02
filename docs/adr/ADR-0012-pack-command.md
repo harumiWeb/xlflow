@@ -57,6 +57,29 @@ The contract for command shape, the JSON envelope, and exit codes lives in `docs
 - **Before non-experimental status** — broader document-module fixtures; hardened signed/protected project detection beyond the MVP's baseline reject-on-detect; non-ASCII/Japanese source fixtures; Windows/Excel smoke tests that open the generated workbook and compile/run a minimal macro; a documented UserForm preservation/update strategy; and docs stating that `pack` does not compile or run VBA.
 - **UserForms, staged in three steps** — (1) preserve the template's existing designer streams unchanged, generating no forms; (2) update form code-behind while keeping the template's designer state; (3) full reconstruction from exported `.frm`/`.frx` as a separate, higher-risk phase. Only step (1)'s "carry existing designer streams through untouched" is compatible with the MVP, and only when the forms already exist in the template.
 
+### Amendment: canonical UserForm generation foundation (Issue #883)
+
+The Stage-3 foundation generates new Designer state from the canonical
+`xlflow.userform` FormSpec, independently of exported `.frm` / `.frx`
+compatibility artifacts. The lossless MS-OFORMS model remains separate from
+the authoring schema. Generation returns a reparsed, signed model; it does
+not weaken the no-op serializer's protection against arbitrary model edits.
+
+Root client dimensions are explicit `form.build.clientWidth` / `clientHeight`
+in points. Existing width/height fields retain their outer-dimension contract.
+Using an assumed window-chrome offset would make generation depend on Excel
+environment and cause repeated round trips to grow forms, so this stage
+does not convert outer dimensions. Excel-backed Designer build rejects the
+new client input before mutation until it has a supported application path.
+
+Issue #883 owns flat common-control generation and code-behind/project
+assembly with an already-present Microsoft Forms reference. Reference
+mutation remains Issue #886; CLI source-authority planning and blank/template
+pack integration remain Issue #887. The current CLI restrictions therefore
+remain in force. Deterministic Designer bytes use only fixed class IDs;
+cryptographically random GUIDs are limited to new component identity in
+code-behind, with injectable generation for reproducible tests.
+
 ### Amendment: stable graduation (Issue #858)
 
 The pre-stable stages are complete. `pack` is now a stable command and no
