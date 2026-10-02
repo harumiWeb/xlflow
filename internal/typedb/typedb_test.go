@@ -13,7 +13,7 @@ import (
 func TestStatusForMissingManifestReportsStale(t *testing.T) {
 	dir := t.TempDir()
 
-	status, err := StatusFor(Options{Dir: dir, GeneratorVersion: "1.2.3"})
+	status, err := StatusFor(Options{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,10 +48,9 @@ func TestLoadForRuntimeMarksMissingManifestIncomplete(t *testing.T) {
 
 func TestLoadForRuntimeRejectsIncompatibleManifestMetadata(t *testing.T) {
 	tests := []struct {
-		name            string
-		manifest        Manifest
-		expectedVersion string
-		warning         string
+		name     string
+		manifest Manifest
+		warning  string
 	}{
 		{
 			name: "schema",
@@ -59,6 +58,7 @@ func TestLoadForRuntimeRejectsIncompatibleManifestMetadata(t *testing.T) {
 				SchemaVersion:    vbadb.SchemaVersion + 1,
 				Generator:        GeneratorName,
 				GeneratorVersion: "test",
+				CatalogRevision:  TypeDBCatalogRevision,
 				Libraries:        []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
 			},
 			warning: "schema version",
@@ -69,29 +69,31 @@ func TestLoadForRuntimeRejectsIncompatibleManifestMetadata(t *testing.T) {
 				SchemaVersion:    vbadb.SchemaVersion,
 				Generator:        "other-tool",
 				GeneratorVersion: "test",
+				CatalogRevision:  TypeDBCatalogRevision,
 				Libraries:        []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
 			},
 			warning: "generator ",
 		},
 		{
-			name: "missing generator version",
-			manifest: Manifest{
-				SchemaVersion: vbadb.SchemaVersion,
-				Generator:     GeneratorName,
-				Libraries:     []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
-			},
-			warning: "generator version is missing",
-		},
-		{
-			name: "stale generator version",
+			name: "missing catalog revision",
 			manifest: Manifest{
 				SchemaVersion:    vbadb.SchemaVersion,
 				Generator:        GeneratorName,
 				GeneratorVersion: "old",
 				Libraries:        []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
 			},
-			expectedVersion: "current",
-			warning:         "generator version \"old\" is stale",
+			warning: "catalog revision 0 is stale",
+		},
+		{
+			name: "stale catalog revision",
+			manifest: Manifest{
+				SchemaVersion:    vbadb.SchemaVersion,
+				Generator:        GeneratorName,
+				GeneratorVersion: "old",
+				CatalogRevision:  TypeDBCatalogRevision - 1,
+				Libraries:        []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+			},
+			warning: "catalog revision 3 is stale",
 		},
 	}
 
@@ -109,7 +111,7 @@ func TestLoadForRuntimeRejectsIncompatibleManifestMetadata(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			result, err := LoadForRuntimeWithGeneratorVersion(dir, test.expectedVersion)
+			result, err := LoadForRuntime(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -127,6 +129,62 @@ func TestLoadForRuntimeRejectsIncompatibleManifestMetadata(t *testing.T) {
 				t.Fatalf("warnings = %+v, want %q", result.Warnings, test.warning)
 			}
 		})
+	}
+}
+
+func TestGeneratorVersionMismatchDoesNotMakeManifestStaleOrIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "excel.generated.json"), []byte(`{"types":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteManifest(dir, Manifest{
+		GeneratorVersion: "older-build",
+		Libraries:        []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := StatusFor(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Stale {
+		t.Fatalf("generator version is informational: %+v", status)
+	}
+	result, err := LoadForRuntime(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Complete {
+		t.Fatalf("generator version must not affect completeness: %+v", result.Warnings)
+	}
+}
+
+func TestStatusForLegacyManifestRequiresCatalogMigration(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "excel.generated.json"), []byte(`{"types":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacy := Manifest{
+		SchemaVersion:    vbadb.SchemaVersion,
+		Generator:        GeneratorName,
+		GeneratorVersion: "legacy-build",
+		Libraries:        []ManifestLibrary{{Name: "Excel", Output: "excel.generated.json"}},
+	}
+	body, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ManifestPath(dir), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := StatusFor(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Stale || status.Reason != "catalog_revision_changed" || status.CatalogRevision != 0 {
+		t.Fatalf("legacy status = %+v", status)
 	}
 }
 
@@ -151,12 +209,15 @@ func TestStatusForManifestChecksOutputFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, err := StatusFor(Options{Dir: dir, GeneratorVersion: "1.2.3"})
+	status, err := StatusFor(Options{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !status.ManifestExists || status.Stale {
 		t.Fatalf("unexpected status: %+v", status)
+	}
+	if status.CatalogRevision != TypeDBCatalogRevision {
+		t.Fatalf("catalog revision = %d, want %d", status.CatalogRevision, TypeDBCatalogRevision)
 	}
 	if len(status.Libraries) != 1 || !status.Libraries[0].Exists {
 		t.Fatalf("library output not detected: %+v", status.Libraries)

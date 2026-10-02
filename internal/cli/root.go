@@ -1845,7 +1845,7 @@ func (a *app) attachTypeDBBootstrap(env *output.Envelope) {
 		return
 	}
 	env.Logs = append(env.Logs, "Type database: built-in DB ok")
-	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	status, err := typedb.StatusFor(typedb.Options{})
 	if err != nil {
 		appendTypeDBBootstrapWarning(env, "type_db_status_failed", "Generated TypeLib DB status could not be inspected: "+err.Error())
 		return
@@ -1870,7 +1870,8 @@ func (a *app) attachTypeDBBootstrap(env *output.Envelope) {
 	typeDBEnv, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
 		OutputDir:        resolvedDir,
 		GeneratorVersion: a.buildInfo.withDefaults().Version,
-		Libraries:        []string{"excel"},
+		CatalogRevision:  typedb.TypeDBCatalogRevision,
+		Libraries:        []string{"all"},
 		Keepalive:        buildCommandOptions(a.stderrWriter()),
 	})
 	if err != nil {
@@ -2124,7 +2125,7 @@ func (a *app) attachTypeDBDoctorStatus(env *output.Envelope) {
 	if env == nil {
 		return
 	}
-	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	status, err := typedb.StatusFor(typedb.Options{})
 	if err != nil {
 		appendTypeDBBootstrapWarning(env, "type_db_status_failed", "Generated TypeLib DB status could not be inspected: "+err.Error())
 		return
@@ -5175,10 +5176,7 @@ func (a *app) typeDBStatusCommand() *cobra.Command {
 		Short: "Show generated TypeLib type database status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			status, err := typedb.StatusFor(typedb.Options{
-				Dir:              dir,
-				GeneratorVersion: a.buildInfo.withDefaults().Version,
-			})
+			status, err := typedb.StatusFor(typedb.Options{Dir: dir})
 			if err != nil {
 				return a.writeFailure("type db status", output.ExitEnvironment, "type_db_status_failed", err)
 			}
@@ -5204,7 +5202,7 @@ func (a *app) typeDBInitCommand() *cobra.Command {
 		Short: "Generate TypeLib type databases when missing",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			status, err := typedb.StatusFor(typedb.Options{Dir: dir, GeneratorVersion: a.buildInfo.withDefaults().Version})
+			status, err := typedb.StatusFor(typedb.Options{Dir: dir})
 			if err != nil {
 				return a.writeFailure("type db init", output.ExitEnvironment, "type_db_status_failed", err)
 			}
@@ -5248,6 +5246,7 @@ func (a *app) generateTypeDB(command string, dir string, libraries []string) err
 	env, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
 		OutputDir:        resolvedDir,
 		GeneratorVersion: a.buildInfo.withDefaults().Version,
+		CatalogRevision:  typedb.TypeDBCatalogRevision,
 		Libraries:        libraries,
 		Keepalive:        buildCommandOptions(a.stderrWriter()),
 	})
@@ -7643,7 +7642,7 @@ func (a *app) lspCommand() *cobra.Command {
 				if err := lspserver.Check(opts); err != nil {
 					return a.writeFailure("lsp", output.ExitEnvironment, "lsp_check_failed", err)
 				}
-				typeDBStatus, statusErr := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+				typeDBStatus, statusErr := typedb.StatusFor(typedb.Options{})
 				typeDatabase := "builtin"
 				if statusErr == nil && typeDBStatus.ManifestExists && !typeDBStatus.Stale {
 					typeDatabase = "builtin+global_generated"
@@ -7674,7 +7673,7 @@ func (a *app) lspCommand() *cobra.Command {
 }
 
 func (a *app) ensureLSPTypeDBGenerated() {
-	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	status, err := typedb.StatusFor(typedb.Options{})
 	if err != nil {
 		a.writeLSPStderr("xlflow-lsp: generated TypeLib DB status could not be inspected: %v\n", err)
 		return
@@ -7695,6 +7694,7 @@ func (a *app) ensureLSPTypeDBGenerated() {
 	typeDBEnv, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
 		OutputDir:        resolvedDir,
 		GeneratorVersion: a.buildInfo.withDefaults().Version,
+		CatalogRevision:  typedb.TypeDBCatalogRevision,
 		Libraries:        []string{"all"},
 		Keepalive:        buildCommandOptions(a.stderrWriter()),
 	})
@@ -8531,10 +8531,9 @@ func (a *app) loadConfig(command string) (config.Config, error) {
 
 func (a *app) analyzer(cfg config.Config, pathFilter func(string) bool) analyze.Analyzer {
 	return analyze.Analyzer{
-		RootDir:                a.cwd,
-		Config:                 cfg,
-		TypeDBGeneratorVersion: a.buildInfo.withDefaults().Version,
-		PathFilter:             pathFilter,
+		RootDir:    a.cwd,
+		Config:     cfg,
+		PathFilter: pathFilter,
 	}
 }
 

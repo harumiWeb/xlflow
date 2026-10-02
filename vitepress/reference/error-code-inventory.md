@@ -154,6 +154,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `case_id`
 - `case_outside_select`
 - `case_selection_invalid`
+- `catalog_revision`
+- `catalog_revision_changed`
 - `cell_diffs`
 - `cells_updated`
 - `certificate_validation_bypass`
@@ -625,8 +627,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generated_files`
 - `generator_changed`
 - `generator_version`
-- `generator_version_changed`
-- `generator_version_missing`
 - `generic_dataflow_cfg_walks`
 - `generic_dataflow_kernel_runs`
 - `get_statement`

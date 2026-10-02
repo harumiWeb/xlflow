@@ -13,6 +13,7 @@ namespace Xlflow.ExcelBridge.Services;
 [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Command services keep instance Execute methods for consistency with other bridge services.")]
 public sealed class TypeLibImporterService
 {
+    private const int TypeDbCatalogRevision = 4;
     private const int MemberIDNil = -1;
     private const int DispIDValue = 0;
     private const short VariantTypeUserDefined = 29;
@@ -27,13 +28,22 @@ public sealed class TypeLibImporterService
 
     private static readonly Dictionary<string, LibraryTarget> KnownLibraries = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["excel"] = new("Excel", "{00020813-0000-0000-C000-000000000046}", "excel.generated.json"),
-        ["office"] = new("Office", "{2DF8D04C-5BFA-101B-BDE5-00AA0044DE52}", "office.generated.json"),
-        ["msforms"] = new("MSForms", "{0D452EE1-E08F-101A-852E-02608C4D0BB4}", "msforms.generated.json"),
-        ["scripting"] = new("Scripting", "{420B2830-E718-11CF-893D-00A0C9054228}", "scripting.generated.json"),
-        ["adodb"] = new("ADODB", "{00000205-0000-0010-8000-00AA006D2EA4}", "adodb.generated.json"),
-        ["vbide"] = new("VBIDE", "{0002E157-0000-0000-C000-000000000046}", "vbide.generated.json"),
-        ["outlook"] = new("Outlook", "{00062FFF-0000-0000-C000-000000000046}", "outlook.generated.json"),
+        ["excel"] = new("Excel", ["{00020813-0000-0000-C000-000000000046}"], "excel.generated.json"),
+        ["office"] = new("Office", ["{2DF8D04C-5BFA-101B-BDE5-00AA0044DE52}"], "office.generated.json"),
+        ["msforms"] = new("MSForms", ["{0D452EE1-E08F-101A-852E-02608C4D0BB4}"], "msforms.generated.json"),
+        ["scripting"] = new("Scripting", ["{420B2830-E718-11CF-893D-00A0C9054228}"], "scripting.generated.json"),
+        ["adodb"] = new("ADODB", ["{00000205-0000-0010-8000-00AA006D2EA4}"], "adodb.generated.json"),
+        ["vbide"] = new("VBIDE", ["{0002E157-0000-0000-C000-000000000046}"], "vbide.generated.json"),
+        ["outlook"] = new("Outlook", ["{00062FFF-0000-0000-C000-000000000046}"], "outlook.generated.json"),
+        ["dao"] = new("DAO", ["{4AC9E1DA-5BAD-4AC7-86E3-24F4CDCECA28}", "{00025E01-0000-0000-C000-000000000046}"], "dao.generated.json"),
+        ["msxml"] = new("MSXML2", ["{F5078F18-C551-11D3-89B9-0000F81FE221}"], "msxml.generated.json"),
+        ["winhttp"] = new("WinHttp", ["{662901FC-6951-4854-9EB2-D9A2570F2B2E}"], "winhttp.generated.json"),
+        ["word"] = new("Word", ["{00020905-0000-0000-C000-000000000046}"], "word.generated.json"),
+        ["powerpoint"] = new("PowerPoint", ["{91493440-5A91-11CF-8700-00AA0060263B}"], "powerpoint.generated.json"),
+        ["access"] = new("Access", ["{4AFFC9A0-5F99-101B-AF4E-00AA003F0F07}"], "access.generated.json"),
+        ["wsh"] = new("IWshRuntimeLibrary", ["{F935DC20-1CF0-11D0-ADB9-00C04FD58A0B}"], "wsh.generated.json"),
+        ["wmi"] = new("WbemScripting", ["{565783C6-CB41-11D1-8B02-00600806D9B6}"], "wmi.generated.json"),
+        ["vbscript-regexp"] = new("VBScript_RegExp_55", ["{3F4DACA7-160D-11D2-A8E9-00104B365C9F}"], "vbscript-regexp.generated.json"),
     };
 
     public BridgeResponse Execute(BridgeRequest request, TypeDbImportArguments args, CancellationToken cancellationToken)
@@ -61,20 +71,14 @@ public sealed class TypeLibImporterService
             foreach (var target in libraries.Targets)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                Dictionary<string, object?> db;
                 TypeLibRegistration registration;
                 try
                 {
-                    registration = ResolveRegisteredTypeLib(target);
-                }
-                catch (InvalidOperationException ex) when (libraries.BestEffort)
-                {
-                    logs.Add($"skipped {target.Name}: {ex.Message}");
-                    continue;
-                }
-                Dictionary<string, object?> db;
-                try
-                {
-                    db = ImportLibrary(target, registration);
+                    (db, registration) = ImportFirstAvailable(
+                        target,
+                        ResolveRegisteredTypeLib,
+                        candidate => ImportLibrary(target, candidate));
                 }
                 catch (Exception ex) when (libraries.BestEffort)
                 {
@@ -87,7 +91,7 @@ public sealed class TypeLibImporterService
                 manifestLibraries.Add(new Dictionary<string, object?>
                 {
                     ["name"] = target.Name,
-                    ["libid"] = target.LibID,
+                    ["libid"] = registration.LibID,
                     ["major"] = registration.Major,
                     ["minor"] = registration.Minor,
                     ["lcid"] = registration.LCID,
@@ -101,11 +105,13 @@ public sealed class TypeLibImporterService
                 throw new InvalidOperationException("No requested TypeLib libraries were found on this machine.");
             }
 
+            var catalogRevision = args.CatalogRevision > 0 ? args.CatalogRevision : TypeDbCatalogRevision;
             var manifest = new Dictionary<string, object?>
             {
                 ["schema_version"] = 1,
                 ["generator"] = "xlflow",
                 ["generator_version"] = string.IsNullOrWhiteSpace(args.GeneratorVersion) ? "dev" : args.GeneratorVersion,
+                ["catalog_revision"] = catalogRevision,
                 ["generated_at"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
                 ["platform"] = "windows",
                 ["arch"] = RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant(),
@@ -124,6 +130,7 @@ public sealed class TypeLibImporterService
                     {
                         ["dir"] = outputDir,
                         ["manifest_path"] = Path.Combine(outputDir, "manifest.json"),
+                        ["catalog_revision"] = catalogRevision,
                         ["generated_files"] = generatedFiles,
                         ["libraries"] = manifestLibraries,
                     },
@@ -179,12 +186,12 @@ public sealed class TypeLibImporterService
         return new ResolvedLibraries(targets, BestEffort: false);
     }
 
-    private static TypeLibRegistration ResolveRegisteredTypeLib(LibraryTarget target)
+    private static TypeLibRegistration? ResolveRegisteredTypeLib(string libID)
     {
-        using var root = Registry.ClassesRoot.OpenSubKey(@"TypeLib\" + target.LibID);
+        using var root = Registry.ClassesRoot.OpenSubKey(@"TypeLib\" + libID);
         if (root is null)
         {
-            throw new InvalidOperationException(target.Name + " TypeLib was not found on this machine.");
+            return null;
         }
         var version = root.GetSubKeyNames()
             .Select(ParseVersion)
@@ -193,19 +200,48 @@ public sealed class TypeLibImporterService
             .OrderByDescending(item => item.Major)
             .ThenByDescending(item => item.Minor)
             .FirstOrDefault();
-        if (version == default)
-        {
-            throw new InvalidOperationException(target.Name + " TypeLib version was not found on this machine.");
-        }
-        return new TypeLibRegistration(target.LibID, version.Major, version.Minor, 0);
+        return version == default
+            ? null
+            : new TypeLibRegistration(libID, version.Major, version.Minor, 0);
     }
 
-    private static (int Major, int Minor)? ParseVersion(string value)
+    internal static (T Result, TypeLibRegistration Registration) ImportFirstAvailable<T>(
+        LibraryTarget target,
+        Func<string, TypeLibRegistration?> resolveRegistration,
+        Func<TypeLibRegistration, T> import)
+    {
+        Exception? lastImportError = null;
+        foreach (var libID in target.LibIDs)
+        {
+            var registration = resolveRegistration(libID);
+            if (registration is null)
+            {
+                continue;
+            }
+            try
+            {
+                return (import(registration), registration);
+            }
+            catch (Exception ex)
+            {
+                lastImportError = ex;
+            }
+        }
+        if (lastImportError is not null)
+        {
+            throw new InvalidOperationException(
+                target.Name + " TypeLib could not be loaded from any registered library.",
+                lastImportError);
+        }
+        throw new InvalidOperationException(target.Name + " TypeLib was not found on this machine.");
+    }
+
+    internal static (int Major, int Minor)? ParseVersion(string value)
     {
         var parts = value.Split('.', 2);
         if (parts.Length != 2 ||
-            !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var major) ||
-            !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var minor))
+            !ushort.TryParse(parts[0], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var major) ||
+            !ushort.TryParse(parts[1], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var minor))
         {
             return null;
         }
@@ -288,7 +324,7 @@ public sealed class TypeLibImporterService
             ["types"] = types.OrderBy(item => item["name"]).ToArray(),
             ["constants"] = constants.OrderBy(item => item["name"]).ToArray(),
         };
-        var progIDs = DiscoverProgIDs(target.LibID, classIDs);
+        var progIDs = DiscoverProgIDs(registration.LibID, classIDs);
         if (progIDs.Count > 0)
         {
             db["progids"] = progIDs;
@@ -567,7 +603,9 @@ public sealed class TypeLibImporterService
             var href = unchecked((int)desc.lpValue.ToInt64());
             typeInfo.GetRefTypeInfo(href, out var refTypeInfo);
             refTypeInfo.GetDocumentation(MemberIDNil, out var rawName, out _, out _, out _);
-            return CanonicalTypeName(library, rawName);
+            refTypeInfo.GetContainingTypeLib(out var containingTypeLib, out _);
+            containingTypeLib.GetDocumentation(MemberIDNil, out var containingLibrary, out _, out _, out _);
+            return CanonicalTypeName(string.IsNullOrWhiteSpace(containingLibrary) ? library : containingLibrary, rawName);
         }
         return vt switch
         {
@@ -600,7 +638,7 @@ public sealed class TypeLibImporterService
         };
     }
 
-    private static string CanonicalTypeName(string library, string rawName)
+    internal static string CanonicalTypeName(string library, string rawName)
     {
         rawName = rawName.Trim();
         while (rawName.StartsWith('_'))
@@ -654,11 +692,14 @@ public sealed class TypeLibImporterService
     [DllImport("oleaut32.dll", PreserveSig = false)]
     private static extern void LoadRegTypeLib(ref Guid rguid, ushort wVerMajor, ushort wVerMinor, int lcid, out ITypeLib typeLib);
 
-    internal sealed record LibraryTarget(string Name, string LibID, string Output);
+    internal sealed record LibraryTarget(string Name, IReadOnlyList<string> LibIDs, string Output)
+    {
+        internal string LibID => LibIDs[0];
+    }
 
     internal sealed record ResolvedLibraries(List<LibraryTarget> Targets, bool BestEffort);
 
-    private sealed record TypeLibRegistration(string LibID, int Major, int Minor, int LCID);
+    internal sealed record TypeLibRegistration(string LibID, int Major, int Minor, int LCID);
 
     internal sealed record DefaultMemberCandidate(string Name, string ReturnType);
 
@@ -670,6 +711,6 @@ public sealed class TypeLibImporterService
         DefaultMemberMetadata? DefaultMember);
 }
 
-public sealed record TypeDbImportArguments(string OutputDir, string GeneratorVersion, string Libraries);
+public sealed record TypeDbImportArguments(string OutputDir, string GeneratorVersion, int CatalogRevision, string Libraries);
 
 internal sealed record RegisteredProgID(Guid ClassID, string TypeLib, IReadOnlyList<string> ProgIDs);
