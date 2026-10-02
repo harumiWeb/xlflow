@@ -381,3 +381,68 @@ func readState(t testing.TB, path string) pushState {
 	}
 	return *state
 }
+
+// Loose .bas/.cls files under src/forms are valid bridge input: the Excel
+// backend imports them as standard/class modules, so the file backend must
+// push them instead of rejecting the layout.
+func TestPushImportsLooseFormModules(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	writeTestFile(t, filepath.Join(root, "src", "modules", "Module1.bas"), moduleSource("Module1", "Option Explicit\n"))
+	writeTestFile(t, filepath.Join(root, "src", "forms", "FormHelper.bas"), moduleSource("FormHelper", "Public Function Loose() As String\n    Loose = \"loose-bas\"\nEnd Function\n"))
+	writeTestFile(t, filepath.Join(root, "src", "forms", "FormUtil.cls"), classSourceText(t, "FormUtil"))
+
+	result, err := Push(root, testConfig(), workbook, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta.Standard != 2 || result.Meta.Class != 1 {
+		t.Fatalf("meta = %+v, want 2 standard + 1 class", result.Meta)
+	}
+	project := readProject(t, workbook)
+	if got := moduleSourceOf(project, "FormHelper"); !strings.Contains(got, "loose-bas") {
+		t.Fatalf("loose form .bas not imported: %q", got)
+	}
+	if got := moduleSourceOf(project, "FormUtil"); !strings.Contains(got, "VB_Name = \"FormUtil\"") {
+		t.Fatalf("loose form .cls not imported: %q", got)
+	}
+}
+
+// The same file seen as /mnt/<drive>/... under WSL and <drive>:\... on Windows
+// must produce one canonical state path, or --changed-only can never skip
+// across the backend/host boundary the bridge schema is shared across.
+func TestPushStatePathsCanonicalAcrossHosts(t *testing.T) {
+	previous := runningOnWSL
+	runningOnWSL = func() bool { return true }
+	t.Cleanup(func() { runningOnWSL = previous })
+
+	if got := normalizeFingerprintPath(`C:\proj\build\Book.xlsm`); got != `C:\proj\build\Book.xlsm` {
+		t.Fatalf("windows path = %q", got)
+	}
+	if got := normalizeFingerprintPath(`/mnt/c/proj/build/Book.xlsm`); got != `C:\proj\build\Book.xlsm` {
+		t.Fatalf("wsl mount path = %q, want windows form", got)
+	}
+	if got := normalizeFingerprintPath(`d:\proj\book.xlsm`); got != `D:\proj\book.xlsm` {
+		t.Fatalf("drive letter not canonicalized: %q", got)
+	}
+	// A non-/mnt Linux path has no Windows counterpart.
+	for _, p := range []string{`/home/dev/proj/Book.xlsm`, `/mnt/`, `/mnt/1x/Book.xlsm`} {
+		if _, ok := wslMountToWindowsPath(p); ok {
+			t.Fatalf("wslMountToWindowsPath(%q) unexpectedly mapped", p)
+		}
+	}
+
+	left := computeFingerprint(`/mnt/c/proj/build/Book.xlsm`, nil, false)
+	right := sourceFingerprint{WorkbookPath: `C:\proj\build\Book.xlsm`}
+	if !fingerprintEquals(left, right) {
+		t.Fatal("cross-host workbook paths broke fingerprint equality")
+	}
+	if !pathsEqual(`C:\proj\build\Book.xlsm`, `/mnt/c/proj/build/Book.xlsm`) {
+		t.Fatal("cross-host saved-file paths did not compare equal")
+	}
+
+	runningOnWSL = func() bool { return false }
+	if got := normalizeFingerprintPath(`/mnt/c/proj/Book.xlsm`); got == `C:\proj\Book.xlsm` {
+		t.Fatalf("non-WSL /mnt path was rewritten: %q", got)
+	}
+}

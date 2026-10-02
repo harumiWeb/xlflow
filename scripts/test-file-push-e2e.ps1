@@ -16,7 +16,7 @@ $utf8NoBom = [Text.UTF8Encoding]::new($false, $true)
 $japaneseModuleName = (-join [char[]](0x65E5, 0x672C, 0x8A9E)) + 'Module'
 $japaneseMarker = -join [char[]](0x65E5, 0x672C, 0x8A9E, 0x78BA, 0x8A8D)
 $japaneseComment = -join [char[]](0x65E5, 0x672C, 0x8A9E, 0x30B3, 0x30E1, 0x30F3, 0x30C8)
-$sentinel = "file push ok|class ok|sheet ok|workbook ok|$japaneseMarker"
+$sentinel = "file push ok|class ok|sheet ok|workbook ok|loose form ok|$japaneseMarker"
 
 function Invoke-XlflowJson {
     param([Parameter(Mandatory)][string[]]$Arguments, [switch]$AllowFailure)
@@ -141,7 +141,7 @@ Option Explicit
 Public Sub Run()
     Dim service As Greeting
     Set service = New Greeting
-    ThisWorkbook.Worksheets(1).Range("A1").Value = TextHelpers.Prefix() & "|" & service.Message() & "|" & Sheet1.DocumentMarker() & "|" & ThisWorkbook.WorkbookMarker() & "|" & $japaneseModuleName.JapaneseMarker()
+    ThisWorkbook.Worksheets(1).Range("A1").Value = TextHelpers.Prefix() & "|" & service.Message() & "|" & Sheet1.DocumentMarker() & "|" & ThisWorkbook.WorkbookMarker() & "|" & FormEnv.LooseMarker() & "|" & $japaneseModuleName.JapaneseMarker()
 End Sub
 "@
         Write-Utf8NoBom (Join-Path $workspace 'src\modules\Shared\TextHelpers.bas') @'
@@ -175,6 +175,16 @@ Option Explicit
 
 Public Function Message() As String
     Message = "class ok"
+End Function
+'@
+        # A loose .bas under src/forms is valid bridge input (imported as a
+        # standard module by VBIDE); the file backend must push it too.
+        Write-Utf8NoBom (Join-Path $workspace 'src\forms\FormEnv.bas') @'
+Attribute VB_Name = "FormEnv"
+Option Explicit
+
+Public Function LooseMarker() As String
+    LooseMarker = "loose form ok"
 End Function
 '@
         Write-Utf8NoBom (Join-Path $workspace 'src\workbook\Sheet1.bas') @'

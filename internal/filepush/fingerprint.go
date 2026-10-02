@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/coordination"
+	"github.com/harumiWeb/xlflow/internal/wsl"
 )
 
 // dotnetTicksPerUnixNano converts a Unix-nanosecond timestamp into .NET
@@ -50,12 +51,78 @@ type pushState struct {
 	AppliedTo   *pushAppliedTo    `json:"applied_to"`
 }
 
+// runningOnWSL is stubbed by tests.
+var runningOnWSL = wsl.IsWSL
+
+// normalizeFingerprintPath canonicalizes a workbook path for push state so a
+// fingerprint or saved-file stamp written on one OS still matches after the
+// other backend sees the same file across a WSL/Windows boundary: a WSL
+// absolute path under /mnt/<drive> and the Windows absolute path for the same
+// file both normalize to the Windows form (`D:\...`). Windows-form input is
+// recognized before host absolutization because filepath.Abs("C:\\x") on a
+// Unix host would produce garbage. Non-WSL hosts never rewrite /mnt/ paths —
+// a bare Linux mount cannot be proven to be the same file Windows sees.
 func normalizeFingerprintPath(path string) string {
+	if windowsPath, ok := windowsDrivePath(path); ok {
+		return windowsPath
+	}
+	// Check the raw absolute /mnt/<drive>/... form before host absolutization:
+	// under WSL filepath.Abs preserves it, and checking first keeps the
+	// mapping testable on non-WSL hosts too.
+	if runningOnWSL() {
+		if windowsPath, ok := wslMountToWindowsPath(path); ok {
+			return windowsPath
+		}
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return filepath.Clean(path)
 	}
-	return filepath.Clean(abs)
+	abs = filepath.Clean(abs)
+	if runningOnWSL() {
+		if windowsPath, ok := wslMountToWindowsPath(abs); ok {
+			return windowsPath
+		}
+	}
+	return abs
+}
+
+// windowsDrivePath reports the canonical `D:\...` form when path already looks
+// like a Windows drive-rooted path (X:\ or X:/), or false otherwise.
+func windowsDrivePath(path string) (string, bool) {
+	p := strings.TrimSpace(path)
+	if len(p) < 3 || p[1] != ':' || !isASCIILetter(p[0]) || (p[2] != '\\' && p[2] != '/') {
+		return "", false
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(strings.ReplaceAll(p, "\\", "/")))
+	rest := ""
+	if len(cleaned) > 2 {
+		rest = strings.ReplaceAll(cleaned[2:], "/", "\\")
+	}
+	return strings.ToUpper(p[:1]) + ":" + rest, true
+}
+
+// wslMountToWindowsPath maps an absolute /mnt/<drive>/... path to its Windows
+// form `D:\...`. Non-/mnt paths report false so Linux-only project paths keep
+// their native form in state — Windows cannot see them anyway.
+func wslMountToWindowsPath(abs string) (string, bool) {
+	slashed := filepath.ToSlash(abs)
+	if !strings.HasPrefix(slashed, "/mnt/") || len(slashed) < len("/mnt/c") {
+		return "", false
+	}
+	rest := slashed[len("/mnt/"):]
+	if !isASCIILetter(rest[0]) || (len(rest) > 1 && rest[1] != '/') {
+		return "", false
+	}
+	drive := strings.ToUpper(rest[:1])
+	if len(rest) == 1 {
+		return drive + `:\`, true
+	}
+	return drive + ":" + strings.ReplaceAll(rest[1:], "/", "\\"), true
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // computeFingerprint ports ComputeFingerprint: one entry per discovered file,

@@ -3,6 +3,7 @@ package filepush
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -18,7 +19,7 @@ import (
 // folder annotation updates, and Erl line-number instrumentation.
 func collectSources(root string, cfg config.Config) ([]packpkg.SourceModule, error) {
 	components, err := sourceinventory.Discover(sourceinventory.Options{
-		Root: root, Config: cfg, ValidateFormArtifacts: true,
+		Root: root, Config: cfg, ValidateFormArtifacts: true, AllowLooseFormModules: true,
 	})
 	if err != nil {
 		var layoutErr *sourceinventory.LayoutError
@@ -48,7 +49,7 @@ func collectSources(root string, cfg config.Config) ([]packpkg.SourceModule, err
 				}
 			}
 		}
-		transformed, err := transformComponentSource(component, source, sidecarText, hasSidecar, roots, cfg, lineNumbers)
+		transformed, err := transformComponentSource(component, source, sidecarText, hasSidecar, componentRootDir(component.Type, roots), cfg, lineNumbers)
 		if err != nil {
 			return nil, err
 		}
@@ -60,7 +61,48 @@ func collectSources(root string, cfg config.Config) ([]packpkg.SourceModule, err
 			Source:       transformed,
 		})
 	}
+	// Loose .bas/.cls files under the forms root are fingerprinted as "form"
+	// entries and imported by the Excel bridge as standard/class modules via
+	// VBIDE, so submit them to pack with the matching component types. The
+	// inventory skips them because they carry no UserForm artifact role.
+	for _, file := range discoverSourceFiles(roots, cfg.UserForm.CodeSource) {
+		if file.Kind != "form" || (file.Extension != ".bas" && file.Extension != ".cls") {
+			continue
+		}
+		body, err := os.ReadFile(file.FullPath)
+		if err != nil {
+			return nil, err
+		}
+		loose := sourceinventory.Component{
+			SourcePath:   looseFormSourcePath(root, file.FullPath),
+			AbsolutePath: file.FullPath,
+			Name:         file.ModuleName,
+			Type:         sourceinventory.ComponentStandard,
+			Source:       body,
+		}
+		if file.Extension == ".cls" {
+			loose.Type = sourceinventory.ComponentClass
+		}
+		transformed, err := transformComponentSource(loose, string(body), "", false, roots.forms, cfg, lineNumbers)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, packpkg.SourceModule{
+			SourcePath: loose.SourcePath,
+			Name:       loose.Name,
+			Type:       packpkg.ModuleType(loose.Type),
+			Source:     transformed,
+		})
+	}
 	return sources, nil
+}
+
+func looseFormSourcePath(root, fullPath string) string {
+	rel, err := filepath.Rel(root, fullPath)
+	if err != nil {
+		return fullPath
+	}
+	return filepath.ToSlash(rel)
 }
 
 // transformComponentSource applies push-time text transforms in the same order
@@ -70,13 +112,12 @@ func collectSources(root string, cfg config.Config) ([]packpkg.SourceModule, err
 // UserForm's code-behind comes from its code/<Name>.bas file verbatim (the
 // bridge replaces the imported code module with the instrumented sidecar
 // text), so the sidecar is numbered but never re-annotated.
-func transformComponentSource(component sourceinventory.Component, source, sidecarText string, hasSidecar bool, roots sourceRoots, cfg config.Config, lineNumbers bool) (string, error) {
+func transformComponentSource(component sourceinventory.Component, source, sidecarText string, hasSidecar bool, annotationRoot string, cfg config.Config, lineNumbers bool) (string, error) {
 	if component.Type == sourceinventory.ComponentDocument {
 		source = normalizeDocumentModuleContent(source)
 	}
-	rootDir := componentRootDir(component.Type, roots)
-	if rootDir != "" {
-		source = updateFolderAnnotationText(source, cfg.VBA.FolderAnnotation, folderAnnotationForPath(rootDir, component.AbsolutePath))
+	if annotationRoot != "" {
+		source = updateFolderAnnotationText(source, cfg.VBA.FolderAnnotation, folderAnnotationForPath(annotationRoot, component.AbsolutePath))
 	}
 	if lineNumbers {
 		numbered, issue := tryAddLineNumbers(source)

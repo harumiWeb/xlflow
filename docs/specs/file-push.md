@@ -145,6 +145,14 @@ still hold:
 2. `applied_to.saved_file` still describes the workbook: normalized path,
    last-write timestamp in .NET ticks, and byte length.
 
+Workbook paths in `fingerprint.workbook_path` and `applied_to.saved_file.path`
+are canonicalized so the same file is identical across the WSL/Windows
+boundary: under WSL an absolute `/mnt/<drive>/...` path is recorded as its
+Windows `D:\...` form, and comparisons normalize both sides the same way, so
+a state file written by the file backend on WSL satisfies the Excel bridge's
+`--changed-only` check on Windows (and vice versa). Paths outside `/mnt/` keep
+their native form — Windows cannot see them, so no interop is claimed.
+
 A state file in the legacy bare-fingerprint shape has no delivery evidence and
 never justifies a skip. A skip is a successful no-op.
 

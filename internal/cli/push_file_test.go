@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/filepush"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/workbookuse"
@@ -220,4 +221,46 @@ func TestFilePushErrorCodeMapping(t *testing.T) {
 			t.Fatalf("filePushErrorCode(%v) = %q, want %q", tc.err, got, tc.want)
 		}
 	}
+}
+
+// The file backend must not take the workbook coordination lease: its ordering
+// guarantee comes from the safety gate plus atomic publication (ADR-0061), and
+// source-tree leases still serialize concurrent pushes.
+func TestPushFileBackendSkipsWorkbookLease(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePushSourceTree(t, dir)
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+	stubClosedWorkbook(t)
+	manager, err := coordination.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbookIdentity, err := coordination.NewWorkbookIdentity(dir, filepath.Join(dir, "build", "Book.xlsm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbookLease, err := manager.Acquire(t.Context(), coordination.AcquireRequest{
+		Identity: workbookIdentity, Command: "pull", OperationKind: coordination.OperationMutate,
+		ResourceScope: coordination.ResourceWorkbook,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, runErr := runPushCommandWithManager(dir, manager, "--json", "push", "--backend", "file")
+	if releaseErr := workbookLease.Release(); releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
+	if runErr != nil {
+		t.Fatalf("file push contended on workbook lease: %v\n%s", runErr, stdout)
+	}
+}
+
+func runPushCommandWithManager(dir string, manager *coordination.Manager, args ...string) (string, error) {
+	stdout := new(bytes.Buffer)
+	a := &app{cwd: dir, stdout: stdout, stderr: new(bytes.Buffer), stdoutTerminal: func() bool { return false }, coordination: manager}
+	root := a.rootCommand()
+	root.SetArgs(args)
+	err := root.Execute()
+	return stdout.String(), err
 }

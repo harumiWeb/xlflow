@@ -64,6 +64,13 @@ type Options struct {
 	Config                config.Config
 	RestrictToRoot        bool
 	ValidateFormArtifacts bool
+	// AllowLooseFormModules tolerates .bas/.cls files directly under the forms
+	// root (outside the reserved code/ and specs/ directories) instead of
+	// rejecting them as unsupported UserForm sources. The Excel bridge imports
+	// such files as standard/class modules, so the push path inventories the
+	// UserForm artifacts here and submits the loose modules separately; they
+	// are skipped, never returned as components.
+	AllowLooseFormModules bool
 	// PrimaryExcluded is used by build to resolve flat UserForm sidecars only
 	// against forms whose primary .frm survives primary-path exclusions.
 	PrimaryExcluded func(path string) bool
@@ -217,6 +224,9 @@ func collectForms(root string, opts Options) ([]Component, error) {
 		}
 		ext := strings.ToLower(filepath.Ext(d.Name()))
 		if ext != ".frm" && ext != ".frx" {
+			if opts.AllowLooseFormModules && (ext == ".bas" || ext == ".cls") {
+				return nil
+			}
 			return layoutError("unsupported UserForm source file %s", displayPath(root, path))
 		}
 		if _, readErr := os.ReadFile(path); readErr != nil {
