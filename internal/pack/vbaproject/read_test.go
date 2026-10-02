@@ -134,6 +134,26 @@ func TestProtectedAndForm(t *testing.T) {
 	}
 }
 
+func TestReadWithoutFormsRetainsDesignerAsOpaqueStreams(t *testing.T) {
+	project, err := ReadWithoutForms(loadCorpus(t, "p4_form"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Forms) != 0 {
+		t.Fatalf("parsed forms = %d, want 0", len(project.Forms))
+	}
+	var hasFormModule, hasDesignerStream bool
+	for _, module := range project.Modules {
+		hasFormModule = hasFormModule || module.Type == ModuleForm
+	}
+	for path := range project.RawStreams {
+		hasDesignerStream = hasDesignerStream || strings.HasPrefix(path, "UserForm1/")
+	}
+	if !hasFormModule || !hasDesignerStream {
+		t.Fatalf("metadata read lost form topology: module=%v stream=%v", hasFormModule, hasDesignerStream)
+	}
+}
+
 func TestIsProtectedClassifiesCorpus(t *testing.T) {
 	// p3 is the protected sample; the rest are unprotected. CMG comes straight
 	// from the PROJECT stream of each real fixture, so this is the external

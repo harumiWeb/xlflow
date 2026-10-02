@@ -38,6 +38,10 @@ Decoded values never replace their persistence bytes. Strings retain their
 compression flag and original encoded bytes. Records retain masks, alignment
 padding, opaque pictures and arrays, raw tails, and the complete source record.
 Each container level retains its original streams and storage metadata.
+Known Designer stream identities follow MS-CFB case-insensitive name matching;
+the model also retains and replays the directory entry's original spelling.
+Case variants such as `F`, `X`, or `\x01COMPOBJ` therefore remain byte-for-byte
+present instead of being normalized or dropped.
 
 The first known property tables cover the built-in classes represented by the
 existing FormSpec contract: Label, TextBox, ComboBox, ListBox, CommandButton,

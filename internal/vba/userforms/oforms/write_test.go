@@ -92,6 +92,57 @@ func TestSerializeFormPreservesEmptyOptionalStream(t *testing.T) {
 	}
 }
 
+func TestSerializeFormPreservesCaseVariantKnownStreams(t *testing.T) {
+	original := openFixture(t, "p6_nested_form.bin")
+	writer, err := cfb.NewWriterForFormat(original.Format())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range original.StoragePaths() {
+		meta, _ := original.Storage(path)
+		writer.AddStorage(splitPath(path), meta)
+	}
+	renames := map[string]string{
+		"f": "F", "o": "O", "\x01CompObj": "\x01COMPOBJ", "\x03VBFrame": "\x03VBFRAME",
+	}
+	sawNested := false
+	for _, path := range original.Paths() {
+		parts := splitPath(path)
+		if len(parts) > 1 && parts[0] == "UserForm1" {
+			if renamed, ok := renames[parts[len(parts)-1]]; ok {
+				parts[len(parts)-1] = renamed
+				sawNested = sawNested || len(parts) > 2
+			}
+		}
+		body, _ := original.Stream(path)
+		writer.AddStream(parts, body)
+	}
+	if !sawNested {
+		t.Fatal("fixture has no nested known Designer stream")
+	}
+	writer.AddStream([]string{"UserForm1", "X"}, nil)
+	body, err := writer.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	container, err := cfb.Open(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forms := DiscoverForms(container); !slices.Equal(forms, []string{"UserForm1"}) {
+		t.Fatalf("DiscoverForms = %q, want UserForm1", forms)
+	}
+	form, err := ReadForm(container, "UserForm1", 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serialized, err := SerializeForm(form, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSerializedSubtree(t, container, "UserForm1", serialized)
+}
+
 func TestSerializeFormRejectsSemanticMutation(t *testing.T) {
 	form, err := ReadForm(openFixture(t, "p4_form.bin"), "UserForm1", 932)
 	if err != nil {

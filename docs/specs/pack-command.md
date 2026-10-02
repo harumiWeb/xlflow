@@ -188,6 +188,10 @@ On success with `--json`, `pack` emits the standard envelope (`status`, `command
 }
 ```
 
+`modules.carried_streams` counts every template stream preserved rather than
+regenerated, including opaque `RawStreams` and streams owned by parsed UserForm
+Designer subtrees.
+
 The backend identifier `pack.backend = "pure-go"` is deliberately distinct from the Excel-bridge `bridge` metadata defined in `cli-contract.md`, because `pack` uses no Excel bridge process. `pack.base` is `template` or `blank`; `pack.template` is present only for template mode. The `vbe_validation_skipped` warning is emitted on every successful run. Machine consumers must read `pack.vbe_validation` — not the absence of errors — to decide whether the artifact has been VBE-validated; it never is.
 
 ## Exit codes

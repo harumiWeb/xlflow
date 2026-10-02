@@ -29,13 +29,18 @@ type Level struct {
 	Controls    []*Control
 
 	FRaw         []byte
+	FStreamName  string
 	ORaw         []byte
+	OStreamName  string
 	XRaw         []byte
+	XStreamName  string
 	HasXStream   bool
 	CompObj      *CompObj
 	CompObjRaw   []byte
+	CompObjName  string
 	HasCompObj   bool
 	VBFrameRaw   []byte
+	VBFrameName  string
 	HasVBFrame   bool
 	ExtraStreams map[string][]byte
 

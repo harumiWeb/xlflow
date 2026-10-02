@@ -96,24 +96,24 @@ func appendLevel(serialized *SerializedForm, root string, level *Level) error {
 	}
 	serialized.Storages[level.Path] = level.StorageMeta
 
-	if err := addSerializedStream(serialized, level.Path+"/f", level.FRaw); err != nil {
+	if err := addSerializedStream(serialized, level.Path+"/"+level.FStreamName, level.FRaw); err != nil {
 		return err
 	}
-	if err := addSerializedStream(serialized, level.Path+"/o", level.ORaw); err != nil {
+	if err := addSerializedStream(serialized, level.Path+"/"+level.OStreamName, level.ORaw); err != nil {
 		return err
 	}
 	if level.HasXStream {
-		if err := addSerializedStream(serialized, level.Path+"/x", level.XRaw); err != nil {
+		if err := addSerializedStream(serialized, level.Path+"/"+level.XStreamName, level.XRaw); err != nil {
 			return err
 		}
 	}
 	if level.HasCompObj {
-		if err := addSerializedStream(serialized, level.Path+"/\x01CompObj", level.CompObjRaw); err != nil {
+		if err := addSerializedStream(serialized, level.Path+"/"+level.CompObjName, level.CompObjRaw); err != nil {
 			return err
 		}
 	}
 	if level.HasVBFrame {
-		if err := addSerializedStream(serialized, level.Path+"/\x03VBFrame", level.VBFrameRaw); err != nil {
+		if err := addSerializedStream(serialized, level.Path+"/"+level.VBFrameName, level.VBFrameRaw); err != nil {
 			return err
 		}
 	}
@@ -165,13 +165,18 @@ type levelSignatureView struct {
 	Sites         []siteSignatureView
 	Controls      []controlSignatureView
 	FRaw          []byte
+	FStreamName   string
 	ORaw          []byte
+	OStreamName   string
 	XRaw          []byte
+	XStreamName   string
 	HasXStream    bool
 	CompObj       *compObjSignatureView
 	CompObjRaw    []byte
+	CompObjName   string
 	HasCompObj    bool
 	VBFrameRaw    []byte
+	VBFrameName   string
 	HasVBFrame    bool
 	ExtraStreams  map[string][]byte
 	MouseIconRaw  []byte
@@ -251,10 +256,11 @@ func modelSignature(form *Form) ([32]byte, error) {
 		levelView := levelSignatureView{
 			Path: level.Path, StorageMeta: level.StorageMeta,
 			Record: recordSignature(level.Record), Sites: siteSignatures(level.Sites),
-			Controls: controlSignatures(level.Controls), FRaw: level.FRaw, ORaw: level.ORaw,
-			XRaw: level.XRaw, HasXStream: level.HasXStream,
-			CompObjRaw: level.CompObjRaw, HasCompObj: level.HasCompObj,
-			VBFrameRaw: level.VBFrameRaw, HasVBFrame: level.HasVBFrame,
+			Controls: controlSignatures(level.Controls), FRaw: level.FRaw, FStreamName: level.FStreamName,
+			ORaw: level.ORaw, OStreamName: level.OStreamName,
+			XRaw: level.XRaw, XStreamName: level.XStreamName, HasXStream: level.HasXStream,
+			CompObjRaw: level.CompObjRaw, CompObjName: level.CompObjName, HasCompObj: level.HasCompObj,
+			VBFrameRaw: level.VBFrameRaw, VBFrameName: level.VBFrameName, HasVBFrame: level.HasVBFrame,
 			ExtraStreams: level.ExtraStreams, MouseIconRaw: level.MouseIconRaw,
 			FontRaw: level.FontRaw, PictureRaw: level.PictureRaw, ClassTable: level.ClassTable,
 			ClassTableRaw: level.ClassTableRaw, DepthsRaw: level.DepthsRaw, TrailingRaw: level.TrailingRaw,

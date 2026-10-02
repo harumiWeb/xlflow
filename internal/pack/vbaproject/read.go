@@ -14,6 +14,18 @@ import (
 
 // Read parses vbaProject.bin and decomposes it into a *Project model.
 func Read(data []byte) (*Project, error) {
+	return read(data, true)
+}
+
+// ReadWithoutForms parses project and module metadata while leaving UserForm
+// Designer subtrees in RawStreams. It is intended for backend capability
+// probes that must route frm-authoritative projects to Excel before applying
+// the pure-Go Designer compatibility boundary.
+func ReadWithoutForms(data []byte) (*Project, error) {
+	return read(data, false)
+}
+
+func read(data []byte, parseForms bool) (*Project, error) {
 	c, err := cfb.Open(data)
 	if err != nil {
 		return nil, fmt.Errorf("vbaproject: cfb open: %w", err)
@@ -93,16 +105,19 @@ func Read(data []byte) (*Project, error) {
 		})
 	}
 
-	formStorages := oforms.DiscoverForms(c)
-	slices.Sort(formStorages)
-	formRoots := make(map[string]struct{}, len(formStorages))
-	for _, storage := range formStorages {
-		form, err := oforms.ReadForm(c, storage, di.CodePage)
-		if err != nil {
-			return nil, fmt.Errorf("vbaproject: read UserForm %q: %w", storage, err)
+	formRoots := map[string]struct{}{}
+	if parseForms {
+		formStorages := oforms.DiscoverForms(c)
+		slices.Sort(formStorages)
+		formRoots = make(map[string]struct{}, len(formStorages))
+		for _, storage := range formStorages {
+			form, err := oforms.ReadForm(c, storage, di.CodePage)
+			if err != nil {
+				return nil, fmt.Errorf("vbaproject: read UserForm %q: %w", storage, err)
+			}
+			p.Forms = append(p.Forms, form)
+			formRoots[cfb.DirectoryNameKey(storage)] = struct{}{}
 		}
-		p.Forms = append(p.Forms, form)
-		formRoots[cfb.DirectoryNameKey(storage)] = struct{}{}
 	}
 
 	// Capture every stream the writer does not own (see Project.RawStreams) so

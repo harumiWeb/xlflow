@@ -83,3 +83,30 @@ type Project struct {
 	Props           ProjectProps
 	Protection      Protection
 }
+
+// CarriedStreamCount reports opaque and parsed Designer streams preserved
+// from a template rather than regenerated from source modules.
+func (p *Project) CarriedStreamCount() int {
+	count := len(p.RawStreams)
+	for _, form := range p.Forms {
+		if form == nil {
+			continue
+		}
+		for _, level := range form.Levels {
+			if level == nil {
+				continue
+			}
+			count += 2 + len(level.ExtraStreams) // required f and o streams
+			if level.HasXStream {
+				count++
+			}
+			if level.HasCompObj {
+				count++
+			}
+			if level.HasVBFrame {
+				count++
+			}
+		}
+	}
+	return count
+}

@@ -254,6 +254,21 @@ func TestProbeInspectsOnlyWorkbookCapabilityWithoutPublishing(t *testing.T) {
 	if frmResult.Supported || frmResult.Reason != "userform_code_source" || !frmResult.HasForms {
 		t.Fatalf("frm probe result = %+v", frmResult)
 	}
+
+	malformed := replaceCFBStream(t, readFixture(t, "p4_form.bin"), "UserForm1/o", func(body []byte) []byte {
+		return append(body, 0xff)
+	})
+	malformedWorkbook := writeWorkbook(t, root, malformed)
+	frmResult, err = Probe(malformedWorkbook, frmConfig)
+	if err != nil {
+		t.Fatalf("frm probe must route before Designer parsing: %v", err)
+	}
+	if frmResult.Supported || frmResult.Reason != "userform_code_source" || !frmResult.HasForms {
+		t.Fatalf("malformed frm probe result = %+v", frmResult)
+	}
+	if _, err := Probe(malformedWorkbook, testConfig()); !errors.Is(err, ErrUserFormDesignerMalformed) {
+		t.Fatalf("sidecar malformed probe error = %v, want ErrUserFormDesignerMalformed", err)
+	}
 }
 
 func TestProbeLeavesSourceTreeValidationToPullContext(t *testing.T) {

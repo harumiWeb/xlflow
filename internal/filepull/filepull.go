@@ -105,7 +105,11 @@ func Pull(root string, cfg config.Config, workbookPath string) (Result, error) {
 // without reading or publishing the source tree. Source-tree validation remains
 // in PullContext, where leases and wait policy protect managed source roots.
 func Probe(workbookPath string, cfg config.Config) (ProbeResult, error) {
-	inspection, err := inspectProject(workbookPath)
+	readProject := vbaproject.Read
+	if !strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+		readProject = vbaproject.ReadWithoutForms
+	}
+	inspection, err := inspectProjectWith(workbookPath, readProject)
 	if err != nil {
 		return ProbeResult{}, err
 	}
@@ -231,11 +235,15 @@ func buildPlan(root string, cfg config.Config, workbookPath string) (plan, error
 }
 
 func inspectProject(workbookPath string) (*inspectedProject, error) {
+	return inspectProjectWith(workbookPath, vbaproject.Read)
+}
+
+func inspectProjectWith(workbookPath string, readProject func([]byte) (*vbaproject.Project, error)) (*inspectedProject, error) {
 	projectBytes, err := readVBAProject(workbookPath)
 	if err != nil {
 		return nil, err
 	}
-	project, err := vbaproject.Read(projectBytes)
+	project, err := readProject(projectBytes)
 	if err != nil {
 		if errors.Is(err, oforms.ErrMalformed) {
 			return nil, fmt.Errorf("%w: %v", ErrUserFormDesignerMalformed, err)
