@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/sourceinventory"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 // collectSources resolves the managed source tree into the pack source plan,

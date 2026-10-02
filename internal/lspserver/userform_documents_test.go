@@ -69,7 +69,7 @@ func TestRepresentativeUserFormFixtureUsesSharedLSPContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	source, err := os.ReadFile(filepath.Join("..", "excel", "forms", "intel", "testdata", "representative-userform.yaml"))
+	source, err := os.ReadFile(filepath.Join("..", "vba", "userforms", "spec", "intel", "testdata", "representative-userform.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

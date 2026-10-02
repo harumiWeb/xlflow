@@ -52,13 +52,14 @@ instead load and overlay the generated TypeLib database. The common semantic
 implementation is shared in both cases, while incomplete views fail open for
 diagnostics that would otherwise infer external type absence.
 
-The filesystem-backed adapter treats generated metadata as complete only when a
-caller that has build metadata supplies the expected TypeLib generator version
-and the manifest matches it. A mismatch does not discard generated members:
-positive type resolution remains available, but completeness-dependent absence
-diagnostics fail open and the existing TypeDB load warning is retained. Callers
-without build metadata keep the version-agnostic loader contract. Standalone
-realtime analysis exposes the same opt-in expected-version path; explicit
+The filesystem-backed adapter treats generated metadata as complete only when
+the manifest's TypeDB catalog revision matches the revision compiled into the
+running xlflow build. A mismatch does not discard generated members: positive
+type resolution remains available, but completeness-dependent absence
+diagnostics fail open and the existing TypeDB load warning is retained. The
+general xlflow generator version remains informational and does not trigger
+TypeDB regeneration. Batch, standalone realtime, and LSP loading use the same
+catalog contract without caller-supplied build metadata; explicit
 `TypeDatabase` injection remains authoritative and bypasses runtime loading.
 
 Keep `AnalyzeProject` source-only after the common boundary is introduced.
@@ -108,6 +109,8 @@ Negative consequences:
 - Callers that need complete UserForm control metadata must supply the relevant
   `.frm` source (and any binary metadata through a future explicit capability);
   `AnalyzeProject` does not infer it from `RootDir`.
+- Patch releases that do not change the supported TypeLib catalog no longer
+  force TypeDB regeneration solely because the xlflow version changed.
 
 ## Alternatives Considered
 
@@ -129,7 +132,8 @@ Negative consequences:
 - Existing analysis input construction: `internal/analyze/analyzer.go`.
 - Model contract and tests: `docs/specs/vba-source-project.md` and
   `internal/vba/sourceproject`.
-- Generator-version compatibility follow-up: issue #813,
+- Catalog-revision migration amendment: issue #896, superseding the
+  generator-version regeneration mechanism introduced for issue #813,
   `internal/typedb/typedb.go`, `internal/analyze/analyzer.go`, and
   `internal/analyze/analyzer_test.go`.
 - Filesystem-free diagnostic capability policy: issue #644,
@@ -151,4 +155,4 @@ Negative consequences:
 
 - `docs/adr/ADR-0014-reusable-vba-lsp-server.md`
 - `docs/adr/ADR-0021-procedure-analysis-ir.md`
-- xlflow issues #641, #642, #643, #644, #645, #813, and #827
+- xlflow issues #641, #642, #643, #644, #645, #813, #827, and #896

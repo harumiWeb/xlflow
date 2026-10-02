@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
-	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
 	vbaintel "github.com/harumiWeb/xlflow/internal/vba/intel"
+	formsintel "github.com/harumiWeb/xlflow/internal/vba/userforms/spec/intel"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
@@ -69,6 +69,11 @@ controls:
     name: Combo1
     type: ComboBox
     list: []
+  - id: opaque
+    name: VendorControl1
+    type: Control
+    unsupported:
+      - controlType
 `
 	path := filepath.Join(root, "src", "forms", "specs", "UserForm1.yaml")
 	doc, err := s.docs.open(pathToFileURI(path), source)
@@ -103,6 +108,7 @@ controls:
 		{"UFV013", "warning", "controls[9].controls", true},
 		{"UFV013", "warning", "controls[10].list", true},
 		{"UFV014", "warning", "controls[6].progId", false},
+		{"UFV015", "warning", "controls[11].type", false},
 	} {
 		field, ok := syntax.Field(want.field)
 		if !ok {

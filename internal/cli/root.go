@@ -36,7 +36,6 @@ import (
 	"github.com/harumiWeb/xlflow/internal/diff"
 	"github.com/harumiWeb/xlflow/internal/excel"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/filepull"
 	"github.com/harumiWeb/xlflow/internal/filepush"
 	formulaspkg "github.com/harumiWeb/xlflow/internal/formulas"
@@ -57,6 +56,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 	"github.com/harumiWeb/xlflow/internal/workbookformat"
 	"github.com/harumiWeb/xlflow/internal/workbookuse"
@@ -1846,7 +1846,7 @@ func (a *app) attachTypeDBBootstrap(env *output.Envelope) {
 		return
 	}
 	env.Logs = append(env.Logs, "Type database: built-in DB ok")
-	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	status, err := typedb.StatusFor(typedb.Options{})
 	if err != nil {
 		appendTypeDBBootstrapWarning(env, "type_db_status_failed", "Generated TypeLib DB status could not be inspected: "+err.Error())
 		return
@@ -1871,7 +1871,8 @@ func (a *app) attachTypeDBBootstrap(env *output.Envelope) {
 	typeDBEnv, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
 		OutputDir:        resolvedDir,
 		GeneratorVersion: a.buildInfo.withDefaults().Version,
-		Libraries:        []string{"excel"},
+		CatalogRevision:  typedb.TypeDBCatalogRevision,
+		Libraries:        []string{"all"},
 		Keepalive:        buildCommandOptions(a.stderrWriter()),
 	})
 	if err != nil {
@@ -2125,7 +2126,7 @@ func (a *app) attachTypeDBDoctorStatus(env *output.Envelope) {
 	if env == nil {
 		return
 	}
-	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	status, err := typedb.StatusFor(typedb.Options{})
 	if err != nil {
 		appendTypeDBBootstrapWarning(env, "type_db_status_failed", "Generated TypeLib DB status could not be inspected: "+err.Error())
 		return
@@ -5425,10 +5426,7 @@ func (a *app) typeDBStatusCommand() *cobra.Command {
 		Short: "Show generated TypeLib type database status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			status, err := typedb.StatusFor(typedb.Options{
-				Dir:              dir,
-				GeneratorVersion: a.buildInfo.withDefaults().Version,
-			})
+			status, err := typedb.StatusFor(typedb.Options{Dir: dir})
 			if err != nil {
 				return a.writeFailure("type db status", output.ExitEnvironment, "type_db_status_failed", err)
 			}
@@ -5454,7 +5452,7 @@ func (a *app) typeDBInitCommand() *cobra.Command {
 		Short: "Generate TypeLib type databases when missing",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			status, err := typedb.StatusFor(typedb.Options{Dir: dir, GeneratorVersion: a.buildInfo.withDefaults().Version})
+			status, err := typedb.StatusFor(typedb.Options{Dir: dir})
 			if err != nil {
 				return a.writeFailure("type db init", output.ExitEnvironment, "type_db_status_failed", err)
 			}
@@ -5498,6 +5496,7 @@ func (a *app) generateTypeDB(command string, dir string, libraries []string) err
 	env, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
 		OutputDir:        resolvedDir,
 		GeneratorVersion: a.buildInfo.withDefaults().Version,
+		CatalogRevision:  typedb.TypeDBCatalogRevision,
 		Libraries:        libraries,
 		Keepalive:        buildCommandOptions(a.stderrWriter()),
 	})
@@ -6334,6 +6333,9 @@ func buildFormWriteOptions(action, specPath string, overwrite, session, noSave b
 	}
 	spec, err := forms.LoadFormSpec(specInput)
 	if err != nil {
+		return formWriteCommandOptions{}, err
+	}
+	if err := forms.ValidateFormSpecForAuthoring(specInput, spec); err != nil {
 		return formWriteCommandOptions{}, err
 	}
 	return formWriteCommandOptions{
@@ -7890,7 +7892,7 @@ func (a *app) lspCommand() *cobra.Command {
 				if err := lspserver.Check(opts); err != nil {
 					return a.writeFailure("lsp", output.ExitEnvironment, "lsp_check_failed", err)
 				}
-				typeDBStatus, statusErr := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+				typeDBStatus, statusErr := typedb.StatusFor(typedb.Options{})
 				typeDatabase := "builtin"
 				if statusErr == nil && typeDBStatus.ManifestExists && !typeDBStatus.Stale {
 					typeDatabase = "builtin+global_generated"
@@ -7921,7 +7923,7 @@ func (a *app) lspCommand() *cobra.Command {
 }
 
 func (a *app) ensureLSPTypeDBGenerated() {
-	status, err := typedb.StatusFor(typedb.Options{GeneratorVersion: a.buildInfo.withDefaults().Version})
+	status, err := typedb.StatusFor(typedb.Options{})
 	if err != nil {
 		a.writeLSPStderr("xlflow-lsp: generated TypeLib DB status could not be inspected: %v\n", err)
 		return
@@ -7942,6 +7944,7 @@ func (a *app) ensureLSPTypeDBGenerated() {
 	typeDBEnv, code, err := a.excelRunner().TypeDBImport(excel.TypeDBImportOptions{
 		OutputDir:        resolvedDir,
 		GeneratorVersion: a.buildInfo.withDefaults().Version,
+		CatalogRevision:  typedb.TypeDBCatalogRevision,
 		Libraries:        []string{"all"},
 		Keepalive:        buildCommandOptions(a.stderrWriter()),
 	})
@@ -8792,10 +8795,9 @@ func (a *app) loadConfig(command string) (config.Config, error) {
 
 func (a *app) analyzer(cfg config.Config, pathFilter func(string) bool) analyze.Analyzer {
 	return analyze.Analyzer{
-		RootDir:                a.cwd,
-		Config:                 cfg,
-		TypeDBGeneratorVersion: a.buildInfo.withDefaults().Version,
-		PathFilter:             pathFilter,
+		RootDir:    a.cwd,
+		Config:     cfg,
+		PathFilter: pathFilter,
 	}
 }
 

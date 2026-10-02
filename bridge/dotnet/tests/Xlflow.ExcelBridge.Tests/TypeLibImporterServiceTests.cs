@@ -16,6 +16,112 @@ public sealed class TypeLibImporterServiceTests
         Assert.False(resolved.BestEffort);
     }
 
+    [Theory]
+    [InlineData("1.9", 1, 9)]
+    [InlineData("8.7", 8, 7)]
+    [InlineData("2.c", 2, 12)]
+    [InlineData("c.0", 12, 0)]
+    public void ParseVersionUsesTypeLibHexadecimalSemantics(string value, int major, int minor)
+    {
+        var parsed = TypeLibImporterService.ParseVersion(value);
+
+        Assert.NotNull(parsed);
+        Assert.Equal(major, parsed.Value.Major);
+        Assert.Equal(minor, parsed.Value.Minor);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("1")]
+    [InlineData("1.2.3")]
+    [InlineData("g.0")]
+    [InlineData("10000.0")]
+    public void ParseVersionRejectsInvalidRegistryVersions(string value)
+    {
+        Assert.Null(TypeLibImporterService.ParseVersion(value));
+    }
+
+    [Fact]
+    public void ResolveLibrariesIncludesExpandedCatalogAndDaoFallback()
+    {
+        var resolved = TypeLibImporterService.ResolveLibraries("all");
+        var byOutput = resolved.Targets.ToDictionary(target => target.Output, StringComparer.OrdinalIgnoreCase);
+
+        Assert.True(resolved.BestEffort);
+        Assert.Equal(16, resolved.Targets.Count);
+        Assert.Equal(
+            ["{4AC9E1DA-5BAD-4AC7-86E3-24F4CDCECA28}", "{00025E01-0000-0000-C000-000000000046}"],
+            byOutput["dao.generated.json"].LibIDs);
+        Assert.Equal("{F5078F18-C551-11D3-89B9-0000F81FE221}", byOutput["msxml.generated.json"].LibID);
+        Assert.Equal("{662901FC-6951-4854-9EB2-D9A2570F2B2E}", byOutput["winhttp.generated.json"].LibID);
+        Assert.Equal("{00020905-0000-0000-C000-000000000046}", byOutput["word.generated.json"].LibID);
+        Assert.Equal("{91493440-5A91-11CF-8700-00AA0060263B}", byOutput["powerpoint.generated.json"].LibID);
+        Assert.Equal("{4AFFC9A0-5F99-101B-AF4E-00AA003F0F07}", byOutput["access.generated.json"].LibID);
+        Assert.Equal("{F935DC20-1CF0-11D0-ADB9-00C04FD58A0B}", byOutput["wsh.generated.json"].LibID);
+        Assert.Equal("{565783C6-CB41-11D1-8B02-00600806D9B6}", byOutput["wmi.generated.json"].LibID);
+        Assert.Equal("{3F4DACA7-160D-11D2-A8E9-00104B365C9F}", byOutput["vbscript-regexp.generated.json"].LibID);
+    }
+
+    [Fact]
+    public void ImportFirstAvailableFallsBackWhenPreferredTypeLibCannotLoad()
+    {
+        var target = TypeLibImporterService.ResolveLibraries("dao").Targets.Single();
+        var registrations = new Dictionary<string, TypeLibImporterService.TypeLibRegistration>(StringComparer.OrdinalIgnoreCase)
+        {
+            [target.LibIDs[0]] = new(target.LibIDs[0], 12, 0, 0),
+            [target.LibIDs[1]] = new(target.LibIDs[1], 3, 6, 0),
+        };
+        var attempted = new List<string>();
+
+        var (result, registration) = TypeLibImporterService.ImportFirstAvailable(
+            target,
+            libID => registrations.GetValueOrDefault(libID),
+            candidate =>
+            {
+                attempted.Add(candidate.LibID);
+                if (candidate.LibID == target.LibIDs[0])
+                {
+                    throw new InvalidOperationException("ACE TypeLib failed to load.");
+                }
+                return "DAO 3.6 imported";
+            });
+
+        Assert.Equal("DAO 3.6 imported", result);
+        Assert.Equal(target.LibIDs, attempted);
+        Assert.Equal(target.LibIDs[1], registration.LibID);
+    }
+
+    [Fact]
+    public void ImportFirstAvailableKeepsPreferredTypeLibWhenItLoads()
+    {
+        var target = TypeLibImporterService.ResolveLibraries("dao").Targets.Single();
+        var registrations = target.LibIDs.ToDictionary(
+            libID => libID,
+            libID => new TypeLibImporterService.TypeLibRegistration(libID, 1, 0, 0),
+            StringComparer.OrdinalIgnoreCase);
+        var attempted = new List<string>();
+
+        var (result, registration) = TypeLibImporterService.ImportFirstAvailable(
+            target,
+            libID => registrations.GetValueOrDefault(libID),
+            candidate =>
+            {
+                attempted.Add(candidate.LibID);
+                return "ACE DAO imported";
+            });
+
+        Assert.Equal("ACE DAO imported", result);
+        Assert.Equal([target.LibIDs[0]], attempted);
+        Assert.Equal(target.LibIDs[0], registration.LibID);
+    }
+
+    [Fact]
+    public void CanonicalTypeNameUsesContainingLibraryQualifier()
+    {
+        Assert.Equal("Office.CommandBar", TypeLibImporterService.CanonicalTypeName("Office", "_CommandBar"));
+        Assert.Equal("MSForms.CommandButton", TypeLibImporterService.CanonicalTypeName("MSForms", "CommandButton"));
+    }
+
     [Fact]
     public void SelectProgIDsForTypeLibMapsRegisteredProgIDsToCoClassTypes()
     {

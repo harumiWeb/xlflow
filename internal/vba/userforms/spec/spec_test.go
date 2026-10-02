@@ -1,10 +1,11 @@
-package forms
+package spec
 
 import (
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -118,6 +119,36 @@ func TestFormSpecFromInspectSnapshotConvertsDesignerPayload(t *testing.T) {
 	}
 	if len(spec.Warnings) != 1 || spec.Warnings[0].Code != "unsupported_property" {
 		t.Fatalf("warnings = %#v", spec.Warnings)
+	}
+}
+
+func TestFormSpecFromInspectSnapshotOmitsUnsupportedBuiltInValue(t *testing.T) {
+	spec, err := FormSpecFromInspectSnapshot(map[string]any{
+		"name": "SnapshotForm",
+		"controls": []any{map[string]any{
+			"name": "Button1", "type": "CommandButton", "value": "False",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := spec.Controls[0]
+	if control.Value != nil {
+		t.Fatalf("CommandButton value = %#v, want omitted", control.Value)
+	}
+	if !slices.Contains(control.Unsupported, "value") {
+		t.Fatalf("unsupported = %q, want value", control.Unsupported)
+	}
+	if len(spec.Warnings) != 1 || spec.Warnings[0].Code != "unsupported_properties" {
+		t.Fatalf("warnings = %#v, want one unsupported_properties warning", spec.Warnings)
+	}
+
+	path := filepath.Join(t.TempDir(), "SnapshotForm.json")
+	if err := WriteSnapshot(SnapshotOutput{Path: path, DisplayPath: path, Format: "json"}, spec); err != nil {
+		t.Fatalf("WriteSnapshot: %v", err)
+	}
+	if _, err := LoadFormSpec(SpecInput{Path: path, DisplayPath: path, Format: "json"}); err != nil {
+		t.Fatalf("LoadFormSpec: %v", err)
 	}
 }
 
@@ -503,6 +534,60 @@ warnings:
 		if !hasValidationIssueWithSupport(issues, want.code, want.field, want.support) {
 			t.Fatalf("missing warning %s at %s support %s in %+v", want.code, want.field, want.support, issues)
 		}
+	}
+}
+
+func TestValidateFormSpecSourceAcceptsUnsupportedSnapshotPlaceholder(t *testing.T) {
+	body := []byte(`schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: parent-relative
+form:
+  name: UserForm1
+controls:
+  - id: control_001
+    name: VendorControl1
+    type: Control
+    unsupported:
+      - controlType
+warnings: []
+`)
+	issues, err := ValidateFormSpecSource(SpecInput{Format: "yaml", DisplayPath: "UserForm1.yaml"}, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasValidationErrors(issues) {
+		t.Fatalf("placeholder source issues = %#v", issues)
+	}
+	found := false
+	for _, issue := range issues {
+		if issue.Code == "UFV015" && issue.Severity == SeverityWarning && issue.Support == SupportLevelSnapshotOnly {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("placeholder source issues = %#v, want UFV015 warning", issues)
+	}
+}
+
+func TestValidateFormSpecForAuthoringRejectsUnsupportedSnapshotPlaceholder(t *testing.T) {
+	spec := FormSpec{
+		SchemaVersion: 1,
+		Kind:          "xlflow.userform",
+		Basis:         "designer",
+		Form:          FormSpecForm{Name: "UserForm1"},
+		Controls: []FormSpecControl{{
+			ID: "control_001", Name: "VendorControl1", Type: UnsupportedControlPlaceholderType,
+			Unsupported: []string{UnsupportedControlTypeProperty},
+		}},
+	}
+	err := ValidateFormSpecForAuthoring(SpecInput{Format: "yaml", DisplayPath: "UserForm1.yaml"}, spec)
+	var specErr *SpecError
+	if !errors.As(err, &specErr) {
+		t.Fatalf("authoring error = %#v, want SpecError", err)
+	}
+	if specErr.Code != "spec_validation_failed" || specErr.Field != "controls[0].type" || len(specErr.Issues) != 1 || specErr.Issues[0].Code != "UFV006" {
+		t.Fatalf("authoring error = %#v", specErr)
 	}
 }
 

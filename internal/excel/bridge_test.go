@@ -16,8 +16,9 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/harumiWeb/xlflow/internal/typedb"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 type fakeBridgeProvider struct {
@@ -1556,6 +1557,7 @@ func TestRunnerTypeDBImportUsesDotNetAndMapsTypeDBPayload(t *testing.T) {
 	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "auto"}.TypeDBImport(TypeDBImportOptions{
 		OutputDir:        `C:\typedb`,
 		GeneratorVersion: "1.2.3",
+		CatalogRevision:  typedb.TypeDBCatalogRevision,
 		Libraries:        []string{"excel"},
 	})
 	if err != nil {
@@ -1567,7 +1569,7 @@ func TestRunnerTypeDBImportUsesDotNetAndMapsTypeDBPayload(t *testing.T) {
 	if len(requests) != 1 || requests[0].Command != "type-db-import" {
 		t.Fatalf("requests = %+v", requests)
 	}
-	if requests[0].Args["OutputDir"] != `C:\typedb` || requests[0].Args["GeneratorVersion"] != "1.2.3" || requests[0].Args["Libraries"] != "excel" {
+	if requests[0].Args["OutputDir"] != `C:\typedb` || requests[0].Args["GeneratorVersion"] != "1.2.3" || requests[0].Args["CatalogRevision"] != "4" || requests[0].Args["Libraries"] != "excel" {
 		t.Fatalf("unexpected request args: %+v", requests[0].Args)
 	}
 	typeDB, ok := env.TypeDB.(map[string]any)

@@ -24,6 +24,7 @@ public sealed class TypeDbImportCommand : ICommandHandler
         var args = new TypeDbImportArguments(
             OutputDir: BridgePayload.GetString(request.Payload, "OutputDir") ?? "",
             GeneratorVersion: BridgePayload.GetString(request.Payload, "GeneratorVersion") ?? "dev",
+            CatalogRevision: BridgePayload.GetInt(request.Payload, "CatalogRevision"),
             Libraries: BridgePayload.GetString(request.Payload, "Libraries") ?? "excel");
         return _service.Execute(request, args, cancellationToken);
     }

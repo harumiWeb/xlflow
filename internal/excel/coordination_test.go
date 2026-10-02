@@ -10,8 +10,8 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 func TestRunnerWorkbookBusyStopsUserFormCommandsBeforeBridgeExecution(t *testing.T) {

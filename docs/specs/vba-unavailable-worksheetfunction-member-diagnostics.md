@@ -33,7 +33,8 @@ an allowlist of names such as `Abs` or `Concatenate`. If the TypeLib database
 is missing, empty, malformed, partial, curated-only, stale, or otherwise
 cannot prove a complete `Excel.WorksheetFunction` member set, the rule fails
 open. A generated manifest is considered stale when its schema, generator, or
-generator version metadata is incompatible with the running consumer.
+TypeDB catalog revision is incompatible with the running consumer. The
+general xlflow generator version is informational.
 
 Unresolved or ambiguous receivers, user-defined shadowing, `Object` and
 `Variant` values, late-bound calls, and non-Excel members remain silent. The

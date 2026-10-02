@@ -15,7 +15,7 @@ import (
 	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/config"
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 type ComponentType string

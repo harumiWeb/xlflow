@@ -3,9 +3,9 @@ package lspserver
 import (
 	"strings"
 
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
-	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
+	formsintel "github.com/harumiWeb/xlflow/internal/vba/userforms/spec/intel"
 )
 
 // userFormYAMLDiagnostics validates the current editor buffer with the same

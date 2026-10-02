@@ -16,6 +16,20 @@ All notable changes to xlflow will be documented in this file.
   `vbe_validation_skipped` because no VBE compile ran. Capabilities schema v3
   now advertises `push` backends (`default_backend="excel"`, `file` with
   `requires_excel=false`), and backup metadata records the producing backend.
+- Added a pure-Go projection from lossless MS-OFORMS UserForm state to the
+  canonical `xlflow.userform` specification. Common controls, nested parent
+  relationships, point-based geometry, captions, values, tab order, and
+  visibility state are projected deterministically; unsupported valid state
+  (including unmodeled site bindings, flag state, nested-container resources,
+  and TabStrip selection) is retained in the binary model and reported through
+  stable snapshot warnings. The shared FormSpec model and editor intelligence
+  now live under the host-neutral VBA UserForm package.
+- Expanded generated TypeLib coverage with DAO/ACE DAO, MSXML, WinHTTP, Word,
+  PowerPoint, Access, Windows Script Host, WMI Scripting, and VBScript RegExp.
+  TypeLib registry versions now use hexadecimal COM semantics, cross-library
+  type references retain their owning library qualifier, and catalog revision
+  4 automatically migrates older generated databases without tying refreshes
+  to every xlflow version change.
 - Added a lossless pure-Go MS-OFORMS reader for existing UserForm designer
   storages. It decodes code-page-aware properties and TextProps, reconstructs
   nested container ownership, preserves opaque and raw persistence bytes, and

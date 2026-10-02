@@ -18,8 +18,8 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/output"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 type Runner struct {
@@ -497,6 +497,7 @@ type DoctorOptions struct {
 type TypeDBImportOptions struct {
 	OutputDir        string
 	GeneratorVersion string
+	CatalogRevision  int
 	Libraries        []string
 	Keepalive        CommandOptions
 }
@@ -528,6 +529,7 @@ func (r Runner) TypeDBImport(opts TypeDBImportOptions) (output.Envelope, int, er
 	return r.run("type-db-import", map[string]string{
 		"OutputDir":        opts.OutputDir,
 		"GeneratorVersion": opts.GeneratorVersion,
+		"CatalogRevision":  strconv.Itoa(opts.CatalogRevision),
 		"Libraries":        strings.Join(libraries, ","),
 	}, opts.Keepalive)
 }

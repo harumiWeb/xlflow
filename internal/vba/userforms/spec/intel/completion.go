@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/harumiWeb/xlflow/internal/excel/forms"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 // CompletionKind is intentionally independent of LSP completion kinds. The

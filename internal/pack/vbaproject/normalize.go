@@ -267,7 +267,7 @@ func normalizeStd(disk string) (string, error) {
 // module to its designer storage) is taken from existing, exactly as normalizeDocument does, so the
 // rewritten code module stays bound to the template's carried designer storage even if the disk .frm's
 // own attributes differ. The code-behind boundary — everything after the last `Attribute VB_` line —
-// mirrors internal/excel/forms.splitUserFormFRMSections, the canonical .frm splitter used by push/pull;
+// mirrors internal/vba/userforms/spec.splitUserFormFRMSections, the canonical .frm splitter used by push/pull;
 // it is reimplemented here to keep internal/pack self-contained (ADR-0012) and the two must stay in agreement.
 func normalizeForm(disk string, existing *Module) (string, error) {
 	if existing == nil {
