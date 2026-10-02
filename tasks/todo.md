@@ -499,4 +499,4 @@ source; all valid. Plan:
 - [x] Align .NET builtin control contracts with the canonical registry and fix the failing Windows/Linux CI test.
 - [x] Verify focused Go/.NET/PowerShell tests, lint/docs, and staged formatting.
 - [x] Rerun the fresh Excel generation gate after the concurrent session finishes: Delay/ScrollBar ProportionalThumb, both forms, save/reopen, sentinel, and normalized binary readback passed; owned PID 204972 cleanup confirmed. Evidence and command recorded in the fixture README.
-- [ ] Push the fixes and reply to the three review comments.
+- [x] Push the fixes (`4e735e72`) and reply to the three review comments with focused regression and fresh Excel evidence; verify the updated PR body on GitHub.
