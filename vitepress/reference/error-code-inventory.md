@@ -1403,6 +1403,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `userform_control_metadata`
 - `userform_count`
 - `userform_detection_unavailable`
+- `userform_edit_conflict`
+- `userform_edit_invalid`
+- `userform_edit_stale_input`
+- `userform_edit_unsupported`
 - `userform_image_export_experimental`
 - `userform_inspect_saved_file`
 - `userform_planned_commands`

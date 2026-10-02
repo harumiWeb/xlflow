@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"math"
 	"unicode/utf16"
-
-	"github.com/harumiWeb/xlflow/internal/pack/ovba"
 )
 
 const maxDesignerStreamSize = 64 << 20
@@ -278,9 +276,15 @@ func readStoredString(r *byteReader, packed uint32, codePage uint16) (StoredStri
 	return StoredString{Text: text, Compressed: compressed, Raw: bytes.Clone(raw)}, nil
 }
 
-func decodeStoredText(raw []byte, compressed bool, codePage uint16) (string, error) {
+func decodeStoredText(raw []byte, compressed bool, _ uint16) (string, error) {
 	if compressed {
-		return ovba.DecodeMBCS(raw, codePage)
+		// Compression removes the zero high byte of UTF-16 code units.
+		// It is independent of the VBA project's MBCS code page.
+		runes := make([]rune, len(raw))
+		for i, value := range raw {
+			runes[i] = rune(value)
+		}
+		return string(runes), nil
 	}
 	if len(raw)%2 != 0 {
 		return "", fmt.Errorf("UTF-16 string has odd byte length %d", len(raw))

@@ -55,13 +55,14 @@ An unsupported class remains an opaque control only when its site record and
 inside a known record are accepted only when its declared record boundary still
 reconciles exactly; otherwise parsing fails.
 
-The serializer in this stage is deliberately no-op and lossless. It replays the
+The serializer is deliberately no-op and lossless. It replays the
 retained `f`, `o`, optional `x`, `\x01CompObj`, `\x03VBFrame`, opaque streams,
 and nested storage metadata. It then reparses that subtree with the supplied
 project code page before returning it. The decoded and raw model is bound to
 its read-time persistence signature; changing either side returns
-`ErrUnsupportedMutation` rather than silently discarding an edit. FormSpec
-property compilation and new Designer generation are separate later stages.
+`ErrUnsupportedMutation` rather than silently discarding an edit. Controlled
+property compilation uses the explicit mutation boundary below; new Designer
+generation remains a separate stage.
 
 `vbaproject.Project.Forms` owns parsed Designer subtrees. Their streams and
 storage metadata are excluded from generic `RawStreams` and
@@ -72,9 +73,14 @@ depend on the user-facing schema.
 
 ## Encoding and geometry
 
-Compressed MS-OFORMS strings and `\x03VBFrame` use the VBA project code page.
-Unsupported code pages and undecodable byte sequences fail. Uncompressed
-strings use little-endian UTF-16 and an odd byte count fails. CompObj identity
+The string storage contract follows [MS-OFORMS Strings](https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oforms/83c93081-0417-4f51-8e2d-9247af5003fa)
+and [String Compression](https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oforms/b9d3da32-3d53-4f98-b0cb-c64af7f13457).
+
+Compressed MS-OFORMS strings store the low byte of UTF-16 code units whose
+high byte is zero; they do not use the VBA project code page. Japanese and
+other characters outside U+0000..U+00FF require uncompressed little-endian
+UTF-16. An odd uncompressed byte count fails. `\x03VBFrame` uses the VBA
+project code page; unsupported code pages and undecodable bytes fail. CompObj identity
 strings use the same supplied project code page while their complete bytes are
 also retained.
 
@@ -137,6 +143,93 @@ that shape only as a snapshot-only placeholder. `form build` and `form apply`
 reject it with `UFV006` before opening Excel; callers must replace it with a
 supported type or the real custom ProgID before authoring.
 
+## Controlled FormSpec mutation (Issue #882)
+
+`internal/vba/userforms/compiler.CompileEdits(base, before, after, codePage)`
+accepts two complete snapshots of one existing form. It applies only changed
+authoring fields and returns an independently owned, reparsed `oforms.Form`
+that the existing `SerializeForm` and `vbaproject.Write` can publish. It does
+not consume `.frx`, open Excel, or enable Designer edits in the `pack` CLI;
+CLI integration remains Issue #887.
+
+Control IDs connect the before/after snapshots. Names and the persisted
+parent/sibling relationships connect the before snapshot to the binary model.
+Control creation, deletion, rename, type/ProgID changes, reparenting, and
+reordering are rejected. Snapshot-only `observed`, `warnings`, and `unsupported`
+metadata is not mutation input. The before value of every changed authoring
+field must agree with the binary model when that value is supplied; a stale
+baseline fails instead of overwriting a different persisted value.
+Geometry comparisons allow the existing 0.05-point Designer parity tolerance
+for Excel twip versus persisted HIMETRIC rounding.
+Both snapshots must use an omitted coordinateSystem, `points`, or
+`parent-relative`; all three describe point-valued geometry relative to the
+owning parent. Other coordinate systems are invalid even for a no-op and are
+rejected before numeric conversion, not silently interpreted as points.
+
+The initial editable classes are Label, TextBox, ComboBox, ListBox,
+CommandButton, CheckBox, OptionButton, and existing Frame containers. Their
+applicable caption, text/value, parent-relative position, size, tab order,
+enabled, and visible fields use explicit persistence mappings. Existing nested
+control geometry remains parent-relative. Form caption is supported; root
+width/height edits are rejected because persisted client dimensions and Excel
+outer Designer dimensions are different. MultiPage/Page/TabStrip editing and
+container topology generation remain subsequent stages.
+
+For the Excel-authored unbound ComboBox/ListBox fixtures, Designer AddItem
+items and ListIndex disappear after save/close/reopen. ComboBox Value persists,
+but ListBox Value returns to null without persisted list state. Therefore
+list/selectedIndex edits and ListBox text/value edits are rejected. RowSource
+and runtime list initialization are outside this compiler's supported layouts.
+The observation is retained under the compiler's Excel-authored testdata.
+
+TextBox text and value address the same persisted Value string. A change to
+one alias is sufficient; conflicting changes to both aliases fail. The same
+rule applies to top-level control fields and their property-bag aliases.
+An explicitly changed `form.build.caption` takes precedence over the legacy
+form caption. Unchanged build/observed fields do not override a changed field.
+When build.caption first appears, the supplied legacy before caption remains
+the stale-input baseline; an existing explicit before build.caption takes
+precedence over the legacy baseline. Observed metadata is never synthesized
+into authoring intent or a supplied baseline.
+Empty strings, zero, and false are explicit values. Removing a property to
+request a default reset is unsupported.
+
+The supported property bag is case-insensitive and rejects duplicate aliases.
+It includes applicable common-field aliases plus Tag, ControlTipText,
+GroupName (OptionButton), BackColor, ForeColor, BorderColor, BorderStyle, and
+MaxLength (TextBox/ComboBox). A binary property must actually exist in the
+control's persistence table. Unsupported property bags remain opaque when
+unchanged; changing an unsupported property is an error. Colors use unsigned
+32-bit OLE_COLOR values, BorderStyle is 0 or 1, and MaxLength is a non-negative
+signed-32-bit value. Geometry uses nearest-integer HIMETRIC conversion; width
+and height are non-negative and all geometry must fit signed 32-bit storage.
+TabIndex is 0..32767. CheckBox/OptionButton checked values accept Boolean,
+True/False, or 0/1/-1 spellings; tri-state null edits are not supported.
+
+Compilation errors include a stable code, form, control, property path, and
+reason. Codes distinguish `userform_edit_unsupported`,
+`userform_edit_invalid`, `userform_edit_stale_input`, and
+`userform_edit_conflict`. Any rejected edit fails the entire compilation.
+No input model or snapshot is changed, and no partial output model is returned.
+
+The low-level `oforms.ApplyEdits` boundary validates the original read-time
+signature, owns a private clone, and encodes only changed records/sites.
+Masks, string byte lengths, alignment, record lengths, ObjectStreamSize, and
+site-data CountOfBytes are recalculated. Untouched records, TextProps, images,
+opaque tails, class/depth tables, auxiliary streams, stream-name spelling, and
+storage metadata are retained. MS-OFORMS strings keep their existing encoding
+when it can represent the new text losslessly and can use UTF-16 otherwise.
+Unknown layouts whose mutation cannot be justified are rejected. Reparse and
+edited-value comparison complete before a signed model is returned; the
+ordinary serializer never blesses arbitrary caller changes.
+
+Enabled uses VariousPropertyBits bit `0x2` for embedded controls and
+BooleanProperties bit `0x4` for Frame. Omitted VariousPropertyBits uses the
+MS-OFORMS class-specific default, independently of flags Excel explicitly
+stores for a new control. Every other flag bit is preserved. The committed
+baseline/all-disabled fixtures bind these changes to saved/reopened Excel
+Designer state, including nested TextBox and Frame.
+
 ## Structural validation
 
 The reader and serializer return `oforms.ErrMalformed`, wrapped by an `oforms.ParseError`
@@ -182,3 +275,20 @@ pure-Go projection of the same workbook. Set
 `XLFLOW_PROJECTION_PARITY_SNAPSHOT` to run this Windows/Excel integration test.
 Root form dimensions are excluded because the binary stores client dimensions
 while Excel reports outer Designer dimensions.
+
+Compiler tests cover edits, string growth/shrink, untouched controls and
+subtrees, stale input, alias conflicts, range errors, and atomic failure.
+`scripts/test-userform-mutation-e2e.ps1` is a developer-only Excel gate:
+its create phase records persistence observations; its verify phase compares
+compiler output against expected Designer properties and runs a sentinel.
+Verify executes workbook VBA with the developer's Excel authority: use only
+the trusted generated baseline and known compiler-produced derivatives.
+Read-only opening and disabled events do not sandbox the explicit sentinel;
+property comparisons do not authenticate workbook code. Do not run verify on
+an untrusted workbook in a credential-bearing developer environment.
+An optional new `NormalizedWorkbookPath` saves and reopens an independent
+artifact in the same owned Excel instance. The gated Go tests
+`TestGenerateExcelMutationArtifact` and `TestReadExcelNormalizedArtifact`
+prepare the file-level output and validate the normalized VBA project. They
+are skipped unless their documented `XLFLOW_MUTATION_*` environment variables
+are supplied. These Excel gates are never ordinary CI tests.

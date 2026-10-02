@@ -235,6 +235,14 @@ func projectControl(source *oforms.Control, target *forms.FormSpecControl) {
 	}
 	if bits, ok := record.Values["VariousPropertyBits"]; ok {
 		target.Enabled = new(bits&(1<<1) != 0)
+	} else if record.Type == "Form" {
+		// Frame/Page store Enabled in BooleanProperties bit2, not the
+		// embedded-control VariousPropertyBits field.
+		bits := int64(4)
+		if stored, found := record.Values["BooleanProperties"]; found {
+			bits = stored
+		}
+		target.Enabled = new(bits&4 != 0)
 	} else {
 		target.Enabled = new(true)
 	}
@@ -298,8 +306,18 @@ func defaultSiteFlags(controlType string) int64 {
 }
 
 func defaultVariousPropertyBits(controlType string) (int64, bool) {
-	if controlType == "TextBox" {
+	switch controlType {
+	case "TextBox":
+		// Retain the projection's established Excel-authored TextBox default
+		// (WordWrap set). The writer's omission default is independently
+		// specified by MS-OFORMS and must not be inferred from this snapshot.
 		return 0x2c80481b, true
+	case "ComboBox", "ListBox", "CheckBox", "OptionButton", "ToggleButton":
+		return oforms.DefaultVariousPropertyBits(23)
+	case "Label":
+		return oforms.DefaultVariousPropertyBits(21)
+	case "CommandButton":
+		return oforms.DefaultVariousPropertyBits(17)
 	}
 	return 0, false
 }
@@ -309,9 +327,9 @@ func isDefaultBooleanProperties(controlType string, value int64) bool {
 	case "Form":
 		return value == 0x4004
 	case "Frame", "Page":
-		return value == 0x8004
+		return value&^int64(4) == 0x8000
 	case "MultiPage":
-		return value == 0xc004
+		return value&^int64(4) == 0xc000
 	default:
 		return false
 	}
