@@ -66,6 +66,12 @@ the same MS-CFB case-insensitive comparison; conflicting case variants and
 storage/stream collisions are rejected on both read and write. Metadata fields
 that MS-CFB requires to be zero for their directory object type are rejected
 rather than normalized.
+Existing UserForm Designer subtrees are parsed into the lossless MS-OFORMS
+model and replayed through its no-op serializer instead of remaining generic
+opaque streams. Every `f`, `o`, optional `x`, `\x01CompObj`, `\x03VBFrame`,
+unknown stream, nested storage, and storage metadata entry remains byte-identical.
+Malformed length/count bookkeeping or an unsupported in-memory Designer edit
+fails with `pack_ambiguous_layout` before the workbook artifact is published.
 MS-OVBA compressed streams are limited to 64 MiB of decompressed data per
 stream, and malformed compressed chunks or truncated `dir` records are
 rejected. These failures are reported through `pack_ambiguous_layout`; `pack`

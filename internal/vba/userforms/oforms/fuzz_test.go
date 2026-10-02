@@ -23,7 +23,13 @@ func FuzzReadForm(f *testing.F) {
 			return
 		}
 		for _, name := range DiscoverForms(container) {
-			_, _ = ReadForm(container, name, 932)
+			form, err := ReadForm(container, name, 932)
+			if err != nil {
+				continue
+			}
+			if _, err := SerializeForm(form, 932); err != nil {
+				t.Fatalf("SerializeForm after successful ReadForm: %v", err)
+			}
 		}
 	})
 }

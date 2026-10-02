@@ -12,6 +12,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
+	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
@@ -190,17 +191,11 @@ func TestPullRejectsMalformedUserFormBeforeMutation(t *testing.T) {
 	root := t.TempDir()
 	existing := filepath.Join(root, "src", "modules", "Existing.bas")
 	writeTestFile(t, existing, "keep")
-	project, err := vbaproject.Read(readFixture(t, "p4_form.bin"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	project.RawStreams["UserForm1/o"] = nil
-	malformed, err := vbaproject.Write(project)
-	if err != nil {
-		t.Fatal(err)
-	}
+	malformed := replaceCFBStream(t, readFixture(t, "p4_form.bin"), "UserForm1/o", func(body []byte) []byte {
+		return append(body, 0xff)
+	})
 	workbook := writeWorkbook(t, root, malformed)
-	_, err = Pull(root, testConfig(), workbook)
+	_, err := Pull(root, testConfig(), workbook)
 	if !errors.Is(err, ErrUserFormDesignerMalformed) {
 		t.Fatalf("error = %v", err)
 	}
@@ -529,4 +524,36 @@ func writeTestFile(t testing.TB, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func replaceCFBStream(t testing.TB, data []byte, target string, replace func([]byte) []byte) []byte {
+	t.Helper()
+	container, err := cfb.Open(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := cfb.NewWriterForFormat(container.Format())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range container.StoragePaths() {
+		meta, _ := container.Storage(path)
+		var parts []string
+		if path != "" {
+			parts = strings.Split(path, "/")
+		}
+		writer.AddStorage(parts, meta)
+	}
+	for _, path := range container.Paths() {
+		body, _ := container.Stream(path)
+		if path == target {
+			body = replace(body)
+		}
+		writer.AddStream(strings.Split(path, "/"), body)
+	}
+	result, err := writer.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
 }

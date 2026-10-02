@@ -3,6 +3,7 @@ package vbaproject
 import (
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/ovba"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
 )
 
 // ModuleType is the kind of a module. It distinguishes the editable kinds
@@ -63,15 +64,17 @@ type Project struct {
 	ReferencesRaw    []byte      // verbatim byte span of the dir references section (written back unchanged)
 	ProjectInfoRaw   []byte      // verbatim span of dir PROJECTINFORMATION (written back unchanged)
 	ProjectStreamRaw []byte      // template PROJECT stream; unrelated content is preserved while component declarations are rebuilt
+	// Forms owns every parsed root-level UserForm Designer storage. Their streams
+	// and nested storage metadata are serialized independently of RawStreams.
+	Forms []*oforms.Form
 	// GenerateProjectMetadata marks a fresh project whose PROJECT and PROJECTwm
 	// streams must be rebuilt from the final component set at write time.
 	GenerateProjectMetadata bool
 	// RawStreams holds every stream the writer does not own, keyed by full
 	// "/"-separated path, captured verbatim at read time and re-emitted on write.
 	// Membership is structural: the first path segment is neither "VBA" (owned and
-	// regenerated) nor "PROJECT" (re-emitted verbatim). This carries root-level
-	// designer storages (UserForm1/f, o, \x01CompObj, \x03VBFrame), PROJECTwm, and
-	// any other opaque payload through a round-trip without modeling it.
+	// regenerated), "PROJECT" (re-emitted verbatim), nor a parsed UserForm storage.
+	// This carries PROJECTwm and any other opaque payload through a round-trip.
 	RawStreams map[string][]byte
 	// StorageMetadata holds every CFB storage directory entry, including the
 	// root under the empty path. It preserves storage CLSIDs, state bits, and

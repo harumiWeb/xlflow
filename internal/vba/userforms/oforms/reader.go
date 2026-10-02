@@ -83,6 +83,10 @@ func ReadForm(container *cfb.Container, storagePath string, codePage uint16) (*F
 		return nil, parseError(storagePath, "\x03VBFrame", 0, "VBFrame", "%v", err)
 	}
 	form.DesignerSource = StoredText{Text: designer, Raw: bytes.Clone(level.VBFrameRaw)}
+	form.sourceSignature, err = modelSignature(form)
+	if err != nil {
+		return nil, parseError(storagePath, "", 0, "Form", "build source signature: %v", err)
+	}
 	return form, nil
 }
 
@@ -114,6 +118,7 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 			return nil, nil, parseError(path, "x", 0, "auxiliary stream", "stream exceeds %d-byte limit", maxDesignerStreamSize)
 		}
 		level.XRaw = bytes.Clone(xRaw)
+		level.HasXStream = true
 	}
 	if compObj, found := s.container.Stream(path + "/\x01CompObj"); found {
 		parsed, err := parseCompObj(compObj, path, s.codePage)
@@ -121,6 +126,7 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 			return nil, nil, err
 		}
 		level.CompObj = &parsed
+		level.HasCompObj = true
 		// parseCompObj enforces the stream cap before cloning. Share that
 		// retained clone rather than allocating a second raw copy for the level.
 		level.CompObjRaw = parsed.Raw
@@ -132,6 +138,7 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 			return nil, nil, parseError(path, "\x03VBFrame", 0, "VBFrame", "stream exceeds %d-byte limit", maxDesignerStreamSize)
 		}
 		level.VBFrameRaw = bytes.Clone(vbFrame)
+		level.HasVBFrame = true
 	} else if root {
 		return nil, nil, parseError(path, "\x03VBFrame", 0, "VBFrame", "required stream is missing")
 	}

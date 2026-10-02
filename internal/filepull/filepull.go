@@ -20,7 +20,6 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
-	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	"github.com/harumiWeb/xlflow/internal/sourceinventory"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
@@ -80,8 +79,7 @@ type plan struct {
 }
 
 type inspectedProject struct {
-	project   *vbaproject.Project
-	container *cfb.Container
+	project *vbaproject.Project
 }
 
 type extractedForm struct {
@@ -239,16 +237,15 @@ func inspectProject(workbookPath string) (*inspectedProject, error) {
 	}
 	project, err := vbaproject.Read(projectBytes)
 	if err != nil {
+		if errors.Is(err, oforms.ErrMalformed) {
+			return nil, fmt.Errorf("%w: %v", ErrUserFormDesignerMalformed, err)
+		}
 		return nil, fmt.Errorf("%w: %v", ErrMalformedVBAProject, err)
 	}
 	if project.Protection.IsProtected {
 		return nil, ErrProtectedProject
 	}
-	container, err := cfb.Open(projectBytes)
-	if err != nil {
-		return nil, fmt.Errorf("%w: reopen CFB container: %v", ErrMalformedVBAProject, err)
-	}
-	return &inspectedProject{project: project, container: container}, nil
+	return &inspectedProject{project: project}, nil
 }
 
 func buildProjectPlan(root string, cfg config.Config, workbookPath string, inspection *inspectedProject) (plan, error) {
@@ -426,42 +423,38 @@ func extractForms(inspection *inspectedProject, cfg config.Config) ([]extractedF
 			formModules = append(formModules, module)
 		}
 	}
-	storages := oforms.DiscoverForms(inspection.container)
-	if len(formModules) == 0 && len(storages) == 0 {
+	if len(formModules) == 0 && len(inspection.project.Forms) == 0 {
 		return nil, nil
 	}
 	if !strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
 		return nil, fmt.Errorf("%w: configured code_source %q", ErrUserFormCodeSourceUnsupported, cfg.UserForm.CodeSource)
 	}
 
-	storageByName := make(map[string]string, len(storages))
-	for _, storage := range storages {
+	formsByStorage := make(map[string]*oforms.Form, len(inspection.project.Forms))
+	for _, parsed := range inspection.project.Forms {
+		storage := parsed.Name
 		key := strings.ToLower(storage)
-		if prior, exists := storageByName[key]; exists {
-			return nil, fmt.Errorf("%w: duplicate Designer storages %q and %q", ErrUserFormIdentityMismatch, prior, storage)
+		if prior, exists := formsByStorage[key]; exists {
+			return nil, fmt.Errorf("%w: duplicate Designer storages %q and %q", ErrUserFormIdentityMismatch, prior.Name, storage)
 		}
-		storageByName[key] = storage
+		formsByStorage[key] = parsed
 	}
 
-	formsByName := make(map[string]extractedForm, len(formModules))
+	extractedByName := make(map[string]extractedForm, len(formModules))
 	for _, module := range formModules {
 		storageIdentity := module.StreamName
 		if storageIdentity == "" {
 			storageIdentity = module.Name
 		}
-		storage, ok := storageByName[strings.ToLower(storageIdentity)]
+		parsed, ok := formsByStorage[strings.ToLower(storageIdentity)]
 		if !ok {
 			return nil, fmt.Errorf("%w: form module %q has no Designer storage %q", ErrUserFormIdentityMismatch, module.Name, storageIdentity)
 		}
-		if !strings.EqualFold(module.Name, storage) {
-			return nil, fmt.Errorf("%w: form module %q maps to Designer storage %q", ErrUserFormIdentityMismatch, module.Name, storage)
+		if !strings.EqualFold(module.Name, parsed.Name) {
+			return nil, fmt.Errorf("%w: form module %q maps to Designer storage %q", ErrUserFormIdentityMismatch, module.Name, parsed.Name)
 		}
-		delete(storageByName, strings.ToLower(storageIdentity))
+		delete(formsByStorage, strings.ToLower(storageIdentity))
 
-		parsed, err := oforms.ReadForm(inspection.container, storage, inspection.project.Props.CodePage)
-		if err != nil {
-			return nil, fmt.Errorf("%w: form %q: %v", ErrUserFormDesignerMalformed, module.Name, err)
-		}
 		spec, err := projection.Project(parsed)
 		if err != nil {
 			return nil, fmt.Errorf("%w: form %q: %v", ErrUserFormDesignerUnsupported, module.Name, err)
@@ -483,17 +476,20 @@ func extractForms(inspection *inspectedProject, cfg config.Config) ([]extractedF
 			}
 		}
 		key := strings.ToLower(module.Name)
-		if _, exists := formsByName[key]; exists {
+		if _, exists := extractedByName[key]; exists {
 			return nil, fmt.Errorf("%w: duplicate form module %q", ErrUserFormIdentityMismatch, module.Name)
 		}
-		formsByName[key] = extractedForm{name: module.Name, code: code, spec: spec}
+		extractedByName[key] = extractedForm{name: module.Name, code: code, spec: spec}
 	}
-	if len(storageByName) > 0 {
-		return nil, fmt.Errorf("%w: Designer storage %q has no form module", ErrUserFormIdentityMismatch, slices.Sorted(maps.Values(storageByName))[0])
+	if len(formsByStorage) > 0 {
+		remaining := slices.SortedFunc(maps.Values(formsByStorage), func(a, b *oforms.Form) int {
+			return strings.Compare(a.Name, b.Name)
+		})
+		return nil, fmt.Errorf("%w: Designer storage %q has no form module", ErrUserFormIdentityMismatch, remaining[0].Name)
 	}
-	result := make([]extractedForm, 0, len(formsByName))
-	for _, key := range slices.Sorted(maps.Keys(formsByName)) {
-		result = append(result, formsByName[key])
+	result := make([]extractedForm, 0, len(extractedByName))
+	for _, key := range slices.Sorted(maps.Keys(extractedByName)) {
+		result = append(result, extractedByName[key])
 	}
 	return result, nil
 }

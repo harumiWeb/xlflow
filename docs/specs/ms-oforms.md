@@ -1,7 +1,7 @@
-# MS-OFORMS reader and projection contract
+# MS-OFORMS persistence and projection contract
 
-This document defines xlflow's internal, pure-Go reader contract for Microsoft
-Forms designer state stored in `vbaProject.bin`. The architectural rationale
+This document defines xlflow's internal, pure-Go persistence contract for
+Microsoft Forms designer state stored in `vbaProject.bin`. The architectural rationale
 for file-level VBA project handling remains in ADR-0012. The user-facing
 UserForm schema remains the `xlflow.userform` `FormSpec`; the model described
 here is a separate binary persistence model.
@@ -24,10 +24,13 @@ The reader owns the following structures:
 - `\x03VBFrame`, `\x01CompObj`, optional `x` streams, CFB storage metadata,
   and nested container storages;
 - raw strings, padding, pictures, arrays, record tails, and streams required by
-  a future lossless writer.
+  the lossless serializer and later controlled mutation stages.
 
 `DiscoverForms` reports root-level non-`VBA` storages containing an `f` stream.
 Module classification remains the responsibility of the VBA project layer.
+`SerializeForm` re-emits one model accepted by `ReadForm` as a validated set of
+full-path streams and storage metadata. It performs no Excel, COM, or VBIDE
+fallback.
 
 ## Lossless binary model
 
@@ -48,8 +51,18 @@ An unsupported class remains an opaque control only when its site record and
 inside a known record are accepted only when its declared record boundary still
 reconciles exactly; otherwise parsing fails.
 
-This package does not publish files during `pull`, edit records, or serialize
-streams. Projection is owned by the separate
+The serializer in this stage is deliberately no-op and lossless. It replays the
+retained `f`, `o`, optional `x`, `\x01CompObj`, `\x03VBFrame`, opaque streams,
+and nested storage metadata. It then reparses that subtree with the supplied
+project code page before returning it. The decoded and raw model is bound to
+its read-time persistence signature; changing either side returns
+`ErrUnsupportedMutation` rather than silently discarding an edit. FormSpec
+property compilation and new Designer generation are separate later stages.
+
+`vbaproject.Project.Forms` owns parsed Designer subtrees. Their streams and
+storage metadata are excluded from generic `RawStreams` and
+`StorageMetadata`, then restored by `vbaproject.Write` through `SerializeForm`.
+Unrelated root streams remain opaque pass-through data. Projection is owned by the separate
 `internal/vba/userforms/projection` adapter so the lossless model does not
 depend on the user-facing schema.
 
@@ -122,7 +135,7 @@ supported type or the real custom ProgID before authoring.
 
 ## Structural validation
 
-The reader returns `oforms.ErrMalformed`, wrapped by an `oforms.ParseError`
+The reader and serializer return `oforms.ErrMalformed`, wrapped by an `oforms.ParseError`
 carrying storage path, stream, byte offset, and structure, when any of these
 invariants fail:
 
@@ -140,7 +153,10 @@ invariants fail:
 
 The resource limits are 64 MiB per designer stream, 65,535 sites per form, and
 64 nested container levels. Counts and lengths are checked against remaining
-input before allocating or slicing.
+input before allocating or slicing. Serialization validates all forms before
+the enclosing CFB is published. A malformed retained count, length,
+`ObjectStreamSize`, or nested ownership relationship therefore fails instead
+of producing a partial `vbaProject.bin`.
 
 ## Verification
 
@@ -149,7 +165,10 @@ known control property record. `p6_nested_form.bin` covers Frame, MultiPage,
 Page, and nested container storages. Focused corruption tests cover missing and
 mis-sized `o` streams, inconsistent depth runs, orphan storages, unsupported
 code pages, and structurally bounded opaque controls. Native Go fuzz targets
-exercise both the public CFB-to-form reader and the `f` stream parser.
+exercise the public CFB-to-form reader, successful parse-to-serialize replay,
+and the `f` stream parser. Serializer tests compare every simple and nested
+Designer stream and storage metadata entry byte-for-byte, cover CP932 text,
+and reject malformed retained data and unsupported semantic mutation.
 Projection tests cover common properties, nested parent relationships,
 snapshot-only opaque controls, validation boundaries, and repeated byte-stable
 JSON output. `TestProjectMatchesExcelBackedSnapshot` can additionally compare

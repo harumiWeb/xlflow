@@ -4,10 +4,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/ovba"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
 )
 
 // Read parses vbaProject.bin and decomposes it into a *Project model.
@@ -91,15 +93,30 @@ func Read(data []byte) (*Project, error) {
 		})
 	}
 
+	formStorages := oforms.DiscoverForms(c)
+	slices.Sort(formStorages)
+	formRoots := make(map[string]struct{}, len(formStorages))
+	for _, storage := range formStorages {
+		form, err := oforms.ReadForm(c, storage, di.CodePage)
+		if err != nil {
+			return nil, fmt.Errorf("vbaproject: read UserForm %q: %w", storage, err)
+		}
+		p.Forms = append(p.Forms, form)
+		formRoots[cfb.DirectoryNameKey(storage)] = struct{}{}
+	}
+
 	// Capture every stream the writer does not own (see Project.RawStreams) so
 	// Write can re-emit it verbatim. VBA/* is regenerated and PROJECT is written
-	// back from ProjectStreamRaw, so both are excluded to avoid a write collision.
+	// back from ProjectStreamRaw. Parsed UserForm subtrees are owned by Forms.
 	p.RawStreams = make(map[string][]byte)
 	for _, path := range c.Paths() {
 		switch firstSegment(path) {
 		case "VBA", "PROJECT":
 			// owned by Write
 		default:
+			if _, owned := formRoots[cfb.DirectoryNameKey(firstSegment(path))]; owned {
+				continue
+			}
 			if s, ok := c.Stream(path); ok {
 				p.RawStreams[path] = s
 			}
@@ -107,6 +124,11 @@ func Read(data []byte) (*Project, error) {
 	}
 	p.StorageMetadata = make(map[string]cfb.StorageMeta)
 	for _, path := range c.StoragePaths() {
+		if path != "" {
+			if _, owned := formRoots[cfb.DirectoryNameKey(firstSegment(path))]; owned {
+				continue
+			}
+		}
 		if meta, ok := c.Storage(path); ok {
 			p.StorageMetadata[path] = meta
 		}
