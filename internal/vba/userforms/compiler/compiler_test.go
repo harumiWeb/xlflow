@@ -193,6 +193,19 @@ func TestCompileRejectsEditsAtomically(t *testing.T) {
 		}},
 		{"tab-range", Invalid, func(_, a *spec.FormSpec) { a.Controls[0].TabIndex = new(32768) }},
 		{"geometry-range", Invalid, func(_, a *spec.FormSpec) { a.Controls[0].Left = new(1e20) }},
+		{"before-coordinate-system", Invalid, func(b, a *spec.FormSpec) {
+			b.CoordinateSystem = "pixels"
+			a.Controls[0].Left = new(72.0)
+		}},
+		{"after-coordinate-system", Invalid, func(_, a *spec.FormSpec) {
+			a.CoordinateSystem = "pixels"
+			a.Controls[0].Properties = map[string]any{"Left": 72.0}
+		}},
+		{"new-build-caption-stale-legacy", Stale, func(b, a *spec.FormSpec) {
+			b.Form.Build = nil
+			b.Form.Caption = new("stale legacy caption")
+			a.Form.Build = &spec.FormSpecBuildForm{Caption: new("requested")}
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			form, before := fixture(t, "p4_form.bin")
@@ -244,6 +257,144 @@ func TestCompileExplicitBuildCaptionAndBagAlias(t *testing.T) {
 	}
 	if got := result.Controls[0].Site.Strings["Tag"].Text; got != "日本語" {
 		t.Fatalf("tag=%q", got)
+	}
+}
+
+func TestCompileCoordinateSystems(t *testing.T) {
+	for _, beforeBasis := range []string{"", "points", "parent-relative"} {
+		for _, afterBasis := range []string{"", "points", "parent-relative"} {
+			t.Run(beforeBasis+"/"+afterBasis, func(t *testing.T) {
+				form, before := fixture(t, "p6_nested_form.bin")
+				before.CoordinateSystem = beforeBasis
+				after := snapshotCopy(t, before)
+				after.CoordinateSystem = afterBasis
+				index := -1
+				for i, control := range after.Controls {
+					if control.Type == "TextBox" && control.ParentID != "" {
+						index = i
+						break
+					}
+				}
+				if index < 0 {
+					t.Fatal("fixture missing nested TextBox")
+				}
+				after.Controls[index].Left = new(72.0)
+				after.Controls[index].Properties = map[string]any{"Top": 36.0}
+				result, err := CompileEdits(form, before, after, 932)
+				if err != nil {
+					t.Fatal(err)
+				}
+				control := findControl(result.Controls, after.Controls[index].Name)
+				if control == nil || control.Site.Position == nil || control.Site.Position.Left != 2540 || control.Site.Position.Top != 1270 {
+					t.Fatal("coordinates must remain parent-relative points")
+				}
+			})
+		}
+	}
+	for _, input := range []string{"before", "after"} {
+		t.Run(input+"-invalid-noop", func(t *testing.T) {
+			form, before := fixture(t, "p4_form.bin")
+			after := snapshotCopy(t, before)
+			if input == "before" {
+				before.CoordinateSystem = "pixels"
+			} else {
+				after.CoordinateSystem = "pixels"
+			}
+			result, err := CompileEdits(form, before, after, 932)
+			detail, ok := errors.AsType[*Error](err)
+			if result != nil || !ok || detail.Code != Invalid || detail.Property != input+".coordinateSystem" {
+				t.Fatalf("expected invalid coordinate system: %v", err)
+			}
+		})
+	}
+}
+
+func TestCompileNewBuildCaptionChecksLegacyBaseline(t *testing.T) {
+	for _, tc := range []struct {
+		name, wantCode string
+		change         func(*spec.FormSpec, *spec.FormSpec)
+	}{
+		{"matching-legacy", "", func(_, _ *spec.FormSpec) {}},
+		{"empty-build-matching-legacy", "", func(b, _ *spec.FormSpec) { b.Form.Build = &spec.FormSpecBuildForm{} }},
+		{"stale-legacy", Stale, func(b, _ *spec.FormSpec) { b.Form.Caption = new("stale") }},
+		{"empty-build-stale-legacy", Stale, func(b, _ *spec.FormSpec) {
+			b.Form.Build = &spec.FormSpecBuildForm{}
+			b.Form.Caption = new("stale")
+		}},
+		{"stale-legacy-equal-new-build", Stale, func(b, a *spec.FormSpec) { b.Form.Caption = a.Form.Build.Caption }},
+		{"absent-legacy", "", func(b, _ *spec.FormSpec) { b.Form.Caption = nil }},
+		{"existing-build-precedence", "", func(b, _ *spec.FormSpec) {
+			b.Form.Build = &spec.FormSpecBuildForm{Caption: b.Form.Caption}
+			b.Form.Caption = new("ignored legacy baseline")
+		}},
+		{"stale-existing-build", Stale, func(b, _ *spec.FormSpec) {
+			b.Form.Build = &spec.FormSpecBuildForm{Caption: new("stale build")}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			form, before := fixture(t, "p4_form.bin")
+			before.Form.Build = nil
+			if before.Form.Caption == nil {
+				before.Form.Caption = new("")
+			}
+			after := snapshotCopy(t, before)
+			after.Form.Build = &spec.FormSpecBuildForm{Caption: new("requested build caption")}
+			after.Form.Caption = new("ignored legacy edit")
+			tc.change(&before, &after)
+			result, err := CompileEdits(form, before, after, 932)
+			if tc.wantCode != "" {
+				detail, ok := errors.AsType[*Error](err)
+				if result != nil || !ok || detail.Code != tc.wantCode || detail.Property != "form.caption" {
+					t.Fatalf("expected stale caption: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := result.Levels[0].Record.Strings["Caption"].Text; got != *after.Form.Build.Caption {
+				t.Fatalf("build precedence lost: %q", got)
+			}
+		})
+	}
+}
+
+func TestCompilePropertyKeyUnionIsDeterministic(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		previous, next map[string]any
+	}{
+		{"empty", nil, nil},
+		{"overlap", map[string]any{"Tag": "", "ControlTipText": ""}, map[string]any{"Tag": "tag", "ControlTipText": "tip", "Caption": "caption"}},
+		{"disjoint", map[string]any{"Tag": nil}, map[string]any{"ControlTipText": "tip", "Caption": "caption"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			form, before := fixture(t, "p4_form.bin")
+			before.Controls[0].Properties = tc.previous
+			after := snapshotCopy(t, before)
+			after.Controls[0].Properties = tc.next
+			var original *oforms.SerializedForm
+			for range 5 {
+				result, err := CompileEdits(form, before, after, 932)
+				if err != nil {
+					t.Fatal(err)
+				}
+				serialized, err := oforms.SerializeForm(result, 932)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for property, want := range tc.next {
+					got, found := editedProperty(result.Controls[0], property)
+					if !found || !reflect.DeepEqual(got, want) {
+						t.Fatalf("property %s: got %v, want %v", property, got, want)
+					}
+				}
+				if original != nil {
+					assertDesignerBytes(t, original, serialized)
+				}
+				original = serialized
+			}
+		})
 	}
 }
 

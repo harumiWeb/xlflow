@@ -9,6 +9,8 @@ param(
 )
 
 # Local developer harness. Never run from ordinary tests/CI; requires trusted VBIDE.
+# Verify executes VBA: use only the trusted generated baseline and known derivatives.
+# Read-only opening and disabled events are not a macro sandbox or authenticity check.
 # create retains every workbook and before/reopened observation in a fresh directory.
 # verify reads a compiler-produced workbook and optionally compares a snapshot JSON.
 $ErrorActionPreference = 'Stop'

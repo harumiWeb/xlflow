@@ -161,6 +161,10 @@ field must agree with the binary model when that value is supplied; a stale
 baseline fails instead of overwriting a different persisted value.
 Geometry comparisons allow the existing 0.05-point Designer parity tolerance
 for Excel twip versus persisted HIMETRIC rounding.
+Both snapshots must use an omitted coordinateSystem, `points`, or
+`parent-relative`; all three describe point-valued geometry relative to the
+owning parent. Other coordinate systems are invalid even for a no-op and are
+rejected before numeric conversion, not silently interpreted as points.
 
 The initial editable classes are Label, TextBox, ComboBox, ListBox,
 CommandButton, CheckBox, OptionButton, and existing Frame containers. Their
@@ -183,6 +187,10 @@ one alias is sufficient; conflicting changes to both aliases fail. The same
 rule applies to top-level control fields and their property-bag aliases.
 An explicitly changed `form.build.caption` takes precedence over the legacy
 form caption. Unchanged build/observed fields do not override a changed field.
+When build.caption first appears, the supplied legacy before caption remains
+the stale-input baseline; an existing explicit before build.caption takes
+precedence over the legacy baseline. Observed metadata is never synthesized
+into authoring intent or a supplied baseline.
 Empty strings, zero, and false are explicit values. Removing a property to
 request a default reset is unsupported.
 
@@ -273,6 +281,11 @@ subtrees, stale input, alias conflicts, range errors, and atomic failure.
 `scripts/test-userform-mutation-e2e.ps1` is a developer-only Excel gate:
 its create phase records persistence observations; its verify phase compares
 compiler output against expected Designer properties and runs a sentinel.
+Verify executes workbook VBA with the developer's Excel authority: use only
+the trusted generated baseline and known compiler-produced derivatives.
+Read-only opening and disabled events do not sandbox the explicit sentinel;
+property comparisons do not authenticate workbook code. Do not run verify on
+an untrusted workbook in a credential-bearing developer environment.
 An optional new `NormalizedWorkbookPath` saves and reopens an independent
 artifact in the same owned Excel instance. The gated Go tests
 `TestGenerateExcelMutationArtifact` and `TestReadExcelNormalizedArtifact`

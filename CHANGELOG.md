@@ -7,7 +7,9 @@ All notable changes to xlflow will be documented in this file.
 - Added an internal pure-Go compiler for supported FormSpec edits to existing
   UserForm Designer records, with atomic failure, structured edit errors,
   deterministic size/mask bookkeeping, and preservation of untouched binary
-  data. CLI `pack` integration remains a separate follow-up.
+  data. Invalid coordinate systems and stale legacy captions when explicit
+  build captions are introduced are rejected before mutation. CLI `pack`
+  integration remains a separate follow-up.
 - Added lossless pure-Go MS-OFORMS serialization for existing UserForms.
   Parsed Designer subtrees now have explicit VBA-project ownership instead of
   remaining generic opaque streams; simple, nested Frame/MultiPage, unknown,

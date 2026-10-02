@@ -62,6 +62,19 @@ func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint1
 		return nil, err
 	}
 	c := compilation{form: base, controls: make(map[string]*oforms.Control)}
+	for _, input := range []struct {
+		name, coordinateSystem string
+	}{
+		{"before", before.CoordinateSystem},
+		{"after", after.CoordinateSystem},
+	} {
+		switch input.coordinateSystem {
+		case "", "points", "parent-relative":
+			// All supported spellings use points relative to the owning parent.
+		default:
+			return nil, c.fail(Invalid, "", input.name+".coordinateSystem", "geometry requires points or parent-relative coordinates")
+		}
+	}
 	var err error
 	c.before, err = normalizedCopy(before)
 	if err != nil {
@@ -279,10 +292,15 @@ func (c *compilation) formEdits() error {
 		return c.fail(Unsupported, "", "form", "root dimensions are client dimensions, not Excel outer dimensions")
 	}
 	oldCaption, nextCaption := old.Caption, next.Caption
+	captionChanged := !reflect.DeepEqual(oldCaption, nextCaption)
 	if !reflect.DeepEqual(oldBuild.Caption, nextBuild.Caption) {
-		oldCaption, nextCaption = oldBuild.Caption, nextBuild.Caption
+		captionChanged = true
+		nextCaption = nextBuild.Caption
+		if oldBuild.Caption != nil {
+			oldCaption = oldBuild.Caption
+		}
 	}
-	if reflect.DeepEqual(oldCaption, nextCaption) {
+	if !captionChanged {
 		return nil
 	}
 	if nextCaption == nil {
@@ -466,15 +484,13 @@ func (c *compilation) propertyEdits(old, next, actual spec.FormSpecControl, path
 	if err != nil {
 		return c.fail(Conflict, old.Name, path+".properties", err.Error())
 	}
-	keys := make([]string, 0, len(previous)+len(desired))
-	for key := range previous {
-		keys = append(keys, key)
-	}
+	keys := slices.Collect(maps.Keys(previous))
 	for key := range desired {
-		keys = append(keys, key)
+		if _, exists := previous[key]; !exists {
+			keys = append(keys, key)
+		}
 	}
 	slices.Sort(keys)
-	keys = slices.Compact(keys)
 	for _, key := range keys {
 		oldValue, newValue := previous[key], desired[key]
 		if reflect.DeepEqual(oldValue, newValue) {

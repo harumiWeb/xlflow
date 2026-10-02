@@ -34,6 +34,12 @@ the workbook-qualified sentinel. Geometry tolerance is 0.05 points for Excel
 twip versus binary HIMETRIC rounding; string and flag comparisons are exact.
 Form width/height are not compared because outer/client dimensions differ.
 
+Verify explicitly executes workbook VBA with the developer's Excel authority.
+Use only this trusted generated baseline and its known compiler-produced
+derivatives. Read-only opening and disabled events do not sandbox the sentinel,
+and matching Designer properties does not authenticate workbook code. Do not
+verify an untrusted workbook in a credential-bearing developer environment.
+
 Main's opt-in `TestGenerateExcelMutationArtifact` accepts
 `XLFLOW_MUTATION_WORKBOOK`, `XLFLOW_MUTATION_OUTPUT`, and
 `XLFLOW_MUTATION_EXPECTED`; use this baseline as input and pass its output
@@ -115,3 +121,17 @@ MBCS encoding contract.
 
 This is a focused persistence/mutation gate. CLI scaffold/new/init/push/pull and
 the complete release matrix were intentionally outside this investigation.
+
+## PR #902 review-fix verification
+
+The coordinate-system, caption-baseline and property-key collection fixes were
+verified again with the same trusted baseline and fresh outputs under
+`C:\Users\HARUMI\orca\workspaces\xlflow\shipworm\tmp_workspaces\issue-882-review-fix-20261002`.
+`TestGenerateExcelMutationArtifact` produced `edited.xlsm` and `expected.json`;
+the verify phase used those paths and
+`-NormalizedWorkbookPath tmp_workspaces/issue-882-review-fix-20261002/normalized.xlsm`.
+All nine controls matched before and after SaveAs/reopen, A1 was
+`issue-882-ok`, Excel remained version 16.0 build 17932, and owned PID 374348
+exited cleanly. `TestReadExcelNormalizedArtifact` passed against
+`normalized.xlsm.bin`. This recheck retains the same narrowed Designer-edit
+scope rather than claiming the complete CLI release matrix.

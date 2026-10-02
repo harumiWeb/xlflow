@@ -1,3 +1,25 @@
+# PR #902 review follow-up (Issue #882)
+
+Verified against `40267db2`: both Devin findings are valid. The two CodeQL
+alerts refer to the same unchecked sum used for key-slice capacity.
+
+1. [x] Reject invalid before/after coordinate systems before interpreting
+       geometry; retain omitted, points and parent-relative inputs.
+2. [x] Check the supplied legacy caption baseline when build.caption first
+       appears, retaining changed-build precedence and atomic failure.
+3. [x] Collect the property-key union without adding untrusted map lengths;
+       cover overlap, disjoint keys and deterministic edits.
+4. [x] Add focused regressions, update compiler/trusted-Excel contracts, and
+       run focused/full tests, race/lint/docs and the saved/reopened Excel gate.
+
+Publish the verified fix to the existing PR and reply to each review thread
+with its disposition and evidence; keep remote CI status separate.
+
+CodeRabbit's pack integration warning belongs to explicit follow-up #887;
+private-helper docstring coverage is not a repository gate. The developer
+Excel harness intentionally executes a sentinel, so explicitly document that
+only trusted generated workbooks and known derivatives may be verified.
+
 # Issue #882 final-review follow-up
 
 Independent review of `d63cde3a` confirmed one in-scope P3: seven new
