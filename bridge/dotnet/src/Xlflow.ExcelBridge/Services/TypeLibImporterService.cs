@@ -71,20 +71,14 @@ public sealed class TypeLibImporterService
             foreach (var target in libraries.Targets)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                Dictionary<string, object?> db;
                 TypeLibRegistration registration;
                 try
                 {
-                    registration = ResolveRegisteredTypeLib(target);
-                }
-                catch (InvalidOperationException ex) when (libraries.BestEffort)
-                {
-                    logs.Add($"skipped {target.Name}: {ex.Message}");
-                    continue;
-                }
-                Dictionary<string, object?> db;
-                try
-                {
-                    db = ImportLibrary(target, registration);
+                    (db, registration) = ImportFirstAvailable(
+                        target,
+                        ResolveRegisteredTypeLib,
+                        candidate => ImportLibrary(target, candidate));
                 }
                 catch (Exception ex) when (libraries.BestEffort)
                 {
@@ -192,26 +186,52 @@ public sealed class TypeLibImporterService
         return new ResolvedLibraries(targets, BestEffort: false);
     }
 
-    private static TypeLibRegistration ResolveRegisteredTypeLib(LibraryTarget target)
+    private static TypeLibRegistration? ResolveRegisteredTypeLib(string libID)
     {
+        using var root = Registry.ClassesRoot.OpenSubKey(@"TypeLib\" + libID);
+        if (root is null)
+        {
+            return null;
+        }
+        var version = root.GetSubKeyNames()
+            .Select(ParseVersion)
+            .Where(item => item is not null)
+            .Select(item => item!.Value)
+            .OrderByDescending(item => item.Major)
+            .ThenByDescending(item => item.Minor)
+            .FirstOrDefault();
+        return version == default
+            ? null
+            : new TypeLibRegistration(libID, version.Major, version.Minor, 0);
+    }
+
+    internal static (T Result, TypeLibRegistration Registration) ImportFirstAvailable<T>(
+        LibraryTarget target,
+        Func<string, TypeLibRegistration?> resolveRegistration,
+        Func<TypeLibRegistration, T> import)
+    {
+        Exception? lastImportError = null;
         foreach (var libID in target.LibIDs)
         {
-            using var root = Registry.ClassesRoot.OpenSubKey(@"TypeLib\" + libID);
-            if (root is null)
+            var registration = resolveRegistration(libID);
+            if (registration is null)
             {
                 continue;
             }
-            var version = root.GetSubKeyNames()
-                .Select(ParseVersion)
-                .Where(item => item is not null)
-                .Select(item => item!.Value)
-                .OrderByDescending(item => item.Major)
-                .ThenByDescending(item => item.Minor)
-                .FirstOrDefault();
-            if (version != default)
+            try
             {
-                return new TypeLibRegistration(libID, version.Major, version.Minor, 0);
+                return (import(registration), registration);
             }
+            catch (Exception ex)
+            {
+                lastImportError = ex;
+            }
+        }
+        if (lastImportError is not null)
+        {
+            throw new InvalidOperationException(
+                target.Name + " TypeLib could not be loaded from any registered library.",
+                lastImportError);
         }
         throw new InvalidOperationException(target.Name + " TypeLib was not found on this machine.");
     }
@@ -679,7 +699,7 @@ public sealed class TypeLibImporterService
 
     internal sealed record ResolvedLibraries(List<LibraryTarget> Targets, bool BestEffort);
 
-    private sealed record TypeLibRegistration(string LibID, int Major, int Minor, int LCID);
+    internal sealed record TypeLibRegistration(string LibID, int Major, int Minor, int LCID);
 
     internal sealed record DefaultMemberCandidate(string Name, string ReturnType);
 

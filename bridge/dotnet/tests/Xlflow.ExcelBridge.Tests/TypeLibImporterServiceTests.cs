@@ -63,6 +63,59 @@ public sealed class TypeLibImporterServiceTests
     }
 
     [Fact]
+    public void ImportFirstAvailableFallsBackWhenPreferredTypeLibCannotLoad()
+    {
+        var target = TypeLibImporterService.ResolveLibraries("dao").Targets.Single();
+        var registrations = new Dictionary<string, TypeLibImporterService.TypeLibRegistration>(StringComparer.OrdinalIgnoreCase)
+        {
+            [target.LibIDs[0]] = new(target.LibIDs[0], 12, 0, 0),
+            [target.LibIDs[1]] = new(target.LibIDs[1], 3, 6, 0),
+        };
+        var attempted = new List<string>();
+
+        var (result, registration) = TypeLibImporterService.ImportFirstAvailable(
+            target,
+            libID => registrations.GetValueOrDefault(libID),
+            candidate =>
+            {
+                attempted.Add(candidate.LibID);
+                if (candidate.LibID == target.LibIDs[0])
+                {
+                    throw new InvalidOperationException("ACE TypeLib failed to load.");
+                }
+                return "DAO 3.6 imported";
+            });
+
+        Assert.Equal("DAO 3.6 imported", result);
+        Assert.Equal(target.LibIDs, attempted);
+        Assert.Equal(target.LibIDs[1], registration.LibID);
+    }
+
+    [Fact]
+    public void ImportFirstAvailableKeepsPreferredTypeLibWhenItLoads()
+    {
+        var target = TypeLibImporterService.ResolveLibraries("dao").Targets.Single();
+        var registrations = target.LibIDs.ToDictionary(
+            libID => libID,
+            libID => new TypeLibImporterService.TypeLibRegistration(libID, 1, 0, 0),
+            StringComparer.OrdinalIgnoreCase);
+        var attempted = new List<string>();
+
+        var (result, registration) = TypeLibImporterService.ImportFirstAvailable(
+            target,
+            libID => registrations.GetValueOrDefault(libID),
+            candidate =>
+            {
+                attempted.Add(candidate.LibID);
+                return "ACE DAO imported";
+            });
+
+        Assert.Equal("ACE DAO imported", result);
+        Assert.Equal([target.LibIDs[0]], attempted);
+        Assert.Equal(target.LibIDs[0], registration.LibID);
+    }
+
+    [Fact]
     public void CanonicalTypeNameUsesContainingLibraryQualifier()
     {
         Assert.Equal("Office.CommandBar", TypeLibImporterService.CanonicalTypeName("Office", "_CommandBar"));
