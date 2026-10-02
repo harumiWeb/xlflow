@@ -49,9 +49,9 @@ Successful JSON includes:
     "state": ".xlflow/state/push.json"
   },
   "output": {
-    "publication": "replace",
+    "publication": "atomic_replace",
     "replaced_existing": true,
-    "temporary_cleanup": { "status": "removed" }
+    "temporary_cleanup": { "status": "clean" }
   },
   "warnings": [
     {
@@ -174,6 +174,30 @@ eligible procedure lines (including continuation tails, block `If`,
 declarations, labels, and unsafe numeric targets), and document-module
 normalization. Both sides compare LF-normalized text because the bridge joins
 lines with the host newline.
+
+## Edge cases stricter than the Excel backend
+
+The file backend rebuilds the component topology from the source tree, so a few
+inputs that the VBIDE path tolerates are rejected or applied differently:
+
+- A document-module source (`workbook/**/*.bas`) with no matching document
+  component in the workbook is a `push_ambiguous_layout` error. The Excel
+  backend silently skips such orphan sources because it iterates workbook
+  components, not disk files.
+- A whitespace-only `code/<Form>.bas` sidecar is authoritative: the merged
+  form ends up with empty code-behind. The Excel bridge treats a
+  whitespace-only sidecar as absent and preserves the embedded code.
+- `Attribute VB_Name` must match the expected component name exactly. The
+  Excel backend's VBIDE import accepts case-only mismatches
+  (`Module1.bas` declaring `VB_Name = "module1"`); the file backend rejects
+  them as `push_ambiguous_layout`.
+- When the configured workbook does not exist, Windows surfaces
+  `push_workbook_open` (the open-state probe cannot determine the state)
+  while other platforms surface `push_source_read_failed` when the template
+  is read.
+
+All of these fail or diverge on the safe side; none can silently corrupt a
+workbook.
 
 ## Real-Excel release gate
 
