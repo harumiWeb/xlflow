@@ -47,7 +47,10 @@ func buildDescriptors() []Descriptor {
 		}),
 		both("build", "build", workbookMutate, bridge("build")),
 		cli("pack", "pack", workbookMutate),
-		both("push", "push", workbookMutate, bridge("push")),
+		withBackends(both("push", "push", workbookMutate, bridge("push")), "excel", map[string]BackendCapability{
+			"excel": {RequiresExcel: true},
+			"file":  {RequiresExcel: false},
+		}),
 		cli("generate.test", "generate test", sourceMutate),
 		cli("module.new", "module new", sourceMutate),
 		cli("module.remove", "module remove", sourceMutate),

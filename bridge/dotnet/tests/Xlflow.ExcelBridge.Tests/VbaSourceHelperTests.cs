@@ -35,6 +35,42 @@ public sealed class VbaSourceHelperTests
         }
     }
 
+    [Fact]
+    public void PushParityFixturesMatchBridgeSourceContract()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "push-parity.json")));
+        var root = document.RootElement;
+        foreach (var test in root.GetProperty("annotationCases").EnumerateArray())
+        {
+            var actual = VbaSourceHelper.UpdateFolderAnnotationText(
+                test.GetProperty("source").GetString()!,
+                test.GetProperty("mode").GetString()!,
+                test.GetProperty("annotation").GetString());
+            Assert.Equal(test.GetProperty("expected").GetString(), NormalizeToLf(actual));
+        }
+        foreach (var test in root.GetProperty("lineNumberAddCases").EnumerateArray())
+        {
+            var applied = ErlLineNumberTransformer.TryAdd(test.GetProperty("source").GetString()!, out var actual, out var issue);
+            if (test.TryGetProperty("unsafe", out var unsafeFlag) && unsafeFlag.GetBoolean())
+            {
+                Assert.False(applied, $"case {test.GetProperty("id")} should be rejected");
+                Assert.NotNull(issue);
+                if (test.TryGetProperty("issueLine", out var issueLine))
+                {
+                    Assert.Equal(issueLine.GetInt32(), issue!.Line);
+                }
+                continue;
+            }
+            Assert.True(applied, $"case {test.GetProperty("id")} rejected: {issue?.Message}");
+            Assert.Equal(test.GetProperty("expected").GetString(), NormalizeToLf(actual));
+        }
+        foreach (var test in root.GetProperty("documentCases").EnumerateArray())
+        {
+            var actual = VbaSourceHelper.NormalizeDocumentModuleContent(test.GetProperty("source").GetString()!);
+            Assert.Equal(test.GetProperty("expected").GetString(), NormalizeToLf(actual));
+        }
+    }
+
     private static string NormalizeToLf(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
     [Fact]
@@ -340,6 +376,47 @@ public sealed class VbaSourceHelperTests
             Assert.NotEqual(disabled.LineNumbersEnabled, enabled.LineNumbersEnabled);
             Assert.True(VbaSourceHelper.FingerprintMatchesState(disabled, statePath));
             Assert.False(VbaSourceHelper.FingerprintMatchesState(enabled, statePath));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void Fingerprint_IgnoresFileEnumerationOrder()
+    {
+        var entryA = new SourceFileEntry { Kind = "module", Path = "Main.bas", Hash = "aaa" };
+        var entryB = new SourceFileEntry { Kind = "module", Path = "Sub/Text.bas", Hash = "bbb" };
+        var forward = new SourceFingerprint { WorkbookPath = "Book.xlsm", Files = [entryA, entryB], FolderAnnotation = "ignore" };
+        var reversed = new SourceFingerprint { WorkbookPath = "Book.xlsm", Files = [entryB, entryA], FolderAnnotation = "ignore" };
+        var different = new SourceFingerprint { WorkbookPath = "Book.xlsm", Files = [entryA], FolderAnnotation = "ignore" };
+
+        Assert.True(VbaSourceHelper.FingerprintEquals(forward, reversed));
+        Assert.False(VbaSourceHelper.FingerprintEquals(forward, different));
+    }
+
+    [Fact]
+    public void Fingerprint_ChangesWhenFolderAnnotationModeChanges()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-fingerprint-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var modules = Path.Combine(root, "modules");
+            Directory.CreateDirectory(modules);
+            File.WriteAllText(Path.Combine(modules, "Main.bas"), "Attribute VB_Name = \"Main\"\r\n");
+
+            var ignored = VbaSourceHelper.ComputeFingerprint("Book.xlsm", modules, "", "", "", "", folderAnnotation: "ignore");
+            var updated = VbaSourceHelper.ComputeFingerprint("Book.xlsm", modules, "", "", "", "", folderAnnotation: "update");
+            var statePath = Path.Combine(root, "state", "push.json");
+            VbaSourceHelper.WriteFingerprintState(ignored, statePath);
+
+            Assert.NotEqual(ignored.FolderAnnotation, updated.FolderAnnotation);
+            Assert.True(VbaSourceHelper.FingerprintMatchesState(ignored, statePath));
+            Assert.False(VbaSourceHelper.FingerprintMatchesState(updated, statePath));
         }
         finally
         {

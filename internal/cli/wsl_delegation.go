@@ -120,14 +120,14 @@ func shouldDelegateCommand(cmd *cobra.Command, topLevel string) bool {
 			if descriptor.ID == "encoding.convert" {
 				return false
 			}
-			if descriptor.ID == "pull" {
+			if descriptor.ID == "pull" || descriptor.ID == "push" {
 				backend := cmd.Flags().Lookup("backend")
 				if backend != nil {
 					value := strings.TrimSpace(backend.Value.String())
 					if strings.EqualFold(value, "file") {
 						return false
 					}
-					if strings.EqualFold(value, "auto") {
+					if descriptor.ID == "pull" && strings.EqualFold(value, "auto") {
 						session := cmd.Flags().Lookup("session")
 						return session != nil && strings.EqualFold(session.Value.String(), "true")
 					}

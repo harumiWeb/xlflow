@@ -38,6 +38,7 @@ the next decision.
 | Check source before Excel import          | `xlflow lint --json` and `xlflow analyze --json`                                        | after source edits                                                                                    |
 | Estimate refactor blast radius            | `xlflow impact Module.Procedure --json`                                                 | changing existing behavior; load [code analysis](references/code-analysis.md)                         |
 | Import edited source into Excel           | `xlflow push --fast --session --no-save --json`                                         | source validation passes                                                                              |
+| Apply source to saved `.xlsm` headless    | `xlflow push --backend file --json`                                                     | no Excel/host needed; workbook must be closed and no live session may own it                          |
 | Run repeatable behavior checks            | `xlflow test --session --no-save --json`                                                | tests cover the behavior; load [testing](references/testing.md)                                       |
 | Run a macro with diagnostics              | `xlflow run Macro.Name --diagnostic --headless --session --json`                        | tests do not cover the intended behavior                                                              |
 | Inspect values, formulas, or styles       | `xlflow inspect range --sheet Result --address A1:F20 --include-style --session --json` | an observable cell result is required                                                                 |
@@ -147,6 +148,15 @@ The default `pull --json` selects the fastest safe backend and reports
 source of truth; it never reads unsaved session state and rejects workbooks
 containing UserForms before changing source. Use `--backend excel` to force
 Excel/VBIDE authority.
+
+`push` has no auto backend: the default `excel` path mutates the live project
+through VBE and compiles it, while `push --backend file --json` rebuilds the
+saved `.xlsm` headlessly. Choose the file backend when Excel is unavailable or
+the run is headless and the workbook is closed; it refuses to overwrite a
+workbook that is open or owned by a live session, and it reports
+`vbe_validation="not_performed"` because no compile happened — prove behavior
+afterwards with `xlflow test`/`run` when compile evidence matters. It cannot
+create new UserForms, so a brand-new form still needs the Excel backend.
 
 Run `xlflow doctor --json` when Excel, COM, VBIDE access, or macro execution
 cannot be trusted. Do not run both session start and attach: choose attach for

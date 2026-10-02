@@ -74,7 +74,7 @@ public sealed class ExcelPushService : IPushService
                 args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
             var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
             var fingerprint = VbaSourceHelper.ComputeFingerprint(
-                args.WorkbookPath, args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource, args.LineNumbersEnabled);
+                args.WorkbookPath, args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource, args.LineNumbersEnabled, args.FolderAnnotation);
 
             if (args.LineNumbersEnabled && !TryValidateLineNumberSources(sourceFiles, out var lineNumberIssue))
             {

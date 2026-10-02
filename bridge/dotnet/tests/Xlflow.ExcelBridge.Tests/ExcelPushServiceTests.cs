@@ -41,7 +41,8 @@ public sealed class ExcelPushServiceTests
                 classesDir,
                 formsDir,
                 workbookDir,
-                "");
+                "",
+                folderAnnotation: "ignore");
             VbaSourceHelper.WritePushState(
                 fingerprint,
                 new PushAppliedTo
@@ -1181,7 +1182,7 @@ public sealed class ExcelPushServiceTests
 
             var statePath = Path.Combine(root, ".xlflow", "state", "push.json");
             var fingerprint = VbaSourceHelper.ComputeFingerprint(
-                workbookPath, modulesDir, "", "", "", "");
+                workbookPath, modulesDir, "", "", "", "", folderAnnotation: "ignore");
             VbaSourceHelper.WritePushState(
                 fingerprint,
                 new PushAppliedTo

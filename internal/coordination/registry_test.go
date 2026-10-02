@@ -228,6 +228,11 @@ func TestPublicCapabilitiesV3StableFields(t *testing.T) {
 		DefaultWaitPolicy: WaitFail,
 		RecoveryBehavior:  RecoveryBlock,
 		RequiresExcel:     true,
+		DefaultBackend:    "excel",
+		Backends: map[string]BackendCapability{
+			"excel": {RequiresExcel: true},
+			"file":  {RequiresExcel: false},
+		},
 	}
 	if !reflect.DeepEqual(push, want) {
 		t.Fatalf("push capability = %#v, want %#v", push, want)

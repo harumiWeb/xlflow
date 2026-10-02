@@ -1,0 +1,110 @@
+{
+  "annotationCases": [
+    {
+      "id": "insert-after-attribute-block",
+      "mode": "update",
+      "annotation": "Domain.Sub",
+      "source": "Attribute VB_Name = \"Main\"\nOption Explicit\n",
+      "expected": "Attribute VB_Name = \"Main\"\n'@Folder(\"Domain.Sub\")\nOption Explicit\n"
+    },
+    {
+      "id": "insert-class-before-begin",
+      "mode": "update",
+      "annotation": "Domain",
+      "source": "VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  'True\nEND\nAttribute VB_Name = \"C\"\nPublic X As String\n",
+      "expected": "VERSION 1.0 CLASS\n'@Folder(\"Domain\")\nBEGIN\n  MultiUse = -1  'True\nEND\nAttribute VB_Name = \"C\"\nPublic X As String\n"
+    },
+    {
+      "id": "replace-existing",
+      "mode": "update",
+      "annotation": "New.Path",
+      "source": "Attribute VB_Name = \"Main\"\n'@Folder(\"Old\")\nOption Explicit\n",
+      "expected": "Attribute VB_Name = \"Main\"\n'@Folder(\"New.Path\")\nOption Explicit\n"
+    },
+    {
+      "id": "remove-at-root",
+      "mode": "update",
+      "annotation": "",
+      "source": "Attribute VB_Name = \"Main\"\n'@Folder(\"Old\")\nOption Explicit\n",
+      "expected": "Attribute VB_Name = \"Main\"\nOption Explicit\n"
+    },
+    {
+      "id": "ignore-mode-untouched",
+      "mode": "ignore",
+      "annotation": "Domain",
+      "source": "Attribute VB_Name = \"Main\"\nOption Explicit\n",
+      "expected": "Attribute VB_Name = \"Main\"\nOption Explicit\n"
+    },
+    {
+      "id": "preserve-mode-untouched",
+      "mode": "preserve",
+      "annotation": "Domain",
+      "source": "Attribute VB_Name = \"Main\"\n'@Folder(\"Keep\")\nOption Explicit\n",
+      "expected": "Attribute VB_Name = \"Main\"\n'@Folder(\"Keep\")\nOption Explicit\n"
+    },
+    {
+      "id": "unicode-folder",
+      "mode": "update",
+      "annotation": "Domain.日本語.Services",
+      "source": "Attribute VB_Name = \"Main\"\nOption Explicit\n",
+      "expected": "Attribute VB_Name = \"Main\"\n'@Folder(\"Domain.日本語.Services\")\nOption Explicit\n"
+    }
+  ],
+  "lineNumberAddCases": [
+    {
+      "id": "basic-sub",
+      "source": "Public Sub Run()\n    Debug.Print \"x\"\nEnd Sub\n",
+      "expected": "Public Sub Run()\n2     Debug.Print \"x\"\nEnd Sub\n"
+    },
+    {
+      "id": "declarations-labels-continuations-blockif",
+      "source": "Sub Run()\nDim x As Long\nDone:\nx = 1 _\n    + 2\nIf x > 0 Then\n    Debug.Print x\nEnd If\nEnd Sub\n",
+      "expected": "Sub Run()\nDim x As Long\nDone:\n 4 x = 1 _\n    + 2\nIf x > 0 Then\n 7     Debug.Print x\nEnd If\nEnd Sub\n"
+    },
+    {
+      "id": "module-width-two-digits",
+      "source": "' one\n' two\n' three\n' four\n' five\n' six\n' seven\n' eight\nPublic Sub Demo()\n    Debug.Print \"ok\"\nEnd Sub\n",
+      "expected": "' one\n' two\n' three\n' four\n' five\n' six\n' seven\n' eight\nPublic Sub Demo()\n10     Debug.Print \"ok\"\nEnd Sub\n"
+    },
+    {
+      "id": "on-error-goto-zero-is-safe",
+      "source": "Public Sub Demo()\n    On Error GoTo 0\nEnd Sub\n",
+      "expected": "Public Sub Demo()\n2     On Error GoTo 0\nEnd Sub\n"
+    },
+    {
+      "id": "numeric-label-rejected",
+      "source": "Public Sub Demo()\n10  Debug.Print \"legacy\"\nEnd Sub\n",
+      "unsafe": true,
+      "issueLine": 2
+    },
+    {
+      "id": "numeric-goto-rejected",
+      "source": "Public Sub Demo()\n    GoTo 10\nEnd Sub\n",
+      "unsafe": true,
+      "issueLine": 2
+    },
+    {
+      "id": "numeric-resume-rejected",
+      "source": "Public Sub Demo()\n    Resume 5\nEnd Sub\n",
+      "unsafe": true,
+      "issueLine": 2
+    }
+  ],
+  "documentCases": [
+    {
+      "id": "class-header-and-attributes-stripped",
+      "source": "VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  'True\r\nEND\r\nAttribute VB_Name = \"Sheet1\"\r\nAttribute VB_Base = \"0{00020820-0000-0000-C000-000000000046}\"\r\nAttribute VB_PredeclaredId = True\r\n\r\nOption Explicit\r\n",
+      "expected": "\nOption Explicit\n"
+    },
+    {
+      "id": "attributes-only-become-option-explicit",
+      "source": "Attribute VB_Name = \"ThisWorkbook\"\r\nAttribute VB_Base = \"0{00020819-0000-0000-C000-000000000046}\"\r\nAttribute VB_PredeclaredId = True\r\n",
+      "expected": "Option Explicit"
+    },
+    {
+      "id": "plain-body-unchanged",
+      "source": "Option Explicit\nPrivate Sub Worksheet_Activate()\nEnd Sub\n",
+      "expected": "Option Explicit\nPrivate Sub Worksheet_Activate()\nEnd Sub\n"
+    }
+  ]
+}

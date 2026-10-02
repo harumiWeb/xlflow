@@ -64,6 +64,18 @@ type Options struct {
 	Config                config.Config
 	RestrictToRoot        bool
 	ValidateFormArtifacts bool
+	// AllowLooseFormModules tolerates .bas/.cls files directly under the forms
+	// root (outside the reserved code/ and specs/ directories) instead of
+	// rejecting them as unsupported UserForm sources. The Excel bridge imports
+	// such files as standard/class modules, so the push path inventories the
+	// UserForm artifacts here and submits the loose modules separately; they
+	// are skipped, never returned as components.
+	AllowLooseFormModules bool
+	// AllowMissingRoots treats an absent configured source root as empty
+	// instead of a layout error, matching the Excel bridge's
+	// Directory.Exists guard. A configured path that exists but is not a
+	// directory still fails.
+	AllowMissingRoots bool
 	// PrimaryExcluded is used by build to resolve flat UserForm sidecars only
 	// against forms whose primary .frm survives primary-path exclusions.
 	PrimaryExcluded func(path string) bool
@@ -106,7 +118,7 @@ func Discover(opts Options) ([]Component, error) {
 		{opts.Config.Src.Classes, ComponentClass, map[string]bool{".cls": true}},
 		{opts.Config.Src.Workbook, ComponentDocument, map[string]bool{".bas": true, ".cls": true}},
 	} {
-		items, collectErr := collectCode(root, source.dir, source.typ, source.exts, opts.RestrictToRoot)
+		items, collectErr := collectCode(root, source.dir, source.typ, source.exts, opts.RestrictToRoot, opts.AllowMissingRoots)
 		if collectErr != nil {
 			return nil, collectErr
 		}
@@ -126,7 +138,7 @@ func Discover(opts Options) ([]Component, error) {
 	return components, nil
 }
 
-func collectCode(root, configured string, typ ComponentType, allowed map[string]bool, restrict bool) ([]Component, error) {
+func collectCode(root, configured string, typ ComponentType, allowed map[string]bool, restrict bool, allowMissing bool) ([]Component, error) {
 	base, err := resolveRoot(root, configured, restrict)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s source root: %w", typ, err)
@@ -134,6 +146,9 @@ func collectCode(root, configured string, typ ComponentType, allowed map[string]
 	info, err := os.Stat(base)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
+			if allowMissing {
+				return nil, nil
+			}
 			return nil, layoutError("read %s source root %s: %w", typ, displayPath(root, base), err)
 		}
 		return nil, fmt.Errorf("read %s source root %s: %w", typ, displayPath(root, base), err)
@@ -174,6 +189,9 @@ func collectForms(root string, opts Options) ([]Component, error) {
 	}
 	if info, statErr := os.Stat(base); statErr != nil {
 		if errors.Is(statErr, fs.ErrNotExist) {
+			if opts.AllowMissingRoots {
+				return nil, nil
+			}
 			return nil, layoutError("read form source root %s: %w", displayPath(root, base), statErr)
 		}
 		return nil, fmt.Errorf("read form source root %s: %w", displayPath(root, base), statErr)
@@ -217,6 +235,9 @@ func collectForms(root string, opts Options) ([]Component, error) {
 		}
 		ext := strings.ToLower(filepath.Ext(d.Name()))
 		if ext != ".frm" && ext != ".frx" {
+			if opts.AllowLooseFormModules && (ext == ".bas" || ext == ".cls") {
+				return nil
+			}
 			return layoutError("unsupported UserForm source file %s", displayPath(root, path))
 		}
 		if _, readErr := os.ReadFile(path); readErr != nil {

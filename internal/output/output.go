@@ -84,6 +84,7 @@ type Envelope struct {
 	Build          any `json:"build,omitempty"`
 	Pack           any `json:"pack,omitempty"`
 	Pull           any `json:"pull,omitempty"`
+	Push           any `json:"push,omitempty"`
 	Spec           any `json:"spec,omitempty"`
 	Edit           any `json:"edit,omitempty"`
 	Project        any `json:"project,omitempty"`
@@ -2256,7 +2257,8 @@ func (r renderer) renderWorkbookSource(env Envelope) string {
 	backup := objectMap(env.Backup)
 	source := objectMap(env.Source)
 	pull := objectMap(env.Pull)
-	if len(workbook) == 0 && len(backup) == 0 && len(source) == 0 && len(pull) == 0 && env.PushDiagnostic == nil && env.Warnings == nil && env.Hints == nil {
+	push := objectMap(env.Push)
+	if len(workbook) == 0 && len(backup) == 0 && len(source) == 0 && len(pull) == 0 && len(push) == 0 && env.PushDiagnostic == nil && env.Warnings == nil && env.Hints == nil {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder
@@ -2272,9 +2274,14 @@ func (r renderer) renderWorkbookSource(env Envelope) string {
 	}
 	if backend := stringValue(pull, "backend"); backend != "" {
 		b.WriteString(kv("Backend", backend))
+	} else if backend := stringValue(push, "backend"); backend != "" {
+		b.WriteString(kv("Backend", backend))
 	}
 	if authority := stringValue(pull, "source"); authority != "" {
 		b.WriteString(kv("Authority", authority))
+	}
+	if validation := stringValue(push, "vbe_validation"); validation == "not_performed" {
+		b.WriteString(kv("VBE validation", "not performed"))
 	}
 	if sessionSummary := summarizeSessionUsage(workbook); sessionSummary != "" {
 		b.WriteString(kv("Session", sessionSummary))
