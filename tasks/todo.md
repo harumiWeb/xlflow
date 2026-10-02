@@ -1,3 +1,21 @@
+# PR #901 review follow-up (Issue #881)
+
+Verified against commit `7396d1fe`; all three Devin bug reports are valid and
+in scope. The temporary-allocation observation is a performance hardening note,
+not a demonstrated regression, and remains a separate follow-up.
+
+1. [x] Resolve known Designer stream names with CFB case-insensitive identity,
+       retain their original spelling, and replay every captured stream under
+       that spelling. Add case-varied root and optional-stream round-trip tests.
+2. [x] Let `pull --backend auto` inspect module topology without parsing
+       Designer data when `code_source = "frm"`, so unsupported Designer
+       layouts can still select Excel; keep strict parsing for the file backend
+       and sidecar probe. Add malformed-Designer probe regressions.
+3. [x] Count parsed Designer streams in `pack.modules.carried_streams` and add
+       a form-bearing output-contract regression.
+4. [x] Run focused and full validation, commit and push the fixes, then reply
+       to all review threads with evidence and the allocation disposition.
+
 # PR #900 review follow-up
 
 Verified against commit `c4ed68d8`; the stale compatibility artifact portion

@@ -425,7 +425,10 @@ function Test-TemplatePack {
         Invoke-XlflowJson @('new', 'StablePack.xlsm', '--json') | Out-Null
         $workbookPath = Join-Path $templateWorkspace 'build\StablePack.xlsm'
         $metadata = New-PackTemplate $workbookPath
-        Invoke-XlflowJson @('pull', '--json') | Out-Null
+        # The fixture requires VBE-exported .frm/.frx compatibility artifacts.
+        # Auto mode may select the file backend for this supported sidecar form,
+        # which intentionally emits YAML/code without regenerating .frm/.frx.
+        Invoke-XlflowJson @('pull', '--backend', 'excel', '--json') | Out-Null
         if (-not (Test-Path -LiteralPath (Join-Path $templateWorkspace 'src\forms\ReleaseForm.frx'))) {
             throw 'Excel did not export the expected ReleaseForm.frx resource'
         }

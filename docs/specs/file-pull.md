@@ -94,10 +94,13 @@ use `xlflow pull --backend excel` to refresh compatibility artifacts before a
 later push. Direct pure-Go FormSpec writing is tracked by parent Issue #876.
 
 Compatibility `frm` code authority is not supported by the file backend and
-fails with `pull_userform_code_source_unsupported` before source mutation.
-Malformed Designer data, unsupported Designer structure, and inconsistent
-module/storage identities also fail before publication and never trigger an
-Excel fallback.
+fails with `pull_userform_code_source_unsupported` before source mutation. For
+Windows `auto` selection, module topology is inspected without parsing Designer
+streams when `code_source = "frm"`, so the compatibility boundary selects Excel
+even when the pure-Go Designer reader would reject the form. Explicit file
+selection and sidecar-mode auto selection remain strict: malformed Designer
+data, unsupported Designer structure, and inconsistent module/storage
+identities fail before publication and do not fall through to Excel.
 The configured forms root must not contain, or be contained by, the module,
 class, or workbook root; overlap fails before reconciliation so form artifacts
 cannot be mistaken for stale managed source.

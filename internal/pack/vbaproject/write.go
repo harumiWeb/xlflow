@@ -9,6 +9,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/ovba"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
 )
 
 // Write assembles a *Project (whose Source fields hold the in-bin form) into a
@@ -20,15 +21,21 @@ func Write(p *Project) ([]byte, error) {
 	if p.Protection.IsProtected {
 		return nil, fmt.Errorf("vbaproject: protected projects are not supported in v1")
 	}
+	serializedForms := make([]*oforms.SerializedForm, 0, len(p.Forms))
+	for _, form := range p.Forms {
+		serialized, err := oforms.SerializeForm(form, p.Props.CodePage)
+		if err != nil {
+			return nil, fmt.Errorf("vbaproject: serialize UserForm: %w", err)
+		}
+		serializedForms = append(serializedForms, serialized)
+	}
 	specs := make([]ovba.ModuleSpec, 0, len(p.Modules))
 	projectSpecs := make([]ovba.ProjectComponentSpec, 0, len(p.Modules))
 	names := make(map[string]string, len(p.Modules))
 	streams := make(map[string]string, len(p.Modules))
 	for _, m := range p.Modules {
-		// A UserForm's code-behind module is written like any other module (its
-		// in-bin source is an Attribute header plus code, the same shape as a class
-		// or document module). The form's designer storage (UserForm1/...) is not
-		// modeled here; it is carried verbatim via RawStreams (see Read).
+		// A UserForm's code-behind module is written like any other module. Its
+		// sibling Designer storage is emitted independently from Project.Forms.
 		if err := ValidateWritableComponentIdentity(m.Name, m.StreamName, p.Props.CodePage); err != nil {
 			return nil, err
 		}
@@ -98,11 +105,19 @@ func Write(p *Project) ([]byte, error) {
 	// storages, PROJECTwm, ...) verbatim before adding the regenerated VBA/* and
 	// PROJECT. RawStreams excludes the VBA/ and PROJECT namespaces, so there is no
 	// collision with the AddStream calls below.
-	for path, data := range p.RawStreams {
+	for _, path := range slices.Sorted(maps.Keys(p.RawStreams)) {
 		if p.GenerateProjectMetadata && path == "PROJECTwm" {
 			continue
 		}
-		w.AddStream(strings.Split(path, "/"), data)
+		w.AddStream(strings.Split(path, "/"), p.RawStreams[path])
+	}
+	for _, form := range serializedForms {
+		for _, path := range slices.Sorted(maps.Keys(form.Storages)) {
+			w.AddStorage(strings.Split(path, "/"), form.Storages[path])
+		}
+		for _, path := range slices.Sorted(maps.Keys(form.Streams)) {
+			w.AddStream(strings.Split(path, "/"), form.Streams[path])
+		}
 	}
 	if p.GenerateProjectMetadata {
 		projectWM, err := ovba.BuildProjectWM(projectSpecs, p.Props.CodePage)

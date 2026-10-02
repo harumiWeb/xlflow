@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
@@ -110,6 +111,19 @@ func TestProtectedAndForm(t *testing.T) {
 	if !hasForm {
 		t.Errorf("p4 should have UserForm1=ModuleForm")
 	}
+	if len(form.Forms) != 1 || form.Forms[0].Name != "UserForm1" {
+		t.Fatalf("p4 parsed forms = %v, want UserForm1", form.Forms)
+	}
+	for path := range form.RawStreams {
+		if strings.HasPrefix(path, "UserForm1/") {
+			t.Errorf("parsed Designer stream remained in RawStreams: %q", path)
+		}
+	}
+	for path := range form.StorageMetadata {
+		if path == "UserForm1" || strings.HasPrefix(path, "UserForm1/") {
+			t.Errorf("parsed Designer storage remained in generic metadata: %q", path)
+		}
+	}
 	// Unprotected -> IsProtected=false
 	p1, err := Read(loadCorpus(t, "p1_compiled"))
 	if err != nil {
@@ -117,6 +131,26 @@ func TestProtectedAndForm(t *testing.T) {
 	}
 	if p1.Protection.IsProtected {
 		t.Errorf("p1 should be IsProtected=false")
+	}
+}
+
+func TestReadWithoutFormsRetainsDesignerAsOpaqueStreams(t *testing.T) {
+	project, err := ReadWithoutForms(loadCorpus(t, "p4_form"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Forms) != 0 {
+		t.Fatalf("parsed forms = %d, want 0", len(project.Forms))
+	}
+	var hasFormModule, hasDesignerStream bool
+	for _, module := range project.Modules {
+		hasFormModule = hasFormModule || module.Type == ModuleForm
+	}
+	for path := range project.RawStreams {
+		hasDesignerStream = hasDesignerStream || strings.HasPrefix(path, "UserForm1/")
+	}
+	if !hasFormModule || !hasDesignerStream {
+		t.Fatalf("metadata read lost form topology: module=%v stream=%v", hasFormModule, hasDesignerStream)
 	}
 }
 

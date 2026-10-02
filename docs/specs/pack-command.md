@@ -66,6 +66,12 @@ the same MS-CFB case-insensitive comparison; conflicting case variants and
 storage/stream collisions are rejected on both read and write. Metadata fields
 that MS-CFB requires to be zero for their directory object type are rejected
 rather than normalized.
+Existing UserForm Designer subtrees are parsed into the lossless MS-OFORMS
+model and replayed through its no-op serializer instead of remaining generic
+opaque streams. Every `f`, `o`, optional `x`, `\x01CompObj`, `\x03VBFrame`,
+unknown stream, nested storage, and storage metadata entry remains byte-identical.
+Malformed length/count bookkeeping or an unsupported in-memory Designer edit
+fails with `pack_ambiguous_layout` before the workbook artifact is published.
 MS-OVBA compressed streams are limited to 64 MiB of decompressed data per
 stream, and malformed compressed chunks or truncated `dir` records are
 rejected. These failures are reported through `pack_ambiguous_layout`; `pack`
@@ -181,6 +187,10 @@ On success with `--json`, `pack` emits the standard envelope (`status`, `command
   "logs": []
 }
 ```
+
+`modules.carried_streams` counts every template stream preserved rather than
+regenerated, including opaque `RawStreams` and streams owned by parsed UserForm
+Designer subtrees.
 
 The backend identifier `pack.backend = "pure-go"` is deliberately distinct from the Excel-bridge `bridge` metadata defined in `cli-contract.md`, because `pack` uses no Excel bridge process. `pack.base` is `template` or `blank`; `pack.template` is present only for template mode. The `vbe_validation_skipped` warning is emitted on every successful run. Machine consumers must read `pack.vbe_validation` — not the absence of errors — to decide whether the artifact has been VBE-validated; it never is.
 

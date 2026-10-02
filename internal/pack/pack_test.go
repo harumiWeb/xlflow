@@ -142,6 +142,28 @@ func TestGenerateVBAProjectPreservesOpaqueStreams(t *testing.T) {
 	}
 }
 
+func TestGenerateVBAProjectCountsParsedDesignerStreams(t *testing.T) {
+	template := readTestFile(t, "corpus", "p4_form.bin")
+	container, err := cfb.Open(template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 0
+	for _, path := range container.Paths() {
+		root, _, _ := strings.Cut(path, "/")
+		if root != "VBA" && root != "PROJECT" {
+			want++
+		}
+	}
+	_, meta, err := generateVBAProject(template, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.CarriedStreams != want {
+		t.Fatalf("CarriedStreams = %d, want %d", meta.CarriedStreams, want)
+	}
+}
+
 func TestGenerateVBAProjectRoundTripStable(t *testing.T) {
 	template := readTestFile(t, "corpus", "p2_refs.bin")
 	out, err := GenerateVBAProject(template, nil)

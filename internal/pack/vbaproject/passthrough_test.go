@@ -2,11 +2,13 @@ package vbaproject
 
 import (
 	"bytes"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
 )
 
 // PROJECTwm is a root-level stream that lives outside the VBA storage and the
@@ -51,8 +53,8 @@ func TestWritePreservesRootStreamsOutsideVBA(t *testing.T) {
 
 // A UserForm contributes a code-behind module stream under VBA/ and a separate
 // root-level designer storage (UserForm1/{f, o, \x01CompObj, \x03VBFrame}) that
-// holds the form definition. Writing a form-bearing project must carry that
-// designer storage through byte-for-byte; the writer never models or edits it.
+// holds the form definition. Writing a form-bearing project must replay that
+// parsed designer storage byte-for-byte without applying semantic edits.
 func TestWriteFormPreservesDesignerStorage(t *testing.T) {
 	in := loadBin(t, "p4_form.bin")
 
@@ -152,12 +154,24 @@ func TestWriteFormEditCodeBehindKeepsDesigner(t *testing.T) {
 	}
 }
 
+func TestWriteFormRejectsUnsupportedDesignerMutation(t *testing.T) {
+	p, err := Read(loadBin(t, "p4_form.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Forms[0].Controls[0].Name = "RenamedControl"
+	_, err = Write(p)
+	if !errors.Is(err, oforms.ErrUnsupportedMutation) {
+		t.Fatalf("Write error = %v, want ErrUnsupportedMutation", err)
+	}
+}
+
 // A UserForm with container controls (Frame, MultiPage, Page) nests their data
 // in sub-storages of the designer storage, several levels deep (e.g.
 // UserForm1/i05/i07/o). Every stream in that subtree must round-trip
-// byte-for-byte: the writer rebuilds the nested storages from their stream paths
-// and never models the controls. Directory metadata is preserved separately so
-// container CLSIDs and timestamps survive alongside the opaque streams.
+// byte-for-byte: the writer rebuilds the nested storages from the lossless form
+// model. Directory metadata is preserved so container CLSIDs and timestamps
+// survive alongside the streams.
 func TestWriteNestedFormPreservesDesignerStorages(t *testing.T) {
 	in := loadBin(t, "p6_nested_form.bin")
 	orig, err := cfb.Open(in)

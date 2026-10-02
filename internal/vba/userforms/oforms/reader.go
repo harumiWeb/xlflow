@@ -48,7 +48,7 @@ func DiscoverForms(container *cfb.Container) []string {
 		if path == "" || strings.Contains(path, "/") || strings.EqualFold(path, "VBA") {
 			continue
 		}
-		if _, ok := container.Stream(path + "/f"); ok {
+		if _, _, ok := directStream(container, path, "f"); ok {
 			forms = append(forms, path)
 		}
 	}
@@ -83,6 +83,10 @@ func ReadForm(container *cfb.Container, storagePath string, codePage uint16) (*F
 		return nil, parseError(storagePath, "\x03VBFrame", 0, "VBFrame", "%v", err)
 	}
 	form.DesignerSource = StoredText{Text: designer, Raw: bytes.Clone(level.VBFrameRaw)}
+	form.sourceSignature, err = modelSignature(form)
+	if err != nil {
+		return nil, parseError(storagePath, "", 0, "Form", "build source signature: %v", err)
+	}
 	return form, nil
 }
 
@@ -90,11 +94,11 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 	if depth >= maxNestingDepth {
 		return nil, nil, parseError(path, "", 0, "container", "nesting exceeds %d levels", maxNestingDepth)
 	}
-	fRaw, ok := s.container.Stream(path + "/f")
+	fName, fRaw, ok := directStream(s.container, path, "f")
 	if !ok {
 		return nil, nil, parseError(path, "f", 0, "FormControl", "required stream is missing")
 	}
-	oRaw, ok := s.container.Stream(path + "/o")
+	oName, oRaw, ok := directStream(s.container, path, "o")
 	if !ok {
 		return nil, nil, parseError(path, "o", 0, "Object stream", "required stream is missing")
 	}
@@ -107,31 +111,39 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 	}
 	level.Path = path
 	level.FRaw = bytes.Clone(fRaw)
+	level.FStreamName = fName
 	level.ORaw = bytes.Clone(oRaw)
+	level.OStreamName = oName
 	level.StorageMeta, _ = s.container.Storage(path)
-	if xRaw, found := s.container.Stream(path + "/x"); found {
+	if xName, xRaw, found := directStream(s.container, path, "x"); found {
 		if len(xRaw) > maxDesignerStreamSize {
 			return nil, nil, parseError(path, "x", 0, "auxiliary stream", "stream exceeds %d-byte limit", maxDesignerStreamSize)
 		}
 		level.XRaw = bytes.Clone(xRaw)
+		level.XStreamName = xName
+		level.HasXStream = true
 	}
-	if compObj, found := s.container.Stream(path + "/\x01CompObj"); found {
+	if compObjName, compObj, found := directStream(s.container, path, "\x01CompObj"); found {
 		parsed, err := parseCompObj(compObj, path, s.codePage)
 		if err != nil {
 			return nil, nil, err
 		}
 		level.CompObj = &parsed
+		level.HasCompObj = true
 		// parseCompObj enforces the stream cap before cloning. Share that
 		// retained clone rather than allocating a second raw copy for the level.
 		level.CompObjRaw = parsed.Raw
+		level.CompObjName = compObjName
 	} else if root {
 		return nil, nil, parseError(path, "\x01CompObj", 0, "CompObj", "required stream is missing")
 	}
-	if vbFrame, found := s.container.Stream(path + "/\x03VBFrame"); found {
+	if vbFrameName, vbFrame, found := directStream(s.container, path, "\x03VBFrame"); found {
 		if len(vbFrame) > maxDesignerStreamSize {
 			return nil, nil, parseError(path, "\x03VBFrame", 0, "VBFrame", "stream exceeds %d-byte limit", maxDesignerStreamSize)
 		}
 		level.VBFrameRaw = bytes.Clone(vbFrame)
+		level.VBFrameName = vbFrameName
+		level.HasVBFrame = true
 	} else if root {
 		return nil, nil, parseError(path, "\x03VBFrame", 0, "VBFrame", "required stream is missing")
 	}
@@ -217,7 +229,9 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 func (s *readState) extraStreams(path string) (map[string][]byte, error) {
 	prefix := path + "/"
 	known := map[string]struct{}{
-		"f": {}, "o": {}, "x": {}, "\x01compobj": {}, "\x03vbframe": {},
+		cfb.DirectoryNameKey("f"): {}, cfb.DirectoryNameKey("o"): {},
+		cfb.DirectoryNameKey("x"): {}, cfb.DirectoryNameKey("\x01CompObj"): {},
+		cfb.DirectoryNameKey("\x03VBFrame"): {},
 	}
 	extra := map[string][]byte{}
 	for _, candidate := range s.container.Paths() {
@@ -225,7 +239,7 @@ func (s *readState) extraStreams(path string) (map[string][]byte, error) {
 		if !ok || rel == "" || strings.Contains(rel, "/") {
 			continue
 		}
-		if _, found := known[strings.ToLower(rel)]; found {
+		if _, found := known[cfb.DirectoryNameKey(rel)]; found {
 			continue
 		}
 		body, _ := s.container.Stream(candidate)
@@ -238,6 +252,20 @@ func (s *readState) extraStreams(path string) (map[string][]byte, error) {
 		return nil, nil
 	}
 	return extra, nil
+}
+
+func directStream(container *cfb.Container, storagePath, streamName string) (string, []byte, bool) {
+	prefix := storagePath + "/"
+	want := cfb.DirectoryNameKey(streamName)
+	for _, candidate := range container.Paths() {
+		rel, ok := strings.CutPrefix(candidate, prefix)
+		if !ok || rel == "" || strings.Contains(rel, "/") || cfb.DirectoryNameKey(rel) != want {
+			continue
+		}
+		body, found := container.Stream(candidate)
+		return rel, body, found
+	}
+	return "", nil, false
 }
 
 func (s *readState) childStorages(path string) (map[int32]string, error) {

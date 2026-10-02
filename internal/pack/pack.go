@@ -229,7 +229,7 @@ func generateVBAProject(template []byte, sources []SourceModule) ([]byte, PackMe
 	if err != nil {
 		return nil, PackMeta{}, err
 	}
-	meta.CarriedStreams = len(project.RawStreams)
+	meta.CarriedStreams = project.CarriedStreamCount()
 	out, err := vbaproject.Write(project)
 	if err != nil {
 		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)

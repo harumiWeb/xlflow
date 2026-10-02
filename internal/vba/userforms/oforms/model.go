@@ -12,6 +12,12 @@ type Form struct {
 	CompObj        CompObj
 	Levels         []*Level
 	Controls       []*Control
+
+	// sourceSignature binds the decoded model to the exact persistence state
+	// accepted by ReadForm. Issue #881 is intentionally a no-op serializer:
+	// callers must not mutate either decoded fields or retained raw bytes until
+	// the explicit mutation layer is added.
+	sourceSignature [32]byte
 }
 
 // Level is one parent-control storage: the form itself or a nested container.
@@ -23,11 +29,19 @@ type Level struct {
 	Controls    []*Control
 
 	FRaw         []byte
+	FStreamName  string
 	ORaw         []byte
+	OStreamName  string
 	XRaw         []byte
+	XStreamName  string
+	HasXStream   bool
 	CompObj      *CompObj
 	CompObjRaw   []byte
+	CompObjName  string
+	HasCompObj   bool
 	VBFrameRaw   []byte
+	VBFrameName  string
+	HasVBFrame   bool
 	ExtraStreams map[string][]byte
 
 	MouseIconRaw  []byte

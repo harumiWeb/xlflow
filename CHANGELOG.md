@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added lossless pure-Go MS-OFORMS serialization for existing UserForms.
+  Parsed Designer subtrees now have explicit VBA-project ownership instead of
+  remaining generic opaque streams; simple, nested Frame/MultiPage, unknown,
+  resource, padding, code-page text, and storage metadata bytes are replayed
+  unchanged. Corrupt size/count bookkeeping and unsupported model mutation
+  fail before `vbaProject.bin` publication.
 - Added `xlflow push --backend file`, a pure-Go saved-workbook push for
   `.xlsm` that rebuilds `xl/vbaProject.bin` from the tracked source tree and
   atomically replaces the workbook without Excel, COM, VBIDE, or the bridge.
