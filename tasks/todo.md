@@ -10,6 +10,52 @@ from unresolved IR and can lose target evidence and possible reachability.
 4. [x] Pass 2 reviewed `4a0fda3c`: the P2 is resolved, the focused callback
        regression passes independently, and no confirmed findings remain.
 
+# PR #906 review follow-up
+
+CodeQL #10 identifies unchecked addition in a capacity hint; use the existing
+raw length directly. The ADR's graduation boundary is historical and must be
+identified as superseded by the later UserForm amendments. The repeated-root-
+Caption report is not reproduced: applyPersistenceEdit updates the clone's
+Caption before the next iteration, confirmed by the exact reported sequence.
+
+1. [x] Remove the allocation-size sum and verify caption byte preservation.
+2. [x] Cover repeated root Caption edits and classify the review with evidence:
+       Original -> Changed -> Original passes without changing ApplyEdits.
+3. [x] Mark historical ADR authority consistently with current amendments.
+4. [x] Run full/focused tests, affected race/vet, docs and formatting checks.
+
+Publish the verified changes to PR #906 and reply with each classification.
+
+# Issue #887 final-review Pass 1 follow-up
+
+Validated against `c87cac40`: the cleanup PID race, workspace reparse-point
+boundary and unstable inventory errors are valid and in scope. Duplicate
+MSForms-reference handling is unchanged from the parent commit; its VBE
+acceptance remains unverified and is a separate follow-up, not a review fix.
+
+1. [x] Pin the verified process handle through cleanup; never kill by PID.
+2. [x] Reject existing reparse-point ancestors before creating a workspace.
+3. [x] Sort inventory validation keys and add multi-error regressions.
+4. [x] Run focused/full verification and the real Excel gate.
+5. [x] Commit fixes and complete the bounded Pass 2 review.
+
+Pass 2 reviewed `8af2ff79` with gpt-6-luna xhigh: PASS, all three in-scope
+findings resolved, no new confirmed findings. Independent harness and
+inventory regressions passed; retained Excel evidence was read back.
+
+# Issue #887
+
+- [x] Add explicit template/source UserForm topology configuration (default template).
+- [x] Discover canonical template specs alongside legacy code-only forms; retain explicit property intent.
+- [x] Plan supported Designer updates/additions/removals atomically with lossless preservation.
+- [x] Reconcile project metadata and reparse output before publication.
+- [x] Cover Go/CLI regressions and run focused/full/race/vet/lint checks.
+- [x] Verify template and blank artifacts in real Excel, including save/reopen and final-form removal.
+- [x] Update ADR/spec/config docs/CHANGELOG and review the complete diff.
+
+Local commands, retained workspaces and results:
+`internal/pack/testdata/userform-integration/README.md`.
+
 # PR #904 review follow-up
 
 REGISTERED aggregate-size and malformed Forms LIBID findings are valid.

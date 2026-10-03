@@ -12,6 +12,8 @@ import (
 	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/filepush"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/compiler"
 	"github.com/harumiWeb/xlflow/internal/workbookuse"
 )
 
@@ -220,6 +222,34 @@ func TestFilePushErrorCodeMapping(t *testing.T) {
 		if got := filePushErrorCode(tc.err); got != tc.want {
 			t.Fatalf("filePushErrorCode(%v) = %q, want %q", tc.err, got, tc.want)
 		}
+	}
+}
+
+func TestFilePushUserFormEngineErrorMapping(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "compiler generation unsupported",
+			err:  &compiler.Error{Code: compiler.GenerationUnsupported, Form: "Login", Reason: "canonical spec required"},
+			want: "push_userform_generation_unsupported",
+		},
+		{
+			name: "vbaproject forms reference",
+			err:  &vbaproject.UserFormGenerationError{Code: vbaproject.UserFormFormsReferenceRequired, Form: "Login", Reason: "Forms reference required"},
+			want: "push_forms_reference_required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := filePushErrorCode(tc.err); got != tc.want {
+				t.Fatalf("filePushErrorCode(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+			if got := filePushExitCode(tc.err); got != output.ExitValidation {
+				t.Fatalf("filePushExitCode(%v) = %d, want validation", tc.err, got)
+			}
+		})
 	}
 }
 

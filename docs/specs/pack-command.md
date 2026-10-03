@@ -40,13 +40,17 @@ does not change output or behavior.
 
 ### Canonical UserForm inputs
 
-Blank mode discovers forms from the flat `specs/` directory under `[src].forms`.
+Blank and template modes discover forms from the flat `specs/` directory under `[src].forms`.
 Each YAML/YML/JSON filename must match `form.name`; duplicate specs, orphan
-artifacts, nested directories and component/CFB name collisions fail with
+artifacts, nested canonical directories and component/CFB name collisions fail with
 `pack_ambiguous_layout`. The supported subset is empty forms plus the eleven
 flat built-in classes specified in `ms-oforms.md`. Containers, custom ActiveX,
 Picture resources and unsupported persisted list state fail with
 `pack_userform_generation_unsupported` before output publication.
+
+Template mode also retains recursive discovery of legacy `.frm` files. A flat
+canonical spec or sidecar can attach to a uniquely named legacy form; duplicate
+identities remain ambiguous. Blank generation requires flat canonical inputs.
 
 Designer authority is always the canonical spec. With `code_source=sidecar`,
 matching `code/<Name>.bas` wins, then matching `.frm` code, then empty code.
@@ -56,6 +60,11 @@ component attributes and GUIDs, and only its code body is used. `.frx` and
 unused compatibility Designer bytes do not participate in generation.
 The file-pull compatibility warning does not block canonical generation;
 Excel-backed push retains its existing synchronization preflight.
+
+Root form Caption is persisted in both the FormControl record and `VBFrame`;
+it must be representable in the template project code page (or
+`[pack.blank].code_page`). This keeps Excel Designer and runtime instances in
+agreement. Control captions and values retain their independent Unicode encoding.
 
 Form additions are sorted by component name. The project-level Forms reference
 is ensured exactly once; complete existing REGISTERED/CONTROL references and
@@ -136,14 +145,44 @@ unchanged.
 
 If generation, validation, or publication fails, an existing destination is left byte-for-byte unchanged. A destination that is locked or cannot be replaced safely fails with `pack_output_busy` (exit 3); a publication that cannot be performed atomically fails with `pack_output_replace_failed` (exit 3); staging or structural-validation failures remain `pack_write_failed` (exit 3). A cleanup failure before publication is joined to and returned with the primary failure. When temporary cleanup fails after a successful publication the command still succeeds, reports `output.temporary_cleanup.status="failed"` with `residual_path`, and emits a `pack_temporary_cleanup_failed` warning.
 
+## Template UserForm authority
+
+`[pack].userform_topology` accepts `template` (default) and `source`. Unknown
+values are configuration errors. Default template authority keeps forms absent
+from source. Explicit source authority removes omitted forms, including an
+empty source form set, and requires canonical specs for all supplied forms.
+Blank mode always uses source form authority independently of this setting.
+
+For a supplied canonical spec, template pack applies supported Designer
+properties and code. The complete control list must match names, types, parent
+relationships and sibling order. IDs are local spec identities and are mapped
+by control names to the binary baseline. Omitted properties retain template
+values; explicit empty text, false and zero remain authoring input. Observed
+snapshot fields and warnings do not request edits. The compiler rejects
+unsupported edits (including root dimensions and control topology changes)
+instead of discarding opaque state through regeneration.
+
+New supported forms use the same compiler and reference admission as blank
+pack. Existing module attributes and GUIDs survive code updates. Removal
+deletes the owned Designer subtree, code module, BaseClass declaration,
+Workspace entry and PROJECTwm mapping together, retaining all references.
+An unchanged Designer subtree remains byte-identical. The completed project
+is serialized, reparsed and compared with the planned modules, Designers,
+ownership and reference records before artifact publication.
+
 ## Supported source
 
 - **Standard modules** (`.bas`) and **class modules** (`.cls`): the source tree is authoritative. Modules absent from the template are added, modules absent from source are removed, and renames are represented as removal of the old component plus addition of the new component. The textual `PROJECT` stream, `dir/PROJECTMODULES`, and `VBA/<stream>` entries are regenerated as one consistent component set.
 - **Document modules**: supported only where they map safely against the template's existing document modules.
-- **UserForm code-behind**: a form already present in the template has its code-behind updated from source, honoring `[userform].code_source`. In `frm` mode the code is read from `src/forms/*.frm`; in `sidecar` mode (the default) the authoritative code-behind is `src/forms/code/<FormName>.bas`, merged into the form in memory (the on-disk `.frm`/`.bas` are never modified — `pack` does not write sources). `src/forms/code` is a flat reserved directory; sidecar subdirectories are unsupported. In both modes only the code-behind is applied; the form's designer storage is carried through byte-for-byte. A matching `.frx` is inventoried and validated as a related source artifact but is not written into the packed project; `pack` never authors or modifies form layout. A `.frm` whose form is not in the template fails with `pack_userform_generation_unsupported`; a sidecar carrying `Attribute VB_*` header lines, using a subdirectory, or with no matching `.frm`, fails with `pack_ambiguous_layout`.
-- **Existing UserForm designer streams in the template**: carried through byte-for-byte, untouched. Their containing storage directory metadata is preserved as described above. `pack` does not generate or modify form layout.
+- **Canonical UserForms**: supported new forms and existing Designer property updates follow the authority contract above; code follows `[userform].code_source`. Sources and compatibility artifacts are never rewritten.
+- **Legacy UserForm code-behind**: `.frm`-only existing forms preserve their Designer and update code from `.frm` or the configured sidecar. Artifact identity and sidecar layout remain validated.
 
-In template mode, document-module and UserForm topology remains template-authoritative. Omitting their source does not remove them; source may update code only when the component already exists in the template. A source-only document module is rejected as `pack_ambiguous_layout`, and a source-only UserForm is rejected as `pack_userform_generation_unsupported`. Blank mode instead follows the fixed document topology above and generates supported canonical-spec UserForms.
+Document-module topology remains template-authoritative: omission preserves
+the component and a source-only document module fails with
+`pack_ambiguous_layout`. UserForms follow the explicit authority contract above.
+Legacy existing forms without canonical specs retain code-only updates and
+lossless Designer preservation under the default topology. A source-only form
+without a canonical spec fails with `pack_userform_generation_unsupported`.
 
 ## Code pages and component names
 
@@ -161,31 +200,33 @@ When regenerating `dir/PROJECTMODULES`, `pack` preserves the module-level metada
 
 Before building the source plan, `pack` validates the complete managed VBA source scope as UTF-8 without BOM. The scan covers configured module, class, form, and workbook roots plus the legacy top-level `tests/` root. Configured roots use the same separator normalization and absolute-path resolution as the pack source inventory, including absolute roots outside the project; external diagnostic paths remain absolute. This pack-only compatibility does not relax the project-containment rules for explicit `encoding check` or `encoding convert` paths. The scan includes `.frm` designer files even in sidecar mode and includes sidecar `.bas` files; binary `.frx` files are excluded. Invalid input returns `source_encoding_invalid` (exit 1) with the same source path, byte position, status, and remediation suggestions as `encoding check`. No source planning, template payload read, `vbaProject.bin` generation, or output publication occurs after this failure. `pack` never converts source implicitly; use `encoding convert --from cp932` explicitly for eligible CP932 input.
 
-After encoding validation, `pack` builds a deterministic, read-only plan. Source discovery is shared with `build`, but `[build].exclude` is deliberately not applied to `pack`. Every configured source root must exist and be readable. Unknown extensions, invalid component names, case-insensitive duplicate names across component types, incomplete or ambiguous UserForm artifacts, and filename/`Attribute VB_Name` identity mismatches fail before project mutation or output publication. Template mode additionally rejects source-only document modules and source-only UserForms; blank mode applies its fixed topology contract.
+After encoding validation, `pack` builds a deterministic, read-only plan. Source discovery is shared with `build`, but `[build].exclude` is deliberately not applied to `pack`. Every configured source root must exist and be readable. Unknown extensions, invalid component names, case-insensitive duplicate names across component types, incomplete or ambiguous UserForm artifacts, and filename/`Attribute VB_Name` identity mismatches fail before project mutation or output publication. Template mode rejects source-only document modules and form additions without canonical specs; blank mode applies its fixed document topology contract.
 
-The plan records each component's primary source path, related UserForm artifact paths, component type, topology authority, code authority, and action (`add`, `update`, `remove`, or `preserve`). Existing template order is retained. Source-authoritative standard/class additions are appended in stable type/name/path order. Standard/class topology and code are source-authoritative; document topology is template-authoritative while its supplied code is source-authoritative; UserForm topology/designer state is template-authoritative while its code follows `[userform].code_source`. Source files, the template, and the output artifact are not modified while the plan is built.
+The plan records each component's primary source path, related UserForm artifact paths, component type, topology authority, code authority, and action (`add`, `update`, `remove`, or `preserve`). Existing template order is retained. Source-authoritative standard/class additions are appended in stable type/name/path order. Standard/class topology and code are source-authoritative; document topology is template-authoritative while its supplied code is source-authoritative; UserForm topology follows `[pack].userform_topology`, Designer intent comes from canonical specs when supplied, and code follows `[userform].code_source`. Source files, the template, and the output artifact are not modified while the plan is built.
 
 ## Unsupported cases (fail-loud)
 
 Each unsupported case is a specific, loud error. `pack` never falls back to best-effort behavior.
 
-| Case                                                    | Error code                                      | Exit |
-| ------------------------------------------------------- | ----------------------------------------------- | ---- |
-| active xlflow session / live workbook                   | `pack_active_session`                           | 2    |
-| in-place overwrite of the template/source workbook      | `pack_in_place_overwrite`                       | 2    |
-| aliased template/workbook path via symlink/junction     | `pack_in_place_overwrite`                       | 2    |
-| output locked or open in another process                | `pack_output_busy`                              | 3    |
-| atomic publication impossible (no fallback)             | `pack_output_replace_failed`                    | 3    |
-| protected VBA project                                   | `pack_protected_project`                        | 1    |
-| signed VBA project                                      | `pack_signed_project`                           | 1    |
-| managed source is not UTF-8 without BOM                 | `source_encoding_invalid`                       | 1    |
-| creating a new template UserForm / unsupported Designer | `pack_userform_generation_unsupported`          | 1    |
-| blank engine form input without a canonical spec        | `pack_blank_userform_unsupported`               | 1    |
-| unknown or ambiguous VBA project layout                 | `pack_ambiguous_layout`                         | 1    |
-| missing `--out`, bad extension, other arg errors        | `pack_args_invalid`                             | 2    |
-| template/source workbook not found or unreadable        | `pack_template_not_found`                       | 2    |
-| source inventory or artifact staging failure            | `pack_source_read_failed` / `pack_write_failed` | 3    |
-| `.xlsb` template selected by template mode              | `workbook_format_unsupported`                   | 2    |
+| Case                                                      | Error code                                                                                                                         | Exit |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| active xlflow session / live workbook                     | `pack_active_session`                                                                                                              | 2    |
+| in-place overwrite of the template/source workbook        | `pack_in_place_overwrite`                                                                                                          | 2    |
+| aliased template/workbook path via symlink/junction       | `pack_in_place_overwrite`                                                                                                          | 2    |
+| output locked or open in another process                  | `pack_output_busy`                                                                                                                 | 3    |
+| atomic publication impossible (no fallback)               | `pack_output_replace_failed`                                                                                                       | 3    |
+| protected VBA project                                     | `pack_protected_project`                                                                                                           | 1    |
+| signed VBA project                                        | `pack_signed_project`                                                                                                              | 1    |
+| managed source is not UTF-8 without BOM                   | `source_encoding_invalid`                                                                                                          | 1    |
+| unsupported new Designer / missing canonical spec         | `pack_userform_generation_unsupported`                                                                                             | 1    |
+| invalid or conflicting form generation                    | `pack_userform_generation_invalid` / `pack_userform_generation_conflict`                                                           | 1    |
+| unsupported, invalid, stale or conflicting Designer edits | `pack_userform_edit_unsupported` / `pack_userform_edit_invalid` / `pack_userform_edit_stale_input` / `pack_userform_edit_conflict` | 1    |
+
+| unknown or ambiguous VBA project layout | `pack_ambiguous_layout` | 1 |
+| missing `--out`, bad extension, other arg errors | `pack_args_invalid` | 2 |
+| template/source workbook not found or unreadable | `pack_template_not_found` | 2 |
+| source inventory or artifact staging failure | `pack_source_read_failed` / `pack_write_failed` | 3 |
+| `.xlsb` template selected by template mode | `workbook_format_unsupported` | 2 |
 
 ## Output / JSON contract
 
@@ -223,9 +264,9 @@ On success with `--json`, `pack` emits the standard envelope (`status`, `command
 }
 ```
 
-`modules.carried_streams` counts every template stream preserved rather than
-regenerated, including opaque `RawStreams` and streams owned by parsed UserForm
-Designer subtrees.
+`modules.carried_streams` counts opaque and Designer template streams whose
+paths and bytes survive unchanged. No-op canonical specs still count as
+preserved data; newly generated and changed streams do not.
 
 The backend identifier `pack.backend = "pure-go"` is deliberately distinct from the Excel-bridge `bridge` metadata defined in `cli-contract.md`, because `pack` uses no Excel bridge process. `pack.base` is `template` or `blank`; `pack.template` is present only for template mode. The `vbe_validation_skipped` warning is emitted on every successful run. Machine consumers must read `pack.vbe_validation` — not the absence of errors — to decide whether the artifact has been VBE-validated; it never is.
 
@@ -290,12 +331,27 @@ This is release-gate evidence for representative builds. It does not change
 never validates, and artifacts produced in the field remain unvalidated until
 opened in Excel.
 
+`scripts/test-pack-userforms-e2e.ps1 -WorkspacePath <fresh-tmp-workspace>`
+adds the canonical Designer integration gate: blank generation, template
+addition/property edits, default preservation, explicit source-authoritative
+removal including the final form, and unsupported-operation publication
+failure. It verifies trusted generated artifacts in real Excel, runs a sentinel,
+saves/reopens them, checks Designer/reference/component state and records
+cleanup evidence. This developer-only script is never invoked by ordinary
+tests or CI.
+
+Issue #887 local results and retained workspace commands are recorded in
+[`userform-integration/README.md`](../../internal/pack/testdata/userform-integration/README.md).
+
 ## Staged UserForm plan
 
 See ADR-0012 for the rationale. Summary:
 
 - **Stage 1 (implemented)**: carry existing template designer streams through untouched; never generate forms.
-- **Stage 2 (implemented)**: update the code-behind of a form already in the template, keeping the template's designer state. The code-behind source follows `[userform].code_source` — `frm` (code in the `.frm`) or `sidecar` (code in `src/forms/code/<FormName>.bas`, merged in memory); `pack` never writes the source tree. A `.frm` whose form is not in the template returns `pack_userform_generation_unsupported` (creating a form is Stage 3). A matching `.frx` is inventoried and validated as a related source artifact but is not written into the packed project.
-- **Stage 3**: full reconstruction from exported `.frm`/`.frx` — a separate, higher-risk phase.
+- **Stage 2 (implemented)**: update the code-behind of a form already in the template, keeping the template's designer state. The code-behind source follows `[userform].code_source` — `frm` (code in the `.frm`) or `sidecar` (code in `src/forms/code/<FormName>.bas`, merged in memory); `pack` never writes the source tree. A new form requires a canonical spec; `.frm` alone fails with `pack_userform_generation_unsupported`. A matching `.frx` is inventoried and validated as a related source artifact but is not written into the packed project.
+- **Stage 3 (supported subset implemented)**: generate new Designers from
+  canonical specs in blank/template modes, apply supported lossless property
+  edits, and explicitly reconcile source-authoritative form topology.
+  Compatibility `.frm`/`.frx` Designer bytes are not authoring input.
 
 The reference implementation has demonstrated the Stage 1 / Stage 2 round-trip against real Excel, including a nested Frame/MultiPage form whose designer sub-storages round-trip byte-for-byte. That informs the staging but is not part of the MVP.

@@ -116,6 +116,40 @@ func TestBlankPackCodePageDefaultsAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPackUserFormTopologyDefaultsAndRoundTrip(t *testing.T) {
+	cfg := Default()
+	if cfg.Pack.UserFormTopology != "template" {
+		t.Fatalf("pack userform topology default = %q, want template", cfg.Pack.UserFormTopology)
+	}
+	cfg.Pack.UserFormTopology = "source"
+	dir := t.TempDir()
+	if err := Write(filepath.Join(dir, FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Pack.UserFormTopology != "source" {
+		t.Fatalf("pack userform topology = %q, want source", loaded.Pack.UserFormTopology)
+	}
+}
+
+func TestLoadRejectsInvalidPackUserFormTopology(t *testing.T) {
+	for _, value := range []string{"invalid", ""} {
+		t.Run(value, func(t *testing.T) {
+			dir := t.TempDir()
+			body := "[pack]\nuserform_topology = " + strconv.Quote(value) + "\n"
+			if err := os.WriteFile(filepath.Join(dir, FileName), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(dir); err == nil || err.Error() != "pack.userform_topology must be one of template, source" {
+				t.Fatalf("invalid topology error = %v", err)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsUnknownPackConfigurationKeys(t *testing.T) {
 	tests := map[string]struct {
 		body string

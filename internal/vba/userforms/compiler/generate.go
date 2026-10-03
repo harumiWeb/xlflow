@@ -210,6 +210,13 @@ func CompileNew(input spec.FormSpec, codePage uint16) (*oforms.Form, error) {
 		if errors.Is(err, oforms.ErrUnsupportedEdit) {
 			code = GenerationUnsupported
 		}
+		if detail, ok := errors.AsType[*oforms.EditError](err); ok && detail.Control == "" && detail.Property == "Caption" {
+			property := "form.caption"
+			if form.Form.Build != nil && form.Form.Build.Caption != nil {
+				property = "form.build.caption"
+			}
+			return nil, &Error{Code: code, Form: form.Form.Name, Property: property, Reason: detail.Error(), Cause: err}
+		}
 		return nil, &Error{Code: code, Form: form.Form.Name, Reason: err.Error(), Cause: err}
 	}
 	return result, nil

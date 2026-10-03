@@ -21,10 +21,26 @@ unsupported persisted list state fail before publication.
 
 `pack` is the stable, pure-Go release path. It is cross-platform and
 Excel-independent: standard/class topology comes from source, workbook and
-document topology comes from the template, and existing UserForm designers are
-preserved while their code-behind can be updated. Creating a new UserForm in
-template mode remains unsupported. `pack` does not compile or execute VBA, so successful JSON keeps
+document topology comes from the template. Template mode also adds supported
+UserForms from canonical specs and edits supported properties of existing
+Designers. The spec lists every control; omitted properties retain template
+values. Existing forms without a spec retain legacy code-only updates.
+`pack` does not compile or execute VBA, so successful JSON keeps
 `pack.backend = "pure-go"` and `pack.vbe_validation = "not_performed"`.
+
+Omitted template forms are preserved by default. To make the source form set
+authoritative, including deleting the final form, configure:
+
+```toml
+[pack]
+userform_topology = "source"
+```
+
+This requires canonical specs for all forms remaining in source. The default
+is `"template"`; blank mode always uses the source form set. New Frame/MultiPage
+generation, existing control topology changes, root-dimension edits and
+unsupported property edits fail before publication with specific
+`pack_userform_generation_*` or `pack_userform_edit_*` errors.
 
 It validates every managed `.bas`, `.cls`, and `.frm` file as UTF-8 without BOM before source planning or binary generation. Invalid input returns `source_encoding_invalid`; run `xlflow encoding check`, then use `xlflow encoding convert --from cp932` only for eligible CP932 source. Open the resulting artifact in real Excel to compile/run a sentinel macro before publishing. See the repository's [pack specification](https://github.com/harumiWeb/xlflow/blob/main/docs/specs/pack-command.md) for release-gate details.
 

@@ -97,6 +97,39 @@ and are identified by OriginalTypeLib. Excel release-gate evidence verifies
 actual resolution, compilation and save/reopen rather than assuming REGISTERED
 and CONTROL forms are operationally interchangeable.
 
+### Amendment: template UserForm source planning (Issue #887)
+
+Template pack now generates supported forms from canonical specs and applies
+supported property edits to existing lossless Designers. Compatibility
+`.frm`/`.frx` Designer bytes remain generated artifacts; `.frx` is not needed
+to author a supported form. Legacy `.frm`-only existing forms retain code-only
+updates, preserving compatibility with earlier pack workflows.
+
+`[pack].userform_topology` defaults to `template`, retaining omitted forms.
+Explicit `source` authority removes omitted forms, including the final form,
+and requires canonical specs for all supplied forms. Deletion is opt-in because
+partial source trees have historically preserved template forms; inferring
+authority from the presence of a spec would silently delete unrelated forms
+and could not represent an intentionally empty form set.
+
+An existing spec lists the complete control topology, while omitted properties
+retain binary values. Supported edits preserve opaque records and existing
+component identities. Unsupported topology/property changes reject the whole
+plan; pack never rebuilds an existing Designer to bypass those restrictions.
+Removal reconciles module, Designer, PROJECT declarations, Workspace entries,
+and PROJECTwm while retaining all references that other code may still use.
+Writer output is reparsed and compared with the planned project before atomic
+publication. This adds structural validation without changing the permanent
+no-VBE-validation contract. Frame generation and MultiPage editing remain
+separate follow-ups.
+
+The Excel gate also established that inspecting root Caption through Designer
+does not establish runtime behavior: instantiated forms use the VBFrame text
+value. Generation and explicit root-caption edits therefore keep FormControl
+and VBFrame values consistent. Values unrepresentable in the project code page
+are rejected rather than silently changing the runtime caption. This restriction
+does not apply to control captions or values, which retain Unicode persistence.
+
 ### Amendment: stable graduation (Issue #858)
 
 The pre-stable stages are complete. `pack` is now a stable command and no
@@ -104,7 +137,10 @@ longer requires `--experimental`. The first stable release accepts that flag as
 a hidden deprecated no-op so existing automation can migrate without changing
 artifact behavior; it is not part of the stable help, JSON, or error contract.
 
-The stable authority boundary is:
+At stable graduation, the authority boundary was as follows. The UserForm
+restrictions in this historical boundary are superseded by the canonical
+blank-generation and template-source-planning amendments above (Issues #883
+and #887).
 
 - standard/class component topology and code are source-authoritative;
 - document topology is template-authoritative and matched document code is
@@ -175,7 +211,9 @@ content validation failure and never produces a best-effort artifact.
 - Negative: stable compatibility still depends on maintaining pure-Go fixtures
   plus a manual Windows/Excel release gate; PR CI alone cannot prove VBE
   compile/runtime compatibility.
-- Negative: blank mode is intentionally not a general workbook-layout generator; projects needing sheets beyond `Sheet1` or UserForms still require a template.
+- Negative: blank mode is intentionally not a general workbook-layout generator;
+  projects needing sheets beyond `Sheet1` still require a template. UserForm
+  generation is limited to the supported canonical-spec subset.
 
 ## Alternatives Considered
 

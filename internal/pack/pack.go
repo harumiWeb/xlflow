@@ -6,7 +6,6 @@ package pack
 import (
 	"archive/zip"
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -32,26 +31,24 @@ const (
 	// ModuleTypeDocument is an Excel host document module, such as ThisWorkbook or a sheet module.
 	ModuleTypeDocument ModuleType = "document"
 
-	// ModuleTypeForm updates existing template code or creates a blank-mode
-	// Designer from canonical FormSpec.
+	// ModuleTypeForm updates template code/Designer or creates a supported
+	// Designer from canonical FormSpec in either pack mode.
 	ModuleTypeForm ModuleType = "form"
 )
 
 // SourceModule is one source-tree module to apply to a template vbaProject.bin.
 //
-// Source is the disk-form text read from a .bas/.cls/.frm file. The complete set of supplied standard
-// and class modules is authoritative: missing template modules are removed and new modules are added.
-// Document modules are replaced by exact module name match against an existing template document
-// module. A UserForm's code-behind is replaced when the form already exists in the template; its
-// designer layout is preserved. Blank mode creates new Designers from FormSpec
-// and interprets Source as code-only text for those forms.
+// Source is disk-form text for ordinary modules and legacy .frm inputs, or
+// code-only text when FormSpec is supplied. Standard/class topology is source
+// authoritative; document components are matched against template hosts.
+// Canonical UserForms author new Designers or edit supported template state.
 type SourceModule struct {
 	SourcePath   string
 	RelatedPaths []string
 	Name         string
 	Type         ModuleType
 	Source       string
-	// FormSpec is authoring intent used only for new blank-mode Designers.
+	// FormSpec is canonical Designer intent; nil retains legacy code-only updates.
 	FormSpec *spec.FormSpec
 }
 
@@ -90,7 +87,7 @@ func BuildBlankWorkbook(sources []SourceModule, opts BlankOptions) ([]byte, Pack
 		switch source.Type {
 		case ModuleTypeForm:
 			if source.FormSpec == nil {
-				return nil, PackMeta{}, fmt.Errorf("%w: canonical spec required for %s", ErrBlankUserFormUnsupported, sourceLabel(source))
+				return nil, PackMeta{}, &compiler.Error{Code: compiler.GenerationUnsupported, Form: source.Name, Reason: "canonical spec required"}
 			}
 			if source.FormSpec.Form.Name != source.Name {
 				return nil, PackMeta{}, fmt.Errorf("%w: spec/module identity mismatch for %s", ErrAmbiguousLayout, sourceLabel(source))
@@ -134,19 +131,15 @@ func BuildBlankWorkbook(sources []SourceModule, opts BlankOptions) ([]byte, Pack
 	for _, source := range formSources {
 		form, err := compiler.CompileNew(*source.FormSpec, project.Props.CodePage)
 		if err != nil {
-			category := ErrAmbiguousLayout
-			if detail, ok := errors.AsType[*compiler.Error](err); ok && detail.Code == compiler.GenerationUnsupported {
-				category = ErrUserFormGenerationUnsupported
-			}
-			return nil, PackMeta{}, fmt.Errorf("%w: %s: %v", category, sourceLabel(source), err)
+			return nil, PackMeta{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
 		}
 		module, err := vbaproject.NewUserFormModule(form, source.Source, project.Props.CodePage)
 		if err != nil {
-			return nil, PackMeta{}, fmt.Errorf("%w: %s: %v", ErrAmbiguousLayout, sourceLabel(source), err)
+			return nil, PackMeta{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
 		}
 		project, err = vbaproject.WithNewUserForm(project, form, module)
 		if err != nil {
-			return nil, PackMeta{}, fmt.Errorf("%w: %s: %v", ErrAmbiguousLayout, sourceLabel(source), err)
+			return nil, PackMeta{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
 		}
 		meta.Form++
 	}
@@ -154,7 +147,7 @@ func BuildBlankWorkbook(sources []SourceModule, opts BlankOptions) ([]byte, Pack
 	if err != nil {
 		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 	}
-	if _, err := vbaproject.Read(vbaProject); err != nil {
+	if err := validateProjectReadback(project, vbaProject); err != nil {
 		return nil, PackMeta{}, fmt.Errorf("%w: blank project readback: %v", ErrAmbiguousLayout, err)
 	}
 
@@ -185,13 +178,13 @@ func BuildBlankWorkbook(sources []SourceModule, opts BlankOptions) ([]byte, Pack
 // GenerateVBAProject returns a regenerated vbaProject.bin based on template.
 //
 // The engine reconstructs the standard and class component set from sources and
-// replaces supplied unambiguous document and UserForm code. Project records,
-// references, codepage, document/UserForm topology, and opaque streams such as
-// existing UserForm designer storages are carried through from the template.
-// Unsupported content returns one of the exported sentinel errors so the CLI can
-// map it to the pack error contract.
-func GenerateVBAProject(template []byte, sources []SourceModule) ([]byte, error) {
-	out, _, err := generateVBAProject(template, sources)
+// replaces supplied unambiguous document and UserForm code. Canonical specs
+// create or edit supported Designers; options select template or source form
+// topology. Project records, references, codepage, document hosts, and unedited
+// opaque Designer state are preserved. Capability failures retain their typed
+// compiler or VBA-project errors for the CLI error contract.
+func GenerateVBAProject(template []byte, sources []SourceModule, options ...TemplateOptions) ([]byte, error) {
+	out, _, err := generateVBAProject(template, sources, options...)
 	return out, err
 }
 
@@ -201,7 +194,7 @@ func GenerateVBAProject(template []byte, sources []SourceModule) ([]byte, error)
 // and compression methods preserved. The only replaced entry is
 // xl/vbaProject.bin. If the template has no vbaProject.bin entry, BuildWorkbook
 // returns ErrAmbiguousLayout.
-func BuildWorkbook(templateXlsm []byte, sources []SourceModule) ([]byte, PackMeta, error) {
+func BuildWorkbook(templateXlsm []byte, sources []SourceModule, options ...TemplateOptions) ([]byte, PackMeta, error) {
 	reader, err := zip.NewReader(bytes.NewReader(templateXlsm), int64(len(templateXlsm)))
 	if err != nil {
 		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
@@ -227,7 +220,7 @@ func BuildWorkbook(templateXlsm []byte, sources []SourceModule) ([]byte, PackMet
 		return nil, PackMeta{}, fmt.Errorf("%w: template is missing xl/vbaProject.bin", ErrAmbiguousLayout)
 	}
 
-	regenerated, meta, err := generateVBAProject(vbaProject, sources)
+	regenerated, meta, err := generateVBAProject(vbaProject, sources, options...)
 	if err != nil {
 		return nil, PackMeta{}, err
 	}
@@ -259,7 +252,7 @@ func BuildWorkbook(templateXlsm []byte, sources []SourceModule) ([]byte, PackMet
 	return buf.Bytes(), meta, nil
 }
 
-func generateVBAProject(template []byte, sources []SourceModule) ([]byte, PackMeta, error) {
+func generateVBAProject(template []byte, sources []SourceModule, options ...TemplateOptions) ([]byte, PackMeta, error) {
 	if hasSignatureStream(template) {
 		return nil, PackMeta{}, ErrSignedProject
 	}
@@ -270,24 +263,30 @@ func generateVBAProject(template []byte, sources []SourceModule) ([]byte, PackMe
 	if project.Protection.IsProtected {
 		return nil, PackMeta{}, ErrProtectedProject
 	}
-	meta, err := applySources(project, sources)
+	meta, err := applySources(project, sources, options...)
 	if err != nil {
 		return nil, PackMeta{}, err
 	}
-	meta.CarriedStreams = project.CarriedStreamCount()
 	out, err := vbaproject.Write(project)
 	if err != nil {
 		return nil, PackMeta{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 	}
+	if err := validateProjectReadback(project, out); err != nil {
+		return nil, PackMeta{}, fmt.Errorf("%w: project readback: %v", ErrAmbiguousLayout, err)
+	}
+	meta.CarriedStreams, err = countCarriedTemplateStreams(template, out)
+	if err != nil {
+		return nil, PackMeta{}, fmt.Errorf("%w: template stream comparison: %v", ErrAmbiguousLayout, err)
+	}
 	return out, meta, nil
 }
 
-func applySources(project *vbaproject.Project, sources []SourceModule) (PackMeta, error) {
-	plan, err := PlanProject(project, sources)
+func applySources(project *vbaproject.Project, sources []SourceModule, options ...TemplateOptions) (PackMeta, error) {
+	plan, err := PlanProject(project, sources, options...)
 	if err != nil {
 		return PackMeta{}, err
 	}
-	project.Modules = plan.modules
+	*project = *plan.project
 	return plan.meta, nil
 }
 

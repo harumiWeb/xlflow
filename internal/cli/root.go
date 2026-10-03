@@ -45,6 +45,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/lspserver"
 	"github.com/harumiWeb/xlflow/internal/output"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
+	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	"github.com/harumiWeb/xlflow/internal/project"
 	"github.com/harumiWeb/xlflow/internal/sourceinventory"
 	staticpreflight "github.com/harumiWeb/xlflow/internal/staticanalysis/preflight"
@@ -56,6 +57,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/compiler"
 	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 	"github.com/harumiWeb/xlflow/internal/workbookformat"
@@ -2665,7 +2667,9 @@ func (a *app) packCommand() *cobra.Command {
 				if readErr != nil {
 					return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", readErr)
 				}
-				workbookBytes, meta, err = packpkg.BuildWorkbook(templateBytes, sources)
+				workbookBytes, meta, err = packpkg.BuildWorkbook(templateBytes, sources, packpkg.TemplateOptions{
+					UserFormTopology: cfg.Pack.UserFormTopology,
+				})
 			}
 			if err != nil {
 				return a.writePackEngineFailure(err)
@@ -2745,15 +2749,14 @@ func (a *app) packCommand() *cobra.Command {
 }
 
 func (a *app) writePackEngineFailure(err error) error {
+	if code, ok := userFormEngineErrorCode(err); ok {
+		return a.writeFailure("pack", output.ExitValidation, "pack_"+code, err)
+	}
 	switch {
 	case errors.Is(err, packpkg.ErrProtectedProject):
 		return a.writeFailure("pack", output.ExitValidation, "pack_protected_project", err)
 	case errors.Is(err, packpkg.ErrSignedProject):
 		return a.writeFailure("pack", output.ExitValidation, "pack_signed_project", err)
-	case errors.Is(err, packpkg.ErrUserFormGenerationUnsupported):
-		return a.writeFailure("pack", output.ExitValidation, "pack_userform_generation_unsupported", err)
-	case errors.Is(err, packpkg.ErrBlankUserFormUnsupported):
-		return a.writeFailure("pack", output.ExitValidation, "pack_blank_userform_unsupported", err)
 	case errors.Is(err, packpkg.ErrAmbiguousLayout):
 		return a.writeFailure("pack", output.ExitValidation, "pack_ambiguous_layout", err)
 	default:
@@ -3247,7 +3250,7 @@ func filePushExitCode(err error) int {
 		return output.ExitEnvironment
 	case errors.Is(err, filepush.ErrDuplicateModule), errors.Is(err, filepush.ErrLineNumberSafety),
 		errors.Is(err, packpkg.ErrProtectedProject), errors.Is(err, packpkg.ErrSignedProject),
-		errors.Is(err, packpkg.ErrUserFormGenerationUnsupported), errors.Is(err, packpkg.ErrAmbiguousLayout):
+		errors.Is(err, packpkg.ErrAmbiguousLayout), isUserFormEngineError(err):
 		return output.ExitValidation
 	default:
 		return output.ExitEnvironment
@@ -3284,8 +3287,6 @@ func filePushErrorCode(err error) string {
 		return "push_protected_project"
 	case errors.Is(err, packpkg.ErrSignedProject):
 		return "push_signed_project"
-	case errors.Is(err, packpkg.ErrUserFormGenerationUnsupported):
-		return "push_userform_generation_unsupported"
 	case errors.Is(err, packpkg.ErrAmbiguousLayout):
 		return "push_ambiguous_layout"
 	case errors.Is(err, filepush.ErrBackup):
@@ -3299,8 +3300,33 @@ func filePushErrorCode(err error) string {
 	case errors.As(err, &pathErr):
 		return "push_source_read_failed"
 	default:
+		if code, ok := userFormEngineErrorCode(err); ok {
+			return "push_" + code
+		}
 		return "push_failed"
 	}
+}
+
+func userFormEngineErrorCode(err error) (string, bool) {
+	if detail, ok := errors.AsType[*compiler.Error](err); ok {
+		switch detail.Code {
+		case compiler.GenerationUnsupported, compiler.GenerationInvalid, compiler.GenerationConflict,
+			compiler.Unsupported, compiler.Invalid, compiler.Stale, compiler.Conflict:
+			return detail.Code, true
+		}
+	}
+	if detail, ok := errors.AsType[*vbaproject.UserFormGenerationError](err); ok {
+		switch detail.Code {
+		case vbaproject.UserFormGenerationInvalid, vbaproject.UserFormGenerationConflict, vbaproject.UserFormFormsReferenceRequired:
+			return detail.Code, true
+		}
+	}
+	return "", false
+}
+
+func isUserFormEngineError(err error) bool {
+	_, ok := userFormEngineErrorCode(err)
+	return ok
 }
 
 type rollbackTarget struct {
@@ -7059,7 +7085,8 @@ func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceM
 func collectPackSourceModulesForMode(root string, cfg config.Config, blank bool) ([]packpkg.SourceModule, error) {
 	components, err := sourceinventory.Discover(sourceinventory.Options{
 		Root: root, Config: cfg, ValidateFormArtifacts: true,
-		CanonicalFormSpecs: blank,
+		CanonicalFormSpecs:       true,
+		AllowLegacyFormArtifacts: true,
 	})
 	if err != nil {
 		var layoutErr *sourceinventory.LayoutError
@@ -7074,7 +7101,7 @@ func collectPackSourceModulesForMode(root string, cfg config.Config, blank bool)
 	for _, component := range components {
 		typ := packpkg.ModuleType(component.Type)
 		source := string(component.Source)
-		if !blank && component.Type == sourceinventory.ComponentForm && strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+		if !blank && component.FormSpec == nil && component.Type == sourceinventory.ComponentForm && strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
 			for _, artifact := range component.Related {
 				if strings.EqualFold(filepath.Ext(artifact.Path), ".bas") && strings.EqualFold(filepath.Base(artifact.Path), component.Name+".bas") {
 					source = forms.MergeUserFormCodeIntoFRM(source, string(artifact.Source))

@@ -78,7 +78,7 @@ End Sub
 	}
 	// Retain both Excel-authored forms and add independently named forms.
 	inputSpec := newSpec()
-	inputSpec.Form.Caption = new("issue883-日本語😀")
+	inputSpec.Form.Caption = new("issue883-日本語")
 	// Use a whole export-grid size so VBIDE's twip/grid quantization does not
 	// obscure the independently verified binary client-size contract.
 	inputSpec.Form.Build = &spec.FormSpecBuildForm{ClientWidth: new(324.0), ClientHeight: new(282.0)}

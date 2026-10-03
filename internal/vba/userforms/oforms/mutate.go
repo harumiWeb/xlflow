@@ -56,7 +56,18 @@ func ApplyEdits(base *Form, edits []Edit, codePage uint16) (*Form, error) {
 	}
 	records := map[*Record]Edit{}
 	sites := map[*Site]Edit{}
+	var rootCaption *string
 	for _, edit := range edits {
+		if edit.Control == "" && edit.Property == "Caption" {
+			caption, ok := edit.Value.(string)
+			if !ok {
+				return nil, &EditError{Control: edit.Control, Property: edit.Property, Err: ErrInvalidEdit}
+			}
+			rootCaption = new(caption)
+			if storedCaption, found := clone.Levels[0].Record.Strings["Caption"]; found && storedCaption.Text == caption {
+				continue
+			}
+		}
 		if err := applyPersistenceEdit(clone, edit, codePage, records, sites); err != nil {
 			return nil, &EditError{Control: edit.Control, Property: edit.Property, Err: err}
 		}
@@ -116,6 +127,20 @@ func ApplyEdits(base *Form, edits []Edit, codePage uint16) (*Form, error) {
 		}
 		stored.Streams[level.Path+"/"+level.FStreamName] = level.FRaw
 		stored.Streams[level.Path+"/"+level.OStreamName] = level.ORaw
+	}
+	if rootCaption != nil {
+		root := clone.Levels[0]
+		current, found, err := rootVBFrameCaption(root.VBFrameRaw, codePage)
+		if err != nil {
+			return nil, &EditError{Control: "", Property: "Caption", Err: err}
+		}
+		if !found || current != *rootCaption {
+			updated, err := rewriteVBFrameCaption(root.VBFrameRaw, *rootCaption, codePage)
+			if err != nil {
+				return nil, &EditError{Control: "", Property: "Caption", Err: err}
+			}
+			stored.Streams[root.Path+"/"+root.VBFrameName] = updated
+		}
 	}
 	return reparseEditedForm(stored, base.Name, codePage)
 }
