@@ -1,3 +1,30 @@
+# PR #904 review follow-up
+
+REGISTERED aggregate-size and malformed Forms LIBID findings are valid.
+PROJECT has an aggregate Size (the comment's first-length explanation is
+incorrect), but it too must be ignored on read in favor of two bounded paths.
+
+1. [x] Share bounded reference payload sizing between both parser paths.
+2. [x] Validate LIBID grammar and cover malformed Forms admission atomically.
+3. [x] Cover PROJECT and REGISTERED aggregate-size variations, truncations
+       and reference byte preservation; remove the unused E2E workbook table.
+4. [x] Affected pack/sourceinventory/CLI tests, race, vet, parser fuzz,
+       lint/docs/PowerShell and staged formatting checks pass.
+
+Publish the verified fix to the existing PR and reply with these results.
+
+# Issue #886 final-review Pass 1 follow-up
+
+Validated against `852a57b7`: the P2 NUL validation finding is in scope.
+
+1. [x] Validate every decoded reference string, including ORIGINAL, CONTROL
+       twiddled LIBID and extended name, before accepting a reference group.
+2. [x] Add corrupted-field regressions and atomic Forms admission coverage;
+       retain valid Excel reference byte-preservation controls.
+3. [x] Run pack tests, race and vet; commit hooks check lint and formatting.
+4. [x] Pass 2 reviewed `eb21a91f` with gpt-6-luna xhigh: the P2 is resolved,
+       no confirmed in-scope defects remain, and affected package tests pass.
+
 # Issue #883 final-review Pass 1 follow-up
 
 Validated against `76cae6b8`: both P2 findings are in scope.
@@ -500,3 +527,11 @@ source; all valid. Plan:
 - [x] Verify focused Go/.NET/PowerShell tests, lint/docs, and staged formatting.
 - [x] Rerun the fresh Excel generation gate after the concurrent session finishes: Delay/ScrollBar ProportionalThumb, both forms, save/reopen, sentinel, and normalized binary readback passed; owned PID 204972 cleanup confirmed. Evidence and command recorded in the fixture README.
 - [x] Push the fixes (`4e735e72`) and reply to the three review comments with focused regression and fresh Excel evidence; verify the updated PR body on GitHub.
+
+# Issue #886
+
+- [x] Parse complete references and ensure first-UserForm Forms reference atomically.
+- [x] Enable canonical spec/code discovery and common-control generation in blank pack.
+- [x] Cover reference preservation, code modes, capability failures and publication safety.
+- [x] Validate generated artifacts in Excel, retain fixtures and run release gates.
+- [x] Update contracts/docs, run checks and independent review. Reference reviewer found no confirmed defects and independently passed pack/fuzz tests; blank-input reviewer found no confirmed defects. Case-variant directory spelling remains an unconfirmed follow-up, not a changed contract. Evidence: `internal/pack/vbaproject/testdata/forms-reference-excel/README.md`.

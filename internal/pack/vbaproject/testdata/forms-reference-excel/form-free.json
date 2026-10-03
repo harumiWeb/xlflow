@@ -1,0 +1,70 @@
+{
+  "stage": "form-free",
+  "workbook": "C:\\Users\\HARUMI\\orca\\workspaces\\xlflow\\acornworm\\tmp_workspaces\\issue-886-reference-observe-20261003-r1\\form-free.xlsm",
+  "beforeSave": {
+    "forms": [],
+    "references": [
+      {
+        "name": "VBA",
+        "guid": "{000204EF-0000-0000-C000-000000000046}",
+        "major": 4,
+        "minor": 2,
+        "isBroken": false
+      },
+      {
+        "name": "Excel",
+        "guid": "{00020813-0000-0000-C000-000000000046}",
+        "major": 1,
+        "minor": 9,
+        "isBroken": false
+      },
+      {
+        "name": "stdole",
+        "guid": "{00020430-0000-0000-C000-000000000046}",
+        "major": 2,
+        "minor": 0,
+        "isBroken": false
+      },
+      {
+        "name": "Office",
+        "guid": "{2DF8D04C-5BFA-101B-BDE5-00AA0044DE52}",
+        "major": 2,
+        "minor": 8,
+        "isBroken": false
+      }
+    ]
+  },
+  "reopened": {
+    "forms": [],
+    "references": [
+      {
+        "name": "VBA",
+        "guid": "{000204EF-0000-0000-C000-000000000046}",
+        "major": 4,
+        "minor": 2,
+        "isBroken": false
+      },
+      {
+        "name": "Excel",
+        "guid": "{00020813-0000-0000-C000-000000000046}",
+        "major": 1,
+        "minor": 9,
+        "isBroken": false
+      },
+      {
+        "name": "stdole",
+        "guid": "{00020430-0000-0000-C000-000000000046}",
+        "major": 2,
+        "minor": 0,
+        "isBroken": false
+      },
+      {
+        "name": "Office",
+        "guid": "{2DF8D04C-5BFA-101B-BDE5-00AA0044DE52}",
+        "major": 2,
+        "minor": 8,
+        "isBroken": false
+      }
+    ]
+  }
+}

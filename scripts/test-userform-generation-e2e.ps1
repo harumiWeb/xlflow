@@ -5,7 +5,8 @@ param(
     [string]$WorkbookPath = '',
     [string]$ExpectedPath = '',
     [string]$NormalizedWorkbookPath = '',
-    [string]$FixtureDirectory = ''
+    [string]$FixtureDirectory = '',
+    [switch]$ReferenceFixturesOnly
 )
 
 # Local developer harness for the UserForm generation gate. This script is
@@ -226,7 +227,26 @@ function Get-FormSnapshot([string]$FormName) {
 function Get-WorkbookObservation([string[]]$Names) {
     $forms = @()
     foreach ($name in $Names) { $forms += Get-FormSnapshot $name }
-    return [pscustomobject]@{ forms = @($forms) }
+    return [pscustomobject]@{ forms = @($forms); references = @(Get-ReferenceSnapshot) }
+}
+
+function Get-ReferenceSnapshot {
+    $project = Hold-Com $script:workbook.VBProject
+    $references = Hold-Com $project.References
+    $rows = @()
+    for ($i = 1; $i -le [int]$references.Count; $i++) {
+        $reference = Hold-Com ($references.Item($i))
+        if ($reference.IsBroken) { throw "Broken project reference: $($reference.Name)" }
+        $rows += [pscustomobject]@{ name = [string]$reference.Name; guid = [string]$reference.GUID; major = [int]$reference.Major; minor = [int]$reference.Minor; isBroken = [bool]$reference.IsBroken }
+    }
+    return $rows
+}
+
+function Assert-FormsReference {
+    $rows = @(Get-ReferenceSnapshot)
+    $forms = @($rows | Where-Object { $_.guid -eq '{0D452EE1-E08F-101A-852E-02608C4D0BB4}' })
+    if ($forms.Count -ne 1) { throw "Expected exactly one Forms reference, got $($forms.Count)" }
+    return $rows
 }
 
 function Set-FormClientSize([string]$FormName, [object]$Designer) {
@@ -499,8 +519,13 @@ function Publish-Fixture {
     if (Test-Path -LiteralPath $FixtureDirectory) { throw "Refusing to overwrite fixture directory: $FixtureDirectory" }
     [void][IO.Directory]::CreateDirectory($FixtureDirectory)
     $artifacts = @('baseline.xlsm', 'baseline.bin', 'baseline.json', 'environment.json')
-    foreach ($control in @('ToggleButtonMain', 'SpinButtonMain', 'ScrollBarMain', 'ImageMain')) {
-        $artifacts += "enabled-$control-False.bin", "enabled-$control-False.json"
+    foreach ($stageName in @('form-free', 'first-form', 'two-forms')) { $artifacts += "$stageName.bin", "$stageName.json" }
+    if ($ReferenceFixturesOnly) {
+        $artifacts = @('environment.json', 'form-free.bin', 'form-free.json', 'first-form.bin', 'first-form.json', 'two-forms.bin', 'two-forms.json')
+    } else {
+        foreach ($control in @('ToggleButtonMain', 'SpinButtonMain', 'ScrollBarMain', 'ImageMain')) {
+            $artifacts += "enabled-$control-False.bin", "enabled-$control-False.json"
+        }
     }
     foreach ($name in $artifacts) {
         $source = Join-Path $WorkspacePath $name
@@ -596,9 +621,13 @@ try {
 
     if ($Phase -eq 'create') {
         $script:workbook = $books.Add()
-        New-Form 'GenerationBaseline' 'issue883-generation-baseline' $true
-        New-Form 'EmptyForm' 'issue883-empty-form' $false
         Add-MainModule
+        Release-Children
+        [void](Save-Stage 'form-free' @())
+        New-Form 'GenerationBaseline' 'issue883-generation-baseline' $true
+        [void](Save-Stage 'first-form' @('GenerationBaseline'))
+        New-Form 'EmptyForm' 'issue883-empty-form' $false
+        [void](Save-Stage 'two-forms' $script:formNames)
         Release-Children
 
         $stage = Save-Stage 'baseline' $script:formNames
@@ -614,7 +643,7 @@ try {
         $baselineObservation | Add-Member -PassThru -NotePropertyName binary -NotePropertyValue (Get-BinaryEvidence $baselineBinaryPath)
         Write-Json (Join-Path $WorkspacePath 'baseline.json') $baselineObservation
 
-        foreach ($controlName in $script:newControlNames) {
+        foreach ($controlName in $(if ($ReferenceFixturesOnly) { @() } else { $script:newControlNames })) {
             foreach ($enabled in @($false, $true)) {
                 $designer = Get-Designer 'GenerationBaseline'
                 $controls = Hold-Com $designer.Controls
@@ -628,6 +657,7 @@ try {
     } else {
         $script:excel.AutomationSecurity = 1
         $script:workbook = $books.Open($WorkbookPath, 0, $true)
+        $referenceSnapshot = @(Assert-FormsReference)
         $generated = Get-FormSnapshot 'GeneratedForm'
         $empty = Get-FormSnapshot 'GeneratedEmptyForm'
         Assert-GeneratedFormShape $generated $empty
@@ -635,6 +665,8 @@ try {
             workbook = $WorkbookPath
             beforeSave = @($generated, $empty)
             reopened = $null
+            referencesBeforeSave = $referenceSnapshot
+            referencesReopened = $null
         }
         Release-Children
         if ($ExpectedPath) {
@@ -652,6 +684,7 @@ try {
             $script:workbook = $null
             $books = Hold-Com $script:excel.Workbooks
             $script:workbook = $books.Open($NormalizedWorkbookPath, 0, $true)
+            $verifyObservation.referencesReopened = @(Assert-FormsReference)
             $generated = Get-FormSnapshot 'GeneratedForm'
             $empty = Get-FormSnapshot 'GeneratedEmptyForm'
             Assert-GeneratedFormShape $generated $empty

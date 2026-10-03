@@ -61,7 +61,7 @@ type Project struct {
 	CFBFormat        cfb.Format
 	Modules          []Module
 	References       []Reference // best-effort, for display (not edited in v1)
-	ReferencesRaw    []byte      // verbatim byte span of the dir references section (written back unchanged)
+	ReferencesRaw    []byte      // authoritative dir references; existing groups retained verbatim on addition
 	ProjectInfoRaw   []byte      // verbatim span of dir PROJECTINFORMATION (written back unchanged)
 	ProjectStreamRaw []byte      // template PROJECT stream; unrelated content is preserved while component declarations are rebuilt
 	// Forms owns every parsed root-level UserForm Designer storage. Their streams

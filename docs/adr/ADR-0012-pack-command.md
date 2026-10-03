@@ -80,6 +80,23 @@ remain in force. Deterministic Designer bytes use only fixed class IDs;
 cryptographically random GUIDs are limited to new component identity in
 code-behind, with injectable generation for reproducible tests.
 
+### Amendment: first-Forms reference and blank UserForms (Issue #886)
+
+Blank pack now creates the supported flat UserForm subset from canonical
+FormSpec and configured code authority. Compatibility `.frm`/`.frx` Designer
+bytes are not generation inputs, because making them authoritative would
+conflict with file-pull's canonical specs. Template Designer integration
+remains Issue #887.
+
+Reference mutation uses complete MS-OVBA reference groups, retaining existing
+records verbatim. Missing Forms references are appended as a canonical
+REGISTERED Forms 2.0 reference using the existing fixed Windows path policy
+for blank references. This avoids persisting a developer's user-specific
+extended-type-library cache path. Existing CONTROL references remain intact
+and are identified by OriginalTypeLib. Excel release-gate evidence verifies
+actual resolution, compilation and save/reopen rather than assuming REGISTERED
+and CONTROL forms are operationally interchangeable.
+
 ### Amendment: stable graduation (Issue #858)
 
 The pre-stable stages are complete. `pack` is now a stable command and no

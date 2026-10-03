@@ -290,10 +290,12 @@ Caller input is never mutated.
 
 New code-behind is generated from code-only text with form attributes and
 two new component GUIDs in VB_Base; class identities are fixed constants.
-Project addition requires a Microsoft Forms reference and preserves its raw
-reference section. Reference creation remains Issue #886. Declaration,
+Project addition ensures a Microsoft Forms reference and preserves existing
+reference groups verbatim. Missing references use a canonical REGISTERED
+Forms 2.0 LIBID with fixed `C:\Windows\System32\FM20.DLL` path, independently
+of the build host. Declaration,
 module and PROJECTwm bookkeeping are completed by the project writer;
-generation does not connect the pack CLI or change source authority (#887).
+blank pack uses canonical specs/code; template Designer integration remains #887.
 
 REGISTERED reference identity must come from a canonical Forms LIBID in a
 complete sized record. CONTROL reference identity must come from the original

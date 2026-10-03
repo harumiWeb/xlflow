@@ -38,7 +38,42 @@ does not change output or behavior.
 
 ## Blank workbook profile
 
-Blank mode has a fixed, fail-loud v1 topology: one workbook document module named `ThisWorkbook` and one worksheet/document module named `Sheet1`. Both `src/workbook/ThisWorkbook.bas` and `src/workbook/Sheet1.bas` must be present. Any additional or differently named document module fails with `pack_ambiguous_layout`. Any UserForm input fails with `pack_blank_userform_unsupported`; blank mode does not author `.frm`/`.frx` designer state. UserForm input is detected before full source-layout validation — `.frm`/`.frx` files anywhere under `[src].forms` and any file under its reserved `code/` or `specs/` directories all count — so malformed form artifacts (for example an orphan `.frx` or an unmatched sidecar) still report `pack_blank_userform_unsupported` rather than `pack_ambiguous_layout`.
+### Canonical UserForm inputs
+
+Blank mode discovers forms from the flat `specs/` directory under `[src].forms`.
+Each YAML/YML/JSON filename must match `form.name`; duplicate specs, orphan
+artifacts, nested directories and component/CFB name collisions fail with
+`pack_ambiguous_layout`. The supported subset is empty forms plus the eleven
+flat built-in classes specified in `ms-oforms.md`. Containers, custom ActiveX,
+Picture resources and unsupported persisted list state fail with
+`pack_userform_generation_unsupported` before output publication.
+
+Designer authority is always the canonical spec. With `code_source=sidecar`,
+matching `code/<Name>.bas` wins, then matching `.frm` code, then empty code.
+Sidecars must be code-only. With `code_source=frm`, matching `.frm` is required;
+its attribute identity is validated, exported attributes are replaced by new
+component attributes and GUIDs, and only its code body is used. `.frx` and
+unused compatibility Designer bytes do not participate in generation.
+The file-pull compatibility warning does not block canonical generation;
+Excel-backed push retains its existing synchronization preflight.
+
+Form additions are sorted by component name. The project-level Forms reference
+is ensured exactly once; complete existing REGISTERED/CONTROL references and
+unrelated reference groups retain their original bytes and order. Every decoded
+reference name and LIBID/path field must be free of NUL, including ORIGINAL,
+CONTROL twiddled LIBID and optional extended names; rejected input must not
+mutate the project. Type-library identifiers must satisfy MS-OVBA
+`LibidReference` (GUID, hexadecimal version/LCID, path, and registration name
+of at most 255 encoded bytes). Both reference parsers ignore REGISTERED,
+CONTROL and PROJECT aggregate sizes and determine boundaries from bounded
+internal string lengths; PROJECT includes both paths and its version tail.
+A missing
+reference is appended using the canonical Forms 2.0 REGISTERED LIBID. All
+project data is serialized and reparsed before atomic artifact publication.
+Random GUIDs are limited to component identity, so independently generated
+UserForm projects are not promised byte-identical outputs.
+
+Blank mode has a fixed, fail-loud v1 topology: one workbook document module named `ThisWorkbook` and one worksheet/document module named `Sheet1`. Both `src/workbook/ThisWorkbook.bas` and `src/workbook/Sheet1.bas` must be present. Any additional or differently named document module fails with `pack_ambiguous_layout`. Blank mode supports canonical-spec UserForms as described below.
 
 The fresh project is named `VBAProject`, uses source-only module streams, and structurally authors the `PROJECT`, `PROJECTwm`, `dir`, `_VBA_PROJECT`, module, stdole, and Office reference records. The workbook and worksheet OOXML code names are `ThisWorkbook` and `Sheet1`, matching the VBA component identities. The output still uses atomic publication and must not alias the configured workbook.
 
@@ -108,7 +143,7 @@ If generation, validation, or publication fails, an existing destination is left
 - **UserForm code-behind**: a form already present in the template has its code-behind updated from source, honoring `[userform].code_source`. In `frm` mode the code is read from `src/forms/*.frm`; in `sidecar` mode (the default) the authoritative code-behind is `src/forms/code/<FormName>.bas`, merged into the form in memory (the on-disk `.frm`/`.bas` are never modified — `pack` does not write sources). `src/forms/code` is a flat reserved directory; sidecar subdirectories are unsupported. In both modes only the code-behind is applied; the form's designer storage is carried through byte-for-byte. A matching `.frx` is inventoried and validated as a related source artifact but is not written into the packed project; `pack` never authors or modifies form layout. A `.frm` whose form is not in the template fails with `pack_userform_generation_unsupported`; a sidecar carrying `Attribute VB_*` header lines, using a subdirectory, or with no matching `.frm`, fails with `pack_ambiguous_layout`.
 - **Existing UserForm designer streams in the template**: carried through byte-for-byte, untouched. Their containing storage directory metadata is preserved as described above. `pack` does not generate or modify form layout.
 
-In template mode, document-module and UserForm topology remains template-authoritative. Omitting their source does not remove them; source may update code only when the component already exists in the template. A source-only document module is rejected as `pack_ambiguous_layout`, and a source-only UserForm is rejected as `pack_userform_generation_unsupported`. Blank mode instead follows the fixed document topology above and rejects every UserForm.
+In template mode, document-module and UserForm topology remains template-authoritative. Omitting their source does not remove them; source may update code only when the component already exists in the template. A source-only document module is rejected as `pack_ambiguous_layout`, and a source-only UserForm is rejected as `pack_userform_generation_unsupported`. Blank mode instead follows the fixed document topology above and generates supported canonical-spec UserForms.
 
 ## Code pages and component names
 
@@ -134,23 +169,23 @@ The plan records each component's primary source path, related UserForm artifact
 
 Each unsupported case is a specific, loud error. `pack` never falls back to best-effort behavior.
 
-| Case                                                | Error code                                      | Exit |
-| --------------------------------------------------- | ----------------------------------------------- | ---- |
-| active xlflow session / live workbook               | `pack_active_session`                           | 2    |
-| in-place overwrite of the template/source workbook  | `pack_in_place_overwrite`                       | 2    |
-| aliased template/workbook path via symlink/junction | `pack_in_place_overwrite`                       | 2    |
-| output locked or open in another process            | `pack_output_busy`                              | 3    |
-| atomic publication impossible (no fallback)         | `pack_output_replace_failed`                    | 3    |
-| protected VBA project                               | `pack_protected_project`                        | 1    |
-| signed VBA project                                  | `pack_signed_project`                           | 1    |
-| managed source is not UTF-8 without BOM             | `source_encoding_invalid`                       | 1    |
-| creating a new UserForm / `.frx` generation         | `pack_userform_generation_unsupported`          | 1    |
-| any UserForm in blank mode                          | `pack_blank_userform_unsupported`               | 1    |
-| unknown or ambiguous VBA project layout             | `pack_ambiguous_layout`                         | 1    |
-| missing `--out`, bad extension, other arg errors    | `pack_args_invalid`                             | 2    |
-| template/source workbook not found or unreadable    | `pack_template_not_found`                       | 2    |
-| source inventory or artifact staging failure        | `pack_source_read_failed` / `pack_write_failed` | 3    |
-| `.xlsb` template selected by template mode          | `workbook_format_unsupported`                   | 2    |
+| Case                                                    | Error code                                      | Exit |
+| ------------------------------------------------------- | ----------------------------------------------- | ---- |
+| active xlflow session / live workbook                   | `pack_active_session`                           | 2    |
+| in-place overwrite of the template/source workbook      | `pack_in_place_overwrite`                       | 2    |
+| aliased template/workbook path via symlink/junction     | `pack_in_place_overwrite`                       | 2    |
+| output locked or open in another process                | `pack_output_busy`                              | 3    |
+| atomic publication impossible (no fallback)             | `pack_output_replace_failed`                    | 3    |
+| protected VBA project                                   | `pack_protected_project`                        | 1    |
+| signed VBA project                                      | `pack_signed_project`                           | 1    |
+| managed source is not UTF-8 without BOM                 | `source_encoding_invalid`                       | 1    |
+| creating a new template UserForm / unsupported Designer | `pack_userform_generation_unsupported`          | 1    |
+| blank engine form input without a canonical spec        | `pack_blank_userform_unsupported`               | 1    |
+| unknown or ambiguous VBA project layout                 | `pack_ambiguous_layout`                         | 1    |
+| missing `--out`, bad extension, other arg errors        | `pack_args_invalid`                             | 2    |
+| template/source workbook not found or unreadable        | `pack_template_not_found`                       | 2    |
+| source inventory or artifact staging failure            | `pack_source_read_failed` / `pack_write_failed` | 3    |
+| `.xlsb` template selected by template mode              | `workbook_format_unsupported`                   | 2    |
 
 ## Output / JSON contract
 
