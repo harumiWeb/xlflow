@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestResolveSnapshotOutputValidatesAndNormalizes(t *testing.T) {
@@ -120,6 +122,302 @@ func TestFormSpecFromInspectSnapshotConvertsDesignerPayload(t *testing.T) {
 	}
 	if len(spec.Warnings) != 1 || spec.Warnings[0].Code != "unsupported_property" {
 		t.Fatalf("warnings = %#v", spec.Warnings)
+	}
+}
+
+func TestFormSpecFromInspectSnapshotMapsPagesTabsAndObservedPageGeometry(t *testing.T) {
+	spec, err := FormSpecFromInspectSnapshot(map[string]any{
+		"name": "NavigationForm",
+		"controls": []any{
+			map[string]any{
+				"name":           "Pages",
+				"type":           "MultiPage",
+				"selected_index": 1,
+				"controls": []any{
+					map[string]any{
+						"name":             "Details",
+						"type":             "Page",
+						"caption":          "Details",
+						"control_tip_text": "Show details",
+						"tag":              "details-page",
+						"accelerator":      "D",
+						"enabled":          true,
+						"visible":          true,
+						"left":             3.0,
+						"top":              4.0,
+						"width":            220.0,
+						"height":           120.0,
+					},
+				},
+			},
+			map[string]any{
+				"name":           "Navigation",
+				"type":           "TabStrip",
+				"selected_index": 0,
+				"tabs": []any{
+					map[string]any{
+						"name":             "Main",
+						"caption":          "Main",
+						"control_tip_text": "Main view",
+						"tag":              "main-tab",
+						"accelerator":      "M",
+						"enabled":          true,
+						"visible":          false,
+					},
+				},
+			},
+			map[string]any{
+				"name": "EmptyNavigation",
+				"type": "TabStrip",
+				"tabs": []any{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.Controls) != 4 {
+		t.Fatalf("controls = %d, want MultiPage, Page, and two TabStrips", len(spec.Controls))
+	}
+	page := spec.Controls[1]
+	if page.Type != "Page" || page.ParentID != spec.Controls[0].ID || page.Caption == nil || *page.Caption != "Details" {
+		t.Fatalf("Page mapping = %#v", page)
+	}
+	if page.Tag == nil || *page.Tag != "details-page" || page.ControlTipText == nil || *page.ControlTipText != "Show details" || page.Accelerator == nil || *page.Accelerator != "D" {
+		t.Fatalf("Page typed properties = %#v", page)
+	}
+	if page.Left != nil || page.Top != nil || page.Width != nil || page.Height != nil || page.Observed == nil || page.Observed.Width == nil || *page.Observed.Width != 220 {
+		t.Fatalf("Page geometry should remain observed-only: %#v", page)
+	}
+	if spec.Controls[0].SelectedIndex == nil || *spec.Controls[0].SelectedIndex != 1 {
+		t.Fatalf("MultiPage selectedIndex = %#v", spec.Controls[0].SelectedIndex)
+	}
+	tabStrip := spec.Controls[2]
+	if len(tabStrip.Tabs) != 1 || tabStrip.Tabs[0].Name != "Main" || tabStrip.Tabs[0].ControlTipText == nil || *tabStrip.Tabs[0].ControlTipText != "Main view" || tabStrip.Tabs[0].Visible == nil || *tabStrip.Tabs[0].Visible {
+		t.Fatalf("TabStrip mapping = %#v", tabStrip)
+	}
+	if tabStrip.Observed == nil || len(tabStrip.Observed.Tabs) != 1 {
+		t.Fatalf("observed TabStrip tabs = %#v", tabStrip.Observed)
+	}
+	if spec.Controls[3].Tabs == nil || len(spec.Controls[3].Tabs) != 0 {
+		t.Fatalf("empty TabStrip tabs lost: %#v", spec.Controls[3].Tabs)
+	}
+	if spec.Controls[3].Observed == nil || spec.Controls[3].Observed.Tabs == nil || len(spec.Controls[3].Observed.Tabs) != 0 {
+		t.Fatalf("empty observed TabStrip tabs lost: %#v", spec.Controls[3].Observed)
+	}
+}
+
+func TestFormSpecTabSlicePreservesNilAndExplicitEmptyInJSONAndYAML(t *testing.T) {
+	for _, format := range []string{"json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			for _, test := range []struct {
+				name string
+				tabs []FormSpecTab
+				want bool
+			}{
+				{name: "nil means unspecified"},
+				{name: "empty means delete all", tabs: []FormSpecTab{}, want: true},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					body, err := MarshalSnapshot(format, FormSpec{
+						SchemaVersion: 1,
+						Kind:          "xlflow.userform",
+						Basis:         "designer",
+						Form:          FormSpecForm{Name: "TabsForm"},
+						Controls: []FormSpecControl{{
+							ID: "tabs", Name: "Tabs", Type: "TabStrip", Tabs: test.tabs,
+							Observed: &FormSpecObservedControl{Tabs: test.tabs},
+						}},
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					var decoded FormSpec
+					if format == "json" {
+						err = json.Unmarshal(body, &decoded)
+					} else {
+						err = yaml.Unmarshal(body, &decoded)
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := decoded.Controls[0].Tabs != nil; got != test.want {
+						t.Fatalf("decoded tabs nonnil = %v, want %v; body:\n%s", got, test.want, body)
+					}
+					if got := decoded.Controls[0].Observed != nil && decoded.Controls[0].Observed.Tabs != nil; got != test.want {
+						t.Fatalf("decoded observed tabs nonnil = %v, want %v; body:\n%s", got, test.want, body)
+					}
+					if test.want {
+						tabsToken := []byte("tabs: []")
+						if format == "json" {
+							tabsToken = []byte(`"tabs": []`)
+						}
+						if !bytes.Contains(body, tabsToken) {
+							t.Fatalf("snapshot does not preserve explicit empty tabs:\n%s", body)
+						}
+					} else {
+						fieldToken := []byte("tabs:")
+						if format == "json" {
+							fieldToken = []byte(`"tabs":`)
+						}
+						if bytes.Contains(body, fieldToken) {
+							t.Fatalf("snapshot should omit unspecified tabs:\n%s", body)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestValidateFormSpecSourceEnforcesPageAndTabStripContract(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		code   string
+		field  string
+	}{
+		{
+			name: "MultiPage only accepts Page children",
+			source: "controls:\n" +
+				"  - id: pages\n    name: Pages\n    type: MultiPage\n" +
+				"  - id: label\n    name: Label\n    type: Label\n    parentId: pages\n",
+			code: "UFV011", field: "controls[1].parentId",
+		},
+		{
+			name: "Page requires MultiPage parent",
+			source: "controls:\n" +
+				"  - id: frame\n    name: Frame\n    type: Frame\n" +
+				"  - id: page\n    name: Page\n    type: Page\n    parentId: frame\n",
+			code: "UFV011", field: "controls[1].parentId",
+		},
+		{
+			name:   "Page requires a parent",
+			source: "controls:\n  - id: page\n    name: Page\n    type: Page\n",
+			code:   "UFV011", field: "controls[0].parentId",
+		},
+		{
+			name: "TabStrip cannot contain controls",
+			source: "controls:\n" +
+				"  - id: tabs\n    name: Tabs\n    type: TabStrip\n" +
+				"  - id: label\n    name: Label\n    type: Label\n    parentId: tabs\n",
+			code: "UFV011", field: "controls[1].parentId",
+		},
+		{
+			name: "Tab names are case insensitive within their owner",
+			source: "controls:\n  - id: tabs\n    name: Tabs\n    type: TabStrip\n    tabs:\n" +
+				"      - name: Main\n      - name: mAiN\n",
+			code: tabNameValidationCode, field: "controls[0].tabs[1].name",
+		},
+		{
+			name:   "Tab names are required",
+			source: "controls:\n  - id: tabs\n    name: Tabs\n    type: TabStrip\n    tabs:\n      - caption: Missing name\n",
+			code:   "UFV004", field: "controls[0].tabs[0].name",
+		},
+		{
+			name:   "Tab property values are typed",
+			source: "controls:\n  - id: tabs\n    name: Tabs\n    type: TabStrip\n    tabs:\n      - name: Main\n        enabled: yes\n",
+			code:   "UFV002", field: "controls[0].tabs[0].enabled",
+		},
+		{
+			name: "Page geometry is not an authoring field",
+			source: "controls:\n" +
+				"  - id: pages\n    name: Pages\n    type: MultiPage\n" +
+				"  - id: page\n    name: Page\n    type: Page\n    parentId: pages\n    width: 10\n",
+			code: "UFV005", field: "controls[1].width",
+		},
+		{
+			name:   "MultiPage accepts a partial Page list and selection",
+			source: "controls:\n  - id: pages\n    name: Pages\n    type: MultiPage\n    selectedIndex: 8\n",
+		},
+		{
+			name:   "TabStrip selected index is checked against explicit tabs",
+			source: "controls:\n  - id: tabs\n    name: Tabs\n    type: TabStrip\n    selectedIndex: 0\n    tabs: []\n",
+			code:   selectedIndexValidationCode, field: "controls[0].selectedIndex",
+		},
+		{
+			name: "TabStrip rejects no-selection when tabs are nonempty",
+			source: "controls:\n  - id: tabs\n    name: Tabs\n    type: TabStrip\n    selectedIndex: -1\n" +
+				"    tabs:\n      - name: First\n",
+			code: selectedIndexValidationCode, field: "controls[0].selectedIndex",
+		},
+		{
+			name:   "selectedIndex accepts no-selection sentinel",
+			source: "controls:\n  - id: tabs\n    name: Tabs\n    type: TabStrip\n    selectedIndex: -1\n    tabs: []\n",
+		},
+		{
+			name: "MultiPage rejects no-selection when Page topology is known nonempty",
+			source: "controls:\n  - id: pages\n    name: Pages\n    type: MultiPage\n    selectedIndex: -1\n" +
+				"  - id: page\n    parentId: pages\n    name: Page\n    type: Page\n",
+			code: selectedIndexValidationCode, field: "controls[0].selectedIndex",
+		},
+		{
+			name:   "MultiPage rejects an index when known empty",
+			source: "controls:\n  - id: pages\n    name: Pages\n    type: MultiPage\n    selectedIndex: 0\n    controls: []\n",
+			code:   selectedIndexValidationCode, field: "controls[0].selectedIndex",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: TestForm\n" + test.source
+			issues, err := ValidateFormSpecSource(SpecInput{Format: "yaml"}, []byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.code == "" {
+				if hasValidationErrors(issues) {
+					t.Fatalf("issues = %#v", issues)
+				}
+				return
+			}
+			if !hasValidationIssue(issues, test.code, test.field) {
+				t.Fatalf("issues = %#v, want %s at %s", issues, test.code, test.field)
+			}
+		})
+	}
+}
+
+func TestValidateFormSpecStrictSelectedIndexUsesKnownPageTopology(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		controls []FormSpecControl
+		invalid  bool
+	}{
+		{
+			name: "partial MultiPage defers unknown page bounds",
+			controls: []FormSpecControl{
+				{ID: "pages", Name: "Pages", Type: "MultiPage", SelectedIndex: new(8)},
+			},
+		},
+		{
+			name: "nonempty MultiPage rejects no selection",
+			controls: []FormSpecControl{
+				{ID: "pages", Name: "Pages", Type: "MultiPage", SelectedIndex: new(-1)},
+				{ID: "page", ParentID: "pages", Name: "Page", Type: "Page"},
+			},
+			invalid: true,
+		},
+		{
+			name: "explicitly empty MultiPage rejects a nonnegative index",
+			controls: []FormSpecControl{
+				{ID: "pages", Name: "Pages", Type: "MultiPage", SelectedIndex: new(0), Controls: []FormSpecControl{}},
+			},
+			invalid: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			spec := FormSpec{
+				SchemaVersion: 1,
+				Kind:          "xlflow.userform",
+				Basis:         "designer",
+				Form:          FormSpecForm{Name: "TestForm"},
+				Controls:      test.controls,
+			}
+			issues := ValidateFormSpecStrict(spec)
+			if got := hasValidationIssue(issues, selectedIndexValidationCode, "controls[0].selectedIndex"); got != test.invalid {
+				t.Fatalf("selectedIndex issue present = %t, want %t; issues = %#v", got, test.invalid, issues)
+			}
+		})
 	}
 }
 

@@ -17,6 +17,16 @@ form:
   observed:
     insideWidth: 110
 controls:
+  - type: Page
+    tag: page-tag
+    controlTipText: Page hint
+    accelerator: P
+  - type: TabStrip
+    tabs:
+      - name: Main
+        tag: tab-tag
+        controlTipText: Tab hint
+        accelerator: M
   - type: ComboBox
     progId: Forms.ComboBox.1
     selectedIndex: 0
@@ -33,19 +43,23 @@ controls:
 		text string
 		want []string
 	}{
+		{"Page tag", 12, "tag", []string{"### `tag`", "Applies to:** `Page`", "string"}},
+		{"Page tooltip", 13, "controlTipText", []string{"### `controlTipText`", "Page"}},
+		{"Tab tag", 18, "tag", []string{"### `tag`", "TabStrip tab", "string"}},
+		{"Tab tooltip", 19, "controlTipText", []string{"### `controlTipText`", "TabStrip tab"}},
 		{"root field", 0, "schemaVersion", []string{"### `schemaVersion`", "**Type:** integer", "**Required:** yes", "document root"}},
 		{"snapshot warnings", 3, "warnings", []string{"snapshot-only", "not a guaranteed normal build input"}},
 		{"best effort form field", 5, "width", []string{"best-effort", "inspect the rebuilt Designer"}},
 		{"nested build field", 7, "width", []string{"best-effort", "form build override"}},
 		{"snapshot field", 8, "observed", []string{"snapshot-only", "not a guaranteed normal build input"}},
 		{"nested observed form field", 9, "insideWidth", []string{"snapshot-only", "captured form state"}},
-		{"list state", 13, "selectedIndex", []string{"observed-only", "best-effort basis", "not guaranteed"}},
-		{"properties", 14, "properties", []string{"custom/unchecked", "not an unrestricted build escape hatch"}},
-		{"unsupported", 15, "unsupported", []string{"snapshot-only", "not a guaranteed normal build input"}},
-		{"nested observed control field", 17, "value", []string{"snapshot-only", "Applies to:** `ComboBox`"}},
-		{"built in type", 11, "ComboBox", []string{"### `ComboBox`", "Forms.ComboBox.1", "Container:** no"}},
-		{"built in progid", 12, "Forms.ComboBox.1", []string{"### `Forms.ComboBox.1`", "ComboBox", "supported"}},
-		{"custom progid", 19, "Vendor.Widget.1", []string{"custom/unchecked", "common structural fields", "installed control"}},
+		{"list state", 23, "selectedIndex", []string{"observed-only", "best-effort basis", "not guaranteed"}},
+		{"properties", 24, "properties", []string{"custom/unchecked", "not an unrestricted build escape hatch"}},
+		{"unsupported", 25, "unsupported", []string{"snapshot-only", "not a guaranteed normal build input"}},
+		{"nested observed control field", 27, "value", []string{"snapshot-only", "Applies to:** `ComboBox`"}},
+		{"built in type", 21, "ComboBox", []string{"### `ComboBox`", "Forms.ComboBox.1", "Container:** no"}},
+		{"built in progid", 22, "Forms.ComboBox.1", []string{"### `Forms.ComboBox.1`", "ComboBox", "supported"}},
+		{"custom progid", 29, "Vendor.Widget.1", []string{"custom/unchecked", "common structural fields", "installed control"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

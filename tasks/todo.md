@@ -613,3 +613,20 @@ source; all valid. Plan:
 - [x] Check the edited pack output's module identity rather than the original output.
 - [x] Reproduce default TabIndex collisions during topology edits; reserve final sibling retained/explicit values before assigning generated defaults, including property-bag aliases, and preserve existing values.
 - [x] Run focused regressions, affected package tests, CLI pack tests, and required lint/docs checks.
+
+# Issue #885 MultiPage / Page / TabStrip
+
+- [x] Capture sequential Excel-authored and saved/reopened differential evidence, including empty Pages/Tabs and layout.
+- [x] Add bounded lossless TabStrip arrays/flags and MultiPage x bookkeeping parsing and writing.
+- [x] Extend new generation and atomic before/after topology/property compilation, preserving opaque state.
+- [x] Align FormSpec, projection, editor intelligence, and Excel authoring/inspection contracts.
+- [x] Verify blank/template pack, file pull, Excel persistence/runtime, and relevant package/bridge tests.
+- [x] Update MS-OFORMS/pack/form specifications, ADR-0012, user documentation and changelogs; self-review.
+
+Evidence and exact local commands are retained in the compiler's
+`testdata/multipage-excel-authored/README.md` and
+`testdata/multipage-excel-generated/README.md`. Focused persistence review
+confirmed and then rechecked fixes for empty cached-tab edits and quadratic
+signature membership checks. Local checks passed for userforms/pack/filepull,
+CLI pack/form, 51 bridge tests, Go lint, VS Code TypeScript and docs. No remote
+CI or publication is claimed.

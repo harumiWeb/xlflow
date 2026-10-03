@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Commands;
 using Xlflow.ExcelBridge.Contract;
@@ -143,6 +145,232 @@ public sealed class FormWriteCommandTests
         Assert.Contains("Caption did not persist", inner.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AddDesignerControlUsesPagesForMultiPageAndSetsValueAfterPageChildren()
+    {
+        const string json = """{"form":{"name":"Sample"},"controls":[{"id":"multi","type":"MultiPage","name":"Tabs","selectedIndex":1},{"id":"first","parentId":"multi","type":"Page","name":"PageA","caption":"First","tag":"page-tag","controlTipText":"page-tip","accelerator":"P","enabled":false,"visible":false},{"id":"second","parentId":"multi","type":"Page","name":"PageB"},{"id":"label","parentId":"first","type":"Label","name":"LabelA","left":12.5}]}""";
+        var designer = new FakeFormDesigner();
+
+        AddFirstControl(json, designer);
+
+        var multiPage = Assert.IsType<FakeMultiPage>(Assert.Single(designer.Controls.Items));
+        Assert.Equal(new[] { "PageA", "PageB" }, multiPage.Pages.AddedNames);
+        Assert.Equal(new[] { "DefaultPage2", "DefaultPage1" }, multiPage.Pages.RemovedNames);
+        Assert.Equal(new[] { "PageA", "PageB" }, multiPage.Pages.Items.Select(page => page.Name));
+        Assert.Equal(1, multiPage.Value);
+        Assert.Equal(2, multiPage.ValueSetPageCount);
+        var page = multiPage.Pages.Items[0];
+        Assert.Equal("First", page.Caption);
+        Assert.Equal("page-tag", page.Tag);
+        Assert.Equal("page-tip", page.ControlTipText);
+        Assert.Equal("P", page.Accelerator);
+        Assert.False(page.Enabled);
+        Assert.False(page.Visible);
+        Assert.Equal(12.5, Assert.Single(page.Controls.Items).Left);
+        Assert.Empty(multiPage.Controls.Items);
+    }
+
+    [Fact]
+    public void AddDesignerControlWritesPageMetadataFromCaseInsensitivePropertyBagAliases()
+    {
+        const string json = """{"form":{"name":"Sample"},"controls":[{"id":"multi","type":"MultiPage","name":"Tabs"},{"id":"page","parentId":"multi","type":"Page","name":"PageAlpha","caption":"Alpha","properties":{"CAPTION":"Alpha","ENABLED":false,"Visible":false,"TaG":"alpha-tag","ControlTipText":"alpha-tip","Accelerator":"A"}}]}""";
+        var designer = new FakeFormDesigner();
+
+        AddFirstControl(json, designer);
+
+        var multiPage = Assert.IsType<FakeMultiPage>(Assert.Single(designer.Controls.Items));
+        var page = Assert.Single(multiPage.Pages.Items);
+        Assert.Equal("Alpha", page.Caption);
+        Assert.False(page.Enabled);
+        Assert.False(page.Visible);
+        Assert.Equal("alpha-tag", page.Tag);
+        Assert.Equal("alpha-tip", page.ControlTipText);
+        Assert.Equal("A", page.Accelerator);
+    }
+
+    [Fact]
+    public void DecodeSpecRejectsConflictingPageAliasesBeforeAnyControlMutation()
+    {
+        const string json = """{"form":{"name":"Sample"},"controls":[{"id":"multi","type":"MultiPage","name":"Tabs"},{"id":"page","parentId":"multi","type":"Page","name":"PageAlpha","tag":"top-level-tag","properties":{"TAG":"bag-tag"}}]}""";
+        var designer = new FakeFormDesigner();
+
+        var exception = Assert.Throws<TargetInvocationException>(() => AddFirstControl(json, designer));
+
+        Assert.Contains("conflicting explicit aliases for 'tag'", exception.InnerException?.Message, StringComparison.Ordinal);
+        Assert.Empty(designer.Controls.Items);
+    }
+
+    [Fact]
+    public void DecodeSpecRejectsInvalidKnownSelectionRanges()
+    {
+        var invalidSpecs = new[]
+        {
+            """{"form":{"name":"Sample"},"controls":[{"id":"multi","type":"MultiPage","name":"Pages","selectedIndex":-1},{"id":"page","parentId":"multi","type":"Page","name":"PageA"}]}""",
+            """{"form":{"name":"Sample"},"controls":[{"id":"multi","type":"MultiPage","name":"Pages","selectedIndex":1},{"id":"page","parentId":"multi","type":"Page","name":"PageA"}]}""",
+            """{"form":{"name":"Sample"},"controls":[{"type":"TabStrip","name":"Tabs","selectedIndex":-1,"tabs":[{"name":"TabA"}]}]}""",
+            """{"form":{"name":"Sample"},"controls":[{"type":"TabStrip","name":"Tabs","selectedIndex":1,"tabs":[{"name":"TabA"}]}]}""",
+            """{"form":{"name":"Sample"},"controls":[{"type":"TabStrip","name":"Tabs","selectedIndex":0,"tabs":[]}]}""",
+        };
+
+        foreach (var json in invalidSpecs)
+        {
+            var exception = Assert.Throws<TargetInvocationException>(() => DecodeSpecObject(json));
+            Assert.Contains("selectedIndex must be", exception.InnerException?.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void ApplySelectionPreflightUsesExistingTabCountWhenTabsAreOmitted()
+    {
+        var spec = DecodeSpecObject("""{"form":{"name":"Sample"},"controls":[{"type":"TabStrip","name":"Tabs","selectedIndex":2}]}""");
+        var designer = new FakeFormDesigner();
+        var strip = new FakeTabStrip("Tabs", designer);
+        strip.Tabs.Add("TabBeta");
+        designer.Controls.Items.Add(strip);
+        var setterCount = strip.ValueSetterCount;
+
+        var exception = Assert.Throws<TargetInvocationException>(() => PrepareApplySelectionIndices(designer, spec));
+
+        Assert.Contains("selectedIndex must be 0..1", exception.InnerException?.Message, StringComparison.Ordinal);
+        Assert.Same(strip, Assert.Single(designer.Controls.Items));
+        Assert.Equal(new[] { "DefaultTab", "TabBeta" }, strip.Tabs.Items.Select(tab => tab.Name));
+        Assert.Equal(setterCount, strip.ValueSetterCount);
+    }
+
+    [Fact]
+    public void ApplySelectionPreflightRetainsExistingTabsWhenAuthoredTabsAreOmitted()
+    {
+        var spec = DecodeSpecObject("""{"form":{"name":"Sample"},"controls":[{"type":"TabStrip","name":"Tabs"}]}""");
+        var designer = new FakeFormDesigner();
+        var strip = new FakeTabStrip("Tabs", designer);
+        strip.Tabs.Add("TabBeta");
+        strip.Tabs.Items[0].Caption = "Existing alpha";
+        strip.Tabs.Items[1].Tag = "existing-beta";
+        designer.Controls.Items.Add(strip);
+
+        PrepareApplySelectionIndices(designer, spec);
+
+        var firstControl = ((IEnumerable)GetDecodedControls(spec)).Cast<object>().Single();
+        var observed = firstControl.GetType().GetProperty("Observed")?.GetValue(firstControl);
+        Assert.NotNull(observed);
+        var tabs = Assert.IsAssignableFrom<IEnumerable>(observed.GetType().GetProperty("Tabs")?.GetValue(observed));
+        var tabNames = tabs.Cast<object>().Select(tab => tab.GetType().GetProperty("Name")?.GetValue(tab)).ToArray();
+        Assert.Equal(new object?[] { "DefaultTab", "TabBeta" }, tabNames);
+        var selectedIndex = observed.GetType().GetProperty("SelectedIndex")?.GetValue(observed);
+        Assert.Equal(0, selectedIndex);
+        Assert.Same(strip, Assert.Single(designer.Controls.Items));
+    }
+
+    [Fact]
+    public void AddDesignerControlClearsDefaultPagesForAnAuthoredEmptyMultiPageWithoutSettingValue()
+    {
+        const string json = """{"form":{"name":"Sample"},"controls":[{"id":"multi","type":"MultiPage","name":"Tabs","selectedIndex":-1}]}""";
+        var designer = new FakeFormDesigner();
+
+        AddFirstControl(json, designer);
+
+        var multiPage = Assert.IsType<FakeMultiPage>(Assert.Single(designer.Controls.Items));
+        Assert.Empty(multiPage.Pages.Items);
+        Assert.Equal(new[] { "DefaultPage2", "DefaultPage1" }, multiPage.Pages.RemovedNames);
+        Assert.False(multiPage.EmptyValueSetterCalled);
+    }
+
+    [Fact]
+    public void AddDesignerControlPreservesOmittedTabsAndClearsExplicitEmptyTabsByNumericIndex()
+    {
+        var omittedDesigner = new FakeFormDesigner();
+        AddFirstControl("""{"form":{"name":"Sample"},"controls":[{"type":"TabStrip","name":"Tabs"}]}""", omittedDesigner);
+        var omittedStrip = Assert.IsType<FakeTabStrip>(Assert.Single(omittedDesigner.Controls.Items));
+        Assert.Equal(new[] { "DefaultTab" }, omittedStrip.Tabs.Items.Select(tab => tab.Name));
+        Assert.Empty(omittedStrip.Tabs.RemoveArguments);
+
+        var emptyDesigner = new FakeFormDesigner();
+        AddFirstControl("""{"form":{"name":"Sample"},"controls":[{"type":"TabStrip","name":"Tabs","tabs":[]}]}""", emptyDesigner);
+        var emptyStrip = Assert.IsType<FakeTabStrip>(Assert.Single(emptyDesigner.Controls.Items));
+        Assert.Empty(emptyStrip.Tabs.Items);
+        Assert.Equal(new object[] { 0 }, emptyStrip.Tabs.RemoveArguments);
+        Assert.Equal(-1, emptyStrip.Value);
+        Assert.Equal(0, emptyStrip.ValueSetterCount);
+    }
+
+    [Fact]
+    public void AddDesignerControlWritesTabMetadataAndSelectionThroughValueAfterTabsExist()
+    {
+        const string json = """{"form":{"name":"Sample"},"controls":[{"type":"TabStrip","name":"Tabs","selectedIndex":1,"tabs":[{"name":"TabAlpha","caption":"Alpha","controlTipText":"tip","tag":"tag","accelerator":"A","enabled":false,"visible":true},{"name":"TabBeta"}]}]}""";
+        var designer = new FakeFormDesigner();
+
+        AddFirstControl(json, designer);
+
+        var strip = Assert.IsType<FakeTabStrip>(Assert.Single(designer.Controls.Items));
+        Assert.Equal(new object[] { 0 }, strip.Tabs.RemoveArguments);
+        Assert.Equal(new[] { "TabAlpha", "TabBeta" }, strip.Tabs.Items.Select(tab => tab.Name));
+        var first = strip.Tabs.Items[0];
+        Assert.Equal("Alpha", first.Caption);
+        Assert.Equal("tip", first.ControlTipText);
+        Assert.Equal("tag", first.Tag);
+        Assert.Equal("A", first.Accelerator);
+        Assert.False(first.Enabled);
+        Assert.True(first.Visible);
+        Assert.Equal("default-caption", strip.Tabs.Items[1].Caption);
+        Assert.Equal(1, strip.Value);
+        Assert.Equal(2, strip.ValueSetTabCount);
+    }
+
+    [Fact]
+    public void DecodeSpecRejectsTabWithoutRequiredName()
+    {
+        var decode = typeof(ExcelFormWriteService).GetMethod("DecodeSpec", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(decode);
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("""{"form":{"name":"Sample"},"controls":[{"type":"TabStrip","name":"Tabs","tabs":[{}]}]}"""));
+
+        var exception = Assert.Throws<TargetInvocationException>(() => decode!.Invoke(null, [encoded]));
+
+        Assert.Contains("tabs[0].name is required", exception.InnerException?.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RequiredModeledPropertyFailsWhenExcelDoesNotPersistIt()
+    {
+        var method = typeof(ExcelFormWriteService).GetMethod("SetRequiredMember", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var exception = Assert.Throws<TargetInvocationException>(() => method!.Invoke(null, [new FakeUnpersistedProperty(), "Width", 24.0]));
+
+        var inner = Assert.IsType<InvalidOperationException>(exception.InnerException);
+        Assert.Contains("Width did not persist", inner.Message, StringComparison.Ordinal);
+    }
+
+    private static void AddFirstControl(string json, FakeFormDesigner designer)
+    {
+        var spec = DecodeSpecObject(json);
+        var controls = GetDecodedControls(spec);
+        var firstControl = ((IEnumerable)controls).Cast<object>().First();
+        var add = typeof(ExcelFormWriteService).GetMethod("AddDesignerControl", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("AddDesignerControl method was not found.");
+        add.Invoke(null, [designer, firstControl, controls, "UserForm"]);
+    }
+
+    private static object DecodeSpecObject(string json)
+    {
+        var decode = typeof(ExcelFormWriteService).GetMethod("DecodeSpec", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("DecodeSpec method was not found.");
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        return decode.Invoke(null, [encoded]) ?? throw new InvalidOperationException("form spec was not decoded.");
+    }
+
+    private static object GetDecodedControls(object spec)
+    {
+        return spec.GetType().GetProperty("Controls")?.GetValue(spec)
+            ?? throw new InvalidOperationException("form controls were not decoded.");
+    }
+
+    private static void PrepareApplySelectionIndices(FakeFormDesigner designer, object spec)
+    {
+        var method = typeof(ExcelFormWriteService).GetMethod("PrepareApplySelectionIndices", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("PrepareApplySelectionIndices method was not found.");
+        method.Invoke(null, [designer, spec]);
+    }
+
     private sealed class FakeFormWriteService(Func<BridgeRequest, FormWriteCommandArguments, BridgeResponse> handler) : IFormWriteService
     {
         public BridgeResponse Execute(BridgeRequest request, FormWriteCommandArguments args, CancellationToken cancellationToken)
@@ -202,6 +430,231 @@ public sealed class FormWriteCommandTests
                     _value = value;
                 }
             }
+        }
+    }
+
+    private sealed class FakeFormDesigner
+    {
+        public FakeFormDesigner()
+        {
+            Controls = new FakeControlCollection(this);
+        }
+
+        public FakeControlCollection Controls { get; }
+    }
+
+    private class FakeControl(string name, string progId, object? parent)
+    {
+        public string Name { get; set; } = name;
+
+        public string ProgId { get; } = progId;
+
+        public object? Parent { get; } = parent;
+
+        public string Caption { get; set; } = "";
+
+        public string Tag { get; set; } = "";
+
+        public string ControlTipText { get; set; } = "";
+
+        public string Accelerator { get; set; } = "";
+
+        public string Text { get; set; } = "";
+
+        public double Left { get; set; }
+
+        public double Top { get; set; }
+
+        public double Width { get; set; }
+
+        public double Height { get; set; }
+
+        public int TabIndex { get; set; }
+
+        public bool Enabled { get; set; } = true;
+
+        public bool Visible { get; set; } = true;
+
+    }
+
+    private sealed class FakeControlCollection(object owner)
+    {
+        public List<FakeControl> Items { get; } = [];
+
+        public int Count => Items.Count;
+
+        public object Item(int index) => Items[index];
+
+        public object Add(string progId, string name, bool visible)
+        {
+            FakeControl control = progId switch
+            {
+                "Forms.MultiPage.1" => new FakeMultiPage(name, owner),
+                "Forms.TabStrip.1" => new FakeTabStrip(name, owner),
+                _ => new FakeControl(name, progId, owner),
+            };
+            control.Visible = visible;
+            Items.Add(control);
+            return control;
+        }
+    }
+
+    private sealed class FakeMultiPage(string name, object? parent) : FakeControl(name, "Forms.MultiPage.1", parent)
+    {
+        private int _value = 1;
+
+        public FakeMultiPage() : this("MultiPage", null)
+        {
+        }
+
+        public FakePageCollection Pages { get; } = new();
+
+        public FakeControlCollection Controls { get; } = new(new object());
+
+        public bool EmptyValueSetterCalled { get; private set; }
+
+        public int ValueSetPageCount { get; private set; }
+
+        public int Value
+        {
+            get => Pages.Count == 0 ? -1 : _value;
+            set
+            {
+                if (Pages.Count == 0)
+                {
+                    EmptyValueSetterCalled = true;
+                    throw new InvalidOperationException("Setting Value on an empty MultiPage is unsafe.");
+                }
+                if (value < 0 || value >= Pages.Count)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value));
+                }
+                _value = value;
+                ValueSetPageCount = Pages.Count;
+            }
+        }
+    }
+
+    private sealed class FakePageCollection
+    {
+        public List<FakePage> Items { get; } = [new("DefaultPage1", null), new("DefaultPage2", null)];
+
+        public List<string> AddedNames { get; } = [];
+
+        public List<string> RemovedNames { get; } = [];
+
+        public int Count => Items.Count;
+
+        public object Item(int index) => Items[index];
+
+        public object Add(string name)
+        {
+            AddedNames.Add(name);
+            var page = new FakePage(name, null);
+            Items.Add(page);
+            return page;
+        }
+
+        public void Remove(string name)
+        {
+            RemovedNames.Add(name);
+            var page = Items.Single(item => string.Equals(item.Name, name, StringComparison.Ordinal));
+            Items.Remove(page);
+        }
+    }
+
+    private sealed class FakePage(string name, object? parent) : FakeControl(name, "Forms.Page.1", parent)
+    {
+        public FakePage() : this("Page", null)
+        {
+        }
+
+        public FakeControlCollection Controls { get; } = new(new object());
+    }
+
+    private sealed class FakeTabStrip(string name, object? parent) : FakeControl(name, "Forms.TabStrip.1", parent)
+    {
+        private int _value = 0;
+
+        public FakeTabStrip() : this("TabStrip", null)
+        {
+        }
+
+        public FakeTabs Tabs { get; } = new();
+
+        public int ValueSetterCount { get; private set; }
+
+        public int ValueSetTabCount { get; private set; }
+
+        public int Value
+        {
+            get => Tabs.Count == 0 ? -1 : _value;
+            set
+            {
+                if (value < 0 || value >= Tabs.Count)
+                {
+                    if (value == -1 && Tabs.Count == 0)
+                    {
+                        _value = value;
+                        ValueSetterCount++;
+                        return;
+                    }
+                    throw new ArgumentOutOfRangeException(nameof(value));
+                }
+                _value = value;
+                ValueSetterCount++;
+                ValueSetTabCount = Tabs.Count;
+            }
+        }
+    }
+
+    private sealed class FakeTabs
+    {
+        public List<FakeTab> Items { get; } = [new("DefaultTab")];
+
+        public List<object> RemoveArguments { get; } = [];
+
+        public int Count => Items.Count;
+
+        public object Item(int index) => Items[index];
+
+        public object Add(string name)
+        {
+            var tab = new FakeTab(name);
+            Items.Add(tab);
+            return tab;
+        }
+
+        public void Remove(int index)
+        {
+            RemoveArguments.Add(index);
+            Items.RemoveAt(index);
+        }
+    }
+
+    private sealed class FakeTab(string name)
+    {
+        public string Name { get; set; } = name;
+
+        public string Caption { get; set; } = "default-caption";
+
+        public string ControlTipText { get; set; } = "default-tip";
+
+        public string Tag { get; set; } = "default-tag";
+
+        public string Accelerator { get; set; } = "default-accelerator";
+
+        public bool Enabled { get; set; } = true;
+
+        public bool Visible { get; set; } = false;
+    }
+
+    private sealed class FakeUnpersistedProperty
+    {
+        public double Width
+        {
+            get => 0;
+            set { }
         }
     }
 }

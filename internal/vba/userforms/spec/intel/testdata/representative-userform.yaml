@@ -19,6 +19,47 @@ controls:
     height: 220
     enabled: true
     visible: true
+  - id: multipage_settings
+    name: MultiPageSettings
+    type: MultiPage
+    progId: Forms.MultiPage.1
+    selectedIndex: 0
+    left: 12
+    top: 12
+    width: 320
+    height: 180
+  - id: page_general
+    name: PageGeneral
+    type: Page
+    progId: Forms.Page.1
+    parentId: multipage_settings
+    caption: General
+    controlTipText: General settings
+    tag: settings-general
+    accelerator: G
+    enabled: true
+    visible: true
+  - id: tabstrip_navigation
+    name: TabStripNavigation
+    type: TabStrip
+    progId: Forms.TabStrip.1
+    selectedIndex: 0
+    tabs:
+      - name: Overview
+        caption: Overview
+        controlTipText: Show overview
+        tag: nav-overview
+        accelerator: O
+        enabled: true
+        visible: true
+      - name: Details
+        caption: Details
+        enabled: true
+        visible: true
+    left: 12
+    top: 200
+    width: 320
+    height: 24
   - id: label_title
     name: LabelTitle
     type: Label

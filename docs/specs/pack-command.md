@@ -44,8 +44,8 @@ Blank and template modes discover forms from the flat `specs/` directory under `
 Each YAML/YML/JSON filename must match `form.name`; duplicate specs, orphan
 artifacts, nested canonical directories and component/CFB name collisions fail with
 `pack_ambiguous_layout`. The supported subset is empty forms, Frames with nested
-Frames and the eleven built-in common classes specified in `ms-oforms.md`.
-MultiPage/Page/TabStrip generation, custom ActiveX,
+Frames, MultiPage/Page hierarchies, standalone TabStrip collections and the
+eleven built-in common classes specified in `ms-oforms.md`. Custom ActiveX,
 Picture resources and unsupported persisted list state fail with
 `pack_userform_generation_unsupported` before output publication.
 
@@ -156,7 +156,8 @@ empty source form set, and requires canonical specs for all supplied forms.
 Blank mode always uses source form authority independently of this setting.
 
 For a supplied canonical spec, template pack applies supported Designer
-properties, Frame/common-control topology and code. The spec supplies the complete
+properties, Frame/common-control and MultiPage/Page/TabStrip topology, and code.
+The spec supplies the complete
 control list, including additions, deletions, replacements, parent changes and
 sibling ordering. IDs are local spec identities and are mapped
 by control names to the binary baseline. Omitted properties retain template
@@ -171,9 +172,12 @@ addition. Nested `controls` and flat
 `parentId` author the same hierarchy. Siblings sort by `zIndex`, with stable
 input-order ties. Moving a control keeps omitted numeric geometry relative to
 its new parent; pack does not convert it into an absolute-position-preserving
-move. Removed Frame subtrees leave no orphan storages. Existing
-MultiPage/Page/TabStrip topology remains unchanged until its dedicated compiler
-is supported. Unknown container bookkeeping rejects structural edits.
+move. Removed container subtrees leave no orphan storages. MultiPage Page order
+follows x-stream IDs, and independent TabStrip tabs follow their authored array.
+Omitted tab fields preserve retained values; an explicit empty tabs array deletes
+all tabs. Page geometry is derived, while unsupported dependent tab layouts and
+unknown container bookkeeping reject structural edits. See
+[MultiPage and TabStrip](userform-multipage-tabstrip.md).
 
 New supported forms use the same compiler and reference admission as blank
 pack. Existing module attributes and GUIDs survive code updates. Removal

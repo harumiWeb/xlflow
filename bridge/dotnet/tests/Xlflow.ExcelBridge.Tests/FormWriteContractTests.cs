@@ -37,11 +37,16 @@ public sealed class FormWriteContractTests
             Assert.True(map.TryGetValue(control.Type, out var progId), $"bridge is missing {control.Type}");
             Assert.Equal(control.ProgId, progId);
         }
+        Assert.Equal("Forms.MultiPage.1", map["multipage"]);
+        Assert.Equal("Forms.Page.1", map["page"]);
+        Assert.Equal("Forms.TabStrip.1", map["tabstrip"]);
 
         AssertJsonProperties("FormWriteFormSpec", snapshot.Bridge.FormFields);
         AssertJsonProperties("FormWriteBuildFormSpec", snapshot.Bridge.FormBuildFields);
         AssertJsonProperties("FormWriteObservedFormSpec", snapshot.Bridge.ObservedFormFields);
         AssertJsonProperties("FormWriteControlSpec", snapshot.Bridge.ControlFields);
+        AssertJsonProperties("FormWriteObservedControlSpec", snapshot.Bridge.ObservedControlFields);
+        AssertJsonProperties("FormWriteTabSpec", snapshot.Bridge.TabFields);
     }
 
     [Theory]
@@ -84,6 +89,20 @@ public sealed class FormWriteContractTests
         Assert.Equal(180, observed.GetProperty("clientHeight").GetDouble());
     }
 
+    [Fact]
+    public void TabStripTabDtoUsesThePublicMetadataFieldNames()
+    {
+        var type = typeof(ExcelFormWriteService).GetNestedType("FormWriteTabSpec", BindingFlags.NonPublic);
+        Assert.NotNull(type);
+        var actual = type!.GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Select(property => property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Cast<string>()
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Equal(new[] { "name", "caption", "controlTipText", "tag", "accelerator", "enabled", "visible" }.ToHashSet(StringComparer.Ordinal), actual);
+    }
+
     private static void AssertJsonProperties(string nestedTypeName, IReadOnlyCollection<string> expected)
     {
         var type = typeof(ExcelFormWriteService).GetNestedType(nestedTypeName, BindingFlags.NonPublic);
@@ -117,5 +136,7 @@ public sealed class FormWriteContractTests
         public List<string> FormBuildFields { get; init; } = [];
         public List<string> ObservedFormFields { get; init; } = [];
         public List<string> ControlFields { get; init; } = [];
+        public List<string> ObservedControlFields { get; init; } = [];
+        public List<string> TabFields { get; init; } = [];
     }
 }

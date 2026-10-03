@@ -150,6 +150,8 @@ func propertyCompletions(doc *Document, parent string, context CursorContext, li
 		properties = formBuildProperties()
 	case isControlPath(parent):
 		properties = controlProperties(contract, controlAtPath(doc.Source, parent))
+	case isTabPath(parent):
+		properties = contract.TabProperties
 	default:
 		return nil
 	}
@@ -180,11 +182,7 @@ func controlProperties(contract forms.Contract, control controlInfo) map[string]
 		properties[name] = property
 	}
 	if control.isKnownType() && !control.isCustomProgID() {
-		if typed, ok := contract.Controls[strings.ToLower(control.Type)]; ok {
-			for name, property := range typed.Properties {
-				properties[name] = property
-			}
-		}
+		return forms.ControlProperties(control.Type)
 	}
 	return properties
 }
@@ -256,6 +254,9 @@ func propertyAt(source, parent, name string) (forms.PropertyContract, bool) {
 	}
 	if parent == "form" {
 		return lookupProperty(contract.FormProperties, name)
+	}
+	if isTabPath(parent) {
+		return forms.LookupTabProperty(name)
 	}
 	if !isControlPath(parent) {
 		return forms.PropertyContract{}, false
@@ -383,11 +384,14 @@ func controlSnippets(line string, replace Range) []CompletionItem {
 		prefix = ""
 	}
 	items := []CompletionItem{
-		controlSnippet("Basic control", prefix+"id: ${1:control_id}\n  name: ${2:ControlName}\n  type: ${3|Label,TextBox,ComboBox,ListBox,CommandButton,CheckBox,OptionButton,Frame|}\n  left: ${4:0}\n  top: ${5:0}\n  width: ${6:100}\n  height: ${7:20}", replace),
+		controlSnippet("Basic control", prefix+"id: ${1:control_id}\n  name: ${2:ControlName}\n  type: ${3|Label,TextBox,ComboBox,ListBox,CommandButton,CheckBox,OptionButton,Frame,MultiPage,Page,TabStrip|}\n  left: ${4:0}\n  top: ${5:0}\n  width: ${6:100}\n  height: ${7:20}", replace),
 		controlSnippet("Frame", prefix+"id: ${1:frame_id}\n  name: ${2:FrameName}\n  type: Frame\n  caption: ${3:Frame}\n  left: ${4:0}\n  top: ${5:0}\n  width: ${6:100}\n  height: ${7:80}", replace),
 		controlSnippet("Label", prefix+"id: ${1:label_id}\n  name: ${2:LabelName}\n  type: Label\n  caption: ${3:Label}\n  left: ${4:0}\n  top: ${5:0}\n  width: ${6:100}\n  height: ${7:20}", replace),
 		controlSnippet("TextBox", prefix+"id: ${1:textbox_id}\n  name: ${2:TextBoxName}\n  type: TextBox\n  text: ${3:}\n  left: ${4:0}\n  top: ${5:0}\n  width: ${6:100}\n  height: ${7:20}", replace),
 		controlSnippet("CommandButton", prefix+"id: ${1:button_id}\n  name: ${2:CommandButtonName}\n  type: CommandButton\n  caption: ${3:OK}\n  left: ${4:0}\n  top: ${5:0}\n  width: ${6:100}\n  height: ${7:20}", replace),
+		controlSnippet("MultiPage", prefix+"id: ${1:multipage_id}\n  name: ${2:MultiPageName}\n  type: MultiPage\n  selectedIndex: ${3:-1}\n  left: ${4:0}\n  top: ${5:0}\n  width: ${6:200}\n  height: ${7:120}", replace),
+		controlSnippet("Page", prefix+"id: ${1:page_id}\n  name: ${2:PageName}\n  type: Page\n  parentId: ${3:multipage_id}\n  caption: ${4:Page}", replace),
+		controlSnippet("TabStrip", prefix+"id: ${1:tabstrip_id}\n  name: ${2:TabStripName}\n  type: TabStrip\n  selectedIndex: ${3:-1}\n  tabs:\n    - name: ${4:Tab1}\n      caption: ${5:Tab 1}\n  left: ${6:0}\n  top: ${7:0}\n  width: ${8:200}\n  height: ${9:24}", replace),
 	}
 	indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 	for i := range items {
@@ -407,6 +411,9 @@ func isControlsSequencePath(path string) bool {
 }
 
 var controlPathPattern = regexp.MustCompile(`^controls\[\d+\](?:\.controls\[\d+\])*$`)
+var tabPathPattern = regexp.MustCompile(`^controls\[\d+\](?:\.controls\[\d+\])*(?:\.tabs\[\d+\])$`)
+
+func isTabPath(path string) bool { return tabPathPattern.MatchString(path) }
 
 func lastPathSegment(path string) string {
 	if index := strings.LastIndex(path, "."); index >= 0 {
@@ -442,9 +449,10 @@ func (control controlInfo) isCustomProgID() bool {
 // That keeps reference completion useful while a key or scalar is half typed.
 func controlsInSource(source string) []controlInfo {
 	type block struct {
-		indent int
-		path   string
-		next   int
+		indent     int
+		itemIndent int
+		path       string
+		next       int
 	}
 	type frame struct {
 		indent int
@@ -478,7 +486,10 @@ func controlsInSource(source string) []controlInfo {
 					break
 				}
 			}
-			if blockIndex >= 0 {
+			if blockIndex >= 0 && (blocks[blockIndex].itemIndent < 0 || blocks[blockIndex].itemIndent == indent) {
+				if blocks[blockIndex].itemIndent < 0 {
+					blocks[blockIndex].itemIndent = indent
+				}
 				itemPath := fmt.Sprintf("%s[%d]", blocks[blockIndex].path, blocks[blockIndex].next)
 				blocks[blockIndex].next++
 				controls = append(controls, controlInfo{path: itemPath, order: len(controls)})
@@ -501,7 +512,7 @@ func controlsInSource(source string) []controlInfo {
 			if owner != "" {
 				path = owner + ".controls"
 			}
-			blocks = append(blocks, block{indent: indent, path: path})
+			blocks = append(blocks, block{indent: indent, itemIndent: -1, path: path})
 			continue
 		}
 		if len(frames) == 0 {
@@ -570,6 +581,12 @@ func parentIDValues(source string, current controlInfo, replace Range) []Complet
 		}
 		canContain, known := containerEligibility(candidate)
 		if known && !canContain {
+			continue
+		}
+		if allowed, known := forms.FormSpecControlParentAllowsChild(
+			forms.FormSpecControl{Type: candidate.Type, ProgID: candidate.progID},
+			forms.FormSpecControl{Type: current.Type, ProgID: current.progID},
+		); known && !allowed {
 			continue
 		}
 		if !known && strings.TrimSpace(candidate.progID) == "" {

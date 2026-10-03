@@ -202,6 +202,16 @@ type controlSignatureView struct {
 	OpaqueRaw        []byte
 	Children         []controlSignatureView
 	LevelPath        *string
+	TabStrip         *TabStrip
+	MultiPage        *multiPageSignatureView
+}
+
+type multiPageSignatureView struct {
+	HiddenID       int32
+	PageIDs        []int32
+	Reserved       []byte
+	PageProperties map[int32][]byte
+	Properties     *recordSignatureView
 }
 
 type siteSignatureView struct {
@@ -242,6 +252,31 @@ type compObjSignatureView struct {
 }
 
 func modelSignature(form *Form) ([32]byte, error) {
+	// Derived references must still point into the signed ownership tree.
+	// Hash their order and semantic state without introducing reference cycles.
+	for _, level := range form.Levels {
+		if level == nil {
+			continue
+		}
+		for _, control := range level.Controls {
+			if control == nil || control.MultiPage == nil {
+				continue
+			}
+			state := control.MultiPage
+			children := make(map[*Control]bool, len(control.Children))
+			for _, child := range control.Children {
+				children[child] = true
+			}
+			if state.Hidden == nil || !children[state.Hidden] {
+				return [32]byte{}, ErrUnsupportedMutation
+			}
+			for _, page := range state.Pages {
+				if page == nil || !children[page] {
+					return [32]byte{}, ErrUnsupportedMutation
+				}
+			}
+		}
+	}
 	view := formSignatureView{
 		Name: form.Name, DesignerSource: form.DesignerSource,
 		CompObj:  compObjSignature(form.CompObj),
@@ -294,6 +329,19 @@ func controlSignatures(controls []*Control) []controlSignatureView {
 			ObjectStreamSize: control.ObjectStreamSize, Depth: control.Depth,
 			SiteType: control.SiteType, Record: recordSignature(control.Record),
 			OpaqueRaw: control.OpaqueRaw, Children: controlSignatures(control.Children),
+			TabStrip: control.TabStrip,
+		}
+		if state := control.MultiPage; state != nil {
+			multi := &multiPageSignatureView{Reserved: state.Reserved, PageProperties: state.PageProperties, Properties: recordSignature(state.Properties)}
+			if state.Hidden != nil {
+				multi.HiddenID = state.Hidden.ID
+			}
+			for _, page := range state.Pages {
+				if page != nil {
+					multi.PageIDs = append(multi.PageIDs, page.ID)
+				}
+			}
+			view.MultiPage = multi
 		}
 		if control.Site != nil {
 			site := siteSignature(control.Site)

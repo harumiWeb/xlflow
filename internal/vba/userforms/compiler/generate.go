@@ -30,6 +30,7 @@ var generationDefaults = map[string]struct {
 	"checkbox": {26, 72, 18}, "optionbutton": {27, 72, 18}, "togglebutton": {28, 72, 18},
 	"combobox": {25, 120, 18}, "listbox": {24, 120, 72}, "spinbutton": {16, 18, 36},
 	"scrollbar": {47, 120, 18}, "image": {12, 72, 72}, "frame": {14, 144, 108},
+	"multipage": {57, 240, 180}, "page": {7, 0, 0}, "tabstrip": {18, 240, 48},
 }
 
 // CompileNew builds a supported Designer tree from canonical authoring intent.
@@ -96,8 +97,8 @@ func CompileNew(input spec.FormSpec, codePage uint16) (*oforms.Form, error) {
 				return nil, generationErrorForControl(form.Form.Name, control.Name, path, err)
 			}
 			if nested := children[control.ID]; len(nested) != 0 {
-				if !strings.EqualFold(control.Type, "Frame") {
-					return nil, fail(GenerationUnsupported, control.Name, path+".controls", "only Frame controls can contain generated controls")
+				if !spec.ControlCanContainChildren(control.Type) {
+					return nil, fail(GenerationUnsupported, control.Name, path+".controls", "control cannot contain generated controls")
 				}
 				if depth+1 >= oforms.MaxNestingDepth {
 					return nil, fail(GenerationInvalid, control.Name, path+".controls", fmt.Sprintf("Designer nesting exceeds %d levels", oforms.MaxNestingDepth))
@@ -105,6 +106,38 @@ func CompileNew(input spec.FormSpec, codePage uint16) (*oforms.Form, error) {
 				item.Controls, err = buildControls(control.ID, depth+1)
 				if err != nil {
 					return nil, err
+				}
+			}
+			if item.Class == 57 {
+				state := &oforms.TabStrip{SelectedIndex: 0}
+				if len(item.Controls) == 0 {
+					state.SelectedIndex = -1
+				}
+				if control.SelectedIndex != nil {
+					if *control.SelectedIndex < -1 || *control.SelectedIndex > math.MaxInt32 {
+						return nil, fail(GenerationInvalid, control.Name, path+".selectedIndex", "selected index exceeds int32")
+					}
+					state.SelectedIndex = int32(*control.SelectedIndex)
+				}
+				for _, page := range item.Controls {
+					tab := oforms.Tab{Name: "Tab_" + page.Name, Caption: page.Name, Enabled: true, Visible: page.Visible}
+					if value, ok := page.Properties["Caption"].(string); ok {
+						tab.Caption = value
+					}
+					if value, ok := page.Properties["ControlTipText"].(string); ok {
+						tab.ControlTipText = value
+					}
+					if value, ok := page.Properties["Accelerator"].(string); ok {
+						tab.Accelerator = value
+					}
+					if value, ok := page.Properties["BooleanProperties"].(int64); ok {
+						tab.Enabled = value&4 != 0
+					}
+					state.Tabs = append(state.Tabs, tab)
+				}
+				item.Tabs = state
+				if len(state.Tabs) == 0 && state.SelectedIndex != -1 || len(state.Tabs) > 0 && (state.SelectedIndex < 0 || int(state.SelectedIndex) >= len(state.Tabs)) {
+					return nil, fail(GenerationInvalid, control.Name, path+".selectedIndex", "selection outside final Page collection")
 				}
 			}
 			if strings.EqualFold(control.Type, "Frame") && depth+1 >= oforms.MaxNestingDepth {
@@ -170,7 +203,7 @@ func generationControlDefinition(control spec.FormSpecControl, tabIndex int) (of
 	if !validGenerationName(control.Name) {
 		return oforms.ControlDefinition{}, generationFailure(GenerationInvalid, "name", "requires a VBA identifier")
 	}
-	if len(control.List) != 0 || control.SelectedIndex != nil {
+	if len(control.List) != 0 || control.SelectedIndex != nil && defaults.class != 57 && defaults.class != 18 {
 		return oforms.ControlDefinition{}, generationFailure(GenerationUnsupported, "", "list/selectedIndex persistence is not supported")
 	}
 	if tabIndex < 0 || tabIndex > math.MaxInt16 {
@@ -185,6 +218,7 @@ func generationControlDefinition(control spec.FormSpecControl, tabIndex int) (of
 		value any
 	}{
 		{"caption", pointerValue(control.Caption)}, {"text", pointerValue(control.Text)}, {"value", control.Value},
+		{"tag", pointerValue(control.Tag)}, {"controltiptext", pointerValue(control.ControlTipText)}, {"accelerator", pointerValue(control.Accelerator)},
 		{"left", pointerValue(control.Left)}, {"top", pointerValue(control.Top)}, {"width", pointerValue(control.Width)}, {"height", pointerValue(control.Height)},
 		{"tabindex", pointerValue(control.TabIndex)}, {"enabled", pointerValue(control.Enabled)}, {"visible", pointerValue(control.Visible)},
 	} {
@@ -225,6 +259,15 @@ func generationControlDefinition(control spec.FormSpecControl, tabIndex int) (of
 		values[name] = value
 	}
 	item := oforms.ControlDefinition{Name: control.Name, Class: defaults.class, Visible: true, TabIndex: int16(tabIndex), Properties: map[string]any{}}
+	if defaults.class == 7 && (control.Left != nil || control.Top != nil || control.Width != nil || control.Height != nil) {
+		return item, generationFailure(GenerationUnsupported, "geometry", "Page geometry is derived from its MultiPage")
+	}
+	if defaults.class == 18 {
+		item.Tabs, err = generationTabs(control.Tabs, control.SelectedIndex, nil)
+		if err != nil {
+			return item, err
+		}
+	}
 	item.Size, err = generationSize(defaults.width, defaults.height)
 	if err != nil {
 		return oforms.ControlDefinition{}, generationFailure(GenerationInvalid, "", err.Error())
@@ -267,12 +310,19 @@ func generationControlDefinition(control spec.FormSpecControl, tabIndex int) (of
 			item.Properties["Position"] = int64(0)
 		}
 	}
-	if defaults.class == 14 {
+	if defaults.class == 14 || defaults.class == 7 || defaults.class == 57 {
 		bits := int64(0x8004)
+		if defaults.class == 57 {
+			bits = 0xc004
+		}
 		if enabled, found := values["Enabled"]; found && !enabled.(bool) {
 			bits &^= 4
 		}
 		item.Properties["BooleanProperties"] = bits
+		if defaults.class == 57 {
+			delete(item.Properties, "BooleanProperties")
+			item.Properties["MultiPageEnabled"] = bits&4 != 0
+		}
 	} else {
 		bits, ok := oforms.DefaultVariousPropertyBits(defaults.class)
 		if !ok {
@@ -287,6 +337,57 @@ func generationControlDefinition(control spec.FormSpecControl, tabIndex int) (of
 		item.Properties["VariousPropertyBits"] = bits
 	}
 	return item, nil
+}
+
+func generationTabs(tabs []spec.FormSpecTab, index *int, baseline *oforms.TabStrip) (*oforms.TabStrip, error) {
+	if index != nil && (*index < -1 || *index > math.MaxInt32) {
+		return nil, generationFailure(GenerationInvalid, "selectedIndex", "selected index exceeds int32")
+	}
+	state := &oforms.TabStrip{SelectedIndex: 0}
+	if len(tabs) == 0 {
+		state.SelectedIndex = -1
+	}
+	old := map[string]oforms.Tab{}
+	selectedName := ""
+	if baseline != nil {
+		for _, tab := range baseline.Tabs {
+			old[tab.Name] = tab
+		}
+		if baseline.SelectedIndex >= 0 && int(baseline.SelectedIndex) < len(baseline.Tabs) {
+			selectedName = baseline.Tabs[baseline.SelectedIndex].Name
+		}
+	}
+	for i, input := range tabs {
+		tab, retained := old[input.Name]
+		if !retained {
+			tab = oforms.Tab{Name: input.Name, Caption: input.Name, Enabled: true, Visible: true}
+		}
+		for _, field := range []struct {
+			target *string
+			source *string
+		}{{&tab.Caption, input.Caption}, {&tab.ControlTipText, input.ControlTipText}, {&tab.Tag, input.Tag}, {&tab.Accelerator, input.Accelerator}} {
+			if field.source != nil {
+				*field.target = *field.source
+			}
+		}
+		if input.Enabled != nil {
+			tab.Enabled = *input.Enabled
+		}
+		if input.Visible != nil {
+			tab.Visible = *input.Visible
+		}
+		state.Tabs = append(state.Tabs, tab)
+		if input.Name == selectedName {
+			state.SelectedIndex = int32(i)
+		}
+	}
+	if index != nil {
+		state.SelectedIndex = int32(*index)
+	}
+	if state.SelectedIndex < -1 || len(tabs) == 0 && state.SelectedIndex != -1 || len(tabs) > 0 && (state.SelectedIndex < 0 || int(state.SelectedIndex) >= len(tabs)) {
+		return nil, generationFailure(GenerationInvalid, "selectedIndex", "selected index is outside the final tab collection")
+	}
+	return state, nil
 }
 
 func validGenerationName(name string) bool {

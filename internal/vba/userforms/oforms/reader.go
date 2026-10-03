@@ -203,6 +203,11 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 			control.Children = childControls
 			control.Level = childLevel
 			control.Record = childLevel.Record
+			if cacheIndex == 57 {
+				if err := bindMultiPage(control, s.codePage); err != nil {
+					return nil, nil, parseError(childPath, "x", 0, "MultiPage", "%v", err)
+				}
+			}
 			delete(childrenByID, id)
 		default:
 			payload := oRaw[objectOffset : objectOffset+uint64(objectSize)]
@@ -213,6 +218,12 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 				}
 				control.Record = record
 				control.Kind = controlKind(cacheIndex, record)
+				if cacheIndex == 18 {
+					control.TabStrip, err = ParseTabStrip(record)
+					if err != nil {
+						return nil, nil, parseError(path, "o", int(objectOffset), "TabStrip", "%v", err)
+					}
+				}
 			} else {
 				control.OpaqueRaw = bytes.Clone(payload)
 			}

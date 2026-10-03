@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Commands;
 using Xlflow.ExcelBridge.Contract;
@@ -50,6 +51,90 @@ public sealed class InspectFormCommandTests
     public void GetChildControls_PropagatesEnumerationFailures()
     {
         Assert.ThrowsAny<Exception>(() => ExcelFormInspectionService.GetChildControls(new DesignerControlWithBrokenChildren(), "Parent"));
+    }
+
+    [Fact]
+    public void SerializeControlReadsMultiPagePagesAndNormalizesEmptySelectionWithoutReadingValue()
+    {
+        var multiPage = new DesignerMultiPage("Multi", value: 1);
+        var firstPage = new DesignerPage("PageA", multiPage);
+        firstPage.Controls.Items.Add(new DesignerControl("LabelA", "Forms.Label.1", firstPage) { Left = 12.5 });
+        multiPage.Pages.Items.Add(firstPage);
+        multiPage.Pages.Items.Add(new DesignerPage("PageB", multiPage));
+
+        var serialized = SerializeControl(multiPage);
+
+        Assert.Equal(1, serialized["selected_index"]);
+        Assert.False(serialized.ContainsKey("value"));
+        var pages = Assert.IsType<List<Dictionary<string, object?>>>(serialized["controls"]);
+        Assert.Equal(new[] { "PageA", "PageB" }, pages.Select(page => page["name"]));
+        var pageControls = Assert.IsType<List<Dictionary<string, object?>>>(pages[0]["controls"]);
+        Assert.Equal("LabelA", pageControls[0]["name"]);
+        Assert.Equal(12.5, pageControls[0]["left"]);
+        Assert.Equal(0, multiPage.ControlsReadCount);
+
+        var empty = new DesignerMultiPage("Empty", value: 1, throwWhenValueRead: true);
+        var emptySnapshot = SerializeControl(empty);
+        Assert.Equal(-1, emptySnapshot["selected_index"]);
+        Assert.Empty(Assert.IsType<List<Dictionary<string, object?>>>(emptySnapshot["controls"]));
+    }
+
+    [Fact]
+    public void SerializeControlReportsTabStripTabsIndependentlyAndUsesValueForSelection()
+    {
+        var tabStrip = new DesignerTabStrip("Tabs", value: 1);
+        tabStrip.Tabs.Items.Add(new DesignerTab("TabAlpha")
+        {
+            Caption = "Alpha",
+            ControlTipText = "tip",
+            Tag = "tag",
+            Accelerator = "A",
+            Enabled = false,
+            Visible = true,
+        });
+        tabStrip.Tabs.Items.Add(new DesignerTab("TabBeta"));
+
+        var serialized = SerializeControl(tabStrip);
+
+        Assert.Equal(1, serialized["selected_index"]);
+        Assert.False(serialized.ContainsKey("value"));
+        Assert.False(serialized.ContainsKey("controls"));
+        var tabs = Assert.IsType<List<Dictionary<string, object?>>>(serialized["tabs"]);
+        Assert.Equal(new[] { "TabAlpha", "TabBeta" }, tabs.Select(tab => tab["name"]));
+        Assert.Equal("Alpha", tabs[0]["caption"]);
+        Assert.Equal("tip", tabs[0]["control_tip_text"]);
+        Assert.Equal("tag", tabs[0]["tag"]);
+        Assert.Equal("A", tabs[0]["accelerator"]);
+        Assert.Equal(false, tabs[0]["enabled"]);
+        Assert.Equal(true, tabs[0]["visible"]);
+        Assert.DoesNotContain("caption", tabs[1].Keys);
+
+        var empty = new DesignerTabStrip("EmptyTabs", value: 0, throwWhenValueRead: true);
+        var emptySnapshot = SerializeControl(empty);
+        Assert.Equal(-1, emptySnapshot["selected_index"]);
+        Assert.Empty(Assert.IsType<List<Dictionary<string, object?>>>(emptySnapshot["tabs"]));
+    }
+
+    [Fact]
+    public void RuntimeInspectHelperUsesPagesAndTabsAndNormalizesEmptySelection()
+    {
+        var method = typeof(ExcelFormInspectionService).GetMethod("BuildInspectHelperCode", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var code = Assert.IsType<string>(method!.Invoke(null, null));
+
+        Assert.Contains("Set children = GetObjectPages(control)", code, StringComparison.Ordinal);
+        Assert.Contains("Set tabs = GetObjectTabs(control)", code, StringComparison.Ordinal);
+        Assert.Contains("JsonAddRaw json, \"tabs\", SerializeTabStripTabs(tabs), hasFields", code, StringComparison.Ordinal);
+        Assert.Contains("JsonAddLong json, \"selected_index\", -1, hasFields", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Case \"frame\", \"multipage\", \"page\", \"tabstrip\"", code, StringComparison.Ordinal);
+    }
+
+    private static Dictionary<string, object?> SerializeControl(object control)
+    {
+        var method = typeof(ExcelFormInspectionService).GetMethod("SerializeControl", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("SerializeControl method was not found.");
+        return Assert.IsType<Dictionary<string, object?>>(method.Invoke(null, [control]));
     }
 
     [Fact]
@@ -253,5 +338,81 @@ public sealed class InspectFormCommandTests
     private sealed class BrokenControls
     {
         public int Count => throw new InvalidOperationException("broken child enumeration");
+    }
+
+    private class DesignerControl(string name, string progId, object? parent)
+    {
+        public string Name { get; } = name;
+
+        public string ProgId { get; } = progId;
+
+        public object? Parent { get; } = parent;
+
+        public double Left { get; init; }
+    }
+
+    private sealed class DesignerMultiPage(string name, int value, bool throwWhenValueRead = false) : DesignerControl(name, "Forms.MultiPage.1", null)
+    {
+        public DesignerChildren Pages { get; } = new();
+
+        public int ControlsReadCount { get; private set; }
+
+        public DesignerChildren Controls
+        {
+            get
+            {
+                ControlsReadCount++;
+                throw new InvalidOperationException("MultiPage.Controls contains an implementation detail and must not be read.");
+            }
+        }
+
+        public int Value => throwWhenValueRead ? throw new InvalidOperationException("empty MultiPage Value must not be read") : value;
+    }
+
+    private sealed class DesignerPage(string name, object parent) : DesignerControl(name, "Forms.Page.1", parent)
+    {
+        public DesignerChildren Controls { get; } = new();
+    }
+
+    private sealed class DesignerChildren
+    {
+        public List<DesignerControl> Items { get; } = [];
+
+        public int Count => Items.Count;
+
+        public object Item(int index) => Items[index];
+    }
+
+    private sealed class DesignerTabStrip(string name, int value, bool throwWhenValueRead = false) : DesignerControl(name, "Forms.TabStrip.1", null)
+    {
+        public DesignerTabs Tabs { get; } = new();
+
+        public int Value => throwWhenValueRead ? throw new InvalidOperationException("empty TabStrip Value must not be read") : value;
+    }
+
+    private sealed class DesignerTabs
+    {
+        public List<DesignerTab> Items { get; } = [];
+
+        public int Count => Items.Count;
+
+        public object Item(int index) => Items[index];
+    }
+
+    private sealed class DesignerTab(string name)
+    {
+        public string Name { get; } = name;
+
+        public string? Caption { get; init; }
+
+        public string? ControlTipText { get; init; }
+
+        public string? Tag { get; init; }
+
+        public string? Accelerator { get; init; }
+
+        public bool? Enabled { get; init; }
+
+        public bool? Visible { get; init; }
     }
 }

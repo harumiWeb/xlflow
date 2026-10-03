@@ -27,6 +27,9 @@ public sealed class ExcelFormWriteService : IFormWriteService
         ["scrollbar"] = "Forms.ScrollBar.1",
         ["image"] = "Forms.Image.1",
         ["frame"] = "Forms.Frame.1",
+        ["multipage"] = "Forms.MultiPage.1",
+        ["page"] = "Forms.Page.1",
+        ["tabstrip"] = "Forms.TabStrip.1",
     };
 
     public BridgeResponse Execute(BridgeRequest request, FormWriteCommandArguments args, CancellationToken cancellationToken)
@@ -254,6 +257,8 @@ public sealed class ExcelFormWriteService : IFormWriteService
             {
                 throw new InvalidOperationException("form.build.clientWidth/clientHeight are supported only by pure-Go generation, not Excel Designer authoring.");
             }
+            ValidateControlSpecs(spec.Controls);
+            ValidateDeclaredSelectionIndices(spec);
             return spec;
         }
         catch (Exception ex)
@@ -381,6 +386,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
                 {
                     throw new InvalidOperationException($"designer_write_failed: failed to access Designer for '{spec.Form.Name}'.");
                 }
+                PrepareApplySelectionIndices(designer, spec);
                 ClearDesignerControls(designer);
             }
             finally
@@ -414,7 +420,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
             SetDesignerFormProperties(designer, component, spec.Form);
             foreach (var root in GetRootControls(spec))
             {
-                AddDesignerControl(designer, root, spec.Controls);
+                AddDesignerControl(designer, root, spec.Controls, "UserForm");
             }
         }
         finally
@@ -446,29 +452,588 @@ public sealed class ExcelFormWriteService : IFormWriteService
             : (parent.Controls ?? []).OrderBy(control => control.ZIndex ?? int.MaxValue).ToArray();
     }
 
-    private static void AddDesignerControl(object parent, FormWriteControlSpec controlSpec, IReadOnlyList<FormWriteControlSpec> allControls)
+    private static void AddDesignerControl(
+        object parent,
+        FormWriteControlSpec controlSpec,
+        IReadOnlyList<FormWriteControlSpec> allControls,
+        string parentType)
     {
-        object? controls = null;
+        object? collection = null;
         object? control = null;
         try
         {
-            controls = ExcelBridgeSupport.Get(parent, "Controls");
-            if (controls is null)
+            var isPage = IsControlType(controlSpec, "Page");
+            if (isPage && !IsControlType(parentType, "MultiPage"))
             {
-                throw new InvalidOperationException("designer_write_failed: failed to access Controls collection.");
+                throw new InvalidOperationException("designer_write_failed: Page controls must be added through a MultiPage Pages collection.");
             }
-            control = ExcelBridgeSupport.InvokeMethod(controls, "Add", ResolveProgId(controlSpec), controlSpec.Name, true)
-                ?? throw new InvalidOperationException($"designer_write_failed: failed to add control '{controlSpec.Name}'.");
+            if (!isPage && (IsControlType(parentType, "MultiPage") || IsControlType(parentType, "TabStrip")))
+            {
+                throw new InvalidOperationException($"designer_write_failed: {parentType} cannot contain '{controlSpec.Type}' through its Controls collection.");
+            }
+
+            collection = ExcelBridgeSupport.Get(parent, isPage ? "Pages" : "Controls");
+            if (collection is null)
+            {
+                throw new InvalidOperationException($"designer_write_failed: failed to access {(isPage ? "Pages" : "Controls")} collection.");
+            }
+            control = isPage
+                ? ExcelBridgeSupport.InvokeMethod(collection, "Add", controlSpec.Name)
+                : ExcelBridgeSupport.InvokeMethod(collection, "Add", ResolveProgId(controlSpec), controlSpec.Name, true);
+            if (control is null)
+            {
+                throw new InvalidOperationException($"designer_write_failed: failed to add control '{controlSpec.Name}'.");
+            }
+            VerifyRequiredStringProperty(control, "Name", controlSpec.Name);
             SetDesignerControlProperties(control, controlSpec);
-            foreach (var child in GetChildControls(allControls, controlSpec))
+
+            var children = GetChildControls(allControls, controlSpec);
+            if (IsControlType(controlSpec, "MultiPage"))
             {
-                AddDesignerControl(control, child, allControls);
+                if (children.Any(child => !IsControlType(child, "Page")))
+                {
+                    throw new InvalidOperationException("designer_write_failed: MultiPage children must all be Page controls.");
+                }
+                ClearMultiPagePages(control);
             }
+            else if (IsControlType(controlSpec, "TabStrip") && children.Length > 0)
+            {
+                throw new InvalidOperationException("designer_write_failed: TabStrip tabs are authored through the tabs array, not child controls.");
+            }
+
+            foreach (var child in children)
+            {
+                AddDesignerControl(control, child, allControls, controlSpec.Type);
+            }
+
+            var tabSpecs = controlSpec.Tabs ?? controlSpec.Observed?.Tabs;
+            if (IsControlType(controlSpec, "TabStrip") && tabSpecs is not null)
+            {
+                ReplaceTabStripTabs(control, tabSpecs);
+            }
+
+            ApplySelectedIndex(control, controlSpec, children.Length);
         }
         finally
         {
             ExcelBridgeSupport.ReleaseComObject(control);
+            ExcelBridgeSupport.ReleaseComObject(collection);
+        }
+    }
+
+    private static void ValidateControlSpecs(IEnumerable<FormWriteControlSpec> controls)
+    {
+        foreach (var control in controls)
+        {
+            if (string.IsNullOrWhiteSpace(control.Name))
+            {
+                throw new InvalidOperationException("designer_write_failed: every control requires a non-empty name.");
+            }
+            if (IsControlType(control, "Page"))
+            {
+                control.ResolvedPageProperties = ResolvePageProperties(control);
+            }
+            var tabs = control.Tabs ?? control.Observed?.Tabs;
+            if (tabs is not null)
+            {
+                for (var index = 0; index < tabs.Count; index++)
+                {
+                    if (string.IsNullOrWhiteSpace(tabs[index].Name))
+                    {
+                        throw new InvalidOperationException($"designer_write_failed: tabs[{index}].name is required.");
+                    }
+                }
+            }
+            if (control.Controls is not null)
+            {
+                ValidateControlSpecs(control.Controls);
+            }
+        }
+    }
+
+    private static void ValidateDeclaredSelectionIndices(FormWriteSpec spec)
+    {
+        foreach (var control in EnumerateControls(spec.Controls))
+        {
+            var selectedIndex = control.SelectedIndex ?? control.Observed?.SelectedIndex;
+            if (selectedIndex is null)
+            {
+                continue;
+            }
+            if (IsControlType(control, "MultiPage"))
+            {
+                ValidateSelectedIndex(control.Name, "MultiPage", selectedIndex.Value, GetChildControls(spec.Controls, control).Length);
+            }
+            else if (IsControlType(control, "TabStrip"))
+            {
+                var tabs = control.Tabs ?? control.Observed?.Tabs;
+                ValidateSelectedIndex(control.Name, "TabStrip", selectedIndex.Value, tabs?.Count);
+            }
+        }
+    }
+
+    private static void PrepareApplySelectionIndices(object designer, FormWriteSpec spec)
+    {
+        foreach (var control in EnumerateControls(spec.Controls))
+        {
+            if (!IsControlType(control, "TabStrip"))
+            {
+                continue;
+            }
+
+            int? tabCount = control.Tabs?.Count;
+            if (control.Tabs is null)
+            {
+                var existing = FindTabStripState(designer, control.Name);
+                if (existing is not null)
+                {
+                    tabCount = existing.Tabs.Count;
+                    control.Observed ??= new FormWriteObservedControlSpec();
+                    control.Observed.Tabs = existing.Tabs;
+                    if (control.SelectedIndex is null)
+                    {
+                        control.Observed.SelectedIndex = existing.SelectedIndex;
+                    }
+                }
+                else
+                {
+                    tabCount = control.Observed?.Tabs?.Count;
+                }
+            }
+
+            var selectedIndex = control.SelectedIndex ?? control.Observed?.SelectedIndex;
+            if (selectedIndex is not null)
+            {
+                ValidateSelectedIndex(control.Name, "TabStrip", selectedIndex.Value, tabCount);
+            }
+        }
+    }
+
+    private static IEnumerable<FormWriteControlSpec> EnumerateControls(IEnumerable<FormWriteControlSpec> controls)
+    {
+        var seen = new HashSet<FormWriteControlSpec>();
+        var pending = new Stack<FormWriteControlSpec>(controls.Reverse());
+        while (pending.Count > 0)
+        {
+            var control = pending.Pop();
+            if (!seen.Add(control))
+            {
+                continue;
+            }
+            yield return control;
+            if (control.Controls is not null)
+            {
+                foreach (var child in control.Controls.AsEnumerable().Reverse())
+                {
+                    pending.Push(child);
+                }
+            }
+        }
+    }
+
+    private static void ValidateSelectedIndex(string controlName, string controlType, int selectedIndex, int? itemCount)
+    {
+        if (selectedIndex < -1 || itemCount is not null &&
+            (itemCount.Value == 0 ? selectedIndex != -1 : selectedIndex < 0 || selectedIndex >= itemCount.Value))
+        {
+            var allowed = itemCount switch
+            {
+                0 => "-1 for an empty collection",
+                > 0 => $"0..{itemCount.Value - 1} for a collection with {itemCount.Value} items",
+                _ => "-1 or a valid zero-based index",
+            };
+            throw new InvalidOperationException($"designer_write_failed: {controlType} '{controlName}' selectedIndex must be {allowed}.");
+        }
+    }
+
+    private static FormWriteExistingTabStripState? FindTabStripState(object designer, string name)
+    {
+        object? controls = null;
+        try
+        {
+            controls = ExcelBridgeSupport.Get(designer, "Controls");
+            return controls is null ? null : FindTabStripStateInCollection(controls, name);
+        }
+        finally
+        {
             ExcelBridgeSupport.ReleaseComObject(controls);
+        }
+    }
+
+    private static FormWriteExistingTabStripState? FindTabStripStateInCollection(object collection, string name)
+    {
+        var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(collection, "Count"));
+        for (var index = 0; index < count; index++)
+        {
+            object? control = null;
+            object? children = null;
+            try
+            {
+                control = ExcelBridgeSupport.Get(collection, "Item", index);
+                if (control is null)
+                {
+                    continue;
+                }
+                var controlName = ExcelBridgeSupport.GetString(control, "Name") ?? "";
+                var progId = ExcelBridgeSupport.GetString(control, "ProgId") ?? "";
+                if (string.Equals(controlName, name, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(progId, "Forms.TabStrip.1", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ReadExistingTabStripState(control);
+                }
+
+                var childCollectionName = progId.Equals("Forms.MultiPage.1", StringComparison.OrdinalIgnoreCase)
+                    ? "Pages"
+                    : progId.Equals("Forms.Frame.1", StringComparison.OrdinalIgnoreCase)
+                        || progId.Equals("Forms.Page.1", StringComparison.OrdinalIgnoreCase)
+                            ? "Controls"
+                            : null;
+                if (childCollectionName is null)
+                {
+                    continue;
+                }
+                children = ExcelBridgeSupport.Get(control, childCollectionName);
+                if (children is not null)
+                {
+                    var match = FindTabStripStateInCollection(children, name);
+                    if (match is not null)
+                    {
+                        return match;
+                    }
+                }
+            }
+            finally
+            {
+                ExcelBridgeSupport.ReleaseComObject(children);
+                ExcelBridgeSupport.ReleaseComObject(control);
+            }
+        }
+        return null;
+    }
+
+    private static FormWriteExistingTabStripState ReadExistingTabStripState(object tabStrip)
+    {
+        object? tabs = null;
+        try
+        {
+            tabs = ExcelBridgeSupport.Get(tabStrip, "Tabs")
+                ?? throw new InvalidOperationException("designer_write_failed: existing TabStrip Tabs collection is unavailable.");
+            var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(tabs, "Count"));
+            var tabSpecs = new List<FormWriteTabSpec>(count);
+            for (var index = 0; index < count; index++)
+            {
+                object? tab = null;
+                try
+                {
+                    tab = ExcelBridgeSupport.Get(tabs, "Item", index)
+                        ?? throw new InvalidOperationException($"designer_write_failed: failed to read existing TabStrip tab at index {index}.");
+                    var tabName = ExcelBridgeSupport.GetString(tab, "Name");
+                    if (string.IsNullOrWhiteSpace(tabName))
+                    {
+                        throw new InvalidOperationException($"designer_write_failed: existing TabStrip tab at index {index} has no name.");
+                    }
+                    tabSpecs.Add(new FormWriteTabSpec
+                    {
+                        Name = tabName,
+                        Caption = TryGetOptionalString(tab, "Caption"),
+                        ControlTipText = TryGetOptionalString(tab, "ControlTipText"),
+                        Tag = TryGetOptionalString(tab, "Tag"),
+                        Accelerator = TryGetOptionalString(tab, "Accelerator"),
+                        Enabled = TryGetOptionalBoolean(tab, "Enabled"),
+                        Visible = TryGetOptionalBoolean(tab, "Visible"),
+                    });
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(tab);
+                }
+            }
+            var selectedIndex = count == 0
+                ? -1
+                : Convert.ToInt32(ExcelBridgeSupport.Get(tabStrip, "Value"), CultureInfo.InvariantCulture);
+            return new FormWriteExistingTabStripState(tabSpecs, selectedIndex);
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(tabs);
+        }
+    }
+
+    private static string? TryGetOptionalString(object target, string propertyName)
+    {
+        try
+        {
+            var value = ExcelBridgeSupport.Get(target, propertyName);
+            return value is null ? null : Convert.ToString(value, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool? TryGetOptionalBoolean(object target, string propertyName)
+    {
+        try
+        {
+            var value = ExcelBridgeSupport.Get(target, propertyName);
+            return value is null ? null : Convert.ToBoolean(value, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static FormWritePageProperties ResolvePageProperties(FormWriteControlSpec control)
+    {
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (control.Properties is not null)
+        {
+            foreach (var (rawName, rawValue) in control.Properties)
+            {
+                var name = rawName.Trim();
+                if (!IsPageProperty(name))
+                {
+                    continue;
+                }
+                if (properties.ContainsKey(name))
+                {
+                    throw new InvalidOperationException($"designer_write_failed: Page '{control.Name}' has duplicate property aliases for '{name}'.");
+                }
+                properties.Add(name, ReadPagePropertyValue(control.Name, name, rawValue));
+            }
+        }
+
+        return new FormWritePageProperties
+        {
+            Caption = ResolvePageString(control, properties, "caption", control.Caption),
+            Enabled = ResolvePageBoolean(control, properties, "enabled", control.Enabled),
+            Visible = ResolvePageBoolean(control, properties, "visible", control.Visible),
+            Tag = ResolvePageString(control, properties, "tag", control.Tag),
+            ControlTipText = ResolvePageString(control, properties, "controltiptext", control.ControlTipText),
+            Accelerator = ResolvePageString(control, properties, "accelerator", control.Accelerator),
+        };
+    }
+
+    private static bool IsPageProperty(string name)
+    {
+        return name.Equals("caption", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("enabled", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("visible", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("tag", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("controltiptext", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("accelerator", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static object ReadPagePropertyValue(string controlName, string propertyName, JsonElement value)
+    {
+        if (propertyName.Equals("enabled", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Equals("visible", StringComparison.OrdinalIgnoreCase))
+        {
+            if (value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                return value.GetBoolean();
+            }
+            throw new InvalidOperationException($"designer_write_failed: Page '{controlName}' property '{propertyName}' must be Boolean.");
+        }
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            return value.GetString() ?? "";
+        }
+        throw new InvalidOperationException($"designer_write_failed: Page '{controlName}' property '{propertyName}' must be a string.");
+    }
+
+    private static string? ResolvePageString(
+        FormWriteControlSpec control,
+        Dictionary<string, object?> properties,
+        string propertyName,
+        string? topLevelValue)
+    {
+        var bagValue = properties.TryGetValue(propertyName, out var value) ? (string)value! : null;
+        if (topLevelValue is not null && bagValue is not null && !string.Equals(topLevelValue, bagValue, StringComparison.Ordinal))
+        {
+            throw PageAliasConflict(control, propertyName);
+        }
+        return topLevelValue ?? bagValue;
+    }
+
+    private static bool? ResolvePageBoolean(
+        FormWriteControlSpec control,
+        Dictionary<string, object?> properties,
+        string propertyName,
+        bool? topLevelValue)
+    {
+        bool? bagValue = properties.TryGetValue(propertyName, out var value) ? (bool)value! : null;
+        if (topLevelValue is not null && bagValue is not null && topLevelValue.Value != bagValue.Value)
+        {
+            throw PageAliasConflict(control, propertyName);
+        }
+        return topLevelValue ?? bagValue;
+    }
+
+    private static InvalidOperationException PageAliasConflict(FormWriteControlSpec control, string propertyName)
+    {
+        return new InvalidOperationException($"designer_write_failed: Page '{control.Name}' has conflicting explicit aliases for '{propertyName}'.");
+    }
+
+    private static bool IsControlType(FormWriteControlSpec control, string type)
+    {
+        return IsControlType(control.Type, type);
+    }
+
+    private static bool IsControlType(string? actualType, string type)
+    {
+        return string.Equals(actualType?.Trim(), type, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void ClearMultiPagePages(object multiPage)
+    {
+        object? pages = null;
+        try
+        {
+            pages = ExcelBridgeSupport.Get(multiPage, "Pages")
+                ?? throw new InvalidOperationException("designer_write_failed: MultiPage Pages collection is unavailable.");
+            while (true)
+            {
+                var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(pages, "Count"));
+                if (count == 0)
+                {
+                    return;
+                }
+
+                object? page = null;
+                try
+                {
+                    page = ExcelBridgeSupport.Get(pages, "Item", count - 1)
+                        ?? throw new InvalidOperationException("designer_write_failed: failed to read the last MultiPage Page.");
+                    var name = ExcelBridgeSupport.GetString(page, "Name");
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        throw new InvalidOperationException("designer_write_failed: MultiPage Page has no removable name.");
+                    }
+                    // Excel accepts a page name here; numeric indexes have
+                    // caused an RPC failure in the supported host environment.
+                    ExcelBridgeSupport.InvokeMethod(pages, "Remove", name);
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(page);
+                }
+
+                var remaining = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(pages, "Count"));
+                if (remaining != count - 1)
+                {
+                    throw new InvalidOperationException("designer_write_failed: MultiPage Page removal did not reduce the collection by one.");
+                }
+            }
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(pages);
+        }
+    }
+
+    private static void ReplaceTabStripTabs(object tabStrip, IReadOnlyList<FormWriteTabSpec> tabSpecs)
+    {
+        object? tabs = null;
+        try
+        {
+            tabs = ExcelBridgeSupport.Get(tabStrip, "Tabs")
+                ?? throw new InvalidOperationException("designer_write_failed: TabStrip Tabs collection is unavailable.");
+            while (true)
+            {
+                var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(tabs, "Count"));
+                if (count == 0)
+                {
+                    break;
+                }
+
+                // MSForms Tabs.Remove accepts a numeric index. Passing a tab
+                // name raises an invalid-argument COM error in Excel.
+                ExcelBridgeSupport.InvokeMethod(tabs, "Remove", count - 1);
+                var remaining = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(tabs, "Count"));
+                if (remaining != count - 1)
+                {
+                    throw new InvalidOperationException("designer_write_failed: TabStrip tab removal did not reduce the collection by one.");
+                }
+            }
+
+            foreach (var tabSpec in tabSpecs)
+            {
+                object? tab = null;
+                try
+                {
+                    tab = ExcelBridgeSupport.InvokeMethod(tabs, "Add", tabSpec.Name)
+                        ?? throw new InvalidOperationException($"designer_write_failed: failed to add TabStrip tab '{tabSpec.Name}'.");
+                    VerifyRequiredStringProperty(tab, "Name", tabSpec.Name);
+                    SetOptionalRequiredStringProperty(tab, "Caption", tabSpec.Caption);
+                    SetOptionalRequiredStringProperty(tab, "ControlTipText", tabSpec.ControlTipText);
+                    SetOptionalRequiredStringProperty(tab, "Tag", tabSpec.Tag);
+                    SetOptionalRequiredStringProperty(tab, "Accelerator", tabSpec.Accelerator);
+                    SetOptionalRequiredBooleanProperty(tab, "Enabled", tabSpec.Enabled);
+                    SetOptionalRequiredBooleanProperty(tab, "Visible", tabSpec.Visible);
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(tab);
+                }
+            }
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(tabs);
+        }
+    }
+
+    private static void ApplySelectedIndex(object control, FormWriteControlSpec spec, int childCount)
+    {
+        var selectedIndex = spec.SelectedIndex ?? spec.Observed?.SelectedIndex;
+        if (IsControlType(spec, "MultiPage"))
+        {
+            if (selectedIndex is null)
+            {
+                return;
+            }
+            ValidateSelectedIndex(spec.Name, "MultiPage", selectedIndex.Value, childCount);
+            if (childCount == 0)
+            {
+                // Excel can crash when Value=-1 is assigned after the last Page
+                // is removed. The empty public selection is normalized on read.
+                return;
+            }
+            SetRequiredMember(control, "Value", selectedIndex.Value);
+            return;
+        }
+
+        if (IsControlType(spec, "TabStrip"))
+        {
+            if (selectedIndex is null)
+            {
+                return;
+            }
+            object? tabs = null;
+            try
+            {
+                tabs = ExcelBridgeSupport.Get(control, "Tabs")
+                    ?? throw new InvalidOperationException("designer_write_failed: TabStrip Tabs collection is unavailable.");
+                var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(tabs, "Count"));
+                ValidateSelectedIndex(spec.Name, "TabStrip", selectedIndex.Value, count);
+                if (count > 0)
+                {
+                    SetRequiredMember(control, "Value", selectedIndex.Value);
+                }
+            }
+            finally
+            {
+                ExcelBridgeSupport.ReleaseComObject(tabs);
+            }
+            return;
+        }
+
+        if (selectedIndex is not null)
+        {
+            TrySetProperty(control, "ListIndex", selectedIndex.Value);
         }
     }
 
@@ -536,73 +1101,73 @@ public sealed class ExcelFormWriteService : IFormWriteService
 
     private static void SetDesignerControlProperties(object control, FormWriteControlSpec spec)
     {
-        var caption = spec.Caption ?? spec.Observed?.Caption;
-        if (!string.IsNullOrWhiteSpace(caption))
+        var pageProperties = IsControlType(spec, "Page") ? spec.ResolvedPageProperties : null;
+        var caption = pageProperties?.Caption ?? spec.Caption ?? spec.Observed?.Caption;
+        if (caption is not null)
         {
-            TrySetProperty(control, "Caption", caption);
+            SetRequiredProperty(control, "Caption", caption);
         }
         var left = spec.Left ?? spec.Observed?.Left;
         if (left is not null)
         {
-            TrySetProperty(control, "Left", left.Value);
+            SetRequiredMember(control, "Left", left.Value);
         }
         var top = spec.Top ?? spec.Observed?.Top;
         if (top is not null)
         {
-            TrySetProperty(control, "Top", top.Value);
+            SetRequiredMember(control, "Top", top.Value);
         }
         var width = spec.Width ?? spec.Observed?.Width;
         if (width is not null)
         {
-            TrySetProperty(control, "Width", width.Value);
+            SetRequiredMember(control, "Width", width.Value);
         }
         var height = spec.Height ?? spec.Observed?.Height;
         if (height is not null)
         {
-            TrySetProperty(control, "Height", height.Value);
+            SetRequiredMember(control, "Height", height.Value);
         }
         var tabIndex = spec.TabIndex ?? spec.Observed?.TabIndex;
         if (tabIndex is not null)
         {
-            TrySetProperty(control, "TabIndex", tabIndex.Value);
+            SetRequiredMember(control, "TabIndex", tabIndex.Value);
         }
-        var enabled = spec.Enabled ?? spec.Observed?.Enabled;
+        var enabled = pageProperties?.Enabled ?? spec.Enabled ?? spec.Observed?.Enabled;
         if (enabled is not null)
         {
-            TrySetProperty(control, "Enabled", enabled.Value);
+            SetRequiredMember(control, "Enabled", enabled.Value);
         }
-        var visible = spec.Visible ?? spec.Observed?.Visible;
+        var visible = pageProperties?.Visible ?? spec.Visible ?? spec.Observed?.Visible;
         if (visible is not null)
         {
-            TrySetProperty(control, "Visible", visible.Value);
+            SetRequiredMember(control, "Visible", visible.Value);
         }
-        if (spec.Value.ValueKind != JsonValueKind.Undefined)
+        var hasValueSelection = IsControlType(spec, "MultiPage") || IsControlType(spec, "TabStrip");
+        if (!hasValueSelection && spec.Value.ValueKind != JsonValueKind.Undefined)
         {
             var value = ConvertFormValue(spec.Value);
             if (value is not null)
             {
-                TrySetProperty(control, "Value", value);
+                SetRequiredMember(control, "Value", value);
             }
         }
-        else if (spec.Observed?.Value.ValueKind != JsonValueKind.Undefined)
+        else if (!hasValueSelection && spec.Observed is { } observed && observed.Value.ValueKind != JsonValueKind.Undefined)
         {
-            var observedValue = ConvertFormValue(spec.Observed!.Value);
+            var observedValue = ConvertFormValue(observed.Value);
             if (observedValue is not null)
             {
-                TrySetProperty(control, "Value", observedValue);
+                SetRequiredMember(control, "Value", observedValue);
             }
         }
         var text = spec.Text ?? spec.Observed?.Text;
-        if (!string.IsNullOrWhiteSpace(text))
+        if (text is not null)
         {
-            TrySetProperty(control, "Text", text);
+            SetRequiredProperty(control, "Text", text);
         }
+        SetOptionalRequiredStringProperty(control, "Tag", pageProperties?.Tag ?? spec.Tag ?? spec.Observed?.Tag);
+        SetOptionalRequiredStringProperty(control, "ControlTipText", pageProperties?.ControlTipText ?? spec.ControlTipText ?? spec.Observed?.ControlTipText);
+        SetOptionalRequiredStringProperty(control, "Accelerator", pageProperties?.Accelerator ?? spec.Accelerator ?? spec.Observed?.Accelerator);
         SetControlListItems(control, spec.List ?? spec.Observed?.List);
-        var selectedIndex = spec.SelectedIndex ?? spec.Observed?.SelectedIndex;
-        if (selectedIndex is not null)
-        {
-            TrySetProperty(control, "ListIndex", selectedIndex.Value);
-        }
     }
 
     // System.Text.Json deserializes object to JsonElement. COM needs concrete
@@ -777,6 +1342,92 @@ public sealed class ExcelFormWriteService : IFormWriteService
         {
             throw new InvalidOperationException($"designer_write_failed: failed to set UserForm Designer {propertyName}. {ex.Message}", ex);
         }
+    }
+
+    private static void VerifyRequiredStringProperty(object target, string propertyName, string expectedValue)
+    {
+        try
+        {
+            var actualValue = ExcelBridgeSupport.GetString(target, propertyName);
+            if (!string.Equals(actualValue, expectedValue, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"designer_write_failed: UserForm Designer {propertyName} did not persist.");
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"designer_write_failed: failed to read UserForm Designer {propertyName}. {ex.Message}", ex);
+        }
+    }
+
+    private static void SetOptionalRequiredStringProperty(object target, string propertyName, string? value)
+    {
+        if (value is not null)
+        {
+            SetRequiredProperty(target, propertyName, value);
+        }
+    }
+
+    private static void SetOptionalRequiredBooleanProperty(object target, string propertyName, bool? value)
+    {
+        if (value is not null)
+        {
+            SetRequiredMember(target, propertyName, value.Value);
+        }
+    }
+
+    private static void SetRequiredMember(object target, string propertyName, object expectedValue)
+    {
+        try
+        {
+            ExcelBridgeSupport.Set(target, propertyName, expectedValue);
+            var actualValue = ExcelBridgeSupport.Get(target, propertyName);
+            if (!RequiredValuesEqual(actualValue, expectedValue))
+            {
+                throw new InvalidOperationException($"designer_write_failed: UserForm Designer {propertyName} did not persist.");
+            }
+        }
+        catch (InvalidOperationException ex) when (ex.Message.StartsWith("designer_write_failed:", StringComparison.Ordinal))
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"designer_write_failed: failed to set UserForm Designer {propertyName}. {ex.Message}", ex);
+        }
+    }
+
+    private static bool RequiredValuesEqual(object? actualValue, object expectedValue)
+    {
+        if (actualValue is null)
+        {
+            return false;
+        }
+        if (expectedValue is string expectedString)
+        {
+            return string.Equals(Convert.ToString(actualValue, CultureInfo.InvariantCulture), expectedString, StringComparison.Ordinal);
+        }
+        if (expectedValue is bool expectedBoolean)
+        {
+            return Convert.ToBoolean(actualValue, CultureInfo.InvariantCulture) == expectedBoolean;
+        }
+        if (expectedValue is int expectedInteger)
+        {
+            return Convert.ToInt32(actualValue, CultureInfo.InvariantCulture) == expectedInteger;
+        }
+        if (expectedValue is long expectedLong)
+        {
+            return Convert.ToInt64(actualValue, CultureInfo.InvariantCulture) == expectedLong;
+        }
+        if (expectedValue is double expectedDouble)
+        {
+            return Math.Abs(Convert.ToDouble(actualValue, CultureInfo.InvariantCulture) - expectedDouble) <= 0.000001;
+        }
+        return Equals(actualValue, expectedValue);
     }
 
     private static object? GetComponentByName(object vbProject, string name)
@@ -1183,6 +1834,8 @@ public sealed class ExcelFormWriteService : IFormWriteService
 
     private sealed record SourceArtifacts(string FormPath, string FrxPath, string? CodePath);
 
+    private sealed record FormWriteExistingTabStripState(List<FormWriteTabSpec> Tabs, int SelectedIndex);
+
     private sealed class FormWriteSpec
     {
         [JsonPropertyName("basis")]
@@ -1284,6 +1937,15 @@ public sealed class ExcelFormWriteService : IFormWriteService
         [JsonPropertyName("caption")]
         public string? Caption { get; init; }
 
+        [JsonPropertyName("tag")]
+        public string? Tag { get; init; }
+
+        [JsonPropertyName("controlTipText")]
+        public string? ControlTipText { get; init; }
+
+        [JsonPropertyName("accelerator")]
+        public string? Accelerator { get; init; }
+
         [JsonPropertyName("text")]
         public string? Text { get; init; }
 
@@ -1320,14 +1982,71 @@ public sealed class ExcelFormWriteService : IFormWriteService
         [JsonPropertyName("controls")]
         public List<FormWriteControlSpec>? Controls { get; init; }
 
+        [JsonPropertyName("tabs")]
+        public List<FormWriteTabSpec>? Tabs { get; init; }
+
+        [JsonPropertyName("properties")]
+        public Dictionary<string, JsonElement>? Properties { get; init; }
+
         [JsonPropertyName("observed")]
-        public FormWriteObservedControlSpec? Observed { get; init; }
+        public FormWriteObservedControlSpec? Observed { get; set; }
+
+        [JsonIgnore]
+        public FormWritePageProperties? ResolvedPageProperties { get; set; }
+    }
+
+    private sealed class FormWritePageProperties
+    {
+        public string? Caption { get; init; }
+
+        public bool? Enabled { get; init; }
+
+        public bool? Visible { get; init; }
+
+        public string? Tag { get; init; }
+
+        public string? ControlTipText { get; init; }
+
+        public string? Accelerator { get; init; }
+    }
+
+    private sealed class FormWriteTabSpec
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; init; } = "";
+
+        [JsonPropertyName("caption")]
+        public string? Caption { get; init; }
+
+        [JsonPropertyName("controlTipText")]
+        public string? ControlTipText { get; init; }
+
+        [JsonPropertyName("tag")]
+        public string? Tag { get; init; }
+
+        [JsonPropertyName("accelerator")]
+        public string? Accelerator { get; init; }
+
+        [JsonPropertyName("enabled")]
+        public bool? Enabled { get; init; }
+
+        [JsonPropertyName("visible")]
+        public bool? Visible { get; init; }
     }
 
     private sealed class FormWriteObservedControlSpec
     {
         [JsonPropertyName("caption")]
         public string? Caption { get; init; }
+
+        [JsonPropertyName("tag")]
+        public string? Tag { get; init; }
+
+        [JsonPropertyName("controlTipText")]
+        public string? ControlTipText { get; init; }
+
+        [JsonPropertyName("accelerator")]
+        public string? Accelerator { get; init; }
 
         [JsonPropertyName("text")]
         public string? Text { get; init; }
@@ -1351,7 +2070,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
         public int? TabIndex { get; init; }
 
         [JsonPropertyName("selectedIndex")]
-        public int? SelectedIndex { get; init; }
+        public int? SelectedIndex { get; set; }
 
         [JsonPropertyName("enabled")]
         public bool? Enabled { get; init; }
@@ -1361,5 +2080,14 @@ public sealed class ExcelFormWriteService : IFormWriteService
 
         [JsonPropertyName("list")]
         public List<string>? List { get; init; }
+
+        [JsonPropertyName("tabs")]
+        public List<FormWriteTabSpec>? Tabs { get; set; }
+
+        [JsonPropertyName("unsupported")]
+        public List<string>? Unsupported { get; init; }
+
+        [JsonPropertyName("properties")]
+        public Dictionary<string, JsonElement>? Properties { get; init; }
     }
 }

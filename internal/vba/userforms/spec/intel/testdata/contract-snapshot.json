@@ -11,7 +11,10 @@
     { "type": "SpinButton", "progId": "Forms.SpinButton.1" },
     { "type": "ScrollBar", "progId": "Forms.ScrollBar.1" },
     { "type": "Image", "progId": "Forms.Image.1" },
-    { "type": "Frame", "progId": "Forms.Frame.1" }
+    { "type": "Frame", "progId": "Forms.Frame.1" },
+    { "type": "MultiPage", "progId": "Forms.MultiPage.1" },
+    { "type": "Page", "progId": "Forms.Page.1" },
+    { "type": "TabStrip", "progId": "Forms.TabStrip.1" }
   ],
   "bridge": {
     "formFields": ["name", "caption", "width", "height", "observed", "build"],
@@ -33,6 +36,9 @@
       "name",
       "progId",
       "caption",
+      "tag",
+      "controlTipText",
+      "accelerator",
       "text",
       "value",
       "left",
@@ -44,8 +50,30 @@
       "enabled",
       "visible",
       "list",
+      "tabs",
       "controls",
       "observed"
-    ]
+    ],
+    "observedControlFields": [
+      "caption",
+      "tag",
+      "controlTipText",
+      "accelerator",
+      "text",
+      "value",
+      "left",
+      "top",
+      "width",
+      "height",
+      "tabIndex",
+      "selectedIndex",
+      "enabled",
+      "visible",
+      "list",
+      "tabs",
+      "unsupported",
+      "properties"
+    ],
+    "tabFields": ["name", "caption", "controlTipText", "tag", "accelerator", "enabled", "visible"]
   }
 }

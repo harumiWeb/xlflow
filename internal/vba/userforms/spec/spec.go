@@ -69,45 +69,133 @@ type FormSpecBuildForm struct {
 }
 
 type FormSpecControl struct {
-	ID            string                   `json:"id,omitempty" yaml:"id,omitempty"`
-	ParentID      string                   `json:"parentId,omitempty" yaml:"parentId,omitempty"`
-	ZIndex        *int                     `json:"zIndex,omitempty" yaml:"zIndex,omitempty"`
-	Type          string                   `json:"type" yaml:"type"`
-	Name          string                   `json:"name" yaml:"name"`
-	ProgID        string                   `json:"progId,omitempty" yaml:"progId,omitempty"`
-	Caption       *string                  `json:"caption,omitempty" yaml:"caption,omitempty"`
-	Text          *string                  `json:"text,omitempty" yaml:"text,omitempty"`
-	Value         any                      `json:"value,omitempty" yaml:"value,omitempty"`
-	Left          *float64                 `json:"left,omitempty" yaml:"left,omitempty"`
-	Top           *float64                 `json:"top,omitempty" yaml:"top,omitempty"`
-	Width         *float64                 `json:"width,omitempty" yaml:"width,omitempty"`
-	Height        *float64                 `json:"height,omitempty" yaml:"height,omitempty"`
-	TabIndex      *int                     `json:"tabIndex,omitempty" yaml:"tabIndex,omitempty"`
-	SelectedIndex *int                     `json:"selectedIndex,omitempty" yaml:"selectedIndex,omitempty"`
-	Enabled       *bool                    `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Visible       *bool                    `json:"visible,omitempty" yaml:"visible,omitempty"`
-	List          []string                 `json:"list,omitempty" yaml:"list,omitempty"`
-	Unsupported   []string                 `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
-	Controls      []FormSpecControl        `json:"controls,omitempty" yaml:"controls,omitempty"`
-	Properties    map[string]any           `json:"properties,omitempty" yaml:"properties,omitempty"`
-	Observed      *FormSpecObservedControl `json:"observed,omitempty" yaml:"observed,omitempty"`
+	ID             string                   `json:"id,omitempty" yaml:"id,omitempty"`
+	ParentID       string                   `json:"parentId,omitempty" yaml:"parentId,omitempty"`
+	ZIndex         *int                     `json:"zIndex,omitempty" yaml:"zIndex,omitempty"`
+	Type           string                   `json:"type" yaml:"type"`
+	Name           string                   `json:"name" yaml:"name"`
+	ProgID         string                   `json:"progId,omitempty" yaml:"progId,omitempty"`
+	Caption        *string                  `json:"caption,omitempty" yaml:"caption,omitempty"`
+	Tag            *string                  `json:"tag,omitempty" yaml:"tag,omitempty"`
+	ControlTipText *string                  `json:"controlTipText,omitempty" yaml:"controlTipText,omitempty"`
+	Accelerator    *string                  `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
+	Text           *string                  `json:"text,omitempty" yaml:"text,omitempty"`
+	Value          any                      `json:"value,omitempty" yaml:"value,omitempty"`
+	Left           *float64                 `json:"left,omitempty" yaml:"left,omitempty"`
+	Top            *float64                 `json:"top,omitempty" yaml:"top,omitempty"`
+	Width          *float64                 `json:"width,omitempty" yaml:"width,omitempty"`
+	Height         *float64                 `json:"height,omitempty" yaml:"height,omitempty"`
+	TabIndex       *int                     `json:"tabIndex,omitempty" yaml:"tabIndex,omitempty"`
+	SelectedIndex  *int                     `json:"selectedIndex,omitempty" yaml:"selectedIndex,omitempty"`
+	Enabled        *bool                    `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Visible        *bool                    `json:"visible,omitempty" yaml:"visible,omitempty"`
+	List           []string                 `json:"list,omitempty" yaml:"list,omitempty"`
+	Tabs           []FormSpecTab            `json:"tabs" yaml:"tabs"`
+	Unsupported    []string                 `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
+	Controls       []FormSpecControl        `json:"controls,omitempty" yaml:"controls,omitempty"`
+	Properties     map[string]any           `json:"properties,omitempty" yaml:"properties,omitempty"`
+	Observed       *FormSpecObservedControl `json:"observed,omitempty" yaml:"observed,omitempty"`
+}
+
+func (control FormSpecControl) MarshalYAML() (any, error) {
+	type formSpecControlAlias FormSpecControl
+	return marshalYAMLWithTabs(formSpecControlAlias(control), control.Tabs)
+}
+
+func (control FormSpecControl) MarshalJSON() ([]byte, error) {
+	type formSpecControlAlias FormSpecControl
+	var tabs json.RawMessage
+	var err error
+	if control.Tabs != nil {
+		tabs, err = json.Marshal(control.Tabs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	wire := struct {
+		formSpecControlAlias
+		Tabs json.RawMessage `json:"tabs,omitempty"`
+	}{formSpecControlAlias: formSpecControlAlias(control), Tabs: tabs}
+	return json.Marshal(wire)
+}
+
+// FormSpecTab describes one standalone TabStrip tab.
+type FormSpecTab struct {
+	Name           string  `json:"name" yaml:"name"`
+	Caption        *string `json:"caption,omitempty" yaml:"caption,omitempty"`
+	ControlTipText *string `json:"controlTipText,omitempty" yaml:"controlTipText,omitempty"`
+	Tag            *string `json:"tag,omitempty" yaml:"tag,omitempty"`
+	Accelerator    *string `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
+	Enabled        *bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Visible        *bool   `json:"visible,omitempty" yaml:"visible,omitempty"`
 }
 
 type FormSpecObservedControl struct {
-	Caption       *string        `json:"caption,omitempty" yaml:"caption,omitempty"`
-	Text          *string        `json:"text,omitempty" yaml:"text,omitempty"`
-	Value         any            `json:"value,omitempty" yaml:"value,omitempty"`
-	Left          *float64       `json:"left,omitempty" yaml:"left,omitempty"`
-	Top           *float64       `json:"top,omitempty" yaml:"top,omitempty"`
-	Width         *float64       `json:"width,omitempty" yaml:"width,omitempty"`
-	Height        *float64       `json:"height,omitempty" yaml:"height,omitempty"`
-	TabIndex      *int           `json:"tabIndex,omitempty" yaml:"tabIndex,omitempty"`
-	SelectedIndex *int           `json:"selectedIndex,omitempty" yaml:"selectedIndex,omitempty"`
-	Enabled       *bool          `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Visible       *bool          `json:"visible,omitempty" yaml:"visible,omitempty"`
-	List          []string       `json:"list,omitempty" yaml:"list,omitempty"`
-	Unsupported   []string       `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
-	Properties    map[string]any `json:"properties,omitempty" yaml:"properties,omitempty"`
+	Caption        *string        `json:"caption,omitempty" yaml:"caption,omitempty"`
+	Tag            *string        `json:"tag,omitempty" yaml:"tag,omitempty"`
+	ControlTipText *string        `json:"controlTipText,omitempty" yaml:"controlTipText,omitempty"`
+	Accelerator    *string        `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
+	Text           *string        `json:"text,omitempty" yaml:"text,omitempty"`
+	Value          any            `json:"value,omitempty" yaml:"value,omitempty"`
+	Left           *float64       `json:"left,omitempty" yaml:"left,omitempty"`
+	Top            *float64       `json:"top,omitempty" yaml:"top,omitempty"`
+	Width          *float64       `json:"width,omitempty" yaml:"width,omitempty"`
+	Height         *float64       `json:"height,omitempty" yaml:"height,omitempty"`
+	TabIndex       *int           `json:"tabIndex,omitempty" yaml:"tabIndex,omitempty"`
+	SelectedIndex  *int           `json:"selectedIndex,omitempty" yaml:"selectedIndex,omitempty"`
+	Enabled        *bool          `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Visible        *bool          `json:"visible,omitempty" yaml:"visible,omitempty"`
+	List           []string       `json:"list,omitempty" yaml:"list,omitempty"`
+	Tabs           []FormSpecTab  `json:"tabs" yaml:"tabs"`
+	Unsupported    []string       `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
+	Properties     map[string]any `json:"properties,omitempty" yaml:"properties,omitempty"`
+}
+
+func (control FormSpecObservedControl) MarshalYAML() (any, error) {
+	type formSpecObservedControlAlias FormSpecObservedControl
+	return marshalYAMLWithTabs(formSpecObservedControlAlias(control), control.Tabs)
+}
+
+func (control FormSpecObservedControl) MarshalJSON() ([]byte, error) {
+	type formSpecObservedControlAlias FormSpecObservedControl
+	var tabs json.RawMessage
+	var err error
+	if control.Tabs != nil {
+		tabs, err = json.Marshal(control.Tabs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	wire := struct {
+		formSpecObservedControlAlias
+		Tabs json.RawMessage `json:"tabs,omitempty"`
+	}{formSpecObservedControlAlias: formSpecObservedControlAlias(control), Tabs: tabs}
+	return json.Marshal(wire)
+}
+
+func marshalYAMLWithTabs(value any, tabs []FormSpecTab) (any, error) {
+	body, err := yaml.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(body, &document); err != nil {
+		return nil, err
+	}
+	if len(document.Content) != 1 {
+		return nil, errors.New("FormSpec YAML value did not produce one document node")
+	}
+	root := document.Content[0]
+	for index := 0; index+1 < len(root.Content); index += 2 {
+		if root.Content[index].Value != "tabs" {
+			continue
+		}
+		if tabs == nil {
+			root.Content = append(root.Content[:index], root.Content[index+2:]...)
+		}
+		return root, nil
+	}
+	return nil, errors.New("FormSpec YAML value is missing its tabs field")
 }
 
 type FormSpecWarning struct {
@@ -123,6 +211,8 @@ const (
 	formDimensionValidationCode                    = "UFV016"
 	formBuildDimensionConflictCode                 = "UFV017"
 	excelClientDimensionValidationCode             = "UFV018"
+	tabNameValidationCode                          = "UFV019"
+	selectedIndexValidationCode                    = "UFV020"
 )
 
 type SpecError struct {
@@ -413,8 +503,25 @@ func ValidateFormSpecStrict(spec FormSpec) []ValidationIssue {
 	}
 	parentByID := make(map[string]string, len(spec.Controls))
 	parentFieldByID := make(map[string]string, len(spec.Controls))
+	pageCountByParentID := make(map[string]int, len(spec.Controls))
+	pageTopologyKnown := make(map[string]bool, len(spec.Controls))
 	for i, control := range spec.Controls {
+		if strings.EqualFold(strings.TrimSpace(control.Type), "Page") && strings.TrimSpace(control.ParentID) != "" {
+			pageCountByParentID[control.ParentID]++
+			pageTopologyKnown[control.ParentID] = true
+		}
+		if strings.EqualFold(strings.TrimSpace(control.Type), "MultiPage") && control.Controls != nil {
+			pageTopologyKnown[control.ID] = true
+			for _, child := range control.Controls {
+				if strings.EqualFold(strings.TrimSpace(child.Type), "Page") {
+					pageCountByParentID[control.ID]++
+				}
+			}
+		}
 		if strings.TrimSpace(control.ParentID) == "" {
+			if strings.EqualFold(strings.TrimSpace(control.Type), "Page") {
+				issues = append(issues, requiredPageParentIssue(fmt.Sprintf("controls[%d].parentId", i)))
+			}
 			continue
 		}
 		field := fmt.Sprintf("controls[%d].parentId", i)
@@ -427,11 +534,23 @@ func ValidateFormSpecStrict(spec FormSpec) []ValidationIssue {
 			issues = append(issues, validationIssue("UFV008", SeverityError, fmt.Sprintf("%s %q was not found.", field, control.ParentID), field, "Use the id of an existing container control.", ""))
 			continue
 		}
-		if canContainChildren, knownParentControl := FormSpecControlCanContainChildren(parent); knownParentControl && !canContainChildren {
-			issues = append(issues, validationIssue("UFV011", SeverityError, fmt.Sprintf("%s %q references non-container control %q.", field, control.ParentID, parent.Name), field, "Use a Frame or custom container control as the parent.", ""))
+		if allowed, knownParentControl := FormSpecControlParentAllowsChild(parent, control); knownParentControl && !allowed {
+			issues = append(issues, controlParentValidationIssue(field, parent, control))
 		}
 		parentByID[control.ID] = control.ParentID
 		parentFieldByID[control.ID] = field
+	}
+	for i, control := range spec.Controls {
+		if !strings.EqualFold(strings.TrimSpace(control.Type), "MultiPage") || !pageTopologyKnown[control.ID] {
+			continue
+		}
+		count := pageCountByParentID[control.ID]
+		tabs := make([]FormSpecTab, count)
+		path := fmt.Sprintf("controls[%d]", i)
+		issues = append(issues, validateSelectedIndex(control.SelectedIndex, tabs, path+".selectedIndex", true)...)
+		if control.Observed != nil {
+			issues = append(issues, validateSelectedIndex(control.Observed.SelectedIndex, tabs, path+".observed.selectedIndex", true)...)
+		}
 	}
 	issues = append(issues, parentCycleIssues(parentByID, parentFieldByID)...)
 	return issues
@@ -466,7 +585,90 @@ func ValidateFormSpecControlIssues(control FormSpecControl, path string) []Valid
 			issues = append(issues, validationIssue("UFV012", SeverityError, fmt.Sprintf("%s.progId %q is for %s, not %s.", path, control.ProgID, progControl.Type, control.Type), path+".progId", "Use the ProgID that matches type or change type to match the ProgID.", ""))
 		}
 	}
+	if strings.EqualFold(strings.TrimSpace(control.Type), "Page") {
+		for _, field := range []struct {
+			name  string
+			value *float64
+		}{
+			{name: "left", value: control.Left},
+			{name: "top", value: control.Top},
+			{name: "width", value: control.Width},
+			{name: "height", value: control.Height},
+		} {
+			if field.value != nil {
+				issues = append(issues, invalidControlPropertyIssue(path+"."+field.name, control.Type))
+			}
+		}
+	}
+	if control.Tabs != nil {
+		if !strings.EqualFold(strings.TrimSpace(control.Type), "TabStrip") {
+			issues = append(issues, invalidControlPropertyIssue(path+".tabs", control.Type))
+		} else {
+			issues = append(issues, validateFormSpecTabs(control.Tabs, path+".tabs")...)
+		}
+	}
+	if isPageSelectionControl(control.Type) {
+		issues = append(issues, validateSelectedIndex(control.SelectedIndex, control.Tabs, path+".selectedIndex", strings.EqualFold(strings.TrimSpace(control.Type), "TabStrip") && control.Tabs != nil)...)
+		if control.Observed != nil {
+			if control.Observed.Tabs != nil && !strings.EqualFold(strings.TrimSpace(control.Type), "TabStrip") {
+				issues = append(issues, invalidControlPropertyIssue(path+".observed.tabs", control.Type))
+			} else {
+				issues = append(issues, validateFormSpecTabs(control.Observed.Tabs, path+".observed.tabs")...)
+			}
+			issues = append(issues, validateSelectedIndex(control.Observed.SelectedIndex, control.Observed.Tabs, path+".observed.selectedIndex", strings.EqualFold(strings.TrimSpace(control.Type), "TabStrip") && control.Observed.Tabs != nil)...)
+		}
+	} else if control.Observed != nil && control.Observed.Tabs != nil {
+		issues = append(issues, invalidControlPropertyIssue(path+".observed.tabs", control.Type))
+	}
 	return issues
+}
+
+func validateFormSpecTabs(tabs []FormSpecTab, path string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	seen := make([]string, 0, len(tabs))
+	for i, tab := range tabs {
+		field := fmt.Sprintf("%s[%d].name", path, i)
+		name := strings.TrimSpace(tab.Name)
+		if name == "" {
+			issues = append(issues, requiredFieldIssue(field))
+			continue
+		}
+		if first := matchingTabName(seen, name); first != "" {
+			issues = append(issues, validationIssue(tabNameValidationCode, SeverityError, fmt.Sprintf("%s duplicates tab name %q from %s.", field, name, first), field, "Use a tab name that is unique within this TabStrip, ignoring case.", ""))
+			continue
+		}
+		seen = append(seen, name)
+	}
+	return issues
+}
+
+func validateSelectedIndex(index *int, tabs []FormSpecTab, path string, bounded bool) []ValidationIssue {
+	if index == nil {
+		return nil
+	}
+	if *index < -1 || bounded && ((*index == -1 && len(tabs) > 0) || *index >= len(tabs)) {
+		return []ValidationIssue{validationIssue(selectedIndexValidationCode, SeverityError, fmt.Sprintf("%s must be -1 or a valid zero-based index.", path), path, "Use -1 for no selection or an index within the declared tabs.", "")}
+	}
+	return nil
+}
+
+func isPageSelectionControl(controlType string) bool {
+	return strings.EqualFold(strings.TrimSpace(controlType), "MultiPage") || strings.EqualFold(strings.TrimSpace(controlType), "TabStrip")
+}
+
+func invalidControlPropertyIssue(path, controlType string) ValidationIssue {
+	return validationIssue("UFV005", SeverityError, fmt.Sprintf("%s is not valid for control type %s.", path, controlType), path, "Remove the property or use the control type that supports it.", "")
+}
+
+func requiredPageParentIssue(path string) ValidationIssue {
+	return validationIssue("UFV011", SeverityError, fmt.Sprintf("%s is required for Page controls; a Page must belong to a MultiPage.", path), path, "Set parentId to the owning MultiPage control.", "")
+}
+
+func controlParentValidationIssue(path string, parent, child FormSpecControl) ValidationIssue {
+	if canContainChildren, known := FormSpecControlCanContainChildren(parent); known && !canContainChildren {
+		return validationIssue("UFV011", SeverityError, fmt.Sprintf("%s %q references non-container control %q.", path, parent.ID, parent.Name), path, "Use a control allowed to contain this child as the parent.", "")
+	}
+	return validationIssue("UFV011", SeverityError, fmt.Sprintf("%s parent %q is not allowed for control type %s.", path, parent.Name, child.Type), path, "MultiPage controls may contain only Page controls, and Page controls must belong to a MultiPage.", "")
 }
 
 // IsUnsupportedControlPlaceholder reports whether a control is a loss-aware
@@ -563,12 +765,17 @@ func validateRawFormSubobject(root map[string]any, key string, properties map[st
 }
 
 type rawControlRef struct {
-	Path     string
-	ID       string
-	ParentID string
-	Name     string
-	Type     string
-	ProgID   string
+	Path                  string
+	ID                    string
+	ParentID              string
+	Name                  string
+	Type                  string
+	ProgID                string
+	SelectedIndex         *float64
+	ObservedSelectedIndex *float64
+	TabsKnown             bool
+	TabCount              int
+	ChildrenKnown         bool
 }
 
 func validateRawControls(value any, path, inheritedParentID string) ([]rawControlRef, []ValidationIssue) {
@@ -611,11 +818,22 @@ func validateRawControl(controlMap map[string]any, path, inheritedParentID strin
 		Type:     strings.TrimSpace(controlType),
 		ProgID:   strings.TrimSpace(progID),
 	}
+	if value, ok := lookupRawField(controlMap, "selectedIndex"); ok {
+		ref.SelectedIndex = rawSelectedIndex(value)
+	}
+	if rawTabs, ok := lookupRawField(controlMap, "tabs"); ok {
+		if tabs, valid := asSlice(rawTabs); valid {
+			ref.TabsKnown = true
+			ref.TabCount = len(tabs)
+		}
+	}
 	refs := []rawControlRef{ref}
 	if observed, ok := asObjectMap(controlMap["observed"]); ok {
 		issues = append(issues, validateRawObservedControlProperties(observed, ref.Type, ref.ProgID, path+".observed")...)
+		refs[0].ObservedSelectedIndex = rawSelectedIndex(observed["selectedIndex"])
 	}
 	if children, ok := controlMap["controls"]; ok {
+		refs[0].ChildrenKnown = true
 		issues = append(issues, validationIssue("UFV013", SeverityWarning, fmt.Sprintf("%s.controls is a legacy nested control structure.", path), path+".controls", "Prefer the canonical flat controls array with parentId references.", SupportLevelSnapshotOnly))
 		childRefs, childIssues := validateRawControls(children, path+".controls", ref.ID)
 		refs = append(refs, childRefs...)
@@ -627,15 +845,17 @@ func validateRawControl(controlMap map[string]any, path, inheritedParentID strin
 func validateRawControlProperties(controlMap map[string]any, controlType, progID, path string) []ValidationIssue {
 	contract := UserFormContract()
 	allowed := clonePropertyMap(contract.CommonControlProperties)
-	builtInControl, builtInType := LookupControlContract(controlType)
+	_, builtInType := LookupControlContract(controlType)
 	if builtInType {
-		for key, property := range builtInControl.Properties {
-			allowed[key] = property
-		}
+		allowed = ControlProperties(controlType)
 	} else if isCustomProgID(progID) {
 		addGenericCustomControlProperties(allowed, SupportLevelCustomUnchecked)
 	}
 	issues := validateObjectProperties(controlMap, allowed, path, nil)
+	if rawTabs, ok := lookupRawField(controlMap, "tabs"); ok {
+		issues = append(issues, validateRawFormSpecTabs(rawTabs, path+".tabs")...)
+	}
+	issues = append(issues, validateRawSelectedIndex(controlMap, controlType, path)...)
 	if builtInType {
 		markUnsupportedControlProperties(issues, controlType)
 	}
@@ -680,6 +900,10 @@ func validateRawObservedControlProperties(controlMap map[string]any, controlType
 		addGenericCustomControlProperties(allowed, SupportLevelCustomUnchecked)
 	}
 	issues := validateObjectProperties(controlMap, allowed, path, nil)
+	if rawTabs, ok := lookupRawField(controlMap, "tabs"); ok {
+		issues = append(issues, validateRawFormSpecTabs(rawTabs, path+".tabs")...)
+	}
+	issues = append(issues, validateRawSelectedIndex(controlMap, controlType, path)...)
 	if _, ok := LookupControlContract(controlType); ok {
 		markUnsupportedControlProperties(issues, controlType)
 	}
@@ -703,6 +927,9 @@ func validateRawControlStructure(controls []rawControlRef) []ValidationIssue {
 	}
 	for _, control := range controls {
 		if control.ParentID == "" {
+			if strings.EqualFold(control.Type, "Page") {
+				issues = append(issues, requiredPageParentIssue(control.Path+".parentId"))
+			}
 			continue
 		}
 		field := control.Path + ".parentId"
@@ -715,28 +942,127 @@ func validateRawControlStructure(controls []rawControlRef) []ValidationIssue {
 			issues = append(issues, validationIssue("UFV008", SeverityError, fmt.Sprintf("%s %q was not found.", field, control.ParentID), field, "Use the id of an existing container control.", ""))
 			continue
 		}
-		if canContainChildren, known := rawControlCanContainChildren(parent); known && !canContainChildren {
-			issues = append(issues, validationIssue("UFV011", SeverityError, fmt.Sprintf("%s %q references non-container control %q.", field, control.ParentID, parent.Name), field, "Use a Frame or custom container control as the parent.", ""))
+		parentSpec := FormSpecControl{ID: parent.ID, Name: parent.Name, Type: parent.Type, ProgID: parent.ProgID}
+		childSpec := FormSpecControl{ID: control.ID, Name: control.Name, Type: control.Type, ProgID: control.ProgID}
+		if allowed, known := FormSpecControlParentAllowsChild(parentSpec, childSpec); known && !allowed {
+			issues = append(issues, controlParentValidationIssue(field, parentSpec, childSpec))
 		}
 		if control.ID != "" {
 			parentByID[control.ID] = control.ParentID
 			parentFieldByID[control.ID] = field
 		}
 	}
+	pageCountByParentID := make(map[string]int, len(controls))
+	pageTopologyKnown := make(map[string]bool, len(controls))
+	for _, control := range controls {
+		if strings.EqualFold(control.Type, "MultiPage") && control.ChildrenKnown {
+			pageTopologyKnown[control.ID] = true
+		}
+		if strings.EqualFold(control.Type, "Page") && control.ParentID != "" {
+			pageCountByParentID[control.ParentID]++
+			pageTopologyKnown[control.ParentID] = true
+		}
+	}
+	for _, control := range controls {
+		if !strings.EqualFold(control.Type, "MultiPage") || !pageTopologyKnown[control.ID] {
+			continue
+		}
+		count := pageCountByParentID[control.ID]
+		for _, item := range []struct {
+			path  string
+			index *float64
+		}{{control.Path + ".selectedIndex", control.SelectedIndex}, {control.Path + ".observed.selectedIndex", control.ObservedSelectedIndex}} {
+			if item.index == nil {
+				continue
+			}
+			invalid := count == 0 && *item.index != -1 || count > 0 && (*item.index < 0 || *item.index >= float64(count))
+			if invalid {
+				issues = append(issues, selectedIndexIssue(item.path))
+			}
+		}
+	}
 	return append(issues, parentCycleIssues(parentByID, parentFieldByID)...)
 }
 
-func rawControlCanContainChildren(control rawControlRef) (bool, bool) {
-	if control.ProgID != "" {
-		if contract, ok := LookupControlContractByProgID(control.ProgID); ok {
-			return contract.CanContainChildren, true
+func validateRawFormSpecTabs(value any, path string) []ValidationIssue {
+	items, ok := asSlice(value)
+	if !ok {
+		return nil
+	}
+	properties := UserFormContract().TabProperties
+	issues := make([]ValidationIssue, 0)
+	seen := make([]string, 0, len(items))
+	for i, item := range items {
+		itemPath := fmt.Sprintf("%s[%d]", path, i)
+		object, ok := asObjectMap(item)
+		if !ok {
+			continue // The enclosing object-array check reports the malformed entry.
 		}
-		return false, false
+		issues = append(issues, validateObjectProperties(object, properties, itemPath, nil)...)
+		name, _ := stringField(object, "name")
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue // Required-field validation above reports the missing name.
+		}
+		if first := matchingTabName(seen, name); first != "" {
+			field := itemPath + ".name"
+			issues = append(issues, validationIssue(tabNameValidationCode, SeverityError, fmt.Sprintf("%s duplicates tab name %q from an earlier tab in this TabStrip.", field, first), field, "Use a tab name that is unique within this TabStrip, ignoring case.", ""))
+			continue
+		}
+		seen = append(seen, name)
 	}
-	if contract, ok := LookupControlContract(control.Type); ok {
-		return contract.CanContainChildren, true
+	return issues
+}
+
+func matchingTabName(names []string, name string) string {
+	for _, candidate := range names {
+		if strings.EqualFold(candidate, name) {
+			return candidate
+		}
 	}
-	return false, false
+	return ""
+}
+
+func validateRawSelectedIndex(values map[string]any, controlType, path string) []ValidationIssue {
+	if !isPageSelectionControl(controlType) {
+		return nil
+	}
+	value, ok := lookupRawField(values, "selectedIndex")
+	if !ok || value == nil || !isInteger(value) {
+		return nil // Type validation reports non-integer values.
+	}
+	index, ok := rawFloat64(value)
+	if !ok {
+		return nil
+	}
+	invalid := index < -1
+	if strings.EqualFold(strings.TrimSpace(controlType), "TabStrip") {
+		if rawTabs, present := lookupRawField(values, "tabs"); present && rawTabs != nil {
+			if tabs, array := asSlice(rawTabs); array {
+				invalid = len(tabs) == 0 && index != -1 || len(tabs) > 0 && (index < 0 || index >= float64(len(tabs)))
+			}
+		}
+	}
+	if !invalid {
+		return nil
+	}
+	field := path + ".selectedIndex"
+	return []ValidationIssue{selectedIndexIssue(field)}
+}
+
+func rawSelectedIndex(value any) *float64 {
+	if value == nil || !isInteger(value) {
+		return nil
+	}
+	index, ok := rawFloat64(value)
+	if !ok {
+		return nil
+	}
+	return &index
+}
+
+func selectedIndexIssue(path string) ValidationIssue {
+	return validationIssue(selectedIndexValidationCode, SeverityError, fmt.Sprintf("%s must be -1 or a valid zero-based index.", path), path, "Use -1 for no selection or an index within the declared collection.", "")
 }
 
 func isCustomProgID(progID string) bool {
@@ -1484,6 +1810,15 @@ func normalizeObservedControl(control FormSpecControl) FormSpecControl {
 	if control.Observed.Caption == nil && control.Caption != nil {
 		control.Observed.Caption = control.Caption
 	}
+	if control.Observed.Tag == nil && control.Tag != nil {
+		control.Observed.Tag = control.Tag
+	}
+	if control.Observed.ControlTipText == nil && control.ControlTipText != nil {
+		control.Observed.ControlTipText = control.ControlTipText
+	}
+	if control.Observed.Accelerator == nil && control.Accelerator != nil {
+		control.Observed.Accelerator = control.Accelerator
+	}
 	if control.Observed.Text == nil && control.Text != nil {
 		control.Observed.Text = control.Text
 	}
@@ -1507,6 +1842,9 @@ func normalizeObservedControl(control FormSpecControl) FormSpecControl {
 	}
 	if control.Observed.SelectedIndex == nil && control.SelectedIndex != nil {
 		control.Observed.SelectedIndex = control.SelectedIndex
+	}
+	if control.Observed.Tabs == nil && control.Tabs != nil {
+		control.Observed.Tabs = slices.Clone(control.Tabs)
 	}
 	if control.Observed.Enabled == nil && control.Enabled != nil {
 		control.Observed.Enabled = control.Enabled
@@ -1589,6 +1927,7 @@ func formSpecControl(root map[string]any, parentID string, index int, unnamedCou
 		Name:     name,
 		Type:     controlType,
 	}
+	properties, _ := asObjectMap(root["properties"])
 	z := index
 	control.ZIndex = &z
 	if control.ID == "" {
@@ -1603,6 +1942,15 @@ func formSpecControl(root map[string]any, parentID string, index int, unnamedCou
 	}
 	if caption, ok := stringField(root, "caption"); ok {
 		control.Caption = &caption
+	}
+	if tag, ok := snapshotStringField(root, properties, "tag"); ok {
+		control.Tag = &tag
+	}
+	if controlTipText, ok := snapshotStringField(root, properties, "control_tip_text", "controlTipText"); ok {
+		control.ControlTipText = &controlTipText
+	}
+	if accelerator, ok := snapshotStringField(root, properties, "accelerator"); ok {
+		control.Accelerator = &accelerator
 	}
 	if text, ok := stringField(root, "text"); ok {
 		control.Text = &text
@@ -1648,13 +1996,41 @@ func formSpecControl(root map[string]any, parentID string, index int, unnamedCou
 	if list, ok := stringSliceField(root, "list"); ok {
 		control.List = list
 	}
+	if rawTabs, found := lookupRawField(root, "tabs"); !found {
+		if rawTabs, found = lookupRawField(properties, "tabs"); found {
+			tabs, tabsErr := formSpecTabs(rawTabs)
+			if tabsErr != nil {
+				return FormSpecControl{}, nil, nil, tabsErr
+			}
+			control.Tabs = tabs
+		}
+	} else {
+		tabs, tabsErr := formSpecTabs(rawTabs)
+		if tabsErr != nil {
+			return FormSpecControl{}, nil, nil, tabsErr
+		}
+		control.Tabs = tabs
+	}
 	if unsupported, ok := stringSliceField(root, "unsupported"); ok {
 		control.Unsupported = append(control.Unsupported, unsupported...)
 		slices.Sort(control.Unsupported)
 		control.Unsupported = slices.Compact(control.Unsupported)
 	}
-	if properties, ok := asObjectMap(root["properties"]); ok && len(properties) > 0 {
+	if len(properties) > 0 {
 		control.Properties = properties
+	}
+	if strings.EqualFold(strings.TrimSpace(control.Type), "Page") &&
+		(control.Left != nil || control.Top != nil || control.Width != nil || control.Height != nil) {
+		control.Observed = &FormSpecObservedControl{
+			Left:   control.Left,
+			Top:    control.Top,
+			Width:  control.Width,
+			Height: control.Height,
+		}
+		control.Left = nil
+		control.Top = nil
+		control.Width = nil
+		control.Height = nil
 	}
 	control = normalizeObservedControl(control)
 	children, childWarnings, err := formSpecControls(root["controls"], control.ID, unnamedCounter, idCounter)
@@ -1663,6 +2039,58 @@ func formSpecControl(root map[string]any, parentID string, index int, unnamedCou
 	}
 	warnings = append(warnings, childWarnings...)
 	return control, children, warnings, nil
+}
+
+func snapshotStringField(root, properties map[string]any, keys ...string) (string, bool) {
+	for _, source := range []map[string]any{root, properties} {
+		for _, key := range keys {
+			if value, ok := stringField(source, key); ok {
+				return value, true
+			}
+		}
+	}
+	return "", false
+}
+
+func formSpecTabs(value any) ([]FormSpecTab, error) {
+	if value == nil {
+		return nil, nil
+	}
+	items, ok := asSlice(value)
+	if !ok {
+		return nil, fmt.Errorf("inspect designer snapshot tabs value is invalid")
+	}
+	tabs := make([]FormSpecTab, 0, len(items))
+	for index, item := range items {
+		object, ok := asObjectMap(item)
+		if !ok {
+			return nil, fmt.Errorf("inspect designer snapshot tab entry %d is invalid", index)
+		}
+		tab := FormSpecTab{}
+		if tab.Name, ok = stringField(object, "name"); !ok {
+			return nil, fmt.Errorf("inspect designer snapshot tab entry %d is missing a name", index)
+		}
+		if caption, ok := stringField(object, "caption"); ok {
+			tab.Caption = &caption
+		}
+		if controlTipText, ok := snapshotStringField(object, nil, "control_tip_text", "controlTipText"); ok {
+			tab.ControlTipText = &controlTipText
+		}
+		if tag, ok := stringField(object, "tag"); ok {
+			tab.Tag = &tag
+		}
+		if accelerator, ok := stringField(object, "accelerator"); ok {
+			tab.Accelerator = &accelerator
+		}
+		if enabled, ok := optionalBoolField(object, "enabled"); ok {
+			tab.Enabled = &enabled
+		}
+		if visible, ok := optionalBoolField(object, "visible"); ok {
+			tab.Visible = &visible
+		}
+		tabs = append(tabs, tab)
+	}
+	return tabs, nil
 }
 
 func formSpecWarnings(value any) ([]FormSpecWarning, error) {
@@ -1751,6 +2179,9 @@ func observedFormClientHeight(observed *FormSpecObservedForm) *float64 {
 func hasObservedControlValues(observed *FormSpecObservedControl) bool {
 	return observed != nil &&
 		(observed.Caption != nil ||
+			observed.Tag != nil ||
+			observed.ControlTipText != nil ||
+			observed.Accelerator != nil ||
 			observed.Text != nil ||
 			observed.Value != nil ||
 			observed.Left != nil ||
@@ -1761,6 +2192,7 @@ func hasObservedControlValues(observed *FormSpecObservedControl) bool {
 			observed.SelectedIndex != nil ||
 			observed.Enabled != nil ||
 			observed.Visible != nil ||
+			observed.Tabs != nil ||
 			len(observed.List) > 0 ||
 			len(observed.Unsupported) > 0 ||
 			len(observed.Properties) > 0)

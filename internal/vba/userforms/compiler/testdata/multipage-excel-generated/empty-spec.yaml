@@ -1,0 +1,19 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: parent-relative
+form:
+  name: MultiTopologyForm
+  caption: Empty topology
+controls:
+  - id: multi
+    name: MultiMain
+    type: MultiPage
+    selectedIndex: -1
+    enabled: true
+  - id: strip
+    name: StripMain
+    type: TabStrip
+    tabs: []
+    selectedIndex: -1
+    enabled: true

@@ -1,0 +1,245 @@
+{
+  "schemaVersion": 1,
+  "kind": "xlflow.userform",
+  "basis": "designer",
+  "coordinateSystem": "parent-relative",
+  "form": {
+    "name": "MultiTopologyForm",
+    "caption": "Multi topology",
+    "width": 240,
+    "height": 180,
+    "observed": {
+      "caption": "Multi topology",
+      "width": 240,
+      "height": 180
+    },
+    "build": {
+      "caption": "Multi topology",
+      "width": 240,
+      "height": 180
+    }
+  },
+  "controls": [
+    {
+      "id": "control_001",
+      "zIndex": 0,
+      "type": "MultiPage",
+      "name": "MultiMain",
+      "left": 12,
+      "top": 12,
+      "width": 264,
+      "height": 204,
+      "tabIndex": 0,
+      "selectedIndex": 0,
+      "enabled": false,
+      "visible": true,
+      "observed": {
+        "left": 12,
+        "top": 12,
+        "width": 264,
+        "height": 204,
+        "tabIndex": 0,
+        "selectedIndex": 0,
+        "enabled": false,
+        "visible": true
+      }
+    },
+    {
+      "id": "control_002",
+      "parentId": "control_001",
+      "zIndex": 0,
+      "type": "Page",
+      "name": "PageBeta",
+      "caption": "Beta",
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "caption": "Beta",
+        "enabled": true,
+        "visible": true
+      }
+    },
+    {
+      "id": "control_003",
+      "parentId": "control_001",
+      "zIndex": 1,
+      "type": "Page",
+      "name": "PageAlpha",
+      "caption": "日本語",
+      "tag": "alpha-tag",
+      "controlTipText": "alpha-tip",
+      "accelerator": "A",
+      "enabled": false,
+      "visible": false,
+      "observed": {
+        "caption": "日本語",
+        "tag": "alpha-tag",
+        "controlTipText": "alpha-tip",
+        "accelerator": "A",
+        "enabled": false,
+        "visible": false
+      }
+    },
+    {
+      "id": "control_004",
+      "parentId": "control_003",
+      "zIndex": 0,
+      "type": "TextBox",
+      "name": "PageText",
+      "text": "page text",
+      "value": "page text",
+      "left": 8,
+      "top": 8,
+      "width": 72,
+      "height": 18,
+      "tabIndex": 0,
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "text": "page text",
+        "value": "page text",
+        "left": 8,
+        "top": 8,
+        "width": 72,
+        "height": 18,
+        "tabIndex": 0,
+        "enabled": true,
+        "visible": true
+      }
+    },
+    {
+      "id": "control_005",
+      "parentId": "control_003",
+      "zIndex": 1,
+      "type": "Frame",
+      "name": "PageFrame",
+      "left": 8,
+      "top": 36,
+      "width": 150,
+      "height": 80,
+      "tabIndex": 1,
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "left": 8,
+        "top": 36,
+        "width": 150,
+        "height": 80,
+        "tabIndex": 1,
+        "enabled": true,
+        "visible": true
+      }
+    },
+    {
+      "id": "control_006",
+      "parentId": "control_005",
+      "zIndex": 0,
+      "type": "Label",
+      "name": "NestedLabel",
+      "caption": "nested",
+      "left": 0,
+      "top": 0,
+      "width": 72,
+      "height": 18,
+      "tabIndex": 0,
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "caption": "nested",
+        "left": 0,
+        "top": 0,
+        "width": 72,
+        "height": 18,
+        "tabIndex": 0,
+        "enabled": true,
+        "visible": true
+      }
+    },
+    {
+      "id": "control_007",
+      "parentId": "control_001",
+      "zIndex": 2,
+      "type": "Page",
+      "name": "PageGamma",
+      "caption": "Gamma",
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "caption": "Gamma",
+        "enabled": true,
+        "visible": true
+      }
+    },
+    {
+      "id": "control_008",
+      "zIndex": 1,
+      "type": "TabStrip",
+      "name": "StripMain",
+      "left": 12,
+      "top": 206,
+      "width": 240,
+      "height": 48,
+      "tabIndex": 1,
+      "selectedIndex": 0,
+      "enabled": false,
+      "visible": true,
+      "observed": {
+        "left": 12,
+        "top": 206,
+        "width": 240,
+        "height": 48,
+        "tabIndex": 1,
+        "selectedIndex": 0,
+        "enabled": false,
+        "visible": true,
+        "tabs": [
+          {
+            "name": "TabBeta",
+            "caption": "Beta",
+            "enabled": true,
+            "visible": true
+          },
+          {
+            "name": "TabAlpha",
+            "caption": "Alpha",
+            "controlTipText": "tab-tip",
+            "tag": "tab-tag",
+            "accelerator": "T",
+            "enabled": false,
+            "visible": false
+          },
+          {
+            "name": "TabGamma",
+            "caption": "Gamma",
+            "enabled": true,
+            "visible": true
+          }
+        ]
+      },
+      "tabs": [
+        {
+          "name": "TabBeta",
+          "caption": "Beta",
+          "enabled": true,
+          "visible": true
+        },
+        {
+          "name": "TabAlpha",
+          "caption": "Alpha",
+          "controlTipText": "tab-tip",
+          "tag": "tab-tag",
+          "accelerator": "T",
+          "enabled": false,
+          "visible": false
+        },
+        {
+          "name": "TabGamma",
+          "caption": "Gamma",
+          "enabled": true,
+          "visible": true
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

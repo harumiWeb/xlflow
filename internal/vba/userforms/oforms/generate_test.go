@@ -40,6 +40,57 @@ func TestNewFormAuthorsIndependentValidatedStreams(t *testing.T) {
 	}
 }
 
+func TestNewFormAuthorsTabStripAndMultiPage(t *testing.T) {
+	form, err := NewForm(Definition{Name: "Tabbed", Size: Size{8467, 6350}, Controls: []ControlDefinition{
+		{
+			Name: "Tabs", Class: 18, Size: Size{3000, 400}, Visible: true,
+			Tabs: &TabStrip{SelectedIndex: 1, Tabs: []Tab{
+				{Name: "TabOne", Caption: "一", Enabled: true, Visible: true},
+				{Name: "TabTwo", Caption: "二", Enabled: true, Visible: true},
+			}},
+		},
+		{
+			Name: "Pages", Class: 57, Size: Size{5000, 3000}, Visible: true,
+			Tabs: &TabStrip{SelectedIndex: 1, Tabs: []Tab{
+				{Name: "TabPageA", Caption: "Alpha", Enabled: true, Visible: true},
+				{Name: "TabPageB", Caption: "日本語", Enabled: false, Visible: true},
+			}},
+			Controls: []ControlDefinition{
+				{Name: "PageA", Class: 7, Visible: true},
+				{Name: "PageB", Class: 7, Visible: true},
+			},
+		},
+	}}, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(form.Controls) != 2 || form.Controls[0].TabStrip == nil || form.Controls[1].MultiPage == nil {
+		t.Fatal("generated TabStrip or MultiPage state was not bound")
+	}
+	standalone := form.Controls[0].TabStrip
+	if len(standalone.Tabs) != 2 || standalone.SelectedIndex != 1 || standalone.Tabs[1].Caption != "二" {
+		t.Fatalf("standalone tabs = %#v", standalone)
+	}
+	multi := form.Controls[1].MultiPage
+	if len(multi.Pages) != 2 || multi.Pages[0].Name != "PageA" || multi.Pages[1].Name != "PageB" {
+		t.Fatalf("generated pages = %#v", multi.Pages)
+	}
+	if multi.Hidden.Name != "" || multi.Hidden.TabStrip == nil || multi.Hidden.TabStrip.SelectedIndex != 1 || multi.Hidden.TabStrip.Tabs[1].Caption != "日本語" {
+		t.Fatalf("generated hidden strip = %#v", multi.Hidden)
+	}
+	stored, err := SerializeForm(form, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := reparseEditedForm(stored, "Tabbed", 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Controls[1].MultiPage.Hidden.TabStrip.Tabs[1].Enabled || reopened.Controls[1].MultiPage.Pages[1].Name != "PageB" {
+		t.Fatal("generated tab flags or Page order did not survive round-trip")
+	}
+}
+
 func TestNewFormRejectsUnsupportedLayoutsAndInvalidRecords(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -48,8 +99,6 @@ func TestNewFormRejectsUnsupportedLayoutsAndInvalidRecords(t *testing.T) {
 	}{
 		{"reserved-name", func(d *Definition) { d.Name = "VBA" }, ErrInvalidEdit},
 		{"path-name", func(d *Definition) { d.Name = "Foo/Bar" }, ErrInvalidEdit},
-		{"multipage", func(d *Definition) { d.Controls[0].Class = 57 }, ErrUnsupportedEdit},
-		{"tabstrip", func(d *Definition) { d.Controls[0].Class = 18 }, ErrUnsupportedEdit},
 		{"picture", func(d *Definition) { d.Controls[0].Properties = map[string]any{"Picture": int64(0xffff)} }, ErrUnsupportedEdit},
 		{"root-caption-codepage", func(d *Definition) { d.Caption = "😀" }, ErrInvalidEdit},
 		{"bad-field-width", func(d *Definition) { d.Controls[0].Properties = map[string]any{"BorderStyle": int64(1 << 20)} }, ErrInvalidEdit},

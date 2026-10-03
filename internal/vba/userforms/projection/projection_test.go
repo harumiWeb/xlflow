@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
+	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
 	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
@@ -62,7 +63,8 @@ func TestProjectSimpleFixture(t *testing.T) {
 }
 
 func TestProjectNestedFixturePreservesParentsAndSiblingOrder(t *testing.T) {
-	got, err := Project(readFixture(t, "p6_nested_form.bin"))
+	form := readFixture(t, "p6_nested_form.bin")
+	got, err := Project(form)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +84,9 @@ func TestProjectNestedFixturePreservesParentsAndSiblingOrder(t *testing.T) {
 	}
 	containerTypes := []string{"Frame", "MultiPage", "Page"}
 	for _, control := range got.Controls {
+		if control.Type == "TabStrip" && strings.HasPrefix(control.Name, "<unnamed_") {
+			t.Fatalf("projected unnamed internal TabStrip: %#v", control)
+		}
 		if control.Enabled == nil {
 			t.Fatalf("control %q omitted the persisted default enabled state", control.Name)
 		}
@@ -91,6 +96,31 @@ func TestProjectNestedFixturePreservesParentsAndSiblingOrder(t *testing.T) {
 		parent := byID[control.ParentID]
 		if !slices.Contains(containerTypes, parent.Type) && !forms.IsUnsupportedControlPlaceholder(parent) {
 			t.Fatalf("control %q has unexpected parent type %q", control.Name, parent.Type)
+		}
+	}
+	for _, source := range form.Controls {
+		if source == nil || source.MultiPage == nil {
+			continue
+		}
+		projected, ok := controlByName(got.Controls, source.Name)
+		if !ok {
+			t.Fatalf("projected MultiPage %q is missing", source.Name)
+		}
+		if projected.Tabs != nil || projected.Observed != nil && projected.Observed.Tabs != nil {
+			t.Fatalf("MultiPage %q exposed standalone tabs: %#v", source.Name, projected)
+		}
+		var gotPages []string
+		for _, control := range got.Controls {
+			if control.ParentID == projected.ID && control.Type == "Page" {
+				gotPages = append(gotPages, control.Name)
+			}
+		}
+		wantPages := make([]string, 0, len(source.MultiPage.Pages))
+		for _, page := range source.MultiPage.Pages {
+			wantPages = append(wantPages, page.Name)
+		}
+		if !slices.Equal(gotPages, wantPages) {
+			t.Fatalf("MultiPage %q page order = %q, want x order %q", source.Name, gotPages, wantPages)
 		}
 	}
 	if issues := forms.ValidateFormSpecStrict(got); hasErrors(issues) {
@@ -232,23 +262,39 @@ func TestProjectNewControlValuesAndDefaultFlags(t *testing.T) {
 }
 
 func TestProjectTabStripSnapshotCanBeWrittenAndLoaded(t *testing.T) {
+	record := emptyRecord("TabStrip")
+	record.Major = 2
+	if err := oforms.SetTabStrip(record, &oforms.TabStrip{
+		SelectedIndex: 1,
+		Tabs: []oforms.Tab{
+			{Name: "TabAlpha", Caption: "Alpha", ControlTipText: "alpha-tip", Tag: "alpha-tag", Accelerator: "A", Enabled: true, Visible: true},
+			{Name: "TabBeta", Caption: "Beta", Enabled: false, Visible: false},
+		},
+	}); err != nil {
+		t.Fatalf("SetTabStrip: %v", err)
+	}
 	form := &oforms.Form{
 		Name:   "TabForm",
 		Levels: []*oforms.Level{{Record: emptyRecord("Form")}},
 		Controls: []*oforms.Control{{
 			Name: "TabStrip1", Kind: "MSForms.TabStrip",
-			Record: &oforms.Record{Type: "TabStrip", Values: map[string]int64{"ListIndex": 1}},
+			Record: record,
 		}},
 	}
 	projected, err := Project(form)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if projected.Controls[0].SelectedIndex != nil {
-		t.Fatalf("TabStrip selectedIndex = %#v, want omitted unsupported state", projected.Controls[0].SelectedIndex)
+	if projected.Controls[0].SelectedIndex == nil || *projected.Controls[0].SelectedIndex != 1 {
+		t.Fatalf("TabStrip selectedIndex = %#v, want 1", projected.Controls[0].SelectedIndex)
 	}
-	if !slices.Contains(projected.Controls[0].Unsupported, "selectedIndex") {
-		t.Fatalf("TabStrip unsupported = %q, want selectedIndex", projected.Controls[0].Unsupported)
+	if len(projected.Controls[0].Tabs) != 2 || projected.Controls[0].Tabs[0].Name != "TabAlpha" || projected.Controls[0].Observed == nil || len(projected.Controls[0].Observed.Tabs) != 2 {
+		t.Fatalf("TabStrip tabs = %#v, observed=%#v", projected.Controls[0].Tabs, projected.Controls[0].Observed)
+	}
+	for _, property := range []string{"selectedIndex", "items", "tipStrings", "tabNames", "tags", "accelerators"} {
+		if slices.Contains(projected.Controls[0].Unsupported, property) {
+			t.Fatalf("TabStrip unsupported = %q, includes projected property %q", projected.Controls[0].Unsupported, property)
+		}
 	}
 
 	path := filepath.Join(t.TempDir(), "TabForm.json")
@@ -259,9 +305,236 @@ func TestProjectTabStripSnapshotCanBeWrittenAndLoaded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFormSpec: %v", err)
 	}
-	if loaded.Controls[0].SelectedIndex != nil || !slices.Contains(loaded.Controls[0].Unsupported, "selectedIndex") {
-		t.Fatalf("loaded TabStrip = %#v, want selectedIndex recorded as unsupported", loaded.Controls[0])
+	if loaded.Controls[0].SelectedIndex == nil || *loaded.Controls[0].SelectedIndex != 1 || len(loaded.Controls[0].Tabs) != 2 || loaded.Controls[0].Observed == nil || len(loaded.Controls[0].Observed.Tabs) != 2 {
+		t.Fatalf("loaded TabStrip = %#v, want selected index and both tab slices", loaded.Controls[0])
 	}
+	if loaded.Controls[0].Tabs[0].ControlTipText == nil || *loaded.Controls[0].Tabs[0].ControlTipText != "alpha-tip" || loaded.Controls[0].Observed.Tabs[1].Visible == nil || *loaded.Controls[0].Observed.Tabs[1].Visible {
+		t.Fatalf("loaded tab metadata = %#v, observed=%#v", loaded.Controls[0].Tabs, loaded.Controls[0].Observed.Tabs)
+	}
+}
+
+func TestProjectEmptyTabStripNormalizesSelection(t *testing.T) {
+	record := emptyRecord("TabStrip")
+	record.Major = 2
+	form := &oforms.Form{
+		Name:   "EmptyTabForm",
+		Levels: []*oforms.Level{{Record: emptyRecord("Form")}},
+		Controls: []*oforms.Control{{
+			Name: "TabStrip1", Kind: "MSForms.TabStrip", Record: record,
+		}},
+	}
+
+	got, err := Project(form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := got.Controls[0]
+	if control.SelectedIndex == nil || *control.SelectedIndex != -1 || control.Tabs == nil || len(control.Tabs) != 0 || control.Observed == nil || control.Observed.Tabs == nil || len(control.Observed.Tabs) != 0 {
+		t.Fatalf("empty TabStrip projection = %#v, want empty tab slices and selectedIndex -1", control)
+	}
+
+	path := filepath.Join(t.TempDir(), "EmptyTabForm.json")
+	if err := forms.WriteSnapshot(forms.SnapshotOutput{Path: path, DisplayPath: path, Format: "json"}, got); err != nil {
+		t.Fatalf("WriteSnapshot: %v", err)
+	}
+	loaded, err := forms.LoadFormSpec(forms.SpecInput{Path: path, DisplayPath: path, Format: "json"})
+	if err != nil {
+		t.Fatalf("LoadFormSpec: %v", err)
+	}
+	if loaded.Controls[0].SelectedIndex == nil || *loaded.Controls[0].SelectedIndex != -1 || loaded.Controls[0].Tabs == nil || len(loaded.Controls[0].Tabs) != 0 {
+		t.Fatalf("loaded empty TabStrip = %#v, want explicit empty tabs and selectedIndex -1", loaded.Controls[0])
+	}
+}
+
+func TestProjectMultiPageAuthoredBaseline(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		wantPageCount int
+		wantSelected  int
+	}{
+		{name: "baseline.bin", wantPageCount: 2, wantSelected: 1},
+		{name: "empty.bin", wantPageCount: 0, wantSelected: -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join("..", "compiler", "testdata", "multipage-excel-authored", test.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			project, err := vbaproject.Read(body)
+			if err != nil {
+				t.Fatalf("read VBA project: %v", err)
+			}
+			if len(project.Forms) != 1 {
+				t.Fatalf("UserForms = %d, want 1", len(project.Forms))
+			}
+			form := project.Forms[0]
+			got, err := Project(form)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var source *oforms.Control
+			for _, control := range form.Controls {
+				if control != nil && control.MultiPage != nil {
+					source = control
+					break
+				}
+			}
+			if source == nil {
+				t.Fatal("evidence form has no root MultiPage")
+			}
+			multiPage, ok := controlByName(got.Controls, source.Name)
+			if !ok {
+				t.Fatalf("projected MultiPage %q is missing", source.Name)
+			}
+			if multiPage.Tabs != nil || multiPage.Observed != nil && multiPage.Observed.Tabs != nil {
+				t.Fatalf("MultiPage exposed TabStrip tabs: %#v", multiPage)
+			}
+			if multiPage.SelectedIndex == nil || *multiPage.SelectedIndex != test.wantSelected {
+				t.Fatalf("MultiPage selectedIndex = %#v, want %d", multiPage.SelectedIndex, test.wantSelected)
+			}
+			var pages []forms.FormSpecControl
+			for _, control := range got.Controls {
+				if control.ParentID == multiPage.ID && control.Type == "Page" {
+					pages = append(pages, control)
+				}
+			}
+			if len(pages) != test.wantPageCount || len(source.MultiPage.Pages) != test.wantPageCount {
+				t.Fatalf("projected/source pages = %d/%d, want %d", len(pages), len(source.MultiPage.Pages), test.wantPageCount)
+			}
+			if test.wantPageCount > 0 && (source.MultiPage.Hidden.TabStrip == nil || len(source.MultiPage.Hidden.TabStrip.Tabs) != test.wantPageCount) {
+				t.Fatalf("hidden TabStrip = %#v, want one tab per page", source.MultiPage.Hidden.TabStrip)
+			}
+			if test.wantPageCount == 0 && (source.MultiPage.Hidden.TabStrip == nil || len(source.MultiPage.Hidden.TabStrip.Tabs) == 0) {
+				t.Fatal("empty evidence should retain cached hidden tabs")
+			}
+			for index, page := range pages {
+				want := source.MultiPage.Hidden.TabStrip.Tabs[index]
+				if page.Name != source.MultiPage.Pages[index].Name || page.Caption == nil || *page.Caption != want.Caption {
+					t.Errorf("page %d identity/caption = %#v, want %q / %q", index, page, source.MultiPage.Pages[index].Name, want.Caption)
+				}
+				if page.Enabled == nil || *page.Enabled != want.Enabled || page.Visible == nil || *page.Visible != want.Visible {
+					t.Errorf("page %q enabled/visible = %#v/%#v, want %t/%t", page.Name, page.Enabled, page.Visible, want.Enabled, want.Visible)
+				}
+				if page.Left != nil || page.Top != nil || page.Width != nil || page.Height != nil {
+					t.Errorf("page %q projected unavailable authoring geometry: %#v", page.Name, page)
+				}
+				if page.ControlTipText == nil || *page.ControlTipText != want.ControlTipText || page.Accelerator == nil || *page.Accelerator != want.Accelerator {
+					t.Errorf("page %q top-level tab strings = tip %#v accelerator %#v, want %q / %q", page.Name, page.ControlTipText, page.Accelerator, want.ControlTipText, want.Accelerator)
+				}
+				if page.Properties != nil {
+					for _, alias := range []string{"ControlTipText", "Accelerator"} {
+						if _, exists := page.Properties[alias]; exists {
+							t.Errorf("page %q duplicated %s in properties bag", page.Name, alias)
+						}
+					}
+				}
+				if expected, ok := source.MultiPage.Pages[index].Site.Strings["Tag"]; ok {
+					if page.Tag == nil || *page.Tag != expected.Text {
+						t.Errorf("page %q tag = %#v, want Site tag %q", page.Name, page.Tag, expected.Text)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestProjectEmptyMultiPageNormalizesSelection(t *testing.T) {
+	hiddenRecord := emptyRecord("TabStrip")
+	hiddenRecord.Major = 2
+	hiddenRecord.Mask = 1
+	hiddenRecord.Values["ListIndex"] = 0
+	multiPage := &oforms.Control{
+		Name: "MultiPage1", Kind: "MSForms.MultiPage", Record: emptyRecord("MultiPage"),
+		MultiPage: &oforms.MultiPage{
+			Hidden:     &oforms.Control{Kind: "MSForms.TabStrip", Record: hiddenRecord},
+			Properties: &oforms.Record{Type: "MultiPageProperties"},
+		},
+	}
+	form := &oforms.Form{
+		Name: "EmptyMultiPageForm", Levels: []*oforms.Level{{Record: emptyRecord("Form")}},
+		Controls: []*oforms.Control{multiPage},
+	}
+
+	got, err := Project(form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := got.Controls[0]
+	if control.SelectedIndex == nil || *control.SelectedIndex != -1 || control.Tabs != nil || control.Observed != nil && control.Observed.Tabs != nil {
+		t.Fatalf("empty MultiPage projection = %#v, want selectedIndex -1 and no tabs", control)
+	}
+}
+
+func TestProjectExcelAuthoredDisabledPageUsesHiddenTabFlags(t *testing.T) {
+	fixtureDir := filepath.Join("..", "compiler", "testdata", "multipage-excel-authored")
+	body, err := os.ReadFile(filepath.Join(fixtureDir, "disabled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := vbaproject.Read(body)
+	if err != nil {
+		t.Fatalf("read disabled fixture: %v", err)
+	}
+	if len(project.Forms) != 1 {
+		t.Fatalf("UserForms = %d, want 1", len(project.Forms))
+	}
+	var source *oforms.Control
+	for _, control := range project.Forms[0].Controls {
+		if control != nil && control.MultiPage != nil {
+			source = control
+			break
+		}
+	}
+	if source == nil || len(source.MultiPage.Pages) == 0 || source.MultiPage.Hidden.TabStrip == nil {
+		t.Fatal("disabled fixture has no populated MultiPage")
+	}
+	pageRecordEnabled := source.MultiPage.Pages[0].Record.Values["BooleanProperties"]&4 != 0
+	pageSiteVisible := source.MultiPage.Pages[0].Site.Values["BitFlags"]&(1<<1) != 0
+	pageTab := source.MultiPage.Hidden.TabStrip.Tabs[0]
+	if !pageRecordEnabled || pageSiteVisible || pageTab.Enabled || pageTab.Visible {
+		t.Fatalf("fixture bits: Page BooleanProperties enabled=%t, Site visible=%t, hidden tab enabled/visible=%t/%t", pageRecordEnabled, pageSiteVisible, pageTab.Enabled, pageTab.Visible)
+	}
+
+	got, err := Project(project.Forms[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, ok := controlByName(got.Controls, source.MultiPage.Pages[0].Name)
+	if !ok || page.Enabled == nil || *page.Enabled || page.Visible == nil || *page.Visible {
+		t.Fatalf("projected disabled Page = %#v, want Enabled=false and Visible=false from hidden tab flags", page)
+	}
+
+	jsonBody, err := os.ReadFile(filepath.Join(fixtureDir, "disabled.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot struct {
+		After struct {
+			Pages []struct {
+				Name    string `json:"name"`
+				Enabled struct {
+					Available bool `json:"available"`
+					Value     bool `json:"value"`
+				} `json:"Enabled"`
+				Visible struct {
+					Available bool `json:"available"`
+					Value     bool `json:"value"`
+				} `json:"Visible"`
+			} `json:"pages"`
+		} `json:"after"`
+	}
+	if err := json.Unmarshal(jsonBody, &snapshot); err != nil {
+		t.Fatalf("decode Excel runtime snapshot: %v", err)
+	}
+	for _, captured := range snapshot.After.Pages {
+		if captured.Name == source.MultiPage.Pages[0].Name && captured.Enabled.Available && captured.Visible.Available {
+			if captured.Enabled.Value || captured.Visible.Value {
+				t.Fatalf("Excel runtime reports PageAlpha enabled/visible=%t/%t, want false/false", captured.Enabled.Value, captured.Visible.Value)
+			}
+			return
+		}
+	}
+	t.Fatal("Excel runtime snapshot does not contain available PageAlpha state")
 }
 
 func TestProjectReportsUnmodeledSiteStrings(t *testing.T) {
@@ -459,6 +732,15 @@ func hasErrors(issues []forms.ValidationIssue) bool {
 		}
 	}
 	return false
+}
+
+func controlByName(controls []forms.FormSpecControl, name string) (forms.FormSpecControl, bool) {
+	for _, control := range controls {
+		if control.Name == name {
+			return control, true
+		}
+	}
+	return forms.FormSpecControl{}, false
 }
 
 func emptyRecord(recordType string) *oforms.Record {

@@ -102,7 +102,9 @@ func Project(form *oforms.Form) (forms.FormSpec, error) {
 	projectForm(form.Levels[0], &result)
 
 	state := projectionState{spec: &result}
-	state.projectControls(form.Controls, "")
+	if err := state.projectControls(form.Controls, "", nil); err != nil {
+		return forms.FormSpec{}, err
+	}
 	return forms.NormalizeFormSpec(result), nil
 }
 
@@ -112,11 +114,33 @@ type projectionState struct {
 	unnamedID int
 }
 
-func (s *projectionState) projectControls(controls []*oforms.Control, parentID string) {
+func (s *projectionState) projectControls(controls []*oforms.Control, parentID string, pageTabs []oforms.Tab) error {
 	for index, source := range controls {
 		if source == nil {
 			continue
 		}
+
+		var tabStrip *oforms.TabStrip
+		if source.MultiPage != nil {
+			if source.MultiPage.Hidden == nil {
+				return fmt.Errorf("project MultiPage %q: hidden TabStrip is missing", source.Name)
+			}
+			var err error
+			tabStrip, err = controlTabStrip(source.MultiPage.Hidden)
+			if err != nil {
+				return fmt.Errorf("project MultiPage %q hidden TabStrip: %w", source.Name, err)
+			}
+			if len(source.MultiPage.Pages) > 0 && len(tabStrip.Tabs) != len(source.MultiPage.Pages) {
+				return fmt.Errorf("project MultiPage %q: %d tabs do not match %d pages", source.Name, len(tabStrip.Tabs), len(source.MultiPage.Pages))
+			}
+		} else if source.Kind == "MSForms.TabStrip" {
+			var err error
+			tabStrip, err = controlTabStrip(source)
+			if err != nil {
+				return fmt.Errorf("project TabStrip %q: %w", source.Name, err)
+			}
+		}
+
 		s.nextID++
 		id := fmt.Sprintf("control_%03d", s.nextID)
 		control := forms.FormSpecControl{
@@ -150,6 +174,46 @@ func (s *projectionState) projectControls(controls []*oforms.Control, parentID s
 		}
 
 		projectControl(source, &control)
+		if pageTabs != nil {
+			if index >= len(pageTabs) {
+				return fmt.Errorf("project Page %q: hidden TabStrip metadata is missing", source.Name)
+			}
+			tab := pageTabs[index]
+			control.Caption = new(tab.Caption)
+			control.ControlTipText = new(tab.ControlTipText)
+			control.Accelerator = new(tab.Accelerator)
+			control.Enabled = new(tab.Enabled)
+			control.Visible = new(tab.Visible)
+			if source.Site != nil {
+				if tag, ok := source.Site.Strings["Tag"]; ok {
+					control.Tag = new(tag.Text)
+				}
+			}
+		}
+		if tabStrip != nil {
+			if source.MultiPage != nil {
+				selectedIndex := int32(0)
+				if source.MultiPage.Hidden.Record != nil {
+					selectedIndex = int32(source.MultiPage.Hidden.Record.Values["ListIndex"])
+				}
+				if len(source.MultiPage.Pages) == 0 {
+					selectedIndex = -1
+				}
+				control.SelectedIndex = new(int(selectedIndex))
+				if source.MultiPage.Properties != nil {
+					control.Enabled = new(source.MultiPage.Properties.Mask&(1<<3) == 0)
+				}
+			} else {
+				control.Tabs = projectTabs(tabStrip.Tabs)
+				control.Observed = &forms.FormSpecObservedControl{Tabs: projectTabs(tabStrip.Tabs)}
+				selectedIndex := tabStrip.SelectedIndex
+				if len(tabStrip.Tabs) == 0 {
+					selectedIndex = -1
+				}
+				control.SelectedIndex = new(int(selectedIndex))
+			}
+		}
+
 		unsupported := unsupportedControlProperties(source, control.Type)
 		unsupported = append(unsupported, unsupportedLevelProperties(source.Level)...)
 		if !known {
@@ -167,8 +231,46 @@ func (s *projectionState) projectControls(controls []*oforms.Control, parentID s
 		}
 
 		s.spec.Controls = append(s.spec.Controls, control)
-		s.projectControls(source.Children, id)
+
+		if source.MultiPage != nil {
+			if err := s.projectControls(source.MultiPage.Pages, id, tabStrip.Tabs); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := s.projectControls(source.Children, id, nil); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+func controlTabStrip(control *oforms.Control) (*oforms.TabStrip, error) {
+	if control == nil {
+		return nil, fmt.Errorf("control is missing")
+	}
+	if control.TabStrip != nil {
+		return control.TabStrip, nil
+	}
+	if control.Record == nil {
+		return nil, fmt.Errorf("TabStrip record is missing")
+	}
+	return oforms.ParseTabStrip(control.Record)
+}
+
+func projectTabs(tabs []oforms.Tab) []forms.FormSpecTab {
+	projected := make([]forms.FormSpecTab, 0, len(tabs))
+	for _, tab := range tabs {
+		projected = append(projected, forms.FormSpecTab{
+			Name:           tab.Name,
+			Caption:        new(tab.Caption),
+			ControlTipText: new(tab.ControlTipText),
+			Tag:            new(tab.Tag),
+			Accelerator:    new(tab.Accelerator),
+			Enabled:        new(tab.Enabled),
+			Visible:        new(tab.Visible),
+		})
+	}
+	return projected
 }
 
 func projectForm(level *oforms.Level, result *forms.FormSpec) {
@@ -207,7 +309,7 @@ func projectForm(level *oforms.Level, result *forms.FormSpec) {
 
 func projectControl(source *oforms.Control, target *forms.FormSpecControl) {
 	if source.Site != nil {
-		if source.Site.Position != nil {
+		if source.Site.Position != nil && target.Type != "Page" {
 			target.Left = new(points(source.Site.Position.Left))
 			target.Top = new(points(source.Site.Position.Top))
 		}
@@ -224,10 +326,10 @@ func projectControl(source *oforms.Control, target *forms.FormSpecControl) {
 		return
 	}
 	record := source.Record
-	if size, ok := record.Sizes["Size"]; ok {
+	if size, ok := record.Sizes["Size"]; ok && target.Type != "Page" {
 		target.Width = new(points(size.Width))
 		target.Height = new(points(size.Height))
-	} else if size, ok := record.Sizes["DisplayedSize"]; ok {
+	} else if size, ok := record.Sizes["DisplayedSize"]; ok && target.Type != "Page" {
 		target.Width = new(points(size.Width))
 		target.Height = new(points(size.Height))
 	}
@@ -274,6 +376,9 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 			}
 		}
 		for _, name := range []string{"Tag", "ControlTipText", "RuntimeLicKey", "ControlSource", "RowSource"} {
+			if controlType == "Page" && (name == "Tag" || name == "ControlTipText") {
+				continue
+			}
 			if value, ok := control.Site.Strings[name]; ok && value.Text != "" {
 				unsupported = append(unsupported, lowerFirst(name))
 			}
@@ -288,6 +393,11 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 		projected["Value"] = supportsControlValue(controlType)
 		projected["Position"] = supportsNumericControlValue(controlType)
 		projected["BooleanProperties"] = isDefaultBooleanProperties(controlType, control.Record.Values["BooleanProperties"])
+		if controlType == "TabStrip" {
+			for _, name := range []string{"Items", "TipStrings", "TabNames", "Tags", "Accelerators"} {
+				projected[name] = true
+			}
+		}
 		unsupported = append(unsupported, unsupportedRecordProperties(control.Record, projected)...)
 		if bits, ok := control.Record.Values["VariousPropertyBits"]; ok {
 			if defaultBits, known := defaultVariousPropertyBits(controlType); !known || bits&^int64(1<<1) != defaultBits&^int64(1<<1) {
@@ -305,7 +415,7 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 }
 
 func supportsSelectedIndex(controlType string) bool {
-	return controlType == "ComboBox" || controlType == "ListBox"
+	return controlType == "ComboBox" || controlType == "ListBox" || controlType == "TabStrip"
 }
 
 func defaultSiteFlags(controlType string) int64 {
@@ -423,6 +533,9 @@ func unsupportedRecordProperties(record *oforms.Record, projected map[string]boo
 		unsupported = append(unsupported, lowerFirst(name))
 	}
 	for name := range record.Arrays {
+		if projected[name] {
+			continue
+		}
 		unsupported = append(unsupported, lowerFirst(name))
 	}
 	for name := range record.Pictures {

@@ -20,6 +20,9 @@ func TestUserFormContractBuiltInControlsAndProgIDs(t *testing.T) {
 		{"ScrollBar", "Forms.ScrollBar.1", false},
 		{"Image", "Forms.Image.1", false},
 		{"Frame", "Forms.Frame.1", true},
+		{"MultiPage", "Forms.MultiPage.1", true},
+		{"Page", "Forms.Page.1", true},
+		{"TabStrip", "Forms.TabStrip.1", false},
 	}
 
 	contract := UserFormContract()
@@ -156,6 +159,13 @@ func TestUserFormContractTypeSpecificProperties(t *testing.T) {
 		{"SpinButton", "value", ValueTypeInteger, SupportLevelSupported},
 		{"ScrollBar", "value", ValueTypeInteger, SupportLevelSupported},
 		{"Frame", "caption", ValueTypeString, SupportLevelSupported},
+		{"MultiPage", "selectedIndex", ValueTypeInteger, SupportLevelSupported},
+		{"Page", "caption", ValueTypeString, SupportLevelSupported},
+		{"Page", "tag", ValueTypeString, SupportLevelSupported},
+		{"Page", "controlTipText", ValueTypeString, SupportLevelSupported},
+		{"Page", "accelerator", ValueTypeString, SupportLevelSupported},
+		{"TabStrip", "selectedIndex", ValueTypeInteger, SupportLevelSupported},
+		{"TabStrip", "tabs", ValueTypeObjectArray, SupportLevelSupported},
 	}
 	for _, tc := range tests {
 		t.Run(tc.typeName+"_"+tc.propertyName, func(t *testing.T) {
@@ -179,11 +189,51 @@ func TestUserFormContractTypeSpecificProperties(t *testing.T) {
 	if property, ok := LookupControlProperty("Image", "caption"); ok {
 		t.Fatalf("Image.caption should not be a type-specific property, got %#v", property)
 	}
+	if property, ok := LookupControlProperty("Page", "width"); ok {
+		t.Fatalf("Page.width should not be an authoring property, got %#v", property)
+	}
 	if property, ok := LookupControlProperty("UnknownControl", "caption"); ok {
 		t.Fatalf("unknown type-specific property should not be claimed, got %#v", property)
 	}
 	if property, ok := LookupControlProperty("UnknownControl", "id"); !ok || property.SupportLevel != SupportLevelSupported {
 		t.Fatalf("custom controls should receive common structural property support, got %#v, %v", property, ok)
+	}
+}
+
+func TestUserFormContractTabFieldsAndContainerTopology(t *testing.T) {
+	for name, valueType := range map[string]ValueType{
+		"name": ValueTypeString, "caption": ValueTypeString, "controlTipText": ValueTypeString,
+		"tag": ValueTypeString, "accelerator": ValueTypeString, "enabled": ValueTypeBoolean, "visible": ValueTypeBoolean,
+	} {
+		property, ok := LookupTabProperty(name)
+		if !ok {
+			t.Fatalf("LookupTabProperty(%q) missing", name)
+		}
+		assertProperty(t, property, valueType, name == "name", SupportLevelSupported)
+	}
+	if property, ok := LookupObservedControlProperty("TabStrip", "tabs"); !ok || property.SupportLevel != SupportLevelSnapshotOnly {
+		t.Fatalf("observed TabStrip.tabs = %#v, %v", property, ok)
+	}
+
+	tests := []struct {
+		parent string
+		child  string
+		allow  bool
+	}{
+		{"MultiPage", "Page", true},
+		{"MultiPage", "Label", false},
+		{"Frame", "Page", false},
+		{"Page", "Label", true},
+		{"TabStrip", "Label", false},
+	}
+	for _, test := range tests {
+		allowed, known := FormSpecControlParentAllowsChild(
+			FormSpecControl{Type: test.parent},
+			FormSpecControl{Type: test.child},
+		)
+		if !known || allowed != test.allow {
+			t.Errorf("parent %s child %s = %v, %v; want %v, true", test.parent, test.child, allowed, known, test.allow)
+		}
 	}
 }
 
