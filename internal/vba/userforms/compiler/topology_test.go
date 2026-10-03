@@ -223,6 +223,70 @@ func TestCompileEditsRejectsStaleAndInvalidTopologyWithoutMutation(t *testing.T)
 	}
 }
 
+func TestCompileTemplateAllocatesUnusedDefaultTabIndexes(t *testing.T) {
+	input := newSpec()
+	input.Controls = []spec.FormSpecControl{
+		{ID: "frame", Name: "FrameMain", Type: "Frame"},
+		{ID: "move", Name: "Moved", Type: "TextBox", TabIndex: new(0)},
+		{ID: "keep", ParentID: "frame", Name: "Kept", Type: "TextBox", TabIndex: new(4)},
+		{ID: "remove", ParentID: "frame", Name: "Removed", Type: "Label", TabIndex: new(2)},
+		{ID: "replace", ParentID: "frame", Name: "Replaced", Type: "Label", TabIndex: new(3)},
+	}
+	base, err := CompileNew(input, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := projection.Project(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := newSpec()
+	after.Form = before.Form
+	after.Controls = []spec.FormSpecControl{
+		{ID: "frame", Name: "FrameMain", Type: "Frame"},
+		{ID: "added", ParentID: "frame", Name: "Added", Type: "TextBox", ZIndex: new(0)},
+		{ID: "replace", ParentID: "frame", Name: "Replaced", Type: "TextBox", ZIndex: new(1)},
+		{ID: "move", ParentID: "frame", Name: "Moved", Type: "TextBox", ZIndex: new(2)},
+		{ID: "keep", ParentID: "frame", Name: "Kept", Type: "TextBox", ZIndex: new(3)},
+		{ID: "explicit", ParentID: "frame", Name: "Explicit", Type: "TextBox", TabIndex: new(1), ZIndex: new(4)},
+		{ID: "bag", ParentID: "frame", Name: "Bag", Type: "TextBox", Properties: map[string]any{" TaBiNdEx ": 5}, ZIndex: new(5)},
+		{ID: "root", Name: "RootAdded", Type: "TextBox"},
+	}
+	result, err := CompileTemplate(base, after, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reservations include controls later in z-order and a moved control whose
+	// omitted TabIndex must retain its persisted value in the new parent.
+	for name, want := range map[string]int16{"Added": 2, "Replaced": 3, "Moved": 0, "Kept": 4, "Explicit": 1, "Bag": 5, "RootAdded": 1} {
+		control := findControl(result.Controls, name)
+		if control == nil || control.TabIndex == nil || *control.TabIndex != want {
+			t.Fatalf("%s TabIndex = %v; want %d", name, control, want)
+		}
+	}
+	stored, err := oforms.SerializeForm(result, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Storages) == 0 {
+		t.Fatal("Frame storage missing")
+	}
+	// Use the retained control's edited value, rather than its before value;
+	// author-supplied duplicates are preserved rather than silently renumbered.
+	after.Controls[4].TabIndex = new(2)
+	after.Controls = append(after.Controls, spec.FormSpecControl{ID: "duplicate", ParentID: "frame", Name: "Duplicate", Type: "TextBox", TabIndex: new(1)})
+	result, err = CompileTemplate(base, after, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]int16{"Added": 3, "Replaced": 4, "Kept": 2, "Explicit": 1, "Duplicate": 1} {
+		control := findControl(result.Controls, name)
+		if control == nil || control.TabIndex == nil || *control.TabIndex != want {
+			t.Fatalf("edited %s TabIndex = %v; want %d", name, control, want)
+		}
+	}
+}
+
 func TestCompileTemplatePreservesAndRejectsMultiPageTopologyChanges(t *testing.T) {
 	base, snapshot := fixture(t, "p6_nested_form.bin")
 	original, err := oforms.SerializeForm(base, 932)

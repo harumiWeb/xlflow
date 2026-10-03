@@ -3,6 +3,7 @@ package compiler
 import (
 	"cmp"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 
@@ -74,6 +75,15 @@ func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint1
 	if err != nil {
 		return nil, err
 	}
+	retainedTabIndexes := map[string]int16{}
+	for _, level := range updated.Levels {
+		for _, control := range level.Controls {
+			retainedTabIndexes[control.Name] = 0
+			if control.TabIndex != nil {
+				retainedTabIndexes[control.Name] = *control.TabIndex
+			}
+		}
+	}
 	children := map[string][]spec.FormSpecControl{}
 	byID := map[string]spec.FormSpecControl{}
 	for _, c := range next.Controls {
@@ -86,7 +96,13 @@ func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint1
 	var desired []oforms.TopologyControl
 	var walk func(string, int) error
 	walk = func(parentID string, depth int) error {
-		for i, c := range children[parentID] {
+		siblings := children[parentID]
+		items := make([]oforms.TopologyControl, len(siblings))
+		usedTabIndexes := map[int16]bool{}
+		var defaults []*oforms.ControlDefinition
+		// Reserve final sibling values before assigning defaults, including
+		// retained controls moved from another parent and explicit property aliases.
+		for i, c := range siblings {
 			parentName := ""
 			if parentID != "" {
 				parentName = byID[parentID].Name
@@ -94,14 +110,39 @@ func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint1
 			item := oforms.TopologyControl{Name: c.Name, Parent: parentName}
 			oldControl, retained := oldByName[c.Name]
 			if !retained || !strings.EqualFold(oldControl.Type, c.Type) {
-				definition, err := generationControlDefinition(c, i)
+				definition, err := generationControlDefinition(c, 0)
 				if err != nil {
 					detail := generationErrorForControl(base.Name, c.Name, "controls", err)
 					return editGenerationError(detail)
 				}
 				item.Definition = &definition
+				explicit := c.TabIndex != nil
+				for key := range c.Properties {
+					explicit = explicit || strings.EqualFold(strings.TrimSpace(key), "tabIndex")
+				}
+				if explicit {
+					usedTabIndexes[definition.TabIndex] = true
+				} else {
+					defaults = append(defaults, item.Definition)
+				}
+			} else {
+				usedTabIndexes[retainedTabIndexes[c.Name]] = true
 			}
-			desired = append(desired, item)
+			items[i] = item
+		}
+		nextTabIndex := 0
+		for _, definition := range defaults {
+			for nextTabIndex <= math.MaxInt16 && usedTabIndexes[int16(nextTabIndex)] {
+				nextTabIndex++
+			}
+			if nextTabIndex > math.MaxInt16 {
+				return templateError(base, Invalid, definition.Name, "tabIndex", "no unused sibling TabIndex is available")
+			}
+			definition.TabIndex = int16(nextTabIndex)
+			usedTabIndexes[definition.TabIndex] = true
+		}
+		for i, c := range siblings {
+			desired = append(desired, items[i])
 			if len(children[c.ID]) > 0 {
 				if depth+1 >= oforms.MaxNestingDepth {
 					return templateError(base, Invalid, c.Name, "controls", "nesting limit")

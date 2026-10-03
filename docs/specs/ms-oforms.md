@@ -362,6 +362,13 @@ from the owning Frame and binary ID, so a moved Frame subtree follows its new
 parent. Retained same-name, same-type controls keep their persisted payloads;
 properties omitted from their source spec remain unchanged.
 
+During structural edits, added/replaced controls with no explicit TabIndex
+receive the lowest unused value among their final siblings in zIndex order.
+Retained values (including reparented controls) and explicit values, including
+property-bag aliases, are reserved first and remain unchanged. Existing or
+explicit duplicate values are not renumbered. Exhaustion of 0..32767 rejects
+the edit atomically.
+
 `oforms.ApplyTopology` accepts an explicit complete control tree through named
 parent relationships and optional definitions for additions/replacements. It
 validates a signed input, clones its persistence state, retains existing

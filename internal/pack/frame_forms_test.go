@@ -56,7 +56,7 @@ func TestPackFramesGenerateAndEditHierarchy(t *testing.T) {
 	if _, orphan := stored.Storages["NestedForm/i01"]; orphan {
 		t.Fatal("deleted Frame orphan")
 	}
-	if project.Modules[len(project.Modules)-1].Type != vbaproject.ModuleForm {
+	if got.Modules[len(got.Modules)-1].Type != vbaproject.ModuleForm {
 		t.Fatal("module identity changed")
 	}
 }

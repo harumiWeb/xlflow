@@ -165,8 +165,9 @@ snapshot fields and warnings do not request edits. The compiler rejects
 unsupported edits (including root dimensions and specialized container changes)
 instead of discarding opaque state through regeneration.
 
-Retained controls are matched by exact name and type. A type change replaces
-the control; renaming is deletion plus addition. Nested `controls` and flat
+Retained controls are matched by case-sensitive names and case-insensitive
+type labels. A type change replaces the control; renaming is deletion plus
+addition. Nested `controls` and flat
 `parentId` author the same hierarchy. Siblings sort by `zIndex`, with stable
 input-order ties. Moving a control keeps omitted numeric geometry relative to
 its new parent; pack does not convert it into an absolute-position-preserving
