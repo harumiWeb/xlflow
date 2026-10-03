@@ -7,7 +7,8 @@ from unresolved IR and can lose target evidence and possible reachability.
 2. [x] Cover receiverless and With Application Run/OnTime/OnKey, including
        project-procedure and non-callable local shadow controls.
 3. [x] Run focused architecture/calls/reachability/CLI tests, race and lint.
-4. [ ] Commit the fix and obtain an independent Pass 2 review.
+4. [x] Pass 2 reviewed `4a0fda3c`: the P2 is resolved, the focused callback
+       regression passes independently, and no confirmed findings remain.
 
 # PR #904 review follow-up
 
