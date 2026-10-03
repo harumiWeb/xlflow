@@ -100,6 +100,7 @@ func buildDescriptors() []Descriptor {
 		cli("lsp", "lsp", sourceRead),
 		cli("analyze", "analyze", sourceRead),
 		cli("metrics", "metrics", sourceRead),
+		cli("architecture", "architecture", sourceRead),
 		cliExcel("check", "check", excelRead),
 		cli("inspect-gui", "inspect-gui", sourceRead),
 		cli("skill.install", "skill install", sourceMutate),

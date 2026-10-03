@@ -807,6 +807,20 @@ xlflow module install --push
 
 ---
 
+## AI エージェント・レビュー向けのプロジェクト構造
+
+```bash
+xlflow architecture
+xlflow architecture --json
+xlflow architecture --module Billing --json
+```
+
+モジュール、入口、依存関係、循環、到達可能性、hotspot、可変状態、
+副作用、不確実性を一度のソース解析で取得できます。Excel や workbook は不要です。
+module／path フィルターでもプロジェクト全体の解決結果と hotspot 順位を維持します。
+情報提供用のレポートであり、lint・analyze・metrics の閾値を適用しません。
+詳細は [architecture コマンドガイド](https://harumiweb.github.io/xlflow/commands/architecture)を参照してください。
+
 ## JSON 出力
 
 すべてのコマンドは `--json` を付けることで、AIエージェントやスクリプトから扱いやすい JSON を返します。

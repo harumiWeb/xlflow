@@ -10,6 +10,12 @@ All notable changes to xlflow will be documented in this file.
   Removed containers leave no orphan storages; unsupported bookkeeping
   rejects the whole operation before artifact publication.
 
+- Added source-only `xlflow architecture` with a versioned JSON report of
+  modules, entry points, dependencies, cycles, reachability, hotspots, mutable
+  state, effects, and uncertainty. Module/path display filters retain full
+  project resolution and global ranks; reporting does not enforce diagnostic
+  or metrics thresholds.
+
 - Added canonical UserForm Designer generation and supported property updates
   to template `pack`, with no `.frx` requirement. Omitted properties retain
   template values; `[pack].userform_topology = "source"` explicitly enables

@@ -1,3 +1,28 @@
+# PR #907 review follow-up
+
+All five comments are valid presentation/projection defects; retain global
+resolution, native metrics identities and incident-edge selection.
+
+1. [x] Filter displayed root candidates while retaining unresolved requests.
+2. [x] Retain all related SCC member dependency nodes and boundary IDs.
+3. [x] Join conditional procedure metrics by declaration start position.
+4. [x] Allow existing empty directories as display scopes; reject invalid files.
+5. [x] Distinguish the field inventory from mutable access counts in human output.
+6. [x] Add regressions and verify architecture/output/CLI tests, affected race,
+       lint/docs/staged formatting and whitespace checks.
+
+# Issue #463 final-review Pass 1 follow-up
+
+Validated against `d143e7e8`: implicit Application callbacks are extracted
+from unresolved IR and can lose target evidence and possible reachability.
+
+1. [x] Project callback references from the existing resolved IR snapshot.
+2. [x] Cover receiverless and With Application Run/OnTime/OnKey, including
+       project-procedure and non-callable local shadow controls.
+3. [x] Run focused architecture/calls/reachability/CLI tests, race and lint.
+4. [x] Pass 2 reviewed `4a0fda3c`: the P2 is resolved, the focused callback
+       regression passes independently, and no confirmed findings remain.
+
 # PR #906 review follow-up
 
 CodeQL #10 identifies unchecked addition in a capacity hint; use the existing

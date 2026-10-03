@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/modulestate"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
@@ -30,6 +31,7 @@ type moduleStateProcedure struct {
 	ParamCount   int
 	Visibility   string
 	EventHandler bool
+	Callees      []string
 }
 
 type moduleStateProcedureAccess struct {
@@ -68,9 +70,15 @@ type moduleStateField struct {
 }
 
 func buildModuleStateAnalysis(rootDir string, cfg config.Config, files []parsedFile) moduleStateAnalysis {
-	procedures, byKey, byCandidate := moduleStateProcedures(files)
-	fields, fieldsByFileName, fieldsByName := moduleStateFields(files)
+	documents := make([]procedureir.DocumentIR, len(files))
+	for index := range files {
+		documents[index] = files[index].IR
+	}
+	facts := modulestate.CollectWithOptions(documents, modulestate.Options{RootDir: rootDir})
+	procedures, byKey := moduleStateProcedures(files, facts.Procedures)
+	fields, fieldsByID := moduleStateFieldsFromFacts(files, facts.Fields, byKey)
 	procedureAccesses := moduleStateProcedureAccesses(procedures)
+	moduleStatePopulateProcedureAccesses(facts.Procedures, fieldsByID, procedureAccesses)
 	if len(fields) == 0 {
 		return moduleStateAnalysis{Metrics: moduleStateMetricsProjection(fields, procedureAccesses)}
 	}
@@ -78,21 +86,9 @@ func buildModuleStateAnalysis(rootDir string, cfg config.Config, files []parsedF
 	edges := map[string]map[string]bool{}
 	for _, procedure := range procedures {
 		edges[procedure.Key] = map[string]bool{}
-	}
-	for _, file := range files {
-		for _, proc := range file.IR.Procedures {
-			caller := moduleStateProcedureKey(file.IR.Path, file.IR.ModuleName, proc.Symbol)
-			if _, ok := byKey[caller]; !ok {
-				continue
-			}
-			for _, call := range proc.Calls {
-				if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
-					continue
-				}
-				callee := moduleStateCandidateKey(call.Resolution.Candidates[0], byCandidate)
-				if callee != "" {
-					edges[caller][callee] = true
-				}
+		for _, callee := range procedure.Callees {
+			if _, ok := byKey[callee]; ok {
+				edges[procedure.Key][callee] = true
 			}
 		}
 	}
@@ -102,125 +98,12 @@ func buildModuleStateAnalysis(rootDir string, cfg config.Config, files []parsedF
 	eventRoots := moduleStateEventRoots(procedures)
 	rootSets := moduleStateRootReachability(edges, roots)
 
-	// Classify collection fields before attributing mutator calls. Otherwise a
-	// mutator in a procedure that appears before the initializer is skipped
-	// while the field still has its declaration-time type classification.
-	for _, file := range files {
-		for _, proc := range file.IR.Procedures {
-			procedure, ok := byKey[moduleStateProcedureKey(file.IR.Path, file.IR.ModuleName, proc.Symbol)]
-			if !ok {
-				continue
-			}
-			for _, access := range proc.Accesses {
-				field := moduleStateResolveField(rootDir, access, procedure, fieldsByFileName, fieldsByName)
-				if field == nil || field.IsCollection {
-					continue
-				}
-				if moduleStateCollectionInitializer(proc, access, field.Name) {
-					field.IsCollection = true
-				}
-			}
+	for _, field := range fields {
+		for key, procedure := range field.Readers {
+			moduleStateAttributeAccess(field, procedure, key, true, cycles, rootSets, eventRoots, byKey)
 		}
-	}
-
-	for _, file := range files {
-		for _, proc := range file.IR.Procedures {
-			procedure, ok := byKey[moduleStateProcedureKey(file.IR.Path, file.IR.ModuleName, proc.Symbol)]
-			if !ok || procedureAccesses[procedure.Key] == nil {
-				continue
-			}
-			for _, access := range proc.Accesses {
-				field := moduleStateResolveField(rootDir, access, procedure, fieldsByFileName, fieldsByName)
-				if field == nil {
-					continue
-				}
-				if access.Mode == procedureir.AccessRead || access.Mode == procedureir.AccessReadWrite {
-					field.Readers[procedure.Key] = procedure
-					if cycles[procedure.Key] {
-						field.InCycle = true
-						field.CycleRead = true
-					}
-					procedureAccesses[procedure.Key].Reads[field.Key] = moduleStateFieldDisplayName(field)
-					for root := range rootSets[procedure.Key] {
-						field.ReadRoots[root] = true
-						if rootProcedure, ok := byKey[root]; ok {
-							field.Roots[root] = rootProcedure
-						}
-					}
-					if procedure.EventHandler {
-						field.EventReads[procedure.Key] = true
-					}
-					for root := range rootSets[procedure.Key] {
-						if eventRoots[root] {
-							field.EventReads[root] = true
-						}
-					}
-				}
-				if access.Mode == procedureir.AccessWrite || access.Mode == procedureir.AccessReadWrite {
-					field.Writers[procedure.Key] = procedure
-					if cycles[procedure.Key] {
-						field.InCycle = true
-						field.CycleWrite = true
-					}
-					procedureAccesses[procedure.Key].Writes[field.Key] = moduleStateFieldDisplayName(field)
-					for root := range rootSets[procedure.Key] {
-						field.WriteRoots[root] = true
-						if rootProcedure, ok := byKey[root]; ok {
-							field.Roots[root] = rootProcedure
-						}
-					}
-					if procedure.EventHandler {
-						field.EventWrites[procedure.Key] = true
-					}
-					for root := range rootSets[procedure.Key] {
-						if eventRoots[root] {
-							field.EventWrites[root] = true
-						}
-					}
-				}
-			}
-			for _, call := range proc.Calls {
-				member := strings.ToLower(strings.TrimSpace(call.Callee.Member))
-				if !moduleStateCollectionMutator(proc, call, member) {
-					continue
-				}
-				name := moduleStateReceiverName(call)
-				if name == "" {
-					continue
-				}
-				if moduleStateProcedureDeclaresName(proc, name) {
-					continue
-				}
-				field := moduleStateResolveName(name, procedure, fieldsByFileName, fieldsByName)
-				if field == nil {
-					continue
-				}
-				if !field.IsCollection {
-					continue
-				}
-				field.Mutators[procedure.Key] = procedure
-				field.Writers[procedure.Key] = procedure
-				if cycles[procedure.Key] {
-					field.InCycle = true
-					field.CycleWrite = true
-				}
-				procedureAccesses[procedure.Key].Mutators[field.Key] = moduleStateFieldDisplayName(field)
-				procedureAccesses[procedure.Key].Writes[field.Key] = moduleStateFieldDisplayName(field)
-				for root := range rootSets[procedure.Key] {
-					field.WriteRoots[root] = true
-					if rootProcedure, ok := byKey[root]; ok {
-						field.Roots[root] = rootProcedure
-					}
-				}
-				if procedure.EventHandler {
-					field.EventWrites[procedure.Key] = true
-				}
-				for root := range rootSets[procedure.Key] {
-					if eventRoots[root] {
-						field.EventWrites[root] = true
-					}
-				}
-			}
+		for key, procedure := range field.Writers {
+			moduleStateAttributeAccess(field, procedure, key, false, cycles, rootSets, eventRoots, byKey)
 		}
 	}
 
@@ -229,32 +112,29 @@ func buildModuleStateAnalysis(rootDir string, cfg config.Config, files []parsedF
 	return moduleStateAnalysis{Findings: findings, Metrics: metrics}
 }
 
-func moduleStateProcedures(files []parsedFile) ([]moduleStateProcedure, map[string]moduleStateProcedure, map[string]string) {
+func moduleStateProcedures(files []parsedFile, facts []modulestate.Procedure) ([]moduleStateProcedure, map[string]moduleStateProcedure) {
 	all := []moduleStateProcedure{}
 	byKey := map[string]moduleStateProcedure{}
-	byCandidate := map[string]string{}
+	byFile := make(map[string]parsedFile, len(files))
 	for _, file := range files {
-		for _, proc := range file.IR.Procedures {
-			item := moduleStateProcedure{
-				Key:          moduleStateProcedureKey(file.IR.Path, file.IR.ModuleName, proc.Symbol),
-				File:         file.Path,
-				DisplayFile:  file.IR.Path,
-				Module:       file.IR.ModuleName,
-				ModuleKind:   file.IR.ModuleKind,
-				Name:         proc.Symbol.Name,
-				Qualified:    proc.Symbol.QualifiedName,
-				Kind:         proc.Symbol.Kind,
-				ParamCount:   len(proc.Symbol.Parameters),
-				Visibility:   proc.Symbol.Visibility,
-				EventHandler: proc.Symbol.IsEventHandler,
-			}
-			all = append(all, item)
-			byKey[item.Key] = item
-			candidate := moduleStateCandidateIdentity(file.IR.Path, proc.Symbol.QualifiedName, proc.Symbol.Kind, proc.Symbol.DeclarationRange.StartLine)
-			byCandidate[candidate] = item.Key
-		}
+		byFile[moduleStatePathKey(file.IR.Path)] = file
 	}
-	return all, byKey, byCandidate
+	for _, fact := range facts {
+		file := byFile[moduleStatePathKey(fact.Path)]
+		item := moduleStateProcedure{
+			Key: fact.ID, File: file.Path, DisplayFile: fact.Path,
+			Module: fact.Module, ModuleKind: fact.ModuleKind, Name: fact.Name,
+			Qualified: fact.QualifiedName, Kind: fact.Kind,
+			ParamCount: fact.ParameterCount, Visibility: fact.Visibility,
+			EventHandler: fact.EventHandler, Callees: fact.Callees,
+		}
+		if item.File == "" {
+			item.File = fact.Path
+		}
+		all = append(all, item)
+		byKey[item.Key] = item
+	}
+	return all, byKey
 }
 
 func moduleStateProcedureAccesses(procedures []moduleStateProcedure) map[string]*moduleStateProcedureAccess {
@@ -270,234 +150,119 @@ func moduleStateProcedureAccesses(procedures []moduleStateProcedure) map[string]
 	return out
 }
 
-func moduleStateFields(files []parsedFile) ([]*moduleStateField, map[string]*moduleStateField, map[string][]*moduleStateField) {
+func moduleStatePopulateProcedureAccesses(facts []modulestate.Procedure, fields map[string]*moduleStateField, accesses map[string]*moduleStateProcedureAccess) {
+	for _, fact := range facts {
+		access := accesses[fact.ID]
+		if access == nil {
+			continue
+		}
+		for _, key := range fact.Reads {
+			if field := fields[key]; field != nil {
+				access.Reads[key] = moduleStateFieldDisplayName(field)
+			}
+		}
+		for _, key := range fact.Writes {
+			if field := fields[key]; field != nil {
+				access.Writes[key] = moduleStateFieldDisplayName(field)
+			}
+		}
+		for _, key := range fact.Mutators {
+			if field := fields[key]; field != nil {
+				access.Mutators[key] = moduleStateFieldDisplayName(field)
+			}
+		}
+	}
+}
+
+func moduleStateFieldsFromFacts(files []parsedFile, facts []modulestate.Field, procedures map[string]moduleStateProcedure) ([]*moduleStateField, map[string]*moduleStateField) {
 	fields := []*moduleStateField{}
-	byFileName := map[string]*moduleStateField{}
-	byName := map[string][]*moduleStateField{}
+	byID := map[string]*moduleStateField{}
+	byFile := make(map[string]parsedFile, len(files))
+	declarationsByFile := make(map[string]map[string]sourceDeclaration, len(files))
 	for _, file := range files {
-		textDeclarations := file.moduleDecls()
-		for _, declaration := range file.IR.Declarations {
-			if declaration.Scope != procedureir.ScopeModule && declaration.Scope != procedureir.ScopeProject {
-				continue
-			}
-			if declaration.Kind != "variable" && declaration.Kind != "const" {
-				continue
-			}
-			line := declaration.Range.StartLine
-			if textDeclaration, ok := textDeclarations[strings.ToLower(strings.TrimSpace(declaration.Name))]; ok && textDeclaration.Line > 0 {
+		path := moduleStatePathKey(file.IR.Path)
+		byFile[path] = file
+		declarationsByFile[path] = file.moduleDecls()
+	}
+	for _, fact := range facts {
+		path := moduleStatePathKey(fact.Path)
+		file := byFile[path]
+		line := fact.DeclarationLine
+		if file.Path != "" {
+			if textDeclaration, ok := declarationsByFile[path][strings.ToLower(strings.TrimSpace(fact.Name))]; ok && textDeclaration.Line > 0 {
 				line = textDeclaration.Line
 			}
-			field := &moduleStateField{
-				Key:          moduleStateFieldKey(file.IR.Path, file.IR.ModuleName, declaration.Name),
-				File:         file.Path,
-				DisplayFile:  file.IR.Path,
-				Module:       file.IR.ModuleName,
-				ModuleKind:   file.IR.ModuleKind,
-				Name:         declaration.Name,
-				Type:         declaration.Type,
-				Visibility:   declaration.Visibility,
-				Kind:         declaration.Kind,
-				Scope:        declaration.Scope,
-				Line:         line,
-				IsObject:     declaration.IsObject,
-				IsCollection: moduleStateCollectionType(declaration.Type),
-				IsExcel:      declaration.IsObject && moduleStateExcelType(declaration.Type),
-				Readers:      map[string]moduleStateProcedure{},
-				Writers:      map[string]moduleStateProcedure{},
-				Mutators:     map[string]moduleStateProcedure{},
-				ReadRoots:    map[string]bool{},
-				WriteRoots:   map[string]bool{},
-				Roots:        map[string]moduleStateProcedure{},
-				EventReads:   map[string]bool{},
-				EventWrites:  map[string]bool{},
-			}
-			fields = append(fields, field)
-			byFileName[moduleStateFieldKey(file.IR.Path, file.IR.ModuleName, declaration.Name)] = field
-			byName[strings.ToLower(strings.TrimSpace(declaration.Name))] = append(byName[strings.ToLower(strings.TrimSpace(declaration.Name))], field)
 		}
-	}
-	return fields, byFileName, byName
-}
-
-func moduleStateResolveField(rootDir string, access procedureir.VariableAccess, procedure moduleStateProcedure, byFileName map[string]*moduleStateField, byName map[string][]*moduleStateField) *moduleStateField {
-	if access.Scope != procedureir.ScopeModule && access.Scope != procedureir.ScopeProject {
-		return nil
-	}
-	if access.Resolution.Scope == procedureir.ScopeProject && len(access.Resolution.Candidates) == 1 {
-		candidate := access.Resolution.Candidates[0]
-		candidateFile := candidate.File
-		for _, field := range byName[strings.ToLower(strings.TrimSpace(access.Name))] {
-			if moduleStateSameFile(field.File, candidateFile) && field.Line == candidate.Line {
-				return field
+		field := &moduleStateField{
+			Key: fact.ID, File: file.Path, DisplayFile: fact.Path,
+			Module: fact.Module, ModuleKind: fact.ModuleKind, Name: fact.Name,
+			Type: fact.Type, Visibility: fact.Visibility, Kind: fact.Kind,
+			Scope: fact.Scope, Line: line, IsObject: fact.IsObject,
+			IsCollection: fact.IsCollection, IsExcel: fact.IsExcel,
+			Readers: map[string]moduleStateProcedure{}, Writers: map[string]moduleStateProcedure{},
+			Mutators: map[string]moduleStateProcedure{}, ReadRoots: map[string]bool{},
+			WriteRoots: map[string]bool{}, Roots: map[string]moduleStateProcedure{},
+			EventReads: map[string]bool{}, EventWrites: map[string]bool{},
+		}
+		if field.File == "" {
+			field.File = fact.Path
+		}
+		for _, key := range fact.Readers {
+			if procedure, ok := procedures[key]; ok {
+				field.Readers[key] = procedure
 			}
 		}
-		if candidateFile != "" && !filepath.IsAbs(candidateFile) && rootDir != "" {
-			candidateFile = filepath.Join(rootDir, filepath.FromSlash(candidateFile))
-			for _, field := range byName[strings.ToLower(strings.TrimSpace(access.Name))] {
-				if moduleStateSameFile(field.File, candidateFile) && field.Line == candidate.Line {
-					return field
-				}
+		for _, key := range fact.Writers {
+			if procedure, ok := procedures[key]; ok {
+				field.Writers[key] = procedure
 			}
 		}
+		for _, key := range fact.Mutators {
+			if procedure, ok := procedures[key]; ok {
+				field.Mutators[key] = procedure
+			}
+		}
+		fields = append(fields, field)
+		byID[field.Key] = field
 	}
-	return moduleStateResolveName(access.Name, procedure, byFileName, byName)
+	return fields, byID
 }
 
-func moduleStateSameFile(left, right string) bool {
-	return strings.EqualFold(moduleStatePathKey(left), moduleStatePathKey(right))
-}
-
-func moduleStateResolveName(name string, procedure moduleStateProcedure, byFileName map[string]*moduleStateField, byName map[string][]*moduleStateField) *moduleStateField {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return nil
-	}
-	if field := byFileName[moduleStateFieldKey(procedure.File, procedure.Module, name)]; field != nil {
-		return field
-	}
-	candidates := byName[name]
-	for _, field := range candidates {
-		if strings.EqualFold(moduleStatePathKey(field.File), moduleStatePathKey(procedure.File)) && strings.EqualFold(field.Module, procedure.Module) {
-			return field
+func moduleStateAttributeAccess(field *moduleStateField, procedure moduleStateProcedure, key string, read bool, cycles map[string]bool, rootSets map[string]map[string]bool, eventRoots map[string]bool, byKey map[string]moduleStateProcedure) {
+	if cycles[key] {
+		field.InCycle = true
+		if read {
+			field.CycleRead = true
+		} else {
+			field.CycleWrite = true
 		}
 	}
-	for _, field := range candidates {
-		if field.Scope == procedureir.ScopeProject && strings.EqualFold(field.ModuleKind, "standard") {
-			return field
+	for root := range rootSets[key] {
+		if read {
+			field.ReadRoots[root] = true
+		} else {
+			field.WriteRoots[root] = true
+		}
+		if rootProcedure, ok := byKey[root]; ok {
+			field.Roots[root] = rootProcedure
 		}
 	}
-	return nil
-}
-
-func moduleStateCandidateKey(candidate procedureir.Candidate, byCandidate map[string]string) string {
-	return byCandidate[moduleStateCandidateIdentity(candidate.File, candidate.QualifiedName, procedureir.ProcedureKind(candidate.Kind), candidate.Line)]
-}
-
-func moduleStateCandidateIdentity(file, qualified string, kind procedureir.ProcedureKind, line int) string {
-	return strings.Join([]string{strings.ToLower(filepath.ToSlash(filepath.Clean(file))), strings.ToLower(strings.TrimSpace(qualified)), strings.ToLower(string(kind)), fmt.Sprint(line)}, "\x00")
-}
-
-func moduleStateProcedureKey(file, module string, symbol procedureir.ProcedureSymbol) string {
-	return moduleStateCandidateIdentity(file, module+"."+symbol.Name, symbol.Kind, symbol.DeclarationRange.StartLine)
-}
-
-func moduleStateFieldKey(file, module, name string) string {
-	return strings.ToLower(filepath.ToSlash(filepath.Clean(file)) + "\x00" + strings.TrimSpace(module) + "\x00" + strings.TrimSpace(name))
-}
-
-func moduleStateReceiverName(call procedureir.CallSite) string {
-	if call.Callee.Receiver != nil {
-		return cleanIdentifier(*call.Callee.Receiver)
+	if procedure.EventHandler {
+		if read {
+			field.EventReads[key] = true
+		} else {
+			field.EventWrites[key] = true
+		}
 	}
-	text := strings.TrimSpace(call.Callee.Text)
-	if dot := strings.LastIndex(text, "."); dot >= 0 {
-		return cleanIdentifier(text[:dot])
-	}
-	return ""
-}
-
-func moduleStateCollectionMutator(proc procedureir.ProcedureIR, call procedureir.CallSite, member string) bool {
-	switch member {
-	case "add", "remove", "removeall", "clear", "delete":
-		return true
-	case "item", "comparemode":
-		return moduleStatePropertySetCall(proc, call)
-	default:
-		return false
-	}
-}
-
-func moduleStatePropertySetCall(proc procedureir.ProcedureIR, call procedureir.CallSite) bool {
-	for _, statement := range proc.Statements {
-		if statement.ID != call.StatementID {
+	for root := range rootSets[key] {
+		if !eventRoots[root] {
 			continue
 		}
-		if statement.Kind != procedureir.StatementSet && statement.Kind != procedureir.StatementAssignment {
-			return false
+		if read {
+			field.EventReads[root] = true
+		} else {
+			field.EventWrites[root] = true
 		}
-		return moduleStateExpressionContains(proc.Expressions, statement.TargetID, call.ExpressionID)
-	}
-	return false
-}
-
-func moduleStateExpressionContains(expressions []procedureir.Expression, rootID, childID int) bool {
-	if rootID <= 0 || childID <= 0 {
-		return false
-	}
-	for current := childID; current > 0 && current <= len(expressions); {
-		if current == rootID {
-			return true
-		}
-		current = expressions[current-1].ParentID
-	}
-	return false
-}
-
-func moduleStateCollectionType(typ string) bool {
-	switch moduleStateUnqualifiedType(typ) {
-	case "collection", "dictionary":
-		return true
-	default:
-		return false
-	}
-}
-
-func moduleStateUnqualifiedType(typ string) string {
-	lower := strings.ToLower(strings.TrimSpace(typ))
-	for _, qualifier := range []string{"excel.", "vba.", "scripting."} {
-		if strings.HasPrefix(lower, qualifier) {
-			return strings.TrimSpace(strings.TrimPrefix(lower, qualifier))
-		}
-	}
-	return lower
-}
-
-func moduleStateCollectionInitializer(proc procedureir.ProcedureIR, access procedureir.VariableAccess, fieldName string) bool {
-	if !strings.EqualFold(strings.TrimSpace(access.Name), strings.TrimSpace(fieldName)) {
-		return false
-	}
-	for _, statement := range proc.Statements {
-		if access.StatementID > 0 && statement.ID != access.StatementID {
-			continue
-		}
-		text := strings.ToLower(statement.Text)
-		if fieldName != "" && !strings.Contains(text, strings.ToLower(strings.TrimSpace(fieldName))) {
-			continue
-		}
-		if strings.Contains(text, "new collection") || strings.Contains(text, "scripting.dictionary") {
-			return true
-		}
-	}
-	return false
-}
-
-func moduleStateProcedureDeclaresName(proc procedureir.ProcedureIR, name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return false
-	}
-	for _, parameter := range proc.Symbol.Parameters {
-		if strings.EqualFold(strings.TrimSpace(parameter.Name), name) {
-			return true
-		}
-	}
-	for _, declaration := range proc.Declarations {
-		if !strings.EqualFold(strings.TrimSpace(declaration.Name), name) {
-			continue
-		}
-		if declaration.Scope == procedureir.ScopeLocal || declaration.Scope == procedureir.ScopeParameter {
-			return true
-		}
-	}
-	return false
-}
-
-func moduleStateExcelType(typ string) bool {
-	switch moduleStateUnqualifiedType(typ) {
-	case "application", "workbook", "worksheet", "range", "chart", "pivottable", "listobject", "window":
-		return true
-	default:
-		return false
 	}
 }
 

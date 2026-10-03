@@ -25,10 +25,15 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `application_state`
 - `application_state_candidate_procedures`
 - `applied_to`
+- `architecture_failed`
+- `architecture_parse_failed`
+- `architecture_scope_invalid`
 - `args_invalid`
 - `argument_count`
 - `argument_diagnostics`
+- `argument_index`
 - `argument_list`
+- `argument_name`
 - `array_bound`
 - `array_bounds`
 - `array_calls_by_line_index_builds`
@@ -132,8 +137,11 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `call_expression`
 - `call_fan_in`
 - `call_fan_out`
+- `call_id`
 - `call_site_count`
 - `call_statement`
+- `caller_id`
+- `callgraph_id`
 - `capability_application_state_builds`
 - `capability_array_builds`
 - `capability_dataflow_builds`
@@ -220,6 +228,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `config_error`
 - `config_path`
 - `confirm_save`
+- `confirmed_call_edges`
+- `confirmed_reachable`
 - `conflicting_analyze_rule_config`
 - `conflicting_lint_rule_config`
 - `consequence_body`
@@ -258,6 +268,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `dataflow_cfg_walks`
 - `debug_log`
 - `debug_stream_init_failed`
+- `declaration_line`
 - `declaration_priority_hits`
 - `declaration_priority_p0_jobs`
 - `declaration_priority_p1_jobs`
@@ -283,6 +294,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `defined_name_count`
 - `defined_names`
 - `deleted_entries`
+- `dependency_boundary_node_ids`
+- `dependency_cycles`
 - `depends_on_sheets`
 - `deprecated_analyze_rule_config`
 - `deprecated_lint_rule_config`
@@ -410,6 +423,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `diff_failed`
 - `direct_callees`
 - `direct_callers`
+- `direct_effect_count`
 - `directory_traversal`
 - `disabled_count`
 - `disabled_rules`
@@ -446,6 +460,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `duration_ms`
 - `dynamic_call_count`
 - `dynamic_identifier`
+- `dynamic_references`
 - `edit_args_invalid`
 - `edit_coordinates_unreconciled`
 - `effect_summaries`
@@ -474,10 +489,12 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `encoding_check_failed`
 - `encoding_convert_failed`
 - `encoding_convert_rollback_failed`
+- `end_byte`
 - `end_column`
 - `end_if_fragment`
 - `end_line`
 - `end_statement`
+- `entry_points`
 - `enum_constant`
 - `enum_declaration`
 - `enum_group`
@@ -510,6 +527,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `excel_com_failure`
 - `excel_com_state_uncertain`
 - `excel_effect_count`
+- `excel_effects`
 - `excel_installed`
 - `excel_instance`
 - `excel_loop_symbols`
@@ -540,6 +558,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `export_image_args_invalid`
 - `expression_count`
 - `expression_statement`
+- `external_dependencies`
 - `external_dependency_count`
 - `external_function_declaration`
 - `external_process`
@@ -717,6 +736,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invalid_withevents_module`
 - `invalid_withevents_shape`
 - `invoke_macro`
+- `is_collection`
+- `is_excel`
+- `is_object`
 - `is_wsl`
 - `iunknown_getwindow`
 - `keyword_casing`
@@ -830,6 +852,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `module_declaration_after_procedure`
 - `module_declaration_count`
 - `module_fact_builds`
+- `module_hotspots`
+- `module_id`
 - `module_install_failed`
 - `module_kind`
 - `module_mutation_failed`
@@ -864,6 +888,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `no_libraries`
 - `no_previous_tree`
 - `no_tests_found`
+- `node_id`
 - `non_callable`
 - `non_numeric`
 - `non_test`
@@ -974,6 +999,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `planned_runtime_runs`
 - `poison_reason`
 - `positional_literal_count`
+- `possible_reachability`
+- `possibly_reachable`
 - `post_until`
 - `post_while`
 - `pre_until`
@@ -991,6 +1018,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_declaration`
 - `procedure_exit`
 - `procedure_fact_builds`
+- `procedure_hotspots`
+- `procedure_id`
 - `procedure_ir`
 - `procedure_ir_builds`
 - `procedure_ir_reuses`
@@ -1025,6 +1054,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `project_init`
 - `project_name`
 - `project_resolution`
+- `project_summary`
 - `project_symbol_count`
 - `project_symbols`
 - `project_wide_diagnostics`
@@ -1278,10 +1308,12 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `stale_index`
 - `standalone_empty_parentheses`
 - `standalone_multi_parenthesized`
+- `start_byte`
 - `start_column`
 - `start_line`
 - `started_at`
 - `statement_count`
+- `statement_id`
 - `static_modifier`
 - `status_hint`
 - `stop_statement`
@@ -1328,6 +1360,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `txt_customer`
 - `txt_parent`
 - `type_database`
+- `type_database_complete`
+- `type_database_incomplete`
+- `type_database_loaded`
 - `type_db`
 - `type_db_clean_failed`
 - `type_db_dir_failed`
@@ -1355,6 +1390,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `ui_dialog`
 - `ui_stream_init_failed`
 - `unary_expression`
+- `uncertain_call_edges`
 - `uncertain_edges`
 - `unchecked_overwrite`
 - `undeclared_variable`
