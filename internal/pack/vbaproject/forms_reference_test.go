@@ -2,6 +2,7 @@ package vbaproject
 
 import (
 	"bytes"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -51,6 +52,30 @@ func TestEnsureMSFormsReferencePreservesAndAddsOnce(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEnsureMSFormsReferenceRejectsCorruptControlAtomically(t *testing.T) {
+	p, err := Read(loadCorpus(t, "p4_form"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for offset := 0; offset+6 <= len(p.ReferencesRaw); {
+		id := binary.LittleEndian.Uint16(p.ReferencesRaw[offset:])
+		n := int(binary.LittleEndian.Uint32(p.ReferencesRaw[offset+2:]))
+		if id == 0x002F {
+			p.ReferencesRaw[offset+10] = 0
+			before := cloneProject(p)
+			if result, err := EnsureMSFormsReference(p); err == nil || result != nil {
+				t.Fatalf("corrupt CONTROL admitted: %v", err)
+			}
+			if !reflect.DeepEqual(p, before) {
+				t.Fatal("rejected project changed")
+			}
+			return
+		}
+		offset += 6 + n
+	}
+	t.Fatal("fixture missing CONTROL")
 }
 
 func TestExcelFirstFormsReferenceEvidence(t *testing.T) {

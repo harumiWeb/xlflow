@@ -59,7 +59,10 @@ Excel-backed push retains its existing synchronization preflight.
 
 Form additions are sorted by component name. The project-level Forms reference
 is ensured exactly once; complete existing REGISTERED/CONTROL references and
-unrelated reference groups retain their original bytes and order. A missing
+unrelated reference groups retain their original bytes and order. Every decoded
+reference name and LIBID/path field must be free of NUL, including ORIGINAL,
+CONTROL twiddled LIBID and optional extended names; rejected input must not
+mutate the project. A missing
 reference is appended using the canonical Forms 2.0 REGISTERED LIBID. All
 project data is serialized and reparsed before atomic artifact publication.
 Random GUIDs are limited to component identity, so independently generated

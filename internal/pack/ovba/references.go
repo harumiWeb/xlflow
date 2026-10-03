@@ -22,6 +22,16 @@ type ProjectReference struct {
 func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, error) {
 	var result []ProjectReference
 	offset := 0
+	decode := func(payload []byte) (string, error) {
+		value, err := DecodeMBCS(payload, codePage)
+		if err != nil {
+			return "", err
+		}
+		if strings.ContainsRune(value, 0) {
+			return "", fmt.Errorf("ovba: NUL in reference")
+		}
+		return value, nil
+	}
 	read := func() (uint16, []byte, error) {
 		if len(raw)-offset < 6 {
 			return 0, nil, fmt.Errorf("ovba: truncated reference at %d", offset)
@@ -53,7 +63,7 @@ func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, er
 		if id != 0x0016 {
 			return fmt.Errorf("ovba: expected reference name")
 		}
-		ref.Name, err = DecodeMBCS(payload, codePage)
+		ref.Name, err = decode(payload)
 		if err != nil {
 			return err
 		}
@@ -85,7 +95,7 @@ func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, er
 			return nil, err
 		}
 		if id == 0x0033 { // REFERENCEORIGINAL must precede CONTROL.
-			if _, err := DecodeMBCS(payload, codePage); err != nil {
+			if _, err := decode(payload); err != nil {
 				return nil, err
 			}
 			id, payload, err = read()
@@ -99,7 +109,7 @@ func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, er
 		ref.Kind = id
 		switch id {
 		case 0x002F:
-			if _, err := DecodeMBCS(payload[4:len(payload)-6], codePage); err != nil {
+			if _, err := decode(payload[4 : len(payload)-6]); err != nil {
 				return nil, err
 			}
 			if offset+2 <= len(raw) && binary.LittleEndian.Uint16(raw[offset:]) == 0x0016 {
@@ -116,9 +126,9 @@ func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, er
 				return nil, fmt.Errorf("ovba: CONTROL missing extended record")
 			}
 			copy(ref.OriginalTypeLib[:], payload[len(payload)-20:len(payload)-4])
-			ref.LibID, err = DecodeMBCS(payload[4:len(payload)-26], codePage)
+			ref.LibID, err = decode(payload[4 : len(payload)-26])
 		case 0x000D:
-			ref.LibID, err = DecodeMBCS(payload[4:len(payload)-6], codePage)
+			ref.LibID, err = decode(payload[4 : len(payload)-6])
 		case 0x000E:
 			// Two sized paths followed by MajorVersion and MinorVersion.
 			p := payload
@@ -130,7 +140,7 @@ func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, er
 				if n > uint64(len(p)-4) {
 					return nil, fmt.Errorf("ovba: PROJECT path exceeds boundary")
 				}
-				if _, err := DecodeMBCS(p[4:4+int(n)], codePage); err != nil {
+				if _, err := decode(p[4 : 4+int(n)]); err != nil {
 					return nil, err
 				}
 				p = p[4+int(n):]
@@ -143,9 +153,6 @@ func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, er
 		}
 		if err != nil {
 			return nil, err
-		}
-		if strings.ContainsRune(ref.LibID, 0) || strings.ContainsRune(ref.Name, 0) {
-			return nil, fmt.Errorf("ovba: NUL in reference")
 		}
 		ref.Raw = bytes.Clone(raw[start:offset])
 		result = append(result, ref)

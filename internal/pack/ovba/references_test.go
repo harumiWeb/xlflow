@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +49,56 @@ func TestReferenceGroupsAndTruncations(t *testing.T) {
 	}
 	if _, err := ParseProjectReferences(control, info.CodePage); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReferenceControlRejectsNULSubfields(t *testing.T) {
+	body, err := os.ReadFile("testdata/p4_form/dir.plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := ParseDir(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs, err := ParseProjectReferences(info.RefsRaw, info.CodePage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := refs[len(refs)-1].Raw
+	for _, field := range []struct {
+		name  string
+		id    uint16
+		inner bool
+	}{
+		{"original LIBID", 0x0033, false},
+		{"twiddled LIBID", 0x002F, true},
+		{"extended LIBID", 0x0030, true},
+	} {
+		t.Run(field.name, func(t *testing.T) {
+			corrupt := bytes.Clone(control)
+			found := false
+			for offset := 0; offset+6 <= len(corrupt); {
+				id := binary.LittleEndian.Uint16(corrupt[offset:])
+				n := int(binary.LittleEndian.Uint32(corrupt[offset+2:]))
+				if id == field.id {
+					start := offset + 6
+					if field.inner {
+						start += 4
+					}
+					corrupt[start] = 0
+					found = true
+					break
+				}
+				offset += 6 + n
+			}
+			if !found {
+				t.Fatal("fixture missing required field")
+			}
+			if _, err := ParseProjectReferences(corrupt, info.CodePage); err == nil || !strings.Contains(err.Error(), "NUL") {
+				t.Fatalf("invalid reference accepted: %v", err)
+			}
+		})
 	}
 }
 

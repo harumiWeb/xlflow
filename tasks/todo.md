@@ -1,3 +1,14 @@
+# Issue #886 final-review Pass 1 follow-up
+
+Validated against `852a57b7`: the P2 NUL validation finding is in scope.
+
+1. [x] Validate every decoded reference string, including ORIGINAL, CONTROL
+       twiddled LIBID and extended name, before accepting a reference group.
+2. [x] Add corrupted-field regressions and atomic Forms admission coverage;
+       retain valid Excel reference byte-preservation controls.
+3. [x] Run pack tests, race and vet; commit hooks check lint and formatting.
+4. [ ] Obtain bounded Pass 2 on the committed review fix.
+
 # Issue #883 final-review Pass 1 follow-up
 
 Validated against `76cae6b8`: both P2 findings are in scope.
