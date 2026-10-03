@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added pure-Go Frame generation with nested Frames and common controls.
+  Canonical template specs can add, remove, replace, reparent and reorder
+  supported controls while retaining unchanged Designer persistence data.
+  Removed containers leave no orphan storages; unsupported bookkeeping
+  rejects the whole operation before artifact publication.
+  Added/replaced controls with omitted TabIndex use an unused sibling value
+  while retaining existing and explicit tab order values.
+
 - Added source-only `xlflow architecture` with a versioned JSON report of
   modules, entry points, dependencies, cycles, reachability, hotspots, mutable
   state, effects, and uncertainty. Module/path display filters retain full

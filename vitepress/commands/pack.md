@@ -16,14 +16,16 @@ Blank mode can create empty UserForms and common controls from canonical
 code comes from `src/forms/code/<Name>.bas`, falling back to matching `.frm`
 code or empty code. In `frm` mode, matching `.frm` code is required. Designer
 state always comes from the spec; `.frx` is not required. Forms references are
-added automatically. Frame/MultiPage, custom ActiveX, embedded pictures and
+added automatically. Frames can contain common controls and nested Frames.
+MultiPage/Page/TabStrip generation, custom ActiveX, embedded pictures and
 unsupported persisted list state fail before publication.
 
 `pack` is the stable, pure-Go release path. It is cross-platform and
 Excel-independent: standard/class topology comes from source, workbook and
 document topology comes from the template. Template mode also adds supported
 UserForms from canonical specs and edits supported properties of existing
-Designers. The spec lists every control; omitted properties retain template
+Designers, including Frame/common-control additions, removals, replacements,
+parent changes and sibling ordering. The spec lists every control; omitted properties retain template
 values. Existing forms without a spec retain legacy code-only updates.
 `pack` does not compile or execute VBA, so successful JSON keeps
 `pack.backend = "pure-go"` and `pack.vbe_validation = "not_performed"`.
@@ -37,10 +39,30 @@ userform_topology = "source"
 ```
 
 This requires canonical specs for all forms remaining in source. The default
-is `"template"`; blank mode always uses the source form set. New Frame/MultiPage
-generation, existing control topology changes, root-dimension edits and
+is `"template"`; blank mode always uses the source form set. MultiPage/Page/TabStrip
+generation or structural changes, root-dimension edits and
 unsupported property edits fail before publication with specific
 `pack_userform_generation_*` or `pack_userform_edit_*` errors.
+
+Use `parentId` or nested `controls` for hierarchy and `zIndex` for sibling order.
+Coordinates are relative to the owning parent. When moving a control, supply
+new coordinates if needed; omitted coordinates keep their numeric values.
+
+For example, this control list creates a Frame with a child TextBox:
+
+```yaml
+controls:
+  - id: frame_main
+    name: FrameMain
+    type: Frame
+    controls:
+      - id: input
+        name: Input
+        type: TextBox
+        left: 12
+        top: 18
+        text: Hello
+```
 
 It validates every managed `.bas`, `.cls`, and `.frm` file as UTF-8 without BOM before source planning or binary generation. Invalid input returns `source_encoding_invalid`; run `xlflow encoding check`, then use `xlflow encoding convert --from cp932` only for eligible CP932 source. Open the resulting artifact in real Excel to compile/run a sentinel macro before publishing. See the repository's [pack specification](https://github.com/harumiWeb/xlflow/blob/main/docs/specs/pack-command.md) for release-gate details.
 

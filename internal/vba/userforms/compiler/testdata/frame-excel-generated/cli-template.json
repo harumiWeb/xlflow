@@ -1,0 +1,1461 @@
+{
+  "issue": 884,
+  "stage": "excel-verified-generated-frame-topology",
+  "workbook": "C:\\Users\\HARUMI\\orca\\workspaces\\xlflow\\crinoid\\tmp_workspaces\\issue-884-cli-pack\\dist\\TemplateTypeInfoFixed.xlsm",
+  "expected": "C:\\Users\\HARUMI\\orca\\workspaces\\xlflow\\crinoid\\tmp_workspaces\\issue-884-cli-pack\\edited-type-info-fixed.json",
+  "beforeSave": {
+    "form": {
+      "name": "FrameTopologyForm",
+      "properties": {
+        "Caption": {
+          "available": true,
+          "value": "issue884-frame-topology"
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        },
+        "InsideWidth": {
+          "available": true,
+          "value": 329.39999389648438
+        },
+        "InsideHeight": {
+          "available": true,
+          "value": 227.05000305175781
+        }
+      }
+    },
+    "collections": [
+      {
+        "parent": null,
+        "count": 4,
+        "order": ["RootCommon", "ParentFrame", "EmptyFrame", "AddedFrame"]
+      },
+      {
+        "parent": "ParentFrame",
+        "count": 2,
+        "order": ["SiblingText", "NestedFrame"]
+      },
+      {
+        "parent": "NestedFrame",
+        "count": 1,
+        "order": ["RootText"]
+      },
+      {
+        "parent": "AddedFrame",
+        "count": 1,
+        "order": ["AddedLabel"]
+      }
+    ],
+    "controls": [
+      {
+        "name": "RootCommon",
+        "type": "Label",
+        "parent": null,
+        "depth": 0,
+        "siblingIndex": 0,
+        "progId": "Forms.Label.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "root-common"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 12
+          },
+          "Top": {
+            "available": true,
+            "value": 10
+          },
+          "Width": {
+            "available": true,
+            "value": 90
+          },
+          "Height": {
+            "available": true,
+            "value": 18
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 1
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483642
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 0
+          },
+          "AutoSize": {
+            "available": true,
+            "value": false
+          },
+          "BackStyle": {
+            "available": true,
+            "value": 1
+          }
+        }
+      },
+      {
+        "name": "ParentFrame",
+        "type": "Frame",
+        "parent": null,
+        "depth": 0,
+        "siblingIndex": 1,
+        "progId": "Forms.Frame.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "parent-frame"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 130
+          },
+          "Top": {
+            "available": true,
+            "value": 40
+          },
+          "Width": {
+            "available": true,
+            "value": 180
+          },
+          "Height": {
+            "available": true,
+            "value": 136
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 0
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 3
+          },
+          "AutoSize": {
+            "available": false
+          },
+          "BackStyle": {
+            "available": false
+          }
+        }
+      },
+      {
+        "name": "SiblingText",
+        "type": "TextBox",
+        "parent": "ParentFrame",
+        "depth": 1,
+        "siblingIndex": 0,
+        "progId": "Forms.TextBox.1",
+        "properties": {
+          "Caption": {
+            "available": false
+          },
+          "Text": {
+            "available": true,
+            "value": "sibling-text"
+          },
+          "Value": {
+            "available": true,
+            "value": "sibling-text"
+          },
+          "Left": {
+            "available": true,
+            "value": 10
+          },
+          "Top": {
+            "available": true,
+            "value": 22
+          },
+          "Width": {
+            "available": true,
+            "value": 84
+          },
+          "Height": {
+            "available": true,
+            "value": 18
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 1
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483643
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483640
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483642
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 2
+          },
+          "AutoSize": {
+            "available": true,
+            "value": false
+          },
+          "BackStyle": {
+            "available": true,
+            "value": 1
+          }
+        }
+      },
+      {
+        "name": "NestedFrame",
+        "type": "Frame",
+        "parent": "ParentFrame",
+        "depth": 1,
+        "siblingIndex": 1,
+        "progId": "Forms.Frame.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "nested-frame"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 12
+          },
+          "Top": {
+            "available": true,
+            "value": 54
+          },
+          "Width": {
+            "available": true,
+            "value": 144
+          },
+          "Height": {
+            "available": true,
+            "value": 64
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 0
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 3
+          },
+          "AutoSize": {
+            "available": false
+          },
+          "BackStyle": {
+            "available": false
+          }
+        }
+      },
+      {
+        "name": "RootText",
+        "type": "TextBox",
+        "parent": "NestedFrame",
+        "depth": 2,
+        "siblingIndex": 0,
+        "progId": "Forms.TextBox.1",
+        "properties": {
+          "Caption": {
+            "available": false
+          },
+          "Text": {
+            "available": true,
+            "value": "root-text"
+          },
+          "Value": {
+            "available": true,
+            "value": "root-text"
+          },
+          "Left": {
+            "available": true,
+            "value": 12
+          },
+          "Top": {
+            "available": true,
+            "value": 202
+          },
+          "Width": {
+            "available": true,
+            "value": 180
+          },
+          "Height": {
+            "available": true,
+            "value": 20
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 0
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483643
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483640
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483642
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 2
+          },
+          "AutoSize": {
+            "available": true,
+            "value": false
+          },
+          "BackStyle": {
+            "available": true,
+            "value": 1
+          }
+        }
+      },
+      {
+        "name": "EmptyFrame",
+        "type": "Label",
+        "parent": null,
+        "depth": 0,
+        "siblingIndex": 2,
+        "progId": "Forms.Label.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "replaced-frame"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 0
+          },
+          "Top": {
+            "available": true,
+            "value": 0
+          },
+          "Width": {
+            "available": true,
+            "value": 72
+          },
+          "Height": {
+            "available": true,
+            "value": 18
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 2
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483642
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 0
+          },
+          "AutoSize": {
+            "available": true,
+            "value": false
+          },
+          "BackStyle": {
+            "available": true,
+            "value": 1
+          }
+        }
+      },
+      {
+        "name": "AddedFrame",
+        "type": "Frame",
+        "parent": null,
+        "depth": 0,
+        "siblingIndex": 3,
+        "progId": "Forms.Frame.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "AddedFrame"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 0
+          },
+          "Top": {
+            "available": true,
+            "value": 0
+          },
+          "Width": {
+            "available": true,
+            "value": 144
+          },
+          "Height": {
+            "available": true,
+            "value": 108
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 3
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 3
+          },
+          "AutoSize": {
+            "available": false
+          },
+          "BackStyle": {
+            "available": false
+          }
+        }
+      },
+      {
+        "name": "AddedLabel",
+        "type": "Label",
+        "parent": "AddedFrame",
+        "depth": 1,
+        "siblingIndex": 0,
+        "progId": "Forms.Label.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "added"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 0
+          },
+          "Top": {
+            "available": true,
+            "value": 0
+          },
+          "Width": {
+            "available": true,
+            "value": 72
+          },
+          "Height": {
+            "available": true,
+            "value": 18
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 0
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483642
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 0
+          },
+          "AutoSize": {
+            "available": true,
+            "value": false
+          },
+          "BackStyle": {
+            "available": true,
+            "value": 1
+          }
+        }
+      }
+    ]
+  },
+  "reopened": {
+    "form": {
+      "name": "FrameTopologyForm",
+      "properties": {
+        "Caption": {
+          "available": true,
+          "value": "issue884-frame-topology"
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        },
+        "InsideWidth": {
+          "available": true,
+          "value": 329.39999389648438
+        },
+        "InsideHeight": {
+          "available": true,
+          "value": 227.05000305175781
+        }
+      }
+    },
+    "collections": [
+      {
+        "parent": null,
+        "count": 4,
+        "order": ["RootCommon", "ParentFrame", "EmptyFrame", "AddedFrame"]
+      },
+      {
+        "parent": "ParentFrame",
+        "count": 2,
+        "order": ["SiblingText", "NestedFrame"]
+      },
+      {
+        "parent": "NestedFrame",
+        "count": 1,
+        "order": ["RootText"]
+      },
+      {
+        "parent": "AddedFrame",
+        "count": 1,
+        "order": ["AddedLabel"]
+      }
+    ],
+    "controls": [
+      {
+        "name": "RootCommon",
+        "type": "Label",
+        "parent": null,
+        "depth": 0,
+        "siblingIndex": 0,
+        "progId": "Forms.Label.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "root-common"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 12
+          },
+          "Top": {
+            "available": true,
+            "value": 10
+          },
+          "Width": {
+            "available": true,
+            "value": 90
+          },
+          "Height": {
+            "available": true,
+            "value": 18
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 1
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483642
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 0
+          },
+          "AutoSize": {
+            "available": true,
+            "value": false
+          },
+          "BackStyle": {
+            "available": true,
+            "value": 1
+          }
+        }
+      },
+      {
+        "name": "ParentFrame",
+        "type": "Frame",
+        "parent": null,
+        "depth": 0,
+        "siblingIndex": 1,
+        "progId": "Forms.Frame.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "parent-frame"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 130
+          },
+          "Top": {
+            "available": true,
+            "value": 40
+          },
+          "Width": {
+            "available": true,
+            "value": 180
+          },
+          "Height": {
+            "available": true,
+            "value": 136
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 0
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 3
+          },
+          "AutoSize": {
+            "available": false
+          },
+          "BackStyle": {
+            "available": false
+          }
+        }
+      },
+      {
+        "name": "SiblingText",
+        "type": "TextBox",
+        "parent": "ParentFrame",
+        "depth": 1,
+        "siblingIndex": 0,
+        "progId": "Forms.TextBox.1",
+        "properties": {
+          "Caption": {
+            "available": false
+          },
+          "Text": {
+            "available": true,
+            "value": "sibling-text"
+          },
+          "Value": {
+            "available": true,
+            "value": "sibling-text"
+          },
+          "Left": {
+            "available": true,
+            "value": 10
+          },
+          "Top": {
+            "available": true,
+            "value": 22
+          },
+          "Width": {
+            "available": true,
+            "value": 84
+          },
+          "Height": {
+            "available": true,
+            "value": 18
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 1
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483643
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483640
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483642
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 2
+          },
+          "AutoSize": {
+            "available": true,
+            "value": false
+          },
+          "BackStyle": {
+            "available": true,
+            "value": 1
+          }
+        }
+      },
+      {
+        "name": "NestedFrame",
+        "type": "Frame",
+        "parent": "ParentFrame",
+        "depth": 1,
+        "siblingIndex": 1,
+        "progId": "Forms.Frame.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "nested-frame"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 12
+          },
+          "Top": {
+            "available": true,
+            "value": 54
+          },
+          "Width": {
+            "available": true,
+            "value": 144
+          },
+          "Height": {
+            "available": true,
+            "value": 64
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 0
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 3
+          },
+          "AutoSize": {
+            "available": false
+          },
+          "BackStyle": {
+            "available": false
+          }
+        }
+      },
+      {
+        "name": "RootText",
+        "type": "TextBox",
+        "parent": "NestedFrame",
+        "depth": 2,
+        "siblingIndex": 0,
+        "progId": "Forms.TextBox.1",
+        "properties": {
+          "Caption": {
+            "available": false
+          },
+          "Text": {
+            "available": true,
+            "value": "root-text"
+          },
+          "Value": {
+            "available": true,
+            "value": "root-text"
+          },
+          "Left": {
+            "available": true,
+            "value": 12
+          },
+          "Top": {
+            "available": true,
+            "value": 202
+          },
+          "Width": {
+            "available": true,
+            "value": 180
+          },
+          "Height": {
+            "available": true,
+            "value": 20
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 0
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483643
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483640
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483642
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 2
+          },
+          "AutoSize": {
+            "available": true,
+            "value": false
+          },
+          "BackStyle": {
+            "available": true,
+            "value": 1
+          }
+        }
+      },
+      {
+        "name": "EmptyFrame",
+        "type": "Label",
+        "parent": null,
+        "depth": 0,
+        "siblingIndex": 2,
+        "progId": "Forms.Label.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "replaced-frame"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 0
+          },
+          "Top": {
+            "available": true,
+            "value": 0
+          },
+          "Width": {
+            "available": true,
+            "value": 72
+          },
+          "Height": {
+            "available": true,
+            "value": 18
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 2
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483642
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 0
+          },
+          "AutoSize": {
+            "available": true,
+            "value": false
+          },
+          "BackStyle": {
+            "available": true,
+            "value": 1
+          }
+        }
+      },
+      {
+        "name": "AddedFrame",
+        "type": "Frame",
+        "parent": null,
+        "depth": 0,
+        "siblingIndex": 3,
+        "progId": "Forms.Frame.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "AddedFrame"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 0
+          },
+          "Top": {
+            "available": true,
+            "value": 0
+          },
+          "Width": {
+            "available": true,
+            "value": 144
+          },
+          "Height": {
+            "available": true,
+            "value": 108
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 3
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 3
+          },
+          "AutoSize": {
+            "available": false
+          },
+          "BackStyle": {
+            "available": false
+          }
+        }
+      },
+      {
+        "name": "AddedLabel",
+        "type": "Label",
+        "parent": "AddedFrame",
+        "depth": 1,
+        "siblingIndex": 0,
+        "progId": "Forms.Label.1",
+        "properties": {
+          "Caption": {
+            "available": true,
+            "value": "added"
+          },
+          "Text": {
+            "available": false
+          },
+          "Value": {
+            "available": false
+          },
+          "Left": {
+            "available": true,
+            "value": 0
+          },
+          "Top": {
+            "available": true,
+            "value": 0
+          },
+          "Width": {
+            "available": true,
+            "value": 72
+          },
+          "Height": {
+            "available": true,
+            "value": 18
+          },
+          "TabIndex": {
+            "available": true,
+            "value": 0
+          },
+          "Enabled": {
+            "available": true,
+            "value": true
+          },
+          "Visible": {
+            "available": true,
+            "value": true
+          },
+          "Tag": {
+            "available": true,
+            "value": null
+          },
+          "ControlTipText": {
+            "available": true,
+            "value": null
+          },
+          "BackColor": {
+            "available": true,
+            "value": -2147483633
+          },
+          "ForeColor": {
+            "available": true,
+            "value": -2147483630
+          },
+          "BorderColor": {
+            "available": true,
+            "value": -2147483642
+          },
+          "BorderStyle": {
+            "available": true,
+            "value": 0
+          },
+          "SpecialEffect": {
+            "available": true,
+            "value": 0
+          },
+          "AutoSize": {
+            "available": true,
+            "value": false
+          },
+          "BackStyle": {
+            "available": true,
+            "value": 1
+          }
+        }
+      }
+    ]
+  },
+  "topologySignature": "\u003croot\u003e/0:RootCommon:Label:12,10,90,18;\u003croot\u003e/1:ParentFrame:Frame:130,40,180,136;ParentFrame/0:SiblingText:TextBox:10,22,84,18;ParentFrame/1:NestedFrame:Frame:12,54,144,64;NestedFrame/0:RootText:TextBox:12,202,180,20;\u003croot\u003e/2:EmptyFrame:Label:0,0,72,18;\u003croot\u003e/3:AddedFrame:Frame:0,0,144,108;AddedFrame/0:AddedLabel:Label:0,0,72,18",
+  "runtimeSentinelBeforeSave": "issue-884-ok|FrameTopologyForm/0:RootCommon:Label;FrameTopologyForm/1:ParentFrame:Frame;ParentFrame/0:SiblingText:TextBox;ParentFrame/1:NestedFrame:Frame;NestedFrame/0:RootText:TextBox;FrameTopologyForm/2:EmptyFrame:Label;FrameTopologyForm/3:AddedFrame:Frame;AddedFrame/0:AddedLabel:Label;",
+  "runtimeSentinelReopened": "issue-884-ok|FrameTopologyForm/0:RootCommon:Label;FrameTopologyForm/1:ParentFrame:Frame;ParentFrame/0:SiblingText:TextBox;ParentFrame/1:NestedFrame:Frame;NestedFrame/0:RootText:TextBox;FrameTopologyForm/2:EmptyFrame:Label;FrameTopologyForm/3:AddedFrame:Frame;AddedFrame/0:AddedLabel:Label;",
+  "environment": {
+    "harness": "scripts/test-userform-frame-e2e.ps1",
+    "issue": 884,
+    "phase": "verify",
+    "version": "16.0",
+    "build": "17932",
+    "operatingSystem": "Windows (64-bit) NT 10.00",
+    "processId": 244912,
+    "processArchitecture": "True",
+    "powershell": "5.1.22621.6133",
+    "trustedVbideRequired": true
+  },
+  "binary": {
+    "entry": "xl/vbaProject.bin",
+    "path": "C:\\Users\\HARUMI\\orca\\workspaces\\xlflow\\crinoid\\tmp_workspaces\\issue-884-cli-template-type-info-fixed\\cli-template.bin",
+    "length": 34304,
+    "sha256": "affa3de691b05446189c818687ee9087e40ecabe5905c72ddd3cd66e3479735b"
+  }
+}

@@ -74,7 +74,7 @@ func TestPackBlankFormsCLIAndPublicationSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Unsupported container must leave the existing output unchanged.
-	writePackSourceModule(t, root, "src/forms/specs/Login.json", []byte(strings.Replace(blankFormSpec, `"type":"TextBox"`, `"type":"Frame"`, 1)))
+	writePackSourceModule(t, root, "src/forms/specs/Login.json", []byte(strings.Replace(blankFormSpec, `"type":"TextBox"`, `"type":"Frame","properties":{"picture":"unsupported"}`, 1)))
 	out, err = runPackCommandForTest(root, "--json", "pack", "--blank", "--out", "dist/Fresh.xlsm")
 	if err == nil || errorCodeFromJSON(t, out) != "pack_userform_generation_unsupported" {
 		t.Fatalf("unsupported result: %v\n%s", err, out)

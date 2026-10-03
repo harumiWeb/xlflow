@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "kind": "xlflow.userform",
+  "basis": "designer",
+  "coordinateSystem": "parent-relative",
+  "form": {
+    "name": "FrameTopologyForm",
+    "caption": "issue884-frame-topology",
+    "observed": {
+      "caption": "issue884-frame-topology",
+      "clientWidth": 324,
+      "clientHeight": 240.00944881889762
+    },
+    "build": {
+      "caption": "issue884-frame-topology",
+      "clientWidth": 324,
+      "clientHeight": 240.00944881889762
+    }
+  },
+  "controls": [
+    {
+      "id": "control_001",
+      "zIndex": 0,
+      "type": "Label",
+      "name": "RootCommon",
+      "progId": "Forms.Label.1",
+      "caption": "root-common",
+      "left": 11.990551181102362,
+      "top": 10.006299212598424,
+      "width": 90,
+      "height": 18,
+      "tabIndex": 0,
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "caption": "root-common",
+        "left": 11.990551181102362,
+        "top": 10.006299212598424,
+        "width": 90,
+        "height": 18,
+        "tabIndex": 0,
+        "enabled": true,
+        "visible": true
+      }
+    },
+    {
+      "id": "control_002",
+      "zIndex": 1,
+      "type": "Frame",
+      "name": "EmptyFrame",
+      "progId": "Forms.Frame.1",
+      "caption": "empty-frame",
+      "left": 11.990551181102362,
+      "top": 39.99685039370079,
+      "width": 100.00629921259842,
+      "height": 57.99685039370079,
+      "tabIndex": 1,
+      "enabled": true,
+      "visible": true,
+      "unsupported": ["logicalSize", "specialEffect"],
+      "observed": {
+        "caption": "empty-frame",
+        "left": 11.990551181102362,
+        "top": 39.99685039370079,
+        "width": 100.00629921259842,
+        "height": 57.99685039370079,
+        "tabIndex": 1,
+        "enabled": true,
+        "visible": true,
+        "unsupported": ["logicalSize", "specialEffect"]
+      }
+    },
+    {
+      "id": "control_003",
+      "zIndex": 2,
+      "type": "Frame",
+      "name": "ParentFrame",
+      "progId": "Forms.Frame.1",
+      "caption": "parent-frame",
+      "left": 129.99685039370078,
+      "top": 39.99685039370079,
+      "width": 180,
+      "height": 136.00629921259844,
+      "tabIndex": 2,
+      "enabled": true,
+      "visible": true,
+      "unsupported": ["logicalSize", "specialEffect"],
+      "observed": {
+        "caption": "parent-frame",
+        "left": 129.99685039370078,
+        "top": 39.99685039370079,
+        "width": 180,
+        "height": 136.00629921259844,
+        "tabIndex": 2,
+        "enabled": true,
+        "visible": true,
+        "unsupported": ["logicalSize", "specialEffect"]
+      }
+    },
+    {
+      "id": "control_004",
+      "parentId": "control_003",
+      "zIndex": 0,
+      "type": "TextBox",
+      "name": "SiblingText",
+      "progId": "Forms.TextBox.1",
+      "text": "sibling-text",
+      "value": "sibling-text",
+      "left": 10.006299212598424,
+      "top": 21.996850393700786,
+      "width": 83.99055118110236,
+      "height": 18,
+      "tabIndex": 0,
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "text": "sibling-text",
+        "value": "sibling-text",
+        "left": 10.006299212598424,
+        "top": 21.996850393700786,
+        "width": 83.99055118110236,
+        "height": 18,
+        "tabIndex": 0,
+        "enabled": true,
+        "visible": true
+      }
+    },
+    {
+      "id": "control_005",
+      "parentId": "control_003",
+      "zIndex": 1,
+      "type": "Frame",
+      "name": "NestedFrame",
+      "progId": "Forms.Frame.1",
+      "caption": "nested-frame",
+      "left": 11.990551181102362,
+      "top": 54,
+      "width": 144,
+      "height": 64.00629921259842,
+      "tabIndex": 1,
+      "enabled": true,
+      "visible": true,
+      "unsupported": ["logicalSize", "specialEffect"],
+      "observed": {
+        "caption": "nested-frame",
+        "left": 11.990551181102362,
+        "top": 54,
+        "width": 144,
+        "height": 64.00629921259842,
+        "tabIndex": 1,
+        "enabled": true,
+        "visible": true,
+        "unsupported": ["logicalSize", "specialEffect"]
+      }
+    },
+    {
+      "id": "control_006",
+      "parentId": "control_005",
+      "zIndex": 0,
+      "type": "Label",
+      "name": "NestedLabel",
+      "progId": "Forms.Label.1",
+      "caption": "nested-label",
+      "left": 7.993700787401575,
+      "top": 20.01259842519685,
+      "width": 108,
+      "height": 18,
+      "tabIndex": 0,
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "caption": "nested-label",
+        "left": 7.993700787401575,
+        "top": 20.01259842519685,
+        "width": 108,
+        "height": 18,
+        "tabIndex": 0,
+        "enabled": true,
+        "visible": true
+      }
+    },
+    {
+      "id": "control_007",
+      "zIndex": 3,
+      "type": "TextBox",
+      "name": "RootText",
+      "progId": "Forms.TextBox.1",
+      "text": "root-text",
+      "value": "root-text",
+      "left": 11.990551181102362,
+      "top": 201.99685039370078,
+      "width": 180,
+      "height": 20.01259842519685,
+      "tabIndex": 3,
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "text": "root-text",
+        "value": "root-text",
+        "left": 11.990551181102362,
+        "top": 201.99685039370078,
+        "width": 180,
+        "height": 20.01259842519685,
+        "tabIndex": 3,
+        "enabled": true,
+        "visible": true
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported form Designer properties were preserved only in the binary model: logicalSize."
+    },
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported Designer properties were preserved only in the binary model: logicalSize, specialEffect.",
+      "control": "EmptyFrame"
+    },
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported Designer properties were preserved only in the binary model: logicalSize, specialEffect.",
+      "control": "ParentFrame"
+    },
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported Designer properties were preserved only in the binary model: logicalSize, specialEffect.",
+      "control": "NestedFrame"
+    }
+  ]
+}

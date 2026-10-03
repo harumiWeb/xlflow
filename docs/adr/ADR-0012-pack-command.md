@@ -114,14 +114,36 @@ and could not represent an intentionally empty form set.
 
 An existing spec lists the complete control topology, while omitted properties
 retain binary values. Supported edits preserve opaque records and existing
-component identities. Unsupported topology/property changes reject the whole
-plan; pack never rebuilds an existing Designer to bypass those restrictions.
+component identities. Topology changes outside the supported Frame/common-
+control boundary and unsupported property changes reject the whole plan; pack
+never rebuilds an existing Designer to bypass those restrictions.
 Removal reconciles module, Designer, PROJECT declarations, Workspace entries,
 and PROJECTwm while retaining all references that other code may still use.
+
+### Amendment: Frame topology compilation (Issue #884)
+
+Frame and common-control topology now follows a complete canonical control
+list: additions, deletions, replacements, reparenting and sibling ordering.
+Existing controls are matched by exact, case-sensitive name and
+case-insensitive type; source IDs express hierarchy rather than binary
+persistence identity. Retained binary records,
+resources and storage metadata are reused instead of regenerating the entire
+Designer, since the authoring schema cannot represent every persisted field.
+Unknown container bookkeeping rejects structural changes rather than risking
+its loss. MultiPage/Page/TabStrip topology requires its separate implementation.
+
+Coordinates always remain relative to the owning parent. An omitted position
+keeps its numeric value after reparenting; there is no implicit absolute-position
+conversion. This keeps source intent deterministic without depending on host
+window chrome, nested client offsets or display DPI. Structural changes follow
+the same clone, encode, reparse and read-back validation boundary as property
+compilation, while the ordinary serializer continues to reject arbitrary model
+mutation.
 Writer output is reparsed and compared with the planned project before atomic
 publication. This adds structural validation without changing the permanent
-no-VBE-validation contract. Frame generation and MultiPage editing remain
-separate follow-ups.
+no-VBE-validation contract. Issue #884 supersedes the earlier Frame-generation
+follow-up for Frame/common-control hierarchies; MultiPage/Page/TabStrip editing
+remains a separate follow-up.
 
 The Excel gate also established that inspecting root Caption through Designer
 does not establish runtime behavior: instantiated forms use the VBFrame text

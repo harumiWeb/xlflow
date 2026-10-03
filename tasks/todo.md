@@ -606,3 +606,10 @@ source; all valid. Plan:
 - [x] Cover reference preservation, code modes, capability failures and publication safety.
 - [x] Validate generated artifacts in Excel, retain fixtures and run release gates.
 - [x] Update contracts/docs, run checks and independent review. Reference reviewer found no confirmed defects and independently passed pack/fuzz tests; blank-input reviewer found no confirmed defects. Case-variant directory spelling remains an unconfirmed follow-up, not a changed contract. Evidence: `internal/pack/vbaproject/testdata/forms-reference-excel/README.md`.
+
+# PR #908 review follow-up
+
+- [x] Clarify case-sensitive retained names and case-insensitive type labels.
+- [x] Check the edited pack output's module identity rather than the original output.
+- [x] Reproduce default TabIndex collisions during topology edits; reserve final sibling retained/explicit values before assigning generated defaults, including property-bag aliases, and preserve existing values.
+- [x] Run focused regressions, affected package tests, CLI pack tests, and required lint/docs checks.

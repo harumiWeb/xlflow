@@ -163,6 +163,7 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 		return nil, nil, err
 	}
 	var objectOffset uint64
+	claimedIDs := map[int32]bool{}
 	controls := make([]*Control, 0, len(level.Sites))
 	for _, site := range level.Sites {
 		objectSize := uint32(site.Values["ObjectStreamSize"])
@@ -170,6 +171,10 @@ func (s *readState) readLevel(path string, depth int, root bool) ([]*Control, *L
 			return nil, nil, parseError(path, "o", int(objectOffset), "ObjectStreamSize", "site %q size %d exceeds stream boundary", siteName(site), objectSize)
 		}
 		id := int32(site.Values["ID"])
+		if claimedIDs[id] {
+			return nil, nil, parseError(path, "f", 0, "container ownership", "duplicate site ID %d", id)
+		}
+		claimedIDs[id] = true
 		cacheIndex := uint16(site.Values["ClsidCacheIndex"])
 		control := &Control{
 			Name: siteName(site), Kind: controlKind(cacheIndex, nil), ID: id,

@@ -7,6 +7,33 @@ import (
 	"testing"
 )
 
+func TestRewriteVBFrameTypeInfoBindsOnlyRootVersion(t *testing.T) {
+	raw := []byte("VERSION 5.00\r\nBegin Form\r\n   Caption = \"keep\"\r\n   TypeInfoVer = 7\r\n   BeginProperty Opaque\r\n      TypeInfoVer = 99\r\n   EndProperty\r\nEnd\r\n")
+	got, err := rewriteVBFrameTypeInfo(raw, 9, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := bytes.Replace(raw, []byte("   TypeInfoVer = 7\r\n"), []byte("   TypeInfoVer = 9\r\n"), 1)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("unrelated bytes changed: %q", got)
+	}
+	unchanged, err := rewriteVBFrameTypeInfo(got, 9, 932)
+	if err != nil || !bytes.Equal(unchanged, got) {
+		t.Fatal("same version must preserve bytes", err)
+	}
+	absent := []byte("VERSION 5.00\r\nBegin Form\r\nEnd\r\n")
+	got, err = rewriteVBFrameTypeInfo(absent, 9, 932)
+	if err != nil || !bytes.Equal(got, absent) {
+		t.Fatal("omitted version must remain omitted", err)
+	}
+	for _, value := range []string{"-1", "bad", "4294967296"} {
+		invalid := bytes.Replace(raw, []byte("TypeInfoVer = 7"), []byte("TypeInfoVer = "+value), 1)
+		if _, err := rewriteVBFrameTypeInfo(invalid, 9, 932); !errors.Is(err, ErrInvalidEdit) {
+			t.Fatalf("invalid version %s: %v", value, err)
+		}
+	}
+}
+
 func TestRewriteVBFrameCaptionEscapesQuotesAndPreservesOtherLines(t *testing.T) {
 	base := openFixture(t, "p4_form.bin")
 	form, err := ReadForm(base, "UserForm1", 932)

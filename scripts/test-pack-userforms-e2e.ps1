@@ -944,7 +944,7 @@ function Assert-ArtifactWorkbook {
     return [pscustomobject]$artifactRecord
 }
 
-function Assert-UnsupportedFramePublication {
+function Assert-UnsupportedFramePicturePublication {
     param(
         [Parameter(Mandatory)][string]$Root,
         [Parameter(Mandatory)][string]$SpecPath,
@@ -959,20 +959,22 @@ basis: designer
 coordinateSystem: points
 form:
   name: NewForm
-  caption: "Unsupported Frame"
+  caption: "Unsupported Frame picture"
 controls:
   - id: frame_new
     name: FrameNew
     type: Frame
+    properties:
+      picture: unsupported
 '@
     $rejected = Invoke-XlflowJson -Root $Root -Arguments @('pack', '--out', 'dist/TemplateDefault.xlsm', '--json') -AllowFailure
-    Write-Utf8NoBom (Join-Path $Root 'dist\unsupported-frame-rejection.json') $rejected.Raw
+    Write-Utf8NoBom (Join-Path $Root 'dist\unsupported-frame-picture-rejection.json') $rejected.Raw
     if ($rejected.ExitCode -ne 1 -or $rejected.Json.error.code -ne 'pack_userform_generation_unsupported') {
-        throw "unsupported Frame rejection contract failed: $($rejected.Raw)$($rejected.Stderr)"
+        throw "unsupported Frame picture rejection contract failed: $($rejected.Raw)$($rejected.Stderr)"
     }
     $afterHash = Get-Sha256 $ExistingArtifactPath
-    if ($beforeHash -cne $afterHash) { throw 'unsupported Frame rejection changed the existing published artifact' }
-    Write-Json (Join-Path $Root 'dist\unsupported-frame-expected.json') ([ordered]@{
+    if ($beforeHash -cne $afterHash) { throw 'unsupported Frame picture rejection changed the existing published artifact' }
+    Write-Json (Join-Path $Root 'dist\unsupported-frame-picture-expected.json') ([ordered]@{
         error_code = 'pack_userform_generation_unsupported'
         output = $ExistingArtifactPath
         output_sha256_before = $beforeHash
@@ -1056,7 +1058,7 @@ try {
     }
     Write-Json (Join-Path $templateWorkspace 'dist\TemplateDefault.expected.json') $templateDefaultExpected
 
-    Assert-UnsupportedFramePublication -Root $templateWorkspace -SpecPath (Join-Path $templateWorkspace 'src\forms\specs\NewForm.yaml') -ExistingArtifactPath $templateDefault.Path
+    Assert-UnsupportedFramePicturePublication -Root $templateWorkspace -SpecPath (Join-Path $templateWorkspace 'src\forms\specs\NewForm.yaml') -ExistingArtifactPath $templateDefault.Path
     Write-TemplateSources -Root $templateWorkspace
 
     New-ScenarioProject -Destination $sourceWorkspace -TemplateRoot $templateWorkspace -FormSet login

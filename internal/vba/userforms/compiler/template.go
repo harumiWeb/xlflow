@@ -45,17 +45,16 @@ func CompileTemplate(base *oforms.Form, desired spec.FormSpec, codePage uint16) 
 		after.CoordinateSystem = desired.CoordinateSystem
 	}
 
-	matched, err := validateTemplateTopology(base, baseline.Controls, desired.Controls)
+	desired, err = normalizedCopy(desired)
 	if err != nil {
-		return nil, err
+		return nil, templateError(base, Invalid, "", "spec", err.Error())
 	}
 	if err := overlayTemplateForm(base, &after.Form, desired.Form); err != nil {
 		return nil, err
 	}
-	for index := range after.Controls {
-		if err := overlayTemplateControl(base, &after.Controls[index], matched[index], index); err != nil {
-			return nil, err
-		}
+	after.Controls, err = overlayTemplateTopology(base, baseline.Controls, desired.Controls)
+	if err != nil {
+		return nil, err
 	}
 
 	result, err := CompileEdits(base, baseline, after, codePage)
@@ -103,107 +102,6 @@ func validateTemplateCoordinateSystem(form, coordinateSystem string) error {
 			Reason:   "geometry requires points or parent-relative coordinates",
 		}
 	}
-}
-
-func validateTemplateTopology(base *oforms.Form, baseline, desired []spec.FormSpecControl) ([]spec.FormSpecControl, error) {
-	if len(desired) != len(baseline) {
-		return nil, templateError(base, Unsupported, "", "controls", "control addition/removal is not supported")
-	}
-
-	baselineByName := make(map[string]int, len(baseline))
-	baselineParentByName := make(map[string]string, len(baseline))
-	baselineNameByID := make(map[string]string, len(baseline))
-	for index, control := range baseline {
-		key := strings.ToLower(control.Name)
-		if _, exists := baselineByName[key]; exists {
-			return nil, templateError(base, Unsupported, control.Name, fmt.Sprintf("controls[%d].name", index), "ambiguous control names")
-		}
-		baselineByName[key] = index
-		baselineNameByID[control.ID] = control.Name
-	}
-	for _, control := range baseline {
-		baselineParentByName[control.Name] = baselineNameByID[control.ParentID]
-	}
-
-	desiredByID := make(map[string]spec.FormSpecControl, len(desired))
-	desiredByName := make(map[string]spec.FormSpecControl, len(desired))
-	for index, control := range desired {
-		path := fmt.Sprintf("controls[%d]", index)
-		if strings.TrimSpace(control.Name) == "" {
-			return nil, templateError(base, Unsupported, "", path+".name", "control name is required")
-		}
-		nameKey := strings.ToLower(control.Name)
-		if previous, exists := desiredByName[nameKey]; exists {
-			return nil, templateError(base, Unsupported, control.Name, path+".name", fmt.Sprintf("duplicate control name also appears for %q", previous.Name))
-		}
-		desiredByName[nameKey] = control
-		if strings.TrimSpace(control.ID) == "" {
-			return nil, templateError(base, Unsupported, control.Name, path+".id", "control IDs are required to resolve parentId")
-		}
-		if _, exists := desiredByID[control.ID]; exists {
-			return nil, templateError(base, Unsupported, control.Name, path+".id", "duplicate control ID")
-		}
-		desiredByID[control.ID] = control
-	}
-
-	desiredParentByName := make(map[string]string, len(desired))
-	for index, control := range desired {
-		path := fmt.Sprintf("controls[%d]", index)
-		baselineIndex, exists := baselineByName[strings.ToLower(control.Name)]
-		if !exists {
-			return nil, templateError(base, Unsupported, control.Name, path, "control addition/removal is not supported")
-		}
-		actual := baseline[baselineIndex]
-		if control.Name != actual.Name || control.Type != actual.Type {
-			return nil, templateError(base, Unsupported, control.Name, path, "control identity, type, parent, or ordering change")
-		}
-		if control.ProgID != "" && !strings.EqualFold(control.ProgID, actual.ProgID) {
-			return nil, templateError(base, Unsupported, control.Name, path+".progId", "control identity, type, parent, or ordering change")
-		}
-		if control.ZIndex != nil && !reflect.DeepEqual(control.ZIndex, actual.ZIndex) {
-			return nil, templateError(base, Unsupported, control.Name, path+".zIndex", "control identity, type, parent, or ordering change")
-		}
-
-		parentName := ""
-		if control.ParentID != "" {
-			parent, ok := desiredByID[control.ParentID]
-			if !ok {
-				return nil, templateError(base, Unsupported, control.Name, path+".parentId", "parent control was not found")
-			}
-			parentName = parent.Name
-		}
-		if parentName != baselineParentByName[actual.Name] {
-			return nil, templateError(base, Unsupported, control.Name, path+".parentId", "control identity, type, parent, or ordering change")
-		}
-		desiredParentByName[control.Name] = parentName
-	}
-	parents := map[string]struct{}{"": {}}
-	for _, parent := range baselineParentByName {
-		parents[parent] = struct{}{}
-	}
-	for _, parent := range desiredParentByName {
-		parents[parent] = struct{}{}
-	}
-	for _, parent := range slices.Sorted(maps.Keys(parents)) {
-		if !slices.Equal(siblingNames(baseline, baselineParentByName, parent), siblingNames(desired, desiredParentByName, parent)) {
-			return nil, templateError(base, Unsupported, "", "controls", "control identity, type, parent, or ordering change")
-		}
-	}
-	matched := make([]spec.FormSpecControl, len(baseline))
-	for index, control := range baseline {
-		matched[index] = desiredByName[strings.ToLower(control.Name)]
-	}
-	return matched, nil
-}
-
-func siblingNames(controls []spec.FormSpecControl, parentByName map[string]string, parentName string) []string {
-	result := make([]string, 0)
-	for _, control := range controls {
-		if parentByName[control.Name] == parentName {
-			result = append(result, control.Name)
-		}
-	}
-	return result
 }
 
 func overlayTemplateForm(base *oforms.Form, target *spec.FormSpecForm, desired spec.FormSpecForm) error {
