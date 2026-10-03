@@ -67,6 +67,10 @@ Uncertain calls retain their original resolution status and locations.
 External, builtin-like, member, unresolved, ambiguous, and dynamic relationships
 never become invented confirmed project edges. Dynamic callback evidence keeps
 the API, expression, known target where available, and source range.
+Callback extraction uses the resolved snapshot so receiverless and
+`With Application` `Run`/`OnTime`/`OnKey` calls retain their targets. Regression
+controls also protect project-procedure and non-callable local shadows from
+being interpreted as Application callbacks.
 
 `dependency_cycles` counts cyclic SCCs, including direct recursion. The
 representative witness is one deterministic cycle, not every elementary cycle.

@@ -217,7 +217,9 @@ func collectContextWithHooks(ctx context.Context, root string, cfgValue config.C
 		procedureMetrics = append(procedureMetrics, proceduremetrics.CollectDocument(snapshot.resolved, snapshot.cfg)...)
 		callResult.TypeReferences = append(callResult.TypeReferences, calls.TypeReferencesFromIR(snapshot.ir)...)
 		callResult.Calls = append(callResult.Calls, calls.FromResolvedIR(snapshot.resolved)...)
-		for _, procedure := range snapshot.ir.Procedures {
+		// Implicit Application APIs need resolution to distinguish callbacks
+		// from project procedures and non-callable locals with the same name.
+		for _, procedure := range snapshot.resolved.Procedures {
 			for _, site := range procedure.Calls {
 				callResult.DynamicReferences = append(callResult.DynamicReferences, calls.DynamicReferencesForIR(site, procedure.Expressions, symbols.ParseSummary{
 					HasError: snapshot.ir.Parse.HasError, HasMissing: snapshot.ir.Parse.HasMissing,

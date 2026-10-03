@@ -170,6 +170,69 @@ func TestContractCollectsEmbeddedFormSource(t *testing.T) {
 	}
 }
 
+func TestContractImplicitApplicationCallbacksUseResolvedSnapshot(t *testing.T) {
+	for _, test := range []struct {
+		name, body, declarations, api string
+		shadow                        bool
+	}{
+		{name: "receiverless Run", body: `Run "Worker.Target"`, api: "application.run"},
+		{name: "receiverless OnTime", body: `OnTime Now, "Worker.Target"`, api: "application.ontime"},
+		{name: "receiverless OnKey", body: `OnKey "{LEFT}", "Worker.Target"`, api: "application.onkey"},
+		{name: "With Run", body: "With Application\n.Run \"Worker.Target\"\nEnd With", api: "application.run"},
+		{name: "With OnTime", body: "With Application\n.OnTime Now, \"Worker.Target\"\nEnd With", api: "application.ontime"},
+		{name: "With OnKey", body: "With Application\n.OnKey \"{LEFT}\", \"Worker.Target\"\nEnd With", api: "application.onkey"},
+		{name: "project procedure shadow", body: `Run "Worker.Target"`, declarations: "Private Sub Run(ByVal target As String)\nEnd Sub\n", shadow: true},
+		{name: "non-callable local shadow", body: "Dim Run As Long\nRun \"Worker.Target\"", shadow: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root, cfg := contractProject(t, 0)
+			cfg.Project.Entry = "Main.Start"
+			writeCollectorSource(t, root, "src/modules/Main.bas", "Attribute VB_Name = \"Main\"\nPublic Sub Start()\n"+test.body+"\nEnd Sub\n"+test.declarations)
+			writeCollectorSource(t, root, "src/modules/Worker.bas", "Attribute VB_Name = \"Worker\"\nPrivate Sub Target()\nEnd Sub\n")
+			report, _, err := collectContextWithHooks(t.Context(), root, cfg, Options{}, &collectionHooks{loadTypeDB: func() (typedb.LoadResult, error) {
+				return typedb.LoadResult{DB: vbadb.New(), Complete: true}, nil
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var caller, target *Procedure
+			for index := range report.Procedures {
+				procedure := &report.Procedures[index]
+				if procedure.QualifiedName == "Main.Start" {
+					caller = procedure
+				}
+				if procedure.QualifiedName == "Worker.Target" {
+					target = procedure
+				}
+			}
+			if caller == nil || target == nil {
+				t.Fatalf("missing procedures: %+v", report.Procedures)
+			}
+			if test.shadow {
+				if len(report.DynamicReferences) != 0 || target.Reachability != "unreachable" {
+					t.Fatalf("shadow invented callback: refs=%+v target=%+v", report.DynamicReferences, target)
+				}
+				return
+			}
+			if len(report.DynamicReferences) != 1 {
+				t.Fatalf("missing callback: %+v", report.DynamicReferences)
+			}
+			ref := report.DynamicReferences[0]
+			if ref.API != test.api || ref.Target != "Worker.Target" || ref.Kind != "static" || ref.CallerID != caller.ID || ref.Range.StartLine <= 0 {
+				t.Fatalf("callback lost canonical evidence: %+v", ref)
+			}
+			if target.Reachability != "possible" || len(report.PossibleReachability) != 1 || report.PossibleReachability[0].ID.String() != target.CallgraphID {
+				t.Fatalf("callback lost possible reachability: target=%+v possible=%+v", target, report.PossibleReachability)
+			}
+			for _, node := range report.Unreachable {
+				if node.ID.String() == target.CallgraphID {
+					t.Fatal("callback target was reported unreachable")
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkArchitectureSparseProject(b *testing.B) {
 	// Keep developer-specific generated TypeLib inventories out of this fixture.
 	b.Setenv(typedb.EnvDir, b.TempDir())
