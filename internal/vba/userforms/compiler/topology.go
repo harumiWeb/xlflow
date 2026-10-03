@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -32,7 +33,35 @@ func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint1
 	if err != nil {
 		return nil, templateError(base, Invalid, "", "before", err.Error())
 	}
-	next, err := normalizedCopy(after)
+	candidate, err := cloneFormSpec(after)
+	if err != nil {
+		return nil, templateError(base, Invalid, "", "after", err.Error())
+	}
+	oldSelections := map[string]spec.FormSpecControl{}
+	for _, control := range old.Controls {
+		oldSelections[control.Name] = control
+	}
+	var omitUnchangedSelection func([]spec.FormSpecControl)
+	omitUnchangedSelection = func(controls []spec.FormSpecControl) {
+		for i := range controls {
+			control := &controls[i]
+			previous, retained := oldSelections[control.Name]
+			if retained && strings.EqualFold(previous.Type, control.Type) && (strings.EqualFold(control.Type, "MultiPage") || strings.EqualFold(control.Type, "TabStrip")) {
+				if reflect.DeepEqual(previous.SelectedIndex, control.SelectedIndex) {
+					control.SelectedIndex = nil
+				}
+				// A copied observation describes the old collection, not the final
+				// topology. Keep explicit authoring selection and resolve omitted
+				// selection by retained identity after topology compilation.
+				if control.Observed != nil && previous.Observed != nil && reflect.DeepEqual(previous.Observed.SelectedIndex, control.Observed.SelectedIndex) {
+					control.Observed.SelectedIndex = nil
+				}
+			}
+			omitUnchangedSelection(control.Controls)
+		}
+	}
+	omitUnchangedSelection(candidate.Controls)
+	next, err := normalizedCopy(candidate)
 	if err != nil {
 		return nil, templateError(base, Invalid, "", "after", err.Error())
 	}
@@ -69,6 +98,20 @@ func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint1
 			}
 			n.ID, n.ParentID, n.ZIndex, n.ProgID, n.Type = c.ID, c.ParentID, c.ZIndex, c.ProgID, c.Type
 			propertyAfter.Controls[i] = n
+			if strings.EqualFold(c.Type, "MultiPage") || strings.EqualFold(c.Type, "TabStrip") {
+				propertyAfter.Controls[i].SelectedIndex = c.SelectedIndex
+				propertyAfter.Controls[i].Tabs = c.Tabs
+				if n.Observed != nil {
+					observed := *n.Observed
+					observed.SelectedIndex = nil
+					observed.Tabs = nil
+					if c.Observed != nil {
+						observed.SelectedIndex = c.Observed.SelectedIndex
+						observed.Tabs = c.Observed.Tabs
+					}
+					propertyAfter.Controls[i].Observed = &observed
+				}
+			}
 		}
 	}
 	updated, err := compilePropertyEdits(base, old, propertyAfter, codePage)
@@ -168,7 +211,7 @@ func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint1
 		}
 		return nil, &Error{Code: code, Form: base.Name, Property: "controls", Reason: err.Error(), Cause: err}
 	}
-	return result, nil
+	return compileTabIntent(base, result, old, next, codePage)
 }
 
 func editGenerationError(err error) error {
@@ -201,6 +244,9 @@ func overlayTemplateTopology(base *oforms.Form, baseline, desired []spec.FormSpe
 				return nil, err
 			}
 			old.ID, old.ParentID, old.ZIndex = c.ID, c.ParentID, c.ZIndex
+			if c.SelectedIndex == nil && (strings.EqualFold(c.Type, "MultiPage") || strings.EqualFold(c.Type, "TabStrip")) {
+				old.SelectedIndex = nil
+			}
 			result = append(result, old)
 		} else {
 			result = append(result, c)

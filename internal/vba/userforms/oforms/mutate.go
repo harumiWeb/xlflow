@@ -262,7 +262,7 @@ func applyPersistenceEdit(form *Form, edit Edit, cp uint16, records map[*Record]
 	if spec == nil {
 		return ErrUnsupportedEdit
 	}
-	if control != nil && control.Level != nil && control.CLSIDCacheIndex != 14 {
+	if control != nil && control.Level != nil && control.CLSIDCacheIndex != 14 && (control.MultiPage == nil || edit.Property != "Width" && edit.Property != "Height") {
 		return ErrUnsupportedEdit
 	}
 	property := edit.Property
@@ -279,6 +279,11 @@ func applyPersistenceEdit(form *Form, edit Edit, cp uint16, records map[*Record]
 		size, found := r.Sizes[name]
 		if !found {
 			return fmt.Errorf("%w: omitted size default unknown", ErrUnsupportedEdit)
+		}
+		if control != nil && control.MultiPage != nil {
+			if err := resizeMultiPage(control, property, v, records, edit); err != nil {
+				return err
+			}
 		}
 		if property == "Width" {
 			size.Width = v
@@ -363,7 +368,7 @@ func applyPersistenceEdit(form *Form, edit Edit, cp uint16, records map[*Record]
 // https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oforms/7a72ac4a-39d9-4e2b-829e-19e3e9a1f60d
 func DefaultVariousPropertyBits(cacheIndex uint16) (int64, bool) {
 	switch cacheIndex {
-	case 17:
+	case 17, 18:
 		return 0x1b, true
 	case 21:
 		return 0x80001b, true

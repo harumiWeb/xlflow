@@ -287,7 +287,7 @@ func TestCompileTemplateAllocatesUnusedDefaultTabIndexes(t *testing.T) {
 	}
 }
 
-func TestCompileTemplatePreservesAndRejectsMultiPageTopologyChanges(t *testing.T) {
+func TestCompileTemplateReparentsMultiPageSubtreeAtomically(t *testing.T) {
 	base, snapshot := fixture(t, "p6_nested_form.bin")
 	original, err := oforms.SerializeForm(base, 932)
 	if err != nil {
@@ -338,18 +338,54 @@ func TestCompileTemplatePreservesAndRejectsMultiPageTopologyChanges(t *testing.T
 	if frameID == "" {
 		t.Fatal("nested fixture has no Frame outside the MultiPage subtree")
 	}
+	multiPageName := desired.Controls[multiPageIndex].Name
 	desired.Controls[multiPageIndex].ParentID = frameID
 	desiredInput := snapshotCopy(t, desired)
 	result, err := CompileTemplate(base, desired, 932)
-	detail, ok := errors.AsType[*Error](err)
-	if result != nil || !ok || detail.Code != Unsupported {
-		t.Fatalf("MultiPage reparent result=%v error=%v; want %s", result, err, Unsupported)
+	if err != nil {
+		t.Fatalf("MultiPage reparent failed: %v", err)
 	}
 	if !reflect.DeepEqual(desiredInput, snapshotCopy(t, desired)) {
-		t.Fatal("rejected MultiPage mutation changed template input")
+		t.Fatal("MultiPage reparent changed template input")
 	}
 	current, err := oforms.SerializeForm(base, 932)
 	if err != nil || !reflect.DeepEqual(current, original) {
-		t.Fatal("rejected MultiPage mutation changed the base Form")
+		t.Fatal("MultiPage reparent changed the base Form")
+	}
+
+	moved := findControl(result.Controls, multiPageName)
+	frame := findControl(result.Controls, byID[frameID].Name)
+	if moved == nil || frame == nil || moved.MultiPage == nil {
+		t.Fatalf("reparented MultiPage=%v, Frame=%v; want MultiPage under the selected Frame", moved, frame)
+	}
+	contained := false
+	for _, child := range frame.Children {
+		if child == moved {
+			contained = true
+			break
+		}
+	}
+	if !contained {
+		t.Fatalf("Frame %q does not own reparented MultiPage %q", frame.Name, moved.Name)
+	}
+	oldMultiPage := findControl(base.Controls, multiPageName)
+	if oldMultiPage == nil || oldMultiPage.MultiPage == nil || len(moved.MultiPage.Pages) != len(oldMultiPage.MultiPage.Pages) {
+		t.Fatalf("reparented MultiPage pages=%v; original=%v", moved.MultiPage, oldMultiPage.MultiPage)
+	}
+
+	relocated, err := oforms.SerializeForm(result, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRelocatedDesignerSubtreeBytes(t, original, relocated, oldMultiPage.Level.Path, moved.Level.Path)
+
+	projected, err := projection.Project(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectedMultiPage := projectedControlByName(t, projected, multiPageName)
+	projectedFrame := projectedControlByName(t, projected, frame.Name)
+	if projectedMultiPage.ParentID != projectedFrame.ID || projectedChildrenOfType(projected, projectedMultiPage.ID, "Page") != len(oldMultiPage.MultiPage.Pages) {
+		t.Fatalf("reparented projection MultiPage=%#v Frame=%#v", projectedMultiPage, projectedFrame)
 	}
 }

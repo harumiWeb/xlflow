@@ -47,8 +47,8 @@ for the internal pure-Go new-form compiler. Do not combine them with outer
 width/height inputs. These are persisted `DisplayedSize` / VBFrame client
 dimensions; runtime MSForms `InsideWidth` / `InsideHeight` can differ.
 Excel-backed `form build` rejects client-size input
-before changing a workbook. New-form generation is not yet connected to the
-`pack` CLI; Forms reference creation and CLI integration are separate stages.
+before changing a workbook. Pure-Go UserForm generation is available through
+the `pack` generation paths; it does not open Excel.
 
 Every authored control requires `id`, `name`, and `type`. Controls are a flat list; use `parentId` to place a child inside a container.
 
@@ -58,9 +58,9 @@ Every authored control requires `id`, `name`, and `type`. Controls are a flat li
 | `name`                           | string                | Supported        | VBA control name.                                                                      |
 | `type`                           | string                | Supported        | One of the built-in types below, or a custom type with `progId`.                       |
 | `progId`                         | string                | Supported        | Must match a known built-in `type` when both are known.                                |
-| `parentId`                       | string                | Supported        | Must reference another control ID; only `Frame` is a built-in container.               |
+| `parentId`                       | string                | Supported        | Must reference another control ID and obey the built-in parent/child rules below.      |
 | `zIndex`                         | integer               | Supported        | Sibling ordering hint.                                                                 |
-| `left`, `top`, `width`, `height` | number                | Supported        | Designer coordinates in points.                                                        |
+| `left`, `top`, `width`, `height` | number                | Supported        | Designer coordinates in points; these are not authoring fields for `Page`.             |
 | `tabIndex`                       | integer               | Supported        | Designer tab order.                                                                    |
 | `enabled`, `visible`             | boolean               | Supported        | Initial control state.                                                                 |
 | `observed`, `unsupported`        | object / string array | Snapshot-only    | Captured state; do not use as normal authoring fields.                                 |
@@ -83,14 +83,86 @@ Every authored control requires `id`, `name`, and `type`. Controls are a flat li
 | `ScrollBar`     | `Forms.ScrollBar.1`     | `value` (integer)                                                                |
 | `Image`         | `Forms.Image.1`         | Common fields; pure-Go generation does not support embedded Picture data         |
 | `Frame`         | `Forms.Frame.1`         | `caption` (string); the built-in container type                                  |
+| `MultiPage`     | `Forms.MultiPage.1`     | `selectedIndex` (integer; zero-based Page index or `-1`)                         |
+| `Page`          | `Forms.Page.1`          | `caption`, `controlTipText`, `tag`, `accelerator` (strings)                      |
+| `TabStrip`      | `Forms.TabStrip.1`      | `selectedIndex` (integer; zero-based Tab index or `-1`), `tabs` (Tab array)      |
 
-`ComboBox` and `ListBox` `list` and `selectedIndex` are observed-only: xlflow attempts to apply them, but round-trip fidelity is not guaranteed.
+### MultiPage, Page, and TabStrip
+
+The authored `controls` array stays flat. Use `parentId` to describe the
+container hierarchy: a `MultiPage` may contain only `Page` controls, each
+`Page` must belong to a `MultiPage`, and controls inside a MultiPage belong
+under a `Page`. A `TabStrip` is independent: it contains no controls, and its
+tabs are records in its own `tabs` array rather than entries in `controls`.
+
+```yaml
+controls:
+  - id: steps
+    name: Steps
+    type: MultiPage
+    selectedIndex: 0
+  - id: identity
+    parentId: steps
+    name: Identity
+    type: Page
+    caption: Identity
+  - id: email
+    parentId: identity
+    name: Email
+    type: TextBox
+  - id: navigation
+    name: Navigation
+    type: TabStrip
+    selectedIndex: 0
+    tabs:
+      - name: Details
+        caption: Details
+        controlTipText: Show details
+        tag: section-details
+        accelerator: D
+        enabled: true
+        visible: true
+```
+
+`TabStrip.tabs` is its authored collection. Each tab requires `name`; names
+must be unique within that TabStrip, ignoring case. Optional fields are
+`caption`, `controlTipText`, `tag`, and `accelerator` (strings), plus `enabled`
+and `visible` (booleans). These fields belong to the tab record, not to the
+TabStrip control. When editing an existing form, omitting `tabs` leaves the
+collection unspecified; author `tabs: []` to remove all tabs. An authored array
+defines the desired collection and order.
+
+`MultiPage.selectedIndex` addresses its Pages collection, while
+`TabStrip.selectedIndex` addresses its independent Tabs collection. Both are
+zero-based; `-1` means no logical selection. An empty collection is represented
+with `selectedIndex: -1` in the normalized UserForm model, including an empty
+MultiPage whose raw Excel selection value may be stale. Inspection snapshots
+use `selected_index`; authored FormSpec uses `selectedIndex`. MultiPage
+snapshots expose Pages as child controls, while TabStrip snapshots expose
+independent tab metadata in `tabs` and no child controls.
+
+Page bounds are derived from the owning MultiPage. Page `left`, `top`, `width`,
+and `height` are not authoring properties; if inspection captures them, they
+are snapshot-only values under `observed`. New pure-Go generation lays out
+standard top tabs using fixed 96-DPI geometry and an explicit Tahoma 8.25pt
+font, independent of the build host's display and font settings.
+
+Modeled UserForm edits are all-or-nothing. The Go compiler validates the
+requested state and applies it to an independent model; a stale, invalid, or
+unsupported edit returns an error without changing the input model. Callers
+publish only a fully compiled result.
+
+`ComboBox` and `ListBox` `list` and `selectedIndex` are observed-only: xlflow attempts to apply them, but round-trip fidelity is not guaranteed. `MultiPage` and `TabStrip` `selectedIndex` are modeled authoring fields.
 
 ### Parent and Custom-Control Rules
 
 - IDs must be unique; `parentId` must resolve to an existing ID.
 - A control cannot parent itself, and parent references cannot form a cycle.
-- A built-in child can only use a built-in container (`Frame`) as its parent.
+- A built-in child can only use a permitted built-in container (`Frame`,
+  `Page`, or `MultiPage`) as its parent. `MultiPage` accepts only `Page`
+  children, and `Page` accepts controls but can only be parented by
+  `MultiPage`.
+- `TabStrip` does not contain controls; model tabs with its `tabs` property.
 - A custom `type` requires an explicit custom `progId`. xlflow validates common fields but emits a `custom/unchecked` warning because type-specific properties cannot be verified.
 
 ## Support Levels
@@ -107,7 +179,7 @@ Every authored control requires `id`, `name`, and `type`. Controls are a flat li
 
 `form build` reports all detected contract issues before Excel opens. YAML files directly under the configured `src/forms/specs` directory receive the same live diagnostics in the xlflow LSP.
 
-The LSP also provides context-aware completion and Hover for known UserForm YAML fields, built-in control types, and built-in ProgIDs. Hover shows the expected value type, required status, applicable controls, support level, and build limitations. In particular, `width` and `height` are best-effort; `list` and `selectedIndex` are observed-only state that may be applied best-effort; and `warnings`, `observed`, `unsupported`, and `properties` are snapshot-oriented or custom/unchecked metadata rather than guaranteed normal build inputs.
+The LSP also provides context-aware completion and Hover for known UserForm YAML fields, built-in control types, and built-in ProgIDs. Hover shows the expected value type, required status, applicable controls, support level, and build limitations. In particular, `width` and `height` are best-effort; `ComboBox` and `ListBox` list selection state is observed-only; and `warnings`, `observed`, `unsupported`, and `properties` are snapshot-oriented or custom/unchecked metadata rather than guaranteed normal build inputs.
 
 | Code              | Meaning                                                                                                                       |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |

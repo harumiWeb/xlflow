@@ -166,6 +166,7 @@ var scrollBarSpec = recordSpec{
 
 var tabStripSpec = recordSpec{
 	typeName: "TabStrip", major: 2, textProps: true, rawTail: true,
+	flags: map[uint8]flagField{10: {name: "MultiRow", value: 1}, 13: {name: "Tooltips", value: 0}, 19: {name: "NewVersion", value: 1}},
 	data: []dataField{
 		{0, "ListIndex", 4, fieldSigned}, {1, "BackColor", 4, fieldUnsigned},
 		{2, "ForeColor", 4, fieldUnsigned}, {5, "ItemsSize", 4, fieldUnsigned},

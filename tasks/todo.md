@@ -613,3 +613,27 @@ source; all valid. Plan:
 - [x] Check the edited pack output's module identity rather than the original output.
 - [x] Reproduce default TabIndex collisions during topology edits; reserve final sibling retained/explicit values before assigning generated defaults, including property-bag aliases, and preserve existing values.
 - [x] Run focused regressions, affected package tests, CLI pack tests, and required lint/docs checks.
+
+# Issue #885 MultiPage / Page / TabStrip
+
+- [x] PR #910 review follow-up: skip observed Page geometry; retain nested omitted tabs using the inspection type resolver; defer and verify sibling TabIndex; populate lists before selection/text; prevent caption normalization from adding exported source lines. Bridge regressions pass (507 full / 59 focused); session-backed Excel build/apply/snapshot/save and reopened snapshot succeed in `tmp_workspaces/issue-910-review-e2e`.
+- [x] PR #910 final-selection acceptance: the pack gate exposed copied observed selection from the old Page collection. Discard unchanged selection observations before final-topology validation and retain original observations in the property-only stage. Six template/edit regressions and related Go tests/lint pass. Pure-Go pack, Excel runtime, save/reopen runtime and confirmed cleanup pass in `tmp_workspaces/issue-910-selection-pack` and `tmp_workspaces/issue-910-selection-excel`.
+
+- [x] Final review P2: synchronize Page Site visibility after topology reconciles the final selected identity; cover selected-page removal, additions, reorder and empty topology. Userforms/pack/filepull tests, lint, docs checks and the retained pure-Go reproduction pass. Review pass 1 report and reproduction are preserved in `tmp_workspaces/final-review/pass-1/`; review resources are cleaned up.
+- [x] Final review pass 2 verified `ffb16e22579fd3931aace7ee6bca6c68fe9f257b`: no confirmed findings; compiler/oforms tests and retained reproduction pass. Report preserved in `tmp_workspaces/final-review/pass-2/`; reviewer, watcher, setup terminal and temporary worktree released/removed. Excel/COM was not rerun after the selection fix; remote CI remains unrun.
+- [x] PR #910 CI follow-up: update CLI/LSP fixture assertions for the added MultiPage/Page/TabStrip controls and supported MultiPage selection; both formerly failing tests pass. Local full Go run also hit the unchanged analyzer package's default 10-minute timeout; do not report it as passed.
+
+- [x] Capture sequential Excel-authored and saved/reopened differential evidence, including empty Pages/Tabs and layout.
+- [x] Add bounded lossless TabStrip arrays/flags and MultiPage x bookkeeping parsing and writing.
+- [x] Extend new generation and atomic before/after topology/property compilation, preserving opaque state.
+- [x] Align FormSpec, projection, editor intelligence, and Excel authoring/inspection contracts.
+- [x] Verify blank/template pack, file pull, Excel persistence/runtime, and relevant package/bridge tests.
+- [x] Update MS-OFORMS/pack/form specifications, ADR-0012, user documentation and changelogs; self-review.
+
+Evidence and exact local commands are retained in the compiler's
+`testdata/multipage-excel-authored/README.md` and
+`testdata/multipage-excel-generated/README.md`. Focused persistence review
+confirmed and then rechecked fixes for empty cached-tab edits and quadratic
+signature membership checks. Local checks passed for userforms/pack/filepull,
+CLI pack/form, 51 bridge tests, Go lint, VS Code TypeScript and docs. No remote
+CI or publication is claimed.

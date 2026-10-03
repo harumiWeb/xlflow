@@ -180,8 +180,9 @@ applicable caption, text/value, parent-relative position, size, tab order,
 enabled, and visible fields use explicit persistence mappings. Existing nested
 control geometry remains parent-relative. Form caption is supported; root
 width/height edits are rejected because persisted client dimensions and Excel
-outer Designer dimensions are different. MultiPage/Page/TabStrip editing remains
-a subsequent stage; Frame/common-control topology is described below.
+outer Designer dimensions are different. MultiPage/Page/TabStrip editing is
+described in the Issue #885 contract below; Frame/common-control topology is
+described separately.
 
 For the Excel-authored unbound ComboBox/ListBox fixtures, Designer AddItem
 items and ListIndex disappear after save/close/reopen. ComboBox Value persists,
@@ -249,9 +250,9 @@ No arbitrary caller-created model is accepted by the lossless serializer.
 
 The supported classes are Label, TextBox, CommandButton, CheckBox,
 OptionButton, ToggleButton, ComboBox, ListBox, SpinButton, ScrollBar, and
-Image without Picture data, plus Frames containing common controls or Frames.
-MultiPage/Page/TabStrip generation,
-custom ActiveX, resources, list/selectedIndex state, and unimplemented
+Image without Picture data, plus Frames, MultiPage/Page hierarchies and
+standalone TabStrips. Custom ActiveX, resources, ComboBox/ListBox list or
+selectedIndex state, and unimplemented
 properties fail loudly. ListBox text/value is rejected because it depends on
 unpersisted list state. SpinButton/ScrollBar value is an integer in the
 initial supported range 0..100; their binary Position is used instead of a
@@ -379,10 +380,31 @@ relative to the new parent. Ordinary serialization still rejects arbitrary
 changes to the lossless model.
 
 Changes to unknown class tables, nonstandard depth/type records, extra
-container bookkeeping or specialized MultiPage/Page/TabStrip topology fail
-loudly. Unchanged specialized subtrees remain byte-preserved when supported
+container bookkeeping fail loudly. MultiPage/Page/TabStrip use the modeled
+bookkeeping below. Unchanged specialized subtrees remain byte-preserved when supported
 Frame controls elsewhere change. All resulting Designer bytes are reparsed
 before returning a signed model; publication remains transactional at pack.
+
+## MultiPage and TabStrip compilation (Issue #885)
+
+The [MultiPage and TabStrip contract](userform-multipage-tabstrip.md) defines
+authoring hierarchy, scoped tabs, selection and geometry boundaries. The reader
+binds Page ownership and x-stream IDs to an unnamed hidden TabStrip, retains
+transition records, capacity and unknown flags, and signs derived semantic
+state as well as raw records. Empty Excel-authored MultiPages can retain cached
+tab arrays; x remains authoritative and no-op replay preserves those bytes.
+
+Controlled topology changes reconcile hidden tab arrays, page storages and x
+records. Changed tab collections emit complete flag arrays, because Excel can
+ignore a short array after growth. Selection follows retained identity unless
+explicit template selection requests a final index; removal falls back to the
+first remaining item, while empty collections expose -1. Nonstandard dependent
+layout edits reject atomically. Ordinary serialization still rejects arbitrary
+model mutation.
+
+Saved/reopened Excel fixtures and local runtime commands are recorded under
+`compiler/testdata/multipage-excel-authored` and `multipage-excel-generated`.
+These gates are developer-only and are never run by ordinary tests or CI.
 
 ## Structural validation
 

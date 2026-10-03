@@ -1,0 +1,80 @@
+schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+coordinateSystem: parent-relative
+form:
+  name: MultiTopologyForm
+  caption: Multi topology
+controls:
+  - id: multi
+    name: MultiMain
+    type: MultiPage
+    left: 12
+    top: 12
+    width: 264
+    height: 204
+    enabled: false
+  - id: alpha
+    parentId: multi
+    name: PageAlpha
+    type: Page
+    caption: 日本語
+    enabled: false
+    visible: false
+    zIndex: 1
+    properties:
+      Tag: alpha-tag
+      ControlTipText: alpha-tip
+      Accelerator: A
+  - id: text
+    parentId: alpha
+    name: PageText
+    type: TextBox
+    text: page text
+    left: 8
+    top: 8
+  - id: frame
+    parentId: alpha
+    name: PageFrame
+    type: Frame
+    left: 8
+    top: 36
+    width: 150
+    height: 80
+  - id: label
+    parentId: frame
+    name: NestedLabel
+    type: Label
+    caption: nested
+  - id: beta
+    parentId: multi
+    name: PageBeta
+    type: Page
+    caption: Beta
+    zIndex: 0
+  - id: gamma
+    parentId: multi
+    name: PageGamma
+    type: Page
+    caption: Gamma
+    zIndex: 2
+  - id: strip
+    name: StripMain
+    type: TabStrip
+    left: 12
+    top: 206
+    width: 240
+    height: 48
+    enabled: false
+    tabs:
+      - name: TabBeta
+        caption: Beta
+      - name: TabAlpha
+        caption: Alpha
+        tag: tab-tag
+        controlTipText: tab-tip
+        accelerator: T
+        enabled: false
+        visible: false
+      - name: TabGamma
+        caption: Gamma

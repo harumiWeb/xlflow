@@ -152,6 +152,30 @@ and VBFrame values consistent. Values unrepresentable in the project code page
 are rejected rather than silently changing the runtime caption. This restriction
 does not apply to control captions or values, which retain Unicode persistence.
 
+### Amendment: MultiPage, Page and TabStrip compilation (Issue #885)
+
+Canonical authoring now includes MultiPage with Page children and independent
+TabStrip tab collections. Pages own their child controls; the unnamed internal
+TabStrip remains persistence state, because exposing it as a second authoring
+control would introduce conflicting authorities for captions and page flags.
+Page order follows the x-stream IDs and tab arrays rather than site order.
+
+The compiler preserves retained records, page transition data and resources.
+Structural edits reconcile the hidden strip, page storages and x records in the
+same clone/encode/reparse boundary. Selection follows the retained selected
+page or tab identity when authoring omits selection; removal selects the first
+remaining item. Empty collections expose -1, while unchanged saved Designers
+retain opaque or stale empty-selection bytes for lossless replay.
+
+New Page client geometry uses fixed 96 DPI, a standard top-tab layout and an
+explicit Tahoma 8.25pt font. Querying host display or font APIs would make pack
+artifacts depend on the build machine. Page COM geometry therefore stays out
+of authoring fields. Existing standard layouts retain their measured insets
+when resized; unsupported dependent layout edits fail before publication.
+This trades automatic support for every tab style for deterministic generation
+and preservation of existing Designer state. Ordinary pack still performs no
+VBE compile or runtime validation.
+
 ### Amendment: stable graduation (Issue #858)
 
 The pre-stable stages are complete. `pack` is now a stable command and no

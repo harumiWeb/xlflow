@@ -68,6 +68,8 @@ type Control struct {
 	OpaqueRaw        []byte
 	Children         []*Control
 	Level            *Level
+	MultiPage        *MultiPage
+	TabStrip         *TabStrip
 }
 
 // Site is an OleSiteConcreteControl and its raw persistence details.

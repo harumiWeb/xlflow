@@ -36,6 +36,34 @@ func TestCompleteYAMLRootFormAndControlProperties(t *testing.T) {
 			t.Fatalf("caption documentation = %#v", caption)
 		}
 	})
+	t.Run("page controls and TabStrip tabs expose typed properties", func(t *testing.T) {
+		pageItems := CompleteYAML("controls:\n  - type: Page\n    ", Position{Line: 2, Character: 4})
+		for _, label := range []string{"caption", "controlTipText", "tag", "accelerator", "enabled", "visible"} {
+			if !hasLabel(pageItems, label) {
+				t.Fatalf("Page items = %#v, missing %s", labels(pageItems), label)
+			}
+		}
+		if hasLabel(pageItems, "tabs") || hasLabel(pageItems, "selectedIndex") {
+			t.Fatalf("Page items include unrelated properties: %#v", labels(pageItems))
+		}
+
+		tabItems := CompleteYAML("controls:\n  - type: TabStrip\n    tabs:\n      - name: Main\n        ", Position{Line: 4, Character: 8})
+		for _, label := range []string{"caption", "controlTipText", "tag", "accelerator", "enabled", "visible"} {
+			if !hasLabel(tabItems, label) {
+				t.Fatalf("Tab items = %#v, missing %s", labels(tabItems), label)
+			}
+		}
+	})
+	t.Run("MultiPage and TabStrip expose supported selectedIndex", func(t *testing.T) {
+		multiPage := CompleteYAML("controls:\n  - type: MultiPage\n    ", Position{Line: 2, Character: 4})
+		if !hasLabel(multiPage, "selectedIndex") || hasLabel(multiPage, "tabs") {
+			t.Fatalf("MultiPage properties = %#v", labels(multiPage))
+		}
+		tabStrip := CompleteYAML("controls:\n  - type: TabStrip\n    ", Position{Line: 2, Character: 4})
+		if !hasLabel(tabStrip, "selectedIndex") || !hasLabel(tabStrip, "tabs") {
+			t.Fatalf("TabStrip properties = %#v", labels(tabStrip))
+		}
+	})
 	t.Run("snapshot field appears only after it is typed", func(t *testing.T) {
 		items := CompleteYAML("form:\n  ob", Position{Line: 1, Character: 4})
 		observed, ok := completionByLabel(items, "observed")
@@ -49,6 +77,33 @@ func TestCompleteYAMLRootFormAndControlProperties(t *testing.T) {
 			t.Fatalf("custom items = %#v", labels(items))
 		}
 	})
+}
+
+func TestCompleteYAMLParentReferencesHonorMultiPagePageTopology(t *testing.T) {
+	source := `controls:
+  - id: FrameMain
+    name: Main frame
+    type: Frame
+  - id: MultiPageMain
+    name: Main pages
+    type: MultiPage
+  - id: PageMain
+    name: Main page
+    type: Page
+    parentId:
+  - id: LabelMain
+    name: Main label
+    type: Label
+    parentId:
+`
+	pageItems := CompleteYAML(source, Position{Line: 10, Character: len("    parentId:")})
+	if !hasLabel(pageItems, "MultiPageMain") || hasLabel(pageItems, "FrameMain") {
+		t.Fatalf("Page parent values = %#v", labels(pageItems))
+	}
+	labelItems := CompleteYAML(source, Position{Line: 14, Character: len("    parentId:")})
+	if hasLabel(labelItems, "MultiPageMain") || !hasLabel(labelItems, "FrameMain") {
+		t.Fatalf("Label parent values = %#v", labels(labelItems))
+	}
 }
 
 func TestCompleteYAMLFixedAndScalarValues(t *testing.T) {

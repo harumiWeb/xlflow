@@ -250,6 +250,9 @@ func (c *compilation) topology() error {
 	var visit func([]*oforms.Control)
 	visit = func(controls []*oforms.Control) {
 		for _, control := range controls {
+			if control.CLSIDCacheIndex == 18 && control.Name == "" {
+				continue
+			}
 			c.controls[strings.ToLower(control.Name)] = control
 			visit(control.Children)
 		}
@@ -313,11 +316,55 @@ func (c *compilation) formEdits() error {
 }
 
 func (c *compilation) controlEdits(old, next, actual spec.FormSpecControl, path string) error {
+	if strings.EqualFold(old.Type, "Page") {
+		if !reflect.DeepEqual(old.Left, next.Left) || !reflect.DeepEqual(old.Top, next.Top) || !reflect.DeepEqual(old.Width, next.Width) || !reflect.DeepEqual(old.Height, next.Height) {
+			return c.fail(Unsupported, old.Name, path+".geometry", "Page geometry is derived from its MultiPage")
+		}
+		next.Caption, next.Enabled, next.Visible = old.Caption, old.Enabled, old.Visible
+		next.ControlTipText, next.Accelerator = old.ControlTipText, old.Accelerator
+		next.Properties = maps.Clone(next.Properties)
+		for key := range next.Properties {
+			if slices.Contains([]string{"caption", "enabled", "visible", "controltiptext", "accelerator"}, strings.ToLower(strings.TrimSpace(key))) {
+				delete(next.Properties, key)
+			}
+		}
+		for key, value := range old.Properties {
+			if slices.Contains([]string{"caption", "enabled", "visible", "controltiptext", "accelerator"}, strings.ToLower(strings.TrimSpace(key))) {
+				if next.Properties == nil {
+					next.Properties = map[string]any{}
+				}
+				next.Properties[key] = value
+			}
+		}
+	}
+	if strings.EqualFold(old.Type, "MultiPage") {
+		next.Enabled = old.Enabled
+		next.Properties = maps.Clone(next.Properties)
+		for key := range next.Properties {
+			if strings.EqualFold(strings.TrimSpace(key), "enabled") {
+				delete(next.Properties, key)
+			}
+		}
+		for key, value := range old.Properties {
+			if strings.EqualFold(strings.TrimSpace(key), "enabled") {
+				if next.Properties == nil {
+					next.Properties = map[string]any{}
+				}
+				next.Properties[key] = value
+			}
+		}
+	}
+	if strings.EqualFold(old.Type, "MultiPage") || strings.EqualFold(old.Type, "TabStrip") {
+		next.SelectedIndex = old.SelectedIndex
+	}
 	fields := []struct {
 		name, persisted   string
 		old, next, actual any
 	}{
 		{"caption", "Caption", pointerValue(old.Caption), pointerValue(next.Caption), pointerValue(actual.Caption)},
+		{"tag", "Tag", pointerValue(old.Tag), pointerValue(next.Tag), pointerValue(actual.Tag)},
+		{"controlTipText", "ControlTipText", pointerValue(old.ControlTipText), pointerValue(next.ControlTipText), pointerValue(actual.ControlTipText)},
+		{"accelerator", "Accelerator", pointerValue(old.Accelerator), pointerValue(next.Accelerator), pointerValue(actual.Accelerator)},
 		{"text", "Value", pointerValue(old.Text), pointerValue(next.Text), pointerValue(actual.Text)},
 		{"value", "Value", old.Value, next.Value, actual.Value},
 		{"left", "Left", pointerValue(old.Left), pointerValue(next.Left), pointerValue(actual.Left)},
@@ -395,7 +442,7 @@ func sameBaseline(property string, before, actual, convertedBefore, convertedAct
 }
 
 func supportedControl(kind string) bool {
-	return slices.Contains([]string{"label", "textbox", "combobox", "listbox", "commandbutton", "checkbox", "optionbutton", "frame"}, strings.ToLower(kind))
+	return slices.Contains([]string{"label", "textbox", "combobox", "listbox", "commandbutton", "checkbox", "optionbutton", "frame", "multipage", "page", "tabstrip"}, strings.ToLower(kind))
 }
 
 func convertValue(kind, property string, value any) (any, error) {
@@ -454,7 +501,8 @@ func convertValue(kind, property string, value any) (any, error) {
 }
 
 var propertyNames = map[string]string{
-	"tag": "Tag", "controltiptext": "ControlTipText", "groupname": "GroupName",
+	"accelerator": "Accelerator",
+	"tag":         "Tag", "controltiptext": "ControlTipText", "groupname": "GroupName",
 	"backcolor": "BackColor", "forecolor": "ForeColor", "bordercolor": "BorderColor",
 	"borderstyle": "BorderStyle", "maxlength": "MaxLength",
 	"caption": "Caption", "text": "Value", "value": "Value",
@@ -593,7 +641,7 @@ func snapshotProperty(control spec.FormSpecControl, key string) (any, bool) {
 
 func bagValue(kind, key string, value any) (any, error) {
 	switch key {
-	case "tag", "controltiptext", "groupname", "caption":
+	case "tag", "controltiptext", "groupname", "caption", "accelerator":
 		v, ok := value.(string)
 		if !ok {
 			return nil, fmt.Errorf("property must be a string")

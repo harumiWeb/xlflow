@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added Excel bridge support for `MultiPage` Pages and independent `TabStrip`
+  tabs in UserForm snapshots and writes. Page hierarchies, tab metadata, and
+  logical `selected_index` are preserved; authored pages replace defaults
+  exactly, explicit empty tab arrays clear the collection, and omitted tab
+  collections remain unspecified during edits.
+
 - Added pure-Go Frame generation with nested Frames and common controls.
   Canonical template specs can add, remove, replace, reparent and reorder
   supported controls while retaining unchanged Designer persistence data.

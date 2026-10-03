@@ -1,0 +1,10 @@
+{
+  "issue": 885,
+  "harness": "scripts/test-userform-multipage-e2e.ps1",
+  "capturedUtc": "2026-10-03T09:40:57.2542063Z",
+  "version": "16.0",
+  "build": 17932,
+  "processId": 94968,
+  "cleanupConfirmed": true,
+  "runtimeVerified": true
+}

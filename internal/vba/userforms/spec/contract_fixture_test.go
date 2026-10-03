@@ -17,10 +17,12 @@ type contractSnapshot struct {
 		ProgID string `json:"progId"`
 	} `json:"builtInControls"`
 	Bridge struct {
-		FormFields         []string `json:"formFields"`
-		FormBuildFields    []string `json:"formBuildFields"`
-		ObservedFormFields []string `json:"observedFormFields"`
-		ControlFields      []string `json:"controlFields"`
+		FormFields            []string `json:"formFields"`
+		FormBuildFields       []string `json:"formBuildFields"`
+		ObservedFormFields    []string `json:"observedFormFields"`
+		ControlFields         []string `json:"controlFields"`
+		ObservedControlFields []string `json:"observedControlFields"`
+		TabFields             []string `json:"tabFields"`
 	} `json:"bridge"`
 }
 
@@ -37,8 +39,8 @@ func TestRepresentativeUserFormFixtureMatchesCanonicalContract(t *testing.T) {
 	if err := yaml.Unmarshal(fixture, &spec); err != nil {
 		t.Fatal(err)
 	}
-	if len(spec.Controls) != 8 {
-		t.Fatalf("fixture controls = %d, want 8", len(spec.Controls))
+	if len(spec.Controls) != 11 {
+		t.Fatalf("fixture controls = %d, want 11", len(spec.Controls))
 	}
 	seen := map[string]FormSpecControl{}
 	for _, control := range spec.Controls {
@@ -48,7 +50,7 @@ func TestRepresentativeUserFormFixtureMatchesCanonicalContract(t *testing.T) {
 			t.Fatalf("%s progId = %q, want %q", control.Type, control.ProgID, progID)
 		}
 	}
-	for _, typeName := range []string{"Frame", "Label", "TextBox", "ComboBox", "ListBox", "CommandButton", "CheckBox", "OptionButton"} {
+	for _, typeName := range []string{"Frame", "Label", "TextBox", "ComboBox", "ListBox", "CommandButton", "CheckBox", "OptionButton", "MultiPage", "Page", "TabStrip"} {
 		if _, ok := seen[typeName]; !ok {
 			t.Fatalf("fixture missing %s", typeName)
 		}
@@ -77,6 +79,8 @@ func TestContractSnapshotMatchesGoContractAndSpecTags(t *testing.T) {
 	assertJSONFields(t, reflect.TypeOf(FormSpecBuildForm{}), snapshot.Bridge.FormBuildFields)
 	assertJSONFields(t, reflect.TypeOf(FormSpecObservedForm{}), snapshot.Bridge.ObservedFormFields)
 	assertJSONFields(t, reflect.TypeOf(FormSpecControl{}), snapshot.Bridge.ControlFields)
+	assertJSONFields(t, reflect.TypeOf(FormSpecObservedControl{}), snapshot.Bridge.ObservedControlFields)
+	assertJSONFields(t, reflect.TypeOf(FormSpecTab{}), snapshot.Bridge.TabFields)
 
 	doc, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "vitepress", "reference", "userform-spec.md"))
 	if err != nil {

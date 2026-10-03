@@ -37,24 +37,28 @@ type FormSnapshot struct {
 }
 
 type ControlSnapshot struct {
-	Name          string            `json:"name"`
-	Type          string            `json:"type"`
-	ProgID        string            `json:"prog_id,omitempty"`
-	Caption       *string           `json:"caption,omitempty"`
-	Text          *string           `json:"text,omitempty"`
-	Value         any               `json:"value,omitempty"`
-	Left          float64           `json:"left,omitempty"`
-	Top           float64           `json:"top,omitempty"`
-	Width         float64           `json:"width,omitempty"`
-	Height        float64           `json:"height,omitempty"`
-	TabIndex      *int              `json:"tab_index,omitempty"`
-	SelectedIndex *int              `json:"selected_index,omitempty"`
-	Enabled       *bool             `json:"enabled,omitempty"`
-	Visible       *bool             `json:"visible,omitempty"`
-	List          []string          `json:"list,omitempty"`
-	Properties    map[string]any    `json:"properties,omitempty"`
-	Unsupported   []string          `json:"unsupported,omitempty"`
-	Controls      []ControlSnapshot `json:"controls,omitempty"`
+	Name           string            `json:"name"`
+	Type           string            `json:"type"`
+	ProgID         string            `json:"prog_id,omitempty"`
+	Caption        *string           `json:"caption,omitempty"`
+	Tag            *string           `json:"tag,omitempty"`
+	ControlTipText *string           `json:"control_tip_text,omitempty"`
+	Accelerator    *string           `json:"accelerator,omitempty"`
+	Text           *string           `json:"text,omitempty"`
+	Value          any               `json:"value,omitempty"`
+	Left           float64           `json:"left,omitempty"`
+	Top            float64           `json:"top,omitempty"`
+	Width          float64           `json:"width,omitempty"`
+	Height         float64           `json:"height,omitempty"`
+	TabIndex       *int              `json:"tab_index,omitempty"`
+	SelectedIndex  *int              `json:"selected_index,omitempty"`
+	Enabled        *bool             `json:"enabled,omitempty"`
+	Visible        *bool             `json:"visible,omitempty"`
+	List           []string          `json:"list,omitempty"`
+	Tabs           []FormSpecTab     `json:"tabs"`
+	Properties     map[string]any    `json:"properties,omitempty"`
+	Unsupported    []string          `json:"unsupported,omitempty"`
+	Controls       []ControlSnapshot `json:"controls,omitempty"`
 }
 
 type FormWarning struct {

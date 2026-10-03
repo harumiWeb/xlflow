@@ -1,6 +1,9 @@
 package spec
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 type ValueType string
 
@@ -36,10 +39,13 @@ type PropertyContract struct {
 }
 
 type ControlContract struct {
-	Type               string
-	ProgID             string
-	CanContainChildren bool
-	Properties         map[string]PropertyContract
+	Type                     string
+	ProgID                   string
+	CanContainChildren       bool
+	AllowedChildTypes        []string
+	AllowedParentTypes       []string
+	ExcludedCommonProperties []string
+	Properties               map[string]PropertyContract
 }
 
 type Contract struct {
@@ -47,6 +53,7 @@ type Contract struct {
 	DocumentProperties      map[string]PropertyContract
 	FormProperties          map[string]PropertyContract
 	CommonControlProperties map[string]PropertyContract
+	TabProperties           map[string]PropertyContract
 	Controls                map[string]ControlContract
 }
 
@@ -65,18 +72,42 @@ func LookupControlContract(typeName string) (ControlContract, bool) {
 }
 
 func LookupControlProperty(typeName, propertyName string) (PropertyContract, bool) {
-	if property, ok := lookupProperty(userFormContract.CommonControlProperties, propertyName); ok {
-		return clonePropertyContract(property), true
-	}
-	control, ok := userFormContract.Controls[contractKey(typeName)]
-	if !ok {
-		return PropertyContract{}, false
-	}
-	property, ok := lookupProperty(control.Properties, propertyName)
+	property, ok := lookupProperty(ControlProperties(typeName), propertyName)
 	if !ok {
 		return PropertyContract{}, false
 	}
 	return clonePropertyContract(property), true
+}
+
+// ControlProperties returns the properties available on the control type,
+// combining common and type-specific properties while applying exclusions.
+func ControlProperties(typeName string) map[string]PropertyContract {
+	properties := clonePropertyMap(userFormContract.CommonControlProperties)
+	control, ok := userFormContract.Controls[contractKey(typeName)]
+	if !ok {
+		return properties
+	}
+	for _, name := range control.ExcludedCommonProperties {
+		deleteProperty(properties, name)
+	}
+	for name, property := range control.Properties {
+		properties[name] = clonePropertyContract(property)
+	}
+	return properties
+}
+
+func deleteProperty(properties map[string]PropertyContract, name string) {
+	for key := range properties {
+		if strings.EqualFold(key, name) {
+			delete(properties, key)
+		}
+	}
+}
+
+// LookupTabProperty returns metadata for one standalone TabStrip tab field.
+func LookupTabProperty(propertyName string) (PropertyContract, bool) {
+	property, ok := lookupProperty(userFormContract.TabProperties, propertyName)
+	return clonePropertyContract(property), ok
 }
 
 // LookupFormBuildProperty returns metadata for the explicit form.build
@@ -160,6 +191,48 @@ func FormSpecControlCanContainChildren(control FormSpecControl) (bool, bool) {
 	return contract.CanContainChildren, true
 }
 
+// FormSpecControlParentAllowsChild applies the built-in parent/child
+// constraints in the canonical UserForm contract. The bool result indicates
+// whether both controls are known well enough to make a decision.
+func FormSpecControlParentAllowsChild(parent, child FormSpecControl) (bool, bool) {
+	parentContract, parentKnown := formSpecControlContract(parent)
+	childContract, childKnown := formSpecControlContract(child)
+	if !parentKnown {
+		if childKnown && childContract.AllowedParentTypes != nil {
+			return false, true
+		}
+		return false, false
+	}
+	if !parentContract.CanContainChildren {
+		return false, true
+	}
+	if parentContract.AllowedChildTypes != nil && (!childKnown || !containsControlType(parentContract.AllowedChildTypes, childContract.Type)) {
+		return false, true
+	}
+	if childKnown && childContract.AllowedParentTypes != nil && !containsControlType(childContract.AllowedParentTypes, parentContract.Type) {
+		return false, true
+	}
+	return true, true
+}
+
+func formSpecControlContract(control FormSpecControl) (ControlContract, bool) {
+	if progID := strings.TrimSpace(control.ProgID); progID != "" {
+		if contract, ok := LookupControlContractByProgID(progID); ok {
+			return contract, true
+		}
+	}
+	return LookupControlContract(control.Type)
+}
+
+func containsControlType(values []string, typeName string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, typeName) {
+			return true
+		}
+	}
+	return false
+}
+
 func ProgIDMatchesControlType(typeName, progID string) bool {
 	builtInProgID, ok := BuiltInControlProgID(typeName)
 	return ok && strings.EqualFold(strings.TrimSpace(progID), builtInProgID)
@@ -185,6 +258,31 @@ func newUserFormContract() Contract {
 		"properties":  property(ValueTypeObject, false, SupportLevelCustomUnchecked, "Unchecked custom property bag for future or non-standard controls.", false),
 		"unsupported": property(ValueTypeStringArray, false, SupportLevelSnapshotOnly, "Properties observed during inspection that xlflow did not model.", false),
 	}
+	tabs := map[string]PropertyContract{
+		"name":           property(ValueTypeString, true, SupportLevelSupported, "TabStrip tab name; names must be unique within the owning TabStrip, ignoring case.", true),
+		"caption":        property(ValueTypeString, false, SupportLevelSupported, "Text displayed on the tab.", true),
+		"controlTipText": property(ValueTypeString, false, SupportLevelSupported, "Tooltip shown for the tab.", true),
+		"tag":            property(ValueTypeString, false, SupportLevelSupported, "Opaque metadata associated with the tab.", true),
+		"accelerator":    property(ValueTypeString, false, SupportLevelSupported, "Keyboard accelerator for the tab.", true),
+		"enabled":        property(ValueTypeBoolean, false, SupportLevelSupported, "Whether the tab is enabled.", true),
+		"visible":        property(ValueTypeBoolean, false, SupportLevelSupported, "Whether the tab is visible.", true),
+	}
+	multiPage := control("MultiPage", "Forms.MultiPage.1", true, map[string]PropertyContract{
+		"selectedIndex": property(ValueTypeInteger, false, SupportLevelSupported, "Zero-based selected Page index, or -1 when no Page is selected.", true),
+	})
+	multiPage.AllowedChildTypes = []string{"Page"}
+	page := control("Page", "Forms.Page.1", true, typeProperties(
+		"caption", "Text displayed on the page tab.",
+		"controlTipText", "Tooltip shown for the page.",
+		"tag", "Opaque metadata associated with the page.",
+		"accelerator", "Keyboard accelerator for the page.",
+	))
+	page.AllowedParentTypes = []string{"MultiPage"}
+	page.ExcludedCommonProperties = []string{"left", "top", "width", "height"}
+	tabStrip := control("TabStrip", "Forms.TabStrip.1", false, map[string]PropertyContract{
+		"selectedIndex": property(ValueTypeInteger, false, SupportLevelSupported, "Zero-based selected Tab index, or -1 when no Tab is selected.", true),
+		"tabs":          property(ValueTypeObjectArray, false, SupportLevelSupported, "Standalone TabStrip tabs. An explicit empty array removes all tabs.", true),
+	})
 
 	return Contract{
 		SchemaVersion: 1,
@@ -206,6 +304,7 @@ func newUserFormContract() Contract {
 			"observed": property(ValueTypeObject, false, SupportLevelSnapshotOnly, "Observed form state captured from Excel.", false),
 		},
 		CommonControlProperties: common,
+		TabProperties:           tabs,
 		Controls: map[string]ControlContract{
 			"label":         control("Label", "Forms.Label.1", false, typeProperties("caption", "Text displayed by the label.")),
 			"textbox":       control("TextBox", "Forms.TextBox.1", false, typeProperties("text", "TextBox text.", "value", "TextBox value.")),
@@ -219,6 +318,9 @@ func newUserFormContract() Contract {
 			"scrollbar":     control("ScrollBar", "Forms.ScrollBar.1", false, integerValueProperties("ScrollBar value.")),
 			"image":         control("Image", "Forms.Image.1", false, map[string]PropertyContract{}),
 			"frame":         control("Frame", "Forms.Frame.1", true, typeProperties("caption", "Frame caption.")),
+			"multipage":     multiPage,
+			"page":          page,
+			"tabstrip":      tabStrip,
 		},
 	}
 }
@@ -306,6 +408,7 @@ func cloneContract(contract Contract) Contract {
 		DocumentProperties:      clonePropertyMap(contract.DocumentProperties),
 		FormProperties:          clonePropertyMap(contract.FormProperties),
 		CommonControlProperties: clonePropertyMap(contract.CommonControlProperties),
+		TabProperties:           clonePropertyMap(contract.TabProperties),
 		Controls:                cloneControlMap(contract.Controls),
 	}
 }
@@ -323,10 +426,13 @@ func cloneControlMap(values map[string]ControlContract) map[string]ControlContra
 
 func cloneControlContract(value ControlContract) ControlContract {
 	return ControlContract{
-		Type:               value.Type,
-		ProgID:             value.ProgID,
-		CanContainChildren: value.CanContainChildren,
-		Properties:         clonePropertyMap(value.Properties),
+		Type:                     value.Type,
+		ProgID:                   value.ProgID,
+		CanContainChildren:       value.CanContainChildren,
+		AllowedChildTypes:        slices.Clone(value.AllowedChildTypes),
+		AllowedParentTypes:       slices.Clone(value.AllowedParentTypes),
+		ExcludedCommonProperties: slices.Clone(value.ExcludedCommonProperties),
+		Properties:               clonePropertyMap(value.Properties),
 	}
 }
 

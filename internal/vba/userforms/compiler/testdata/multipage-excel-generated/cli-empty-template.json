@@ -1,0 +1,38 @@
+{
+  "name": "normalized",
+  "workbook": "C:\\Users\\HARUMI\\orca\\workspaces\\xlflow\\huchen\\tmp_workspaces\\issue-885-cli-empty-template-01\\normalized.xlsm",
+  "before": {
+    "pageValue": {
+      "available": true,
+      "value": -1
+    },
+    "tabValue": {
+      "available": true,
+      "value": -1
+    },
+    "enabled": true,
+    "tabEnabled": true,
+    "width": 264,
+    "height": 204,
+    "pages": [],
+    "tabs": []
+  },
+  "runtimeSentinel": "issue-885-ok|0:-1|tabs=0:-1|text=|label=|enabled=True:True",
+  "after": {
+    "pageValue": {
+      "available": true,
+      "value": -1
+    },
+    "tabValue": {
+      "available": true,
+      "value": -1
+    },
+    "enabled": true,
+    "tabEnabled": true,
+    "width": 264,
+    "height": 204,
+    "pages": [],
+    "tabs": []
+  },
+  "binarySha256": "aaa46453c9aea76015994d05547ff9d7500ac0b49074cd86bdaaac45654d81d3"
+}

@@ -56,6 +56,9 @@ func propertyAtPath(doc *Document, path string) (forms.PropertyContract, string,
 	case parent == "form.observed":
 		property, ok := forms.LookupFormObservedProperty(name)
 		return property, "captured form state", ok
+	case isTabPath(parent):
+		property, ok := forms.LookupTabProperty(name)
+		return property, "TabStrip tab", ok
 	case isControlPath(parent):
 		control := controlAtPath(doc.Source, parent)
 		if property, ok := forms.LookupControlProperty(control.Type, name); ok {

@@ -25,7 +25,7 @@ func TestBuildFormWriteOptionsAcceptsRepresentativeUserFormFixture(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Spec.Form.Name != "AllControlsForm" || len(opts.Spec.Controls) != 8 {
+	if opts.Spec.Form.Name != "AllControlsForm" || len(opts.Spec.Controls) != 11 {
 		t.Fatalf("fixture options = %#v", opts)
 	}
 }

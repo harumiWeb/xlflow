@@ -61,6 +61,10 @@ func CompileTemplate(base *oforms.Form, desired spec.FormSpec, codePage uint16) 
 	if err != nil {
 		return nil, err
 	}
+	result, err = applyExplicitTabSelection(result, desired, codePage)
+	if err != nil {
+		return nil, err
+	}
 	caption, explicit := templateExplicitRootCaption(desired.Form)
 	if !explicit {
 		return result, nil
@@ -234,6 +238,9 @@ func overlayTemplateControl(base *oforms.Form, target *spec.FormSpecControl, des
 	if desired.SelectedIndex != nil {
 		target.SelectedIndex = new(*desired.SelectedIndex)
 	}
+	if desired.Tabs != nil {
+		target.Tabs = overlayTabs(target.Tabs, desired.Tabs)
+	}
 	return nil
 }
 
@@ -261,6 +268,14 @@ func templateAliasRequests(control spec.FormSpecControl) ([]templateAliasRequest
 			return nil, &templateConversionError{key: "caption", err: err}
 		}
 		add("Caption", "caption", *control.Caption, value)
+	}
+	for _, field := range []struct {
+		name, key string
+		value     *string
+	}{{"Tag", "tag", control.Tag}, {"ControlTipText", "controlTipText", control.ControlTipText}, {"Accelerator", "accelerator", control.Accelerator}} {
+		if field.value != nil {
+			add(field.name, field.key, *field.value, *field.value)
+		}
 	}
 	if control.Text != nil {
 		value, err := convertValue(control.Type, "text", *control.Text)
@@ -325,6 +340,18 @@ func groupTemplateAliases(requests []templateAliasRequest) map[string][]template
 
 func applyTemplateAlias(control *spec.FormSpecControl, request templateAliasRequest) {
 	switch request.canonical {
+	case "Tag":
+		if value, ok := request.raw.(string); ok {
+			control.Tag = new(value)
+		}
+	case "ControlTipText":
+		if value, ok := request.raw.(string); ok {
+			control.ControlTipText = new(value)
+		}
+	case "Accelerator":
+		if value, ok := request.raw.(string); ok {
+			control.Accelerator = new(value)
+		}
 	case "Caption":
 		if value, ok := request.raw.(string); ok {
 			control.Caption = new(value)

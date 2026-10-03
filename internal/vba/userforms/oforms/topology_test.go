@@ -13,6 +13,20 @@ func frameDefinition(name string, children ...ControlDefinition) ControlDefiniti
 	return ControlDefinition{Name: name, Class: 14, Size: Size{5080, 3810}, Visible: true, Properties: map[string]any{"Caption": name, "BooleanProperties": int64(0x8004)}, Controls: children}
 }
 
+func multiPageDefinition(name string, pageNames ...string) ControlDefinition {
+	pages := make([]ControlDefinition, len(pageNames))
+	tabs := make([]Tab, len(pageNames))
+	for i, pageName := range pageNames {
+		pages[i] = ControlDefinition{Name: pageName, Class: 7, Visible: true}
+		tabs[i] = Tab{Name: "Tab" + pageName, Caption: pageName, Enabled: true, Visible: true}
+	}
+	selected := int32(0)
+	if len(pages) == 0 {
+		selected = -1
+	}
+	return ControlDefinition{Name: name, Class: 57, Size: Size{5000, 3000}, Visible: true, Controls: pages, Tabs: &TabStrip{SelectedIndex: selected, Tabs: tabs}}
+}
+
 func TestNewFormNestedFrameOwnership(t *testing.T) {
 	form, err := NewForm(Definition{Name: "Nested", Size: Size{8467, 6350}, Controls: []ControlDefinition{
 		frameDefinition("Outer", frameDefinition("Inner", ControlDefinition{Name: "Text", Class: 23, Size: Size{1000, 600}, Position: Position{10, 20}, Visible: true, Properties: map[string]any{"Value": "日本語"}})), frameDefinition("Empty"),
@@ -60,7 +74,11 @@ func topologyOf(form *Form) []TopologyControl {
 				name = fmt.Sprintf("<unnamed_%d>", unnamed)
 			}
 			out = append(out, TopologyControl{Name: name, Parent: parent})
-			walk(c.Children, name)
+			children := c.Children
+			if c.MultiPage != nil {
+				children = c.MultiPage.Pages
+			}
+			walk(children, name)
 		}
 	}
 	walk(form.Controls, "")
@@ -142,7 +160,7 @@ func TestApplyTopologyMovesAddsDeletesAndReplacesAtomically(t *testing.T) {
 	}
 }
 
-func TestApplyTopologyRejectsCyclesAndSpecializedRemoval(t *testing.T) {
+func TestApplyTopologyRejectsCyclesAndAcceptsMultiPageRemoval(t *testing.T) {
 	form, err := NewForm(Definition{Name: "Nested", Size: Size{1000, 1000}, Controls: []ControlDefinition{frameDefinition("A", frameDefinition("B"))}}, 1252)
 	if err != nil {
 		t.Fatal(err)
@@ -150,12 +168,111 @@ func TestApplyTopologyRejectsCyclesAndSpecializedRemoval(t *testing.T) {
 	if _, err := ApplyTopology(form, []TopologyControl{{Name: "A", Parent: "B"}, {Name: "B", Parent: "A"}}, 1252); !errors.Is(err, ErrInvalidEdit) {
 		t.Fatalf("cycle=%v", err)
 	}
-	legacy, err := ReadForm(openFixture(t, "p6_nested_form.bin"), "UserForm1", 932)
+	base, err := NewForm(Definition{Name: "TopologyMulti", Size: Size{8467, 6350}, Controls: []ControlDefinition{
+		multiPageDefinition("Pages", "PageA", "PageB"),
+		frameDefinition("Keep"),
+	}}, 932)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ApplyTopology(legacy, nil, 932); !errors.Is(err, ErrUnsupportedEdit) {
-		t.Fatalf("specialized removal=%v", err)
+	before, err := SerializeForm(base, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed, err := ApplyTopology(base, []TopologyControl{{Name: "Keep"}}, 932)
+	if err != nil {
+		t.Fatalf("MultiPage removal: %v", err)
+	}
+	if len(removed.Controls) != 1 || removed.Controls[0].Name != "Keep" {
+		t.Fatalf("controls after removal = %#v", removed.Controls)
+	}
+	removedStreams, err := SerializeForm(removed, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removedPrefix := base.Controls[0].Level.Path + "/"
+	for path := range removedStreams.Streams {
+		if len(path) >= len(removedPrefix) && path[:len(removedPrefix)] == removedPrefix {
+			t.Fatalf("removed MultiPage left stream %q", path)
+		}
+	}
+	unchanged, err := SerializeForm(base, 932)
+	if err != nil || !reflect.DeepEqual(before, unchanged) {
+		t.Fatal("successful removal changed input")
+	}
+}
+
+func TestApplyTopologyMovesPageBetweenMultiPagesAtomically(t *testing.T) {
+	base, err := NewForm(Definition{Name: "TopologyMove", Size: Size{8467, 6350}, Controls: []ControlDefinition{
+		multiPageDefinition("FirstPages", "PageA", "PageB"),
+		multiPageDefinition("SecondPages", "PageC"),
+		frameDefinition("Container"),
+	}}, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := SerializeForm(base, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pageB := base.Controls[0].MultiPage.Pages[1]
+	wantTopology := []TopologyControl{
+		{Name: "FirstPages"}, {Name: "PageA", Parent: "FirstPages"}, {Name: "PageB", Parent: "FirstPages"},
+		{Name: "SecondPages"}, {Name: "PageC", Parent: "SecondPages"}, {Name: "Container"},
+	}
+	if got := topologyOf(base); !reflect.DeepEqual(got, wantTopology) {
+		t.Fatalf("topologyOf included hidden strips or changed Page order: %#v", got)
+	}
+	desired := []TopologyControl{
+		{Name: "FirstPages"}, {Name: "PageA", Parent: "FirstPages"},
+		{Name: "SecondPages"}, {Name: "PageB", Parent: "SecondPages"}, {Name: "PageC", Parent: "SecondPages"},
+		{Name: "Container"},
+	}
+	moved, err := ApplyTopology(base, desired, 932)
+	if err != nil {
+		t.Fatalf("Page move: %v", err)
+	}
+	first, second := moved.Controls[0].MultiPage, moved.Controls[1].MultiPage
+	if len(first.Pages) != 1 || first.Pages[0].Name != "PageA" || len(second.Pages) != 2 || second.Pages[0].Name != "PageB" || second.Pages[1].Name != "PageC" {
+		t.Fatalf("pages after move: first=%#v second=%#v", first.Pages, second.Pages)
+	}
+	if second.Pages[0].ID != pageB.ID || second.Hidden.TabStrip.Tabs[0].Caption != "PageB" || second.Hidden.TabStrip.Tabs[1].Caption != "PageC" {
+		t.Fatal("moving a Page lost its identity or associated tab")
+	}
+	if second.Hidden.TabStrip.SelectedIndex != 1 {
+		t.Fatalf("moved MultiPage selection=%d, want retained PageC at index 1", second.Hidden.TabStrip.SelectedIndex)
+	}
+	if _, err := SerializeForm(moved, 932); err != nil {
+		t.Fatalf("moved topology did not serialize: %v", err)
+	}
+
+	invalidBase, err := NewForm(Definition{Name: "InvalidPageParent", Size: Size{8467, 6350}, Controls: []ControlDefinition{
+		multiPageDefinition("Pages", "PageA", "PageB"),
+		frameDefinition("Container"),
+	}}, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidBefore, err := SerializeForm(invalidBase, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := topologyOf(invalidBase)
+	for i := range invalid {
+		if invalid[i].Name == "PageA" {
+			invalid[i].Parent = "Container"
+		}
+	}
+	if rejected, err := ApplyTopology(invalidBase, invalid, 932); rejected != nil || !errors.Is(err, ErrUnsupportedEdit) {
+		t.Fatalf("Page under ordinary Frame: result=%v error=%v", rejected, err)
+	}
+	unchanged, err := SerializeForm(base, 932)
+	if err != nil || !reflect.DeepEqual(before, unchanged) {
+		t.Fatal("move changed input")
+	}
+	unchanged, err = SerializeForm(invalidBase, 932)
+	if err != nil || !reflect.DeepEqual(invalidBefore, unchanged) {
+		t.Fatal("invalid-parent attempt changed input")
 	}
 }
 
@@ -188,8 +305,9 @@ func TestFrameEditPreservesUnchangedMultiPageSubtree(t *testing.T) {
 		t.Fatal(err)
 	}
 	desired := topologyOf(base)
+	frame := frameDefinition("AddedFrame")
 	label := ControlDefinition{Name: "NewLabel", Class: 21, Size: Size{1000, 600}, Visible: true}
-	desired = append(desired, TopologyControl{Name: "NewLabel", Parent: base.Controls[1].Name, Definition: &label})
+	desired = append(desired, TopologyControl{Name: "AddedFrame", Definition: &frame}, TopologyControl{Name: "NewLabel", Parent: "AddedFrame", Definition: &label})
 	after, err := ApplyTopology(base, desired, 932)
 	if err != nil {
 		t.Fatal(err)
@@ -198,12 +316,14 @@ func TestFrameEditPreservesUnchangedMultiPageSubtree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	multiPagePrefix := base.Controls[1].Level.Path + "/"
 	for path, raw := range before.Streams {
-		if len(path) >= len("UserForm1/i05/") && path[:len("UserForm1/i05/")] == "UserForm1/i05/" && !bytes.Equal(raw, got.Streams[path]) {
+		if len(path) >= len(multiPagePrefix) && path[:len(multiPagePrefix)] == multiPagePrefix && !bytes.Equal(raw, got.Streams[path]) {
 			t.Fatalf("special subtree changed: %s", path)
 		}
 	}
-	if after.Levels[0].Record.Values["NextAvailableID"] <= int64(after.Controls[1].Children[len(after.Controls[1].Children)-1].ID) {
+	addedFrame := after.Controls[len(after.Controls)-1]
+	if addedFrame.Name != "AddedFrame" || len(addedFrame.Children) != 1 || after.Levels[0].Record.Values["NextAvailableID"] <= int64(addedFrame.Children[0].ID) {
 		t.Fatal("root allocation counter did not include nested addition")
 	}
 }

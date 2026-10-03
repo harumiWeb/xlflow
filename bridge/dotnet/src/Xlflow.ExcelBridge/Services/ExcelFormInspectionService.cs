@@ -446,13 +446,15 @@ public sealed class ExcelFormInspectionService : IInspectFormService
     {
         var controls = new List<Dictionary<string, object?>>();
         object? children = null;
+        var parentType = ResolveControlType(parent);
+        var collectionName = string.Equals(parentType, "MultiPage", StringComparison.OrdinalIgnoreCase) ? "Pages" : "Controls";
         try
         {
             try
             {
-                children = ExcelBridgeSupport.Get(parent, "Controls");
+                children = ExcelBridgeSupport.Get(parent, collectionName);
             }
-            catch
+            catch when (!string.Equals(parentType, "MultiPage", StringComparison.OrdinalIgnoreCase))
             {
                 return controls;
             }
@@ -492,10 +494,11 @@ public sealed class ExcelFormInspectionService : IInspectFormService
     {
         var progId = TryGetStringMember(control, "ProgId") ?? "";
         var fallbackTypeName = TryGetComControlTypeName(control) ?? control.GetType().Name;
+        var controlType = ResolveDesignerControlType(progId, fallbackTypeName);
         var result = new Dictionary<string, object?>
         {
             ["name"] = TryGetStringMember(control, "Name") ?? "",
-            ["type"] = ResolveDesignerControlType(progId, fallbackTypeName),
+            ["type"] = controlType,
         };
 
         if (!string.IsNullOrWhiteSpace(progId))
@@ -503,8 +506,15 @@ public sealed class ExcelFormInspectionService : IInspectFormService
             result["prog_id"] = progId;
         }
         AddStringMember(control, result, "Caption", "caption");
+        AddStringMember(control, result, "Tag", "tag");
+        AddStringMember(control, result, "ControlTipText", "control_tip_text");
+        AddStringMember(control, result, "Accelerator", "accelerator");
         AddStringMember(control, result, "Text", "text");
-        AddStringMember(control, result, "Value", "value");
+        var selectionControl = IsSelectionValueControl(controlType);
+        if (!selectionControl)
+        {
+            AddStringMember(control, result, "Value", "value");
+        }
         AddDoubleMember(control, result, "Left", "left");
         AddDoubleMember(control, result, "Top", "top");
         AddDoubleMember(control, result, "Width", "width");
@@ -512,7 +522,20 @@ public sealed class ExcelFormInspectionService : IInspectFormService
         AddIntMember(control, result, "TabIndex", "tab_index");
         AddBoolMember(control, result, "Enabled", "enabled");
         AddBoolMember(control, result, "Visible", "visible");
-        AddIntMember(control, result, "ListIndex", "selected_index");
+        if (selectionControl)
+        {
+            var collectionName = string.Equals(controlType, "MultiPage", StringComparison.OrdinalIgnoreCase) ? "Pages" : "Tabs";
+            result["selected_index"] = GetSelectedIndex(control, collectionName);
+        }
+        else
+        {
+            AddIntMember(control, result, "ListIndex", "selected_index");
+        }
+
+        if (string.Equals(controlType, "TabStrip", StringComparison.OrdinalIgnoreCase))
+        {
+            result["tabs"] = SerializeTabStripTabs(control);
+        }
 
         var list = TryGetList(control);
         if (list.Count > 0)
@@ -523,14 +546,88 @@ public sealed class ExcelFormInspectionService : IInspectFormService
         if (ControlCanContainChildren(Convert.ToString(result["type"], CultureInfo.InvariantCulture) ?? ""))
         {
             var name = Convert.ToString(result["name"], CultureInfo.InvariantCulture) ?? "";
-            var children = GetChildControls(control, name);
-            if (children.Count > 0)
-            {
-                result["controls"] = children;
-            }
+            result["controls"] = GetChildControls(control, name);
         }
 
         return result;
+    }
+
+    internal static string ResolveControlType(object control)
+    {
+        var progId = TryGetStringMember(control, "ProgId");
+        var fallbackTypeName = TryGetComControlTypeName(control) ?? control.GetType().Name;
+        return ResolveDesignerControlType(progId, fallbackTypeName);
+    }
+
+    private static bool IsSelectionValueControl(string controlType)
+    {
+        return string.Equals(controlType, "MultiPage", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(controlType, "TabStrip", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int GetSelectedIndex(object control, string collectionName)
+    {
+        object? collection = null;
+        try
+        {
+            collection = ExcelBridgeSupport.Get(control, collectionName)
+                ?? throw new InvalidOperationException($"XlflowInspectFormJson: {collectionName} collection is unavailable.");
+            var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(collection, "Count"));
+            if (count == 0)
+            {
+                return -1;
+            }
+            return Convert.ToInt32(ExcelBridgeSupport.Get(control, "Value"), CultureInfo.InvariantCulture);
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(collection);
+        }
+    }
+
+    private static List<Dictionary<string, object?>> SerializeTabStripTabs(object tabStrip)
+    {
+        var serializedTabs = new List<Dictionary<string, object?>>();
+        object? tabs = null;
+        try
+        {
+            tabs = ExcelBridgeSupport.Get(tabStrip, "Tabs")
+                ?? throw new InvalidOperationException("XlflowInspectFormJson: TabStrip Tabs collection is unavailable.");
+            var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(tabs, "Count"));
+            for (var index = 0; index < count; index++)
+            {
+                object? tab = null;
+                try
+                {
+                    tab = ExcelBridgeSupport.Get(tabs, "Item", index)
+                        ?? throw new InvalidOperationException($"XlflowInspectFormJson: failed to read TabStrip tab at index {index}.");
+                    var name = ExcelBridgeSupport.GetString(tab, "Name");
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        throw new InvalidOperationException($"XlflowInspectFormJson: TabStrip tab at index {index} has no name.");
+                    }
+
+                    var serializedTab = new Dictionary<string, object?> { ["name"] = name };
+                    AddStringMember(tab, serializedTab, "Caption", "caption");
+                    AddStringMember(tab, serializedTab, "ControlTipText", "control_tip_text");
+                    AddStringMember(tab, serializedTab, "Tag", "tag");
+                    AddStringMember(tab, serializedTab, "Accelerator", "accelerator");
+                    AddBoolMember(tab, serializedTab, "Enabled", "enabled");
+                    AddBoolMember(tab, serializedTab, "Visible", "visible");
+                    serializedTabs.Add(serializedTab);
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(tab);
+                }
+            }
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(tabs);
+        }
+
+        return serializedTabs;
     }
 
     internal static string ResolveDesignerControlType(string? progId, string? fallbackTypeName)
@@ -702,7 +799,7 @@ public sealed class ExcelFormInspectionService : IInspectFormService
 
     private static bool ControlCanContainChildren(string controlType)
     {
-        return controlType.Trim().ToLowerInvariant() is "frame" or "multipage" or "page" or "tabstrip";
+        return controlType.Trim().ToLowerInvariant() is "frame" or "multipage" or "page";
     }
 
     private static List<string> TryGetList(object control)
@@ -1060,7 +1157,9 @@ Private Function SerializeControl(ByVal control As Object) As String
   Dim json As String
   Dim hasFields As Boolean
   Dim children As Object
+  Dim tabs As Object
   Dim listCount As Long
+  Dim childCount As Long
   Dim selectedIndex As Long
   Dim typeNameValue As String
 
@@ -1071,8 +1170,13 @@ Private Function SerializeControl(ByVal control As Object) As String
   JsonAddString json, "type", typeNameValue, hasFields
   JsonAddStringFromMember json, control, "ProgId", "prog_id", hasFields
   JsonAddStringFromMember json, control, "Caption", "caption", hasFields
+  JsonAddStringFromMember json, control, "Tag", "tag", hasFields
+  JsonAddStringFromMember json, control, "ControlTipText", "control_tip_text", hasFields
+  JsonAddStringFromMember json, control, "Accelerator", "accelerator", hasFields
   JsonAddFocusSafeText json, control, typeNameValue, hasFields
-  JsonAddStringFromMember json, control, "Value", "value", hasFields
+  If StrComp(typeNameValue, "MultiPage", vbTextCompare) <> 0 And StrComp(typeNameValue, "TabStrip", vbTextCompare) <> 0 Then
+    JsonAddStringFromMember json, control, "Value", "value", hasFields
+  End If
   JsonAddNumberFromMember json, control, "Left", "left", hasFields
   JsonAddNumberFromMember json, control, "Top", "top", hasFields
   JsonAddNumberFromMember json, control, "Width", "width", hasFields
@@ -1081,7 +1185,30 @@ Private Function SerializeControl(ByVal control As Object) As String
   JsonAddBoolFromMember json, control, "Enabled", "enabled", hasFields
   JsonAddBoolFromMember json, control, "Visible", "visible", hasFields
 
-  If TryGetLongMember(control, "ListIndex", selectedIndex) Then
+  If StrComp(typeNameValue, "MultiPage", vbTextCompare) = 0 Then
+    Set children = GetObjectPages(control)
+    If children Is Nothing Then Err.Raise vbObjectError + 885, "SerializeControl", "MultiPage Pages collection is unavailable."
+    childCount = CLng(CallByName(children, "Count", VbGet))
+    If childCount = 0 Then
+      JsonAddLong json, "selected_index", -1, hasFields
+    ElseIf TryGetLongMember(control, "Value", selectedIndex) Then
+      JsonAddLong json, "selected_index", selectedIndex, hasFields
+    Else
+      Err.Raise vbObjectError + 885, "SerializeControl", "MultiPage Value is unavailable."
+    End If
+  ElseIf StrComp(typeNameValue, "TabStrip", vbTextCompare) = 0 Then
+    Set tabs = GetObjectTabs(control)
+    If tabs Is Nothing Then Err.Raise vbObjectError + 885, "SerializeControl", "TabStrip Tabs collection is unavailable."
+    childCount = CLng(CallByName(tabs, "Count", VbGet))
+    JsonAddRaw json, "tabs", SerializeTabStripTabs(tabs), hasFields
+    If childCount = 0 Then
+      JsonAddLong json, "selected_index", -1, hasFields
+    ElseIf TryGetLongMember(control, "Value", selectedIndex) Then
+      JsonAddLong json, "selected_index", selectedIndex, hasFields
+    Else
+      Err.Raise vbObjectError + 885, "SerializeControl", "TabStrip Value is unavailable."
+    End If
+  ElseIf TryGetLongMember(control, "ListIndex", selectedIndex) Then
     JsonAddLong json, "selected_index", selectedIndex, hasFields
   End If
   If TryGetLongMember(control, "ListCount", listCount) Then
@@ -1089,7 +1216,7 @@ Private Function SerializeControl(ByVal control As Object) As String
   End If
 
   If ControlCanContainChildren(typeNameValue) Then
-    Set children = GetObjectControls(control)
+    If children Is Nothing Then Set children = GetObjectControls(control)
   End If
   If Not children Is Nothing Then
     JsonAddRaw json, "controls", SerializeControls(children, SafeControlName(control)), hasFields
@@ -1097,6 +1224,40 @@ Private Function SerializeControl(ByVal control As Object) As String
 
   json = json & "}"
   SerializeControl = json
+  Set tabs = Nothing
+  Set children = Nothing
+End Function
+
+Private Function SerializeTabStripTabs(ByVal tabs As Object) As String
+  Dim json As String
+  Dim first As Boolean
+  Dim tabItem As Object
+  Dim hasFields As Boolean
+  Dim tabName As String
+
+  json = "["
+  first = True
+  For Each tabItem In tabs
+    If Not first Then json = json & ","
+    json = json & "{"
+    hasFields = False
+    If Not TryGetStringMember(tabItem, "Name", tabName) Or Len(Trim$(tabName)) = 0 Then
+      Err.Raise vbObjectError + 885, "SerializeTabStripTabs", "TabStrip tab Name is unavailable."
+    End If
+    JsonAddString json, "name", tabName, hasFields
+    JsonAddStringFromMember json, tabItem, "Caption", "caption", hasFields
+    JsonAddStringFromMember json, tabItem, "ControlTipText", "control_tip_text", hasFields
+    JsonAddStringFromMember json, tabItem, "Tag", "tag", hasFields
+    JsonAddStringFromMember json, tabItem, "Accelerator", "accelerator", hasFields
+    JsonAddBoolFromMember json, tabItem, "Enabled", "enabled", hasFields
+    JsonAddBoolFromMember json, tabItem, "Visible", "visible", hasFields
+    json = json & "}"
+    first = False
+    Set tabItem = Nothing
+  Next tabItem
+  json = json & "]"
+  SerializeTabStripTabs = json
+  Set tabItem = Nothing
 End Function
 
 Private Function ControlHasExpectedParent(ByVal control As Object, ByVal expectedParentName As String) As Boolean
@@ -1129,7 +1290,7 @@ End Function
 
 Private Function ControlCanContainChildren(ByVal controlType As String) As Boolean
   Select Case LCase$(Trim$(controlType))
-    Case "frame", "multipage", "page", "tabstrip"
+    Case "frame", "multipage", "page"
       ControlCanContainChildren = True
     Case Else
       ControlCanContainChildren = False
@@ -1182,6 +1343,18 @@ End Function
 Private Function GetObjectControls(ByVal target As Object) As Object
   On Error Resume Next
   Set GetObjectControls = target.Controls
+  On Error GoTo 0
+End Function
+
+Private Function GetObjectPages(ByVal target As Object) As Object
+  On Error Resume Next
+  Set GetObjectPages = target.Pages
+  On Error GoTo 0
+End Function
+
+Private Function GetObjectTabs(ByVal target As Object) As Object
+  On Error Resume Next
+  Set GetObjectTabs = target.Tabs
   On Error GoTo 0
 End Function
 

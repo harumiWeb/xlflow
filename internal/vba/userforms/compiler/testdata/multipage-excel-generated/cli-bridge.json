@@ -1,0 +1,510 @@
+{
+  "name": "normalized",
+  "workbook": "C:\\Users\\HARUMI\\orca\\workspaces\\xlflow\\huchen\\tmp_workspaces\\issue-885-cli-bridge-01\\normalized.xlsm",
+  "before": {
+    "pageValue": {
+      "available": true,
+      "value": 0
+    },
+    "tabValue": {
+      "available": true,
+      "value": 0
+    },
+    "enabled": false,
+    "tabEnabled": false,
+    "width": 264,
+    "height": 204,
+    "pages": [
+      {
+        "name": "PageBeta",
+        "Caption": {
+          "available": true,
+          "value": "Beta"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": null
+        },
+        "Tag": {
+          "available": true,
+          "value": null
+        },
+        "Accelerator": {
+          "available": true,
+          "value": null
+        },
+        "Enabled": {
+          "available": true,
+          "value": true
+        },
+        "Visible": {
+          "available": true,
+          "value": true
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      },
+      {
+        "name": "PageAlpha",
+        "Caption": {
+          "available": true,
+          "value": "日本語"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": null
+        },
+        "Tag": {
+          "available": true,
+          "value": null
+        },
+        "Accelerator": {
+          "available": true,
+          "value": null
+        },
+        "Enabled": {
+          "available": true,
+          "value": false
+        },
+        "Visible": {
+          "available": true,
+          "value": false
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      },
+      {
+        "name": "PageGamma",
+        "Caption": {
+          "available": true,
+          "value": "Gamma"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": null
+        },
+        "Tag": {
+          "available": true,
+          "value": null
+        },
+        "Accelerator": {
+          "available": true,
+          "value": null
+        },
+        "Enabled": {
+          "available": true,
+          "value": true
+        },
+        "Visible": {
+          "available": true,
+          "value": true
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      }
+    ],
+    "tabs": [
+      {
+        "name": "TabBeta",
+        "Caption": {
+          "available": true,
+          "value": "Beta"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": null
+        },
+        "Tag": {
+          "available": true,
+          "value": null
+        },
+        "Accelerator": {
+          "available": true,
+          "value": null
+        },
+        "Enabled": {
+          "available": true,
+          "value": true
+        },
+        "Visible": {
+          "available": true,
+          "value": true
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      },
+      {
+        "name": "TabAlpha",
+        "Caption": {
+          "available": true,
+          "value": "Alpha"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": "tab-tip"
+        },
+        "Tag": {
+          "available": true,
+          "value": "tab-tag"
+        },
+        "Accelerator": {
+          "available": true,
+          "value": "T"
+        },
+        "Enabled": {
+          "available": true,
+          "value": false
+        },
+        "Visible": {
+          "available": true,
+          "value": false
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      },
+      {
+        "name": "TabGamma",
+        "Caption": {
+          "available": true,
+          "value": "Gamma"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": null
+        },
+        "Tag": {
+          "available": true,
+          "value": null
+        },
+        "Accelerator": {
+          "available": true,
+          "value": null
+        },
+        "Enabled": {
+          "available": true,
+          "value": true
+        },
+        "Visible": {
+          "available": true,
+          "value": true
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      }
+    ]
+  },
+  "runtimeSentinel": "issue-885-ok|3:0|PageBeta:Beta:True:True|PageAlpha:日本語:False:False|PageGamma:Gamma:True:True|tabs=3:0|TabBeta:Beta:True:True|TabAlpha:Alpha:False:False|TabGamma:Gamma:True:True|text=page text|label=nested|enabled=False:False",
+  "after": {
+    "pageValue": {
+      "available": true,
+      "value": 0
+    },
+    "tabValue": {
+      "available": true,
+      "value": 0
+    },
+    "enabled": false,
+    "tabEnabled": false,
+    "width": 264,
+    "height": 204,
+    "pages": [
+      {
+        "name": "PageBeta",
+        "Caption": {
+          "available": true,
+          "value": "Beta"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": null
+        },
+        "Tag": {
+          "available": true,
+          "value": null
+        },
+        "Accelerator": {
+          "available": true,
+          "value": null
+        },
+        "Enabled": {
+          "available": true,
+          "value": true
+        },
+        "Visible": {
+          "available": true,
+          "value": true
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      },
+      {
+        "name": "PageAlpha",
+        "Caption": {
+          "available": true,
+          "value": "日本語"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": null
+        },
+        "Tag": {
+          "available": true,
+          "value": null
+        },
+        "Accelerator": {
+          "available": true,
+          "value": null
+        },
+        "Enabled": {
+          "available": true,
+          "value": false
+        },
+        "Visible": {
+          "available": true,
+          "value": false
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      },
+      {
+        "name": "PageGamma",
+        "Caption": {
+          "available": true,
+          "value": "Gamma"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": null
+        },
+        "Tag": {
+          "available": true,
+          "value": null
+        },
+        "Accelerator": {
+          "available": true,
+          "value": null
+        },
+        "Enabled": {
+          "available": true,
+          "value": true
+        },
+        "Visible": {
+          "available": true,
+          "value": true
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      }
+    ],
+    "tabs": [
+      {
+        "name": "TabBeta",
+        "Caption": {
+          "available": true,
+          "value": "Beta"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": null
+        },
+        "Tag": {
+          "available": true,
+          "value": null
+        },
+        "Accelerator": {
+          "available": true,
+          "value": null
+        },
+        "Enabled": {
+          "available": true,
+          "value": true
+        },
+        "Visible": {
+          "available": true,
+          "value": true
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      },
+      {
+        "name": "TabAlpha",
+        "Caption": {
+          "available": true,
+          "value": "Alpha"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": "tab-tip"
+        },
+        "Tag": {
+          "available": true,
+          "value": "tab-tag"
+        },
+        "Accelerator": {
+          "available": true,
+          "value": "T"
+        },
+        "Enabled": {
+          "available": true,
+          "value": false
+        },
+        "Visible": {
+          "available": true,
+          "value": false
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      },
+      {
+        "name": "TabGamma",
+        "Caption": {
+          "available": true,
+          "value": "Gamma"
+        },
+        "ControlTipText": {
+          "available": true,
+          "value": null
+        },
+        "Tag": {
+          "available": true,
+          "value": null
+        },
+        "Accelerator": {
+          "available": true,
+          "value": null
+        },
+        "Enabled": {
+          "available": true,
+          "value": true
+        },
+        "Visible": {
+          "available": true,
+          "value": true
+        },
+        "Left": {
+          "available": false
+        },
+        "Top": {
+          "available": false
+        },
+        "Width": {
+          "available": false
+        },
+        "Height": {
+          "available": false
+        }
+      }
+    ]
+  },
+  "binarySha256": "3fc0ce61ea4030dc04e743fa6343f82763c51be8e34efafe4cc332b058416355"
+}

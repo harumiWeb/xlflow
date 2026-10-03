@@ -28,6 +28,8 @@ type ControlDefinition struct {
 	Visible    bool
 	Properties map[string]any
 	Controls   []ControlDefinition
+	Tabs       *TabStrip
+	Internal   bool
 }
 
 // NewForm authors a built-in Designer and returns a read-time signed model.
@@ -45,7 +47,7 @@ func NewForm(input Definition, codePage uint16) (*Form, error) {
 	}
 	stored := &SerializedForm{Storages: map[string]cfb.StorageMeta{}, Streams: map[string][]byte{input.Name + "/\x03VBFrame": frameBytes}}
 	state := generationState{stored: stored, codePage: codePage, names: map[string]bool{}, nextID: 1}
-	if err := state.level(input.Name, input.Caption, input.Size, nil, input.Controls, 0); err != nil {
+	if err := state.level(input.Name, input.Caption, input.Size, nil, input.Controls, 0, 0, nil); err != nil {
 		return nil, err
 	}
 	return reparseEditedForm(stored, input.Name, codePage)
@@ -61,7 +63,7 @@ type generationState struct {
 // MaxNestingDepth includes the root form level and matches the reader's limit.
 const MaxNestingDepth = maxNestingDepth
 
-func (g *generationState) level(path, caption string, size Size, properties map[string]any, controls []ControlDefinition, depth int) error {
+func (g *generationState) level(path, caption string, size Size, properties map[string]any, controls []ControlDefinition, depth int, class uint16, tabs *TabStrip) error {
 	if depth >= maxNestingDepth || len(controls) > math.MaxInt16+1 {
 		return fmt.Errorf("%w: nesting or site limit", ErrInvalidEdit)
 	}
@@ -75,15 +77,21 @@ func (g *generationState) level(path, caption string, size Size, properties map[
 	root.Sizes["DisplayedSize"] = size
 	root.Sizes["LogicalSize"] = Size{}
 	if depth > 0 {
-		root.Mask |= 1<<6 | 1<<17
+		root.Mask |= 1 << 6
 		root.Values["BooleanProperties"] = 0x8004
-		root.Values["SpecialEffect"] = 3
+		if class == 14 {
+			root.Mask |= 1 << 17
+			root.Values["SpecialEffect"] = 3
+		}
+		if class == 57 {
+			root.Values["BooleanProperties"] = 0xc004
+		}
 	}
 	if err := setGenerationProperty(root, &formSpec, "Caption", caption); err != nil {
 		return err
 	}
 	for _, name := range slices.Sorted(maps.Keys(properties)) {
-		if name == "Tag" || name == "ControlTipText" {
+		if name == "Tag" || name == "ControlTipText" || name == "Accelerator" || name == "MultiPageEnabled" || class == 7 && (name == "Caption" || name == "BooleanProperties") {
 			continue
 		}
 		if err := setGenerationProperty(root, &formSpec, name, properties[name]); err != nil {
@@ -99,19 +107,41 @@ func (g *generationState) level(path, caption string, size Size, properties map[
 	if root.Values["BooleanProperties"]&0x8000 != 0 {
 		level.ClassTableRaw = nil
 	}
+	if class == 57 {
+		if tabs == nil {
+			tabs = &TabStrip{SelectedIndex: 0}
+			if len(controls) == 0 {
+				tabs.SelectedIndex = -1
+			}
+		}
+		if len(tabs.Tabs) != len(controls) {
+			return fmt.Errorf("%w: MultiPage tabs/pages count", ErrInvalidEdit)
+		}
+		for i := range controls {
+			if controls[i].Class != 7 {
+				return fmt.Errorf("%w: MultiPage requires Page children", ErrInvalidEdit)
+			}
+			controls[i].Position, controls[i].Size = generatedPageBox(size)
+			controls[i].Visible = int32(i) == tabs.SelectedIndex
+		}
+		controls = append([]ControlDefinition{{Class: 18, Internal: true, Visible: true, Size: size, Tabs: tabs}}, controls...)
+		level.TrailingRaw = []byte{0, 2, 12, 0, 25, 0, 0, 0, 252, 143, 0, 0, 255, 1, 0, 0}
+	}
 	siteBytes := len(root.Raw) + 10
 	for _, control := range controls {
-		if control.Name == "" || strings.ContainsAny(control.Name, "\\/\x00\r\n\"") || g.names[strings.ToLower(control.Name)] || control.TabIndex < 0 || control.Size.Width < 0 || control.Size.Height < 0 {
+		if (!control.Internal && (control.Name == "" || g.names[strings.ToLower(control.Name)])) || strings.ContainsAny(control.Name, "\\/\x00\r\n\"") || control.TabIndex < 0 || control.Size.Width < 0 || control.Size.Height < 0 {
 			return fmt.Errorf("%w: invalid control %q", ErrInvalidEdit, control.Name)
 		}
-		g.names[strings.ToLower(control.Name)] = true
+		if !control.Internal {
+			g.names[strings.ToLower(control.Name)] = true
+		}
 		id := g.nextID
 		g.nextID++
 		table := specsByCacheIndex[control.Class]
-		if control.Class == 14 {
+		if control.Class == 14 || control.Class == 7 || control.Class == 57 {
 			table = &formSpec
 		}
-		if table == nil || control.Class == 15 || control.Class == 18 || control.Class != 14 && len(control.Controls) > 0 {
+		if table == nil || control.Class == 15 || table != &formSpec && len(control.Controls) > 0 {
 			return fmt.Errorf("%w: class %d", ErrUnsupportedEdit, control.Class)
 		}
 		record := newGenerationRecord(table)
@@ -135,8 +165,34 @@ func (g *generationState) level(path, caption string, size Size, properties map[
 				return err
 			}
 		}
+		if control.Class == 18 {
+			record.Mask |= 1 << 19
+			if control.Tabs == nil {
+				control.Tabs = &TabStrip{SelectedIndex: -1}
+			}
+			if err := SetTabStrip(record, control.Tabs); err != nil {
+				return err
+			}
+			// A newly authored empty strip must persist -1 explicitly. Omission
+			// has the wire default 0, unlike the projected empty selection.
+			if len(control.Tabs.Tabs) == 0 {
+				record.Mask |= 1
+				record.Values["ListIndex"] = -1
+			}
+			font := record.TextProps
+			if err := setGenerationProperty(font, &textPropsSpec, "FontName", "Tahoma"); err != nil {
+				return err
+			}
+			if err := setGenerationProperty(font, &textPropsSpec, "FontHeight", int64(165)); err != nil {
+				return err
+			}
+			font.Raw, err = encodeEditedRecord(font, &textPropsSpec)
+			if err != nil {
+				return err
+			}
+		}
 		for _, name := range slices.Sorted(maps.Keys(control.Properties)) {
-			if name == "Tag" || name == "ControlTipText" {
+			if name == "Tag" || name == "ControlTipText" || name == "Accelerator" || name == "MultiPageEnabled" || control.Class == 7 && (name == "Caption" || name == "BooleanProperties") {
 				continue
 			}
 			if err := setGenerationProperty(record, table, name, control.Properties[name]); err != nil {
@@ -147,8 +203,8 @@ func (g *generationState) level(path, caption string, size Size, properties map[
 		if err != nil {
 			return err
 		}
-		if control.Class == 14 {
-			if err := g.level(fmt.Sprintf("%s/i%02d", path, id), "", control.Size, control.Properties, control.Controls, depth+1); err != nil {
+		if table == &formSpec {
+			if err := g.level(fmt.Sprintf("%s/i%02d", path, id), "", control.Size, control.Properties, control.Controls, depth+1, control.Class, control.Tabs); err != nil {
 				return err
 			}
 			record.Raw = nil
@@ -161,7 +217,7 @@ func (g *generationState) level(path, caption string, size Size, properties map[
 		if control.Class == 21 {
 			flags = 0x32
 		}
-		if control.Class == 14 {
+		if table == &formSpec {
 			flags = 0x40023
 		}
 		if !control.Visible {
@@ -170,7 +226,7 @@ func (g *generationState) level(path, caption string, size Size, properties map[
 		site := &Site{Mask: 1<<0 | 1<<2 | 1<<4 | 1<<5 | 1<<6 | 1<<7 | 1<<8,
 			Values:  map[string]int64{"NameData": packedStringLength(siteName), "ID": id, "BitFlags": flags, "ObjectStreamSize": int64(len(record.Raw)), "TabIndex": int64(control.TabIndex), "ClsidCacheIndex": int64(control.Class)},
 			Strings: map[string]StoredString{"Name": siteName}, Position: &control.Position}
-		if control.Class == 14 {
+		if table == &formSpec {
 			site.Mask &^= 1 << 5
 			delete(site.Values, "ObjectStreamSize")
 		}
@@ -201,6 +257,7 @@ func (g *generationState) level(path, caption string, size Size, properties map[
 		}
 		siteBytes += len(site.Raw) + 4
 		level.Sites = append(level.Sites, site)
+		level.Controls = append(level.Controls, &Control{ID: int32(id), Site: site, Name: control.Name, CLSIDCacheIndex: control.Class, Record: record})
 		if len(record.Raw) > maxDesignerStreamSize-len(level.ORaw) {
 			return fmt.Errorf("%w: object stream exceeds limit", ErrInvalidEdit)
 		}
@@ -226,8 +283,28 @@ func (g *generationState) level(path, caption string, size Size, properties map[
 	g.stored.Streams[path+"/o"] = level.ORaw
 	g.stored.Streams[path+"/\x01CompObj"] = generationCompObj()
 	if depth > 0 {
-		g.stored.Storages[path] = cfb.StorageMeta{CLSID: frameCLSID}
-		g.stored.Streams[path+"/\x01CompObj"] = generationFrameCompObj()
+		identity, progID := frameCLSID, "Forms.Frame.1"
+		if class == 7 {
+			identity, progID = pageCLSID, "Forms.Form.1"
+		}
+		if class == 57 {
+			identity, progID = multiPageCLSID, "Forms.MultiPage.1"
+		}
+		g.stored.Storages[path] = cfb.StorageMeta{CLSID: identity}
+		g.stored.Streams[path+"/\x01CompObj"] = generationContainerCompObj(identity, progID)
+	}
+	if class == 57 {
+		state := &MultiPage{Hidden: level.Controls[0], Pages: level.Controls[1:], PageProperties: map[int32][]byte{}}
+		// Find the enclosing definition's enable state passed as a property.
+		if enabled, ok := properties["MultiPageEnabled"].(bool); ok && !enabled {
+			state.Properties = newGenerationRecord(&multiPagePropertiesSpec)
+			state.Properties.Mask |= 1 << 3
+		}
+		x, err := encodeMultiPageX(state)
+		if err != nil {
+			return err
+		}
+		g.stored.Streams[path+"/x"] = x
 	}
 	return nil
 }
@@ -292,11 +369,17 @@ func generationCompObj() []byte {
 // Excel-authored Frames bind both directory and CompObj identities to this
 // CLSID; root UserForms use the existing zero-CLSID CompObj layout.
 var frameCLSID = [16]byte{0x20, 0x20, 0x18, 0x6e, 0x60, 0xf4, 0xce, 0x11, 0x9b, 0xcd, 0x00, 0xaa, 0x00, 0x60, 0x8e, 0x01}
+var multiPageCLSID = [16]byte{0x70, 0x13, 0xe3, 0x46, 0x7a, 0x3f, 0xce, 0x11, 0xbe, 0xd6, 0, 0xaa, 0, 0x61, 0x10, 0x80}
+var pageCLSID = [16]byte{0xf0, 0x69, 0x2a, 0xc6, 0xdc, 0x16, 0xce, 0x11, 0x9e, 0x98, 0, 0xaa, 0, 0x57, 0x4a, 0x4f}
 
-func generationFrameCompObj() []byte {
+func generationContainerCompObj(identity [16]byte, progID string) []byte {
 	b := generationCompObj()[:28]
-	copy(b[12:28], frameCLSID[:])
-	for _, text := range []string{"Microsoft Forms 2.0 Frame\x00", "Embedded Object\x00", "Forms.Frame.1\x00"} {
+	copy(b[12:28], identity[:])
+	userType := "Microsoft Forms 2.0 Form\x00"
+	if identity == frameCLSID {
+		userType = "Microsoft Forms 2.0 Frame\x00"
+	}
+	for _, text := range []string{userType, "Embedded Object\x00", progID + "\x00"} {
 		b = binary.LittleEndian.AppendUint32(b, uint32(len(text)))
 		b = append(b, text...)
 	}
