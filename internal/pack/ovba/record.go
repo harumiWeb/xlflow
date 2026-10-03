@@ -3,12 +3,20 @@ package ovba
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"unicode/utf16"
 )
 
 // sizedRecord builds a record in the form "2-byte id + 4-byte size + payload".
 func sizedRecord(id uint16, payload []byte) []byte {
-	out := make([]byte, 6+len(payload))
+	if len(payload) > math.MaxUint32 {
+		panic(fmt.Sprintf("ovba: record payload too large for uint32 length: %d", len(payload)))
+	}
+	if len(payload) > math.MaxInt-6 {
+		panic(fmt.Sprintf("ovba: record payload size overflows allocation: %d", len(payload)))
+	}
+	size := 6 + len(payload)
+	out := make([]byte, size)
 	binary.LittleEndian.PutUint16(out[0:], id)
 	binary.LittleEndian.PutUint32(out[2:], uint32(len(payload)))
 	copy(out[6:], payload)
