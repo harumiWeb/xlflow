@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -120,6 +121,59 @@ func TestCompileNewGeneratesMultiPageAndTabStripMetadata(t *testing.T) {
 	emptyTabs := projectedControlByName(t, projected, "EmptyTabs")
 	if emptyTabs.SelectedIndex == nil || *emptyTabs.SelectedIndex != -1 || emptyTabs.Tabs == nil || len(emptyTabs.Tabs) != 0 {
 		t.Fatalf("generated empty TabStrip = %#v", emptyTabs)
+	}
+}
+
+func TestCompileSelectedPageRemovalWithCopiedObservation(t *testing.T) {
+	for _, mode := range []string{"template", "edits"} {
+		for _, test := range []struct {
+			name      string
+			selection *int
+		}{{"omitted", nil}, {"explicit", new(0)}, {"empty", new(-1)}} {
+			t.Run(mode+"/"+test.name, func(t *testing.T) {
+				selection := test.selection
+				base, before := multipageExcelAuthoredFixture(t, "baseline")
+				after := snapshotCopy(t, before)
+				if mode == "template" {
+					after = templateInput(t, base, before)
+				}
+				multi := projectedControlByType(t, after, "MultiPage")
+				multi.SelectedIndex = selection
+				after.Controls = slices.DeleteFunc(after.Controls, func(c spec.FormSpecControl) bool {
+					return c.Name == "PageBeta" || (selection != nil && *selection == -1 && c.ParentID == multi.ID)
+				})
+				if selection != nil && *selection == -1 {
+					// Remove descendants as well when making the collection empty.
+					after.Controls = slices.DeleteFunc(after.Controls, func(c spec.FormSpecControl) bool { return c.ParentID != "" && c.ParentID != multi.ID })
+				}
+				input := snapshotCopy(t, after)
+				var result *oforms.Form
+				var err error
+				if mode == "template" {
+					result, err = CompileTemplate(base, after, 932)
+				} else {
+					result, err = CompileEdits(base, before, after, 932)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(input, after) {
+					t.Fatal("mutated after input")
+				}
+				projected, err := projection.Project(result)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := 0
+				if selection != nil {
+					want = *selection
+				}
+				got := projectedControlByType(t, projected, "MultiPage")
+				if got.SelectedIndex == nil || *got.SelectedIndex != want {
+					t.Fatalf("selection = %v, want %d", got.SelectedIndex, want)
+				}
+			})
+		}
 	}
 }
 

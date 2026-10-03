@@ -46,8 +46,16 @@ func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint1
 		for i := range controls {
 			control := &controls[i]
 			previous, retained := oldSelections[control.Name]
-			if retained && strings.EqualFold(previous.Type, control.Type) && (strings.EqualFold(control.Type, "MultiPage") || strings.EqualFold(control.Type, "TabStrip")) && reflect.DeepEqual(previous.SelectedIndex, control.SelectedIndex) {
-				control.SelectedIndex = nil
+			if retained && strings.EqualFold(previous.Type, control.Type) && (strings.EqualFold(control.Type, "MultiPage") || strings.EqualFold(control.Type, "TabStrip")) {
+				if reflect.DeepEqual(previous.SelectedIndex, control.SelectedIndex) {
+					control.SelectedIndex = nil
+				}
+				// A copied observation describes the old collection, not the final
+				// topology. Keep explicit authoring selection and resolve omitted
+				// selection by retained identity after topology compilation.
+				if control.Observed != nil && previous.Observed != nil && reflect.DeepEqual(previous.Observed.SelectedIndex, control.Observed.SelectedIndex) {
+					control.Observed.SelectedIndex = nil
+				}
 			}
 			omitUnchangedSelection(control.Controls)
 		}
@@ -93,6 +101,16 @@ func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint1
 			if strings.EqualFold(c.Type, "MultiPage") || strings.EqualFold(c.Type, "TabStrip") {
 				propertyAfter.Controls[i].SelectedIndex = c.SelectedIndex
 				propertyAfter.Controls[i].Tabs = c.Tabs
+				if n.Observed != nil {
+					observed := *n.Observed
+					observed.SelectedIndex = nil
+					observed.Tabs = nil
+					if c.Observed != nil {
+						observed.SelectedIndex = c.Observed.SelectedIndex
+						observed.Tabs = c.Observed.Tabs
+					}
+					propertyAfter.Controls[i].Observed = &observed
+				}
 			}
 		}
 	}

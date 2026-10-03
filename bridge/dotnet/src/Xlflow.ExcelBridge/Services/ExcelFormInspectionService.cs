@@ -552,7 +552,7 @@ public sealed class ExcelFormInspectionService : IInspectFormService
         return result;
     }
 
-    private static string ResolveControlType(object control)
+    internal static string ResolveControlType(object control)
     {
         var progId = TryGetStringMember(control, "ProgId");
         var fallbackTypeName = TryGetComControlTypeName(control) ?? control.GetType().Name;

@@ -46,6 +46,14 @@ collection index. These collection-specific removal forms reflect measured
 Excel COM behavior: name removal works for Pages, while indexed removal works
 for Tabs.
 
+The writer creates all siblings before assigning their TabIndex values in
+ascending order, then verifies the final sibling indexes. MSForms can clamp
+an index during creation and renumber previously created siblings. List items
+are populated before writing selection Text/Value. Omitted nested TabStrip
+state is captured with the inspection type resolver, including containers
+whose ProgId is unavailable. Caption normalization doubles embedded quotes
+and leaves multiline captions in the exported FRX without adding source lines.
+
 Designer and runtime inspection represent MultiPage Pages as child controls
 and expose TabStrip tabs as independent tab metadata. TabStrip is not treated
 as a child-control container. Inspection reports the logical selection as
@@ -73,12 +81,20 @@ Page `visible` flag stored in the hidden TabStrip. Synchronization also applies
 when deleting the selected Page falls back to index zero or an added Page has
 an initially visible Site. No-op replay retains existing saved bytes.
 
+Copied observed selection describes the original collection. Compilation
+discards that unchanged observation before validating the final topology;
+explicit authored selection is checked against the final collection, while
+omitted selection follows retained identity. The property-only stage uses
+the original collection and its original observed selection.
+
 ## Page geometry and deterministic generation
 
 Page `left`, `top`, `width`, and `height` are derived from the owning
 MultiPage, not authoring inputs. Inspection may preserve observed Page bounds
 under snapshot-only `observed` data. The compiler rejects Page geometry edits
 instead of treating the bounds as independent values.
+The Designer writer also skips observed Page bounds during snapshot rebuilds;
+ordinary controls under a Page still receive their authored geometry.
 
 New pure-Go generation computes standard top-tab Page bounds at fixed 96 DPI
 and writes an explicit Tahoma 8.25pt font. The generated geometry does not

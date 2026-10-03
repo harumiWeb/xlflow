@@ -418,10 +418,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
                 throw new InvalidOperationException($"designer_write_failed: failed to access Designer for '{spec.Form.Name}'.");
             }
             SetDesignerFormProperties(designer, component, spec.Form);
-            foreach (var root in GetRootControls(spec))
-            {
-                AddDesignerControl(designer, root, spec.Controls, "UserForm");
-            }
+            AddDesignerControls(designer, GetRootControls(spec), spec.Controls, "UserForm");
         }
         finally
         {
@@ -501,10 +498,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
                 throw new InvalidOperationException("designer_write_failed: TabStrip tabs are authored through the tabs array, not child controls.");
             }
 
-            foreach (var child in children)
-            {
-                AddDesignerControl(control, child, allControls, controlSpec.Type);
-            }
+            AddDesignerControls(control, children, allControls, controlSpec.Type);
 
             var tabSpecs = controlSpec.Tabs ?? controlSpec.Observed?.Tabs;
             if (IsControlType(controlSpec, "TabStrip") && tabSpecs is not null)
@@ -517,6 +511,62 @@ public sealed class ExcelFormWriteService : IFormWriteService
         finally
         {
             ExcelBridgeSupport.ReleaseComObject(control);
+            ExcelBridgeSupport.ReleaseComObject(collection);
+        }
+    }
+
+    private static void AddDesignerControls(object parent, IReadOnlyList<FormWriteControlSpec> siblings,
+        IReadOnlyList<FormWriteControlSpec> allControls, string parentType)
+    {
+        foreach (var sibling in siblings)
+        {
+            AddDesignerControl(parent, sibling, allControls, parentType);
+        }
+        var tabOrder = siblings.Where(sibling => (sibling.TabIndex ?? sibling.Observed?.TabIndex) is not null)
+            .OrderBy(sibling => sibling.TabIndex ?? sibling.Observed?.TabIndex).ToArray();
+        if (tabOrder.Length == 0)
+        {
+            return;
+        }
+        object? collection = null;
+        try
+        {
+            collection = ExcelBridgeSupport.Get(parent, IsControlType(parentType, "MultiPage") ? "Pages" : "Controls")
+                ?? throw new InvalidOperationException("designer_write_failed: tab order collection unavailable.");
+            foreach (var sibling in tabOrder)
+            {
+                object? control = null;
+                try
+                {
+                    control = ExcelBridgeSupport.Get(collection, "Item", sibling.Name)
+                        ?? throw new InvalidOperationException($"designer_write_failed: tab order control '{sibling.Name}' unavailable.");
+                    SetRequiredMember(control, "TabIndex", (sibling.TabIndex ?? sibling.Observed!.TabIndex)!.Value);
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(control);
+                }
+            }
+            foreach (var sibling in tabOrder)
+            {
+                object? control = null;
+                try
+                {
+                    control = ExcelBridgeSupport.Get(collection, "Item", sibling.Name);
+                    var expected = sibling.TabIndex ?? sibling.Observed!.TabIndex;
+                    if (control is null || ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(control, "TabIndex")) != expected)
+                    {
+                        throw new InvalidOperationException($"designer_write_failed: TabIndex did not persist for '{sibling.Name}'.");
+                    }
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(control);
+                }
+            }
+        }
+        finally
+        {
             ExcelBridgeSupport.ReleaseComObject(collection);
         }
     }
@@ -675,17 +725,16 @@ public sealed class ExcelFormWriteService : IFormWriteService
                     continue;
                 }
                 var controlName = ExcelBridgeSupport.GetString(control, "Name") ?? "";
-                var progId = ExcelBridgeSupport.GetString(control, "ProgId") ?? "";
+                var controlType = ExcelFormInspectionService.ResolveControlType(control);
                 if (string.Equals(controlName, name, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(progId, "Forms.TabStrip.1", StringComparison.OrdinalIgnoreCase))
+                    && IsControlType(controlType, "TabStrip"))
                 {
                     return ReadExistingTabStripState(control);
                 }
 
-                var childCollectionName = progId.Equals("Forms.MultiPage.1", StringComparison.OrdinalIgnoreCase)
+                var childCollectionName = IsControlType(controlType, "MultiPage")
                     ? "Pages"
-                    : progId.Equals("Forms.Frame.1", StringComparison.OrdinalIgnoreCase)
-                        || progId.Equals("Forms.Page.1", StringComparison.OrdinalIgnoreCase)
+                    : IsControlType(controlType, "Frame") || IsControlType(controlType, "Page")
                             ? "Controls"
                             : null;
                 if (childCollectionName is null)
@@ -1107,30 +1156,25 @@ public sealed class ExcelFormWriteService : IFormWriteService
         {
             SetRequiredProperty(control, "Caption", caption);
         }
-        var left = spec.Left ?? spec.Observed?.Left;
+        var left = IsControlType(spec, "Page") ? null : spec.Left ?? spec.Observed?.Left;
         if (left is not null)
         {
             SetRequiredMember(control, "Left", left.Value);
         }
-        var top = spec.Top ?? spec.Observed?.Top;
+        var top = IsControlType(spec, "Page") ? null : spec.Top ?? spec.Observed?.Top;
         if (top is not null)
         {
             SetRequiredMember(control, "Top", top.Value);
         }
-        var width = spec.Width ?? spec.Observed?.Width;
+        var width = IsControlType(spec, "Page") ? null : spec.Width ?? spec.Observed?.Width;
         if (width is not null)
         {
             SetRequiredMember(control, "Width", width.Value);
         }
-        var height = spec.Height ?? spec.Observed?.Height;
+        var height = IsControlType(spec, "Page") ? null : spec.Height ?? spec.Observed?.Height;
         if (height is not null)
         {
             SetRequiredMember(control, "Height", height.Value);
-        }
-        var tabIndex = spec.TabIndex ?? spec.Observed?.TabIndex;
-        if (tabIndex is not null)
-        {
-            SetRequiredMember(control, "TabIndex", tabIndex.Value);
         }
         var enabled = pageProperties?.Enabled ?? spec.Enabled ?? spec.Observed?.Enabled;
         if (enabled is not null)
@@ -1142,6 +1186,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
         {
             SetRequiredMember(control, "Visible", visible.Value);
         }
+        SetControlListItems(control, spec.List ?? spec.Observed?.List);
         var hasValueSelection = IsControlType(spec, "MultiPage") || IsControlType(spec, "TabStrip");
         if (!hasValueSelection && spec.Value.ValueKind != JsonValueKind.Undefined)
         {
@@ -1167,7 +1212,6 @@ public sealed class ExcelFormWriteService : IFormWriteService
         SetOptionalRequiredStringProperty(control, "Tag", pageProperties?.Tag ?? spec.Tag ?? spec.Observed?.Tag);
         SetOptionalRequiredStringProperty(control, "ControlTipText", pageProperties?.ControlTipText ?? spec.ControlTipText ?? spec.Observed?.ControlTipText);
         SetOptionalRequiredStringProperty(control, "Accelerator", pageProperties?.Accelerator ?? spec.Accelerator ?? spec.Observed?.Accelerator);
-        SetControlListItems(control, spec.List ?? spec.Observed?.List);
     }
 
     // System.Text.Json deserializes object to JsonElement. COM needs concrete
@@ -1739,6 +1783,13 @@ public sealed class ExcelFormWriteService : IFormWriteService
 
     private static string InjectOrUpdateCaption(string content, string caption)
     {
+        // Multiline captions already live in the exported FRX. Never synthesize
+        // additional source lines for them in the single-line FRM assignment.
+        if (caption.Contains('\r') || caption.Contains('\n'))
+        {
+            return content;
+        }
+        var escapedCaption = caption.Replace("\"", "\"\"", StringComparison.Ordinal);
         var lines = new List<string>(content.Split(["\r\n", "\n", "\r"], StringSplitOptions.None));
         var beginIndex = lines.FindIndex(line => line.Trim() == "Begin");
         var endIndex = beginIndex >= 0 ? lines.FindIndex(beginIndex + 1, line => line.Trim() == "End") : -1;
@@ -1749,11 +1800,11 @@ public sealed class ExcelFormWriteService : IFormWriteService
                 var trimmed = lines[index].Trim();
                 if (trimmed.StartsWith("Caption", StringComparison.OrdinalIgnoreCase) && trimmed.Contains('='))
                 {
-                    lines[index] = $"   Caption = \"{caption}\"";
+                    lines[index] = $"   Caption = \"{escapedCaption}\"";
                     return string.Join(Environment.NewLine, lines);
                 }
             }
-            lines.Insert(beginIndex + 1, $"   Caption = \"{caption}\"");
+            lines.Insert(beginIndex + 1, $"   Caption = \"{escapedCaption}\"");
         }
         return string.Join(Environment.NewLine, lines);
     }

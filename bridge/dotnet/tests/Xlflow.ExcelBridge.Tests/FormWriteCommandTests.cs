@@ -340,6 +340,108 @@ public sealed class FormWriteCommandTests
         Assert.Contains("Width did not persist", inner.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void PageObservedGeometryIsNotWrittenButChildGeometryIsApplied()
+    {
+        const string json = """{"form":{"name":"Sample"},"controls":[{"id":"multi","type":"MultiPage","name":"Tabs","width":300},{"id":"page","parentId":"multi","type":"Page","name":"PageAlpha","observed":{"left":4,"top":20,"width":210,"height":100}},{"parentId":"page","type":"TextBox","name":"InnerText","left":12.5,"width":80}]}""";
+        var designer = new FakeFormDesigner();
+        AddFirstControl(json, designer);
+        var multi = Assert.IsType<FakeMultiPage>(Assert.Single(designer.Controls.Items));
+        var page = Assert.Single(multi.Pages.Items);
+        Assert.Equal(0, page.Left);
+        Assert.Equal(0, page.Top);
+        Assert.Equal(0, page.Width);
+        Assert.Equal(0, page.Height);
+        Assert.Equal(12.5, Assert.Single(page.Controls.Items).Left);
+        Assert.Equal(80, Assert.Single(page.Controls.Items).Width);
+    }
+
+    [Fact]
+    public void OmittedTabsAreCapturedThroughContainersWithoutProgIds()
+    {
+        var designer = new FakeFormDesigner();
+        var multi = new FakeMultiPage("Pages", designer) { MissingProgId = true };
+        var page = multi.Pages.Items[0];
+        page.MissingProgId = true;
+        var frame = new FakeFrame("Frame", page) { MissingProgId = true };
+        var strip = new FakeTabStrip("NestedTabs", frame) { MissingProgId = true };
+        strip.Tabs.Add("SecondTab");
+        strip.Value = 1;
+        designer.Controls.Items.Add(multi);
+        page.Controls.Items.Add(frame);
+        frame.Controls.Items.Add(strip);
+        foreach (var (control, type) in new (FakeControl, string)[] { (multi, "MultiPage"), (page, "Page"), (frame, "Frame"), (strip, "TabStrip") })
+        {
+            System.ComponentModel.TypeDescriptor.AddProvider(new ControlTypeProvider(type), control);
+        }
+        var spec = DecodeSpecObject("""{"form":{"name":"Sample"},"controls":[{"type":"TabStrip","name":"NestedTabs"}]}""");
+        PrepareApplySelectionIndices(designer, spec);
+        var controlSpec = ((IEnumerable)GetDecodedControls(spec)).Cast<object>().Single();
+        var observed = controlSpec.GetType().GetProperty("Observed")!.GetValue(controlSpec)!;
+        var tabs = (IEnumerable)observed.GetType().GetProperty("Tabs")!.GetValue(observed)!;
+        Assert.Equal(new[] { "DefaultTab", "SecondTab" }, tabs.Cast<object>().Select(tab => tab.GetType().GetProperty("Name")!.GetValue(tab)));
+        Assert.Equal(1, observed.GetType().GetProperty("SelectedIndex")!.GetValue(observed));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TabOrderIsAppliedAfterAllSiblingsExist(bool nested)
+    {
+        var children = """[{"id":"first","type":"TextBox","name":"First","tabIndex":1,"zIndex":0},{"id":"second","type":"TextBox","name":"Second","tabIndex":0,"zIndex":1}]""";
+        var json = nested
+            ? "{\"form\":{\"name\":\"Sample\"},\"controls\":[{\"id\":\"frame\",\"type\":\"Frame\",\"name\":\"Frame\",\"controls\":" + children + "}]}"
+            : "{\"form\":{\"name\":\"Sample\"},\"controls\":" + children + "}";
+        var spec = DecodeSpecObject(json);
+        var controls = GetDecodedControls(spec);
+        var roots = typeof(ExcelFormWriteService).GetMethod("GetRootControls", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [spec]);
+        var designer = new FakeFormDesigner();
+        typeof(ExcelFormWriteService).GetMethod("AddDesignerControls", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [designer, roots, controls, "UserForm"]);
+        var siblings = nested ? Assert.IsType<FakeFrame>(Assert.Single(designer.Controls.Items)).Controls.Items : designer.Controls.Items;
+        Assert.Equal(new[] { "First", "Second" }, siblings.Select(control => control.Name));
+        Assert.Equal(new[] { 1, 0 }, siblings.Select(control => control.TabIndex));
+    }
+
+    [Fact]
+    public void ListItemsExistBeforeRequiredTextAndValueWrites()
+    {
+        var designer = new FakeFormDesigner();
+        AddFirstControl("""{"form":{"name":"Sample"},"controls":[{"type":"ListBox","name":"List","list":["Alpha","Beta"],"value":"Beta","text":"Beta"}]}""", designer);
+        var list = Assert.IsType<FakeListBox>(Assert.Single(designer.Controls.Items));
+        Assert.Equal("Beta", list.Text);
+        Assert.Equal("Beta", list.Value);
+        Assert.Equal(new[] { "Alpha", "Beta" }, list.Items);
+    }
+
+    [Theory]
+    [InlineData("quote \" text", "   Caption = \"quote \"\" text\"")]
+    [InlineData("line\r\nEnd\r\nSub Injected()", null)]
+    [InlineData("line\nEnd", null)]
+    public void CaptionNormalizationCannotAddSourceLines(string caption, string? expected)
+    {
+        const string content = "VERSION 5.00\r\nBegin\r\n   Caption = \"Original\"\r\nEnd\r\nAttribute VB_Name = \"Sample\"";
+        var result = (string)typeof(ExcelFormWriteService).GetMethod("InjectOrUpdateCaption", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [content, caption])!;
+        if (expected is null)
+        {
+            Assert.Equal(content, result);
+        }
+        else
+        {
+            Assert.Contains(expected, result, StringComparison.Ordinal);
+            Assert.Equal(content.Split('\n').Length, result.Split('\n').Length);
+        }
+    }
+
+    private sealed class ControlTypeProvider(string type) : System.ComponentModel.TypeDescriptionProvider
+    {
+        public override System.ComponentModel.ICustomTypeDescriptor GetTypeDescriptor(Type objectType, object? instance) => new ControlTypeDescriptor(type);
+    }
+
+    private sealed class ControlTypeDescriptor(string type) : System.ComponentModel.CustomTypeDescriptor
+    {
+        public override string GetClassName() => type;
+    }
+
     private static void AddFirstControl(string json, FakeFormDesigner designer)
     {
         var spec = DecodeSpecObject(json);
@@ -447,7 +549,9 @@ public sealed class FormWriteCommandTests
     {
         public string Name { get; set; } = name;
 
-        public string ProgId { get; } = progId;
+        public bool MissingProgId { get; set; }
+
+        public string ProgId => MissingProgId ? throw new InvalidOperationException("ProgId unavailable") : progId;
 
         public object? Parent { get; } = parent;
 
@@ -459,7 +563,7 @@ public sealed class FormWriteCommandTests
 
         public string Accelerator { get; set; } = "";
 
-        public string Text { get; set; } = "";
+        public virtual string Text { get; set; } = "";
 
         public double Left { get; set; }
 
@@ -469,7 +573,24 @@ public sealed class FormWriteCommandTests
 
         public double Height { get; set; }
 
-        public int TabIndex { get; set; }
+        private int _tabIndex = parent switch { FakeFormDesigner designer => designer.Controls.Count, FakeFrame frame => frame.Controls.Count, _ => 0 };
+
+        public int TabIndex
+        {
+            get => _tabIndex;
+            set
+            {
+                var siblings = Parent switch { FakeFormDesigner designer => designer.Controls.Items, FakeFrame frame => frame.Controls.Items, _ => null };
+                if (siblings is null) { _tabIndex = value; return; }
+                var next = Math.Clamp(value, 0, siblings.Count - 1);
+                foreach (var sibling in siblings.Where(sibling => sibling != this))
+                {
+                    if (sibling._tabIndex >= next && sibling._tabIndex < _tabIndex) { sibling._tabIndex++; }
+                    else if (sibling._tabIndex <= next && sibling._tabIndex > _tabIndex) { sibling._tabIndex--; }
+                }
+                _tabIndex = next;
+            }
+        }
 
         public bool Enabled { get; set; } = true;
 
@@ -485,17 +606,46 @@ public sealed class FormWriteCommandTests
 
         public object Item(int index) => Items[index];
 
+        public object Item(string name) => Items.Single(control => control.Name == name);
+
         public object Add(string progId, string name, bool visible)
         {
             FakeControl control = progId switch
             {
                 "Forms.MultiPage.1" => new FakeMultiPage(name, owner),
                 "Forms.TabStrip.1" => new FakeTabStrip(name, owner),
+                "Forms.Frame.1" => new FakeFrame(name, owner),
+                "Forms.ListBox.1" => new FakeListBox(name, owner),
                 _ => new FakeControl(name, progId, owner),
             };
             control.Visible = visible;
             Items.Add(control);
             return control;
+        }
+    }
+
+    private sealed class FakeFrame : FakeControl
+    {
+        public FakeFrame(string name, object? parent) : base(name, "Forms.Frame.1", parent) { Controls = new FakeControlCollection(this); }
+        public FakeControlCollection Controls { get; }
+    }
+
+    private sealed class FakeListBox(string name, object? parent) : FakeControl(name, "Forms.ListBox.1", parent)
+    {
+        public List<string> Items { get; } = [];
+        public int ListCount => Items.Count;
+        public void AddItem(string item) => Items.Add(item);
+        public void Clear() => Items.Clear();
+        public override string Text
+        {
+            get => base.Text;
+            set { if (!Items.Contains(value)) { throw new InvalidOperationException("Text must match an existing item"); } base.Text = value; }
+        }
+        private string _value = "";
+        public string Value
+        {
+            get => _value;
+            set { if (!Items.Contains(value)) { throw new InvalidOperationException("Value must match an existing item"); } _value = value; }
         }
     }
 
