@@ -4,11 +4,20 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added canonical UserForm Designer generation and supported property updates
+  to template `pack`, with no `.frx` requirement. Omitted properties retain
+  template values; `[pack].userform_topology = "source"` explicitly enables
+  form removal, including the last form. Whole-project read-back validation
+  precedes atomic publication, and unsupported generation/edit operations
+  report specific capability errors without launching Excel.
+  Form Caption is synchronized with VBFrame so runtime instances match the
+  Designer; root captions unrepresentable in the project code page fail
+  explicitly while control captions and values retain Unicode support.
+
 - Added first-UserForm Microsoft Forms reference creation and pure-Go
   `pack --blank` generation from canonical UserForm specs and code. Empty
   forms and eleven common controls need no `.frx` or Excel at build time.
-  Existing Forms and unrelated reference records remain byte-preserved;
-  template Designer generation remains a separate follow-up.
+  Existing Forms and unrelated reference records remain byte-preserved.
 
 - Added the internal pure-Go generation foundation for new empty UserForms
   and eleven common MSForms controls, with validated Designer streams,
@@ -17,15 +26,13 @@ All notable changes to xlflow will be documented in this file.
   through `form.build.clientWidth` / `clientHeight`; Excel-backed form build
   rejects these inputs before mutation, including direct bridge requests.
   CONTROL reference admission checks the original TypeLib GUID instead of
-  trusting twiddled LIBIDs. Template `pack` Designer integration remains
-  a separate follow-up.
+  trusting twiddled LIBIDs.
 
 - Added an internal pure-Go compiler for supported FormSpec edits to existing
   UserForm Designer records, with atomic failure, structured edit errors,
   deterministic size/mask bookkeeping, and preservation of untouched binary
   data. Invalid coordinate systems and stale legacy captions when explicit
-  build captions are introduced are rejected before mutation. CLI `pack`
-  integration remains a separate follow-up.
+  build captions are introduced are rejected before mutation.
 - Added lossless pure-Go MS-OFORMS serialization for existing UserForms.
   Parsed Designer subtrees now have explicit VBA-project ownership instead of
   remaining generic opaque streams; simple, nested Frame/MultiPage, unknown,

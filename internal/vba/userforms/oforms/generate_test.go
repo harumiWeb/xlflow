@@ -2,13 +2,14 @@ package oforms
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 )
 
 func TestNewFormAuthorsIndependentValidatedStreams(t *testing.T) {
-	input := Definition{Name: "FreshForm", Caption: "日本語😀", Size: Size{8467, 6350}, Controls: []ControlDefinition{{Name: "TextMain", Class: 23, Size: Size{4233, 635}, Position: Position{100, 200}, TabIndex: 4, Visible: true, Properties: map[string]any{"Value": "日本語😀", "Tag": "tag", "VariousPropertyBits": int64(0x2c804819)}}}}
+	input := Definition{Name: "FreshForm", Caption: "Fresh Form", Size: Size{8467, 6350}, Controls: []ControlDefinition{{Name: "TextMain", Class: 23, Size: Size{4233, 635}, Position: Position{100, 200}, TabIndex: 4, Visible: true, Properties: map[string]any{"Value": "日本語😀", "Tag": "tag", "VariousPropertyBits": int64(0x2c804819)}}}}
 	form, err := NewForm(input, 1252)
 	if err != nil {
 		t.Fatal(err)
@@ -25,6 +26,9 @@ func TestNewFormAuthorsIndependentValidatedStreams(t *testing.T) {
 	}
 	if form.Controls[0].TabIndex == nil || *form.Controls[0].TabIndex != 4 || form.Controls[0].Site.Strings["Tag"].Text != "tag" {
 		t.Fatal("site state differs")
+	}
+	if !strings.Contains(form.DesignerSource.Text, `Caption = "Fresh Form"`) {
+		t.Fatalf("VBFrame root caption missing: %q", form.DesignerSource.Text)
 	}
 	input.Controls[0].Properties["Value"] = "mutated input"
 	if form.Controls[0].Record.Strings["Value"].Text != "日本語😀" {
@@ -47,6 +51,7 @@ func TestNewFormRejectsUnsupportedLayoutsAndInvalidRecords(t *testing.T) {
 		{"container", func(d *Definition) { d.Controls[0].Class = 14 }, ErrUnsupportedEdit},
 		{"tabstrip", func(d *Definition) { d.Controls[0].Class = 18 }, ErrUnsupportedEdit},
 		{"picture", func(d *Definition) { d.Controls[0].Properties = map[string]any{"Picture": int64(0xffff)} }, ErrUnsupportedEdit},
+		{"root-caption-codepage", func(d *Definition) { d.Caption = "😀" }, ErrInvalidEdit},
 		{"bad-field-width", func(d *Definition) { d.Controls[0].Properties = map[string]any{"BorderStyle": int64(1 << 20)} }, ErrInvalidEdit},
 		{"duplicate-name", func(d *Definition) { d.Controls = append(d.Controls, d.Controls[0]) }, ErrInvalidEdit},
 		{"negative-tab", func(d *Definition) { d.Controls[0].TabIndex = -1 }, ErrInvalidEdit},

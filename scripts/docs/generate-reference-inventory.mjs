@@ -100,6 +100,7 @@ const source = sourceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n
 // same snake_case shape as error-code literals but are not user-facing errors
 // and do not belong in this inventory.
 const excludedErrorInventoryLiterals = new Set([
+  "userform_topology",
   "binding_status",
   "counter_snapshot",
   "rule_codes",

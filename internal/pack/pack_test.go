@@ -14,6 +14,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/ovba"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/compiler"
 )
 
 func readTestFile(t *testing.T, parts ...string) []byte {
@@ -186,10 +187,11 @@ func TestGenerateVBAProjectRoundTripStable(t *testing.T) {
 func TestGenerateVBAProjectTypedErrors(t *testing.T) {
 	template := readTestFile(t, "corpus", "p1_compiled.bin")
 	cases := []struct {
-		name    string
-		bin     []byte
-		sources []SourceModule
-		want    error
+		name       string
+		bin        []byte
+		sources    []SourceModule
+		want       error
+		capability bool
 	}{
 		{
 			name: "protected project",
@@ -202,14 +204,13 @@ func TestGenerateVBAProjectTypedErrors(t *testing.T) {
 			want: ErrSignedProject,
 		},
 		{
-			// UserForm1 is absent from p1_compiled.bin, so this is a new form: pack cannot
-			// author a form's designer storage, so it is rejected as UserForm generation.
+			// A new form without a canonical spec cannot author its Designer.
 			name: "new form on form-less template",
 			bin:  template,
 			sources: []SourceModule{{
 				Name: "UserForm1", Type: ModuleTypeForm, Source: "VERSION 5.00\r\nBegin VB.UserForm UserForm1\r\nEnd\r\n",
 			}},
-			want: ErrUserFormGenerationUnsupported,
+			capability: true,
 		},
 		{
 			name:    "ambiguous duplicate source",
@@ -227,6 +228,12 @@ func TestGenerateVBAProjectTypedErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := GenerateVBAProject(tc.bin, tc.sources)
+			if tc.capability {
+				if detail, ok := errors.AsType[*compiler.Error](err); !ok || detail.Code != compiler.GenerationUnsupported {
+					t.Fatalf("wrong capability error: %v", err)
+				}
+				return
+			}
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want errors.Is(..., %v)", err, tc.want)
 			}
@@ -601,8 +608,8 @@ func TestGenerateVBAProjectRejectsNewFormWithFormError(t *testing.T) {
 			"Attribute VB_Name = \"BrandNewForm\"\r\nPrivate Sub a()\r\nEnd Sub\r\n",
 	}
 	_, err := GenerateVBAProject(template, []SourceModule{src})
-	if !errors.Is(err, ErrUserFormGenerationUnsupported) {
-		t.Fatalf("want ErrUserFormGenerationUnsupported, got %v", err)
+	if detail, ok := errors.AsType[*compiler.Error](err); !ok || detail.Code != compiler.GenerationUnsupported {
+		t.Fatalf("want userform_generation_unsupported, got %v", err)
 	}
 	if errors.Is(err, ErrAmbiguousLayout) {
 		t.Fatal("new form must not surface as ErrAmbiguousLayout")
@@ -685,7 +692,7 @@ func TestBuildBlankWorkbookJapaneseCodePage(t *testing.T) {
 func TestBuildBlankWorkbookRejectsUnsupportedTopology(t *testing.T) {
 	documents := []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeDocument}, {Name: "Sheet1", Type: ModuleTypeDocument}}
 	_, _, err := BuildBlankWorkbook(append(documents, SourceModule{Name: "UserForm1", Type: ModuleTypeForm}), BlankOptions{})
-	if !errors.Is(err, ErrBlankUserFormUnsupported) {
+	if detail, ok := errors.AsType[*compiler.Error](err); !ok || detail.Code != compiler.GenerationUnsupported {
 		t.Fatalf("form error = %v", err)
 	}
 	_, _, err = BuildBlankWorkbook(documents[:1], BlankOptions{})

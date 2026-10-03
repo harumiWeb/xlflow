@@ -926,7 +926,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `pack_active_session`
 - `pack_ambiguous_layout`
 - `pack_args_invalid`
-- `pack_blank_userform_unsupported`
 - `pack_failed`
 - `pack_in_place_overwrite`
 - `pack_output_busy`
@@ -1068,6 +1067,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `push_backup_failed`
 - `push_diagnostic`
 - `push_failed`
+- `push_forms_reference_required`
 - `push_output_busy`
 - `push_output_replace_failed`
 - `push_protected_project`

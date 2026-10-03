@@ -239,6 +239,15 @@ Each pattern is normalized to `/`; Windows and WSL separators match identically.
 release builds. Remove an entry or set `exclude = []` when those components are
 required by a release.
 
+### `[pack]`
+
+| Key                 | Type   | Required | Default      | Description                                                                                                                                     |
+| ------------------- | ------ | -------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `userform_topology` | string | no       | `"template"` | Template pack keeps omitted forms with `"template"`; explicit `"source"` removes omitted forms and requires canonical specs for supplied forms. |
+
+Blank pack always uses source form topology. Unknown values are configuration
+errors. See [pack](../commands/pack) for canonical inputs and supported edits.
+
 ### `[pack.blank]`
 
 | Key         | Type | Required | Default | Description                                                     |

@@ -8,6 +8,8 @@ import (
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	"github.com/harumiWeb/xlflow/internal/sourceinventory"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/compiler"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
 )
 
 type PlanAction string
@@ -45,13 +47,39 @@ type PackPlan struct {
 	Components []PlannedComponent
 	modules    []vbaproject.Module
 	meta       PackMeta
+	project    *vbaproject.Project
+}
+
+// TemplateOptions controls whether omitted template forms survive packing.
+// Empty UserFormTopology retains the backwards-compatible template authority.
+type TemplateOptions struct {
+	UserFormTopology string
 }
 
 // PlanProject validates and reconciles sources against a parsed template
 // without modifying either input.
-func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan, error) {
+func PlanProject(project *vbaproject.Project, sources []SourceModule, options ...TemplateOptions) (PackPlan, error) {
 	if project == nil {
 		return PackPlan{}, fmt.Errorf("%w: template project is nil", ErrAmbiguousLayout)
+	}
+	if len(options) > 1 {
+		return PackPlan{}, fmt.Errorf("%w: multiple template options", ErrAmbiguousLayout)
+	}
+	formAuthority := AuthorityTemplate
+	if len(options) == 1 {
+		switch options[0].UserFormTopology {
+		case "", "template":
+		case "source":
+			formAuthority = AuthoritySource
+		default:
+			return PackPlan{}, fmt.Errorf("%w: invalid UserForm topology %q", ErrAmbiguousLayout, options[0].UserFormTopology)
+		}
+	}
+	// Mutations below operate on an independent project, and the caller never
+	// sees a partially reconciled Designer/reference/component state.
+	working, err := vbaproject.Clone(project)
+	if err != nil {
+		return PackPlan{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
 	}
 	templateByName := make(map[string]vbaproject.Module, len(project.Modules))
 	for _, module := range project.Modules {
@@ -68,6 +96,12 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 	sourceByName := make(map[string]SourceModule, len(sources))
 	sourceByKey := make(map[string]SourceModule, len(sources))
 	for _, source := range sources {
+		if source.FormSpec != nil && (source.Type != ModuleTypeForm || source.FormSpec.Form.Name != source.Name) {
+			return PackPlan{}, &compiler.Error{Code: compiler.GenerationInvalid, Form: source.Name, Reason: "canonical spec identity differs from source component"}
+		}
+		if source.Type == ModuleTypeForm && formAuthority == AuthoritySource && source.FormSpec == nil {
+			return PackPlan{}, &compiler.Error{Code: compiler.GenerationUnsupported, Form: source.Name, Reason: "source UserForm topology requires a canonical spec"}
+		}
 		if !sourceinventory.ValidComponentName(source.Name) {
 			return PackPlan{}, fmt.Errorf("%w: invalid VBA component name %q", ErrAmbiguousLayout, source.Name)
 		}
@@ -111,8 +145,17 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 		source, supplied := sourceByKey[key]
 		planned := PlannedComponent{Name: module.Name, Type: typ}
 		setAuthorities(&planned)
+		if typ == ModuleTypeForm {
+			planned.TopologyAuthority = formAuthority
+		}
 		if !supplied {
-			if typ == ModuleTypeStandard || typ == ModuleTypeClass {
+			if typ == ModuleTypeStandard || typ == ModuleTypeClass || typ == ModuleTypeForm && formAuthority == AuthoritySource {
+				if typ == ModuleTypeForm {
+					working, err = vbaproject.WithoutUserForm(working, module.Name)
+					if err != nil {
+						return PackPlan{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+					}
+				}
 				planned.Action = PlanRemove
 				plan.Components = append(plan.Components, planned)
 				continue
@@ -121,6 +164,17 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 			plan.Components = append(plan.Components, planned)
 			plan.modules = append(plan.modules, module)
 			continue
+		}
+		if typ == ModuleTypeForm && source.FormSpec != nil {
+			index := slices.IndexFunc(working.Forms, func(f *oforms.Form) bool { return f.Name == module.Name })
+			if index < 0 {
+				return PackPlan{}, fmt.Errorf("%w: form %q has no Designer", ErrAmbiguousLayout, module.Name)
+			}
+			updated, err := compiler.CompileTemplate(working.Forms[index], *source.FormSpec, project.Props.CodePage)
+			if err != nil {
+				return PackPlan{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
+			}
+			working.Forms[index] = updated
 		}
 
 		normalized, err := normalizePlannedSource(module, source)
@@ -145,7 +199,10 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 		}
 		switch source.Type {
 		case ModuleTypeForm:
-			return PackPlan{}, fmt.Errorf("%w: form %q is not in the template; pack updates the code-behind of existing forms only and cannot create a new UserForm", ErrUserFormGenerationUnsupported, source.Name)
+			if source.FormSpec == nil {
+				return PackPlan{}, &compiler.Error{Code: compiler.GenerationUnsupported, Form: source.Name, Reason: "new UserForms require a canonical spec"}
+			}
+			additions = append(additions, source)
 		case ModuleTypeDocument:
 			return PackPlan{}, fmt.Errorf("%w: document module %q is not in the template; document topology is template-owned", ErrAmbiguousLayout, source.Name)
 		case ModuleTypeStandard, ModuleTypeClass:
@@ -162,6 +219,24 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 		return strings.Compare(a.SourcePath, b.SourcePath)
 	})
 	for _, source := range additions {
+		if source.Type == ModuleTypeForm {
+			form, err := compiler.CompileNew(*source.FormSpec, project.Props.CodePage)
+			if err != nil {
+				return PackPlan{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
+			}
+			module, err := vbaproject.NewUserFormModule(form, source.Source, project.Props.CodePage)
+			if err != nil {
+				return PackPlan{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
+			}
+			working, err = vbaproject.WithNewUserForm(working, form, module)
+			if err != nil {
+				return PackPlan{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
+			}
+			plan.modules = append(plan.modules, module)
+			plan.Components = append(plan.Components, PlannedComponent{SourcePath: source.SourcePath, RelatedPaths: slices.Clone(source.RelatedPaths), Name: source.Name, Type: source.Type, Action: PlanAdd, TopologyAuthority: formAuthority, CodeAuthority: AuthoritySource})
+			incrementMeta(&plan.meta, source.Type)
+			continue
+		}
 		targetType, _ := toProjectModuleType(source.Type)
 		normalized, err := normalizePlannedSource(vbaproject.Module{Name: source.Name, StreamName: source.Name, Type: targetType}, source)
 		if err != nil {
@@ -188,6 +263,8 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule) (PackPlan,
 		}
 		streams[key] = module.StreamName
 	}
+	working.Modules = slices.Clone(plan.modules)
+	plan.project = working
 	return plan, nil
 }
 
@@ -196,6 +273,14 @@ func moduleKey(name string, typ ModuleType) string {
 }
 
 func normalizePlannedSource(module vbaproject.Module, source SourceModule) (string, error) {
+	if source.Type == ModuleTypeForm && source.FormSpec != nil {
+		if hasAttribute(source.Source) {
+			return "", &compiler.Error{Code: compiler.GenerationInvalid, Form: source.Name, Reason: "canonical form code must not contain Attribute headers"}
+		}
+		// NormalizeModuleSource keeps all of the existing component attributes.
+		// The synthetic disk header is only an in-memory code boundary.
+		source.Source = "Attribute VB_Name = \"" + source.Name + "\"\r\n" + source.Source
+	}
 	if source.Type == ModuleTypeDocument && hasAttribute(source.Source) {
 		return "", fmt.Errorf("%w: %s: document source must not contain Attribute headers", ErrAmbiguousLayout, sourceLabel(source))
 	}

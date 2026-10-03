@@ -1,3 +1,16 @@
+# Issue #887
+
+- [x] Add explicit template/source UserForm topology configuration (default template).
+- [x] Discover canonical template specs alongside legacy code-only forms; retain explicit property intent.
+- [x] Plan supported Designer updates/additions/removals atomically with lossless preservation.
+- [x] Reconcile project metadata and reparse output before publication.
+- [x] Cover Go/CLI regressions and run focused/full/race/vet/lint checks.
+- [x] Verify template and blank artifacts in real Excel, including save/reopen and final-form removal.
+- [x] Update ADR/spec/config docs/CHANGELOG and review the complete diff.
+
+Local commands, retained workspaces and results:
+`internal/pack/testdata/userform-integration/README.md`.
+
 # PR #904 review follow-up
 
 REGISTERED aggregate-size and malformed Forms LIBID findings are valid.
