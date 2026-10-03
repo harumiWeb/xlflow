@@ -43,14 +43,16 @@ does not change output or behavior.
 Blank and template modes discover forms from the flat `specs/` directory under `[src].forms`.
 Each YAML/YML/JSON filename must match `form.name`; duplicate specs, orphan
 artifacts, nested canonical directories and component/CFB name collisions fail with
-`pack_ambiguous_layout`. The supported subset is empty forms plus the eleven
-flat built-in classes specified in `ms-oforms.md`. Containers, custom ActiveX,
+`pack_ambiguous_layout`. The supported subset is empty forms, Frames with nested
+Frames and the eleven built-in common classes specified in `ms-oforms.md`.
+MultiPage/Page/TabStrip generation, custom ActiveX,
 Picture resources and unsupported persisted list state fail with
 `pack_userform_generation_unsupported` before output publication.
 
 Template mode also retains recursive discovery of legacy `.frm` files. A flat
 canonical spec or sidecar can attach to a uniquely named legacy form; duplicate
-identities remain ambiguous. Blank generation requires flat canonical inputs.
+identities remain ambiguous. Blank generation requires canonical spec/code
+files directly in their configured directories; controls inside a spec may nest.
 
 Designer authority is always the canonical spec. With `code_source=sidecar`,
 matching `code/<Name>.bas` wins, then matching `.frm` code, then empty code.
@@ -154,13 +156,23 @@ empty source form set, and requires canonical specs for all supplied forms.
 Blank mode always uses source form authority independently of this setting.
 
 For a supplied canonical spec, template pack applies supported Designer
-properties and code. The complete control list must match names, types, parent
-relationships and sibling order. IDs are local spec identities and are mapped
+properties, Frame/common-control topology and code. The spec supplies the complete
+control list, including additions, deletions, replacements, parent changes and
+sibling ordering. IDs are local spec identities and are mapped
 by control names to the binary baseline. Omitted properties retain template
 values; explicit empty text, false and zero remain authoring input. Observed
 snapshot fields and warnings do not request edits. The compiler rejects
-unsupported edits (including root dimensions and control topology changes)
+unsupported edits (including root dimensions and specialized container changes)
 instead of discarding opaque state through regeneration.
+
+Retained controls are matched by exact name and type. A type change replaces
+the control; renaming is deletion plus addition. Nested `controls` and flat
+`parentId` author the same hierarchy. Siblings sort by `zIndex`, with stable
+input-order ties. Moving a control keeps omitted numeric geometry relative to
+its new parent; pack does not convert it into an absolute-position-preserving
+move. Removed Frame subtrees leave no orphan storages. Existing
+MultiPage/Page/TabStrip topology remains unchanged until its dedicated compiler
+is supported. Unknown container bookkeeping rejects structural edits.
 
 New supported forms use the same compiler and reference admission as blank
 pack. Existing module attributes and GUIDs survive code updates. Removal

@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added pure-Go Frame generation with nested Frames and common controls.
+  Canonical template specs can add, remove, replace, reparent and reorder
+  supported controls while retaining unchanged Designer persistence data.
+  Removed containers leave no orphan storages; unsupported bookkeeping
+  rejects the whole operation before artifact publication.
+
 - Added canonical UserForm Designer generation and supported property updates
   to template `pack`, with no `.frx` requirement. Omitted properties retain
   template values; `[pack].userform_topology = "source"` explicitly enables

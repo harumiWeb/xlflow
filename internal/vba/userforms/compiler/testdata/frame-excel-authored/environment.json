@@ -1,0 +1,15 @@
+{
+  "harness": "scripts/test-userform-frame-e2e.ps1",
+  "issue": 884,
+  "phase": "inspect",
+  "version": "16.0",
+  "build": "17932",
+  "operatingSystem": "Windows (64-bit) NT 10.00",
+  "processId": 106160,
+  "processArchitecture": "True",
+  "powershell": "5.1.22621.6133",
+  "trustedVbideRequired": true,
+  "cleanupConfirmed": true,
+  "binarySha256": "0bd476a4e2e5ac511d95fe3f20d76ed98f6a7d7a0a302c2e6cb0840d2f1dd61a",
+  "ownedExcelPidExited": true
+}

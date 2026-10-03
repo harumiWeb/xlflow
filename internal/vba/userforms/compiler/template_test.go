@@ -213,22 +213,42 @@ func TestCompileTemplateRejectsUnsupportedEditsAndAllowsOpaqueNoOp(t *testing.T)
 func TestCompileTemplateRejectsTopologyAndAliasConflicts(t *testing.T) {
 	base, snapshot := fixture(t, "p6_nested_form.bin")
 	t.Run("rename", func(t *testing.T) {
+		base, snapshot := topologyBase(t)
 		desired := templateInput(t, base, snapshot)
+		oldName := desired.Controls[0].Name
 		desired.Controls[0].Name = "Renamed"
-		_, err := CompileTemplate(base, desired, 932)
-		assertTemplateErrorCode(t, err, Unsupported)
+		result, err := CompileTemplate(base, desired, 932)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projected, err := projection.Project(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(projected.Controls) != len(snapshot.Controls) || findControl(result.Controls, oldName) != nil || findControl(result.Controls, "Renamed") == nil {
+			t.Fatalf("rename was not compiled as removal plus addition: %#v", projected.Controls)
+		}
 	})
 	t.Run("reorder", func(t *testing.T) {
+		base, snapshot := topologyBase(t)
 		desired := templateInput(t, base, snapshot)
-		desired.Controls[0], desired.Controls[1] = desired.Controls[1], desired.Controls[0]
-		_, err := CompileTemplate(base, desired, 932)
-		assertTemplateErrorCode(t, err, Unsupported)
+		if len(desired.Controls) < 3 || desired.Controls[0].ParentID != "" || desired.Controls[2].ParentID != "" {
+			t.Fatal("flat fixture does not have two root siblings")
+		}
+		desired.Controls[0].ZIndex, desired.Controls[2].ZIndex = new(1), new(0)
+		result, err := CompileTemplate(base, desired, 932)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Controls[0].Name != snapshot.Controls[2].Name || result.Controls[1].Name != snapshot.Controls[0].Name {
+			t.Fatalf("root sibling order = %q, %q", result.Controls[0].Name, result.Controls[1].Name)
+		}
 	})
 	t.Run("duplicate-name", func(t *testing.T) {
 		desired := templateInput(t, base, snapshot)
 		desired.Controls[1].Name = desired.Controls[0].Name
 		_, err := CompileTemplate(base, desired, 932)
-		assertTemplateErrorCode(t, err, Unsupported)
+		assertTemplateErrorCode(t, err, Invalid)
 	})
 	t.Run("alias-conflict", func(t *testing.T) {
 		desired := templateInput(t, base, snapshot)

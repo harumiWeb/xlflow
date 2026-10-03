@@ -48,7 +48,7 @@ func TestNewFormRejectsUnsupportedLayoutsAndInvalidRecords(t *testing.T) {
 	}{
 		{"reserved-name", func(d *Definition) { d.Name = "VBA" }, ErrInvalidEdit},
 		{"path-name", func(d *Definition) { d.Name = "Foo/Bar" }, ErrInvalidEdit},
-		{"container", func(d *Definition) { d.Controls[0].Class = 14 }, ErrUnsupportedEdit},
+		{"multipage", func(d *Definition) { d.Controls[0].Class = 57 }, ErrUnsupportedEdit},
 		{"tabstrip", func(d *Definition) { d.Controls[0].Class = 18 }, ErrUnsupportedEdit},
 		{"picture", func(d *Definition) { d.Controls[0].Properties = map[string]any{"Picture": int64(0xffff)} }, ErrUnsupportedEdit},
 		{"root-caption-codepage", func(d *Definition) { d.Caption = "😀" }, ErrInvalidEdit},

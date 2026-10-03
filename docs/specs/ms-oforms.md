@@ -152,13 +152,21 @@ that the existing `SerializeForm` and `vbaproject.Write` can publish. It does
 not consume `.frx`, open Excel, or enable Designer edits in the `pack` CLI;
 CLI integration remains Issue #887.
 
-Control IDs connect the before/after snapshots. Names and the persisted
-parent/sibling relationships connect the before snapshot to the binary model.
-Control creation, deletion, rename, type/ProgID changes, reparenting, and
-reordering are rejected. Snapshot-only `observed`, `warnings`, and `unsupported`
-metadata is not mutation input. The before value of every changed authoring
-field must agree with the binary model when that value is supplied; a stale
-baseline fails instead of overwriting a different persisted value.
+The complete `before` snapshot must describe the existing binary topology.
+Control IDs are snapshot-local parent references; exact, case-sensitive names
+connect controls to retained persistence across snapshots, with type labels
+matched case-insensitively. The complete `after` snapshot supplies the desired
+topology. A same-name, same-type control retains its persisted payload; an
+absent name is deleted, a new name is generated, and a same-name type change
+replaces the control. A name change is therefore a deletion plus an addition,
+not an in-place rename. Names must be unique case-insensitively across the
+form. An explicitly supplied ProgID for a retained control must match its
+persisted identity. Reparenting and sibling reordering are supported within the
+Frame and common-control topology boundary described below. Snapshot-only `observed`,
+`warnings`, and `unsupported` metadata is not mutation input. The before value
+of every changed authoring field must agree with the binary model when that
+value is supplied; a stale baseline fails instead of overwriting a different
+persisted value.
 Geometry comparisons allow the existing 0.05-point Designer parity tolerance
 for Excel twip versus persisted HIMETRIC rounding.
 Both snapshots must use an omitted coordinateSystem, `points`, or
@@ -172,8 +180,8 @@ applicable caption, text/value, parent-relative position, size, tab order,
 enabled, and visible fields use explicit persistence mappings. Existing nested
 control geometry remains parent-relative. Form caption is supported; root
 width/height edits are rejected because persisted client dimensions and Excel
-outer Designer dimensions are different. MultiPage/Page/TabStrip editing and
-container topology generation remain subsequent stages.
+outer Designer dimensions are different. MultiPage/Page/TabStrip editing remains
+a subsequent stage; Frame/common-control topology is described below.
 
 For the Excel-authored unbound ComboBox/ListBox fixtures, Designer AddItem
 items and ListIndex disappear after save/close/reopen. ComboBox Value persists,
@@ -232,7 +240,7 @@ Designer state, including nested TextBox and Frame.
 
 ## New Designer generation (Issue #883)
 
-`compiler.CompileNew(spec, codePage)` authors a new flat Designer without a
+`compiler.CompileNew(spec, codePage)` authors a new Designer without a
 template, `.frm`, `.frx`, Excel, COM, or VBIDE. `oforms.NewForm` accepts a
 separate persistence-unit definition and reuses the existing property tables,
 record encoders and CFB writer. It emits required `f`, `o`, `\x01CompObj`, and
@@ -241,7 +249,8 @@ No arbitrary caller-created model is accepted by the lossless serializer.
 
 The supported classes are Label, TextBox, CommandButton, CheckBox,
 OptionButton, ToggleButton, ComboBox, ListBox, SpinButton, ScrollBar, and
-Image without Picture data. Frame and all nested/container structures,
+Image without Picture data, plus Frames containing common controls or Frames.
+MultiPage/Page/TabStrip generation,
 custom ActiveX, resources, list/selectedIndex state, and unimplemented
 properties fail loudly. ListBox text/value is rejected because it depends on
 unpersisted list state. SpinButton/ScrollBar value is an integer in the
@@ -273,6 +282,7 @@ The default control sizes are:
 | SpinButton                                  | 18 x 36                 |
 | ScrollBar                                   | 120 x 18                |
 | Image                                       | 72 x 72                 |
+| Frame                                       | 144 x 108               |
 
 Position defaults to zero. Controls are ordered by normalized zIndex with
 stable input-order ties. Site IDs start at 1 in that order; NextAvailableID
@@ -303,8 +313,9 @@ blank and template pack use canonical specs/code for new forms. Template pack
 applies supported edits through `CompileTemplate`, which projects the binary
 baseline, reconciles source control identities/parents/order by name, overlays
 explicit properties, and invokes `CompileEdits`. Omitted properties retain the
-baseline; observed snapshot metadata is not authoring intent. Unsupported
-topology or property changes reject the complete operation.
+baseline; observed snapshot metadata is not authoring intent. Topology changes
+outside the Frame/common-control boundary below, and unsupported property
+changes, reject the complete operation.
 
 REGISTERED reference identity must come from a canonical Forms LIBID in a
 complete sized record. CONTROL reference identity must come from the original
@@ -314,6 +325,57 @@ including a Forms LIBID paired with a foreign OriginalTypeLib or a GUID appearin
 only in a file path or description. Project addition independently rejects
 equal component GUIDs in `VB_Base`, comparing them case-insensitively even
 when the caller constructs the module without `NewUserFormModule`.
+
+## Frame hierarchy and structural compilation (Issue #884)
+
+Frame is cache index 14. Its site owns a nested `i<site-id>` storage and has
+zero inline object bytes. The child storage contains its own FormControl and
+site data in `f`, child object records in `o`, and a Frame `CompObj`. Generated
+directory and CompObj CLSIDs both use
+`6E182020-F460-11CE-9BCD-00AA00608E01`; CompObj declares
+`Microsoft Forms 2.0 Frame` and `Forms.Frame.1`. These identities are bound to
+Excel-authored fixtures. All control geometry remains parent-relative.
+
+Frame BooleanProperties sets `DontSaveClassTable` (`0x8000`), so the class
+table is omitted entirely, including its count. Writing an empty count here
+shifts the site data and causes Excel's insufficient-memory dialog. Generated
+root forms without that flag retain a stored empty class table.
+
+`ShapeCookie` tracks descendant membership mutations: additions and deletions
+increment the affected container and its ancestors, while sibling reordering
+keeps it unchanged. A stored root `VBFrame.TypeInfoVer` must follow the root
+cookie; retaining its old value produces runtime error 370 even when Designer
+inspection succeeds. Generated forms may omit this text property. These rules
+are bound to Excel-authored add/remove/reorder fixtures and runtime checks.
+COM `Controls` enumeration can follow retained site IDs rather than persisted
+site order. The runtime gate checks membership, parents, types and properties;
+pure-Go readback of the saved binary checks the persisted sibling order.
+
+The authoring adapter resolves flat `parentId` and nested `controls` through
+the existing normalization/validation contract. It orders siblings separately
+by zIndex with stable input ties, then emits deterministic preorder. New
+control names are unique across the form. Source IDs identify controls and
+parent references in a snapshot; they do not specify binary site IDs. Added
+and replaced controls receive binary IDs beyond the retained high-water mark,
+while retained controls keep their binary IDs. Nested storage paths derive
+from the owning Frame and binary ID, so a moved Frame subtree follows its new
+parent. Retained same-name, same-type controls keep their persisted payloads;
+properties omitted from their source spec remain unchanged.
+
+`oforms.ApplyTopology` accepts an explicit complete control tree through named
+parent relationships and optional definitions for additions/replacements. It
+validates a signed input, clones its persistence state, retains existing
+payloads, updates owning site/object streams, and emits only reachable storage
+subtrees. Missing controls are deleted. Existing properties omitted from a
+template spec remain unchanged. Reparenting keeps omitted position values
+relative to the new parent. Ordinary serialization still rejects arbitrary
+changes to the lossless model.
+
+Changes to unknown class tables, nonstandard depth/type records, extra
+container bookkeeping or specialized MultiPage/Page/TabStrip topology fail
+loudly. Unchanged specialized subtrees remain byte-preserved when supported
+Frame controls elsewhere change. All resulting Designer bytes are reparsed
+before returning a signed model; publication remains transactional at pack.
 
 ## Structural validation
 

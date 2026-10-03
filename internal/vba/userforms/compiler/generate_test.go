@@ -107,7 +107,10 @@ func TestCompileNewRejectsUnsupportedAndInvalidInput(t *testing.T) {
 		{"outer-size", GenerationUnsupported, func(s *spec.FormSpec) { s.Form.Width = new(300.0) }},
 		{"size-overflow", GenerationInvalid, func(s *spec.FormSpec) { s.Form.Build = &spec.FormSpecBuildForm{ClientWidth: new(1e100)} }},
 		{"nan", GenerationInvalid, func(s *spec.FormSpec) { s.Controls[0].Left = new(math.NaN()) }},
-		{"container", GenerationUnsupported, func(s *spec.FormSpec) { s.Controls[0].Type = "Frame" }},
+		{"frame-picture", GenerationUnsupported, func(s *spec.FormSpec) {
+			s.Controls[0].Type = "Frame"
+			s.Controls[0].Properties = map[string]any{"Picture": "data"}
+		}},
 		{"picture", GenerationUnsupported, func(s *spec.FormSpec) {
 			s.Controls[0].Type = "Image"
 			s.Controls[0].Properties = map[string]any{"Picture": "data"}

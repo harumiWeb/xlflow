@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -62,12 +63,13 @@ func rewriteVBFrameCaption(raw []byte, caption string, codePage uint16) ([]byte,
 }
 
 type vbFrameLayout struct {
-	rootBeginIndex   int
-	rootCaptionIndex int
+	rootBeginIndex    int
+	rootCaptionIndex  int
+	rootTypeInfoIndex int
 }
 
 func inspectVBFrameLayout(lines [][]byte, codePage uint16) (vbFrameLayout, error) {
-	layout := vbFrameLayout{rootBeginIndex: -1, rootCaptionIndex: -1}
+	layout := vbFrameLayout{rootBeginIndex: -1, rootCaptionIndex: -1, rootTypeInfoIndex: -1}
 	depth, propertyDepth := 0, 0
 	for index, line := range lines {
 		body, ending := vbFrameLineParts(line)
@@ -109,6 +111,12 @@ func inspectVBFrameLayout(lines [][]byte, codePage uint16) (vbFrameLayout, error
 			}
 			layout.rootCaptionIndex = index
 		}
+		if depth == 1 && isVBFrameProperty(trimmed, "TypeInfoVer") {
+			if layout.rootTypeInfoIndex >= 0 {
+				return vbFrameLayout{}, fmt.Errorf("%w: duplicate root TypeInfoVer properties in VBFrame", ErrInvalidEdit)
+			}
+			layout.rootTypeInfoIndex = index
+		}
 		if depth == 0 && isVBFrameBegin(trimmed) {
 			if layout.rootBeginIndex >= 0 {
 				return vbFrameLayout{}, fmt.Errorf("%w: multiple root Begin blocks in VBFrame", ErrInvalidEdit)
@@ -131,6 +139,39 @@ func inspectVBFrameLayout(lines [][]byte, codePage uint16) (vbFrameLayout, error
 		return vbFrameLayout{}, fmt.Errorf("%w: unknown VBFrame layout", ErrInvalidEdit)
 	}
 	return layout, nil
+}
+
+// Excel binds a stored TypeInfoVer to the root ShapeCookie. Keep that binding
+// when membership changes; generated forms legitimately omit TypeInfoVer.
+func rewriteVBFrameTypeInfo(raw []byte, cookie int64, codePage uint16) ([]byte, error) {
+	lines := bytes.SplitAfter(raw, []byte{'\n'})
+	layout, err := inspectVBFrameLayout(lines, codePage)
+	if err != nil {
+		return nil, err
+	}
+	if layout.rootTypeInfoIndex < 0 {
+		return raw, nil
+	}
+	body, ending := vbFrameLineParts(lines[layout.rootTypeInfoIndex])
+	text, err := ovba.DecodeMBCS(body, codePage)
+	if err != nil {
+		return nil, err
+	}
+	_, value, _ := strings.Cut(text, "=")
+	value, _, _ = strings.Cut(value, "'")
+	old, err := strconv.ParseUint(strings.TrimSpace(value), 10, 32)
+	if err != nil || len(ending) == 0 || cookie < 0 || cookie > math.MaxUint32 {
+		return nil, fmt.Errorf("%w: malformed root TypeInfoVer", ErrInvalidEdit)
+	}
+	if int64(old) == cookie {
+		return raw, nil
+	}
+	line, err := ovba.EncodeMBCS(fmt.Sprintf("   TypeInfoVer = %d%s", cookie, ending), codePage)
+	if err != nil {
+		return nil, err
+	}
+	lines[layout.rootTypeInfoIndex] = line
+	return bytes.Join(lines, nil), nil
 }
 
 func rootVBFrameCaption(raw []byte, codePage uint16) (string, bool, error) {

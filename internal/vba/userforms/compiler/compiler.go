@@ -54,10 +54,10 @@ type compilation struct {
 	edits    []pendingEdit
 }
 
-// CompileEdits compiles changes between two complete snapshots of the same
+// compilePropertyEdits compiles property changes between complete snapshots of the same
 // form. Snapshot-only metadata is not authoring input. It returns a newly read,
 // signed model; neither snapshots nor base are changed on success or failure.
-func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint16) (*oforms.Form, error) {
+func compilePropertyEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint16) (*oforms.Form, error) {
 	if _, err := oforms.SerializeForm(base, codePage); err != nil {
 		return nil, err
 	}

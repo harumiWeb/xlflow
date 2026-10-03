@@ -90,6 +90,7 @@ func TestTemplatePlanFormsIsAtomicAndDeterministic(t *testing.T) {
 	}
 	bad := authoredForm("Bad")
 	bad.FormSpec.Controls[0].Type = "Frame"
+	bad.FormSpec.Controls[0].Properties = map[string]any{"picture": "unsupported"}
 	plan, err := PlanProject(p, []SourceModule{authoredForm("Good"), bad})
 	if detail, ok := errors.AsType[*compiler.Error](err); !ok || detail.Code != compiler.GenerationUnsupported {
 		t.Fatalf("capability error: %v", err)

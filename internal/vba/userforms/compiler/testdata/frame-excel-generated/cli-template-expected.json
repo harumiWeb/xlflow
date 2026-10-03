@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "kind": "xlflow.userform",
+  "basis": "designer",
+  "coordinateSystem": "parent-relative",
+  "form": {
+    "name": "FrameTopologyForm",
+    "caption": "issue884-frame-topology",
+    "observed": {
+      "caption": "issue884-frame-topology",
+      "clientWidth": 329.38582677165357,
+      "clientHeight": 231.59055118110237
+    },
+    "build": {
+      "caption": "issue884-frame-topology",
+      "clientWidth": 329.38582677165357,
+      "clientHeight": 231.59055118110237
+    }
+  },
+  "controls": [
+    {
+      "id": "control_001",
+      "zIndex": 0,
+      "type": "Frame",
+      "name": "ParentFrame",
+      "progId": "Forms.Frame.1",
+      "caption": "parent-frame",
+      "left": 129.99685039370078,
+      "top": 39.99685039370079,
+      "width": 180,
+      "height": 136.00629921259844,
+      "tabIndex": 0,
+      "enabled": true,
+      "visible": true,
+      "unsupported": ["logicalSize", "specialEffect"],
+      "observed": {
+        "caption": "parent-frame",
+        "left": 129.99685039370078,
+        "top": 39.99685039370079,
+        "width": 180,
+        "height": 136.00629921259844,
+        "tabIndex": 0,
+        "enabled": true,
+        "visible": true,
+        "unsupported": ["logicalSize", "specialEffect"]
+      }
+    },
+    {
+      "id": "control_002",
+      "parentId": "control_001",
+      "zIndex": 0,
+      "type": "Frame",
+      "name": "NestedFrame",
+      "progId": "Forms.Frame.1",
+      "caption": "nested-frame",
+      "left": 11.990551181102362,
+      "top": 54,
+      "width": 144,
+      "height": 64.00629921259842,
+      "tabIndex": 0,
+      "enabled": true,
+      "visible": true,
+      "unsupported": ["logicalSize", "specialEffect"],
+      "observed": {
+        "caption": "nested-frame",
+        "left": 11.990551181102362,
+        "top": 54,
+        "width": 144,
+        "height": 64.00629921259842,
+        "tabIndex": 0,
+        "enabled": true,
+        "visible": true,
+        "unsupported": ["logicalSize", "specialEffect"]
+      }
+    },
+    {
+      "id": "control_003",
+      "parentId": "control_002",
+      "zIndex": 0,
+      "type": "TextBox",
+      "name": "RootText",
+      "progId": "Forms.TextBox.1",
+      "text": "root-text",
+      "value": "root-text",
+      "left": 11.990551181102362,
+      "top": 201.99685039370078,
+      "width": 180,
+      "height": 20.01259842519685,
+      "tabIndex": 0,
+      "enabled": true,
+      "visible": true,
+      "unsupported": ["textProps"],
+      "observed": {
+        "text": "root-text",
+        "value": "root-text",
+        "left": 11.990551181102362,
+        "top": 201.99685039370078,
+        "width": 180,
+        "height": 20.01259842519685,
+        "tabIndex": 0,
+        "enabled": true,
+        "visible": true,
+        "unsupported": ["textProps"]
+      }
+    },
+    {
+      "id": "control_004",
+      "parentId": "control_001",
+      "zIndex": 1,
+      "type": "TextBox",
+      "name": "SiblingText",
+      "progId": "Forms.TextBox.1",
+      "text": "sibling-text",
+      "value": "sibling-text",
+      "left": 10.006299212598424,
+      "top": 21.996850393700786,
+      "width": 83.99055118110236,
+      "height": 18,
+      "tabIndex": 1,
+      "enabled": true,
+      "visible": true,
+      "unsupported": ["textProps"],
+      "observed": {
+        "text": "sibling-text",
+        "value": "sibling-text",
+        "left": 10.006299212598424,
+        "top": 21.996850393700786,
+        "width": 83.99055118110236,
+        "height": 18,
+        "tabIndex": 1,
+        "enabled": true,
+        "visible": true,
+        "unsupported": ["textProps"]
+      }
+    },
+    {
+      "id": "control_005",
+      "zIndex": 1,
+      "type": "Label",
+      "name": "RootCommon",
+      "progId": "Forms.Label.1",
+      "caption": "root-common",
+      "left": 11.990551181102362,
+      "top": 10.006299212598424,
+      "width": 90,
+      "height": 18,
+      "tabIndex": 1,
+      "enabled": true,
+      "visible": true,
+      "unsupported": ["textProps"],
+      "observed": {
+        "caption": "root-common",
+        "left": 11.990551181102362,
+        "top": 10.006299212598424,
+        "width": 90,
+        "height": 18,
+        "tabIndex": 1,
+        "enabled": true,
+        "visible": true,
+        "unsupported": ["textProps"]
+      }
+    },
+    {
+      "id": "control_006",
+      "zIndex": 2,
+      "type": "Label",
+      "name": "EmptyFrame",
+      "progId": "Forms.Label.1",
+      "caption": "replaced-frame",
+      "left": 0,
+      "top": 0,
+      "width": 72,
+      "height": 18,
+      "tabIndex": 2,
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "caption": "replaced-frame",
+        "left": 0,
+        "top": 0,
+        "width": 72,
+        "height": 18,
+        "tabIndex": 2,
+        "enabled": true,
+        "visible": true
+      }
+    },
+    {
+      "id": "control_007",
+      "zIndex": 3,
+      "type": "Frame",
+      "name": "AddedFrame",
+      "progId": "Forms.Frame.1",
+      "caption": "AddedFrame",
+      "left": 0,
+      "top": 0,
+      "width": 144,
+      "height": 108,
+      "tabIndex": 3,
+      "enabled": true,
+      "visible": true,
+      "unsupported": ["logicalSize", "specialEffect"],
+      "observed": {
+        "caption": "AddedFrame",
+        "left": 0,
+        "top": 0,
+        "width": 144,
+        "height": 108,
+        "tabIndex": 3,
+        "enabled": true,
+        "visible": true,
+        "unsupported": ["logicalSize", "specialEffect"]
+      }
+    },
+    {
+      "id": "control_008",
+      "parentId": "control_007",
+      "zIndex": 0,
+      "type": "Label",
+      "name": "AddedLabel",
+      "progId": "Forms.Label.1",
+      "caption": "added",
+      "left": 0,
+      "top": 0,
+      "width": 72,
+      "height": 18,
+      "tabIndex": 0,
+      "enabled": true,
+      "visible": true,
+      "observed": {
+        "caption": "added",
+        "left": 0,
+        "top": 0,
+        "width": 72,
+        "height": 18,
+        "tabIndex": 0,
+        "enabled": true,
+        "visible": true
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported form Designer properties were preserved only in the binary model: logicalSize."
+    },
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported Designer properties were preserved only in the binary model: logicalSize, specialEffect.",
+      "control": "ParentFrame"
+    },
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported Designer properties were preserved only in the binary model: logicalSize, specialEffect.",
+      "control": "NestedFrame"
+    },
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported Designer properties were preserved only in the binary model: textProps.",
+      "control": "RootText"
+    },
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported Designer properties were preserved only in the binary model: textProps.",
+      "control": "SiblingText"
+    },
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported Designer properties were preserved only in the binary model: textProps.",
+      "control": "RootCommon"
+    },
+    {
+      "code": "unsupported_properties",
+      "message": "Unsupported Designer properties were preserved only in the binary model: logicalSize, specialEffect.",
+      "control": "AddedFrame"
+    }
+  ]
+}
