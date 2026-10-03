@@ -10,7 +10,7 @@ import (
 )
 
 func TestBlankFormsJapaneseAndAllCommonControlsReadback(t *testing.T) {
-	formSpec := spec.FormSpec{SchemaVersion: 1, Kind: "xlflow.userform", Basis: "designer", Form: spec.FormSpecForm{Name: "JapaneseForm", Caption: new("日本語😀")}}
+	formSpec := spec.FormSpec{SchemaVersion: 1, Kind: "xlflow.userform", Basis: "designer", Form: spec.FormSpecForm{Name: "JapaneseForm", Caption: new("日本語")}}
 	for i, kind := range []string{"Label", "TextBox", "CommandButton", "CheckBox", "OptionButton", "ToggleButton", "ComboBox", "ListBox", "SpinButton", "ScrollBar", "Image"} {
 		control := spec.FormSpecControl{ID: kind, Name: kind + "Main", Type: kind, TabIndex: new(i)}
 		if kind == "TextBox" {
@@ -41,7 +41,7 @@ func TestBlankFormsJapaneseAndAllCommonControlsReadback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if projected.Form.Caption == nil || *projected.Form.Caption != "日本語😀" || len(projected.Controls) != 11 {
+	if projected.Form.Caption == nil || *projected.Form.Caption != "日本語" || len(projected.Controls) != 11 {
 		t.Fatalf("projection=%+v", projected)
 	}
 	for _, module := range p.Modules {

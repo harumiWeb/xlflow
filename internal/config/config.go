@@ -87,7 +87,8 @@ type BuildConfig struct {
 
 // PackConfig controls pure-Go workbook artifact generation.
 type PackConfig struct {
-	Blank BlankPackConfig `toml:"blank"`
+	UserFormTopology string          `toml:"userform_topology"`
+	Blank            BlankPackConfig `toml:"blank"`
 }
 
 // BlankPackConfig controls text encoding for template-free VBA projects.
@@ -506,7 +507,7 @@ func Default() Config {
 		UserForm: UserFormConfig{
 			CodeSource: "sidecar",
 		},
-		Pack: PackConfig{Blank: BlankPackConfig{CodePage: 1252}},
+		Pack: PackConfig{UserFormTopology: "template", Blank: BlankPackConfig{CodePage: 1252}},
 		Backup: BackupConfig{
 			Retention: BackupRetentionConfig{
 				Enabled:        false,
@@ -595,6 +596,9 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 	meta, err := toml.DecodeFile(path, &cfg)
 	if err != nil {
 		return cfg, err
+	}
+	if meta.IsDefined("pack", "userform_topology") && strings.TrimSpace(cfg.Pack.UserFormTopology) == "" {
+		return cfg, fmt.Errorf("pack.userform_topology must be one of template, source")
 	}
 	for _, key := range meta.Undecoded() {
 		name := key.String()
@@ -688,6 +692,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.Pack.Blank.CodePage == 0 {
 		cfg.Pack.Blank.CodePage = defaults.Pack.Blank.CodePage
 	}
+	if cfg.Pack.UserFormTopology == "" {
+		cfg.Pack.UserFormTopology = defaults.Pack.UserFormTopology
+	}
 }
 
 func validate(cfg Config) error {
@@ -712,6 +719,11 @@ func validate(cfg Config) error {
 	case "frm", "sidecar":
 	default:
 		return fmt.Errorf("userform.code_source must be one of frm, sidecar")
+	}
+	switch cfg.Pack.UserFormTopology {
+	case "template", "source":
+	default:
+		return fmt.Errorf("pack.userform_topology must be one of template, source")
 	}
 	if cfg.Backup.Retention.MaxCount < 0 {
 		return errors.New("backup.retention.max_count must be zero or greater")
@@ -1389,7 +1401,7 @@ func renderBuildConfig(cfg BuildConfig) string {
 }
 
 func renderPackConfig(cfg PackConfig) string {
-	return fmt.Sprintf("# VBA project text encoding for `xlflow pack --blank`.\n[pack.blank]\ncode_page = %d\n", cfg.Blank.CodePage)
+	return fmt.Sprintf("# UserForm topology authority for template-backed `xlflow pack`.\n# Valid values: \"template\", \"source\". Blank mode is always source-authoritative.\n[pack]\nuserform_topology = %q\n\n# VBA project text encoding for `xlflow pack --blank`.\n[pack.blank]\ncode_page = %d\n", cfg.UserFormTopology, cfg.Blank.CodePage)
 }
 
 func renderMetricsConfig(cfg MetricsConfig) string {

@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
-	"github.com/harumiWeb/xlflow/internal/pack/ovba"
 )
 
 // Definition is authoring input in persistence units, separate from FormSpec.
@@ -151,12 +150,9 @@ func NewForm(input Definition, codePage uint16) (*Form, error) {
 	if err != nil {
 		return nil, err
 	}
-	// VBFrame is MBCS compatibility text; Unicode captions live in f, not here.
-	frame := fmt.Sprintf("VERSION 5.00\r\nBegin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} %s\r\n   ClientHeight = %d\r\n   ClientWidth = %d\r\n   StartUpPosition = 1\r\nEnd\r\n", input.Name,
-		int64(math.Round(float64(input.Size.Height)*1440/2540)), int64(math.Round(float64(input.Size.Width)*1440/2540)))
-	frameBytes, err := ovba.EncodeMBCS(frame, codePage)
+	frameBytes, err := generatedVBFrame(input.Name, input.Caption, input.Size, codePage)
 	if err != nil {
-		return nil, err
+		return nil, &EditError{Control: "", Property: "Caption", Err: err}
 	}
 	stored := &SerializedForm{Storages: map[string]cfb.StorageMeta{input.Name: {}}, Streams: map[string][]byte{
 		input.Name + "/f": f, input.Name + "/o": level.ORaw, input.Name + "/\x01CompObj": generationCompObj(), input.Name + "/\x03VBFrame": frameBytes,

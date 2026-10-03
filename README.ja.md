@@ -621,6 +621,11 @@ default_component_folders = true
 #   "sidecar" – コードは src/forms/code/<フォーム名>.bas に分離されます。
 code_source = "sidecar"
 
+# テンプレート pack は省略した UserForm を既定で保持します。
+# "source" は省略フォームを削除し、canonical spec を必須にします。
+[pack]
+userform_topology = "template"
+
 # リリース用ビルドのソースフィルタリング。これは `build` のみに適用され、
 # `push` と `pack` では常にソースツリー全体が使用されます。
 [build]

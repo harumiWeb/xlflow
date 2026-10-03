@@ -65,8 +65,13 @@ type Options struct {
 	Config                config.Config
 	RestrictToRoot        bool
 	ValidateFormArtifacts bool
-	// CanonicalFormSpecs is reserved for blank pack: specs own Designers.
+	// CanonicalFormSpecs makes canonical specs the Designer input while still
+	// permitting legacy .frm/.frx compatibility artifacts when requested.
 	CanonicalFormSpecs bool
+	// AllowLegacyFormArtifacts keeps legacy .frm/.frx forms in a canonical
+	// inventory with a nil FormSpec. Pack uses this in both template and blank
+	// modes so a legacy form without a spec reaches the engine's typed error.
+	AllowLegacyFormArtifacts bool
 	// AllowLooseFormModules tolerates .bas/.cls files directly under the forms
 	// root (outside the reserved code/ and specs/ directories) instead of
 	// rejecting them as unsupported UserForm sources. The Excel bridge imports

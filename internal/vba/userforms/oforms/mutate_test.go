@@ -62,7 +62,7 @@ func TestApplyEditsFixtureRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	edits := []Edit{
-		{"", "Caption", "日本語😀フォーム"},
+		{"", "Caption", "日本語フォーム"},
 		{"CommandButton1", "Caption", "実行😀"},
 		{"CommandButton1", "Left", int32(-17)},
 		{"CommandButton1", "Top", int32(42)},
@@ -78,8 +78,11 @@ func TestApplyEditsFixtureRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Levels[0].Record.Strings["Caption"].Text != "日本語😀フォーム" {
+	if got.Levels[0].Record.Strings["Caption"].Text != "日本語フォーム" {
 		t.Fatal("root caption lost")
+	}
+	if !strings.Contains(got.DesignerSource.Text, `Caption = "日本語フォーム"`) {
+		t.Fatalf("VBFrame root caption lost: %q", got.DesignerSource.Text)
 	}
 	c := got.Controls[0]
 	if c.Record.Strings["Caption"].Text != "実行😀" || c.Record.Strings["Caption"].Compressed {
@@ -116,7 +119,7 @@ func TestApplyEditsFixtureRoundTrip(t *testing.T) {
 		t.Fatal("metadata changed")
 	}
 	for path, raw := range before.Streams {
-		if path != "UserForm1/f" && path != "UserForm1/o" && !bytes.Equal(raw, after.Streams[path]) {
+		if path != "UserForm1/f" && path != "UserForm1/o" && path != "UserForm1/\x03VBFrame" && !bytes.Equal(raw, after.Streams[path]) {
 			t.Fatalf("stream %s changed", path)
 		}
 	}

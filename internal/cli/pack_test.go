@@ -19,6 +19,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/output"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/projection"
 )
 
 func TestRootCommandIncludesPackCommand(t *testing.T) {
@@ -137,11 +138,12 @@ func TestPackCommandBlankRejectsUserFormArtifacts(t *testing.T) {
 	cases := []struct {
 		name string
 		path string
+		code string
 	}{
-		{name: "frm", path: filepath.Join("src", "forms", "Login.frm")},
-		{name: "orphan frx", path: filepath.Join("src", "forms", "Login.frx")},
-		{name: "orphan sidecar code", path: filepath.Join("src", "forms", "code", "Login.bas")},
-		{name: "orphan form spec", path: filepath.Join("src", "forms", "specs", "Login.yaml")},
+		{name: "frm", path: filepath.Join("src", "forms", "Login.frm"), code: "pack_userform_generation_unsupported"},
+		{name: "orphan frx", path: filepath.Join("src", "forms", "Login.frx"), code: "pack_ambiguous_layout"},
+		{name: "orphan sidecar code", path: filepath.Join("src", "forms", "code", "Login.bas"), code: "pack_ambiguous_layout"},
+		{name: "orphan form spec", path: filepath.Join("src", "forms", "specs", "Login.yaml"), code: "pack_ambiguous_layout"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,8 +156,8 @@ func TestPackCommandBlankRejectsUserFormArtifacts(t *testing.T) {
 			if err == nil || output.ExitCode(err) != output.ExitValidation {
 				t.Fatalf("err=%v exit=%d, want validation failure", err, output.ExitCode(err))
 			}
-			if got := errorCodeFromJSON(t, stdout); got != "pack_ambiguous_layout" {
-				t.Fatalf("error code = %q, want pack_ambiguous_layout\n%s", got, stdout)
+			if got := errorCodeFromJSON(t, stdout); got != tc.code {
+				t.Fatalf("error code = %q, want %s\n%s", got, tc.code, stdout)
 			}
 		})
 	}
@@ -790,6 +792,67 @@ func TestPackCommandEndToEndUpdatesFormCodeBehind(t *testing.T) {
 	}
 }
 
+func TestPackCommandCanonicalTemplateFormLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	writePackConfig(t, dir)
+	writePackSourceTree(t, dir, false)
+	initialSpec := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login","caption":"Initial"},"controls":[{"id":"text1","name":"TextBox1","type":"TextBox","text":"first"}]}`
+	writePackSourceModule(t, dir, filepath.Join("src", "forms", "specs", "Login.json"), []byte(initialSpec))
+	writePackSourceModule(t, dir, filepath.Join("src", "forms", "code", "Login.bas"), []byte("Option Explicit\nPublic Sub InitialCode()\nEnd Sub\n"))
+	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--out", "dist/Add.xlsm")
+	if err != nil {
+		t.Fatalf("canonical add failed: %v\n%s", err, stdout)
+	}
+	added := readPackedProjectForTest(t, filepath.Join(dir, "dist", "Add.xlsm"))
+	if len(added.Forms) != 1 || added.Forms[0].Name != "Login" {
+		t.Fatalf("canonical add forms = %+v", added.Forms)
+	}
+	if !strings.Contains(moduleSourceForTest(added, "Login"), "InitialCode") {
+		t.Fatal("canonical add did not use code sidecar")
+	}
+
+	writePackSourceModule(t, dir, filepath.Join("src", "forms", "specs", "Login.json"), []byte(strings.Replace(initialSpec, "Initial", "Edited", 1)))
+	writePackSourceModule(t, dir, filepath.Join("build", "Book.xlsm"), readFileForTest(t, filepath.Join(dir, "dist", "Add.xlsm")))
+	stdout, err = runPackCommandForTest(dir, "--json", "pack", "--out", "dist/Edit.xlsm")
+	if err != nil {
+		t.Fatalf("canonical edit failed: %v\n%s", err, stdout)
+	}
+	edited := readPackedProjectForTest(t, filepath.Join(dir, "dist", "Edit.xlsm"))
+	state, err := projection.Project(edited.Forms[0])
+	if err != nil || state.Form.Caption == nil || *state.Form.Caption != "Edited" {
+		t.Fatalf("canonical edit caption = %+v, err=%v", state.Form.Caption, err)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "src", "forms", "specs", "Login.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "src", "forms", "code", "Login.bas")); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Pack.UserFormTopology = "source"
+	if err := os.Remove(filepath.Join(dir, config.FileName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	writePackSourceModule(t, dir, filepath.Join("build", "Book.xlsm"), readFileForTest(t, filepath.Join(dir, "dist", "Edit.xlsm")))
+	stdout, err = runPackCommandForTest(dir, "--json", "pack", "--out", "dist/Remove.xlsm")
+	if err != nil {
+		t.Fatalf("canonical source removal failed: %v\n%s", err, stdout)
+	}
+	removed := readPackedProjectForTest(t, filepath.Join(dir, "dist", "Remove.xlsm"))
+	if len(removed.Forms) != 0 || moduleSourceForTest(removed, "Login") != "" {
+		t.Fatalf("canonical source removal retained Login: forms=%+v source=%q", removed.Forms, moduleSourceForTest(removed, "Login"))
+	}
+}
+
 func TestPackCommandMapsProtectedProjectEngineError(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)
@@ -1164,6 +1227,16 @@ func moduleSourceForTest(project *vbaproject.Project, name string) string {
 	return ""
 }
 
+func readPackedProjectForTest(t *testing.T, path string) *vbaproject.Project {
+	t.Helper()
+	bin := zipEntryBytes(t, readFileForTest(t, path), "xl/vbaProject.bin")
+	project, err := vbaproject.Read(bin)
+	if err != nil {
+		t.Fatalf("read packed project: %v", err)
+	}
+	return project
+}
+
 func errorCodeFromJSON(t *testing.T, stdout string) string {
 	t.Helper()
 	var env struct {
@@ -1231,6 +1304,9 @@ func TestCollectPackSourceModulesSidecarMergesBasIntoSource(t *testing.T) {
 	}
 	if !strings.Contains(got[0].Source, "NEW") {
 		t.Errorf("sidecar code not merged into source: %q", got[0].Source)
+	}
+	if !strings.Contains(got[0].Source, `Attribute VB_Name = "UserForm1"`) || !strings.Contains(got[0].Source, "Begin {GUID} UserForm1") {
+		t.Errorf("sidecar merge dropped legacy Designer header: %q", got[0].Source)
 	}
 	after, _ := os.ReadFile(filepath.Join(formsDir, "UserForm1.frm"))
 	if string(after) != frm {

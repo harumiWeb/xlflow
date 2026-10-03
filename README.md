@@ -650,6 +650,11 @@ default_component_folders = true
 #   "sidecar" – code is split into src/forms/code/<FormName>.bas.
 code_source = "sidecar"
 
+# Template pack preserves omitted UserForms by default.
+# Use "source" to remove omitted forms and require canonical specs.
+[pack]
+userform_topology = "template"
+
 # Release build source filtering. This affects `build` only; `push` and `pack`
 # always use the complete source tree.
 [build]

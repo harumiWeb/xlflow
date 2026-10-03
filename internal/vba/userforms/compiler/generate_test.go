@@ -18,7 +18,7 @@ func newSpec() spec.FormSpec {
 func TestCompileNewEmptyAndCommonControls(t *testing.T) {
 	for _, codePage := range []uint16{1252, 932} {
 		input := newSpec()
-		input.Form.Caption = new("日本語😀")
+		input.Form.Caption = new("Generated Caption")
 		input.Form.Build = &spec.FormSpecBuildForm{ClientWidth: new(320.0), ClientHeight: new(240.0)}
 		empty, err := CompileNew(input, codePage)
 		if err != nil {
@@ -134,6 +134,27 @@ func TestCompileNewRejectsUnsupportedAndInvalidInput(t *testing.T) {
 			detail, ok := errors.AsType[*Error](err)
 			if result != nil || !ok || detail.Code != tc.code {
 				t.Fatalf("got result=%v error=%v; want %s", result, err, tc.code)
+			}
+		})
+	}
+}
+
+func TestCompileNewReportsRootCaptionCodePageContext(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		form     spec.FormSpecForm
+		property string
+	}{
+		{name: "legacy", form: spec.FormSpecForm{Name: "GeneratedForm", Caption: new("😀")}, property: "form.caption"},
+		{name: "build", form: spec.FormSpecForm{Name: "GeneratedForm", Build: &spec.FormSpecBuildForm{Caption: new("😀")}}, property: "form.build.caption"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := newSpec()
+			input.Form = tc.form
+			_, err := CompileNew(input, 932)
+			detail, ok := errors.AsType[*Error](err)
+			if !ok || detail.Code != GenerationInvalid || detail.Property != tc.property {
+				t.Fatalf("error = %v, want invalid %s", err, tc.property)
 			}
 		})
 	}

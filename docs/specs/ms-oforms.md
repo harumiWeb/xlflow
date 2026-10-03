@@ -279,9 +279,13 @@ stable input-order ties. Site IDs start at 1 in that order; NextAvailableID
 is one past the maximum (1 for an empty form). Default tab order follows
 the same order and explicit indices are retained. Site counts, byte counts,
 record lengths, and object extents are computed from encoded bytes.
-MS-OFORMS captions and values use compressed low-byte UTF-16 or full UTF-16,
-independent of the project code page. VBFrame remains code-page text and
-does not duplicate Unicode captions from the authoritative FormControl.
+MS-OFORMS control captions and values use compressed low-byte UTF-16 or full
+UTF-16, independent of the project code page. Root form Caption must also be
+written to the code-page-encoded `VBFrame` text: Excel Designer inspection can
+show the FormControl value while instantiated forms use the VBFrame value.
+Generation and root-caption edits keep both representations equal; a caption
+that cannot be represented in the project code page is rejected before output
+publication. Unedited VBFrame lines and all control Unicode values are preserved.
 
 Errors retain form/control/property context and use
 `userform_generation_invalid`, `userform_generation_unsupported`, or
@@ -295,7 +299,12 @@ reference groups verbatim. Missing references use a canonical REGISTERED
 Forms 2.0 LIBID with fixed `C:\Windows\System32\FM20.DLL` path, independently
 of the build host. Declaration,
 module and PROJECTwm bookkeeping are completed by the project writer;
-blank pack uses canonical specs/code; template Designer integration remains #887.
+blank and template pack use canonical specs/code for new forms. Template pack
+applies supported edits through `CompileTemplate`, which projects the binary
+baseline, reconciles source control identities/parents/order by name, overlays
+explicit properties, and invokes `CompileEdits`. Omitted properties retain the
+baseline; observed snapshot metadata is not authoring intent. Unsupported
+topology or property changes reject the complete operation.
 
 REGISTERED reference identity must come from a canonical Forms LIBID in a
 complete sized record. CONTROL reference identity must come from the original

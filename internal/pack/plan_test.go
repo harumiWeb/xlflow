@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/compiler"
 )
 
 func TestPlanProjectIsReadOnlyAndRecordsDeterministicAuthority(t *testing.T) {
@@ -140,8 +141,10 @@ func TestPlanProjectRejectsSourceOnlyTemplateOwnedTopology(t *testing.T) {
 	if _, err := PlanProject(project, []SourceModule{{Name: "Sheet99", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"}}); !errors.Is(err, ErrAmbiguousLayout) {
 		t.Fatalf("document err = %v", err)
 	}
-	if _, err := PlanProject(project, []SourceModule{{Name: "Form99", Type: ModuleTypeForm, Source: "Attribute VB_Name = \"Form99\"\r\n"}}); !errors.Is(err, ErrUserFormGenerationUnsupported) {
+	if _, err := PlanProject(project, []SourceModule{{Name: "Form99", Type: ModuleTypeForm, Source: "Attribute VB_Name = \"Form99\"\r\n"}}); err == nil {
 		t.Fatalf("form err = %v", err)
+	} else if detail, ok := errors.AsType[*compiler.Error](err); !ok || detail.Code != compiler.GenerationUnsupported {
+		t.Fatalf("wrong capability error = %v", err)
 	}
 }
 
