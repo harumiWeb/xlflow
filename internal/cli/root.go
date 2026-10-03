@@ -264,6 +264,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.fmtCommand(),
 		a.analyzeCommand(),
 		a.metricsCommand(),
+		a.architectureCommand(),
 		a.checkCommand(),
 		a.generateCommand(),
 		a.moduleCommand(),

@@ -833,6 +833,21 @@ xlflow module install --push
 
 ---
 
+## Project architecture for agents and reviewers
+
+```bash
+xlflow architecture
+xlflow architecture --json
+xlflow architecture --module Billing --json
+```
+
+Get modules, entry points, dependencies, cycles, reachability, hotspots,
+mutable state, effects, and uncertainty in one source-only snapshot. No Excel
+or workbook is required. Module/path filters preserve whole-project resolution
+and hotspot ranks. The report is informational and does not apply lint,
+analyzer, or metrics thresholds. See the
+[architecture command guide](https://harumiweb.github.io/xlflow/commands/architecture).
+
 ## JSON output
 
 Every command can return AI-agent-friendly JSON by passing `--json`.

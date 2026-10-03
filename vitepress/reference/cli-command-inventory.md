@@ -40,6 +40,7 @@ Generated from the Cobra command registrations in `internal/cli/root.go`. Run `p
 | `xlflow encoding`           | [command guide](../commands/encoding)           |
 | `xlflow analyze`            | [command guide](../commands/analyze)            |
 | `xlflow metrics`            | [command guide](../commands/metrics)            |
+| `xlflow architecture`       | [command guide](../commands/architecture)       |
 | `xlflow check`              | [command guide](../commands/check)              |
 | `xlflow generate`           | [command guide](../commands/generate)           |
 | `xlflow module`             | [command guide](../commands/module)             |

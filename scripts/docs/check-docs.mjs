@@ -38,6 +38,7 @@ const requiredCommandPages = [
   "lsp",
   "fmt",
   "analyze",
+  "architecture",
   "check",
   "module",
   "completion",

@@ -116,6 +116,17 @@ Command-specific fields are top-level fields such as `issues`, `analysis`,
 `output` carries `fmt` result summaries, `export-image` output paths, and `form`
 command artifacts.
 
+## Project architecture
+
+The separate [architecture command](../commands/architecture) provides a
+versioned project snapshot in `architecture.schema_version=1`, combining
+modules/procedures, entry points, confirmed and uncertain dependencies,
+cyclic SCCs, reachability, native hotspots, mutable state, direct effects, and
+external evidence. It is informational: metric thresholds and diagnostic
+selectors do not affect its exit status. Its module/path filters preserve
+whole-project resolution and hotspot ranks; `project_summary` and `summary`
+distinguish whole-project and selected-view counts.
+
 ## Procedure complexity metrics
 
 `xlflow metrics --json` is a source-only command. It does not open Excel or run
