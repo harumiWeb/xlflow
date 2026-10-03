@@ -1,3 +1,18 @@
+# PR #904 review follow-up
+
+REGISTERED aggregate-size and malformed Forms LIBID findings are valid.
+PROJECT has an aggregate Size (the comment's first-length explanation is
+incorrect), but it too must be ignored on read in favor of two bounded paths.
+
+1. [x] Share bounded reference payload sizing between both parser paths.
+2. [x] Validate LIBID grammar and cover malformed Forms admission atomically.
+3. [x] Cover PROJECT and REGISTERED aggregate-size variations, truncations
+       and reference byte preservation; remove the unused E2E workbook table.
+4. [x] Affected pack/sourceinventory/CLI tests, race, vet, parser fuzz,
+       lint/docs/PowerShell and staged formatting checks pass.
+
+Publish the verified fix to the existing PR and reply with these results.
+
 # Issue #886 final-review Pass 1 follow-up
 
 Validated against `852a57b7`: the P2 NUL validation finding is in scope.

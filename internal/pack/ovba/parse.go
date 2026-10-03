@@ -30,13 +30,11 @@ func walkRecords(buf []byte) ([]record, error) {
 			continue
 		}
 		size := uint64(binary.LittleEndian.Uint32(buf[i+2:]))
-		if id == 0x002F || id == 0x0030 {
-			if len(buf)-i < 10 {
-				return nil, fmt.Errorf("ovba: truncated CONTROL length at %d", i)
-			}
-			size = 4 + uint64(binary.LittleEndian.Uint32(buf[i+6:])) + 6
-			if id == 0x0030 {
-				size += 20
+		if id == 0x002F || id == 0x0030 || id == 0x000D || id == 0x000E {
+			var err error
+			size, err = referencePayloadSize(buf[i:])
+			if err != nil {
+				return nil, err
 			}
 		}
 		end := uint64(i) + 6 + size

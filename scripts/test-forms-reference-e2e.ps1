@@ -15,8 +15,6 @@ foreach ($dir in @('src/modules', 'src/classes', 'src/workbook', 'src/forms/spec
 $configText = @'
 [project]
 name = "Issue886"
-[workbook]
-path = "build/Book.xlsm"
 [userform]
 code_source = "sidecar"
 '@

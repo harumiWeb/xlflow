@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/pack/ovba"
@@ -76,6 +77,55 @@ func TestEnsureMSFormsReferenceRejectsCorruptControlAtomically(t *testing.T) {
 		offset += 6 + n
 	}
 	t.Fatal("fixture missing CONTROL")
+}
+
+func TestEnsureMSFormsReferenceProjectAndMalformedLIBID(t *testing.T) {
+	p, err := NewProject(NewProjectSpec{Name: "Test", CodePage: 1252})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte{}
+	for _, path := range []string{`*\CC:\Example Path\Referenced.xls`, `*\CReferenced.xls`} {
+		payload = binary.LittleEndian.AppendUint32(payload, uint32(len(path)))
+		payload = append(payload, path...)
+	}
+	payload = append(payload, make([]byte, 6)...)
+	projectRef := binary.LittleEndian.AppendUint16(nil, 0x000E)
+	projectRef = binary.LittleEndian.AppendUint32(projectRef, 0xFFFFFFFF)
+	projectRef = append(projectRef, payload...)
+	p.ReferencesRaw = append(p.ReferencesRaw, projectRef...)
+	before := cloneProject(p)
+	result, err := EnsureMSFormsReference(p)
+	if err != nil || !bytes.HasPrefix(result.ReferencesRaw, p.ReferencesRaw) {
+		t.Fatalf("PROJECT reference not preserved: %v", err)
+	}
+	if !reflect.DeepEqual(p, before) {
+		t.Fatal("input changed")
+	}
+	body, err := Write(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readback, err := Read(body)
+	if err != nil || !bytes.Equal(readback.ReferencesRaw, result.ReferencesRaw) {
+		t.Fatalf("PROJECT round trip failed: %v", err)
+	}
+	again, err := EnsureMSFormsReference(result)
+	if err != nil || !bytes.Equal(again.ReferencesRaw, result.ReferencesRaw) {
+		t.Fatalf("duplicate reference: %v", err)
+	}
+	bad, err := ovba.BuildProjectReferences([]ovba.RegisteredReferenceSpec{{Name: "MSForms", LibID: strings.Replace(formsLibID, "#2.0#", "#invalid#", 1)}}, 1252)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.ReferencesRaw = append(p.ReferencesRaw, bad...)
+	before = cloneProject(p)
+	if result, err := EnsureMSFormsReference(p); err == nil || result != nil {
+		t.Fatalf("malformed Forms reference admitted: %v", err)
+	}
+	if !reflect.DeepEqual(p, before) {
+		t.Fatal("invalid input changed")
+	}
 }
 
 func TestExcelFirstFormsReferenceEvidence(t *testing.T) {

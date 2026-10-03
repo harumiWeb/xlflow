@@ -62,7 +62,12 @@ is ensured exactly once; complete existing REGISTERED/CONTROL references and
 unrelated reference groups retain their original bytes and order. Every decoded
 reference name and LIBID/path field must be free of NUL, including ORIGINAL,
 CONTROL twiddled LIBID and optional extended names; rejected input must not
-mutate the project. A missing
+mutate the project. Type-library identifiers must satisfy MS-OVBA
+`LibidReference` (GUID, hexadecimal version/LCID, path, and registration name
+of at most 255 encoded bytes). Both reference parsers ignore REGISTERED,
+CONTROL and PROJECT aggregate sizes and determine boundaries from bounded
+internal string lengths; PROJECT includes both paths and its version tail.
+A missing
 reference is appended using the canonical Forms 2.0 REGISTERED LIBID. All
 project data is serialized and reparsed before atomic artifact publication.
 Random GUIDs are limited to component identity, so independently generated

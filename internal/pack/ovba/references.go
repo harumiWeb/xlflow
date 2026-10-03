@@ -32,24 +32,24 @@ func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, er
 		}
 		return value, nil
 	}
+	decodeLIBID := func(payload []byte) (string, error) {
+		value, err := decode(payload)
+		if err != nil {
+			return "", err
+		}
+		if err := validateReferenceLIBID(payload); err != nil {
+			return "", err
+		}
+		return value, nil
+	}
 	read := func() (uint16, []byte, error) {
 		if len(raw)-offset < 6 {
 			return 0, nil, fmt.Errorf("ovba: truncated reference at %d", offset)
 		}
 		id := binary.LittleEndian.Uint16(raw[offset:])
-		n := uint64(binary.LittleEndian.Uint32(raw[offset+2:]))
-		// CONTROL aggregate sizes are ignored on read per MS-OVBA.
-		if id == 0x002F || id == 0x0030 || id == 0x000D {
-			if len(raw)-offset < 10 {
-				return 0, nil, fmt.Errorf("ovba: truncated LIBID length")
-			}
-			n = 4 + uint64(binary.LittleEndian.Uint32(raw[offset+6:])) + 6
-			if id == 0x0030 {
-				n += 20
-			}
-		}
-		if n > uint64(len(raw)-offset-6) {
-			return 0, nil, fmt.Errorf("ovba: reference 0x%04X exceeds boundary", id)
+		n, err := referencePayloadSize(raw[offset:])
+		if err != nil {
+			return 0, nil, err
 		}
 		payload := raw[offset+6 : offset+6+int(n)]
 		offset += 6 + int(n)
@@ -95,7 +95,7 @@ func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, er
 			return nil, err
 		}
 		if id == 0x0033 { // REFERENCEORIGINAL must precede CONTROL.
-			if _, err := decode(payload); err != nil {
+			if _, err := decodeLIBID(payload); err != nil {
 				return nil, err
 			}
 			id, payload, err = read()
@@ -109,7 +109,7 @@ func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, er
 		ref.Kind = id
 		switch id {
 		case 0x002F:
-			if _, err := decode(payload[4 : len(payload)-6]); err != nil {
+			if _, err := decodeLIBID(payload[4 : len(payload)-6]); err != nil {
 				return nil, err
 			}
 			if offset+2 <= len(raw) && binary.LittleEndian.Uint16(raw[offset:]) == 0x0016 {
@@ -126,9 +126,9 @@ func ParseProjectReferences(raw []byte, codePage uint16) ([]ProjectReference, er
 				return nil, fmt.Errorf("ovba: CONTROL missing extended record")
 			}
 			copy(ref.OriginalTypeLib[:], payload[len(payload)-20:len(payload)-4])
-			ref.LibID, err = decode(payload[4 : len(payload)-26])
+			ref.LibID, err = decodeLIBID(payload[4 : len(payload)-26])
 		case 0x000D:
-			ref.LibID, err = decode(payload[4 : len(payload)-6])
+			ref.LibID, err = decodeLIBID(payload[4 : len(payload)-6])
 		case 0x000E:
 			// Two sized paths followed by MajorVersion and MinorVersion.
 			p := payload
