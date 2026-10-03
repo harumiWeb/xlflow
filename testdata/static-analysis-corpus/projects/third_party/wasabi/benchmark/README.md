@@ -10,12 +10,12 @@ This directory contains a self contained, high resolution benchmark harness for 
 
 ## Evaluated Operations
 
-| Operation Category | Targeted Internal Functions | Description |
-|:---|:---|:---|
-| **Memory Boundaries** | `WasabiMemFind` | Evaluates the speed of internal byte array scanning for HTTP boundaries and payload separators. |
+| Operation Category      | Targeted Internal Functions    | Description                                                                                                                                                 |
+| :---------------------- | :----------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Memory Boundaries**   | `WasabiMemFind`                | Evaluates the speed of internal byte array scanning for HTTP boundaries and payload separators.                                                             |
 | **Crypto and Encoding** | `DecodeBase64`, `Base64Encode` | Measures the execution time of the `CryptStringToBinaryW` and `CryptBinaryToStringW` APIs, specifically validating the safe NTLM token decoding throughput. |
-| **String Conversions** | `StringToUtf8`, `Utf8ToString` | Measures the overhead of wide character to UTF-8 byte array transformations. |
-| **WebSocket Framing** | `BuildWSFrame` | Tests allocation overhead, native masking speed, and MTU fragmentation limits when constructing heavy 64KB payload frames. |
+| **String Conversions**  | `StringToUtf8`, `Utf8ToString` | Measures the overhead of wide character to UTF-8 byte array transformations.                                                                                |
+| **WebSocket Framing**   | `BuildWSFrame`                 | Tests allocation overhead, native masking speed, and MTU fragmentation limits when constructing heavy 64KB payload frames.                                  |
 
 ## Prerequisites
 
@@ -30,8 +30,8 @@ This directory contains a self contained, high resolution benchmark harness for 
 
 ## Interpreting the Telemetry
 
-* **Avg Latency (µs):** The average microseconds consumed per individual operation.
-* **Throughput (MB/s):** The volume of megabytes the operation successfully processes per second.
-* **Ops/s (k):** The total thousands of operations completed per second.
+- **Avg Latency (µs):** The average microseconds consumed per individual operation.
+- **Throughput (MB/s):** The volume of megabytes the operation successfully processes per second.
+- **Ops/s (k):** The total thousands of operations completed per second.
 
 The suite dynamically adapts iteration counts based on the payload size to ensure statistically significant timing samples.

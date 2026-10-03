@@ -6,35 +6,36 @@
 > [!NOTE]
 > <img src="../resources/logo.png" width="20" /> **Wasabi Version targeted:** [v2.3.7-beta](https://github.com/uesleibros/wasabi/releases/tag/v2.3.7-beta)
 
-This directory contains the comprehensive unit and integration testing suite for Wasabi. The architecture is written entirely in pure VBA and executes directly within the native VBA IDE, requiring no external dependencies or third party testing frameworks. 
+This directory contains the comprehensive unit and integration testing suite for Wasabi. The architecture is written entirely in pure VBA and executes directly within the native VBA IDE, requiring no external dependencies or third party testing frameworks.
 
 ## Test Suite Architecture
 
 The framework is orchestrated by `Test_Runner.bas`, which tracks assertions and aggregates pass/fail metrics. The suite is divided into specific domains:
-* `Test_Utils.bas`: Validates data transformations, specifically the cryptography API implementations for Base64 and UTF-8 handling.
-* `Test_Memory.bas`: Ensures internal memory boundary logic operates safely without buffer overflows.
-* `Test_WebSockets.bas`: Verifies framing, handshakes, and payload integrity.
-* `Test_TCP.bas`: Validates raw socket connections and error state handling.
-* `Test_MQTT.bas`: Tests the protocol negotiation and MQTT broker handshake implementation.
+
+- `Test_Utils.bas`: Validates data transformations, specifically the cryptography API implementations for Base64 and UTF-8 handling.
+- `Test_Memory.bas`: Ensures internal memory boundary logic operates safely without buffer overflows.
+- `Test_WebSockets.bas`: Verifies framing, handshakes, and payload integrity.
+- `Test_TCP.bas`: Validates raw socket connections and error state handling.
+- `Test_MQTT.bas`: Tests the protocol negotiation and MQTT broker handshake implementation.
 
 ## Prerequisites
 
 To perform deep internal validation, certain core functions within `Wasabi.bas` must be temporarily exposed. You will need to change the scope of the following functions from `Private` to `Public` prior to running the suite:
 
-| Internal Function | Validation Target |
-|:---|:---|
-| `DecodeBase64` | CryptStringToBinaryW implementation and NTLM integrity |
-| `Base64Encode` | Standard Base64 encoding logic |
-| `WasabiMemFind` | Internal byte boundary detection and memory scanning |
-| `SHA1` | Cryptographic hashing for WebSocket handshakes |
-| `GenerateWSKey` | Sec-WebSocket-Key generation |
-| `ComputeWebSocketAccept` | Sec-WebSocket-Accept validation |
-| `ParseURL` | URI scheme and port extraction logic |
-| `StringToUtf8` | Wide string to UTF-8 byte array conversion |
-| `Utf8ToString` | UTF-8 byte array to wide string conversion |
-| `BuildWSFrame` | RFC 6455 compliant frame construction |
+| Internal Function        | Validation Target                                      |
+| :----------------------- | :----------------------------------------------------- |
+| `DecodeBase64`           | CryptStringToBinaryW implementation and NTLM integrity |
+| `Base64Encode`           | Standard Base64 encoding logic                         |
+| `WasabiMemFind`          | Internal byte boundary detection and memory scanning   |
+| `SHA1`                   | Cryptographic hashing for WebSocket handshakes         |
+| `GenerateWSKey`          | Sec-WebSocket-Key generation                           |
+| `ComputeWebSocketAccept` | Sec-WebSocket-Accept validation                        |
+| `ParseURL`               | URI scheme and port extraction logic                   |
+| `StringToUtf8`           | Wide string to UTF-8 byte array conversion             |
+| `Utf8ToString`           | UTF-8 byte array to wide string conversion             |
+| `BuildWSFrame`           | RFC 6455 compliant frame construction                  |
 
-*Disclaimer: These functions are not part of the stable public API. Their signatures and internal memory management routines may change between releases without notice.*
+_Disclaimer: These functions are not part of the stable public API. Their signatures and internal memory management routines may change between releases without notice._
 
 ## Execution Procedure
 
