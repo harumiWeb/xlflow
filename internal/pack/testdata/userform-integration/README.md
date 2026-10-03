@@ -76,5 +76,34 @@ code page; control Unicode persistence remains independent of it. Rejected
 root captions, quoting, opaque property-block preservation, and no-op bytes are
 covered by Go regressions.
 
+## Pass 1 review regression checks
+
+The developer harness now pins the verified Excel process handle through wait
+and termination, rejects unavailable process identity, and never terminates by
+PID. It rejects existing reparse-point ancestors before creating its workspace.
+Inventory validation reports multiple invalid directories or legacy collisions
+in sorted order.
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-pack-userforms-harness.ps1
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/go.ps1 test ./internal/sourceinventory -count 1
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/go.ps1 test ./... -timeout 30m -p 4 -parallel 4
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/go.ps1 test -race ./internal/sourceinventory
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/go.ps1 vet ./internal/sourceinventory
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-pack-userforms-e2e.ps1 -WorkspacePath tmp_workspaces/issue-887-template-review-20261003-r1
+```
+
+All passed. The standalone harness regressions exercise normal/forced exit,
+reused PID and unavailable identity with fake processes, and reject a real
+junction before writing or starting Excel. These do not simulate Windows PID
+reuse itself. The real Excel gate again checked five artifacts and confirmed
+cleanup without forced termination. Its retained workspace is
+`C:\Users\HARUMI\orca\workspaces\xlflow\acornworm\tmp_workspaces\issue-887-template-review-20261003-r1`;
+the evidence is `run-evidence.json`.
+
+Duplicate MSForms-reference admission is unchanged from the parent commit and
+remains a follow-up requiring input evidence and VBE validation before changing
+the existing reference-preservation contract.
+
 No remote CI or Linux execution was performed during this local verification.
 The Windows-only Excel scripts are excluded from ordinary tests and CI.

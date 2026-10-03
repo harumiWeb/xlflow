@@ -33,6 +33,12 @@ if (-not $WorkspacePath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgno
 if (Test-Path -LiteralPath $WorkspacePath) {
     throw "WorkspacePath must be fresh; refusing to delete or reuse $WorkspacePath"
 }
+# Reject aliases before any write, including a junction at tmp_workspaces itself.
+for ($ancestor = [IO.DirectoryInfo]::new($WorkspacePath).Parent; $null -ne $ancestor; $ancestor = $ancestor.Parent) {
+    if ($ancestor.Exists -and ($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "WorkspacePath must not traverse a reparse point: $($ancestor.FullName)"
+    }
+}
 [void][IO.Directory]::CreateDirectory($WorkspacePath)
 
 $blankWorkspace = Join-Path $WorkspacePath 'blank'
@@ -189,29 +195,27 @@ function Stop-OwnedExcel {
             if ($null -eq $process) {
                 $cleanup.exited = $true
             } else {
+                # Pin the handle before checking identity. Keep this same process
+                # object through waiting and termination: a PID may be reused.
+                [void]$process.Handle
                 $identity = Get-ProcessIdentity $process
                 $cleanup.verified_process = $identity
-                if ($identity.start_time_utc -ne $script:excelStartTime) {
+                if ($identity.name -ne 'EXCEL' -or $identity.start_time_utc -eq '<unavailable>' -or $identity.start_time_utc -ne $script:excelStartTime) {
                     $script:currentCleanupErrors.Add("Excel PID $($script:excelPID) was reused by a different process; it was not terminated")
                 } else {
-                    try { [void]$process.WaitForExit(10000) } catch { $script:currentCleanupErrors.Add($_.Exception.Message) }
-                    $process = Get-Process -Id $script:excelPID -ErrorAction SilentlyContinue
-                    if ($null -eq $process) {
-                        $cleanup.exited = $true
-                    } else {
-                        $cleanup.verified_process = Get-ProcessIdentity $process
-                        try {
-                            Stop-Process -Id $script:excelPID -Force
+                    try {
+                        $cleanup.exited = $process.WaitForExit(10000)
+                        if (-not $cleanup.exited) {
+                            $process.Kill()
                             $cleanup.forced_termination = $true
-                            [void]$process.WaitForExit(10000)
-                        } catch { $script:currentCleanupErrors.Add($_.Exception.Message) }
-                        if ($null -eq (Get-Process -Id $script:excelPID -ErrorAction SilentlyContinue)) {
-                            $cleanup.exited = $true
-                        } else {
+                            $cleanup.exited = $process.WaitForExit(10000)
+                        }
+                        if (-not $cleanup.exited) {
                             $script:currentCleanupErrors.Add("Owned Excel PID $($script:excelPID) remained after safe termination")
                         }
-                    }
+                    } catch { $script:currentCleanupErrors.Add($_.Exception.Message) }
                 }
+                $process.Dispose()
             }
         }
     } finally {

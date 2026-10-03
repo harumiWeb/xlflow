@@ -105,7 +105,7 @@ func collectCanonicalForms(root, base string, opts Options) ([]Component, error)
 	if err != nil {
 		return nil, err
 	}
-	for dir := range legacyDirs {
+	for _, dir := range slices.Sorted(maps.Keys(legacyDirs)) {
 		if !legacyDirsWithForms[dir] {
 			return nil, layoutError("unsupported canonical form directory %s", displayPath(root, dir))
 		}
@@ -233,13 +233,15 @@ func firstFormArtifact(artifacts map[string]string) string {
 // make the source layout ambiguous.
 func reconcileCanonicalLegacyArtifacts(groups map[string]map[string]string) error {
 	byName := map[string][]string{}
-	for key, artifacts := range groups {
+	for _, key := range slices.Sorted(maps.Keys(groups)) {
+		artifacts := groups[key]
 		if artifacts[".frm"] == "" {
 			continue
 		}
 		byName[strings.ToLower(formArtifactName(artifacts))] = append(byName[strings.ToLower(formArtifactName(artifacts))], key)
 	}
-	for _, artifacts := range groups {
+	for _, key := range slices.Sorted(maps.Keys(groups)) {
+		artifacts := groups[key]
 		if artifacts[".frm"] != "" || (artifacts["spec"] == "" && artifacts["code"] == "") {
 			continue
 		}

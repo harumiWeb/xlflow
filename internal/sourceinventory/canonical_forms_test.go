@@ -103,6 +103,39 @@ func TestCanonicalFormsRejectEmptyNestedDirectory(t *testing.T) {
 	}
 }
 
+func TestCanonicalFormsReportFirstInvalidDirectoryDeterministically(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "src", "forms")
+	for _, name := range []string{"Zulu", "Alpha"} {
+		if err := os.MkdirAll(filepath.Join(base, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 64 {
+		_, err := collectCanonicalForms(root, base, Options{Config: config.Default()})
+		if err == nil || !strings.Contains(err.Error(), "src/forms/Alpha") {
+			t.Fatalf("expected first directory Alpha, got %v", err)
+		}
+	}
+}
+
+func TestCanonicalFormsReportFirstAmbiguousLegacyFormDeterministically(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "src", "forms")
+	for _, name := range []string{"Zulu", "Alpha"} {
+		for _, dir := range []string{"one", "two"} {
+			writeInventoryFile(t, root, "src/forms/"+dir, name+".frm", "VERSION 5.00\n")
+		}
+		writeInventoryFile(t, root, "src/forms/code", name+".bas", "Option Explicit\n")
+	}
+	for range 64 {
+		_, err := collectCanonicalForms(root, base, Options{Config: config.Default(), AllowLegacyFormArtifacts: true})
+		if err == nil || !strings.Contains(err.Error(), "ambiguous legacy form Alpha:") {
+			t.Fatalf("expected first ambiguous form Alpha, got %v", err)
+		}
+	}
+}
+
 func TestCanonicalFormSpecPreservesAuthoredRootOmission(t *testing.T) {
 	root := t.TempDir()
 	base := filepath.Join(root, "src", "forms")

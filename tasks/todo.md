@@ -1,3 +1,16 @@
+# Issue #887 final-review Pass 1 follow-up
+
+Validated against `c87cac40`: the cleanup PID race, workspace reparse-point
+boundary and unstable inventory errors are valid and in scope. Duplicate
+MSForms-reference handling is unchanged from the parent commit; its VBE
+acceptance remains unverified and is a separate follow-up, not a review fix.
+
+1. [x] Pin the verified process handle through cleanup; never kill by PID.
+2. [x] Reject existing reparse-point ancestors before creating a workspace.
+3. [x] Sort inventory validation keys and add multi-error regressions.
+4. [x] Run focused/full verification and the real Excel gate.
+5. [ ] Commit fixes and complete the bounded Pass 2 review.
+
 # Issue #887
 
 - [x] Add explicit template/source UserForm topology configuration (default template).
