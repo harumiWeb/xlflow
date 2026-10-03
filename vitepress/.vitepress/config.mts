@@ -96,6 +96,7 @@ function commandSidebar() {
         { text: "encoding", link: "/commands/encoding" },
         { text: "analyze", link: "/commands/analyze" },
         { text: "metrics", link: "/commands/metrics" },
+        { text: "architecture", link: "/commands/architecture" },
         { text: "check", link: "/commands/check" },
         { text: "generate", link: "/commands/generate" },
         { text: "module", link: "/commands/module" },

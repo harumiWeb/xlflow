@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added source-only `xlflow architecture` with a versioned JSON report of
+  modules, entry points, dependencies, cycles, reachability, hotspots, mutable
+  state, effects, and uncertainty. Module/path display filters retain full
+  project resolution and global ranks; reporting does not enforce diagnostic
+  or metrics thresholds.
+
 - Added first-UserForm Microsoft Forms reference creation and pure-Go
   `pack --blank` generation from canonical UserForm specs and code. Empty
   forms and eleven common controls need no `.frx` or Excel at build time.

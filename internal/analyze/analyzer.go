@@ -3160,38 +3160,21 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 }
 
 func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB) procedureir.Resolver {
-	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
-	for _, file := range files {
-		module := strings.TrimSpace(file.IR.ModuleName)
-		if module == "" {
-			module = file.Module
+	documents := make([]procedureir.DocumentIR, len(files))
+	for i, file := range files {
+		document := file.IR
+		if strings.TrimSpace(document.ModuleName) == "" {
+			document.ModuleName = file.Module
 		}
-		for _, declaration := range file.IR.Declarations {
-			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
-				Name: declaration.Name, Type: declaration.Type, Module: module, ModuleKind: file.IR.ModuleKind,
-				Kind: declaration.Kind, Visibility: declaration.Visibility, File: file.IR.Path,
-				Line: declaration.Range.StartLine, Parent: declaration.Parent, Recovered: declaration.Recovered,
-				IsArray: declaration.IsArray, IsConst: declaration.IsConst,
-				ValueShape:          declaration.ValueShape,
-				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), declaration.ConditionalBranches...),
-			})
-		}
-		for _, procedure := range file.IR.Procedures {
-			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
-				Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: module, ModuleKind: file.IR.ModuleKind,
-				Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: file.IR.Path,
-				Line: procedure.Symbol.DeclarationRange.StartLine, Recovered: procedure.Symbol.Recovered,
-				IsArray: procedure.Symbol.IsArray, ValueShape: procedure.Symbol.ValueShape,
-				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), procedure.Symbol.ConditionalBranches...),
-			})
-		}
+		documents[i] = document
 	}
+	var externalSymbols []procedureir.ResolverSymbol
 	if typeDB != nil {
 		for _, constant := range typeDB.AllConstantsList() {
 			if strings.TrimSpace(constant.EnumGroup) == "" {
 				continue
 			}
-			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+			externalSymbols = append(externalSymbols, procedureir.ResolverSymbol{
 				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
 				ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
 				File: "<typelib>" + constant.Library, Line: 0,
@@ -3199,7 +3182,7 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 			})
 		}
 	}
-	return procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
+	return procedureir.BuildProjectResolver(documents, externalSymbols, complete)
 }
 
 func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectAnalysis *objectAnalysisContext, capabilityPlan projectCapabilityPlan, projectResolver procedureir.Resolver) analysisContext {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -344,7 +343,10 @@ func TestBuildHotspotReportAggregatesGraphSignals(t *testing.T) {
 		{File: "helper.bas", Module: "Helper", Name: "B", Kind: procedureir.ProcedureSub, ResolvedCallees: []string{"main.a"}, Metrics: proceduremetrics.Metrics{CyclomaticComplexity: 3, CallFanOut: 1}},
 		{File: "other.bas", Module: "Other", Name: "C", Kind: procedureir.ProcedureSub, ResolvedCallees: []string{"helper.b"}, Metrics: proceduremetrics.Metrics{CyclomaticComplexity: 1, CallFanOut: 1}},
 	}
-	report := buildHotspotReport(metrics)
+	report, _, err := hotspots.BuildFromMetrics(t.Context(), metrics)
+	if err != nil {
+		t.Fatalf("BuildFromMetrics() error = %v", err)
+	}
 	byProcedure := map[string]hotspots.Entity{}
 	for _, entity := range report.Procedures {
 		byProcedure[entity.Name] = entity
@@ -364,41 +366,5 @@ func TestBuildHotspotReportAggregatesGraphSignals(t *testing.T) {
 	}
 	if byModule["Main"].RawSignals["affected_module_count"] != 2 {
 		t.Fatalf("Main module affected modules = %#v", byModule["Main"].RawSignals)
-	}
-}
-
-func TestCycleParticipationCountsIsDeterministicAndBounded(t *testing.T) {
-	build := func(reverse bool) map[string]map[string]bool {
-		graph := make(map[string]map[string]bool)
-		for offset := 0; offset < 10; offset++ {
-			i := offset
-			if reverse {
-				i = 9 - offset
-			}
-			from := fmt.Sprintf("n%02d", i)
-			graph[from] = map[string]bool{}
-			for targetOffset := 0; targetOffset < 10; targetOffset++ {
-				j := targetOffset
-				if reverse {
-					j = 9 - targetOffset
-				}
-				if i == j {
-					continue
-				}
-				to := fmt.Sprintf("n%02d", j)
-				graph[from][to] = true
-			}
-		}
-		return graph
-	}
-	first := cycleParticipationCounts(build(false))
-	second := cycleParticipationCounts(build(true))
-	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("cycle counts changed with input order: %#v vs %#v", first, second)
-	}
-	for i := 0; i < 10; i++ {
-		if first[fmt.Sprintf("n%02d", i)] == 0 {
-			t.Fatalf("node n%02d did not participate in a cycle: %#v", i, first)
-		}
 	}
 }

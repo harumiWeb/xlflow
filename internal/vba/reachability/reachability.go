@@ -3,6 +3,7 @@
 package reachability
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,10 +23,16 @@ type Options struct {
 	Config  config.Config
 	Symbols *symbols.Result
 	Calls   *calls.Result
+	// Sources contains source bytes keyed by their project-relative or absolute
+	// paths. Project collectors pass the same bytes used to build symbols and
+	// procedure IR so root discovery never reopens those files.
+	Sources     map[string][]byte
+	sourceIndex map[string][]byte
 }
 
 type Result struct {
-	Roots []callgraph.Root
+	Roots       []callgraph.Root
+	EntryPoints []callgraph.RootResolution
 	callgraph.ReachabilityResult
 	// Reportable marks call-graph nodes that VB021 may surface. Private and
 	// Friend procedures are always candidates; Public procedures qualify only
@@ -35,29 +42,76 @@ type Result struct {
 }
 
 func Analyze(opts Options) (Result, error) {
+	return analyzeContext(context.Background(), opts, false)
+}
+
+// AnalyzeContext is the cancellable form of Analyze. Callers may supply the
+// bytes already captured for the project; when absent, source files are read
+// from disk as before. It also retains entry-point resolution evidence.
+func AnalyzeContext(ctx context.Context, opts Options) (Result, error) {
+	return analyzeContext(ctx, opts, true)
+}
+
+func analyzeContext(ctx context.Context, opts Options, retainRoots bool) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	opts.sourceIndex = indexCapturedSources(opts)
 	if opts.Calls == nil {
 		return Result{}, nil
 	}
-	roots, err := buildRoots(opts)
+	roots, err := buildRootsContext(ctx, opts)
 	if err != nil {
 		return Result{}, err
 	}
-	reportable := buildReportable(opts)
-	result := callgraph.AnalyzeReachability(callgraph.SnapshotFromResult(opts.Calls), callgraph.ReachabilityRequest{Roots: roots, Reportable: reportable})
-	return Result{Roots: roots, ReachabilityResult: result, Reportable: reportable}, nil
+	reportable, err := buildReportableContext(ctx, opts)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	snapshot := callgraph.SnapshotFromResult(opts.Calls)
+	request := callgraph.ReachabilityRequest{Roots: roots, Reportable: reportable}
+	var result callgraph.ReachabilityResult
+	var entryPoints []callgraph.RootResolution
+	if retainRoots {
+		result, entryPoints = callgraph.AnalyzeReachabilityWithRoots(snapshot, request)
+	} else {
+		result = callgraph.AnalyzeReachability(snapshot, request)
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	return Result{Roots: roots, EntryPoints: entryPoints, ReachabilityResult: result, Reportable: reportable}, nil
 }
 
 // buildReportable computes which procedures are internal enough to report
 // when unreachable. Friend members are project-internal by visibility, and
 // Public procedures in an Option Private Module lose the host-facing surface
 // unless the module is VB_Exposed.
-func buildReportable(opts Options) map[string]bool {
+func buildReportableContext(ctx context.Context, opts Options) (map[string]bool, error) {
 	reportable := make(map[string]bool)
 	if opts.Symbols == nil {
-		return reportable
+		return reportable, nil
 	}
 	for _, file := range opts.Symbols.Files {
-		privacy := modulePrivacyFacts(opts.RootDir, file)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		body, err := sourceBytes(ctx, opts, file.Path)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			// Missing or unreadable Option Private Module metadata has always
+			// failed open, leaving the procedure visible as a possible root.
+			body = nil
+		}
+		privacy := modulePrivacyFacts(file, body)
 		for _, sym := range file.Symbols {
 			if !procedureSymbolKind(sym.Kind) || strings.TrimSpace(sym.Name) == "" {
 				continue
@@ -76,7 +130,7 @@ func buildReportable(opts Options) map[string]bool {
 			}
 		}
 	}
-	return reportable
+	return reportable, ctx.Err()
 }
 
 // modulePrivacy describes how a module's public surface interacts with host
@@ -88,7 +142,7 @@ type modulePrivacy struct {
 	hostHidden    bool
 }
 
-func modulePrivacyFacts(rootDir string, file symbols.FileResult) modulePrivacy {
+func modulePrivacyFacts(file symbols.FileResult, source []byte) modulePrivacy {
 	var privacy modulePrivacy
 	// Option Private Module only narrows standard and class modules; document
 	// and form modules keep their host-driven surface.
@@ -105,23 +159,15 @@ func modulePrivacyFacts(rootDir string, file symbols.FileResult) modulePrivacy {
 			}
 		}
 	}
-	privacy.optionPrivate = moduleDeclaresOptionPrivate(rootDir, file)
+	privacy.optionPrivate = moduleDeclaresOptionPrivate(source)
 	privacy.hostHidden = privacy.optionPrivate && !privacy.exposed
 	return privacy
 }
 
 var optionPrivateModuleRE = regexp.MustCompile(`(?i)^\s*option\s+private\s+module\b`)
 
-func moduleDeclaresOptionPrivate(rootDir string, file symbols.FileResult) bool {
-	path := file.Path
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(rootDir, filepath.FromSlash(path))
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	for _, line := range strings.Split(string(body), "\n") {
+func moduleDeclaresOptionPrivate(source []byte) bool {
+	for _, line := range strings.Split(string(source), "\n") {
 		if optionPrivateModuleRE.MatchString(line) {
 			return true
 		}
@@ -129,7 +175,7 @@ func moduleDeclaresOptionPrivate(rootDir string, file symbols.FileResult) bool {
 	return false
 }
 
-func buildRoots(opts Options) ([]callgraph.Root, error) {
+func buildRootsContext(ctx context.Context, opts Options) ([]callgraph.Root, error) {
 	roots := []callgraph.Root{}
 	if entry := strings.TrimSpace(opts.Config.Project.Entry); entry != "" {
 		roots = append(roots, callgraph.Root{Target: entry, Confidence: callgraph.RootConfirmed, Reason: "project.entry"})
@@ -140,6 +186,9 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 
 	withevents := map[string]map[string]bool{}
 	for _, file := range opts.Symbols.Files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		fields := map[string]bool{}
 		for _, sym := range file.Symbols {
 			if sym.Kind == "withevents_field" && sym.Parent == "" && strings.TrimSpace(sym.Name) != "" {
@@ -152,7 +201,19 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 	}
 
 	for _, file := range opts.Symbols.Files {
-		privacy := modulePrivacyFacts(opts.RootDir, file)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		body, err := sourceBytes(ctx, opts, file.Path)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			// Preserve moduleDeclaresOptionPrivate's previous fail-open behavior
+			// when captured or on-disk source is unavailable.
+			body = nil
+		}
+		privacy := modulePrivacyFacts(file, body)
 		for _, sym := range file.Symbols {
 			if !procedureSymbolKind(sym.Kind) || strings.TrimSpace(sym.Name) == "" {
 				continue
@@ -204,7 +265,7 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 			}
 		}
 
-		controls, err := controlNames(opts.RootDir, file)
+		controls, err := controlNamesContext(ctx, opts, file)
 		if err != nil {
 			return nil, err
 		}
@@ -224,12 +285,19 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 			}
 		}
 	}
-	return roots, nil
+	return roots, ctx.Err()
 }
 
-func controlNames(rootDir string, file symbols.FileResult) ([]string, error) {
+func controlNamesContext(ctx context.Context, opts Options, file symbols.FileResult) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !strings.EqualFold(file.ModuleKind, "form") {
 		return nil, nil
+	}
+	rootDir := opts.RootDir
+	if rootDir == "" {
+		rootDir = "."
 	}
 	path := file.Path
 	if !filepath.IsAbs(path) {
@@ -241,7 +309,11 @@ func controlNames(rootDir string, file symbols.FileResult) ([]string, error) {
 	if !strings.EqualFold(filepath.Ext(path), ".frm") {
 		return nil, nil
 	}
-	body, err := os.ReadFile(path)
+	body, ok := capturedSource(opts, path)
+	var err error
+	if !ok {
+		body, err = os.ReadFile(path)
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -256,6 +328,62 @@ func controlNames(rootDir string, file symbols.FileResult) ([]string, error) {
 		}
 	}
 	return controls, nil
+}
+
+func sourceBytes(ctx context.Context, opts Options, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if source, ok := capturedSource(opts, path); ok {
+		return source, nil
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(opts.RootDir, filepath.FromSlash(path))
+	}
+	return os.ReadFile(path)
+}
+
+func capturedSource(opts Options, path string) ([]byte, bool) {
+	if source, ok := opts.Sources[path]; ok {
+		return source, true
+	}
+	root := opts.RootDir
+	if root == "" {
+		root = "."
+	}
+	target := path
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(root, filepath.FromSlash(target))
+	}
+	target, err := filepath.Abs(target)
+	if err != nil {
+		return nil, false
+	}
+	source, ok := opts.sourceIndex[capturedSourceKey(target)]
+	return source, ok
+}
+
+func indexCapturedSources(opts Options) map[string][]byte {
+	root := opts.RootDir
+	if root == "" {
+		root = "."
+	}
+	index := make(map[string][]byte, len(opts.Sources))
+	for candidate, source := range opts.Sources {
+		if !filepath.IsAbs(candidate) {
+			candidate = filepath.Join(root, filepath.FromSlash(candidate))
+		}
+		absolute, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		index[capturedSourceKey(absolute)] = source
+	}
+	return index
+}
+
+func capturedSourceKey(path string) string {
+	return strings.ToLower(filepath.Clean(path))
 }
 
 // testHookName reports whether name is one of the fixed per-module hook

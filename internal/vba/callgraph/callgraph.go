@@ -159,6 +159,17 @@ type Root struct {
 	Reason     string
 }
 
+// RootResolution is the graph's canonical interpretation of one requested
+// reachability root. Confidence is downgraded to possible when the target is
+// ambiguous or only matches by an unqualified suffix. Unresolved requests are
+// retained with no Nodes so report consumers can explain the missing root.
+type RootResolution struct {
+	Root       Root
+	Status     string
+	Confidence RootConfidence
+	Nodes      []Node
+}
+
 type ReachabilityRequest struct {
 	Roots []Root
 	// Reportable lists node IDs that callers may surface when unreachable even
@@ -515,23 +526,21 @@ func foldEqualFold(value string) string {
 // references. Dynamic dispatch never becomes a confirmed graph edge.
 func AnalyzeReachability(input Snapshot, request ReachabilityRequest) ReachabilityResult {
 	g := build(input)
-	confirmed := map[string]bool{}
-	possible := map[string]bool{}
+	confirmed, possible, _ := seedRoots(g, request.Roots, false)
+	return analyzeReachabilityGraph(input, request, g, confirmed, possible)
+}
 
-	for _, root := range request.Roots {
-		keys, exact := g.rootKeysWithExact(root.Target)
-		if len(keys) == 0 {
-			continue
-		}
-		if root.Confidence == RootPossible || !exact || len(keys) != 1 {
-			for _, key := range keys {
-				possible[key] = true
-			}
-			continue
-		}
-		confirmed[keys[0]] = true
-	}
+// AnalyzeReachabilityWithRoots returns both the normal reachability result
+// and the resolved interpretation of its requested roots from one graph build.
+// Report consumers can retain ambiguous and unresolved requests without
+// rebuilding the project graph.
+func AnalyzeReachabilityWithRoots(input Snapshot, request ReachabilityRequest) (ReachabilityResult, []RootResolution) {
+	g := build(input)
+	confirmed, possible, rootResolutions := seedRoots(g, request.Roots, true)
+	return analyzeReachabilityGraph(input, request, g, confirmed, possible), rootResolutions
+}
 
+func analyzeReachabilityGraph(input Snapshot, request ReachabilityRequest, g graph, confirmed, possible map[string]bool) ReachabilityResult {
 	refsByCaller := map[string][]calls.DynamicReference{}
 	for _, ref := range input.DynamicReferences {
 		if key := dynamicCallerKey(g, ref); key != "" {
@@ -584,6 +593,58 @@ func AnalyzeReachability(input Snapshot, request ReachabilityRequest) Reachabili
 	sortNodes(result.Unreachable)
 	result.Clusters = unreachablePrivateClusters(g, result.Unreachable)
 	return result
+}
+
+// seedRoots resolves configured roots once and builds reachability seeds.
+// Retained node metadata is materialized only for report consumers; legacy
+// lint callers keep the prior low-allocation path.
+func seedRoots(g graph, roots []Root, retain bool) (map[string]bool, map[string]bool, []RootResolution) {
+	confirmed := make(map[string]bool)
+	possible := make(map[string]bool)
+	var result []RootResolution
+	if retain {
+		result = make([]RootResolution, 0, len(roots))
+	}
+	for _, root := range roots {
+		keys, exact := g.rootKeysWithExact(root.Target)
+		resolution := RootResolution{
+			Root: root, Status: "unresolved", Confidence: RootPossible,
+		}
+		if len(keys) > 0 {
+			resolution.Status = "resolved"
+			if len(keys) > 1 {
+				resolution.Status = "ambiguous"
+			}
+			if !exact {
+				resolution.Status = "fallback"
+			}
+			if !exact || len(keys) != 1 {
+				resolution.Confidence = RootPossible
+			} else {
+				resolution.Confidence = root.Confidence
+			}
+			for _, key := range keys {
+				if resolution.Confidence == RootPossible {
+					possible[key] = true
+				} else {
+					confirmed[key] = true
+				}
+			}
+			if retain {
+				resolution.Nodes = make([]Node, 0, len(keys))
+				for _, key := range keys {
+					resolution.Nodes = append(resolution.Nodes, g.nodes[key])
+				}
+				sortNodes(resolution.Nodes)
+			}
+		} else if retain {
+			resolution.Nodes = []Node{}
+		}
+		if retain {
+			result = append(result, resolution)
+		}
+	}
+	return confirmed, possible, result
 }
 
 func propagateConfirmed(g graph, confirmed map[string]bool) {

@@ -70,6 +70,7 @@ type Envelope struct {
 	// owned by the diagnostics/analyze command and has different compatibility
 	// semantics.
 	Metrics        any `json:"metrics,omitempty"`
+	Architecture   any `json:"architecture,omitempty"`
 	Check          any `json:"check,omitempty"`
 	Version        any `json:"version,omitempty"`
 	Update         any `json:"update,omitempty"`
@@ -425,6 +426,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderAnalysis(env))
 	case "metrics":
 		b.WriteString(r.renderMetrics(env))
+	case "architecture":
+		b.WriteString(r.renderArchitecture(env))
 	case "check":
 		b.WriteString(r.renderCheck(env))
 		if env.Issues != nil {
