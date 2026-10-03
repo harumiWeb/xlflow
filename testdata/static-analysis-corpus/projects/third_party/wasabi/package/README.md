@@ -29,11 +29,12 @@ Wasabi exposes three independent operational layers that share a unified underly
 ### Unified Transport Features
 
 All three modes benefit from a shared foundational architecture:
-* TLS 1.2 and TLS 1.3 negotiated natively via the Windows SChannel provider.
-* HTTP and SOCKS proxy traversal, featuring stable `CryptStringToBinaryW` decoding for safe NTLM proxy authentication without data corruption.
-* Dual stack IPv4 and IPv6 routing with configurable resolution preference.
-* Microsecond precision latency telemetry and deep internal buffer diagnostics.
-* Asynchronous, non blocking execution utilizing a subclassed hidden message window (`WSAAsyncSelect`), protected by `EbMode` guards to prevent host application crashes during state interruptions.
+
+- TLS 1.2 and TLS 1.3 negotiated natively via the Windows SChannel provider.
+- HTTP and SOCKS proxy traversal, featuring stable `CryptStringToBinaryW` decoding for safe NTLM proxy authentication without data corruption.
+- Dual stack IPv4 and IPv6 routing with configurable resolution preference.
+- Microsecond precision latency telemetry and deep internal buffer diagnostics.
+- Asynchronous, non blocking execution utilizing a subclassed hidden message window (`WSAAsyncSelect`), protected by `EbMode` guards to prevent host application crashes during state interruptions.
 
 ## Connection Handle Management
 

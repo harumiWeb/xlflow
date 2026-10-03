@@ -4,9 +4,9 @@ This directory contains importable VBA modules that demonstrate the public API f
 
 ## Modules
 
-* [BasicRead.bas](BasicRead.bas): Parses JSON, reads object fields, traverses nested nodes, and reads arrays by index.
-* [TokenIteration.bas](TokenIteration.bas): Iterates arrays of objects with token helpers for high-volume reads.
-* [StringifyValues.bas](StringifyValues.bas): Serializes Dictionaries, Collections, arrays, and parsed JSON nodes.
+- [BasicRead.bas](BasicRead.bas): Parses JSON, reads object fields, traverses nested nodes, and reads arrays by index.
+- [TokenIteration.bas](TokenIteration.bas): Iterates arrays of objects with token helpers for high-volume reads.
+- [StringifyValues.bas](StringifyValues.bas): Serializes Dictionaries, Collections, arrays, and parsed JSON nodes.
 
 ## Using the Examples
 
