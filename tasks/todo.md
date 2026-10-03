@@ -618,6 +618,7 @@ source; all valid. Plan:
 
 - [x] Final review P2: synchronize Page Site visibility after topology reconciles the final selected identity; cover selected-page removal, additions, reorder and empty topology. Userforms/pack/filepull tests, lint, docs checks and the retained pure-Go reproduction pass. Review pass 1 report and reproduction are preserved in `tmp_workspaces/final-review/pass-1/`; review resources are cleaned up.
 - [x] Final review pass 2 verified `ffb16e22579fd3931aace7ee6bca6c68fe9f257b`: no confirmed findings; compiler/oforms tests and retained reproduction pass. Report preserved in `tmp_workspaces/final-review/pass-2/`; reviewer, watcher, setup terminal and temporary worktree released/removed. Excel/COM was not rerun after the selection fix; remote CI remains unrun.
+- [x] PR #910 CI follow-up: update CLI/LSP fixture assertions for the added MultiPage/Page/TabStrip controls and supported MultiPage selection; both formerly failing tests pass. Local full Go run also hit the unchanged analyzer package's default 10-minute timeout; do not report it as passed.
 
 - [x] Capture sequential Excel-authored and saved/reopened differential evidence, including empty Pages/Tabs and layout.
 - [x] Add bounded lossless TabStrip arrays/flags and MultiPage x bookkeeping parsing and writing.

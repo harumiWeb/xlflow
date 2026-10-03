@@ -89,7 +89,7 @@ func TestRepresentativeUserFormFixtureUsesSharedLSPContract(t *testing.T) {
 		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
 		Position:     protocol.Position{Line: protocol.UInteger(selectedLine), Character: protocol.UInteger(strings.Index(lineAt(string(source), selectedLine), "selectedIndex") + 2)},
 	}})
-	if err != nil || hover == nil || !strings.Contains(hover.Contents.(protocol.MarkupContent).Value, "observed-only") {
+	if err != nil || hover == nil || !strings.Contains(hover.Contents.(protocol.MarkupContent).Value, "**Support:** supported") {
 		t.Fatalf("selectedIndex hover = %#v, %v", hover, err)
 	}
 
