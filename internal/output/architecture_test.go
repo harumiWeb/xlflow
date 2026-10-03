@@ -43,3 +43,15 @@ func TestArchitectureRendererFailureDoesNotInventReport(t *testing.T) {
 		t.Fatalf("failure rendered a fabricated report: %s", text)
 	}
 }
+
+func TestArchitectureRendererStateInventoryIncludesConstants(t *testing.T) {
+	env := New("architecture")
+	env.Architecture = architecture.Report{ModuleState: architecture.ModuleState{
+		Fields:  []architecture.ModuleStateField{{Name: "Limit", Kind: "const"}, {Name: "state", Kind: "variable"}},
+		Summary: architecture.ModuleStateSummary{MutableStateReads: 1, MutableStateWrites: 2},
+	}}
+	text := renderHuman(env, Options{})
+	if !strings.Contains(text, "Module state inventory: 2 field(s) including constants; mutable reads 1 / writes 2 / mutations 0") || strings.Contains(text, "Mutable state: 2 field(s)") {
+		t.Fatalf("constant inventory mislabeled as mutable fields: %s", text)
+	}
+}

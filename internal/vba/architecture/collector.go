@@ -79,7 +79,13 @@ func collectContextWithHooks(ctx context.Context, root string, cfgValue config.C
 		return Report{}, []map[string]any{}, err
 	}
 	if options.Path != "" && !discoveryContainsPath(files, scopePhysical) {
-		return Report{}, []map[string]any{}, fmt.Errorf("%w: path %q contains no discovered VBA source", ErrInvalidScope, options.Path)
+		info, err := os.Stat(scopePhysical)
+		if err != nil {
+			return Report{}, []map[string]any{}, fmt.Errorf("inspect architecture scope %q: %w", options.Path, err)
+		}
+		if !info.IsDir() {
+			return Report{}, []map[string]any{}, fmt.Errorf("%w: path %q is not a discovered VBA source", ErrInvalidScope, options.Path)
+		}
 	}
 
 	snapshots := make([]sourceSnapshot, 0, len(files))
@@ -357,7 +363,7 @@ func assembleFullReport(
 	callerIDs := make(map[string]string)
 	metricsByProcedure := make(map[string]proceduremetrics.Metrics, len(procedureMetrics))
 	for _, metric := range procedureMetrics {
-		metricsByProcedure[metricIdentityKey(metric.File, metric.Module, metric.Name, string(metric.Kind))] = metric.Metrics
+		metricsByProcedure[metricIdentityKey(metric.File, metric.Module, metric.Name, string(metric.Kind), metric.DeclarationRange.StartByte)] = metric.Metrics
 	}
 	reachabilityByProcedure := make(map[string]string, len(reachable.Confirmed)+len(reachable.Possible)+len(reachable.Unreachable))
 	for _, node := range reachable.Confirmed {
@@ -402,7 +408,7 @@ func assembleFullReport(
 				File: snapshot.path, Location: callgraph.Location{File: snapshot.path, StartLine: rng.StartLine, StartColumn: rng.StartColumn, EndLine: rng.EndLine, EndColumn: rng.EndColumn},
 				Visibility: proc.Symbol.Visibility, Reachability: reachabilityByProcedure[id],
 				DeclarationRange: sourceRange(rng),
-				Metrics:          metricsByProcedure[metricIdentityKey(snapshot.path, snapshot.ir.ModuleName, proc.Symbol.Name, string(proc.Symbol.Kind))],
+				Metrics:          metricsByProcedure[metricIdentityKey(snapshot.path, snapshot.ir.ModuleName, proc.Symbol.Name, string(proc.Symbol.Kind), rng.StartByte)],
 			})
 		}
 	}
@@ -483,8 +489,8 @@ func assembleFullReport(
 	}
 }
 
-func metricIdentityKey(file, module, name, kind string) string {
-	return strings.ToLower(filepath.ToSlash(filepath.Clean(file)) + "\x00" + module + "\x00" + name + "\x00" + kind)
+func metricIdentityKey(file, module, name, kind string, startByte int) string {
+	return strings.ToLower(filepath.ToSlash(filepath.Clean(file)) + "\x00" + module + "\x00" + name + "\x00" + kind + "\x00" + fmt.Sprint(startByte))
 }
 
 func semanticProcedureKey(file, module, name, kind string, line int) string {
@@ -703,7 +709,25 @@ func scopeReport(full Report, snapshots []sourceSnapshot, callResult calls.Resul
 	out.Scope = Scope{Path: options.Path, Module: strings.TrimSpace(options.Module)}
 	out.Modules = filterModules(full.Modules, selectedFiles)
 	out.Procedures = filterProcedures(full.Procedures, selectedFiles)
+	out.EntryPoints = filterEntryPoints(full.EntryPoints, out.Procedures)
 	out.Dependencies = filterDependencyResult(full.Dependencies, selectedFiles)
+	out.Cycles = filterCycles(full.Cycles, out.Procedures)
+	// Related SCCs retain every member, including nonadjacent boundary nodes.
+	retained := make(map[string]bool, len(out.Dependencies.Nodes))
+	for _, node := range out.Dependencies.Nodes {
+		retained[node.ID] = true
+	}
+	for _, component := range out.Cycles {
+		for _, member := range component.Nodes {
+			retained["procedure|"+member.String()] = true
+		}
+	}
+	out.Dependencies.Nodes = make([]callgraph.DependencyNode, 0, len(retained))
+	for _, node := range full.Dependencies.Nodes {
+		if retained[node.ID] {
+			out.Dependencies.Nodes = append(out.Dependencies.Nodes, node)
+		}
+	}
 	selectedDependencyNodes := selectedDependencyNodeIDs(full.Dependencies, selectedFiles)
 	boundaryIDs := make([]string, 0)
 	for _, node := range out.Dependencies.Nodes {
@@ -713,7 +737,6 @@ func scopeReport(full Report, snapshots []sourceSnapshot, callResult calls.Resul
 	}
 	slices.Sort(boundaryIDs)
 	out.DependencyBoundaryNodeIDs = boundaryIDs
-	out.Cycles = filterCycles(full.Cycles, out.Procedures)
 	out.Unreachable = filterReachabilityNodes(reachable.Unreachable, out.Procedures)
 	out.PossibleReachability = filterReachabilityNodes(reachable.Possible, out.Procedures)
 	out.DynamicReferences = filterDynamicReferences(full.DynamicReferences, selectedFiles)
@@ -724,6 +747,32 @@ func scopeReport(full Report, snapshots []sourceSnapshot, callResult calls.Resul
 	out.Uncertainty = uncertaintyForScope(full.Uncertainty, callResult, selectedFiles)
 	out.Summary = summarize(out, snapshotsForScope(snapshots, selectedFiles), callsForScope(callResult, selectedFiles), reachable)
 	return out, true
+}
+
+func filterEntryPoints(input []EntryPoint, procedures []Procedure) []EntryPoint {
+	selected := make(map[string]bool, len(procedures))
+	for _, procedure := range procedures {
+		selected[procedure.ID] = true
+	}
+	out := make([]EntryPoint, 0)
+	for _, entry := range input {
+		candidates := make([]string, 0)
+		for _, id := range entry.Candidates {
+			if selected[id] {
+				candidates = append(candidates, id)
+			}
+		}
+		if len(entry.Candidates) != 0 && len(candidates) == 0 {
+			continue
+		}
+		entry.Candidates = candidates
+		// Filtering does not upgrade an ambiguous root to a resolved one.
+		if !selected[entry.NodeID] {
+			entry.NodeID = ""
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func filterModules(input []Module, files map[string]bool) []Module {

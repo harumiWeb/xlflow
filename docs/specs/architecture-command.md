@@ -103,15 +103,22 @@ source file or directory; relative paths resolve from the project root. When
 both are supplied, selected entities must satisfy both filters. Invalid
 module names, nonexistent paths, and paths outside the project are input
 errors. A valid empty selection is an empty report view.
+Existing in-project directories remain valid even when no VBA source is
+discovered below them; a file scope must name a discovered source file.
 
 All sources are parsed and resolved before filtering. Project-wide reachability,
 fan-in/fan-out, metrics, and hotspot ranks/scores survive filtering unchanged.
 `project_summary` describes the whole analyzed project; `summary` describes the
 selected view. The scope metadata identifies the display filters.
+Displayed entry points retain only selected procedure candidates; unresolved
+root requests remain explicit. Their project-wide status/confidence is not
+upgraded when filtering removes other candidates. Conditional declarations
+join their metrics by declaration start position as well as name and kind.
 
 Confirmed dependencies incident to selected entities retain their endpoint
-nodes. `dependency_boundary_node_ids` identifies out-of-scope endpoint nodes. Related
-cyclic components retain complete member/witness information. Boundary context
+nodes. Related cyclic components retain complete member/witness information
+and every member's dependency node, including nonadjacent members.
+`dependency_boundary_node_ids` identifies all retained out-of-scope nodes. Boundary context
 does not increase the selected module/procedure counts. Filtering never turns
 an out-of-scope target into an unresolved call or proves a procedure unreachable.
 

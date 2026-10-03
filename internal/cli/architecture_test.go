@@ -188,6 +188,23 @@ func TestArchitectureHumanOutputIsBounded(t *testing.T) {
 	}
 }
 
+func TestArchitectureCommandExistingEmptyDirectorySucceeds(t *testing.T) {
+	root := architectureCLIProject(t, 2)
+	if err := os.MkdirAll(filepath.Join(root, "src/modules/Empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	text, code := runArchitectureCLI(t, root, "architecture", "--path", "src/modules/Empty", "--json")
+	var payload struct {
+		Architecture architecture.Report `json:"architecture"`
+	}
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if code != output.ExitSuccess || payload.Architecture.Summary != (architecture.Summary{}) || payload.Architecture.ProjectSummary.Procedures != 4 || len(payload.Architecture.EntryPoints) != 0 {
+		t.Fatalf("empty directory scope: exit=%d %s", code, text)
+	}
+}
+
 func TestArchitectureHotspotsMatchMetricsCommandCollector(t *testing.T) {
 	root := architectureCLIProject(t, 2)
 	cfg := config.Default()

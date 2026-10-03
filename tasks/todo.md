@@ -1,3 +1,16 @@
+# PR #907 review follow-up
+
+All five comments are valid presentation/projection defects; retain global
+resolution, native metrics identities and incident-edge selection.
+
+1. [x] Filter displayed root candidates while retaining unresolved requests.
+2. [x] Retain all related SCC member dependency nodes and boundary IDs.
+3. [x] Join conditional procedure metrics by declaration start position.
+4. [x] Allow existing empty directories as display scopes; reject invalid files.
+5. [x] Distinguish the field inventory from mutable access counts in human output.
+6. [x] Add regressions and verify architecture/output/CLI tests, affected race,
+       lint/docs/staged formatting and whitespace checks.
+
 # Issue #463 final-review Pass 1 follow-up
 
 Validated against `d143e7e8`: implicit Application callbacks are extracted

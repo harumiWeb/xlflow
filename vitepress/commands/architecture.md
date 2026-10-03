@@ -46,6 +46,9 @@ source file/directory. Together they select the intersection. The entire
 project is resolved first, so a filtered view preserves reachability,
 fan-in/out, and global hotspot ranks. Cross-boundary dependencies and related
 cycle members remain explicit context; selected counts exclude boundary nodes.
+Displayed entry points are limited to selected candidates, with unresolved
+root requests retained as uncertainty. Existing empty directories yield an
+empty selected view while preserving the whole-project summary.
 
 Confirmed project dependencies remain separate from ambiguous, unresolved,
 external, member, built-in, and dynamic relationships. A possible root or

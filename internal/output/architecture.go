@@ -57,7 +57,7 @@ func (r renderer) renderArchitecture(env Envelope) string {
 	writeArchitectureRemainder(&b, len(report.Unreachable), "unreachable procedure")
 	b.WriteString(r.section("State and effects"))
 	state := report.ModuleState.Summary
-	fmt.Fprintf(&b, "  Mutable state: %d field(s); reads %d / writes %d / mutations %d\n", len(report.ModuleState.Fields), state.MutableStateReads, state.MutableStateWrites, state.MutableStateMutations)
+	fmt.Fprintf(&b, "  Module state inventory: %d field(s) including constants; mutable reads %d / writes %d / mutations %d\n", len(report.ModuleState.Fields), state.MutableStateReads, state.MutableStateWrites, state.MutableStateMutations)
 	fmt.Fprintf(&b, "  Excel effects: %d direct evidence item(s)\n", report.ExcelEffects.DirectEffectCount)
 	b.WriteString(r.section("Uncertainty"))
 	b.WriteString(r.kvRows(

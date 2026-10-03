@@ -115,10 +115,10 @@ func TestCollectorProcedureMetricsAndHotspotsMatchNativeProjection(t *testing.T)
 	}
 	metricsByID := make(map[string]proceduremetrics.Metrics, len(nativeMetrics))
 	for _, metric := range nativeMetrics {
-		metricsByID[metricIdentityKey(metric.File, metric.Module, metric.Name, string(metric.Kind))] = metric.Metrics
+		metricsByID[metricIdentityKey(metric.File, metric.Module, metric.Name, string(metric.Kind), metric.DeclarationRange.StartByte)] = metric.Metrics
 	}
 	for _, procedure := range report.Procedures {
-		key := metricIdentityKey(procedure.File, procedure.Module, procedure.Name, procedure.Kind)
+		key := metricIdentityKey(procedure.File, procedure.Module, procedure.Name, procedure.Kind, procedure.DeclarationRange.StartByte)
 		if got, ok := metricsByID[key]; !ok || !reflect.DeepEqual(procedure.Metrics, got) {
 			t.Errorf("%s metrics=%+v native=%+v (present=%v)", procedure.QualifiedName, procedure.Metrics, got, ok)
 		}
