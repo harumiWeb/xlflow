@@ -9,7 +9,11 @@ acceptance remains unverified and is a separate follow-up, not a review fix.
 2. [x] Reject existing reparse-point ancestors before creating a workspace.
 3. [x] Sort inventory validation keys and add multi-error regressions.
 4. [x] Run focused/full verification and the real Excel gate.
-5. [ ] Commit fixes and complete the bounded Pass 2 review.
+5. [x] Commit fixes and complete the bounded Pass 2 review.
+
+Pass 2 reviewed `8af2ff79` with gpt-6-luna xhigh: PASS, all three in-scope
+findings resolved, no new confirmed findings. Independent harness and
+inventory regressions passed; retained Excel evidence was read back.
 
 # Issue #887
 
