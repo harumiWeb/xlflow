@@ -66,6 +66,13 @@ compilation preserves them. Direct TabEdit calls on an empty MultiPage reject
 changed cached tab state. Adding a Page through topology replaces the cache
 with the final authored Page collection.
 
+After a Page collection changes, topology reconciles the selected Page identity
+and synchronizes every remaining Page's Site visible bit to the final selection.
+This Site bit identifies the active Page and is separate from the authored
+Page `visible` flag stored in the hidden TabStrip. Synchronization also applies
+when deleting the selected Page falls back to index zero or an added Page has
+an initially visible Site. No-op replay retains existing saved bytes.
+
 ## Page geometry and deterministic generation
 
 Page `left`, `top`, `width`, and `height` are derived from the owning

@@ -163,6 +163,22 @@ func rebuildMultiPage(owner *Control, wanted []*Control, oldTabs map[*Control]Ta
 			}
 		}
 	}
+	// Topology may remove the selected identity or add a Page whose generated
+	// Site is visible. Reconcile every remaining Site after the final index is
+	// known, even when the subsequent TabEdit keeps that numeric index.
+	for i, page := range state.Pages {
+		flags := page.Site.Values["BitFlags"]
+		next := editedBit(flags, int32(i) == strip.SelectedIndex)
+		if flags != next {
+			page.Site.Mask |= 1 << 4
+			page.Site.Values["BitFlags"] = next
+			var err error
+			page.Site.Raw, err = encodeEditedSite(page.Site)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	if err := SetTabStrip(state.Hidden.Record, &strip); err != nil {
 		return err
 	}

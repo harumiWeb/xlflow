@@ -49,6 +49,63 @@ func TestTabSelectionFollowsRetainedIdentityAndExplicitTemplateIndex(t *testing.
 					t.Fatalf("%s selection=%v want%d", name, got.SelectedIndex, want)
 				}
 			}
+			assertMultiPageSiteSelection(t, result, "MultiMain")
+		})
+	}
+}
+
+func assertMultiPageSiteSelection(t *testing.T, form *oforms.Form, name string) {
+	t.Helper()
+	owner := findModelControl(form.Controls, name)
+	for i, page := range owner.MultiPage.Pages {
+		visible := page.Site.Values["BitFlags"]&2 != 0
+		if want := int32(i) == owner.MultiPage.Hidden.TabStrip.SelectedIndex; visible != want {
+			t.Fatalf("%s Site visible=%t want=%t (selected=%d)", page.Name, visible, want, owner.MultiPage.Hidden.TabStrip.SelectedIndex)
+		}
+	}
+}
+
+func TestMultiPageTopologySynchronizesPageSiteSelection(t *testing.T) {
+	for _, mode := range []string{"remove selected", "add unselected", "remove all"} {
+		t.Run(mode, func(t *testing.T) {
+			input := spec.FormSpec{SchemaVersion: 1, Kind: "xlflow.userform", Basis: "designer", Form: spec.FormSpecForm{Name: "SelectionForm"}, Controls: []spec.FormSpecControl{
+				{ID: "multi", Name: "Pages", Type: "MultiPage", SelectedIndex: new(1), ZIndex: new(0)},
+				{ID: "a", ParentID: "multi", Name: "PageA", Type: "Page", ZIndex: new(0)},
+				{ID: "b", ParentID: "multi", Name: "PageB", Type: "Page", ZIndex: new(1)},
+			}}
+			base, err := CompileNew(input, 932)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := projection.Project(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			desired := snapshotCopy(t, before)
+			wantIndex := int32(1)
+			switch mode {
+			case "remove selected":
+				desired.Controls = desired.Controls[:2]
+				desired.Controls[0].SelectedIndex = new(0)
+				desired.Controls[0].Observed.SelectedIndex = new(0)
+				wantIndex = 0
+			case "add unselected":
+				desired.Controls = append(desired.Controls, spec.FormSpecControl{ID: "c", ParentID: desired.Controls[0].ID, Name: "PageC", Type: "Page", ZIndex: new(2)})
+			case "remove all":
+				desired.Controls = desired.Controls[:1]
+				desired.Controls[0].SelectedIndex = nil
+				desired.Controls[0].Observed = nil
+				wantIndex = -1
+			}
+			result, err := CompileEdits(base, before, desired, 932)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := findModelControl(result.Controls, "Pages").MultiPage.Hidden.TabStrip.SelectedIndex; got != wantIndex {
+				t.Fatalf("selection=%d want=%d", got, wantIndex)
+			}
+			assertMultiPageSiteSelection(t, result, "Pages")
+			assertMultiPageSiteSelection(t, base, "Pages")
 		})
 	}
 }
