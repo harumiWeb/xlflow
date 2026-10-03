@@ -137,7 +137,10 @@ longer requires `--experimental`. The first stable release accepts that flag as
 a hidden deprecated no-op so existing automation can migrate without changing
 artifact behavior; it is not part of the stable help, JSON, or error contract.
 
-The stable authority boundary is:
+At stable graduation, the authority boundary was as follows. The UserForm
+restrictions in this historical boundary are superseded by the canonical
+blank-generation and template-source-planning amendments above (Issues #883
+and #887).
 
 - standard/class component topology and code are source-authoritative;
 - document topology is template-authoritative and matched document code is
@@ -208,7 +211,9 @@ content validation failure and never produces a best-effort artifact.
 - Negative: stable compatibility still depends on maintaining pure-Go fixtures
   plus a manual Windows/Excel release gate; PR CI alone cannot prove VBE
   compile/runtime compatibility.
-- Negative: blank mode is intentionally not a general workbook-layout generator; projects needing sheets beyond `Sheet1` or UserForms still require a template.
+- Negative: blank mode is intentionally not a general workbook-layout generator;
+  projects needing sheets beyond `Sheet1` still require a template. UserForm
+  generation is limited to the supported canonical-spec subset.
 
 ## Alternatives Considered
 

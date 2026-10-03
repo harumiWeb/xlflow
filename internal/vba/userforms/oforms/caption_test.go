@@ -116,3 +116,35 @@ func TestApplyEditsSynchronizesRootCaptionVBFrame(t *testing.T) {
 		t.Fatalf("unrepresentable root caption error = %v", err)
 	}
 }
+
+func TestApplyEditsRepeatedRootCaptionsUseLastValue(t *testing.T) {
+	fixture, err := ReadForm(openFixture(t, "p4_form.bin"), "UserForm1", 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := ApplyEdits(fixture, []Edit{{Property: "Caption", Value: "Original"}}, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, final := range []string{"Original", "Changed", "Second"} {
+		t.Run(final, func(t *testing.T) {
+			got, err := ApplyEdits(base, []Edit{
+				{Property: "Caption", Value: "Changed"},
+				{Property: "Caption", Value: final},
+			}, 932)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if caption := got.Levels[0].Record.Strings["Caption"].Text; caption != final {
+				t.Fatalf("record Caption = %q, want %q", caption, final)
+			}
+			caption, found, err := rootVBFrameCaption(got.Levels[0].VBFrameRaw, 932)
+			if err != nil || !found || caption != final {
+				t.Fatalf("VBFrame Caption = %q, found=%v, error=%v; want %q", caption, found, err, final)
+			}
+			if caption := base.Levels[0].Record.Strings["Caption"].Text; caption != "Original" {
+				t.Fatalf("input Caption was mutated: %q", caption)
+			}
+		})
+	}
+}

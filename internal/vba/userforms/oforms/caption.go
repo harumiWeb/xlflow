@@ -28,7 +28,7 @@ func rewriteVBFrameCaption(raw []byte, caption string, codePage uint16) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	result := make([]byte, 0, len(raw)+len(caption)+16)
+	result := make([]byte, 0, len(raw))
 	for index, line := range lines {
 		body, ending := vbFrameLineParts(line)
 		_, err := ovba.DecodeMBCS(body, codePage)

@@ -1,3 +1,19 @@
+# PR #906 review follow-up
+
+CodeQL #10 identifies unchecked addition in a capacity hint; use the existing
+raw length directly. The ADR's graduation boundary is historical and must be
+identified as superseded by the later UserForm amendments. The repeated-root-
+Caption report is not reproduced: applyPersistenceEdit updates the clone's
+Caption before the next iteration, confirmed by the exact reported sequence.
+
+1. [x] Remove the allocation-size sum and verify caption byte preservation.
+2. [x] Cover repeated root Caption edits and classify the review with evidence:
+       Original -> Changed -> Original passes without changing ApplyEdits.
+3. [x] Mark historical ADR authority consistently with current amendments.
+4. [x] Run full/focused tests, affected race/vet, docs and formatting checks.
+
+Publish the verified changes to PR #906 and reply with each classification.
+
 # Issue #887 final-review Pass 1 follow-up
 
 Validated against `c87cac40`: the cleanup PID race, workspace reparse-point
