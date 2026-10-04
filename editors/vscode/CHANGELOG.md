@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.12.0
+
 - Added UserForm Image `picture` field intelligence for project-relative BMP
   and JPEG assets, including explicit picture removal.
 
