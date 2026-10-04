@@ -42,7 +42,7 @@ type Config struct {
 	Analyze   AnalyzeConfig    `toml:"analyze"`
 	Warnings  []map[string]any `toml:"-"`
 	// PicturePaths is resolved, command-local source-role metadata. Keys are
-	// lowercase logical absolute paths; it is never loaded from configuration.
+	// host-normalized logical absolute paths; never loaded from configuration.
 	PicturePaths map[string]bool `toml:"-" json:"-"`
 }
 

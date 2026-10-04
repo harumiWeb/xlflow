@@ -35,10 +35,10 @@ func samePathLists(left, right []string) bool {
 	}
 	left = slices.Clone(left)
 	right = slices.Clone(right)
-	slices.SortFunc(left, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
-	slices.SortFunc(right, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
+	slices.SortFunc(left, func(a, b string) int { return strings.Compare(canonicalPathKey(a), canonicalPathKey(b)) })
+	slices.SortFunc(right, func(a, b string) int { return strings.Compare(canonicalPathKey(a), canonicalPathKey(b)) })
 	for i := range left {
-		if !strings.EqualFold(filepath.Clean(left[i]), filepath.Clean(right[i])) {
+		if canonicalPathKey(left[i]) != canonicalPathKey(right[i]) {
 			return false
 		}
 	}

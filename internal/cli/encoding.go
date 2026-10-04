@@ -12,6 +12,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/sourceinventory"
+	"github.com/harumiWeb/xlflow/internal/sourcepath"
 	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 )
 
@@ -86,10 +87,10 @@ func (a *app) runCanonicalSourceEncodingPreflight(ctx context.Context, command s
 	if len(artifacts) > 0 {
 		pictures := make(map[string]bool, len(artifacts))
 		for _, artifact := range artifacts {
-			pictures[strings.ToLower(filepath.Clean(filepath.Join(root, filepath.FromSlash(artifact.Path))))] = true
+			pictures[sourcepath.Key(filepath.Join(root, filepath.FromSlash(artifact.Path)))] = true
 		}
 		filter = func(path string) bool {
-			return !pictures[strings.ToLower(filepath.Clean(path))]
+			return !pictures[sourcepath.Key(path)]
 		}
 		cfg.PicturePaths = pictures
 	}

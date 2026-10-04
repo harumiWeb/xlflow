@@ -178,6 +178,14 @@ lint and analysis never parse these binary assets as VBA. This is a source
 classification exclusion, not a partial-project analysis filter; ordinary VBA
 files remain included in project-wide diagnostics.
 
+Artifact identity uses host path semantics: Windows paths are case folded,
+while case-sensitive hosts retain distinct paths. VBA component names remain
+case-insensitive independently. On Linux, a referenced `code/login.bas`
+picture must not hide a distinct `code/Login.bas` sidecar, either during
+collection or ordinary source validation. The CLI regression verifies both
+commands preserve that sidecar and reject its invalid encoding before
+publication.
+
 The CLI regression exercises both commands through publication, verifies the
 persisted decoded BMP bytes, and then proves an invalid ordinary VBA module
 still fails validation without changing the published workbook. Referenced

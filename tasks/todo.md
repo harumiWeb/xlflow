@@ -660,4 +660,7 @@ CI or publication is claimed.
 - [x] Resolve validated picture roles before encoding and share command-local role metadata with symbol discovery, preserving full-project diagnostics.
 - [x] Add CLI pack/file-push publication regressions for .bas/.cls/.frm pictures, a code-sidecar collision, and an internal symlink; verify persisted bytes and ordinary invalid-VBA rejection.
 - [x] Run affected/full Go checks, corpus snapshots, lint and fresh installed-binary Excel picture gates.
-- [ ] Complete analyzer performance comparison and bounded pass 2 review of the committed fix.
+- [x] Complete analyzer performance comparison: deterministic counters unchanged, no suspicious metric increases; concurrent test activity prevents isolated timing claims. Pass 2 confirmed the first fix and found a Linux case-distinct picture/sidecar identity defect.
+- [x] Reproduce the pass 2 P2 in Linux, share host path keys across inventory/preflight/symbol discovery/file-push dependencies, and verify actual CLI pack/push preserve case-distinct sidecar code and reject invalid code before publication.
+- [x] Complete final full Go/lint/format checks and fresh installed-binary Excel file-push/blank-pack/template-pack picture gates after the structural path-identity correction.
+- [ ] Run exceptional pass 3 on the committed correction for the repeated source-role defect class; preserve reports and clean up review resources.

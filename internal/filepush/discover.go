@@ -10,6 +10,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
+	"github.com/harumiWeb/xlflow/internal/sourcepath"
 )
 
 // discoveredFile mirrors the .NET VbaSourceHelper.DiscoveredSourceFile shape.
@@ -58,7 +59,7 @@ func isSidecarMode(codeSource string) bool {
 }
 
 func canonicalPathKey(path string) string {
-	return strings.ToLower(filepath.Clean(path))
+	return sourcepath.Key(path)
 }
 
 func samePath(left, right string) bool {

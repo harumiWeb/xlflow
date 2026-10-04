@@ -13,6 +13,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+	"github.com/harumiWeb/xlflow/internal/sourcepath"
 	formpicture "github.com/harumiWeb/xlflow/internal/vba/userforms/picture"
 	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 	"gopkg.in/yaml.v3"
@@ -364,7 +365,7 @@ func formSpecHasUnsynchronizedCompatibilityArtifact(snapshot *forms.FormSpec) bo
 }
 
 func canonicalPathKey(path string) string {
-	return strings.ToLower(filepath.Clean(path))
+	return sourcepath.Key(path)
 }
 
 func loadFormPictureAssets(root string, snapshot *forms.FormSpec) ([]Artifact, map[string]bool, error) {
@@ -403,7 +404,7 @@ func loadFormPictureAssets(root string, snapshot *forms.FormSpec) ([]Artifact, m
 						return fmt.Errorf("resolve UserForm picture %q: %w", pictureSpec.Path, err)
 					}
 					display := displayPath(root, logicalAbsolute)
-					key := strings.ToLower(filepath.ToSlash(filepath.Clean(display)))
+					key := canonicalPathKey(logicalAbsolute)
 					assets[key] = Artifact{Path: display, AbsolutePath: filepath.Clean(physicalPath), Source: slices.Clone(asset.Data), Role: ArtifactRolePicture}
 					referencedFiles[canonicalPathKey(logicalAbsolute)] = true
 				}
