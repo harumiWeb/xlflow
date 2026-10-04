@@ -665,3 +665,10 @@ CI or publication is claimed.
 - [x] Complete final full Go/lint/format checks and fresh installed-binary Excel file-push/blank-pack/template-pack picture gates after the structural path-identity correction.
 - [x] Run exceptional pass 3 on 2ab038f7: prior findings resolved, one new in-scope P2 confirmed for case-distinct Assets/ nested forms. Stop the full review loop at three passes.
 - [x] Preserve pass 3 evidence and clean up all review resources. Correct reserved assets comparisons using the shared host path key; Linux inventory/actual-push regressions and full Windows Go/lint/format checks pass. Fresh installed-binary Excel file-push/blank-pack/template-pack gates pass with confirmed cleanup. Final correction receives coordinator regression/self-review verification; no fourth independent pass or remote CI is claimed.
+
+# v0.35.0 bundled agent skill refresh
+
+- [x] Correct backend routing and obsolete UserForm restrictions in the entrypoint; retain session-first guidance for Excel work.
+- [x] Refresh forms reference with canonical source authority, containers, pictures and omission semantics; add focused pack reference and architecture discovery.
+- [x] Verify installed reference links across providers and execute the documented examples through blank/template pack and file push with artifact readback. Full agentskill/CLI tests PASS (1.350s/136.836s), lint and skill validator PASS; installed-binary skill smoke PASS in tmp_workspaces/issue912-agent-skill-release/xlflow.
+- [x] Complete self-review and docs/lint checks; prepare the skill update for commit and resume the authorized PR preparation. Validation evidence: tmp_workspaces/final-review/agent-skill-validation.md.

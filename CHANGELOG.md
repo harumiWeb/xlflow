@@ -6,6 +6,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## v0.35.0
 
+- Updated the bundled agent skill for canonical UserForm development, Image
+  assets, saved-file push, template/blank pack, and source-only architecture
+  discovery, with backend-specific authority and verification guidance.
 - Fixed CLI source preflight to classify referenced picture assets before VBA
   encoding checks, including images with `.bas`, `.cls`, and `.frm` suffixes.
   Case-sensitive hosts retain distinct picture and code-sidecar paths, and

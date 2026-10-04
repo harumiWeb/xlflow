@@ -12,6 +12,13 @@ and test selection, not to replace behavioral verification.
 
 Start with the smallest question that can guide the next edit:
 
+- Use `xlflow architecture --module ModuleName --json` for an overview of an
+  unfamiliar area: entry points, dependencies, cycles, state/effects, hotspots
+  and uncertainty. Use `--path src/modules` for a source-directory view, or
+  omit filters when a project-wide overview is needed. Filters retain complete
+  project resolution and global ranks; they do not enforce diagnostic or
+  maintainability thresholds. Use `analyze` for risk diagnostics and `metrics`
+  for optional maintainability gates.
 - Use `xlflow impact Module.Procedure --direction callers --json` to ask what
   project-local behavior may break if that procedure changes.
 - Use `xlflow impact Module.Procedure --direction callees --json` to understand
