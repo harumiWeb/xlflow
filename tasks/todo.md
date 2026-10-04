@@ -2,9 +2,9 @@
 
 - [x] Resolve picture roles before every canonical VBA component collector; cover module, class and document roots through CLI pack/file push.
 - [x] Preserve case-distinct Code/ loose modules and fingerprints on case-sensitive hosts.
-- [x] Correct Windows CI assertions to compare physical paths with host-aware keys, retaining symlink target checks.
+- [x] Correct Windows CI assertions to resolve expected physical paths before host-key comparison, retaining symlink target checks. Directory-alias fixtures cover resolved roots as well as filename casing; the initial case-only correction was insufficient on the runner.
 - [x] Remove the CodeQL allocation-size sum, propagate input path-resolution errors, and correct obsolete pack restrictions.
-- [ ] Run affected Windows/Linux checks, lint and installed Excel gate; publish fixes and report review dispositions.
+- [x] Run affected Windows/Linux checks, lint and installed Excel gate; publish fixes and report review dispositions. CodeQL alert 11 is fixed and Linux CI passes; Windows CI is rerun after the physical-path assertion correction.
 
 # PR #913 review follow-up
 

@@ -366,7 +366,7 @@ func TestPushCaseDistinctCodeDirectory(t *testing.T) {
 }
 
 func TestPushLocksReferencedPictureDirectory(t *testing.T) {
-	root := newSourceTree(t)
+	root := newPictureSourceTree(t)
 	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
 	cfg := testConfig()
 	cfg.UserForm.CodeSource = "sidecar"
@@ -387,13 +387,14 @@ func TestPushLocksReferencedPictureDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pictureFound bool
+	wantPicturePath := resolvedPicturePathKey(t, filepath.Join(assetDir, "logo.bas"))
 	for _, input := range snapshot.files {
-		if canonicalPathKey(input.FullPath) == canonicalPathKey(filepath.Join(assetDir, "logo.bas")) {
+		if canonicalPathKey(input.FullPath) == wantPicturePath {
 			pictureFound = input.Kind == "form_asset"
 		}
 	}
 	if !pictureFound {
-		t.Fatal("referenced arbitrary-suffix picture was not inventoried as a form asset")
+		t.Fatalf("referenced picture %s was not inventoried as a form asset: %+v", wantPicturePath, snapshot.files)
 	}
 	manager, err := coordination.NewManager(t.TempDir())
 	if err != nil {
@@ -417,7 +418,7 @@ func TestPushLocksReferencedPictureDirectory(t *testing.T) {
 }
 
 func TestPushReferencedPictureWithBasSuffixIsNotImportedAsModule(t *testing.T) {
-	root := newSourceTree(t)
+	root := newPictureSourceTree(t)
 	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
 	cfg := testConfig()
 	cfg.UserForm.CodeSource = "sidecar"
@@ -440,13 +441,14 @@ func TestPushReferencedPictureWithBasSuffixIsNotImportedAsModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pictureFound bool
+	wantPicturePath := resolvedPicturePathKey(t, imagePath)
 	for _, file := range snapshot.files {
-		if canonicalPathKey(file.FullPath) == canonicalPathKey(imagePath) && file.Kind == "form_asset" {
+		if canonicalPathKey(file.FullPath) == wantPicturePath && file.Kind == "form_asset" {
 			pictureFound = true
 		}
 	}
 	if !pictureFound {
-		t.Fatal("picture with module suffix was not inventoried as an asset")
+		t.Fatalf("picture %s with module suffix was not inventoried as an asset: %+v", wantPicturePath, snapshot.files)
 	}
 	for _, module := range snapshot.modules {
 		if strings.EqualFold(module.Name, "logo") {
@@ -462,7 +464,7 @@ func TestPushReferencedPictureWithBasSuffixIsNotImportedAsModule(t *testing.T) {
 }
 
 func TestPushReferencedPictureSymlinkWithBasSuffixIsNotImportedAsModule(t *testing.T) {
-	root := newSourceTree(t)
+	root := newPictureSourceTree(t)
 	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
 	cfg := testConfig()
 	cfg.UserForm.CodeSource = "sidecar"
@@ -487,13 +489,14 @@ func TestPushReferencedPictureSymlinkWithBasSuffixIsNotImportedAsModule(t *testi
 		t.Fatal(err)
 	}
 	var pictureFound bool
+	wantPicturePath := resolvedPicturePathKey(t, imagePath)
 	for _, file := range snapshot.files {
-		if file.Kind == "form_asset" && file.RelativePath == "src/forms/Linked.bas" && canonicalPathKey(file.FullPath) == canonicalPathKey(imagePath) {
+		if file.Kind == "form_asset" && file.RelativePath == "src/forms/Linked.bas" && canonicalPathKey(file.FullPath) == wantPicturePath {
 			pictureFound = true
 		}
 	}
 	if !pictureFound {
-		t.Fatal("symlink picture did not retain its logical reference and physical target")
+		t.Fatalf("symlink picture did not retain its logical reference and physical target %s: %+v", wantPicturePath, snapshot.files)
 	}
 	first, err := Push(root, cfg, workbook, Options{BackupMode: "never", ChangedOnly: true})
 	if err != nil || first.Skipped {
@@ -616,6 +619,26 @@ func testConfig() config.Config {
 
 // newSourceTree creates every configured source root because
 // sourceinventory.Discover rejects a missing root.
+func resolvedPicturePathKey(t testing.TB, path string) string {
+	t.Helper()
+	physical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonicalPathKey(physical)
+}
+
+func newPictureSourceTree(t testing.TB) string {
+	t.Helper()
+	root := newSourceTree(t)
+	alias := filepath.Join(t.TempDir(), "source-root")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Logf("directory aliases unavailable; using the original source root: %v", err)
+		return root
+	}
+	return alias
+}
+
 func newSourceTree(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
