@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	formpicture "github.com/harumiWeb/xlflow/internal/vba/userforms/picture"
 	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
@@ -22,6 +23,50 @@ type canonicalFormFile struct {
 	rel  string
 	name string
 	ext  string
+}
+
+// DiscoverPictureArtifacts resolves only canonical picture references so
+// source preflights can exclude binary assets before inspecting VBA text.
+// It does not classify code or compatibility artifacts.
+func DiscoverPictureArtifacts(root string, cfg config.Config) ([]Artifact, error) {
+	base, err := resolveRoot(root, cfg.Src.Forms, false)
+	if err != nil {
+		return nil, err
+	}
+	specDir := filepath.Join(base, "specs")
+	entries, err := os.ReadDir(specDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var result []Artifact
+	for _, entry := range entries {
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if entry.IsDir() || ext != ".yaml" && ext != ".yml" && ext != ".json" {
+			continue // The complete inventory validates layout separately.
+		}
+		path := filepath.Join(specDir, entry.Name())
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		format := "yaml"
+		if ext == ".json" {
+			format = "json"
+		}
+		snapshot, err := loadAuthoredFormSpec(forms.SpecInput{Path: path, DisplayPath: displayPath(root, path), Format: format}, body)
+		if err != nil {
+			return nil, layoutError("%s: %w", path, err)
+		}
+		artifacts, _, err := loadFormPictureAssets(root, &snapshot)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, artifacts...)
+	}
+	return result, nil
 }
 
 func collectCanonicalForms(root, base string, opts Options) ([]Component, error) {

@@ -296,6 +296,9 @@ func SourceFileForPath(rootDir string, cfg config.Config, path string) (SourceFi
 		return SourceFile{}, false, err
 	}
 	path = filepath.Clean(path)
+	if cfg.PicturePaths[strings.ToLower(path)] {
+		return SourceFile{}, false, nil
+	}
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext != ".bas" && ext != ".cls" && ext != ".frm" {
 		return SourceFile{}, false, nil
@@ -546,6 +549,9 @@ func collectFilesContext(ctx context.Context, root string, opts Options) ([]file
 		return nil, err
 	}
 	if !info.IsDir() {
+		if opts.Config.PicturePaths[strings.ToLower(filepath.Clean(root))] {
+			return nil, nil
+		}
 		ext := strings.ToLower(filepath.Ext(root))
 		if ext != ".bas" && ext != ".cls" && ext != ".frm" {
 			return nil, fmt.Errorf("unsupported source extension: %s", ext)
@@ -561,6 +567,9 @@ func collectFilesContext(ctx context.Context, root string, opts Options) ([]file
 			return walkErr
 		}
 		if d.IsDir() {
+			return nil
+		}
+		if opts.Config.PicturePaths[strings.ToLower(filepath.Clean(path))] {
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))

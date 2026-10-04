@@ -168,6 +168,21 @@ must retain the original persisted picture resource identity. Re-encoding is
 assessed by equivalent pixels and Designer behavior rather than equality with
 the originally authored JPEG bytes.
 
+## Source preflight roles
+
+CLI `pack` and `push --backend file` resolve canonical picture references
+before source encoding validation. Validated picture assets are excluded by
+their logical absolute paths, including `.bas`, `.cls`, `.frm`, and symlink
+paths. Command-local picture-role metadata also reaches symbol discovery, so
+lint and analysis never parse these binary assets as VBA. This is a source
+classification exclusion, not a partial-project analysis filter; ordinary VBA
+files remain included in project-wide diagnostics.
+
+The CLI regression exercises both commands through publication, verifies the
+persisted decoded BMP bytes, and then proves an invalid ordinary VBA module
+still fails validation without changing the published workbook. Referenced
+assets remain independently validated and tracked by the publisher.
+
 ## Related
 
 - ADR-0063

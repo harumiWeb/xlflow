@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/harumiWeb/xlflow/internal/sourceinventory"
 	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 )
 
@@ -56,9 +58,45 @@ func (a *app) runSourceEncodingPreflight(ctx context.Context, command string, cf
 }
 
 func (a *app) runPackSourceEncodingPreflight(ctx context.Context, cfg config.Config) error {
+	_, err := a.runCanonicalSourceEncodingPreflight(ctx, "pack", cfg, true)
+	return err
+}
+
+func (a *app) runCanonicalSourceEncodingPreflight(ctx context.Context, command string, cfg config.Config, allowExternalRoots bool) (config.Config, error) {
+	root, err := filepath.Abs(a.cwd)
+	if err != nil {
+		return cfg, a.writeFailure(command, output.ExitEnvironment, "source_preflight_failed", err)
+	}
+	artifacts, err := sourceinventory.DiscoverPictureArtifacts(root, cfg)
+	if err != nil {
+		code := output.ExitEnvironment
+		if _, ok := errors.AsType[*sourceinventory.LayoutError](err); ok {
+			code = output.ExitValidation
+		}
+		errorCode := "source_preflight_failed"
+		if command == "pack" {
+			errorCode = "pack_source_read_failed"
+			if code == output.ExitValidation {
+				errorCode = "pack_ambiguous_layout"
+			}
+		}
+		return cfg, a.writeFailure(command, code, errorCode, err)
+	}
+	var filter func(string) bool
+	if len(artifacts) > 0 {
+		pictures := make(map[string]bool, len(artifacts))
+		for _, artifact := range artifacts {
+			pictures[strings.ToLower(filepath.Clean(filepath.Join(root, filepath.FromSlash(artifact.Path))))] = true
+		}
+		filter = func(path string) bool {
+			return !pictures[strings.ToLower(filepath.Clean(path))]
+		}
+		cfg.PicturePaths = pictures
+	}
 	opts := sourceEncodingOptions(a.cwd, cfg, nil)
-	opts.AllowExternalRoots = true
-	return a.runSourceEncodingPreflightWithOptions(ctx, "pack", opts)
+	opts.AllowExternalRoots = allowExternalRoots
+	opts.PathFilter = filter
+	return cfg, a.runSourceEncodingPreflightWithOptions(ctx, command, opts)
 }
 
 func (a *app) runSourceEncodingPreflightWithOptions(ctx context.Context, command string, opts sourceencoding.Options) error {

@@ -653,3 +653,11 @@ confirmed and then rechecked fixes for empty cached-tab edits and quadratic
 signature membership checks. Local checks passed for userforms/pack/filepull,
 CLI pack/form, 51 bridge tests, Go lint, VS Code TypeScript and docs. No remote
 CI or publication is claimed.
+
+# Issue #912 final review follow-up
+
+- [x] Validate the pass 1 P2: CLI encoding preflight misclassifies referenced pictures with source suffixes.
+- [x] Resolve validated picture roles before encoding and share command-local role metadata with symbol discovery, preserving full-project diagnostics.
+- [x] Add CLI pack/file-push publication regressions for .bas/.cls/.frm pictures, a code-sidecar collision, and an internal symlink; verify persisted bytes and ordinary invalid-VBA rejection.
+- [x] Run affected/full Go checks, corpus snapshots, lint and fresh installed-binary Excel picture gates.
+- [ ] Complete analyzer performance comparison and bounded pass 2 review of the committed fix.
