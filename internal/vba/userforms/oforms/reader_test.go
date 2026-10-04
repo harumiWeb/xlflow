@@ -233,7 +233,7 @@ func TestParseCompObjRejectsOversizedStream(t *testing.T) {
 	}
 }
 
-func openFixture(t *testing.T, name string) *cfb.Container {
+func openFixture(t testing.TB, name string) *cfb.Container {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join("..", "..", "..", "pack", "vbaproject", "testdata", "corpus", name))
 	if err != nil {

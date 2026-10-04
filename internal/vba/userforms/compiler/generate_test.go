@@ -2,10 +2,15 @@ package compiler
 
 import (
 	"errors"
+	"fmt"
+	"maps"
 	"math"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
+	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/projection"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
@@ -98,6 +103,39 @@ func TestCompileNewEmptyAndCommonControls(t *testing.T) {
 	}
 }
 
+func TestCompileNewLargeFormRoundTrips512Controls(t *testing.T) {
+	input := newSpec()
+	input.Form.Build = &spec.FormSpecBuildForm{ClientWidth: new(640.0), ClientHeight: new(480.0)}
+	for i := range 512 {
+		input.Controls = append(input.Controls, spec.FormSpecControl{
+			Name: fmt.Sprintf("Label%03d", i), Type: "Label", Caption: new(fmt.Sprintf("Control %03d 日本語", i)),
+			Left: new(float64(i % 32 * 18)), Top: new(float64(i / 32 * 18)), Width: new(72.0), Height: new(16.0),
+		})
+	}
+	form, err := CompileNew(input, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serialized, err := oforms.SerializeForm(form, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reparsed, err := readSerializedForm(t, serialized, form.Name, 932)
+	if err != nil {
+		t.Fatalf("reparse large form: %v", err)
+	}
+	projected, err := projection.Project(reparsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected.Controls) != 512 {
+		t.Fatalf("projected controls = %d, want 512", len(projected.Controls))
+	}
+	if projected.Controls[511].Name != "Label511" || projected.Controls[511].Caption == nil || *projected.Controls[511].Caption != "Control 511 日本語" {
+		t.Fatalf("last control did not survive round trip: %#v", projected.Controls[511])
+	}
+}
+
 func TestCompileNewRejectsUnsupportedAndInvalidInput(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -161,6 +199,26 @@ func TestCompileNewReportsRootCaptionCodePageContext(t *testing.T) {
 			}
 		})
 	}
+}
+
+func readSerializedForm(t *testing.T, serialized *oforms.SerializedForm, name string, codePage uint16) (*oforms.Form, error) {
+	t.Helper()
+	writer := cfb.NewWriter()
+	for _, path := range slices.Sorted(maps.Keys(serialized.Storages)) {
+		writer.AddStorage(strings.Split(path, "/"), serialized.Storages[path])
+	}
+	for _, path := range slices.Sorted(maps.Keys(serialized.Streams)) {
+		writer.AddStream(strings.Split(path, "/"), serialized.Streams[path])
+	}
+	body, err := writer.Bytes()
+	if err != nil {
+		return nil, err
+	}
+	container, err := cfb.Open(body)
+	if err != nil {
+		return nil, err
+	}
+	return oforms.ReadForm(container, name, codePage)
 }
 
 func TestCompileEditsRejectsClientSizeChanges(t *testing.T) {

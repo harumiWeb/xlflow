@@ -360,6 +360,14 @@ tests or CI.
 Issue #887 local results and retained workspace commands are recorded in
 [`userform-integration/README.md`](../../internal/pack/testdata/userform-integration/README.md).
 
+The MS-OFORMS reader's Linux tests also replay the committed Excel-authored
+simple, common-control, Frame, MultiPage and empty-page projects. Fuzz coverage
+for CFB traversal, form/site records, and control property records runs in the
+Linux CI `userform-fuzz` matrix. Frame and MultiPage real-Excel verification
+remains a developer release gate and is recorded with the fixture evidence in
+`compiler/testdata/frame-excel-authored` and
+`compiler/testdata/multipage-excel-authored`.
+
 ## Staged UserForm plan
 
 See ADR-0012 for the rationale. Summary:

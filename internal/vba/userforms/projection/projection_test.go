@@ -62,6 +62,125 @@ func TestProjectSimpleFixture(t *testing.T) {
 	}
 }
 
+func TestProjectControlCaptionOnlyWhenControlContractAllowsIt(t *testing.T) {
+	tests := []struct {
+		name        string
+		controlType string
+		caption     string
+		wantCaption bool
+	}{
+		{name: "label", controlType: "Label", caption: "Title", wantCaption: true},
+		{name: "page", controlType: "Page", caption: "Details", wantCaption: true},
+		{name: "multipage-empty-caption", controlType: "MultiPage", caption: "", wantCaption: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			projected := forms.FormSpecControl{
+				ID:   "controlNode",
+				Type: test.controlType,
+				Name: "Control1",
+			}
+			projectControl(&oforms.Control{
+				Record: &oforms.Record{
+					Strings: map[string]oforms.StoredString{
+						"Caption": {Text: test.caption},
+					},
+				},
+			}, &projected)
+			if (projected.Caption != nil) != test.wantCaption {
+				t.Fatalf("Caption = %#v, want present=%t", projected.Caption, test.wantCaption)
+			}
+			controls := []forms.FormSpecControl{projected}
+			if test.controlType == "Page" {
+				projected.ID = "pageNode"
+				projected.ParentID = "multiNode"
+				controls = []forms.FormSpecControl{
+					{ID: "multiNode", Type: "MultiPage", Name: "PagesMain"},
+					projected,
+				}
+			}
+			form := forms.FormSpec{
+				SchemaVersion: 1,
+				Kind:          "xlflow.userform",
+				Basis:         "designer",
+				Form:          forms.FormSpecForm{Name: "ProjectionForm"},
+				Controls:      controls,
+			}
+			if issues := forms.ValidateFormSpecStrict(form); hasErrors(issues) {
+				t.Fatalf("projected control violates its contract: %#v", issues)
+			}
+		})
+	}
+}
+
+func TestProjectControlCaptionReportingMatchesControlContract(t *testing.T) {
+	tests := []struct {
+		name            string
+		controlType     string
+		caption         string
+		wantCaption     bool
+		wantUnsupported bool
+	}{
+		{name: "label", controlType: "Label", caption: "Title", wantCaption: true},
+		{name: "label-empty", controlType: "Label", wantCaption: true},
+		{name: "frame", controlType: "Frame", caption: "Group", wantCaption: true},
+		{name: "textbox", controlType: "TextBox", caption: "Internal label", wantUnsupported: true},
+		{name: "textbox-empty", controlType: "TextBox"},
+		{name: "multipage", controlType: "MultiPage", caption: "Internal pages", wantUnsupported: true},
+		{name: "multipage-empty", controlType: "MultiPage"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			record := emptyRecord(test.controlType)
+			record.Strings["Caption"] = oforms.StoredString{Text: test.caption}
+			form := &oforms.Form{
+				Name: "CaptionForm",
+				Levels: []*oforms.Level{{
+					Record: emptyRecord("Form"),
+				}},
+				Controls: []*oforms.Control{{
+					Name: "ProjectedInput", Kind: "MSForms." + test.controlType, Record: record,
+				}},
+			}
+			got, err := Project(form)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Controls) != 1 {
+				t.Fatalf("controls = %d, want 1", len(got.Controls))
+			}
+			control := got.Controls[0]
+			if (control.Caption != nil) != test.wantCaption {
+				t.Fatalf("Caption = %#v, want present=%t", control.Caption, test.wantCaption)
+			}
+			if control.Caption != nil && *control.Caption != test.caption {
+				t.Fatalf("Caption = %q, want %q", *control.Caption, test.caption)
+			}
+			var wantUnsupported []string
+			if test.wantUnsupported {
+				wantUnsupported = []string{"caption"}
+			}
+			if !slices.Equal(control.Unsupported, wantUnsupported) {
+				t.Fatalf("unsupported = %q, want %q", control.Unsupported, wantUnsupported)
+			}
+			if test.wantUnsupported {
+				if len(got.Warnings) != 1 || got.Warnings[0].Code != "unsupported_properties" ||
+					got.Warnings[0].Control != control.Name || !strings.Contains(got.Warnings[0].Message, "caption") {
+					t.Fatalf("warnings = %#v, want control caption warning", got.Warnings)
+				}
+			} else if len(got.Warnings) != 0 {
+				t.Fatalf("warnings = %#v, want none", got.Warnings)
+			}
+			if issues := forms.ValidateFormSpecStrict(got); hasErrors(issues) {
+				t.Fatalf("projected control violates its contract: %#v", issues)
+			}
+			if record.Strings["Caption"].Text != test.caption {
+				t.Fatal("projection changed the persisted caption")
+			}
+		})
+	}
+}
+
 func TestProjectNestedFixturePreservesParentsAndSiblingOrder(t *testing.T) {
 	form := readFixture(t, "p6_nested_form.bin")
 	got, err := Project(form)
