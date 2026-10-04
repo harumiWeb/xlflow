@@ -42,8 +42,7 @@ userform_topology = "source"
 ```
 
 This requires canonical specs for all forms remaining in source. The default
-is `"template"`; blank mode always uses the source form set. MultiPage/Page/TabStrip
-generation or structural changes, root-dimension edits and
+is `"template"`; blank mode always uses the source form set. Root-dimension edits and
 unsupported property edits fail before publication with specific
 `pack_userform_generation_*` or `pack_userform_edit_*` errors.
 

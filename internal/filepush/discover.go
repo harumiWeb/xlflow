@@ -128,9 +128,11 @@ func filesFromDir(dir, kind, ext, excludedDir string) ([]discoveredFile, error) 
 	}
 	excludedFull := ""
 	if strings.TrimSpace(excludedDir) != "" {
-		if abs, absErr := filepath.Abs(excludedDir); absErr == nil {
-			excludedFull = filepath.Clean(abs) + string(filepath.Separator)
+		abs, absErr := filepath.Abs(excludedDir)
+		if absErr != nil {
+			return nil, &SourceReadError{Path: excludedDir, Err: absErr}
 		}
+		excludedFull = canonicalPathKey(abs) + string(filepath.Separator)
 	}
 	var found []discoveredFile
 	walkErr := filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
@@ -151,7 +153,7 @@ func filesFromDir(dir, kind, ext, excludedDir string) ([]discoveredFile, error) 
 			return &SourceReadError{Path: path, Err: absErr}
 		}
 		abs = filepath.Clean(abs)
-		if excludedFull != "" && strings.HasPrefix(strings.ToLower(abs), strings.ToLower(excludedFull)) {
+		if excludedFull != "" && strings.HasPrefix(canonicalPathKey(abs), excludedFull) {
 			return nil
 		}
 		rel, relErr := filepath.Rel(dir, abs)

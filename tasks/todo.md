@@ -1,3 +1,11 @@
+# PR #923 review follow-up
+
+- [x] Resolve picture roles before every canonical VBA component collector; cover module, class and document roots through CLI pack/file push.
+- [x] Preserve case-distinct Code/ loose modules and fingerprints on case-sensitive hosts.
+- [x] Correct Windows CI assertions to compare physical paths with host-aware keys, retaining symlink target checks.
+- [x] Remove the CodeQL allocation-size sum, propagate input path-resolution errors, and correct obsolete pack restrictions.
+- [ ] Run affected Windows/Linux checks, lint and installed Excel gate; publish fixes and report review dispositions.
+
 # PR #913 review follow-up
 
 The persisted-caption finding is valid: caption projection respects the

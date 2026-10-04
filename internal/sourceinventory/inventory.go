@@ -133,6 +133,23 @@ func Discover(opts Options) ([]Component, error) {
 		return nil, fmt.Errorf("resolve project root: %w", err)
 	}
 	root = filepath.Clean(root)
+	// Canonical references assign picture authority before any VBA root is
+	// classified, including images with source suffixes outside the forms root.
+	var formComponents []Component
+	if opts.CanonicalFormSpecs {
+		formComponents, err = collectForms(root, opts)
+		if err != nil {
+			return nil, err
+		}
+	}
+	picturePaths := map[string]bool{}
+	for _, component := range formComponents {
+		for _, artifact := range component.Related {
+			if artifact.Role == ArtifactRolePicture {
+				picturePaths[canonicalPathKey(picturePathFromProjectRoot(root, artifact.Path))] = true
+			}
+		}
+	}
 	var components []Component
 	for _, source := range []struct {
 		dir  string
@@ -143,15 +160,17 @@ func Discover(opts Options) ([]Component, error) {
 		{opts.Config.Src.Classes, ComponentClass, map[string]bool{".cls": true}},
 		{opts.Config.Src.Workbook, ComponentDocument, map[string]bool{".bas": true, ".cls": true}},
 	} {
-		items, collectErr := collectCode(root, source.dir, source.typ, source.exts, opts.RestrictToRoot, opts.AllowMissingRoots)
+		items, collectErr := collectCode(root, source.dir, source.typ, source.exts, opts.RestrictToRoot, opts.AllowMissingRoots, picturePaths)
 		if collectErr != nil {
 			return nil, collectErr
 		}
 		components = append(components, items...)
 	}
-	formComponents, err := collectForms(root, opts)
-	if err != nil {
-		return nil, err
+	if !opts.CanonicalFormSpecs {
+		formComponents, err = collectForms(root, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 	components = append(components, formComponents...)
 	slices.SortFunc(components, func(a, b Component) int {
@@ -163,7 +182,7 @@ func Discover(opts Options) ([]Component, error) {
 	return components, nil
 }
 
-func collectCode(root, configured string, typ ComponentType, allowed map[string]bool, restrict bool, allowMissing bool) ([]Component, error) {
+func collectCode(root, configured string, typ ComponentType, allowed map[string]bool, restrict bool, allowMissing bool, picturePaths map[string]bool) ([]Component, error) {
 	base, err := resolveRoot(root, configured, restrict)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s source root: %w", typ, err)
@@ -187,6 +206,9 @@ func collectCode(root, configured string, typ ComponentType, allowed map[string]
 			return walkErr
 		}
 		if d.IsDir() {
+			return nil
+		}
+		if picturePaths[canonicalPathKey(path)] {
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(d.Name()))

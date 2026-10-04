@@ -14,7 +14,7 @@ import (
 
 func TestCanonicalPictureSourcePreflights(t *testing.T) {
 	for _, command := range []string{"pack", "push"} {
-		for _, assetPath := range []string{"src/forms/images/logo.bas", "src/forms/images/logo.cls", "src/forms/images/logo.frm", "src/forms/code/Login.bas", "src/forms/Linked.bas"} {
+		for _, assetPath := range []string{"src/modules/logo.bas", "src/classes/logo.cls", "src/workbook/logo.bas", "src/modules/logo.bmp", "src/forms/images/logo.bas", "src/forms/images/logo.cls", "src/forms/images/logo.frm", "src/forms/code/Login.bas", "src/forms/Linked.bas"} {
 			t.Run(command+"/"+assetPath, func(t *testing.T) {
 				dir := t.TempDir()
 				writePackConfig(t, dir)

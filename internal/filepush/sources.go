@@ -88,12 +88,15 @@ func collectSources(root string, cfg config.Config, rawFiles []discoveredFile) (
 	sources := make([]packpkg.SourceModule, 0, len(components))
 	inputs := map[string]discoveredFile{}
 	assetDirs := map[string]string{}
-	addInput := func(kind, path, fullPath string, body []byte) {
+	addInput := func(kind, path, fullPath string, body []byte) error {
 		abs := fullPath
 		if abs == "" {
 			abs = filepath.Join(root, filepath.FromSlash(path))
 		}
-		abs, _ = filepath.Abs(abs)
+		abs, err := filepath.Abs(abs)
+		if err != nil {
+			return &SourceReadError{Path: path, Err: err}
+		}
 		abs = filepath.Clean(abs)
 		inputPath := abs
 		if kind == "form_asset" {
@@ -103,7 +106,10 @@ func collectSources(root string, cfg config.Config, rawFiles []discoveredFile) (
 			if !filepath.IsAbs(inputPath) {
 				inputPath = filepath.Join(root, inputPath)
 			}
-			inputPath, _ = filepath.Abs(inputPath)
+			inputPath, err = filepath.Abs(inputPath)
+			if err != nil {
+				return &SourceReadError{Path: path, Err: err}
+			}
 		}
 		relative := filepath.ToSlash(path)
 		inputs[canonicalPathKey(inputPath)] = discoveredFile{
@@ -112,6 +118,7 @@ func collectSources(root string, cfg config.Config, rawFiles []discoveredFile) (
 			ModuleName: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
 			Body:       slices.Clone(body), HasBody: true,
 		}
+		return nil
 	}
 	for _, component := range components {
 		if component.Type == sourceinventory.ComponentDocument && !strings.EqualFold(filepath.Ext(component.AbsolutePath), ".bas") {
@@ -158,11 +165,15 @@ func collectSources(root string, cfg config.Config, rawFiles []discoveredFile) (
 			PreserveExistingCode: component.PreserveExistingCode,
 		})
 		if component.Type != sourceinventory.ComponentForm {
-			addInput(sourceKind(component.Type), component.SourcePath, component.AbsolutePath, component.Source)
+			if err := addInput(sourceKind(component.Type), component.SourcePath, component.AbsolutePath, component.Source); err != nil {
+				return sourceSnapshot{}, err
+			}
 		}
 		for _, artifact := range component.Related {
 			kind := relatedSourceKind(artifact, component.Type, sidecar)
-			addInput(kind, artifact.Path, artifact.AbsolutePath, artifact.Source)
+			if err := addInput(kind, artifact.Path, artifact.AbsolutePath, artifact.Source); err != nil {
+				return sourceSnapshot{}, err
+			}
 			if kind == "form_asset" {
 				dir := filepath.Dir(artifact.AbsolutePath)
 				assetDirs[canonicalPathKey(dir)] = dir
@@ -206,7 +217,9 @@ func collectSources(root string, cfg config.Config, rawFiles []discoveredFile) (
 			Type:       packpkg.ModuleType(loose.Type),
 			Source:     transformed,
 		})
-		addInput(file.Kind, file.RelativePath, file.FullPath, body)
+		if err := addInput(file.Kind, file.RelativePath, file.FullPath, body); err != nil {
+			return sourceSnapshot{}, err
+		}
 	}
 
 	files := make([]discoveredFile, 0, len(rawFiles)+len(inputs))

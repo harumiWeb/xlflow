@@ -95,7 +95,7 @@ func Encode(data []byte) ([]byte, error) {
 	if _, err := inspect(data); err != nil {
 		return nil, err
 	}
-	raw := make([]byte, 0, len(stdPictureCLSID)+8+len(data))
+	raw := make([]byte, 0, len(stdPictureCLSID)+8)
 	raw = append(raw, stdPictureCLSID[:]...)
 	raw = binary.LittleEndian.AppendUint32(raw, stdPictureTag)
 	raw = binary.LittleEndian.AppendUint32(raw, uint32(len(data)))

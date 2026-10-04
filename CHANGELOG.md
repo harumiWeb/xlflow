@@ -13,6 +13,9 @@ All notable changes to xlflow will be documented in this file.
   encoding checks, including images with `.bas`, `.cls`, and `.frm` suffixes.
   Case-sensitive hosts retain distinct picture and code-sidecar paths, and
   nested forms under `Assets/` remain separate from reserved `assets/` files.
+  Canonical inventories also exclude referenced pictures from standard,
+  class and document module roots; file push retains loose modules under a
+  case-distinct `Code/` directory and fingerprints their changes.
 - Expanded pure-Go UserForm persistence verification across the committed
   Excel-authored control, Frame, MultiPage, and empty-page fixtures. Linux CI
   now runs dedicated fuzz jobs for nested CFB traversal, FormControl, Site, and

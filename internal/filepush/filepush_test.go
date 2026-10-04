@@ -320,6 +320,51 @@ func TestPushChangedOnlyTracksFormSpecAndReferencedPictureBytes(t *testing.T) {
 	}
 }
 
+func TestPushCaseDistinctCodeDirectory(t *testing.T) {
+	root := newSourceTree(t)
+	formsDir := filepath.Join(root, "src", "forms")
+	codeDir := filepath.Join(formsDir, "code")
+	if err := os.MkdirAll(codeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(formsDir, "Code")); err == nil {
+		t.Skip("requires a case-sensitive filesystem")
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(formsDir, "Code", "Utility.bas"), moduleSource("Utility", "Kept"))
+	writeTestFile(t, filepath.Join(formsDir, "Code", "Helper.cls"), classSourceText(t, "Helper"))
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	cfg := testConfig()
+	cfg.UserForm.CodeSource = "sidecar"
+	first, err := Push(root, cfg, workbook, Options{BackupMode: "never", ChangedOnly: true})
+	if err != nil || first.Skipped {
+		t.Fatalf("push = %+v, %v", first, err)
+	}
+	project := readProject(t, workbook)
+	for _, name := range []string{"Utility", "Helper"} {
+		if moduleSourceOf(project, name) == "" {
+			t.Fatalf("case-distinct loose module %s was omitted", name)
+		}
+	}
+	unchanged, err := Push(root, cfg, workbook, Options{BackupMode: "never", ChangedOnly: true})
+	if err != nil || !unchanged.Skipped {
+		t.Fatalf("unchanged push = %+v, %v", unchanged, err)
+	}
+	for _, path := range []string{"Utility.bas", "Helper.cls"} {
+		file := filepath.Join(formsDir, "Code", path)
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, file, string(body)+"\n' changed\n")
+		changed, err := Push(root, cfg, workbook, Options{BackupMode: "never", ChangedOnly: true})
+		if err != nil || changed.Skipped {
+			t.Fatalf("%s change omitted from fingerprint: %+v, %v", path, changed, err)
+		}
+	}
+}
+
 func TestPushLocksReferencedPictureDirectory(t *testing.T) {
 	root := newSourceTree(t)
 	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
@@ -343,7 +388,7 @@ func TestPushLocksReferencedPictureDirectory(t *testing.T) {
 	}
 	var pictureFound bool
 	for _, input := range snapshot.files {
-		if input.FullPath == filepath.Join(assetDir, "logo.bas") {
+		if canonicalPathKey(input.FullPath) == canonicalPathKey(filepath.Join(assetDir, "logo.bas")) {
 			pictureFound = input.Kind == "form_asset"
 		}
 	}
@@ -396,7 +441,7 @@ func TestPushReferencedPictureWithBasSuffixIsNotImportedAsModule(t *testing.T) {
 	}
 	var pictureFound bool
 	for _, file := range snapshot.files {
-		if file.FullPath == imagePath && file.Kind == "form_asset" {
+		if canonicalPathKey(file.FullPath) == canonicalPathKey(imagePath) && file.Kind == "form_asset" {
 			pictureFound = true
 		}
 	}
@@ -443,7 +488,7 @@ func TestPushReferencedPictureSymlinkWithBasSuffixIsNotImportedAsModule(t *testi
 	}
 	var pictureFound bool
 	for _, file := range snapshot.files {
-		if file.Kind == "form_asset" && file.RelativePath == "src/forms/Linked.bas" && file.FullPath == imagePath {
+		if file.Kind == "form_asset" && file.RelativePath == "src/forms/Linked.bas" && canonicalPathKey(file.FullPath) == canonicalPathKey(imagePath) {
 			pictureFound = true
 		}
 	}
