@@ -334,7 +334,9 @@ func projectControl(source *oforms.Control, target *forms.FormSpecControl) {
 		target.Height = new(points(size.Height))
 	}
 	if caption, ok := record.Strings["Caption"]; ok {
-		target.Caption = new(caption.Text)
+		if _, supported := forms.LookupControlProperty(target.Type, "caption"); supported {
+			target.Caption = new(caption.Text)
+		}
 	}
 	if value, ok := record.Strings["Value"]; ok && supportsControlValue(target.Type) {
 		target.Value = projectedControlValue(target.Type, value.Text)

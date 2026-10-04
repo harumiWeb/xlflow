@@ -433,15 +433,23 @@ of producing a partial `vbaProject.bin`.
 
 ## Verification
 
-The committed Excel-authored `p4_form.bin` fixture covers a simple form and
-known control property record. `p6_nested_form.bin` covers Frame, MultiPage,
-Page, and nested container storages. Focused corruption tests cover missing and
-mis-sized `o` streams, inconsistent depth runs, orphan storages, unsupported
-code pages, and structurally bounded opaque controls. Native Go fuzz targets
-exercise the public CFB-to-form reader, successful parse-to-serialize replay,
-and the `f` stream parser. Serializer tests compare every simple and nested
-Designer stream and storage metadata entry byte-for-byte, cover CP932 text,
-and reject malformed retained data and unsupported semantic mutation.
+The committed Excel-authored corpus also includes the common-control,
+Frame, MultiPage, empty-page, and property-mutation projects maintained under
+`compiler/testdata`. `TestExcelAuthoredCorpusNoOpRoundTrips` reads each project,
+discovers every form and compares all serialized Designer streams and storage
+metadata byte-for-byte. These checks run without Excel or Python. The corpus
+currently reuses the focused fixtures; it does not claim a complete survey of
+every fixture category in Issue #888.
+
+Focused corruption tests cover missing and mis-sized `o` streams, inconsistent
+depth runs, orphan storages, unsupported code pages, and structurally bounded
+opaque controls. Native Go fuzz targets exercise the public CFB-to-form reader
+and nested-storage traversal, the `f` stream parser, individual Site records,
+and class-specific control property records. Every successfully parsed form
+must serialize with identical Designer stream bytes and storage metadata.
+Linux CI runs each target for 30 seconds from the committed Excel-authored
+seeds. Serializer tests also cover CP932 text and reject malformed retained
+data and unsupported semantic mutation.
 Projection tests cover common properties, nested parent relationships,
 snapshot-only opaque controls, validation boundaries, and repeated byte-stable
 JSON output. `TestProjectMatchesExcelBackedSnapshot` can additionally compare

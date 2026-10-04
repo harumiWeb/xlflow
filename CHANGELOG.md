@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Expanded pure-Go UserForm persistence verification across the committed
+  Excel-authored control, Frame, MultiPage, and empty-page fixtures. Linux CI
+  now runs dedicated fuzz jobs for nested CFB traversal, FormControl, Site, and
+  control property records, and compiler coverage includes a 512-control form.
+- Fixed pure-Go UserForm projection to omit persisted control properties that
+  the control's FormSpec contract does not support. This keeps MultiPage
+  file-pull snapshots valid for subsequent pure-Go generation.
+
 - Added Excel bridge support for `MultiPage` Pages and independent `TabStrip`
   tabs in UserForm snapshots and writes. Page hierarchies, tab metadata, and
   logical `selected_index` are preserved; authored pages replace defaults

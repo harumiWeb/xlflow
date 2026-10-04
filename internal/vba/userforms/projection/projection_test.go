@@ -62,6 +62,57 @@ func TestProjectSimpleFixture(t *testing.T) {
 	}
 }
 
+func TestProjectControlCaptionOnlyWhenControlContractAllowsIt(t *testing.T) {
+	tests := []struct {
+		name        string
+		controlType string
+		caption     string
+		wantCaption bool
+	}{
+		{name: "label", controlType: "Label", caption: "Title", wantCaption: true},
+		{name: "page", controlType: "Page", caption: "Details", wantCaption: true},
+		{name: "multipage-empty-caption", controlType: "MultiPage", caption: "", wantCaption: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			projected := forms.FormSpecControl{
+				ID:   "controlNode",
+				Type: test.controlType,
+				Name: "Control1",
+			}
+			projectControl(&oforms.Control{
+				Record: &oforms.Record{
+					Strings: map[string]oforms.StoredString{
+						"Caption": {Text: test.caption},
+					},
+				},
+			}, &projected)
+			if (projected.Caption != nil) != test.wantCaption {
+				t.Fatalf("Caption = %#v, want present=%t", projected.Caption, test.wantCaption)
+			}
+			controls := []forms.FormSpecControl{projected}
+			if test.controlType == "Page" {
+				projected.ID = "pageNode"
+				projected.ParentID = "multiNode"
+				controls = []forms.FormSpecControl{
+					{ID: "multiNode", Type: "MultiPage", Name: "PagesMain"},
+					projected,
+				}
+			}
+			form := forms.FormSpec{
+				SchemaVersion: 1,
+				Kind:          "xlflow.userform",
+				Basis:         "designer",
+				Form:          forms.FormSpecForm{Name: "ProjectionForm"},
+				Controls:      controls,
+			}
+			if issues := forms.ValidateFormSpecStrict(form); hasErrors(issues) {
+				t.Fatalf("projected control violates its contract: %#v", issues)
+			}
+		})
+	}
+}
+
 func TestProjectNestedFixturePreservesParentsAndSiblingOrder(t *testing.T) {
 	form := readFixture(t, "p6_nested_form.bin")
 	got, err := Project(form)

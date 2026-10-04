@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -25,6 +27,36 @@ func TestSerializeFormPreservesDesignerSubtree(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertSerializedSubtree(t, original, "UserForm1", serialized)
+		})
+	}
+}
+
+func TestExcelAuthoredCorpusNoOpRoundTrips(t *testing.T) {
+	for _, fixture := range corpusProjectFixtures() {
+		t.Run(filepath.Base(filepath.Dir(fixture))+"/"+filepath.Base(fixture), func(t *testing.T) {
+			body, err := os.ReadFile(fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			container, err := cfb.Open(body)
+			if err != nil {
+				t.Fatalf("open Excel-authored project: %v", err)
+			}
+			forms := DiscoverForms(container)
+			if len(forms) == 0 {
+				t.Fatal("fixture contains no discoverable UserForms")
+			}
+			for _, name := range forms {
+				form, err := ReadForm(container, name, 932)
+				if err != nil {
+					t.Fatalf("read %s: %v", name, err)
+				}
+				serialized, err := SerializeForm(form, 932)
+				if err != nil {
+					t.Fatalf("serialize %s: %v", name, err)
+				}
+				assertSerializedSubtree(t, container, name, serialized)
+			}
 		})
 	}
 }
