@@ -148,6 +148,10 @@ func propertyCompletions(doc *Document, parent string, context CursorContext, li
 		properties = contract.FormProperties
 	case parent == "form.build":
 		properties = formBuildProperties()
+	case isPictureActionPath(parent):
+		if strings.EqualFold(controlAtPath(doc.Source, parentPath(parent)).Type, "Image") {
+			properties = forms.PictureActionProperties()
+		}
 	case isControlPath(parent):
 		properties = controlProperties(contract, controlAtPath(doc.Source, parent))
 	case isTabPath(parent):
@@ -258,6 +262,12 @@ func propertyAt(source, parent, name string) (forms.PropertyContract, bool) {
 	if isTabPath(parent) {
 		return forms.LookupTabProperty(name)
 	}
+	if isPictureActionPath(parent) {
+		if strings.EqualFold(controlAtPath(source, parentPath(parent)).Type, "Image") {
+			return forms.LookupPictureActionProperty(name)
+		}
+		return forms.PropertyContract{}, false
+	}
 	if !isControlPath(parent) {
 		return forms.PropertyContract{}, false
 	}
@@ -269,6 +279,17 @@ func propertyAt(source, parent, name string) (forms.PropertyContract, bool) {
 		return forms.LookupControlProperty(control.Type, name)
 	}
 	return forms.PropertyContract{}, false
+}
+
+func isPictureActionPath(path string) bool {
+	if !strings.HasSuffix(path, ".picture") {
+		return false
+	}
+	controlPath := strings.TrimSuffix(path, ".picture")
+	if !isControlPath(controlPath) {
+		return false
+	}
+	return isControlPath(controlPath)
 }
 
 func lookupProperty(properties map[string]forms.PropertyContract, name string) (forms.PropertyContract, bool) {

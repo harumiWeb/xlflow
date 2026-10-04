@@ -46,8 +46,15 @@ artifacts, nested canonical directories and component/CFB name collisions fail w
 `pack_ambiguous_layout`. The supported subset is empty forms, Frames with nested
 Frames, MultiPage/Page hierarchies, standalone TabStrip collections and the
 eleven built-in common classes specified in `ms-oforms.md`. Custom ActiveX,
-Picture resources and unsupported persisted list state fail with
+unsupported picture formats and unsupported persisted list state fail with
 `pack_userform_generation_unsupported` before output publication.
+
+The built-in Image class accepts the optional `picture` field for project-
+root-relative BMP/JPEG assets. It supports path-based replacement and explicit
+`remove: true`; omission leaves an existing template picture unchanged and
+leaves a new Image empty. Null, empty, mixed, false-removal, unknown, or
+out-of-root inputs fail before publication. See
+[`userform-picture-assets.md`](userform-picture-assets.md).
 
 Template mode also retains recursive discovery of legacy `.frm` files. A flat
 canonical spec or sidecar can attach to a uniquely named legacy form; duplicate
@@ -60,8 +67,8 @@ Sidecars must be code-only. With `code_source=frm`, matching `.frm` is required;
 its attribute identity is validated, exported attributes are replaced by new
 component attributes and GUIDs, and only its code body is used. `.frx` and
 unused compatibility Designer bytes do not participate in generation.
-The file-pull compatibility warning does not block canonical generation;
-Excel-backed push retains its existing synchronization preflight.
+The file-pull compatibility warning does not block pure-Go pack when a
+canonical spec and explicit sidecar code are authoritative. If `[userform].code_source = "frm"`, or sidecar mode falls back to `.frm` code because no code sidecar exists, the marked `.frm` is import authority and fails with `FRM201`. Excel-backed operations that import marked `.frm` compatibility state also fail with `FRM201`.
 
 Root form Caption is persisted in both the FormControl record and `VBFrame`;
 it must be representable in the template project code page (or
@@ -156,7 +163,8 @@ empty source form set, and requires canonical specs for all supplied forms.
 Blank mode always uses source form authority independently of this setting.
 
 For a supplied canonical spec, template pack applies supported Designer
-properties, Frame/common-control and MultiPage/Page/TabStrip topology, and code.
+properties, Frame/common-control and MultiPage/Page/TabStrip topology, Image
+picture replacement/removal, and code.
 The spec supplies the complete
 control list, including additions, deletions, replacements, parent changes and
 sibling ordering. IDs are local spec identities and are mapped
@@ -325,7 +333,8 @@ repository's `xlflow-tmp-workspace-e2e` skill. It covers:
    whose visible name differs from its CodeName, standard/class topology, an
    external reference, and an existing `.frx`-bearing nested UserForm.
 2. Pack standard/class updates, additions, removals, and renames; document and
-   UserForm code updates; Japanese text; and a non-ASCII module name.
+   UserForm code and supported Image picture updates; Japanese text; and a
+   non-ASCII module name.
 3. Open the packed artifact, inspect the VBA project and UserForm designer,
    force compilation by running a representative macro, and assert its
    sentinel output.
@@ -356,6 +365,16 @@ failure. It verifies trusted generated artifacts in real Excel, runs a sentinel,
 saves/reopens them, checks Designer/reference/component state and records
 cleanup evidence. This developer-only script is never invoked by ordinary
 tests or CI.
+
+`scripts/test-formspec-file-push-e2e.ps1` also exercises blank and template
+picture packs and opens the generated workbook in Excel after the source assets
+are unavailable. Its native-JPEG output passed real Excel verification in
+both blank and template pack, including SaveAs/reopen, picture type and
+dimensions, picture mode/alignment, and the VBA sentinel on Excel 16.0 build
+17932 / Windows 10.0.22631. The full gate also verified the file-push output
+after source assets were unavailable. The separate Excel-authored fixture
+records JPEG input normalized to BMP and is not the evidence for native JPEG
+compatibility.
 
 Issue #887 local results and retained workspace commands are recorded in
 [`userform-integration/README.md`](../../internal/pack/testdata/userform-integration/README.md).

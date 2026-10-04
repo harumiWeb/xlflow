@@ -1,14 +1,16 @@
 package filepush
 
 import (
+	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	packpkg "github.com/harumiWeb/xlflow/internal/pack"
+	"github.com/harumiWeb/xlflow/internal/sourcepath"
 )
 
 // discoveredFile mirrors the .NET VbaSourceHelper.DiscoveredSourceFile shape.
@@ -23,6 +25,8 @@ type discoveredFile struct {
 	RelativePath string // relative to RootDir, '/' separators
 	Extension    string // lowercase
 	ModuleName   string
+	Body         []byte
+	HasBody      bool
 }
 
 // sourceRoots resolves the configured source directories against the project
@@ -54,74 +58,107 @@ func isSidecarMode(codeSource string) bool {
 	return strings.EqualFold(strings.TrimSpace(codeSource), "sidecar")
 }
 
+func canonicalPathKey(path string) string {
+	return sourcepath.Key(path)
+}
+
 // discoverSourceFiles ports VbaSourceHelper.DiscoverSourceFiles: plain
 // recursive extension matching under each configured root, with the reserved
 // src/forms/code directory excluded from the "form" enumeration only in
 // sidecar mode. Missing roots contribute no files, matching the .NET
 // Directory.Exists guard. Within each root group files are sorted by relative
 // path so the fingerprint is deterministic.
-func discoverSourceFiles(roots sourceRoots, codeSource string) []discoveredFile {
+func discoverSourceFiles(roots sourceRoots, codeSource string) ([]discoveredFile, error) {
 	var files []discoveredFile
-	addFiles := func(dir, kind, ext, excludedDir string) {
-		files = append(files, filesFromDir(dir, kind, ext, excludedDir)...)
+	addFiles := func(dir, kind, ext, excludedDir string) error {
+		found, err := filesFromDir(dir, kind, ext, excludedDir)
+		if err != nil {
+			return err
+		}
+		files = append(files, found...)
+		return nil
 	}
 
-	addFiles(roots.modules, "module", ".bas", "")
-	addFiles(roots.classes, "class", ".cls", "")
+	for _, root := range []struct{ dir, kind, ext, excluded string }{
+		{roots.modules, "module", ".bas", ""},
+		{roots.classes, "class", ".cls", ""},
+	} {
+		if err := addFiles(root.dir, root.kind, root.ext, root.excluded); err != nil {
+			return nil, err
+		}
+	}
 
 	formsCodeDir := ""
 	if isSidecarMode(codeSource) {
 		formsCodeDir = filepath.Join(roots.forms, "code")
 	}
-	addFiles(roots.forms, "form", ".bas", formsCodeDir)
-	addFiles(roots.forms, "form", ".cls", formsCodeDir)
-	addFiles(roots.forms, "form", ".frm", formsCodeDir)
-	addFiles(roots.forms, "form", ".frx", formsCodeDir)
-
-	addFiles(roots.workbook, "document", ".bas", "")
+	for _, ext := range []string{".bas", ".cls", ".frm", ".frx"} {
+		if err := addFiles(roots.forms, "form", ext, formsCodeDir); err != nil {
+			return nil, err
+		}
+	}
+	if err := addFiles(roots.workbook, "document", ".bas", ""); err != nil {
+		return nil, err
+	}
 
 	if isSidecarMode(codeSource) && strings.TrimSpace(roots.forms) != "" {
 		codeDir := filepath.Join(roots.forms, "code")
-		if info, err := os.Stat(codeDir); err == nil && info.IsDir() {
-			files = append(files, filesFromDir(codeDir, "form_code", ".bas", "")...)
+		if found, err := filesFromDir(codeDir, "form_code", ".bas", ""); err != nil {
+			return nil, err
+		} else {
+			files = append(files, found...)
 		}
 	}
-	return files
+	return files, nil
 }
 
-func filesFromDir(dir, kind, ext, excludedDir string) []discoveredFile {
+func filesFromDir(dir, kind, ext, excludedDir string) ([]discoveredFile, error) {
 	if strings.TrimSpace(dir) == "" {
-		return nil
+		return nil, nil
 	}
 	info, err := os.Stat(dir)
-	if err != nil || !info.IsDir() {
-		return nil
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, &SourceReadError{Path: dir, Err: err}
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%w: source root %s is not a directory", packpkg.ErrAmbiguousLayout, dir)
 	}
 	excludedFull := ""
 	if strings.TrimSpace(excludedDir) != "" {
-		if abs, absErr := filepath.Abs(excludedDir); absErr == nil {
-			excludedFull = filepath.Clean(abs) + string(filepath.Separator)
+		abs, absErr := filepath.Abs(excludedDir)
+		if absErr != nil {
+			return nil, &SourceReadError{Path: excludedDir, Err: absErr}
 		}
+		excludedFull = canonicalPathKey(abs) + string(filepath.Separator)
 	}
 	var found []discoveredFile
-	_ = filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil || entry.IsDir() {
-			return walkErr
+	walkErr := filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return &SourceReadError{Path: path, Err: walkErr}
+		}
+		if entry.IsDir() {
+			if kind == "form" && canonicalPathKey(path) == canonicalPathKey(filepath.Join(dir, "assets")) {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if !strings.EqualFold(filepath.Ext(entry.Name()), ext) {
 			return nil
 		}
 		abs, absErr := filepath.Abs(path)
 		if absErr != nil {
-			return nil
+			return &SourceReadError{Path: path, Err: absErr}
 		}
 		abs = filepath.Clean(abs)
-		if excludedFull != "" && strings.HasPrefix(strings.ToLower(abs), strings.ToLower(excludedFull)) {
+		if excludedFull != "" && strings.HasPrefix(canonicalPathKey(abs), excludedFull) {
 			return nil
 		}
 		rel, relErr := filepath.Rel(dir, abs)
 		if relErr != nil {
-			return nil
+			return &SourceReadError{Path: path, Err: relErr}
 		}
 		found = append(found, discoveredFile{
 			Kind:         kind,
@@ -133,49 +170,11 @@ func filesFromDir(dir, kind, ext, excludedDir string) []discoveredFile {
 		})
 		return nil
 	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
 	slices.SortFunc(found, func(a, b discoveredFile) int {
 		return strings.Compare(a.RelativePath, b.RelativePath)
 	})
-	return found
-}
-
-// findDuplicateModuleNames ports FindDuplicateModuleNames: a
-// case-insensitive basename collision across module/class/form/document
-// entries is fatal. .frx companions and form-code sidecars never collide
-// because they are not standalone components.
-func findDuplicateModuleNames(files []discoveredFile) [][]string {
-	seen := map[string][]string{}
-	for _, file := range files {
-		if file.Extension == ".frx" || file.Kind == "form_code" {
-			continue
-		}
-		key := strings.ToLower(file.ModuleName)
-		seen[key] = append(seen[key], file.RelativePath)
-	}
-	var duplicates [][]string
-	for _, key := range slices.Sorted(maps.Keys(seen)) {
-		if len(seen[key]) > 1 {
-			duplicates = append(duplicates, seen[key])
-		}
-	}
-	return duplicates
-}
-
-// validateLineNumberSources ports TryValidateLineNumberSources: before any
-// workbook mutation, every discovered text file must prove safe for Erl
-// instrumentation so the push cannot fail halfway through.
-func validateLineNumberSources(files []discoveredFile) error {
-	for _, file := range files {
-		if file.Extension == ".frx" {
-			continue
-		}
-		body, err := os.ReadFile(file.FullPath)
-		if err != nil {
-			continue
-		}
-		if _, issue := tryAddLineNumbers(string(body)); issue != nil {
-			return fmt.Errorf("%w: %s:%d: %s", ErrLineNumberSafety, file.RelativePath, issue.Line, issue.Message)
-		}
-	}
-	return nil
+	return found, nil
 }

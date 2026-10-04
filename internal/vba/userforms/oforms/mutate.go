@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/picture"
 )
 
 var (
@@ -187,6 +188,31 @@ func applyPersistenceEdit(form *Form, edit Edit, cp uint16, records map[*Record]
 	}
 	if control != nil {
 		s := control.Site
+		if edit.Property == "Picture" {
+			if control.CLSIDCacheIndex != 12 || r.Type != "Image" {
+				return ErrUnsupportedEdit
+			}
+			if edit.Value == nil {
+				delete(r.Pictures, "Picture")
+				r.Mask &^= 1 << 10
+			} else {
+				raw, ok := edit.Value.([]byte)
+				if !ok {
+					return ErrInvalidEdit
+				}
+				if _, err := picture.Decode(raw); err != nil {
+					return fmt.Errorf("%w: invalid Picture: %v", ErrInvalidEdit, err)
+				}
+				if r.Pictures == nil {
+					r.Pictures = make(map[string][]byte)
+				}
+				r.Pictures["Picture"] = bytes.Clone(raw)
+				r.Values["Picture"] = math.MaxUint16
+				r.Mask |= 1 << 10
+			}
+			records[r] = edit
+			return nil
+		}
 		switch edit.Property {
 		case "Left", "Top":
 			v, ok := edit.Value.(int32)

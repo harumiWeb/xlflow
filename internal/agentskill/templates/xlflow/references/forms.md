@@ -1,53 +1,57 @@
-# UserForm Command Reference
+# UserForm Development Reference
 
-Load this reference when the task depends on `xlflow list forms`, `xlflow inspect form`, `xlflow form snapshot`, `xlflow form build`, or `xlflow form export-image`, especially if you need to:
+Load this reference before creating or editing a UserForm, changing Designer or
+code authority, extracting pictures, or inspecting form behavior. For building a
+separate release workbook, also load [pack.md](pack.md).
 
-- choose the right form command for design-time vs runtime inspection
-- author or edit a persisted UserForm spec
-- validate whether a spec shape is supported by `form build`
-- understand overwrite safety, session/save behavior, or known Designer-backed limitations
+## Choose the Workbook Boundary
 
-## Command Selection
+| Goal                                                              | Workflow                                                     | Evidence provided                                                            |
+| ----------------------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Capture saved Designer, code and supported pictures without Excel | `xlflow pull --backend file --json` in sidecar mode          | Canonical spec, code sidecar and content-addressed assets from saved `.xlsm` |
+| Apply canonical source to a closed development workbook           | `xlflow push --backend file --json`                          | Supported Designer/code changes in saved `.xlsm`; no VBE compile             |
+| Generate a separate template or blank artifact                    | `xlflow pack ... --json`                                     | New `.xlsm`; no VBE compile or runtime execution                             |
+| Inspect or rebuild a live Excel Designer                          | Session-backed `inspect form`, `form snapshot`, `form build` | Excel Designer state; use runtime inspection for execution evidence          |
 
-- Use `xlflow list forms --session --json` to discover workbook UserForm names and expected `.frm` / `.frx` source paths.
-- Use `xlflow inspect form <FormName> --designer --session --json` for direct VBIDE Designer inspection without running workbook VBA.
-- Use `xlflow inspect form <FormName> --runtime --session --json` for runtime-populated state from a temporary workbook copy. Add `--initializer <MethodName>` when the form must be explicitly populated before inspection.
-- Use `xlflow inspect form <FormName> --both --session --json` when you need designer and runtime snapshots in one pass.
-- Use `xlflow form snapshot <FormName> --out <path.json|path.yaml|path.yml> --session --json` when you need a persisted Designer spec suitable for review, diff, or later `form build`.
-- Prefer `src/forms/specs/<FormName>.yaml` as that persisted artifact path in normal projects.
-- Use `xlflow form build <spec> --session --json` to create a new Designer-backed UserForm from a persisted spec.
-- Use `xlflow form build <spec> --session --overwrite --json` when the intended workflow is to replace an existing UserForm from spec.
-- Use `xlflow form export-image <FormName> --out <path.png> --session --json` when visual verification depends on the runtime-rendered form.
-- In `sidecar` mode, run `pull` before reviewing or editing `src/forms/code/<FormName>.bas`; `form snapshot` does not emit code-behind.
-- `form apply` is hidden and should not be used for sidecar-aware UserForm workflows; prefer `form build --overwrite`.
+File commands never read unsaved live state. Establish saved-file authority and
+close the workbook/session before file push; use the existing session when live
+Excel is authoritative. Unsupported pure-Go operations fail before publication;
+do not silently switch to Excel or regenerate an unknown control.
 
-## Workbook Coordination
+## Canonical Sources and Code Authority
 
-Workbook-backed form, inspect, list, pull, and push commands share one canonical
-workbook lock with run and test. Do not launch them concurrently for the same
-workbook. Treat `workbook_busy` as a retryable operational result: retry after
-the owner completes, or explicitly add global `--wait --wait-timeout <duration>`
-for a bounded acquisition wait. Waiting does not retry the command body.
+With the default source layout, keep these artifacts under version control:
 
-`form new` and source-only UserForm rename/delete steps do not lock Excel. Their
-workbook boundary is the later coordinated `push`. A prior idle `session status`
-is advisory only; the command's own lock acquisition remains authoritative.
+```text
+src/forms/specs/Login.yaml   # Designer intent; JSON/YML also accepted
+src/forms/code/Login.bas     # Code-only VBA in sidecar mode
+src/forms/assets/logo.bmp    # An image referenced by picture.path
+```
 
-## Persisted Spec Contract
+Use the configured `[src].forms` root when it differs. Canonical specs and code
+sidecars are flat in `specs/` and `code/`; the spec filename must match
+`form.name`. Do not put exported `Attribute VB_*` headers in a sidecar.
+`[userform].code_source = "sidecar"` makes the sidecar authoritative; `"frm"`
+uses code embedded in the matching `.frm`. Confirm this setting before editing
+code or migrating an imported project.
 
-`form snapshot` persists an `xlflow.userform` spec. `form build` consumes the same contract.
+File pull in sidecar mode extracts specs, code and supported BMP/JPEG pictures
+in one source transaction. Asset paths contain the full content hash; identical
+files are reused, conflicting files fail, and obsolete assets are retained.
+Excel may persist a JPEG input as BMP, so pull can produce a `.bmp` asset.
 
-For ongoing maintenance, treat `src/forms/specs/*.yaml` as the canonical source-controlled artifact for Designer structure. Code-behind authority depends on `[userform].code_source`: new projects default to `sidecar`, where `src/forms/code/*.bas` is canonical, while imported projects default to `frm`, where `.frm` embedded code remains canonical until migration. Exported `.frm` / `.frx` files can stay in the repository, but they are generated Designer artifacts rather than the primary source of truth for Designer-backed behavior. Successful `form build` re-materializes them back into `src/forms/`, and `push` now fails preflight instead of importing stale/mismatched artifacts when spec filename, `form.name`, `.frm` basename, or `.frm` `Attribute VB_Name` disagree.
+File pull does not refresh compatibility `.frm`/`.frx` exports and records
+`compatibility_artifact_unsynchronized`. Canonical spec plus sidecar file push
+and pack can ignore these stale exports. Excel push or a pack path that selects
+the marked `.frm` for code still rejects it with `FRM201`; refresh those exports
+with Excel pull before using that authority. Do not remove the warning marker to
+force an import. `form snapshot` captures Designer state but does not export the
+code sidecar or picture files; use pull when those artifacts are required.
 
-Required top-level fields:
+## Minimal New Form
 
-- `schemaVersion: 1`
-- `kind: "xlflow.userform"`
-- `basis: "designer"`
-- `form`
-- `controls`
-
-Typical shape:
+Write this complete spec as `src/forms/specs/Login.yaml` and provide a valid
+BMP file at the image path. Geometry is in points relative to the owning parent.
 
 ```yaml
 schemaVersion: 1
@@ -55,115 +59,170 @@ kind: xlflow.userform
 basis: designer
 coordinateSystem: points
 form:
-  name: CustomerForm
-  caption: Customer
-  observed:
-    width: 240
-    height: 180
+  name: Login
+  caption: Sign in
 controls:
-  - id: frame_main
-    name: FrameMain
+  - id: details
+    name: Details
     type: Frame
-    progId: Forms.Frame.1
     left: 12
     top: 12
-    width: 216
+    width: 180
     height: 96
-    caption: Details
-  - id: label_name
-    parentId: frame_main
-    zIndex: 0
-    name: LabelName
-    type: Label
-    progId: Forms.Label.1
+    caption: Account
+  - id: username
+    parentId: details
+    name: Username
+    type: TextBox
     left: 12
     top: 18
-    width: 48
+    width: 144
     height: 18
-    caption: Name
+  - id: brand
+    name: Brand
+    type: Image
+    left: 204
+    top: 12
+    width: 48
+    height: 32
+    picture:
+      path: src/forms/assets/logo.bmp
 ```
 
-## Canonical Structural Rules
+For example, put this code-only event handler in `src/forms/code/Login.bas`:
 
-- `controls` is the canonical flat capture array.
-- Each authored control must have a stable `id`.
-- `parentId` is optional and case-sensitive. When present, it must reference another control `id`.
-- For known first-class controls, `parentId` must reference a container-capable control. Currently `Frame` is container-capable; custom controls with explicit `progId` remain unchecked for compatibility.
-- `zIndex` is optional and is used to preserve sibling ordering when present.
-- Explicit duplicate `id` values are validation errors. xlflow does not auto-correct them.
-- Self-referencing `parentId` values and parent cycles are validation errors.
-- Legacy nested `controls` input may still be accepted and normalized into the flat array, but new specs should use the flat structure directly.
+```vba
+Option Explicit
 
-## Supported Build Semantics
+Private Sub UserForm_Initialize()
+    Me.Username.Text = "Ready"
+End Sub
+```
 
-`form build` is designed to recreate UserForm structure and common Designer-backed properties, not to guarantee a lossless round-trip for every captured field.
+Use file push to apply it to a configured, closed `.xlsm`, or pack to create a
+separate workbook. No `.frx` is required for supported canonical generation.
+For a new form that needs an explicit client size, use
+`form.build.clientWidth` / `clientHeight` in points. Do not combine client and
+outer dimensions. Pure-Go template edits reject root-size changes; Excel-backed
+`form build` rejects client-size authoring. Root captions must fit the workbook
+project code page; see [pack.md](pack.md) for Japanese blank projects.
 
-Strongly supported:
+## Editing Existing Forms
 
-- UserForm creation from `form.name`
-- top-level vs nested control structure from `id` / `parentId`
-- supported control types and ProgID mapping
-- common geometry and visual properties such as `caption`, `text`, `value`, `visible`, and `enabled`
+- Treat `controls` as the complete desired control collection, not a patch.
+  Omitting an existing control removes it. Stable `id` values connect
+  `parentId`; retained binary controls are matched by case-sensitive names.
+  Rename or type replacement can replace the control and its persistence.
+- Omitted properties on a retained control preserve existing values. Explicit
+  empty strings, false and zero are authored values. `observed`, `warnings`
+  and `unsupported` describe captured state rather than edit requests.
+- Use `zIndex` for sibling ordering. Moving a control keeps omitted numeric
+  geometry relative to its new parent; supply new coordinates when needed.
+- File push keeps forms omitted from source regardless of pack topology. A
+  missing sidecar preserves an existing form's entire code source, an explicitly
+  empty sidecar clears its code, and a new form with no sidecar has empty code.
+  Pack uses a different code fallback; read [pack.md](pack.md).
+- Supported edits preserve unrelated/opaque Designer resources. If an edit
+  would lose unsupported state, fix the request or report the capability limit;
+  do not strip metadata to make generation succeed.
 
-xlflow core defines the canonical UserForm contract for document fields, form fields, built-in control types, property value types, support levels, ProgID mappings, and container capability. `form build` validates raw YAML/JSON specs against that contract before Excel opens, including unknown fields, incorrect value types, fixed values, type-specific control properties, parent references, and known built-in `type` / `progId` consistency. Invalid specs fail with all detected issues in `spec.issues[]` so editors and agents can show multiple diagnostics from one pass.
+## Containers, Tabs and Supported Controls
 
-Custom controls with an explicit custom `progId` remain accepted with reduced validation. xlflow validates common structural fields and the `properties` bag, then returns a `custom/unchecked` warning because type-specific behavior cannot be verified from the built-in contract.
+Built-in controls include Label, TextBox, ComboBox, ListBox, CommandButton,
+CheckBox, OptionButton, ToggleButton, SpinButton, ScrollBar, Image, Frame,
+MultiPage, Page and TabStrip. Support is property- and backend-specific; use
+contract diagnostics instead of assuming every captured field is authorable.
+Custom ActiveX is outside pure-Go generation; Excel builds may accept explicit
+custom ProgIDs with reduced validation and `custom/unchecked` warnings.
 
-Best-effort or observed-only:
+Frames can contain controls and nested Frames. A MultiPage contains only Pages;
+a Page belongs to a MultiPage, and its controls belong under that Page. A
+TabStrip is independent: tabs are records in `tabs`, not child controls.
 
-- form-level `width` / `height`: best-effort only
-- design-time `ComboBox` / `ListBox` `list` / `selectedIndex`: observed-only for round-trip expectations, even though xlflow still attempts to apply them
-- persisted `warnings`, `observed`, `unsupported`, and legacy nested `controls`: snapshot-only metadata
+```yaml
+controls:
+  - id: steps
+    name: Steps
+    type: MultiPage
+    selectedIndex: 0
+  - id: account
+    parentId: steps
+    name: Account
+    type: Page
+    caption: Account
+  - id: email
+    parentId: account
+    name: Email
+    type: TextBox
+  - id: navigation
+    name: Navigation
+    type: TabStrip
+    selectedIndex: 0
+    tabs:
+      - name: Details
+        caption: Details
+```
 
-Expect successful `form build` responses to return contract warnings when the spec depends on those weaker fields.
+Use this control collection in a complete FormSpec. `selectedIndex` is zero-based;
+`-1` represents no logical selection and an empty collection. Tab names must be
+unique ignoring case. On edits, omitted `tabs` preserves the collection while
+`tabs: []` removes it. Page geometry is derived from its MultiPage; do not copy
+Page observed bounds into authored `left`/`top`/`width`/`height` fields. New
+pure-Go MultiPage layout uses fixed 96-DPI geometry. ComboBox/ListBox list and
+selection capture has weaker persistence guarantees; do not equate it with the
+modeled MultiPage/TabStrip collection contract.
 
-When `form build` fails before Excel opens, expect structured `spec_parse_failed`, `spec_validation_failed`, or `spec_schema_invalid` errors plus top-level `spec` metadata such as `path`, `format`, optional `line` / `column`, optional first `field`, optional remediation `suggestion`, and `issues[]` containing all validation issues.
+## Image Assets
 
-## Overwrite and Safety Rules
+An Image accepts `picture: { path: src/forms/assets/logo.bmp }` for validated
+project-relative BMP/JPEG bytes or `picture: { remove: true }` to clear it.
+Omission preserves an existing picture and leaves a new Image empty. Null,
+empty/mixed objects, `remove: false`, unknown fields and non-Image picture
+authoring are rejected. Assets must resolve inside the project, including
+symlink targets; limits are 16 MiB and 16 million pixels. Asset bytes are embedded
+in the workbook, so runtime does not require the original image file.
 
-- Without `--overwrite`, `form build` fails with `form_already_exists` when a UserForm with the same `form.name` already exists.
-- `--overwrite` is only for replacing an existing UserForm. A same-name non-UserForm component must not be deleted.
-- Overwrite is implemented as export-backup -> delete -> save -> rebuild.
-- In `sidecar` mode, xlflow synchronizes tracked `.frm` embedded code from `src/forms/code/<FormName>.bas` and reapplies that sidecar to the new UserForm when present.
-- In `sidecar` mode, if no sidecar exists yet, overwrite falls back to the deleted workbook form's code-behind so the rebuild does not silently drop VBA lines.
-- In `frm` mode, overwrite preserves the deleted workbook form's code-behind without consulting `src/forms/code`.
-- If rebuild fails after the delete/save checkpoint, xlflow restores the original UserForm from the temporary export before returning failure.
-- `--no-save` is valid only with `--session`.
-- `--overwrite --no-save` is invalid because Excel requires an intermediate save after removing the old UserForm and before recreating it.
+Picture authoring is supported by pure-Go pack and file push. Excel-backed
+`form build` rejects it before mutation. Keep conventional image suffixes for
+clarity, even though explicit references classify assets independently of suffix.
+An image-only edit invalidates file-push changed-only state. Unreferenced files
+under reserved `assets/` are ignored and never automatically garbage-collected.
 
-## Supported Control Types
+## Live Excel Inspection and Rebuild
 
-Current first-class build support covers these controls:
+Use one session for commands against the same workbook; do not run them
+concurrently. Start it for a managed closed workbook or attach to the user's
+already-open configured workbook. `workbook_busy` supports bounded global
+`--wait --wait-timeout <duration>` acquisition; waiting does not retry command
+execution.
 
-- `Label`
-- `TextBox`
-- `ComboBox`
-- `ListBox`
-- `CommandButton`
-- `CheckBox`
-- `OptionButton`
-- `Frame`
+- Discover names with `xlflow list forms --session --json`.
+- Capture without running VBA with `xlflow inspect form Login --designer --session --json`
+  or `xlflow form snapshot Login --out src/forms/specs/Login.yaml --session --json`.
+- Use `xlflow form build src/forms/specs/Login.yaml --session --json` for
+  supported Excel creation, adding `--overwrite` only for intentional replacement.
+  Overwrite backs up, deletes, saves and rebuilds; failure restores the old form.
+  Sidecar mode reapplies its code or preserves old code when no sidecar exists;
+  frm mode preserves old code without consulting sidecars. A same-name non-form
+  must not be deleted. `--overwrite --no-save` is invalid.
+- `form apply` is hidden; use sidecar-aware `form build` for this workflow.
+- Inspect runtime-populated state with `xlflow inspect form Login --runtime --session --json`,
+  optionally `--initializer <MethodName>`. Runtime inspection and
+  `xlflow form export-image Login --out preview.png --session --json` use a
+  temporary workbook copy and may execute UserForm_Initialize.
 
-When `progId` is present in the spec, xlflow prefers it. Otherwise it falls back to the built-in type-to-ProgID mapping for supported controls.
+Check `spec.issues[]` and structured warnings before choosing a rebuild.
+Common Excel form failures include `spec_parse_failed`, `spec_validation_failed`
+and `spec_schema_invalid`. A snapshot is not a guarantee that every captured
+property can be rebuilt through every backend.
 
-## Session and Inspection Caveats
+## Proof and Completion
 
-- `inspect form --designer` reads the source workbook Designer directly.
-- `inspect form --runtime` and `form export-image` execute against a temporary workbook copy and may run `UserForm_Initialize` plus an optional explicit initializer.
-- `form snapshot` uses the same non-executing Designer basis as `inspect form --designer`; it resolves concrete control types from `ProgId` or COM metadata when Excel exposes them.
-- Disk-backed `inspect workbook|sheets|range|used-range|cell` commands do not reflect unsaved live session changes. Run `xlflow save --json` first if the live workbook may be newer than disk.
-
-## Recommended Agent Workflow
-
-When an agent needs to review or regenerate a UserForm safely:
-
-1. `xlflow list forms --session --json`
-2. `xlflow inspect form <FormName> --designer --session --json`
-3. `xlflow pull --session --json`
-4. `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --json`
-5. in `sidecar` mode, review or edit `src/forms/code/<FormName>.bas` if code-behind changed
-6. edit the persisted spec under `src/forms/specs/`
-7. `xlflow form build src/forms/specs/<FormName>.yaml --session --overwrite --json`
-8. inspect the result with `inspect form` and, when visuals matter, `form export-image`
-
-Treat `form build` as a deterministic scaffold/rebuild command for supported structure and common properties, not as a promise of lossless Designer round-trip fidelity.
+For file-backed work, validate source, apply the selected file command, and read
+its structured result; report the output path and the absence of VBE validation.
+For behavioral acceptance on Windows, use the session proof loop in SKILL.md
+to run focused tests/macros. Inspect the rendered form when appearance matters;
+use runtime inspection for initialization-populated controls and save/reopen
+when persistence is required. Worksheet `export-image` does not prove a
+UserForm's appearance. Do not overwrite a verified live workbook with a stale
+file artifact or pull old disk state over newer unsaved edits.

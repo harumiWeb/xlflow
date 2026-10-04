@@ -116,6 +116,60 @@ func TestTemplatePlanFormsIsAtomicAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestPlanProjectPreservesExistingFormCodeAuthority(t *testing.T) {
+	base := readTestFile(t, "corpus", "p1_compiled.bin")
+	created, err := GenerateVBAProject(base, []SourceModule{authoredForm("Login")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := vbaproject.Read(created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalCode := projectModuleSource(project, "Login")
+	update := authoredForm("Login")
+	update.Source = ""
+	update.PreserveExistingCode = true
+	update.FormSpec.Form.Caption = new("Preserved code")
+	plan, err := PlanProject(project, []SourceModule{update})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := projectModuleSource(plan.project, "Login"); got != originalCode {
+		t.Fatalf("existing form source changed: got %q, want %q", got, originalCode)
+	}
+	if len(plan.project.Forms) != 1 {
+		t.Fatalf("Designer spec was not applied while preserving code: %+v", plan.project.Forms)
+	}
+	state, err := projection.Project(plan.project.Forms[0])
+	if err != nil || state.Form.Caption == nil || *state.Form.Caption != "Preserved code" {
+		t.Fatalf("Designer caption was not applied: %+v, %v", state, err)
+	}
+	var found bool
+	for _, component := range plan.Components {
+		if component.Name == "Login" {
+			found = true
+			if component.CodeAuthority != AuthorityTemplate {
+				t.Fatalf("preserved form code authority = %q, want template", component.CodeAuthority)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("preserved form missing from plan")
+	}
+}
+
+func TestPlanProjectRejectsPreserveExistingCodeForNonForm(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := SourceModule{Name: "Main", Type: ModuleTypeStandard, Source: standardSource("Main"), PreserveExistingCode: true}
+	if _, err := PlanProject(project, []SourceModule{source}); !errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("err = %v, want ErrAmbiguousLayout", err)
+	}
+}
+
 func TestReadbackRejectsOrphanDesigner(t *testing.T) {
 	body, err := GenerateVBAProject(readTestFile(t, "corpus", "p1_compiled.bin"), []SourceModule{authoredForm("Login")})
 	if err != nil {

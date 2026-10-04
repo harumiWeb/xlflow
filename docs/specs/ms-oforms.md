@@ -133,12 +133,19 @@ warning.
 Form-level unsupported state is summarized by a form warning. Raw persistence
 details used only for lossless replay are not exposed as property-bag values.
 The file-pull publisher additionally appends the operational warning
-`compatibility_artifact_unsynchronized` to every emitted FormSpec. This marker
-does not describe a projection loss: it records that pure-Go pull deliberately
-did not regenerate compatibility `.frm` / `.frx` artifacts. Shared source
-preflight rejects the marker with `FRM201` before either push backend can import
-a missing or stale `.frm`; `form build` followed by an Excel-backed pull clears
-the unsafe state by applying the spec and refreshing those artifacts.
+`compatibility_artifact_unsynchronized` to every emitted FormSpec. It records
+that pure-Go pull did not regenerate compatibility `.frm` / `.frx` artifacts;
+it is not a projection-loss warning. Canonical FormSpec plus sidecar code is
+valid authority for pure-Go file push, which ignores stale compatibility
+artifacts. `FRM201` still rejects the marker when `.frm` code or compatibility
+artifacts are selected as import authority.
+
+For the built-in Image control, supported BMP/JPEG picture assets are exposed
+by the canonical `picture` field and embedded in the Designer by the shared
+pure-Go compiler. Container-level pictures and other non-Image picture
+properties remain unsupported and are retained only as raw Designer data.
+File-pull extraction and picture limits are defined in
+[`userform-picture-assets.md`](userform-picture-assets.md).
 
 A structurally bounded control whose type or ProgID cannot be recovered is
 retained as `type: Control` with `unsupported: [controlType]`. `UFV015` accepts
@@ -253,8 +260,9 @@ No arbitrary caller-created model is accepted by the lossless serializer.
 
 The supported classes are Label, TextBox, CommandButton, CheckBox,
 OptionButton, ToggleButton, ComboBox, ListBox, SpinButton, ScrollBar, and
-Image without Picture data, plus Frames, MultiPage/Page hierarchies and
-standalone TabStrips. Custom ActiveX, resources, ComboBox/ListBox list or
+Image with optional supported BMP/JPEG picture data, plus Frames,
+MultiPage/Page hierarchies and standalone TabStrips. Custom ActiveX, other
+resources, ComboBox/ListBox list or
 selectedIndex state, and unimplemented
 properties fail loudly. ListBox text/value is rejected because it depends on
 unpersisted list state. SpinButton/ScrollBar value is an integer in the
@@ -300,6 +308,14 @@ show the FormControl value while instantiated forms use the VBFrame value.
 Generation and root-caption edits keep both representations equal; a caption
 that cannot be represented in the project code page is rejected before output
 publication. Unedited VBFrame lines and all control Unicode values are preserved.
+
+Image picture payloads are added, replaced, or cleared only through the
+explicit `picture.path` and `picture.remove: true` forms. Omission preserves a
+retained payload. The compiler unwraps and validates the persisted StdPicture
+resource before Designer publication; source bytes remain in the in-memory
+`FormSpecPicture.Data` field and are excluded from YAML/JSON. Excel-backed
+`form build` and apply surfaces reject picture input until they implement the
+same contract. No file backend invokes Excel as a fallback.
 
 Errors retain form/control/property context and use
 `userform_generation_invalid`, `userform_generation_unsupported`, or
@@ -428,7 +444,8 @@ invariants fail:
   supported opaque tail.
 
 The resource limits are 64 MiB per designer stream, 65,535 sites per form, and
-64 nested container levels. Counts and lengths are checked against remaining
+64 nested container levels. External image assets have a separate 16 MiB and
+16-million-pixel bound, defined in `userform-picture-assets.md`. Counts and lengths are checked against remaining
 input before allocating or slicing. Serialization validates all forms before
 the enclosing CFB is published. A malformed retained count, length,
 `ObjectStreamSize`, or nested ownership relationship therefore fails instead

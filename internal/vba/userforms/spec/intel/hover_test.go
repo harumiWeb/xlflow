@@ -86,6 +86,21 @@ func TestHoverYAMLReturnsNilForUnknownFields(t *testing.T) {
 	}
 }
 
+func TestHoverYAMLDocumentsImagePictureAction(t *testing.T) {
+	source := "controls:\n  - type: Image\n    picture:\n      path: assets/logo.bmp\n"
+	line := 3
+	column := strings.Index(sourceLine(source, line), "path") + 1
+	hover := HoverYAML(source, Position{Line: line, Character: column})
+	if hover == nil {
+		t.Fatal("HoverYAML() = nil for Image picture path")
+	}
+	for _, want := range []string{"Image picture action", "Project-root-relative BMP or JPEG asset path."} {
+		if !strings.Contains(hover.Contents, want) {
+			t.Fatalf("hover missing %q:\n%s", want, hover.Contents)
+		}
+	}
+}
+
 func sourceLine(source string, line int) string {
 	return strings.Split(source, "\n")[line]
 }

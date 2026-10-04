@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +57,7 @@ func CompileTemplate(base *oforms.Form, desired spec.FormSpec, codePage uint16) 
 	if err != nil {
 		return nil, err
 	}
+	after.Warnings = reconcileTemplatePictureWarnings(after.Warnings, desired.Controls)
 
 	result, err := CompileEdits(base, baseline, after, codePage)
 	if err != nil {
@@ -241,6 +243,17 @@ func overlayTemplateControl(base *oforms.Form, target *spec.FormSpecControl, des
 	if desired.Tabs != nil {
 		target.Tabs = overlayTabs(target.Tabs, desired.Tabs)
 	}
+	if desired.Picture != nil {
+		pictureAction := *desired.Picture
+		pictureAction.Data = bytes.Clone(desired.Picture.Data)
+		target.Picture = &pictureAction
+		target.Unsupported = slices.DeleteFunc(target.Unsupported, func(value string) bool {
+			return strings.EqualFold(strings.TrimSpace(value), "picture")
+		})
+		if len(target.Unsupported) == 0 {
+			target.Unsupported = nil
+		}
+	}
 	return nil
 }
 
@@ -412,7 +425,52 @@ func cloneFormSpec(input spec.FormSpec) (spec.FormSpec, error) {
 	if err := json.Unmarshal(body, &clone); err != nil {
 		return spec.FormSpec{}, err
 	}
+	clonePictureData(input.Controls, clone.Controls)
 	return clone, nil
+}
+
+func clonePictureData(input, output []spec.FormSpecControl) {
+	for index := range input {
+		if index >= len(output) {
+			return
+		}
+		if input[index].Picture != nil {
+			if output[index].Picture == nil {
+				pictureAction := *input[index].Picture
+				output[index].Picture = &pictureAction
+			}
+			output[index].Picture.Data = bytes.Clone(input[index].Picture.Data)
+		}
+		clonePictureData(input[index].Controls, output[index].Controls)
+	}
+}
+
+func reconcileTemplatePictureWarnings(warnings []spec.FormSpecWarning, controls []spec.FormSpecControl) []spec.FormSpecWarning {
+	explicit := make(map[string]bool)
+	for _, control := range controls {
+		if control.Picture != nil {
+			explicit[strings.ToLower(control.Name)] = true
+		}
+	}
+	if len(explicit) == 0 {
+		return warnings
+	}
+	const prefix = "Unsupported Designer properties were preserved only in the binary model: "
+	result := make([]spec.FormSpecWarning, 0, len(warnings))
+	for _, warning := range warnings {
+		if warning.Code != "unsupported_properties" || !explicit[strings.ToLower(warning.Control)] || !strings.HasPrefix(warning.Message, prefix) || !strings.HasSuffix(warning.Message, ".") {
+			result = append(result, warning)
+			continue
+		}
+		properties := strings.Split(strings.TrimSuffix(strings.TrimPrefix(warning.Message, prefix), "."), ", ")
+		properties = slices.DeleteFunc(properties, func(value string) bool { return strings.EqualFold(strings.TrimSpace(value), "picture") })
+		if len(properties) == 0 {
+			continue
+		}
+		warning.Message = prefix + strings.Join(properties, ", ") + "."
+		result = append(result, warning)
+	}
+	return result
 }
 
 func templateError(base *oforms.Form, code, control, property, reason string) error {

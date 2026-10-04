@@ -786,6 +786,37 @@ func TestProjectDoesNotReportPersistedBitfieldDefaults(t *testing.T) {
 	}
 }
 
+func TestProjectImagePictureDisplayProperties(t *testing.T) {
+	form := &oforms.Form{
+		Name:   "ImageProperties",
+		Levels: []*oforms.Level{{Record: &oforms.Record{Type: "Form", Values: map[string]int64{}}}},
+		Controls: []*oforms.Control{{
+			Name: "Image1", Kind: "MSForms.Image",
+			Site: &oforms.Site{Values: map[string]int64{"BitFlags": 0x33}},
+			Record: &oforms.Record{
+				Type: "Image",
+				Values: map[string]int64{
+					"VariousPropertyBits": 0x1b,
+					"PictureAlignment":    3,
+					"PictureSizeMode":     3,
+				},
+				Pictures: map[string][]byte{"Picture": {0x01}},
+			},
+		}},
+	}
+	got, err := Project(form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := got.Controls[0]
+	if image.Properties["pictureAlignment"] != 3 || image.Properties["pictureSizeMode"] != 3 {
+		t.Fatalf("Image properties = %#v, want alignment and size mode 3", image.Properties)
+	}
+	if !slices.Equal(image.Unsupported, []string{"picture"}) {
+		t.Fatalf("Image unsupported = %q, want picture only", image.Unsupported)
+	}
+}
+
 func TestProjectedControlValueMatchesExcelBooleanSpelling(t *testing.T) {
 	for _, test := range []struct {
 		persisted string

@@ -63,6 +63,7 @@ Every authored control requires `id`, `name`, and `type`. Controls are a flat li
 | `left`, `top`, `width`, `height` | number                | Supported        | Designer coordinates in points; these are not authoring fields for `Page`.             |
 | `tabIndex`                       | integer               | Supported        | Designer tab order.                                                                    |
 | `enabled`, `visible`             | boolean               | Supported        | Initial control state.                                                                 |
+| `picture`                        | object                | Image only       | Project-relative BMP/JPEG asset path or explicit `{ remove: true }`.                   |
 | `observed`, `unsupported`        | object / string array | Snapshot-only    | Captured state; do not use as normal authoring fields.                                 |
 | `controls`                       | array                 | Snapshot-only    | Legacy nested form accepted for compatibility; prefer flat `controls` plus `parentId`. |
 | `properties`                     | object                | Custom/unchecked | Unchecked property bag; avoid it in hand-authored built-in controls.                   |
@@ -81,11 +82,43 @@ Every authored control requires `id`, `name`, and `type`. Controls are a flat li
 | `ToggleButton`  | `Forms.ToggleButton.1`  | `caption` (string), `value` (any)                                                |
 | `SpinButton`    | `Forms.SpinButton.1`    | `value` (integer)                                                                |
 | `ScrollBar`     | `Forms.ScrollBar.1`     | `value` (integer)                                                                |
-| `Image`         | `Forms.Image.1`         | Common fields; pure-Go generation does not support embedded Picture data         |
+| `Image`         | `Forms.Image.1`         | Common fields; optional `picture` asset                                          |
 | `Frame`         | `Forms.Frame.1`         | `caption` (string); the built-in container type                                  |
 | `MultiPage`     | `Forms.MultiPage.1`     | `selectedIndex` (integer; zero-based Page index or `-1`)                         |
 | `Page`          | `Forms.Page.1`          | `caption`, `controlTipText`, `tag`, `accelerator` (strings)                      |
 | `TabStrip`      | `Forms.TabStrip.1`      | `selectedIndex` (integer; zero-based Tab index or `-1`), `tabs` (Tab array)      |
+
+### Image pictures
+
+An Image may reference a BMP or JPEG file using a path relative to the xlflow
+project root. Paths are checked after resolving filesystem aliases, including
+symlinks and Windows junctions, and must remain inside the project. Assets are
+limited to 16 MiB and 16 million pixels. The enclosing Designer stream retains
+its 64 MiB limit.
+
+```yaml
+- id: brand-mark
+  name: BrandMark
+  type: Image
+  picture:
+    path: src/forms/assets/brand.jpg
+```
+
+Use `picture: { remove: true }` to explicitly clear an existing picture.
+Omitting `picture` preserves an existing picture and leaves a new Image empty.
+Null, empty values, `remove: false`, mixed `path` and `remove`, unknown keys,
+and `picture` on non-Image controls are rejected. Picture source bytes are
+referenced by path and are not embedded in the YAML or JSON spec.
+
+Pure-Go `pack` and `push --backend file` support this field. Excel-backed
+`form build` and apply APIs reject it until they implement picture authoring.
+File pull emits supported embedded pictures under `src/forms/assets/` using
+content-addressed BMP/JPEG names. Identical assets may be shared; pull does not
+automatically delete old assets. File push loads, validates, and fingerprints
+only referenced assets. Unreferenced files under `src/forms/assets/` are
+retained and ignored.
+Excel may normalize a JPEG input to a BMP picture resource when saving, so a
+pulled asset can be BMP and need not be byte-identical to the original JPEG.
 
 ### MultiPage, Page, and TabStrip
 

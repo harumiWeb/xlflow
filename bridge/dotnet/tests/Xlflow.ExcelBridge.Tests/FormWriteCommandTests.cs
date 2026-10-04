@@ -328,6 +328,34 @@ public sealed class FormWriteCommandTests
         Assert.Contains("tabs[0].name is required", exception.InnerException?.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("{\"path\":\"src/forms/assets/logo.bmp\"}")]
+    [InlineData("null")]
+    public void DecodeSpecRejectsPictureAuthoringBeforeDesignerAccess(string pictureJson)
+    {
+        var decode = typeof(ExcelFormWriteService).GetMethod("DecodeSpec", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(decode);
+        var json = "{\"form\":{\"name\":\"Sample\"},\"controls\":[{\"type\":\"Image\",\"name\":\"Logo\",\"picture\":" + pictureJson + "}]}";
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+
+        var exception = Assert.Throws<TargetInvocationException>(() => decode!.Invoke(null, [encoded]));
+
+        Assert.Contains("controls[*].picture is supported only by pure-Go generation", exception.InnerException?.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DecodeSpecRejectsNestedPictureAuthoringBeforeDesignerAccess()
+    {
+        var decode = typeof(ExcelFormWriteService).GetMethod("DecodeSpec", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(decode);
+        const string json = """{"form":{"name":"Sample"},"controls":[{"type":"Frame","name":"Frame","controls":[{"type":"Image","name":"Logo","picture":{"remove":true}}]}]}""";
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+
+        var exception = Assert.Throws<TargetInvocationException>(() => decode!.Invoke(null, [encoded]));
+
+        Assert.Contains("controls[*].picture is supported only by pure-Go generation", exception.InnerException?.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RequiredModeledPropertyFailsWhenExcelDoesNotPersistIt()
     {

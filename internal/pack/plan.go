@@ -96,6 +96,9 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 	sourceByName := make(map[string]SourceModule, len(sources))
 	sourceByKey := make(map[string]SourceModule, len(sources))
 	for _, source := range sources {
+		if source.PreserveExistingCode && source.Type != ModuleTypeForm {
+			return PackPlan{}, fmt.Errorf("%w: PreserveExistingCode is only valid for UserForms", ErrAmbiguousLayout)
+		}
 		if source.FormSpec != nil && (source.Type != ModuleTypeForm || source.FormSpec.Form.Name != source.Name) {
 			return PackPlan{}, &compiler.Error{Code: compiler.GenerationInvalid, Form: source.Name, Reason: "canonical spec identity differs from source component"}
 		}
@@ -177,11 +180,15 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 			working.Forms[index] = updated
 		}
 
-		normalized, err := normalizePlannedSource(module, source)
-		if err != nil {
-			return PackPlan{}, err
+		if source.PreserveExistingCode {
+			planned.CodeAuthority = AuthorityTemplate
+		} else {
+			normalized, err := normalizePlannedSource(module, source)
+			if err != nil {
+				return PackPlan{}, err
+			}
+			module.Source = normalized
 		}
-		module.Source = normalized
 		planned.Action = PlanUpdate
 		planned.SourcePath = source.SourcePath
 		planned.RelatedPaths = slices.Clone(source.RelatedPaths)

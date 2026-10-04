@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.12.0
+
+- Added UserForm Image `picture` field intelligence for project-relative BMP
+  and JPEG assets, including explicit picture removal.
+
 ## v0.11.0
 
 - Accept xlflow capability schemas v1 through v3, including backend-specific

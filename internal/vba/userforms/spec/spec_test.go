@@ -377,6 +377,58 @@ func TestValidateFormSpecSourceEnforcesPageAndTabStripContract(t *testing.T) {
 	}
 }
 
+func TestImagePictureSourceContract(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		controlType string
+		action      string
+		valid       bool
+	}{
+		{"path", "Image", "picture: {path: assets/logo.jpg}", true},
+		{"remove", "Image", "picture: {remove: true}", true},
+		{"null", "Image", "picture: null", false},
+		{"empty", "Image", "picture: {}", false},
+		{"false-remove", "Image", "picture: {remove: false}", false},
+		{"mixed", "Image", "picture: {path: assets/logo.bmp, remove: true}", false},
+		{"unknown", "Image", "picture: {data: opaque}", false},
+		{"empty-path", "Image", "picture: {path: '  '} ", false},
+		{"wrong-control", "TextBox", "picture: {path: assets/logo.bmp}", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			control := "  - id: image\n    name: Logo\n    type: " + test.controlType + "\n    " + test.action + "\n"
+			source := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Form\ncontrols:\n" + control
+			issues, err := ValidateFormSpecSource(SpecInput{Format: "yaml"}, []byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.valid == hasValidationErrors(issues) {
+				t.Fatalf("valid=%t issues=%#v", test.valid, issues)
+			}
+		})
+	}
+}
+
+func TestFormSpecPictureDataAndRemoveFalseAreNotSerialized(t *testing.T) {
+	control := FormSpecControl{
+		Type: "Image", Name: "Logo",
+		Picture: &FormSpecPicture{Path: "assets/logo.bmp", Data: []byte{1, 2, 3}},
+	}
+	jsonBody, err := json.Marshal(control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(jsonBody), "Data") || strings.Contains(string(jsonBody), "\"data\"") || strings.Contains(string(jsonBody), "\"remove\"") {
+		t.Fatalf("internal bytes or false remove were serialized: %s", jsonBody)
+	}
+	yamlBody, err := yaml.Marshal(control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(yamlBody), "data:") || strings.Contains(string(yamlBody), "remove:") {
+		t.Fatalf("internal bytes or false remove were serialized: %s", yamlBody)
+	}
+}
+
 func TestValidateFormSpecStrictSelectedIndexUsesKnownPageTopology(t *testing.T) {
 	for _, test := range []struct {
 		name     string

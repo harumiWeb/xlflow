@@ -3096,13 +3096,11 @@ func (a *app) pushViaFile(ctx context.Context, cfg config.Config, pushOpts excel
 		unsupported := workbookformat.UnsupportedError{Capability: "push --backend file", Extension: filepath.Ext(workbookPath)}
 		return output.Envelope{}, output.ExitConfig, a.writeUnsupportedWorkbookFormat("push", unsupported)
 	}
-	if err := a.runSourceEncodingPreflight(ctx, "push", cfg); err != nil {
+	cfg, err := a.runCanonicalSourceEncodingPreflight(ctx, "push", cfg, false)
+	if err != nil {
 		return output.Envelope{}, 0, err
 	}
 	if err := a.runUserFormCodeSourceValidation("push", cfg); err != nil {
-		return output.Envelope{}, 0, err
-	}
-	if err := a.runUserFormArtifactPreflight("push", cfg, nil); err != nil {
 		return output.Envelope{}, 0, err
 	}
 	if err := a.runSourcePreflightAfterEncoding(ctx, "push", cfg, "pushing to the saved workbook", nil, nil); err != nil {

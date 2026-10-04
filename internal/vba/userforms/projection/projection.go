@@ -363,6 +363,16 @@ func projectControl(source *oforms.Control, target *forms.FormSpecControl) {
 	} else {
 		target.Enabled = new(true)
 	}
+	if strings.EqualFold(target.Type, "Image") {
+		for _, name := range []string{"PictureAlignment", "PictureSizeMode"} {
+			if value, ok := record.Values[name]; ok {
+				if target.Properties == nil {
+					target.Properties = make(map[string]any)
+				}
+				target.Properties[lowerFirst(name)] = int(value)
+			}
+		}
+	}
 }
 
 func unsupportedControlProperties(control *oforms.Control, controlType string) []string {
@@ -398,6 +408,10 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 		projected["Value"] = supportsControlValue(controlType)
 		projected["Position"] = supportsNumericControlValue(controlType)
 		projected["BooleanProperties"] = isDefaultBooleanProperties(controlType, control.Record.Values["BooleanProperties"])
+		if strings.EqualFold(controlType, "Image") {
+			projected["PictureAlignment"] = true
+			projected["PictureSizeMode"] = true
+		}
 		if controlType == "TabStrip" {
 			for _, name := range []string{"Items", "TipStrings", "TabNames", "Tags", "Accelerators"} {
 				projected[name] = true

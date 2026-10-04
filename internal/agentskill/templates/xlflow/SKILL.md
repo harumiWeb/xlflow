@@ -1,15 +1,17 @@
 ---
 name: xlflow
-description: Use when an AI agent needs to edit, test, debug, or validate an Excel VBA workbook with xlflow. Provides the safe source-to-workbook proof loop and routes specialized work to focused references.
+description: Use when an AI agent needs to develop VBA or UserForms, build an xlsm artifact, or test, debug, or validate an Excel workbook with xlflow. Routes source-only, saved-file, and live Excel workflows to focused references.
 ---
 
 # xlflow Skill
 
 ## Purpose
 
-Use xlflow as the proof loop for Excel VBA work. Source changes are not complete
-until xlflow has imported the relevant source and produced evidence appropriate to
-the behavior: diagnostics, focused tests, macro execution, or workbook inspection.
+Use xlflow to produce evidence appropriate to the task: source diagnostics,
+saved-workbook generation, focused tests, macro execution, or workbook inspection.
+For artifact-only work, validate the generated file and report that VBE compile
+and runtime validation were not performed. Behavioral claims need execution or
+workbook evidence; generating an artifact alone does not prove them.
 
 This Skill is an orchestration contract. Use xlflow help, structured output, and
 the command documentation for command syntax, flags, result schemas, and detailed
@@ -39,6 +41,9 @@ the next decision.
 | Estimate refactor blast radius            | `xlflow impact Module.Procedure --json`                                                 | changing existing behavior; load [code analysis](references/code-analysis.md)                         |
 | Import edited source into Excel           | `xlflow push --fast --session --no-save --json`                                         | source validation passes                                                                              |
 | Apply source to saved `.xlsm` headless    | `xlflow push --backend file --json`                                                     | no Excel/host needed; workbook must be closed and no live session may own it                          |
+| Build an artifact from a template         | `xlflow pack --template templates/Base.xlsm --out dist/Release.xlsm --json`             | source is authoritative; load [pack guidance](references/pack.md)                                     |
+| Build an artifact without a template      | `xlflow pack --blank --out dist/Release.xlsm --json`                                    | fixed ThisWorkbook + Sheet1 profile; load [pack guidance](references/pack.md)                         |
+| Orient in an unfamiliar VBA project       | `xlflow architecture --module ModuleName --json`                                        | source-only overview; load [code analysis](references/code-analysis.md)                               |
 | Run repeatable behavior checks            | `xlflow test --session --no-save --json`                                                | tests cover the behavior; load [testing](references/testing.md)                                       |
 | Run a macro with diagnostics              | `xlflow run Macro.Name --diagnostic --headless --session --json`                        | tests do not cover the intended behavior                                                              |
 | Inspect values, formulas, or styles       | `xlflow inspect range --sheet Result --address A1:F20 --include-style --session --json` | an observable cell result is required                                                                 |
@@ -55,7 +60,7 @@ criteria include rendered appearance; inspect the generated image before saving.
 - Determine the authoritative source before editing. When source and workbook
   state disagree or their freshness is unclear, establish the source of truth
   through xlflow before changing either copy.
-- For normal iterative work, use one xlflow session from orientation through
+- For iterative Excel work, use one xlflow session from orientation through
   verification. Start a managed session for a closed workbook; attach to the
   configured workbook when the user already has it open in Excel. Do not create a
   separate Excel instance for a workbook the user expects to remain open.
@@ -99,6 +104,12 @@ structured xlflow state:
 5. What observable result will prove the task: a focused test, macro result,
    diagnostic, worksheet value, form state, or rendered workbook output?
 
+Choose the workbook boundary before choosing a session: Excel push updates the
+live development project; file push updates the configured closed saved `.xlsm`;
+pack creates a separate `.xlsm` artifact from source plus a template or the blank
+profile. File push and pack need no Excel session. Load [forms](references/forms.md)
+for Designer/code authority and [pack](references/pack.md) for artifact generation.
+
 Do not begin a normal source edit while these decisions are unknown. When the
 workbook is authoritative, pull into the configured source artifacts first; when
 source is authoritative, push it through xlflow rather than manually importing
@@ -106,7 +117,7 @@ VBA in the VBE.
 
 ## Quick Start: Normal Source Change
 
-For a typical source-backed workbook change, start with this session-first loop.
+For a typical source-backed change verified in Excel, use this session-first loop.
 Replace the focused test, macro, and inspection target with evidence returned by
 xlflow or the project contract.
 
@@ -148,9 +159,10 @@ The default `pull --json` selects the fastest safe backend and reports
 source of truth; it never reads unsaved session state. It can publish canonical
 UserForm Designer YAML and code sidecars when `code_source = "sidecar"`, but it
 does not generate compatibility `.frm` / `.frx` exports. File-pulled specs mark
-those artifacts unsynchronized, so push fails safely until `form build` applies
-the spec and an Excel pull refreshes compatibility source. Use `--backend excel`
-to force Excel/VBIDE authority or preserve `frm` code authority.
+those artifacts unsynchronized. Canonical spec plus sidecar file push and pack
+can use the spec directly; operations that import the stale `.frm` still fail
+with `FRM201`. Use an Excel pull to refresh compatibility exports before that
+import path. See [forms](references/forms.md) before switching code authority.
 
 `push` has no auto backend: the default `excel` path mutates the live project
 through VBE and compiles it, while `push --backend file --json` rebuilds the
@@ -158,8 +170,10 @@ saved `.xlsm` headlessly. Choose the file backend when Excel is unavailable or
 the run is headless and the workbook is closed; it refuses to overwrite a
 workbook that is open or owned by a live session, and it reports
 `vbe_validation="not_performed"` because no compile happened — prove behavior
-afterwards with `xlflow test`/`run` when compile evidence matters. It cannot
-create new UserForms, so a brand-new form still needs the Excel backend.
+afterwards with `xlflow test`/`run` when compile evidence matters. It can add and
+edit supported UserForms from canonical specs, including BMP/JPEG Image assets.
+Omitted forms remain; `[pack].userform_topology` does not change file push.
+For a separate release artifact, use [pack](references/pack.md).
 
 Run `xlflow doctor --json` when Excel, COM, VBIDE access, or macro execution
 cannot be trusted. Do not run both session start and attach: choose attach for
@@ -191,6 +205,9 @@ that interaction.
 
 ## Canonical Development Loop
 
+For work verified in live Excel, follow this loop. Artifact-only work uses the
+generation and completion criteria in [pack](references/pack.md).
+
 1. **Orient.** Read project configuration, inspect the relevant source and
    current xlflow state, determine source authority, and use the Quick Start
    commands to start or attach the appropriate session.
@@ -217,9 +234,10 @@ that interaction.
     persist, then stop the session. Recovery-required state is the exception:
     follow the recovery reference instead of saving.
 
-Use isolated non-session commands only for one-shot CI-style verification,
-release checks, suspicious session state, or when the user explicitly requests
-that Excel not stay open.
+Use the session loop for live Excel development. Source-only analysis and
+saved-file generation are separate workflows; do not start Excel merely to run
+pack or file push. Load their references and report the evidence those paths
+actually provide.
 
 ## Scope Boundaries
 
@@ -239,6 +257,7 @@ that Excel not stay open.
 | Writing tests, selecting tests, test metadata, hooks, or test failures                                                                                                           | [testing.md](references/testing.md)                       |
 | Formula-driven behavior, defined names, or sheet-layout formulas                                                                                                                 | [formulas.md](references/formulas.md)                     |
 | UserForm design, code-behind authority, inspection, snapshots, or rebuilds                                                                                                       | [forms.md](references/forms.md)                           |
+| Template/blank artifact generation, pack topology or release-artifact verification                                                                                               | [pack.md](references/pack.md)                             |
 | Dialogs, file pickers, headless UI, or interactive-vs-unattended behavior                                                                                                        | [xlflow-ui.md](references/xlflow-ui.md)                   |
 | Runtime or compile diagnostics that do not identify the cause                                                                                                                    | [debugging.md](references/debugging.md)                   |
 | Recovery-required state or uncertain workbook termination                                                                                                                        | [recovery.md](references/recovery.md)                     |
@@ -260,5 +279,13 @@ Report and preserve evidence that answers all of these questions:
 - Was the verified workbook saved and the session stopped, or is a recovery or
   other user-owned follow-up still required?
 
-Do not declare VBA work complete from source review alone. If the available
-evidence cannot prove the requested behavior safely, state the remaining gap.
+Distinguish artifact generation from demonstrated VBA behavior. When execution
+or visual acceptance is required, do not declare it complete from source review
+or a successful pack alone. State any remaining compile, runtime, or visual gap.
+
+## Updating an Installed Skill
+
+The installed skill is a copy bundled with the xlflow binary. After upgrading
+xlflow, review local customizations before replacing that copy, for example with
+`xlflow skill install --agent codex --force --json`. Use the project's actual
+provider (`agents`, `codex`, `claude`, `cursor`, or `gemini`) or explicit target.

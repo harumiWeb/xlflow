@@ -257,6 +257,10 @@ public sealed class ExcelFormWriteService : IFormWriteService
             {
                 throw new InvalidOperationException("form.build.clientWidth/clientHeight are supported only by pure-Go generation, not Excel Designer authoring.");
             }
+            if (EnumerateControls(spec.Controls).Any(control => control.Picture.ValueKind != JsonValueKind.Undefined))
+            {
+                throw new InvalidOperationException("controls[*].picture is supported only by pure-Go generation; the Excel bridge cannot author picture resources.");
+            }
             ValidateControlSpecs(spec.Controls);
             ValidateDeclaredSelectionIndices(spec);
             return spec;
@@ -2026,6 +2030,10 @@ public sealed class ExcelFormWriteService : IFormWriteService
 
         [JsonPropertyName("visible")]
         public bool? Visible { get; init; }
+
+        [JsonPropertyName("picture")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public JsonElement Picture { get; init; }
 
         [JsonPropertyName("list")]
         public List<string>? List { get; init; }

@@ -1,3 +1,11 @@
+# PR #923 review follow-up
+
+- [x] Resolve picture roles before every canonical VBA component collector; cover module, class and document roots through CLI pack/file push.
+- [x] Preserve case-distinct Code/ loose modules and fingerprints on case-sensitive hosts.
+- [x] Correct Windows CI assertions to resolve expected physical paths before host-key comparison, retaining symlink target checks. Directory-alias fixtures cover resolved roots as well as filename casing; the initial case-only correction was insufficient on the runner.
+- [x] Remove the CodeQL allocation-size sum, propagate input path-resolution errors, and correct obsolete pack restrictions.
+- [x] Run affected Windows/Linux checks, lint and installed Excel gate; publish fixes and report review dispositions. CodeQL alert 11 is fixed and Linux CI passes; Windows CI is rerun after the physical-path assertion correction.
+
 # PR #913 review follow-up
 
 The persisted-caption finding is valid: caption projection respects the
@@ -653,3 +661,22 @@ confirmed and then rechecked fixes for empty cached-tab edits and quadratic
 signature membership checks. Local checks passed for userforms/pack/filepull,
 CLI pack/form, 51 bridge tests, Go lint, VS Code TypeScript and docs. No remote
 CI or publication is claimed.
+
+# Issue #912 final review follow-up
+
+- [x] Validate the pass 1 P2: CLI encoding preflight misclassifies referenced pictures with source suffixes.
+- [x] Resolve validated picture roles before encoding and share command-local role metadata with symbol discovery, preserving full-project diagnostics.
+- [x] Add CLI pack/file-push publication regressions for .bas/.cls/.frm pictures, a code-sidecar collision, and an internal symlink; verify persisted bytes and ordinary invalid-VBA rejection.
+- [x] Run affected/full Go checks, corpus snapshots, lint and fresh installed-binary Excel picture gates.
+- [x] Complete analyzer performance comparison: deterministic counters unchanged, no suspicious metric increases; concurrent test activity prevents isolated timing claims. Pass 2 confirmed the first fix and found a Linux case-distinct picture/sidecar identity defect.
+- [x] Reproduce the pass 2 P2 in Linux, share host path keys across inventory/preflight/symbol discovery/file-push dependencies, and verify actual CLI pack/push preserve case-distinct sidecar code and reject invalid code before publication.
+- [x] Complete final full Go/lint/format checks and fresh installed-binary Excel file-push/blank-pack/template-pack picture gates after the structural path-identity correction.
+- [x] Run exceptional pass 3 on 2ab038f7: prior findings resolved, one new in-scope P2 confirmed for case-distinct Assets/ nested forms. Stop the full review loop at three passes.
+- [x] Preserve pass 3 evidence and clean up all review resources. Correct reserved assets comparisons using the shared host path key; Linux inventory/actual-push regressions and full Windows Go/lint/format checks pass. Fresh installed-binary Excel file-push/blank-pack/template-pack gates pass with confirmed cleanup. Final correction receives coordinator regression/self-review verification; no fourth independent pass or remote CI is claimed.
+
+# v0.35.0 bundled agent skill refresh
+
+- [x] Correct backend routing and obsolete UserForm restrictions in the entrypoint; retain session-first guidance for Excel work.
+- [x] Refresh forms reference with canonical source authority, containers, pictures and omission semantics; add focused pack reference and architecture discovery.
+- [x] Verify installed reference links across providers and execute the documented examples through blank/template pack and file push with artifact readback. Full agentskill/CLI tests PASS (1.350s/136.836s), lint and skill validator PASS; installed-binary skill smoke PASS in tmp_workspaces/issue912-agent-skill-release/xlflow.
+- [x] Complete self-review and docs/lint checks; prepare the skill update for commit and resume the authorized PR preparation. Validation evidence: tmp_workspaces/final-review/agent-skill-validation.md.

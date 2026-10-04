@@ -32,10 +32,21 @@ xlflow push --backend file --json
 
 `--backend file` rebuilds the saved `.xlsm` directly from the tracked source
 tree — no Excel, COM, VBIDE, or bridge process — so it works on Linux,
-containers, CI runners, WSL, and remote coding agents. It preserves existing
-UserForm designer storage and updates form code-behind (including `sidecar`
-mode sidecars), but it cannot author a brand-new UserForm; use `--backend
-excel` when a form does not yet exist in the workbook.
+containers, CI runners, WSL, and remote coding agents. It uses canonical
+FormSpecs to add supported UserForms, apply supported Designer edits, and
+embed BMP/JPEG assets for Image controls. See the [UserForm specification](../reference/userform-spec)
+for `picture.path` and `picture.remove`.
+
+File push preserves existing forms omitted from source and ignores
+`[pack].userform_topology`. In sidecar mode, a missing code sidecar preserves
+existing form code; an explicitly empty sidecar clears it. A new form with no
+sidecar has empty code. A canonical spec and sidecar code make retained `.frm`
+and `.frx` files non-authoritative; the `compatibility_artifact_unsynchronized`
+marker blocks operations that select `.frm` code or compatibility files as
+import authority. Unsupported custom ActiveX cases fail without starting
+Excel. Custom-control compatibility requires Excel-authored `.frm` / `.frx`
+artifacts and an explicitly selected Excel workflow; file push never falls
+back to Excel.
 
 Because the backend replaces the saved workbook beneath any live Excel/VBE
 state, it refuses to run — before changing anything — when the workbook looks
@@ -50,9 +61,11 @@ structurally validated — it does not mean the VBA compiled. JSON reports
 Compile/run validation still requires opening the workbook in Excel (for
 example through `xlflow run` or `xlflow test`).
 
-`--changed-only` interoperates across both backends: state written by either
-backend satisfies the other. `--backend file` cannot be combined with
-`--session` or `--no-save`.
+File-backend `--changed-only` fingerprints include FormSpecs and referenced
+asset contents. State from another backend justifies a skip only when its
+fingerprint covers the same effective inputs; otherwise file push rebuilds
+conservatively. `--backend file` cannot be combined with `--session` or
+`--no-save`.
 
 ## Notes
 

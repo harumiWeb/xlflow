@@ -3,6 +3,7 @@ package agentskill
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -12,6 +13,7 @@ var referenceFiles = []string{
 	"debugging.md",
 	"formulas.md",
 	"forms.md",
+	"pack.md",
 	"xlflow-ui.md",
 	"recovery.md",
 	"code-analysis.md",
@@ -34,6 +36,39 @@ func requireReferenceFiles(t *testing.T, skillDir string) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("missing installed reference %s: %v", name, err)
 		}
+	}
+	// Check links in the installed copy, where repository-only references would
+	// otherwise pass source checks but break for every supported provider.
+	links := regexp.MustCompile(`\]\(([^)]+)\)`)
+	if err := filepath.WalkDir(skillDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".md" {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, match := range links.FindAllStringSubmatch(string(body), -1) {
+			target, _, _ := strings.Cut(match[1], "#")
+			if target == "" || strings.Contains(target, "://") {
+				continue
+			}
+			resolved := filepath.Join(filepath.Dir(path), filepath.FromSlash(target))
+			rel, err := filepath.Rel(skillDir, resolved)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				t.Errorf("installed reference escapes skill: %s -> %s", path, target)
+				continue
+			}
+			if _, err := os.Stat(resolved); err != nil {
+				t.Errorf("broken installed reference: %s -> %s: %v", path, target, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -17,16 +17,19 @@ code comes from `src/forms/code/<Name>.bas`, falling back to matching `.frm`
 code or empty code. In `frm` mode, matching `.frm` code is required. Designer
 state always comes from the spec; `.frx` is not required. Forms references are
 added automatically. Frames can contain common controls and nested Frames.
-MultiPage/Page/TabStrip generation, custom ActiveX, embedded pictures and
+MultiPage/Page/TabStrip and BMP/JPEG Image pictures are supported. Custom ActiveX and
 unsupported persisted list state fail before publication.
+Image assets use `picture.path` or explicit `picture.remove: true`; see the
+[UserForm specification](../reference/userform-spec).
 
 `pack` is the stable, pure-Go release path. It is cross-platform and
 Excel-independent: standard/class topology comes from source, workbook and
 document topology comes from the template. Template mode also adds supported
 UserForms from canonical specs and edits supported properties of existing
 Designers, including Frame/common-control additions, removals, replacements,
-parent changes and sibling ordering. The spec lists every control; omitted properties retain template
-values. Existing forms without a spec retain legacy code-only updates.
+parent changes, sibling ordering, and Image picture replacement/removal. The
+spec lists every control; omitted properties retain template values. Existing
+forms without a spec retain legacy code-only updates.
 `pack` does not compile or execute VBA, so successful JSON keeps
 `pack.backend = "pure-go"` and `pack.vbe_validation = "not_performed"`.
 
@@ -39,8 +42,7 @@ userform_topology = "source"
 ```
 
 This requires canonical specs for all forms remaining in source. The default
-is `"template"`; blank mode always uses the source form set. MultiPage/Page/TabStrip
-generation or structural changes, root-dimension edits and
+is `"template"`; blank mode always uses the source form set. Root-dimension edits and
 unsupported property edits fail before publication with specific
 `pack_userform_generation_*` or `pack_userform_edit_*` errors.
 

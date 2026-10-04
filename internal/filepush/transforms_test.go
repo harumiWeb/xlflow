@@ -164,7 +164,10 @@ func TestDiscoverSourceFilesKindsAndOrdering(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "src", "workbook", "ThisWorkbook.bas"), "x")
 
 	cfg := testConfig()
-	files := discoverSourceFiles(resolvedRoots(root, cfg), "sidecar")
+	files, err := discoverSourceFiles(resolvedRoots(root, cfg), "sidecar")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var kinds []string
 	for _, f := range files {
 		kinds = append(kinds, f.Kind+":"+f.RelativePath)
@@ -181,7 +184,10 @@ func TestDiscoverSourceFilesKindsAndOrdering(t *testing.T) {
 	}
 
 	// Non-sidecar mode fingerprints code/*.bas as a plain form file set entry.
-	files = discoverSourceFiles(resolvedRoots(root, cfg), "embedded")
+	files, err = discoverSourceFiles(resolvedRoots(root, cfg), "embedded")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, f := range files {
 		if f.Kind == "form_code" {
 			t.Fatalf("non-sidecar discovery produced form_code: %+v", f)

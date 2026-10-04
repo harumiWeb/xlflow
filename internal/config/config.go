@@ -41,6 +41,9 @@ type Config struct {
 	Lint      LintConfig       `toml:"lint"`
 	Analyze   AnalyzeConfig    `toml:"analyze"`
 	Warnings  []map[string]any `toml:"-"`
+	// PicturePaths is resolved, command-local source-role metadata. Keys are
+	// host-normalized logical absolute paths; never loaded from configuration.
+	PicturePaths map[string]bool `toml:"-" json:"-"`
 }
 
 type ProjectConfig struct {

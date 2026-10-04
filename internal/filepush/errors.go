@@ -2,12 +2,29 @@ package filepush
 
 import "errors"
 
+// SourceReadError identifies a failed source-tree discovery or read without
+// making filesystem failures look like an empty source or empty hash.
+type SourceReadError struct {
+	Path string
+	Err  error
+}
+
+func (e *SourceReadError) Error() string {
+	return "file push: read source " + e.Path + ": " + e.Err.Error()
+}
+
+func (e *SourceReadError) Unwrap() error { return e.Err }
+
 var (
 	// ErrDuplicateModule reports case-insensitive VBA component name collisions
 	// across the managed source roots. The .NET Excel push fails with the
 	// duplicate_module_name contract before touching Excel; the file backend
 	// detects the same conflicts before reading the workbook.
 	ErrDuplicateModule = errors.New("file push: duplicate VBA module names")
+
+	// ErrSourceChanged reports that the source snapshot changed while push was
+	// acquiring locks or preparing publication.
+	ErrSourceChanged = errors.New("file push: source changed during push")
 
 	// ErrLineNumberSafety reports a source file that Erl instrumentation cannot
 	// transform safely (existing numeric labels or numeric GoTo/GoSub/Resume

@@ -147,6 +147,9 @@ type Options struct {
 	// AllowExternalRoots permits configured roots outside RootDir while still
 	// requiring every discovered file to remain inside a configured root.
 	AllowExternalRoots bool
+	// PathFilter selects VBA text by its logical absolute path before symlink
+	// scope checks. Callers must validate excluded binary dependencies separately.
+	PathFilter func(string) bool
 }
 
 // Validate accepts only UTF-8 without a BOM. Unknown path extensions are
@@ -434,6 +437,9 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 				if contextErr := contextError(ctx); contextErr != nil {
 					return contextErr
 				}
+				if !entry.IsDir() && opts.PathFilter != nil && !opts.PathFilter(candidate) {
+					return nil
+				}
 				if entry.Type()&os.ModeSymlink != 0 {
 					canonical, evalErr := filepath.EvalSymlinks(candidate)
 					if evalErr != nil {
@@ -458,6 +464,9 @@ func DiscoverFiles(ctx context.Context, opts Options) ([]File, error) {
 			}); walkErr != nil {
 				return nil, &FileIOError{Path: raw, Operation: "discover", Cause: walkErr}
 			}
+			continue
+		}
+		if opts.PathFilter != nil && !opts.PathFilter(path) {
 			continue
 		}
 		if !isSourceExtension(path) {

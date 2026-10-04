@@ -3,7 +3,6 @@
 package compiler
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -13,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/picture"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/projection"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
@@ -165,6 +165,15 @@ func editedProperty(control *oforms.Control, name string) (any, bool) {
 		return nil, false
 	}
 	switch name {
+	case "Picture":
+		if control.Record == nil {
+			return nil, false
+		}
+		value, found := control.Record.Pictures["Picture"]
+		if !found {
+			return nil, true
+		}
+		return value, true
 	case "Left", "Top":
 		if control.Site.Position == nil {
 			return nil, false
@@ -209,12 +218,8 @@ func editedProperty(control *oforms.Control, name string) (any, bool) {
 }
 
 func normalizedCopy(input spec.FormSpec) (spec.FormSpec, error) {
-	body, err := json.Marshal(input)
+	copied, err := cloneFormSpec(input)
 	if err != nil {
-		return spec.FormSpec{}, err
-	}
-	var copied spec.FormSpec
-	if err := json.Unmarshal(body, &copied); err != nil {
 		return spec.FormSpec{}, err
 	}
 	// Normalize topology on the owned copy, but do not synthesize form build
@@ -419,6 +424,27 @@ func (c *compilation) controlEdits(old, next, actual spec.FormSpecControl, path 
 			return err
 		}
 	}
+	if next.Picture != nil && !reflect.DeepEqual(old.Picture, next.Picture) {
+		if !strings.EqualFold(old.Type, "Image") {
+			return c.fail(Invalid, old.Name, path+".picture", "picture actions apply only to Image controls")
+		}
+		if next.Picture.Remove {
+			if err := c.add(old.Name, "Picture", nil, path+".picture"); err != nil {
+				return err
+			}
+		} else {
+			if len(next.Picture.Data) == 0 {
+				return c.fail(Invalid, old.Name, path+".picture.path", "picture source bytes were not resolved before compilation")
+			}
+			raw, err := picture.Encode(next.Picture.Data)
+			if err != nil {
+				return c.fail(Invalid, old.Name, path+".picture.path", err.Error())
+			}
+			if err := c.add(old.Name, "Picture", raw, path+".picture"); err != nil {
+				return err
+			}
+		}
+	}
 	return c.propertyEdits(old, next, actual, path)
 }
 
@@ -442,7 +468,7 @@ func sameBaseline(property string, before, actual, convertedBefore, convertedAct
 }
 
 func supportedControl(kind string) bool {
-	return slices.Contains([]string{"label", "textbox", "combobox", "listbox", "commandbutton", "checkbox", "optionbutton", "frame", "multipage", "page", "tabstrip"}, strings.ToLower(kind))
+	return slices.Contains([]string{"label", "textbox", "combobox", "listbox", "commandbutton", "checkbox", "optionbutton", "image", "frame", "multipage", "page", "tabstrip"}, strings.ToLower(kind))
 }
 
 func convertValue(kind, property string, value any) (any, error) {
@@ -508,6 +534,7 @@ var propertyNames = map[string]string{
 	"caption": "Caption", "text": "Value", "value": "Value",
 	"left": "Left", "top": "Top", "width": "Width", "height": "Height",
 	"tabindex": "TabIndex", "enabled": "Enabled", "visible": "Visible",
+	"picturealignment": "PictureAlignment", "picturesizemode": "PictureSizeMode",
 }
 
 func propertyMap(properties map[string]any) (map[string]any, error) {
@@ -594,6 +621,8 @@ func canonicalField(key string) string {
 
 func applicableProperty(kind, key string) bool {
 	switch key {
+	case "picturealignment", "picturesizemode":
+		return strings.EqualFold(kind, "Image")
 	case "groupname":
 		return strings.EqualFold(kind, "OptionButton")
 	case "maxlength":
@@ -635,6 +664,9 @@ func snapshotProperty(control spec.FormSpecControl, key string) (any, bool) {
 	case "visible":
 		return pointerValue(control.Visible), true
 	default:
+		if value, ok := control.Properties[key]; ok {
+			return value, true
+		}
 		return nil, false
 	}
 }
@@ -659,6 +691,15 @@ func bagValue(kind, key string, value any) (any, error) {
 			return nil, fmt.Errorf("maxLength exceeds Excel range")
 		}
 		return int64(v), nil
+	case "picturealignment", "picturesizemode":
+		v, ok := numberValue(value)
+		if !ok || math.IsNaN(v) || math.IsInf(v, 0) || v != math.Trunc(v) || v < 0 || v > 4 {
+			return nil, fmt.Errorf("%s must be an integer in the supported range", key)
+		}
+		if key == "picturesizemode" && v != 0 && v != 1 && v != 3 {
+			return nil, fmt.Errorf("pictureSizeMode must be 0, 1, or 3")
+		}
+		return int64(v), nil
 	case "enabled", "visible":
 		v, ok := value.(bool)
 		if !ok {
@@ -673,6 +714,29 @@ func bagValue(kind, key string, value any) (any, error) {
 		return int16(v), nil
 	default:
 		return convertValue(kind, key, value)
+	}
+}
+
+func numberValue(value any) (float64, bool) {
+	switch number := value.(type) {
+	case float64:
+		return number, true
+	case float32:
+		return float64(number), true
+	case int:
+		return float64(number), true
+	case int32:
+		return float64(number), true
+	case int64:
+		return float64(number), true
+	case uint:
+		return float64(number), true
+	case uint32:
+		return float64(number), true
+	case uint64:
+		return float64(number), true
+	default:
+		return 0, false
 	}
 }
 
