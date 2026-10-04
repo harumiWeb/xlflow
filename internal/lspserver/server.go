@@ -221,7 +221,7 @@ func RunStdio(opts Options) error {
 	}
 	defer cleanup()
 	stream := jsonrpc2.NewBufferedStream(stdioReadWriteCloser{}, jsonrpc2.VSCodeObjectCodec{})
-	conn := jsonrpc2.NewConn(context.Background(), stream, rpcHandler{handler: &s.handler, server: s, custom: s.handleCustomNotification, dispatch: s.dispatchCodeAction})
+	conn := jsonrpc2.NewConn(context.Background(), stream, rpcHandler{handler: &s.handler, server: s, custom: s.handleCustomNotification, dispatch: s.dispatchRequest})
 	<-conn.DisconnectNotify()
 	return conn.Close()
 }
@@ -788,7 +788,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	s.codeActionDocumentChanges.Store(versionedActions)
 	s.applyDeclarationPriorityOptions(params)
 	capabilities := s.handler.CreateServerCapabilities()
-	capabilities.Experimental = map[string]any{"declarationPriority": true}
+	capabilities.Experimental = map[string]any{"declarationPriority": true, "userFormPreview": true}
 	if capabilities.CodeLensProvider != nil {
 		resolveProvider := false
 		capabilities.CodeLensProvider.ResolveProvider = &resolveProvider

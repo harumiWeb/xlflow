@@ -1,3 +1,8 @@
+# Issue #915 designer review follow-up
+
+- [x] Honor explicit visibility for controls and Page tabs, retaining original Page collection indexes.
+- [x] Add hidden-parent and hidden-Page selection regressions and rerun Designer/Windows Webview checks.
+
 # PR #923 review follow-up
 
 - [x] Resolve picture roles before every canonical VBA component collector; cover module, class and document roots through CLI pack/file push.

@@ -34,14 +34,16 @@
   "scripts": {
     "compile": "pnpm run check && pnpm run bundle",
     "watch": "tsc -watch -p ./",
-    "check": "tsc -p ./ --noEmit",
+    "check": "tsc -p ./ --noEmit && tsc -p tsconfig.webview.json",
     "bundle": "node esbuild.js",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
-    "test": "pnpm run compile && node ./dist/test/runTest.js",
+    "test": "pnpm run compile && node ./dist/test/userFormRendering.test.js && node ./dist/test/runTest.js",
+    "test:designer": "pnpm run compile && node ./dist/test/userFormRendering.test.js",
     "lint": "oxlint ."
   },
   "dependencies": {
+    "preact": "^10.29.1",
     "vscode-languageclient": "^10.0.0"
   },
   "devDependencies": {
@@ -51,10 +53,23 @@
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1",
     "oxlint": "^1.71.0",
+    "preact-render-to-string": "^6.8.0",
     "typescript": "^5.9.0"
   },
   "l10n": "./l10n",
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "xlflow.userFormDesigner",
+        "displayName": "%customEditor.userFormDesigner.displayName%",
+        "selector": [
+          {
+            "filenamePattern": "*.{yaml,yml,json}"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
     "configuration": {
       "title": "%configuration.title%",
       "properties": {

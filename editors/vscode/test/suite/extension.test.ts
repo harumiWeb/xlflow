@@ -1,4 +1,9 @@
 import * as assert from "assert";
+import { runUserFormEditorAssertions } from "./userFormEditor.test";
+import {
+  runUserFormWebviewAssertions,
+  runCustomEditorRegistrationAssertions,
+} from "./userFormWebview.test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -108,12 +113,15 @@ export async function run(): Promise<void> {
 }
 
 async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<void> {
+  await runUserFormEditorAssertions();
   const extension =
     vscode.extensions.getExtension("ed2c27e6-6563-6407-a650-31eef08e0f25.xlflow-vscode") ??
     vscode.extensions.getExtension("harumiweb.xlflow-vscode");
   assert.ok(extension, "extension should be discoverable");
   await extension.activate();
   assertLocalizationResources(extension.extensionPath);
+  await runUserFormWebviewAssertions(extension.extensionUri);
+  await runCustomEditorRegistrationAssertions();
   assert.deepStrictEqual([...initWorkbookExtensions], ["xlsm", "xlam", "xlsb"]);
   assert.ok(newProjectWorkbookPlaceholder.includes(".xlsb"));
   assert.ok(newProjectWorkbookPlaceholder.includes(".xlam"));

@@ -15,6 +15,25 @@ const common = {
 Promise.all([
   esbuild.build({
     ...common,
+    jsx: "automatic",
+    jsxImportSource: "preact",
+    entryPoints: ["test/userFormRendering.test.tsx"],
+    outfile: "dist/test/userFormRendering.test.js",
+  }),
+  esbuild.build({
+    bundle: true,
+    platform: "browser",
+    format: "iife",
+    target: "es2022",
+    jsx: "automatic",
+    jsxImportSource: "preact",
+    entryPoints: ["webview/userFormDesigner/App.tsx"],
+    outfile: "dist/userFormDesigner/app.js",
+    sourcemap: !production,
+    minify: production,
+  }),
+  esbuild.build({
+    ...common,
     entryPoints: ["src/extension.ts"],
     outfile: "dist/extension.js",
   }),

@@ -367,6 +367,11 @@ func LoadFormSpec(input SpecInput) (FormSpec, error) {
 	if err != nil {
 		return FormSpec{}, err
 	}
+	return ParseFormSpec(input, body)
+}
+
+// ParseFormSpec validates and normalizes an in-memory source without reading files.
+func ParseFormSpec(input SpecInput, body []byte) (FormSpec, error) {
 	issues, err := ValidateFormSpecSource(input, body)
 	if err != nil {
 		return FormSpec{}, err

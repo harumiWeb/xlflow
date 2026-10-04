@@ -294,5 +294,11 @@
   "xlflow module new {name}": "xlflow module new {name}",
   "xlflow form new {name}": "xlflow form new {name}",
   "xlflow run {target}": "xlflow run {target}",
-  "xlflow test {target}": "xlflow test {target}"
+  "xlflow test {target}": "xlflow test {target}",
+  "Enable xlflow LSP to use the UserForm Designer.": "Enable xlflow LSP to use the UserForm Designer.",
+  "Select this form's project in xlflow before opening its designer.": "Select this form's project in xlflow before opening its designer.",
+  "Update xlflow to a version supporting UserForm previews.": "Update xlflow to a version supporting UserForm previews.",
+  "Open a FormSpec in an xlflow project.": "Open a FormSpec in an xlflow project.",
+  "This workspace has no xlflow.toml.": "This workspace has no xlflow.toml.",
+  "Open a FormSpec directly under the configured forms root's specs directory.": "Open a FormSpec directly under the configured forms root's specs directory."
 }

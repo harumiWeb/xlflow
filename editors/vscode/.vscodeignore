@@ -2,6 +2,8 @@
 .vscode-test/**
 .gitignore
 src/**
+webview/**
+tsconfig.webview.json
 test/**
 out/**
 dist-types/**

@@ -71,6 +71,9 @@ The main features include:
 
 - Displays project status for xlflow projects
 - Project recognition based on `xlflow.toml` configuration
+- Opens canonical YAML, YML, and JSON UserForm FormSpecs in an optional
+  read-only visual editor. The preview follows the current document and keeps
+  its last valid rendering while the source has errors.
 - Imports VBA modules from Excel workbooks
 - Applies edited VBA modules back to Excel workbooks
 - Starts and stops xlflow sessions
@@ -295,6 +298,9 @@ Additionally, ensure that both Windows and WSL instances can execute xlflow succ
 ## Known Limitations
 
 - This extension does not install or bundle `xlflow` itself.
+- The UserForm Designer is a read-only, approximate preview. It does not
+  provide editing, zoom, Page selection, or image asset loading; it requires a
+  compatible xlflow LSP for the selected project.
 - Macro selection functionality currently does not support interactive operations. Running `xlflow: Run Macro` will execute the configured default macro. Standalone `Sub` procedures without arguments can be invoked via CodeLens.
 - Both `xlflow: New Project` and `xlflow: Initialize Project` only display basic CLI workflows and do not provide a picker for selecting options like `--with-skill`, `--with-module`, `--agent`, or `--json`.
 - This extension itself does not implement VBA code analysis, diagnostics, formatting, suggestion displays, or symbol analysis. These functionalities are delegated to the `xlflow` CLI and `xlflow-lsp` components.

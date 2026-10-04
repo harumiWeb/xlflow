@@ -18,6 +18,7 @@ import { XlflowTestController } from "./testing";
 import { XlflowCapabilitiesService } from "./capabilities";
 import { XlflowRulesRegistryService } from "./rulesRegistry";
 import { setXlflowCapabilitiesService, setXlflowCliAvailabilityService } from "./xlflow";
+import { designerViewType, UserFormEditorProvider } from "./userFormEditor/provider";
 
 let clientManager: XlflowLanguageClientManager | undefined;
 let testController: XlflowTestController | undefined;
@@ -42,6 +43,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   cliAvailability = new XlflowCliAvailabilityService();
   setXlflowCliAvailabilityService(cliAvailability);
   clientManager = new XlflowLanguageClientManager(channels, startup);
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      designerViewType,
+      new UserFormEditorProvider(context.extensionUri, clientManager),
+      { supportsMultipleEditorsPerDocument: true },
+    ),
+  );
   testController = new XlflowTestController(channels);
   sessionManager = new SessionManager(channels);
   capabilitiesService = new XlflowCapabilitiesService(channels, {

@@ -1,0 +1,153 @@
+body {
+  font: var(--vscode-font-size) var(--vscode-font-family);
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  padding: 12px;
+}
+header {
+  margin-bottom: 16px;
+}
+button {
+  margin-left: 16px;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: 0;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.error {
+  border: 1px solid var(--vscode-inputValidation-errorBorder);
+  background: var(--vscode-inputValidation-errorBackground);
+  padding: 10px;
+}
+.notice {
+  color: var(--vscode-descriptionForeground);
+}
+.form-shell {
+  display: inline-block;
+  border: 1px solid var(--vscode-panel-border);
+  margin: 8px;
+}
+.form-title {
+  padding: 6px 10px;
+  background: var(--vscode-titleBar-activeBackground);
+  color: var(--vscode-titleBar-activeForeground);
+}
+.form {
+  position: relative;
+  overflow: hidden;
+  background: #f0f0f0;
+  color: #111;
+  font:
+    11px Tahoma,
+    sans-serif;
+}
+.control {
+  position: absolute;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+}
+.textbox,
+.combobox,
+.listbox {
+  border: 1px solid #888;
+  background: #fff;
+  padding: 2px;
+  overflow: hidden;
+}
+.commandbutton,
+.togglebutton,
+.spinbutton,
+.scrollbar {
+  border: 1px outset #aaa;
+  background: #ddd;
+  text-align: center;
+  overflow: hidden;
+}
+.commandbutton,
+.togglebutton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+}
+.commandbutton,
+.togglebutton,
+.combo-arrow {
+  border: 1px solid;
+  border-color: #fff #404040 #404040 #fff;
+  box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080;
+  background: #f0f0f0;
+}
+.combobox {
+  padding: 2px 22px 2px 3px;
+  border-color: #808080 #fff #fff #808080;
+  box-shadow: inset 1px 1px 0 #404040, inset -1px -1px 0 #dfdfdf;
+}
+.combo-text {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.combo-arrow {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  right: 1px;
+  width: 18px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.combo-chevron {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid #000;
+}
+.frame,
+.multipage {
+  border: 1px solid #aaa;
+}
+.frame-caption {
+  position: absolute;
+  top: -7px;
+  left: 8px;
+  background: #f0f0f0;
+  padding: 0 3px;
+}
+.image {
+  border: 1px dashed #888;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.placeholder {
+  color: #555;
+  overflow: hidden;
+}
+.disabled {
+  opacity: 0.55;
+}
+.tabs {
+  display: flex;
+  height: 24px;
+  overflow: hidden;
+}
+.tabs span {
+  padding: 4px 8px;
+  border: 1px solid #aaa;
+  white-space: nowrap;
+  background: #ddd;
+}
+.tabs .active {
+  background: #f0f0f0;
+  border-bottom: 0;
+}
+.page-content {
+  position: absolute;
+  inset: 24px 2px 2px;
+  overflow: hidden;
+}
