@@ -31,7 +31,12 @@ type Artifact struct {
 	Path         string
 	AbsolutePath string
 	Source       []byte
+	Role         ArtifactRole
 }
+
+type ArtifactRole string
+
+const ArtifactRolePicture ArtifactRole = "picture"
 
 type Component struct {
 	SourcePath   string
@@ -41,6 +46,9 @@ type Component struct {
 	Source       []byte
 	Related      []Artifact
 	FormSpec     *forms.FormSpec
+	// PreserveExistingCode keeps the current workbook code-behind when a
+	// sidecar-authoritative file push has no code sidecar for this form.
+	PreserveExistingCode bool
 }
 
 func (c Component) RelatedPaths() []string {
@@ -72,6 +80,15 @@ type Options struct {
 	// inventory with a nil FormSpec. Pack uses this in both template and blank
 	// modes so a legacy form without a spec reaches the engine's typed error.
 	AllowLegacyFormArtifacts bool
+	// IgnoreCanonicalCompatibilityArtifacts lets a FormSpec plus sidecar
+	// author Designer and code without reading stale .frm/.frx compatibility
+	// files. It applies only to forms that have a canonical spec in sidecar
+	// mode; legacy forms retain their existing artifact handling.
+	IgnoreCanonicalCompatibilityArtifacts bool
+	// PreserveMissingFormCode makes an absent sidecar mean "keep existing
+	// workbook code" for file pushes. An existing empty sidecar still clears
+	// the code, and a new form still starts with empty code.
+	PreserveMissingFormCode bool
 	// AllowLooseFormModules tolerates .bas/.cls files directly under the forms
 	// root (outside the reserved code/ and specs/ directories) instead of
 	// rejecting them as unsupported UserForm sources. The Excel bridge imports

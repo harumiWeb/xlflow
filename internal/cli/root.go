@@ -3102,9 +3102,6 @@ func (a *app) pushViaFile(ctx context.Context, cfg config.Config, pushOpts excel
 	if err := a.runUserFormCodeSourceValidation("push", cfg); err != nil {
 		return output.Envelope{}, 0, err
 	}
-	if err := a.runUserFormArtifactPreflight("push", cfg, nil); err != nil {
-		return output.Envelope{}, 0, err
-	}
 	if err := a.runSourcePreflightAfterEncoding(ctx, "push", cfg, "pushing to the saved workbook", nil, nil); err != nil {
 		return output.Envelope{}, 0, err
 	}

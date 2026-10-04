@@ -1,0 +1,46 @@
+{
+  "issue": 912,
+  "phase": "create",
+  "version": "16.0",
+  "build": "17932",
+  "os": "Microsoft Windows NT 10.0.22631.0",
+  "pid": 282464,
+  "cleanupConfirmed": true,
+  "beforeSave": [
+    {
+      "name": "ImageBmp",
+      "type": 1,
+      "width": 508,
+      "height": 339,
+      "pictureSizeMode": 3,
+      "pictureAlignment": 3
+    },
+    {
+      "name": "ImageJpeg",
+      "type": 1,
+      "width": 508,
+      "height": 339,
+      "pictureSizeMode": 3,
+      "pictureAlignment": 3
+    }
+  ],
+  "reopened": [
+    {
+      "name": "ImageBmp",
+      "type": 1,
+      "width": 508,
+      "height": 339,
+      "pictureSizeMode": 3,
+      "pictureAlignment": 3
+    },
+    {
+      "name": "ImageJpeg",
+      "type": 1,
+      "width": 508,
+      "height": 339,
+      "pictureSizeMode": 3,
+      "pictureAlignment": 3
+    }
+  ],
+  "sentinel": "issue-912-ok"
+}

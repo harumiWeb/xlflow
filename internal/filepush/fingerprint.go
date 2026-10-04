@@ -133,13 +133,22 @@ func isASCIILetter(b byte) bool {
 // computeFingerprint ports ComputeFingerprint: one entry per discovered file,
 // the normalized workbook path, and the transform toggles (line numbers,
 // folder annotation mode) that change the effective imported text.
-func computeFingerprint(workbookPath string, files []discoveredFile, lineNumbers bool, folderAnnotation string) sourceFingerprint {
+func computeFingerprint(workbookPath string, files []discoveredFile, lineNumbers bool, folderAnnotation string) (sourceFingerprint, error) {
 	entries := make([]sourceFileEntry, 0, len(files))
 	for _, file := range files {
+		body := file.Body
+		if !file.HasBody {
+			var err error
+			body, err = os.ReadFile(file.FullPath)
+			if err != nil {
+				return sourceFingerprint{}, &SourceReadError{Path: file.FullPath, Err: err}
+			}
+		}
+		sum := sha256.Sum256(body)
 		entries = append(entries, sourceFileEntry{
 			Kind: file.Kind,
 			Path: file.RelativePath,
-			Hash: computeFileHash(file.FullPath),
+			Hash: hex.EncodeToString(sum[:]),
 		})
 	}
 	return sourceFingerprint{
@@ -147,16 +156,7 @@ func computeFingerprint(workbookPath string, files []discoveredFile, lineNumbers
 		Files:              entries,
 		LineNumbersEnabled: lineNumbers,
 		FolderAnnotation:   folderAnnotation,
-	}
-}
-
-func computeFileHash(path string) string {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:])
+	}, nil
 }
 
 // fingerprintEquals compares fingerprints as multisets of (kind, path, hash)

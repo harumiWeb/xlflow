@@ -73,21 +73,26 @@ All notable changes to xlflow will be documented in this file.
   `.xlsm` that rebuilds `xl/vbaProject.bin` from the tracked source tree and
   atomically replaces the workbook without Excel, COM, VBIDE, or the bridge.
   It supports Linux, containers, CI, WSL, and remote agents; refuses to run
-  while the workbook is open or owned by a recorded session; preserves
-  existing UserForm designer storage and sidecar code-behind; and shares the
-  Excel backend's fingerprint and `push.json` schema so `--changed-only`
-  interoperates across backends. A successful file push reports
+  while the workbook is open or owned by a recorded session. It now uses
+  canonical FormSpecs to add supported forms, apply Designer edits, and embed
+  bounded BMP/JPEG assets on Image controls. Omitted forms and omitted
+  pictures preserve template state; file push has template-authoritative form
+  topology independently of `[pack].userform_topology`. Its changed-only
+  fingerprint includes FormSpecs and referenced asset bytes and skips only
+  when the recorded backend covered the same effective inputs. A successful file push reports
   `push.backend="file"`, `vbe_validation="not_performed"`, and warning
   `vbe_validation_skipped` because no VBE compile ran. Capabilities schema v3
   now advertises `push` backends (`default_backend="excel"`, `file` with
   `requires_excel=false`), and backup metadata records the producing backend.
 - Added pure-Go UserForm extraction to `pull --backend file` for sidecar
   projects. Saved MS-OFORMS Designer state is published as canonical YAML with
-  code-behind sidecars in the same rollback-capable source transaction as
-  ordinary modules; closed supported UserForm workbooks now use the file
-  backend in auto mode without launching Excel. File-pulled specs persist an
-  unsynchronized compatibility-artifact marker so both push backends fail
-  safely instead of importing a same-named stale `.frm` Designer.
+  code-behind sidecars and supported content-addressed picture assets in the
+  same rollback-capable source publication as ordinary modules; closed
+  supported UserForm workbooks now use the file backend in auto mode without
+  launching Excel. The compatibility-artifact marker blocks `.frm`-authority
+  imports, while canonical FormSpec plus sidecar file push ignores stale
+  compatibility artifacts. Pulled assets are retained and are not
+  automatically garbage-collected.
 - Added a pure-Go projection from lossless MS-OFORMS UserForm state to the
   canonical `xlflow.userform` specification. Common controls, nested parent
   relationships, point-based geometry, captions, values, tab order, and

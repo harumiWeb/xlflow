@@ -410,7 +410,6 @@ End Function
         }
         $formsCanary = Join-Path $userFormWorkspace 'src\forms\release-gate-canary.frx'
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $formsCanary) | Out-Null
-        [IO.File]::WriteAllBytes($formsCanary, [byte[]](0, 13, 10, 255, 128, 1))
         $formSpecPath = Join-Path $userFormWorkspace 'src\forms\specs\FilePullForm.yaml'
         $formCodePath = Join-Path $userFormWorkspace 'src\forms\code\FilePullForm.bas'
         if (-not (Test-Path -LiteralPath $formSpecPath) -or -not (Test-Path -LiteralPath $formCodePath)) {
@@ -425,7 +424,7 @@ End Function
         if (-not ([IO.File]::ReadAllText($formSpecPath).Contains('compatibility_artifact_unsynchronized'))) {
             throw 'UserForm Designer YAML did not mark compatibility artifacts as unsynchronized'
         }
-        foreach ($backend in @('file', 'excel')) {
+        foreach ($backend in @('excel')) {
             $pushExcelPidsBefore = @((Get-Process -Name EXCEL -ErrorAction SilentlyContinue).Id | Sort-Object)
             $rejectedPush = Invoke-XlflowJson @('push', '--backend', $backend, '--json') -AllowFailure
             $pushExcelPidsAfter = @((Get-Process -Name EXCEL -ErrorAction SilentlyContinue).Id | Sort-Object)
@@ -437,6 +436,12 @@ End Function
                 throw "Rejected UserForm push --backend $backend started Excel processes: new=$($newPushExcelPids -join ',')"
             }
         }
+        $filePushPidsBefore = @((Get-Process -Name EXCEL -ErrorAction SilentlyContinue).Id | Sort-Object)
+        $canonicalPush = Invoke-XlflowJson @('push', '--backend', 'file', '--json')
+        if ($canonicalPush.Json.push.backend -ne 'file') { throw 'Canonical-only UserForm push did not use file authority.' }
+        $filePushPidsAfter = @((Get-Process -Name EXCEL -ErrorAction SilentlyContinue).Id | Sort-Object)
+        if (@($filePushPidsAfter | Where-Object { $filePushPidsBefore -notcontains $_ }).Count) { throw 'Canonical file push started Excel.' }
+        [IO.File]::WriteAllBytes($formsCanary, [byte[]](0, 13, 10, 255, 128, 1))
         $beforeRepeat = Get-SourceByteSnapshot $userFormWorkspace
         $explicitFormPull = Invoke-XlflowJson @('pull', '--backend', 'file', '--json')
         if ($explicitFormPull.Json.pull.backend_selection -ne 'explicit') {

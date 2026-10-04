@@ -92,6 +92,17 @@ bridge so both backends agree on what changed:
   `forms/**/*.frm|.frx|.bas|.cls`, `workbook/**/*.bas`, and — only in
   sidecar mode — `forms/code/**/*.bas` as `form_code`. Fingerprint entries are
   `(kind, root-relative path, SHA-256)`.
+- In sidecar mode, canonical `forms/specs/**/*.yaml|.yml|.json` FormSpecs are
+  passed to the shared pure-Go UserForm compiler. A FormSpec can add a form,
+  update a supported Designer, or replace/remove an Image picture. Referenced
+  assets are resolved relative to the project root and included in the
+  file-backend fingerprint. See
+  [`userform-picture-assets.md`](userform-picture-assets.md) for schema,
+  bounds, and containment rules.
+- Only image assets referenced by canonical FormSpecs are loaded, validated,
+  and included in file-push fingerprints. Unreferenced files under the reserved
+  forms `assets/` directory are retained and ignored; pull does not
+  automatically garbage-collect them.
 - Duplicate component names across module/class/form/document entries fail
   with `duplicate_module_name` before mutation. `.frx` companions and
   `form_code` sidecars never collide.
@@ -107,17 +118,29 @@ VB_*` lines stripped; an empty body becomes `Option Explicit`), matching
   and runs as a whole-tree preflight: existing numeric labels or numeric
   `GoTo`/`GoSub`/`Resume` targets fail with `vba_line_number_safety_failed`
   before the workbook is read.
-- In sidecar mode a UserForm's `code/<Name>.bas` is merged into its `.frm` in
-  memory; the tracked `.frm` on disk is never rewritten by this backend.
-  A FormSpec carrying the file-pull marker
-  `compatibility_artifact_unsynchronized` fails shared source preflight with
-  `FRM201`, even when a same-name `.frm` exists, because that compatibility
-  artifact may contain stale Designer state. Apply the spec with `form build`
-  and refresh compatibility artifacts with an Excel-backed pull before either
-  push backend is used.
-  Creating a new UserForm (no designer storage in the template) fails with
-  `push_userform_generation_unsupported`; existing forms update code-behind
-  and carry `.frx` storage byte-for-byte.
+- Canonical FormSpec state is the Designer authority for sidecar forms. A
+  retained `.frm` / `.frx` is not imported when a canonical spec and sidecar
+  code are selected, so the file-pull
+  `compatibility_artifact_unsynchronized` marker does not block that path.
+  The marker still fails with `FRM201` when `frm` code or compatibility
+  artifacts are selected as import authority. File push never rewrites
+  compatibility files in the source tree.
+- File-push UserForm topology remains template-authoritative: forms absent
+  from source are preserved, and `[pack].userform_topology` is ignored. In
+  sidecar mode, a missing code sidecar preserves an existing form's code; an
+  explicitly empty sidecar clears it. A newly added form with no code sidecar
+  starts with empty code. `pack` retains its separate topology and code-source
+  contract.
+- New forms, Designer edits, and supported picture edits are compiled and
+  validated by the shared pure-Go pipeline before publication. Existing
+  unsupported picture resources are preserved when omitted; an operation that
+  would lose unsupported resource bytes fails before publication. Custom
+  ActiveX generation or import is unsupported by this backend and never
+  triggers an Excel fallback. Such compatibility operations require explicit
+  Excel-authored `.frm` / `.frx` artifacts and an explicitly selected Excel
+  workflow. The current registry probes found no `MSComctlLib.TreeCtrl.2`,
+  `MSComctlLib.ListViewCtrl.2`, `RefEdit.Ctrl`, or `MSCAL.Calendar.7`; no
+  real-Excel custom ActiveX import behavior has been verified.
 
 Protected or signed projects, missing `xl/vbaProject.bin`, and structurally
 ambiguous component sets fail before publication with the pack engine's
@@ -147,8 +170,10 @@ still hold:
 
 1. the source fingerprint (workbook path, per-file kind/path/hash entries,
    `line_numbers_enabled`, and the effective `folder_annotation` mode)
-   matches the current tree — compared order-insensitively so bridge and
-   file enumeration order both match;
+   matches the current tree — compared order-insensitively. File-backend
+   fingerprints additionally include canonical FormSpecs and referenced
+   asset bytes; a fingerprint from a backend that did not include those inputs
+   cannot justify a skip;
 2. `applied_to.saved_file` still describes the workbook: normalized path,
    last-write timestamp in .NET ticks, and byte length.
 
@@ -157,7 +182,8 @@ are canonicalized so the same file is identical across the WSL/Windows
 boundary: under WSL an absolute `/mnt/<drive>/...` path is recorded as its
 Windows `D:\...` form, and comparisons normalize both sides the same way, so
 a state file written by the file backend on WSL satisfies the Excel bridge's
-`--changed-only` check on Windows (and vice versa). Paths outside `/mnt/` keep
+`--changed-only` check on Windows (and vice versa) when both recorded
+fingerprints represent the same effective inputs. Paths outside `/mnt/` keep
 their native form — Windows cannot see them, so no interop is claimed.
 
 A state file in the legacy bare-fingerprint shape has no delivery evidence and
@@ -235,29 +261,45 @@ project is live-valid — the boundary the file backend itself cannot check.
 The script prints the workspace path, sentinel result, and Excel/OS identity
 for release evidence.
 
+`scripts/test-formspec-file-push-e2e.ps1` covers canonical pull → file push →
+pull, spec-only and asset-only changes, malformed-asset rejection without
+publication, blank and template pack, and an Excel open/compile/run check after
+the source assets are unavailable. Picture-specific Designer persistence is
+also covered by `scripts/test-userform-pictures-e2e.ps1`. The Excel-authored
+JPEG fixture is normalized to BMP; the separate canonical Issue #912 gate
+verifies native JPEG picture output through file push, blank pack, and template
+pack in real Excel after source asset paths are unavailable. All three paths
+passed picture display, Designer property, sentinel, and SaveAs/reopen checks
+on Excel 16.0 build 17932 / Windows 10.0.22631, with owned Excel cleanup
+confirmed. These are
+developer-only gates and do not run in PR CI. The available registry did not
+contain `MSComctlLib.TreeCtrl.2`, `MSComctlLib.ListViewCtrl.2`,
+`RefEdit.Ctrl`, or `MSCAL.Calendar.7`; no real-Excel custom ActiveX import
+result is established by these gates.
+
 ## Stable failures
 
-| Error code                             | Meaning                                                                |
-| -------------------------------------- | ---------------------------------------------------------------------- |
-| `push_args_invalid`                    | Unknown backend, or `--backend file` with `--session`/`--no-save`.     |
-| `workbook_format_unsupported`          | File backend was requested for a non-`.xlsm` workbook.                 |
-| `push_workbook_open`                   | Lock file, Restart Manager open report, or indeterminate probe.        |
-| `push_active_session`                  | A matching xlflow session is recorded (or WSL probe failed).           |
-| `duplicate_module_name`                | Case-insensitive component-name collision across kinds.                |
-| `vba_line_number_safety_failed`        | Source is unsafe for Erl instrumentation.                              |
-| `push_backup_failed`                   | Pre-push backup could not be created.                                  |
-| `push_protected_project`               | The saved VBA project is protected.                                    |
-| `push_signed_project`                  | The saved VBA project is signed.                                       |
-| `push_userform_generation_unsupported` | Source defines a UserForm absent from the workbook's designer storage. |
-| `push_ambiguous_layout`                | Component set cannot be mapped unambiguously onto the project.         |
-| `push_output_busy`                     | The workbook cannot be replaced because it is in use.                  |
-| `push_output_replace_failed`           | Atomic replacement of the workbook failed.                             |
-| `push_write_failed`                    | Publication failed for an uncategorized reason.                        |
-| `push_state_persist_failed` (warning)  | Workbook published but `push.json` could not be written.               |
-| `workbook_busy`                        | Another xlflow operation holds the workbook lease for the push window. |
-| `workbook_recovery_required`           | The workbook carries a recovery marker requiring explicit recovery.    |
-| `coordination_recovery_check_failed`   | The workbook's recovery state could not be read safely.                |
-| `coordination_acquire_failed`          | The publish-window workbook lease could not be acquired.               |
-| `source_tree_busy`                     | Another process owns a managed source root.                            |
-| `source_tree_busy_timeout`             | Waiting for a managed source root timed out.                           |
-| `source_tree_busy_cancelled`           | Waiting for a managed source root was cancelled.                       |
+| Error code                             | Meaning                                                                                         |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `push_args_invalid`                    | Unknown backend, or `--backend file` with `--session`/`--no-save`.                              |
+| `workbook_format_unsupported`          | File backend was requested for a non-`.xlsm` workbook.                                          |
+| `push_workbook_open`                   | Lock file, Restart Manager open report, or indeterminate probe.                                 |
+| `push_active_session`                  | A matching xlflow session is recorded (or WSL probe failed).                                    |
+| `duplicate_module_name`                | Case-insensitive component-name collision across kinds.                                         |
+| `vba_line_number_safety_failed`        | Source is unsafe for Erl instrumentation.                                                       |
+| `push_backup_failed`                   | Pre-push backup could not be created.                                                           |
+| `push_protected_project`               | The saved VBA project is protected.                                                             |
+| `push_signed_project`                  | The saved VBA project is signed.                                                                |
+| `push_userform_generation_unsupported` | A requested UserForm generation or Designer resource is outside the supported pure-Go contract. |
+| `push_ambiguous_layout`                | Component set cannot be mapped unambiguously onto the project.                                  |
+| `push_output_busy`                     | The workbook cannot be replaced because it is in use.                                           |
+| `push_output_replace_failed`           | Atomic replacement of the workbook failed.                                                      |
+| `push_write_failed`                    | Publication failed for an uncategorized reason.                                                 |
+| `push_state_persist_failed` (warning)  | Workbook published but `push.json` could not be written.                                        |
+| `workbook_busy`                        | Another xlflow operation holds the workbook lease for the push window.                          |
+| `workbook_recovery_required`           | The workbook carries a recovery marker requiring explicit recovery.                             |
+| `coordination_recovery_check_failed`   | The workbook's recovery state could not be read safely.                                         |
+| `coordination_acquire_failed`          | The publish-window workbook lease could not be acquired.                                        |
+| `source_tree_busy`                     | Another process owns a managed source root.                                                     |
+| `source_tree_busy_timeout`             | Waiting for a managed source root timed out.                                                    |
+| `source_tree_busy_cancelled`           | Waiting for a managed source root was cancelled.                                                |

@@ -1,6 +1,7 @@
 package oforms
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"maps"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/picture"
 )
 
 // Definition is authoring input in persistence units, separate from FormSpec.
@@ -319,7 +321,23 @@ func setGenerationProperty(record *Record, table *recordSpec, name string, value
 			continue
 		}
 		if field.kind == fieldMarker {
-			return fmt.Errorf("%w: resource %s", ErrUnsupportedEdit, name)
+			if table != &imageSpec || name != "Picture" {
+				return fmt.Errorf("%w: resource %s", ErrUnsupportedEdit, name)
+			}
+			raw, ok := value.([]byte)
+			if !ok {
+				return fmt.Errorf("%w: Picture requires encoded StdPicture bytes", ErrInvalidEdit)
+			}
+			if _, err := picture.Decode(raw); err != nil {
+				return fmt.Errorf("%w: invalid Picture: %v", ErrInvalidEdit, err)
+			}
+			if record.Pictures == nil {
+				record.Pictures = make(map[string][]byte)
+			}
+			record.Pictures[name] = bytes.Clone(raw)
+			record.Values[name] = math.MaxUint16
+			record.Mask |= uint64(1) << field.bit
+			return nil
 		}
 		if field.kind == fieldStringLength {
 			text, ok := value.(string)

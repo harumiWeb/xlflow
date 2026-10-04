@@ -59,6 +59,12 @@ func propertyAtPath(doc *Document, path string) (forms.PropertyContract, string,
 	case isTabPath(parent):
 		property, ok := forms.LookupTabProperty(name)
 		return property, "TabStrip tab", ok
+	case isPictureActionPath(parent):
+		control := controlAtPath(doc.Source, parentPath(parent))
+		if strings.EqualFold(control.Type, "Image") {
+			property, ok := forms.LookupPictureActionProperty(name)
+			return property, "Image picture action", ok
+		}
 	case isControlPath(parent):
 		control := controlAtPath(doc.Source, parent)
 		if property, ok := forms.LookupControlProperty(control.Type, name); ok {

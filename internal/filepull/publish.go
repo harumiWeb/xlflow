@@ -1,6 +1,7 @@
 package filepull
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -24,8 +25,12 @@ type originalFile struct {
 
 func publish(p plan) error {
 	paths := make([]string, 0, len(p.files)+len(p.stale))
+	assetBodies := make(map[string][]byte)
 	for _, file := range p.files {
 		paths = append(paths, file.path)
+		if file.preserveExistingAsset {
+			assetBodies[filepath.Clean(file.path)] = file.body
+		}
 	}
 	paths = append(paths, p.stale...)
 	slices.Sort(paths)
@@ -37,6 +42,9 @@ func publish(p plan) error {
 		original, err := snapshot(path)
 		if err != nil {
 			return fmt.Errorf("%w: snapshot %s: %v", ErrPublish, path, err)
+		}
+		if body, asset := assetBodies[filepath.Clean(path)]; asset && original.exists && !bytes.Equal(original.body, body) {
+			return fmt.Errorf("%w: existing path %s has different contents", ErrPictureAssetConflict, path)
 		}
 		originals = append(originals, original)
 	}

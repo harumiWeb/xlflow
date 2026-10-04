@@ -124,6 +124,27 @@ func LookupFormObservedProperty(propertyName string) (PropertyContract, bool) {
 	return clonePropertyContract(property), ok
 }
 
+// LookupPictureActionProperty returns metadata for fields nested under an
+// Image control's picture action object.
+func LookupPictureActionProperty(propertyName string) (PropertyContract, bool) {
+	property, ok := lookupProperty(pictureActionProperties(), propertyName)
+	if !ok {
+		return PropertyContract{}, false
+	}
+	return clonePropertyContract(property), true
+}
+
+func PictureActionProperties() map[string]PropertyContract {
+	return clonePropertyMap(pictureActionProperties())
+}
+
+func pictureActionProperties() map[string]PropertyContract {
+	return map[string]PropertyContract{
+		"path":   property(ValueTypeString, false, SupportLevelSupported, "Project-root-relative BMP or JPEG asset path.", true),
+		"remove": propertyWithAllowed(ValueTypeBoolean, false, SupportLevelSupported, "Clear the existing Image picture.", true, "true"),
+	}
+}
+
 // LookupObservedControlProperty returns snapshot metadata for fields nested
 // under controls[*].observed. The same field names may be build-supported at a
 // control's top level, but their observed copies describe captured state.
@@ -316,11 +337,15 @@ func newUserFormContract() Contract {
 			"togglebutton":  control("ToggleButton", "Forms.ToggleButton.1", false, typeProperties("caption", "ToggleButton caption.", "value", "ToggleButton selected state.")),
 			"spinbutton":    control("SpinButton", "Forms.SpinButton.1", false, integerValueProperties("SpinButton value.")),
 			"scrollbar":     control("ScrollBar", "Forms.ScrollBar.1", false, integerValueProperties("ScrollBar value.")),
-			"image":         control("Image", "Forms.Image.1", false, map[string]PropertyContract{}),
-			"frame":         control("Frame", "Forms.Frame.1", true, typeProperties("caption", "Frame caption.")),
-			"multipage":     multiPage,
-			"page":          page,
-			"tabstrip":      tabStrip,
+			"image": control("Image", "Forms.Image.1", false, map[string]PropertyContract{
+				"picture":          property(ValueTypeObject, false, SupportLevelSupported, "Replace or remove an Image picture using a project-root-relative BMP or JPEG asset.", true),
+				"pictureAlignment": propertyWithAllowed(ValueTypeInteger, false, SupportLevelSupported, "Image picture alignment (0 through 4).", true, "0", "1", "2", "3", "4"),
+				"pictureSizeMode":  propertyWithAllowed(ValueTypeInteger, false, SupportLevelSupported, "Image picture size mode: clip (0), stretch (1), or zoom (3).", true, "0", "1", "3"),
+			}),
+			"frame":     control("Frame", "Forms.Frame.1", true, typeProperties("caption", "Frame caption.")),
+			"multipage": multiPage,
+			"page":      page,
+			"tabstrip":  tabStrip,
 		},
 	}
 }

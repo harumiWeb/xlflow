@@ -44,7 +44,14 @@ func TestPushAppliesSourceTreeAndWritesState(t *testing.T) {
 		t.Fatalf("backup not created: %v", err)
 	}
 	state := readState(t, result.StatePath)
-	current := computeFingerprint(workbook, discoverSourceFiles(resolvedRoots(root, cfg), cfg.UserForm.CodeSource), false, cfg.VBA.FolderAnnotation)
+	snapshot, err := captureSourceSnapshot(root, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := computeFingerprint(workbook, snapshot.files, false, cfg.VBA.FolderAnnotation)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !fingerprintEquals(state.Fingerprint, current) {
 		t.Fatal("recorded fingerprint does not match the pushed source tree")
 	}
@@ -213,6 +220,260 @@ func TestPushUpdatesUserFormCodeBehindFromSidecar(t *testing.T) {
 	// in memory only.
 	if body := mustRead(t, filepath.Join(root, "src", "forms", "UserForm1.frm")); bytes.Contains(body, []byte("SIDECAR")) {
 		t.Fatal("file push rewrote the tracked .frm")
+	}
+}
+
+func TestPushChangedOnlyTracksFormSpecAndReferencedPictureBytes(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	cfg := testConfig()
+	cfg.UserForm.CodeSource = "sidecar"
+	assetDir := filepath.Join(root, "src", "forms", "assets")
+	if err := os.MkdirAll(assetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bmp, err := os.ReadFile(filepath.Join("..", "vba", "userforms", "compiler", "testdata", "pictures-excel-authored", "logo.bmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assetPath := filepath.Join(assetDir, "123abc456def.bmp")
+	if err := os.WriteFile(assetPath, bmp, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(root, "src", "forms", "specs", "Login.json")
+	spec := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login","caption":"Before"},"controls":[{"id":"image1","name":"Image1","type":"Image","picture":{"path":"src/forms/assets/123abc456def.bmp"}}]}`
+	writeTestFile(t, specPath, spec)
+
+	first, err := Push(root, cfg, workbook, Options{ChangedOnly: true, BackupMode: "never"})
+	if err != nil || first.Skipped {
+		t.Fatalf("first push = %+v, %v", first, err)
+	}
+	// Old SHA-addressed files and other user files are retained without
+	// becoming source inputs or invalidating changed-only state.
+	if err := os.WriteFile(filepath.Join(assetDir, "deadbeef.bmp"), bmp, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(assetDir, "manifest.txt"), []byte("retained"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, err := Push(root, cfg, workbook, Options{ChangedOnly: true, BackupMode: "never"})
+	if err != nil || !unchanged.Skipped {
+		t.Fatalf("retained assets invalidated unchanged skip: %+v, %v", unchanged, err)
+	}
+
+	writeTestFile(t, specPath, strings.Replace(spec, "Before", "After", 1))
+	changed, err := Push(root, cfg, workbook, Options{ChangedOnly: true, BackupMode: "never"})
+	if err != nil || changed.Skipped {
+		t.Fatalf("FormSpec-only change did not invalidate fingerprint: %+v, %v", changed, err)
+	}
+}
+
+func TestPushLocksReferencedPictureDirectory(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	cfg := testConfig()
+	cfg.UserForm.CodeSource = "sidecar"
+	assetDir := filepath.Join(root, "assets")
+	if err := os.MkdirAll(assetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bmp, err := os.ReadFile(filepath.Join("..", "vba", "userforms", "compiler", "testdata", "pictures-excel-authored", "logo.bmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(assetDir, "logo.bas"), bmp, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(root, "src", "forms", "specs", "Login.json"), `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login"},"controls":[{"id":"image1","name":"Image1","type":"Image","picture":{"path":"assets/logo.bas"}}]}`)
+	snapshot, err := captureSourceSnapshot(root, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pictureFound bool
+	for _, input := range snapshot.files {
+		if input.FullPath == filepath.Join(assetDir, "logo.bas") {
+			pictureFound = input.Kind == "form_asset"
+		}
+	}
+	if !pictureFound {
+		t.Fatal("referenced arbitrary-suffix picture was not inventoried as a form asset")
+	}
+	manager, err := coordination.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := coordination.NewSourceTreeIdentity(root, assetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := manager.Acquire(context.Background(), coordination.AcquireRequest{
+		Identity: identity, Command: "pull", OperationKind: coordination.OperationMutate,
+		ResourceScope: coordination.ResourceSourceTree,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Release() }()
+	if _, err := Push(root, cfg, workbook, Options{Coordination: manager, BackupMode: "never"}); !errors.Is(err, coordination.ErrSourceTreeBusy) {
+		t.Fatalf("push error = %v, want referenced asset directory lock contention", err)
+	}
+}
+
+func TestPushReferencedPictureWithBasSuffixIsNotImportedAsModule(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	cfg := testConfig()
+	cfg.UserForm.CodeSource = "sidecar"
+	imagePath := filepath.Join(root, "src", "forms", "images", "logo.bas")
+	bmp, err := os.ReadFile(filepath.Join("..", "vba", "userforms", "compiler", "testdata", "pictures-excel-authored", "logo.bmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(imagePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(imagePath, bmp, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(root, "src", "forms", "specs", "Login.json"), `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login"},"controls":[{"id":"image1","name":"Image1","type":"Image","picture":{"path":"src/forms/images/logo.bas"}}]}`)
+	writeTestFile(t, filepath.Join(root, "src", "forms", "code", "Login.bas"), "Private Sub FormCode()\nEnd Sub\n")
+
+	snapshot, err := captureSourceSnapshot(root, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pictureFound bool
+	for _, file := range snapshot.files {
+		if file.FullPath == imagePath && file.Kind == "form_asset" {
+			pictureFound = true
+		}
+	}
+	if !pictureFound {
+		t.Fatal("picture with module suffix was not inventoried as an asset")
+	}
+	for _, module := range snapshot.modules {
+		if strings.EqualFold(module.Name, "logo") {
+			t.Fatalf("picture bytes were submitted as VBA module source: %+v", module)
+		}
+	}
+	if _, err := Push(root, cfg, workbook, Options{BackupMode: "never"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := moduleSourceOf(readProject(t, workbook), "logo"); got != "" {
+		t.Fatalf("picture was imported as a VBA module: %q", got)
+	}
+}
+
+func TestPushReferencedPictureSymlinkWithBasSuffixIsNotImportedAsModule(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	cfg := testConfig()
+	cfg.UserForm.CodeSource = "sidecar"
+	imagePath := filepath.Join(root, "src", "forms", "assets", "picture.bmp")
+	bmp, err := os.ReadFile(filepath.Join("..", "vba", "userforms", "compiler", "testdata", "pictures-excel-authored", "logo.bmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(imagePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(imagePath, bmp, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkPath := filepath.Join(root, "src", "forms", "Linked.bas")
+	if err := os.Symlink(filepath.Join("assets", "picture.bmp"), linkPath); err != nil {
+		t.Skipf("cannot create an image symlink: %v", err)
+	}
+	writeTestFile(t, filepath.Join(root, "src", "forms", "specs", "Login.json"), `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login"},"controls":[{"id":"image1","name":"Image1","type":"Image","picture":{"path":"src/forms/Linked.bas"}}]}`)
+	snapshot, err := captureSourceSnapshot(root, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pictureFound bool
+	for _, file := range snapshot.files {
+		if file.Kind == "form_asset" && file.RelativePath == "src/forms/Linked.bas" && file.FullPath == imagePath {
+			pictureFound = true
+		}
+	}
+	if !pictureFound {
+		t.Fatal("symlink picture did not retain its logical reference and physical target")
+	}
+	first, err := Push(root, cfg, workbook, Options{BackupMode: "never", ChangedOnly: true})
+	if err != nil || first.Skipped {
+		t.Fatalf("initial symlink picture push = %+v, %v", first, err)
+	}
+	if got := moduleSourceOf(readProject(t, workbook), "Linked"); got != "" {
+		t.Fatalf("symlink picture was imported as a VBA module: %q", got)
+	}
+	unchanged, err := Push(root, cfg, workbook, Options{BackupMode: "never", ChangedOnly: true})
+	if err != nil || !unchanged.Skipped {
+		t.Fatalf("unchanged symlink picture push = %+v, %v", unchanged, err)
+	}
+	bmp[len(bmp)-1] ^= 1
+	if err := os.WriteFile(imagePath, bmp, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := Push(root, cfg, workbook, Options{BackupMode: "never", ChangedOnly: true})
+	if err != nil || changed.Skipped {
+		t.Fatalf("symlink target change did not invalidate the fingerprint: %+v, %v", changed, err)
+	}
+}
+
+func TestPushCanonicalFormMissingAndEmptySidecarSemantics(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	cfg := testConfig()
+	cfg.UserForm.CodeSource = "sidecar"
+	specPath := filepath.Join(root, "src", "forms", "specs", "Login.json")
+	sidecarPath := filepath.Join(root, "src", "forms", "code", "Login.bas")
+	spec := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login","caption":"Initial"},"controls":[]}`
+	writeTestFile(t, specPath, spec)
+	writeTestFile(t, sidecarPath, "Private Sub KeepMe()\n    Debug.Print \"keep\"\nEnd Sub\n")
+	if _, err := Push(root, cfg, workbook, Options{BackupMode: "never"}); err != nil {
+		t.Fatalf("initial form push: %v", err)
+	}
+	initialCode := moduleSourceOf(readProject(t, workbook), "Login")
+
+	if err := os.Remove(sidecarPath); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Pack.UserFormTopology = "source"
+	cfg.VBA.LineNumbers.Enabled = true
+	writeTestFile(t, specPath, strings.Replace(spec, "Initial", "Updated", 1))
+	if _, err := Push(root, cfg, workbook, Options{BackupMode: "never"}); err != nil {
+		t.Fatalf("push with omitted sidecar: %v", err)
+	}
+	project := readProject(t, workbook)
+	if got := moduleSourceOf(project, "Login"); got != initialCode {
+		t.Fatalf("omitted sidecar changed existing code:\n got: %q\nwant: %q", got, initialCode)
+	}
+	if len(project.Forms) != 1 {
+		t.Fatalf("omitted forms were removed under source topology: %d forms", len(project.Forms))
+	}
+
+	if err := os.WriteFile(sidecarPath, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Push(root, cfg, workbook, Options{BackupMode: "never"}); err != nil {
+		t.Fatalf("push with explicit empty sidecar: %v", err)
+	}
+	project = readProject(t, workbook)
+	if got := moduleSourceOf(project, "Login"); strings.Contains(got, "KeepMe") || strings.Contains(got, `Debug.Print "keep"`) {
+		t.Fatalf("explicit empty sidecar did not clear code: %q", got)
+	}
+
+	if err := os.Remove(specPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(sidecarPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Push(root, cfg, workbook, Options{BackupMode: "never"}); err != nil {
+		t.Fatalf("push with omitted form under source topology: %v", err)
+	}
+	project = readProject(t, workbook)
+	if len(project.Forms) != 1 {
+		t.Fatalf("filepush removed an omitted form from the template topology: %d forms", len(project.Forms))
 	}
 }
 
@@ -434,7 +695,10 @@ func TestPushStatePathsCanonicalAcrossHosts(t *testing.T) {
 		}
 	}
 
-	left := computeFingerprint(`/mnt/c/proj/build/Book.xlsm`, nil, false, "")
+	left, err := computeFingerprint(`/mnt/c/proj/build/Book.xlsm`, nil, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	right := sourceFingerprint{WorkbookPath: `C:\proj\build\Book.xlsm`}
 	if !fingerprintEquals(left, right) {
 		t.Fatal("cross-host workbook paths broke fingerprint equality")

@@ -25,3 +25,26 @@ normalized no-selection value is `-1`, including when the collection is empty.
 Page geometry comes from its owning MultiPage, so do not author Page
 `left`/`top`/`width`/`height`. See the [UserForm specification](../reference/userform-spec)
 for the complete schema, snapshot shape, and generation details.
+
+## Image pictures
+
+An Image control can load a project-root-relative BMP or JPEG asset in pure-Go
+`pack` and `push --backend file`:
+
+```yaml
+- id: brand-mark
+  name: BrandMark
+  type: Image
+  picture:
+    path: src/forms/assets/brand.jpg
+```
+
+Assets are confined to the project after resolving symlinks and junctions, and
+are limited to 16 MiB and 16 million pixels. Use `picture: { remove: true }`
+to clear an existing picture. Omitting `picture` preserves it. File pull stores
+supported embedded images in `src/forms/assets/<full-SHA-256>.bmp|jpg`; those
+files are not automatically deleted. File push loads, validates, and
+fingerprints referenced assets only; unreferenced assets are retained and
+ignored. Excel may normalize JPEG input to BMP when saving. Excel-backed `form build` and apply APIs reject `picture` until
+they implement the same contract. See the [UserForm specification](../reference/userform-spec)
+for invalid values and full field details.

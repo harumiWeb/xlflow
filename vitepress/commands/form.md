@@ -42,6 +42,11 @@ blocking.
 
 Edit Designer specifications directly under `src/forms/specs/` to receive real-time UserForm YAML diagnostics, context-aware completion, and Hover documentation from `xlflow lsp`. Hover distinguishes supported fields from best-effort geometry, observed-only list state, snapshot metadata, and custom/unchecked fields before `form build` opens Excel.
 
+The `picture` field for an Image control is currently supported by pure-Go
+`pack` and `push --backend file`. Excel-backed `form build` and apply APIs
+reject picture authoring until they implement the same asset validation and
+Designer encoding contract. See the [Image picture guidance](../guides/userforms#image-pictures).
+
 All other workbook-backed form commands share the configured workbook lock with
 `run`, `test`, `push`, `pull`, and Designer inspection. Contention returns
 `workbook_busy` before Excel or VBIDE starts. Use global `--wait` for an explicit

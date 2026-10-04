@@ -36,6 +36,17 @@ func TestCompleteYAMLRootFormAndControlProperties(t *testing.T) {
 			t.Fatalf("caption documentation = %#v", caption)
 		}
 	})
+	t.Run("Image picture action offers path and remove true", func(t *testing.T) {
+		items := CompleteYAML("controls:\n  - type: Image\n    picture:\n      \n", Position{Line: 3, Character: 6})
+		if !hasLabel(items, "path") || !hasLabel(items, "remove") {
+			t.Fatalf("Image picture action items = %#v", labels(items))
+		}
+
+		removeValues := CompleteYAML("controls:\n  - type: Image\n    picture:\n      remove: \n", Position{Line: 3, Character: len("      remove: ")})
+		if len(removeValues) != 1 || removeValues[0].Label != "true" {
+			t.Fatalf("picture.remove values = %#v, want only true", labels(removeValues))
+		}
+	})
 	t.Run("page controls and TabStrip tabs expose typed properties", func(t *testing.T) {
 		pageItems := CompleteYAML("controls:\n  - type: Page\n    ", Position{Line: 2, Character: 4})
 		for _, label := range []string{"caption", "controlTipText", "tag", "accelerator", "enabled", "visible"} {

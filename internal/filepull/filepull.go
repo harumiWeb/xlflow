@@ -4,7 +4,10 @@ package filepull
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +26,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	"github.com/harumiWeb/xlflow/internal/sourceinventory"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/picture"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/projection"
 	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
@@ -36,6 +40,7 @@ var (
 	ErrUserFormDesignerUnsupported   = errors.New("file pull: unsupported UserForm Designer structure")
 	ErrUserFormIdentityMismatch      = errors.New("file pull: inconsistent UserForm module and storage identity")
 	ErrUnsafeSourcePath              = errors.New("file pull: unsafe source path")
+	ErrPictureAssetConflict          = errors.New("file pull: picture asset path conflicts with an existing user file")
 	ErrPublish                       = errors.New("file pull: source publication failed")
 )
 
@@ -68,8 +73,9 @@ type ProbeResult struct {
 }
 
 type plannedFile struct {
-	path string
-	body []byte
+	path                  string
+	body                  []byte
+	preserveExistingAsset bool
 }
 
 type plan struct {
@@ -83,9 +89,16 @@ type inspectedProject struct {
 }
 
 type extractedForm struct {
-	name string
-	code string
-	spec forms.FormSpec
+	name     string
+	code     string
+	spec     forms.FormSpec
+	pictures []extractedPicture
+}
+
+type extractedPicture struct {
+	controlIndex int
+	data         []byte
+	format       string
 }
 
 type PullOptions struct {
@@ -95,6 +108,24 @@ type PullOptions struct {
 }
 
 var folderAnnotationPattern = regexp.MustCompile(`(?i)^'?@Folder\(\s*"([^"]*)"\s*\)`)
+
+var projectedControlTypes = map[string]string{
+	"MSForms.CheckBox":      "CheckBox",
+	"MSForms.ComboBox":      "ComboBox",
+	"MSForms.CommandButton": "CommandButton",
+	"MSForms.Form":          "Page",
+	"MSForms.Frame":         "Frame",
+	"MSForms.Image":         "Image",
+	"MSForms.Label":         "Label",
+	"MSForms.ListBox":       "ListBox",
+	"MSForms.MultiPage":     "MultiPage",
+	"MSForms.OptionButton":  "OptionButton",
+	"MSForms.ScrollBar":     "ScrollBar",
+	"MSForms.SpinButton":    "SpinButton",
+	"MSForms.TabStrip":      "TabStrip",
+	"MSForms.TextBox":       "TextBox",
+	"MSForms.ToggleButton":  "ToggleButton",
+}
 
 // Pull parses, validates, and publishes one complete saved-workbook snapshot.
 func Pull(root string, cfg config.Config, workbookPath string) (Result, error) {
@@ -278,6 +309,8 @@ func buildProjectPlan(root string, cfg config.Config, workbookPath string, inspe
 	seenNames := map[string]string{}
 	seenPaths := map[string]string{}
 	desired := map[string]string{}
+	plannedAssets := map[string][]byte{}
+	assetOutputPaths := map[string]string{}
 	for _, module := range project.Modules {
 		if !sourceinventory.ValidComponentName(module.Name) {
 			return plan{}, fmt.Errorf("%w: invalid component name %q", ErrMalformedVBAProject, module.Name)
@@ -341,6 +374,33 @@ func buildProjectPlan(root string, cfg config.Config, workbookPath string, inspe
 	}
 
 	for _, form := range extractedForms {
+		for _, extracted := range form.pictures {
+			if extracted.controlIndex < 0 || extracted.controlIndex >= len(form.spec.Controls) {
+				return plan{}, fmt.Errorf("%w: form %q picture control index %d is invalid", ErrUserFormDesignerUnsupported, form.name, extracted.controlIndex)
+			}
+			target, relative, err := pictureAssetTarget(root, roots.forms, extracted)
+			if err != nil {
+				return plan{}, fmt.Errorf("form %q picture asset: %w", form.name, err)
+			}
+			pathKey := strings.ToLower(filepath.Clean(target))
+			if prior, exists := seenPaths[pathKey]; exists {
+				if priorBody, isAsset := plannedAssets[pathKey]; !isAsset || !bytes.Equal(priorBody, extracted.data) {
+					return plan{}, fmt.Errorf("%w: %s and picture asset for %s resolve to the same source path", ErrUnsafeSourcePath, prior, form.name)
+				}
+			} else {
+				reused, err := existingPictureAsset(target, extracted.data)
+				if err != nil {
+					return plan{}, fmt.Errorf("%w: form %q picture asset: %w", ErrUserFormDesignerUnsupported, form.name, err)
+				}
+				seenPaths[pathKey] = "picture asset for " + form.name
+				plannedAssets[pathKey] = bytes.Clone(extracted.data)
+				assetOutputPaths[pathKey] = target
+				if !reused {
+					p.files = append(p.files, plannedFile{path: target, body: bytes.Clone(extracted.data), preserveExistingAsset: true})
+				}
+			}
+			form.spec.Controls[extracted.controlIndex].Picture = &forms.FormSpecPicture{Path: relative}
+		}
 		specBody, err := forms.MarshalSnapshot("yaml", form.spec)
 		if err != nil {
 			return plan{}, fmt.Errorf("%w: form %q: %v", ErrUserFormDesignerUnsupported, form.name, err)
@@ -409,6 +469,11 @@ func buildProjectPlan(root string, cfg config.Config, workbookPath string, inspe
 	for _, file := range p.files {
 		p.result.Written = append(p.result.Written, file.path)
 	}
+	for _, path := range assetOutputPaths {
+		p.result.Written = append(p.result.Written, path)
+	}
+	slices.Sort(p.result.Written)
+	p.result.Written = slices.Compact(p.result.Written)
 	p.result.Removed = append(p.result.Removed, p.stale...)
 	return p, nil
 }
@@ -473,6 +538,11 @@ func extractForms(inspection *inspectedProject, cfg config.Config) ([]extractedF
 			Message: "Compatibility .frm/.frx artifacts were not generated by pull --backend file and must not be used as Designer authority.",
 		})
 		spec = forms.NormalizeFormSpec(spec)
+		pictures, pictureWarnings, err := extractFormPictures(parsed, &spec)
+		if err != nil {
+			return nil, fmt.Errorf("%w: form %q: %v", ErrUserFormDesignerUnsupported, module.Name, err)
+		}
+		spec.Warnings = append(spec.Warnings, pictureWarnings...)
 		code, err := exportFormCode(module)
 		if err != nil {
 			return nil, fmt.Errorf("%w: form %q code: %v", ErrUserFormIdentityMismatch, module.Name, err)
@@ -487,7 +557,7 @@ func extractForms(inspection *inspectedProject, cfg config.Config) ([]extractedF
 		if _, exists := extractedByName[key]; exists {
 			return nil, fmt.Errorf("%w: duplicate form module %q", ErrUserFormIdentityMismatch, module.Name)
 		}
-		extractedByName[key] = extractedForm{name: module.Name, code: code, spec: spec}
+		extractedByName[key] = extractedForm{name: module.Name, code: code, spec: spec, pictures: pictures}
 	}
 	if len(formsByStorage) > 0 {
 		remaining := slices.SortedFunc(maps.Values(formsByStorage), func(a, b *oforms.Form) int {
@@ -500,6 +570,198 @@ func extractForms(inspection *inspectedProject, cfg config.Config) ([]extractedF
 		result = append(result, extractedByName[key])
 	}
 	return result, nil
+}
+
+func extractFormPictures(form *oforms.Form, spec *forms.FormSpec) ([]extractedPicture, []forms.FormSpecWarning, error) {
+	var pictures []extractedPicture
+	var warnings []forms.FormSpecWarning
+	controlIndex := 0
+	unnamedControlIndex := 0
+	var mappingErr error
+	var visit func([]*oforms.Control) bool
+	visit = func(controls []*oforms.Control) bool {
+		for _, control := range controls {
+			if control == nil {
+				continue
+			}
+			if controlIndex >= len(spec.Controls) {
+				return false
+			}
+			projected := spec.Controls[controlIndex]
+			controlIndex++
+			expectedName := control.Name
+			if strings.TrimSpace(expectedName) == "" {
+				unnamedControlIndex++
+				expectedName = fmt.Sprintf("<unnamed_%d>", unnamedControlIndex)
+			}
+			expectedType, knownType := projectedControlTypes[control.Kind]
+			if !knownType {
+				expectedType = forms.UnsupportedControlPlaceholderType
+			}
+			if projected.Name != expectedName || projected.Type != expectedType {
+				mappingErr = fmt.Errorf("designer control %q (%s) does not match projected control %q (%s) at index %d", control.Name, control.Kind, projected.Name, projected.Type, controlIndex-1)
+				return false
+			}
+			if control.Kind == "MSForms.Image" && control.Record != nil {
+				if raw, ok := control.Record.Pictures["Picture"]; ok && len(raw) > 0 {
+					asset, err := picture.Decode(raw)
+					if err != nil {
+						warnings = append(warnings, unsupportedPictureWarning(projected.Name))
+					} else if extension, ok := pictureAssetExtension(asset.Format); !ok || len(asset.Data) == 0 {
+						warnings = append(warnings, unsupportedPictureWarning(projected.Name))
+					} else {
+						removeExportedPictureFromUnsupported(spec, controlIndex-1)
+						pictures = append(pictures, extractedPicture{
+							controlIndex: controlIndex - 1,
+							data:         bytes.Clone(asset.Data),
+							format:       extension,
+						})
+					}
+				}
+			}
+			children := control.Children
+			if control.MultiPage != nil {
+				children = control.MultiPage.Pages
+			}
+			if !visit(children) {
+				return false
+			}
+		}
+		return true
+	}
+	if !visit(form.Controls) || controlIndex != len(spec.Controls) {
+		if mappingErr != nil {
+			return nil, nil, mappingErr
+		}
+		return nil, nil, fmt.Errorf("projected controls do not match the designer control tree")
+	}
+	return pictures, warnings, nil
+}
+
+func removeExportedPictureFromUnsupported(spec *forms.FormSpec, controlIndex int) {
+	control := &spec.Controls[controlIndex]
+	control.Unsupported = slices.DeleteFunc(control.Unsupported, func(property string) bool {
+		return strings.EqualFold(strings.TrimSpace(property), "picture")
+	})
+
+	const prefix = "Unsupported Designer properties were preserved only in the binary model: "
+	warnings := make([]forms.FormSpecWarning, 0, len(spec.Warnings))
+	for _, warning := range spec.Warnings {
+		if warning.Code != "unsupported_properties" || !strings.EqualFold(warning.Control, control.Name) {
+			warnings = append(warnings, warning)
+			continue
+		}
+		properties, ok := strings.CutPrefix(warning.Message, prefix)
+		if !ok {
+			warnings = append(warnings, warning)
+			continue
+		}
+		properties = strings.TrimSuffix(properties, ".")
+		remaining := strings.Split(properties, ", ")
+		remaining = slices.DeleteFunc(remaining, func(property string) bool {
+			return strings.EqualFold(strings.TrimSpace(property), "picture")
+		})
+		if len(remaining) == 0 {
+			continue
+		}
+		warning.Message = prefix + strings.Join(remaining, ", ") + "."
+		warnings = append(warnings, warning)
+	}
+	spec.Warnings = warnings
+}
+
+func unsupportedPictureWarning(controlName string) forms.FormSpecWarning {
+	return forms.FormSpecWarning{
+		Code:    "unsupported_picture_resource",
+		Message: "The embedded Image picture could not be exported as a BMP/JPEG asset and remains available only in the lossless workbook Designer storage.",
+		Control: controlName,
+	}
+}
+
+func pictureAssetExtension(format string) (string, bool) {
+	format = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(format)), "image/")
+	switch format {
+	case "bmp":
+		return "bmp", true
+	case "jpg", "jpeg":
+		return "jpg", true
+	default:
+		return "", false
+	}
+}
+
+func pictureAssetTarget(projectRoot, formsRoot string, extracted extractedPicture) (string, string, error) {
+	extension, ok := pictureAssetExtension(extracted.format)
+	if !ok || len(extracted.data) == 0 {
+		return "", "", fmt.Errorf("%w: unsupported or empty picture asset", ErrUserFormDesignerUnsupported)
+	}
+	sum := sha256.Sum256(extracted.data)
+	filename := hex.EncodeToString(sum[:]) + "." + extension
+
+	formsRootAbs, err := filepath.Abs(formsRoot)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: resolve forms root: %v", ErrUnsafeSourcePath, err)
+	}
+	target, err := safeTarget(formsRootAbs, filepath.Join("assets", filename))
+	if err != nil {
+		return "", "", err
+	}
+	projectRootAbs, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: resolve project root: %v", ErrUnsafeSourcePath, err)
+	}
+	rootIdentity, err := coordination.NewWorkbookIdentity(projectRootAbs, projectRootAbs)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: resolve project root: %v", ErrUnsafeSourcePath, err)
+	}
+	targetIdentity, err := coordination.NewWorkbookIdentity(projectRootAbs, target)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: resolve picture target: %v", ErrUnsafeSourcePath, err)
+	}
+	if !pathWithin(rootIdentity.CanonicalPath, targetIdentity.CanonicalPath) {
+		return "", "", fmt.Errorf("%w: picture asset target %s escapes project root %s", ErrUnsafeSourcePath, target, projectRootAbs)
+	}
+	relative, err := filepath.Rel(projectRootAbs, target)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return "", "", fmt.Errorf("%w: picture asset target %s is not project-relative", ErrUnsafeSourcePath, target)
+	}
+	return target, filepath.ToSlash(relative), nil
+}
+
+func existingPictureAsset(target string, expected []byte) (bool, error) {
+	entries, err := os.ReadDir(filepath.Dir(target))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	name := filepath.Base(target)
+	for _, entry := range entries {
+		if !strings.EqualFold(entry.Name(), name) {
+			continue
+		}
+		candidate := filepath.Join(filepath.Dir(target), entry.Name())
+		if entry.Name() != name {
+			return false, fmt.Errorf("%w: existing path %s differs in case from deterministic path %s", ErrPictureAssetConflict, candidate, target)
+		}
+		info, err := os.Lstat(candidate)
+		if err != nil {
+			return false, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return false, fmt.Errorf("%w: existing path %s is not a regular file", ErrPictureAssetConflict, candidate)
+		}
+		body, err := os.ReadFile(candidate)
+		if err != nil {
+			return false, err
+		}
+		if !bytes.Equal(body, expected) {
+			return false, fmt.Errorf("%w: existing path %s has different contents", ErrPictureAssetConflict, candidate)
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 func exportFormCode(module vbaproject.Module) (string, error) {

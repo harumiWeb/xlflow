@@ -99,25 +99,43 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 			return Result{}, fmt.Errorf("initialize source-tree coordination: %w", err)
 		}
 	}
-	release, err := acquireSourceTrees(ctx, manager, root, cfg, opts)
-	if err != nil {
-		return Result{}, err
-	}
-	defer release()
-
 	statePath := opts.StatePath
 	if strings.TrimSpace(statePath) == "" {
 		statePath = filepath.Join(root, ".xlflow", "state", "push.json")
 	}
 
-	files := discoverSourceFiles(resolvedRoots(root, cfg), cfg.UserForm.CodeSource)
-	fingerprint := computeFingerprint(workbookPath, files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation)
-	if cfg.VBA.LineNumbers.Enabled {
-		if err := validateLineNumberSources(files); err != nil {
-			return Result{}, err
-		}
+	snapshot, err := captureSourceSnapshot(root, cfg)
+	if err != nil {
+		return Result{}, err
 	}
-	if duplicates := findDuplicateModuleNames(files); len(duplicates) > 0 {
+	fingerprint, err := computeFingerprint(workbookPath, snapshot.files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation)
+	if err != nil {
+		return Result{}, err
+	}
+	release, err := acquireSourceTrees(ctx, manager, root, cfg, opts, snapshot.assetDirs)
+	if err != nil {
+		return Result{}, err
+	}
+	defer release()
+
+	// Re-capture after all referenced asset directories are covered by the
+	// source-tree leases. If either file bytes or reference topology changed
+	// while those locks were acquired, retry from a stable checkout.
+	lockedSnapshot, err := captureSourceSnapshot(root, cfg)
+	if err != nil {
+		return Result{}, err
+	}
+	lockedFingerprint, err := computeFingerprint(workbookPath, lockedSnapshot.files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation)
+	if err != nil {
+		return Result{}, err
+	}
+	if !fingerprintEquals(fingerprint, lockedFingerprint) || !samePathLists(snapshot.assetDirs, lockedSnapshot.assetDirs) {
+		return Result{}, ErrSourceChanged
+	}
+	snapshot = lockedSnapshot
+	fingerprint = lockedFingerprint
+
+	if duplicates := findDuplicateSourceModules(snapshot.modules); len(duplicates) > 0 {
 		details := make([]string, 0, len(duplicates))
 		for _, dup := range duplicates {
 			details = append(details, strings.Join(dup, ", "))
@@ -129,7 +147,7 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 		return Result{
 			WorkbookPath: normalizeFingerprintPath(workbookPath),
 			Skipped:      true,
-			SourceFiles:  len(files),
+			SourceFiles:  len(snapshot.files),
 			StatePath:    statePath,
 		}, nil
 	}
@@ -169,13 +187,23 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 		return Result{}, err
 	}
 
-	sources, err := collectSources(root, cfg)
+	built, meta, err := packpkg.BuildWorkbook(template, snapshot.modules)
 	if err != nil {
 		return Result{}, err
 	}
-	built, meta, err := packpkg.BuildWorkbook(template, sources)
+
+	// Source leases coordinate xlflow writers, while this final comparison also
+	// catches external edits that do not participate in those locks.
+	latestSnapshot, err := captureSourceSnapshot(root, cfg)
 	if err != nil {
 		return Result{}, err
+	}
+	latestFingerprint, err := computeFingerprint(workbookPath, latestSnapshot.files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation)
+	if err != nil {
+		return Result{}, err
+	}
+	if !fingerprintEquals(fingerprint, latestFingerprint) || !samePathLists(snapshot.assetDirs, latestSnapshot.assetDirs) {
+		return Result{}, ErrSourceChanged
 	}
 
 	var record *backup.Record
@@ -200,7 +228,7 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 		Backup:       record,
 		Meta:         meta,
 		Publication:  publication,
-		SourceFiles:  len(files),
+		SourceFiles:  len(snapshot.files),
 		StatePath:    statePath,
 	}
 	if err := writePushState(statePath, fingerprint, buildFilePushAppliedTo(workbookPath)); err != nil {
@@ -212,14 +240,14 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 // acquireSourceTrees mirrors filepull's lease acquisition: every managed
 // source root is taken exclusively while its ancestors are shared, so source
 // mutations cannot interleave with the read of the tree being pushed.
-func acquireSourceTrees(ctx context.Context, manager *coordination.Manager, root string, cfg config.Config, opts Options) (func(), error) {
+func acquireSourceTrees(ctx context.Context, manager *coordination.Manager, root string, cfg config.Config, opts Options, extraDirs []string) (func(), error) {
 	type lockTarget struct {
 		identity coordination.ResourceIdentity
 		shared   bool
 	}
 	roots := resolvedRoots(root, cfg)
 	targets := map[string]lockTarget{}
-	for _, path := range []string{roots.modules, roots.classes, roots.forms, roots.workbook} {
+	for _, path := range append([]string{roots.modules, roots.classes, roots.forms, roots.workbook}, extraDirs...) {
 		identity, err := coordination.NewSourceTreeIdentity(root, path)
 		if err != nil {
 			return nil, fmt.Errorf("resolve source-tree identity %s: %w", path, err)

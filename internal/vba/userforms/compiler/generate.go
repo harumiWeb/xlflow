@@ -13,6 +13,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/picture"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
@@ -203,6 +204,11 @@ func generationControlDefinition(control spec.FormSpecControl, tabIndex int) (of
 	if !validGenerationName(control.Name) {
 		return oforms.ControlDefinition{}, generationFailure(GenerationInvalid, "name", "requires a VBA identifier")
 	}
+	if control.Picture == nil && slices.ContainsFunc(control.Unsupported, func(value string) bool {
+		return strings.EqualFold(strings.TrimSpace(value), "picture")
+	}) {
+		return oforms.ControlDefinition{}, generationFailure(GenerationUnsupported, "picture", "unsupported existing picture metadata requires an explicit picture replacement or removal")
+	}
 	if len(control.List) != 0 || control.SelectedIndex != nil && defaults.class != 57 && defaults.class != 18 {
 		return oforms.ControlDefinition{}, generationFailure(GenerationUnsupported, "", "list/selectedIndex persistence is not supported")
 	}
@@ -335,6 +341,16 @@ func generationControlDefinition(control spec.FormSpecControl, tabIndex int) (of
 			bits &^= 2
 		}
 		item.Properties["VariousPropertyBits"] = bits
+	}
+	if control.Picture != nil && !control.Picture.Remove {
+		if len(control.Picture.Data) == 0 {
+			return oforms.ControlDefinition{}, generationFailure(GenerationInvalid, "picture.path", "picture source bytes were not resolved before generation")
+		}
+		raw, err := picture.Encode(control.Picture.Data)
+		if err != nil {
+			return oforms.ControlDefinition{}, generationFailure(GenerationInvalid, "picture.path", err.Error())
+		}
+		item.Properties["Picture"] = raw
 	}
 	return item, nil
 }

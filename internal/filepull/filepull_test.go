@@ -3,10 +3,13 @@ package filepull
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,7 +17,11 @@ import (
 	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/oforms"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/picture"
+	"github.com/harumiWeb/xlflow/internal/vba/userforms/projection"
 	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
+	"gopkg.in/yaml.v3"
 )
 
 func TestPullExtractsSupportedModulesAndReconcilesManagedFiles(t *testing.T) {
@@ -146,6 +153,355 @@ func TestPullExtractsNestedUserFormAndReconcilesManagedArtifacts(t *testing.T) {
 		if _, err := os.Stat(kept); err != nil {
 			t.Fatalf("unmanaged form artifact changed: %s: %v", kept, err)
 		}
+	}
+}
+
+func TestPullExtractsExcelAuthoredImageAssetsRecursively(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, readPictureFixture(t, "baseline.bin"))
+	result, err := Pull(root, testConfig(), workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Modules.Form != 1 {
+		t.Fatalf("form count = %d, want 1", result.Modules.Form)
+	}
+
+	specs, err := os.ReadDir(filepath.Join(root, "src", "forms", "specs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("spec count = %d, want 1", len(specs))
+	}
+	specBody, err := os.ReadFile(filepath.Join(root, "src", "forms", "specs", specs[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec forms.FormSpec
+	if err := yaml.Unmarshal(specBody, &spec); err != nil {
+		t.Fatalf("decode pulled FormSpec: %v\n%s", err, specBody)
+	}
+	controls := make(map[string]forms.FormSpecControl, len(spec.Controls))
+	for _, control := range spec.Controls {
+		controls[control.Name] = control
+	}
+	frame, ok := controls["FrameMain"]
+	if !ok || frame.Type != "Frame" {
+		t.Fatalf("nested frame missing from pulled spec: %+v", frame)
+	}
+	assets := excelAuthoredPictureAssets(t)
+	paths := make(map[string]string, 2)
+	for _, name := range []string{"ImageBmp", "ImageJpeg"} {
+		control, ok := controls[name]
+		if !ok || control.Type != "Image" || control.Picture == nil {
+			t.Fatalf("picture control %q missing from pulled spec: %+v", name, control)
+		}
+		if name == "ImageJpeg" && control.ParentID != frame.ID {
+			t.Fatalf("nested image parent = %q, want FrameMain id %q", control.ParentID, frame.ID)
+		}
+		asset := assets[name]
+		sum := sha256.Sum256(asset.Data)
+		wantRelative := filepath.ToSlash(filepath.Join("src", "forms", "assets", hex.EncodeToString(sum[:])+".bmp"))
+		if control.Picture.Path != wantRelative {
+			t.Fatalf("%s picture path = %q, want %q", name, control.Picture.Path, wantRelative)
+		}
+		assetPath := filepath.Join(root, filepath.FromSlash(control.Picture.Path))
+		paths[name] = control.Picture.Path
+		assetBody, err := os.ReadFile(assetPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(assetBody, asset.Data) {
+			t.Fatalf("%s asset differs from decoded Excel-authored picture bytes", name)
+		}
+		if !containsPath(result.Written, assetPath) {
+			t.Fatalf("pull result does not report picture asset %s: %+v", assetPath, result.Written)
+		}
+		if slices.ContainsFunc(control.Unsupported, func(property string) bool { return strings.EqualFold(property, "picture") }) {
+			t.Fatalf("successfully extracted picture remains unsupported on %s: %+v", name, control.Unsupported)
+		}
+		for _, warning := range spec.Warnings {
+			if warning.Code != "unsupported_properties" || !strings.EqualFold(warning.Control, name) {
+				continue
+			}
+			const warningPrefix = "Unsupported Designer properties were preserved only in the binary model: "
+			properties, ok := strings.CutPrefix(warning.Message, warningPrefix)
+			if !ok {
+				continue
+			}
+			for _, property := range strings.Split(strings.TrimSuffix(properties, "."), ", ") {
+				if strings.EqualFold(strings.TrimSpace(property), "picture") {
+					t.Fatalf("successfully extracted picture remains in unsupported warning for %s: %+v", name, warning)
+				}
+			}
+		}
+	}
+	if assets["ImageBmp"].Format != "bmp" || assets["ImageJpeg"].Format != "bmp" || assets["ImageBmp"].Width != 24 || assets["ImageBmp"].Height != 16 || assets["ImageJpeg"].Width != 24 || assets["ImageJpeg"].Height != 16 {
+		t.Fatalf("Excel-authored fixture picture decode does not match environment evidence: %+v", assets)
+	}
+	if bytes.Equal(assets["ImageBmp"].Data, assets["ImageJpeg"].Data) || paths["ImageBmp"] == paths["ImageJpeg"] {
+		t.Fatalf("Excel-authored BMP and JPEG inputs did not persist as distinct BMP assets: paths=%+v", paths)
+	}
+}
+
+func TestExtractFormPicturesRequiresExactProjectedControlMapping(t *testing.T) {
+	project, err := vbaproject.Read(readPictureFixture(t, "baseline.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Forms) != 1 {
+		t.Fatalf("Excel-authored fixture form count = %d, want 1", len(project.Forms))
+	}
+	source := project.Forms[0]
+	for _, test := range []struct {
+		name   string
+		mutate func(*forms.FormSpecControl)
+	}{
+		{name: "name", mutate: func(control *forms.FormSpecControl) { control.Name += "Changed" }},
+		{name: "type", mutate: func(control *forms.FormSpecControl) { control.Type = "Frame" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			projected, err := projection.Project(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projected.Controls = slices.Clone(projected.Controls)
+			test.mutate(&projected.Controls[0])
+
+			if _, _, err := extractFormPictures(source, &projected); err == nil || !strings.Contains(err.Error(), "does not match projected control") {
+				t.Fatalf("control mapping error = %v, want name/type mismatch", err)
+			}
+		})
+	}
+}
+
+func TestPullDeduplicatesRepeatedImageAssets(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, readPictureFixture(t, "baseline.bin"))
+	project, err := vbaproject.Read(readPictureFixture(t, "baseline.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var imageBMP, imageJPEG *oforms.Control
+	var visit func([]*oforms.Control)
+	visit = func(controls []*oforms.Control) {
+		for _, control := range controls {
+			if control == nil {
+				continue
+			}
+			switch control.Name {
+			case "ImageBmp":
+				imageBMP = control
+			case "ImageJpeg":
+				imageJPEG = control
+			}
+			children := control.Children
+			if control.MultiPage != nil {
+				children = control.MultiPage.Pages
+			}
+			visit(children)
+		}
+	}
+	visit(project.Forms[0].Controls)
+	if imageBMP == nil || imageJPEG == nil || imageBMP.Record == nil || imageJPEG.Record == nil {
+		t.Fatalf("fixture Image controls were not found: BMP=%+v JPEG=%+v", imageBMP, imageJPEG)
+	}
+	imageJPEG.Record.Pictures["Picture"] = bytes.Clone(imageBMP.Record.Pictures["Picture"])
+	p, err := buildProjectPlan(root, testConfig(), workbook, &inspectedProject{project: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assetCount := 0
+	var formSpec forms.FormSpec
+	for _, file := range p.files {
+		if file.preserveExistingAsset {
+			assetCount++
+		}
+		if filepath.Ext(file.path) == ".yaml" && strings.Contains(filepath.ToSlash(file.path), "/forms/specs/") {
+			if err := yaml.Unmarshal(file.body, &formSpec); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if assetCount != 1 {
+		t.Fatalf("planned asset count = %d, want one deduplicated asset", assetCount)
+	}
+	paths := make(map[string]string)
+	for _, control := range formSpec.Controls {
+		if control.Name == "ImageBmp" || control.Name == "ImageJpeg" {
+			if control.Picture == nil {
+				t.Fatalf("picture missing from %s", control.Name)
+			}
+			paths[control.Name] = control.Picture.Path
+		}
+	}
+	if paths["ImageBmp"] == "" || paths["ImageBmp"] != paths["ImageJpeg"] {
+		t.Fatalf("duplicate picture paths differ: %+v", paths)
+	}
+}
+
+func TestPullReusesExistingPictureAssetsAndKeepsUnmanagedAssets(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, readPictureFixture(t, "baseline.bin"))
+	first, err := Pull(root, testConfig(), workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assetsRoot := filepath.Join(root, "src", "forms", "assets")
+	var assetPaths []string
+	assetBodies := make(map[string][]byte)
+	for _, path := range first.Written {
+		if filepath.Dir(path) != assetsRoot {
+			continue
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assetPaths = append(assetPaths, path)
+		assetBodies[path] = body
+	}
+	if len(assetPaths) != 2 {
+		t.Fatalf("first pull asset count = %d, want 2: %+v", len(assetPaths), first.Written)
+	}
+	userAsset := filepath.Join(assetsRoot, "user-owned.txt")
+	staleAsset := filepath.Join(assetsRoot, "previous-pull.bmp")
+	writeTestFile(t, userAsset, "keep user asset")
+	writeTestFile(t, staleAsset, "keep stale asset")
+
+	originalPublish := publishArtifact
+	t.Cleanup(func() { publishArtifact = originalPublish })
+	assetWrites := 0
+	publishArtifact = func(path string, body []byte, validate func(string) error) (coordination.PublishResult, error) {
+		if _, exists := assetBodies[path]; exists {
+			assetWrites++
+		}
+		return originalPublish(path, body, validate)
+	}
+	if _, err := Pull(root, testConfig(), workbook); err != nil {
+		t.Fatal(err)
+	}
+	if assetWrites != 0 {
+		t.Fatalf("identical picture assets were published %d times", assetWrites)
+	}
+	for path, want := range assetBodies {
+		got, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("reused asset changed at %s: %v", path, err)
+		}
+	}
+	for path, want := range map[string]string{userAsset: "keep user asset", staleAsset: "keep stale asset"} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Fatalf("unmanaged asset changed at %s: %q, %v", path, got, err)
+		}
+	}
+}
+
+func TestPullPictureAssetCollisionFailsBeforePublication(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, readPictureFixture(t, "baseline.bin"))
+	initial, err := buildPlan(root, testConfig(), workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conflictingAsset, specPath string
+	for _, file := range initial.files {
+		if file.preserveExistingAsset {
+			conflictingAsset = file.path
+		}
+		if filepath.Ext(file.path) == ".yaml" && strings.Contains(filepath.ToSlash(file.path), "/forms/specs/") {
+			specPath = file.path
+		}
+	}
+	if conflictingAsset == "" || specPath == "" {
+		t.Fatalf("fixture plan lacks asset/spec: asset=%q spec=%q", conflictingAsset, specPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(conflictingAsset), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, conflictingAsset, "user-owned conflict")
+	writeTestFile(t, specPath, "keep existing spec")
+	sentinel := filepath.Join(root, "src", "modules", "Existing.bas")
+	writeTestFile(t, sentinel, "keep existing module")
+
+	if _, err := Pull(root, testConfig(), workbook); !errors.Is(err, ErrPictureAssetConflict) {
+		t.Fatalf("pull error = %v, want picture asset conflict", err)
+	}
+	for path, want := range map[string]string{
+		conflictingAsset: "user-owned conflict",
+		specPath:         "keep existing spec",
+		sentinel:         "keep existing module",
+	} {
+		body, err := os.ReadFile(path)
+		if err != nil || string(body) != want {
+			t.Fatalf("file changed after picture collision at %s: %q, %v", path, body, err)
+		}
+	}
+}
+
+func TestPullPictureAssetPublicationFailureRollsBackAssets(t *testing.T) {
+	root := t.TempDir()
+	workbook := writeWorkbook(t, root, readPictureFixture(t, "baseline.bin"))
+	initial, err := buildPlan(root, testConfig(), workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var assetPaths []string
+	var specPath string
+	for _, file := range initial.files {
+		if file.preserveExistingAsset {
+			assetPaths = append(assetPaths, file.path)
+		}
+		if filepath.Ext(file.path) == ".yaml" && strings.Contains(filepath.ToSlash(file.path), "/forms/specs/") {
+			specPath = file.path
+		}
+	}
+	if len(assetPaths) != 2 || specPath == "" {
+		t.Fatalf("fixture plan lacks expected assets/spec: assets=%v spec=%q", assetPaths, specPath)
+	}
+	originalPublish := publishArtifact
+	t.Cleanup(func() { publishArtifact = originalPublish })
+	assetPublished := false
+	publishArtifact = func(path string, body []byte, validate func(string) error) (coordination.PublishResult, error) {
+		if path == specPath {
+			return coordination.PublishResult{}, errors.New("injected FormSpec publication failure")
+		}
+		if strings.EqualFold(filepath.Dir(path), filepath.Dir(assetPaths[0])) {
+			assetPublished = true
+		}
+		return originalPublish(path, body, validate)
+	}
+	if _, err := Pull(root, testConfig(), workbook); !errors.Is(err, ErrPublish) {
+		t.Fatalf("pull error = %v, want publication failure", err)
+	}
+	if !assetPublished {
+		t.Fatal("failure injection occurred before any picture asset was published")
+	}
+	for _, path := range assetPaths {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("picture asset remained after rollback at %s: %v", path, err)
+		}
+	}
+}
+
+func TestPullRejectsPictureAssetsEscapingProjectThroughFormsJunction(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	formsPath := filepath.Join(root, "src", "forms")
+	if err := os.MkdirAll(filepath.Dir(formsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, formsPath); err != nil {
+		t.Skipf("directory symlink/junction unavailable: %v", err)
+	}
+	workbook := writeWorkbook(t, root, readPictureFixture(t, "baseline.bin"))
+	if _, err := Pull(root, testConfig(), workbook); !errors.Is(err, ErrUnsafeSourcePath) {
+		t.Fatalf("pull error = %v, want unsafe source path", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "assets")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pull wrote picture assets outside project root: %v", err)
 	}
 }
 
@@ -503,6 +859,66 @@ func readFixture(t testing.TB, name string) []byte {
 		t.Fatal(err)
 	}
 	return body
+}
+
+func readPictureFixture(t testing.TB, name string) []byte {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("..", "vba", "userforms", "compiler", "testdata", "pictures-excel-authored", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func excelAuthoredPictureAssets(t testing.TB) map[string]picture.Asset {
+	t.Helper()
+	project, err := vbaproject.Read(readPictureFixture(t, "baseline.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets := make(map[string]picture.Asset)
+	var visit func([]*oforms.Control)
+	visit = func(controls []*oforms.Control) {
+		for _, control := range controls {
+			if control == nil {
+				continue
+			}
+			if control.Kind == "MSForms.Image" && control.Record != nil {
+				if raw, ok := control.Record.Pictures["Picture"]; ok {
+					prefix := []byte{
+						0x04, 0x52, 0xe3, 0x0b, 0x91, 0x8f, 0xce, 0x11,
+						0x9d, 0xe3, 0x00, 0xaa, 0x00, 0x4b, 0xb8, 0x51,
+						0x6c, 0x74, 0x00, 0x00, 0xb6, 0x04, 0x00, 0x00, 0x42, 0x4d,
+					}
+					if !bytes.HasPrefix(raw, prefix) {
+						t.Fatalf("%s picture persistence preamble = % x, want % x", control.Name, raw[:min(len(raw), len(prefix))], prefix)
+					}
+					asset, err := picture.Decode(raw)
+					if err != nil {
+						t.Fatalf("decode Excel-authored picture for %s: %v", control.Name, err)
+					}
+					assets[control.Name] = asset
+				}
+			}
+			children := control.Children
+			if control.MultiPage != nil {
+				children = control.MultiPage.Pages
+			}
+			visit(children)
+		}
+	}
+	if len(project.Forms) != 1 {
+		t.Fatalf("Excel-authored fixture form count = %d, want 1", len(project.Forms))
+	}
+	visit(project.Forms[0].Controls)
+	if len(assets) != 2 {
+		t.Fatalf("Excel-authored fixture image count = %d, want 2", len(assets))
+	}
+	return assets
+}
+
+func containsPath(paths []string, path string) bool {
+	return slices.Contains(paths, path)
 }
 
 func writeWorkbook(t testing.TB, root string, project []byte) string {

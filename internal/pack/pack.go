@@ -50,6 +50,10 @@ type SourceModule struct {
 	Source       string
 	// FormSpec is canonical Designer intent; nil retains legacy code-only updates.
 	FormSpec *spec.FormSpec
+	// PreserveExistingCode keeps the current template code-behind when the
+	// caller has no authoritative source for an existing UserForm. It does not
+	// affect new forms, which start with the supplied Source (usually empty).
+	PreserveExistingCode bool
 }
 
 // PackMeta summarizes the modules and opaque streams handled during pack.

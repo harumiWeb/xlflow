@@ -84,18 +84,31 @@ Designer storage. Code-behind becomes `src/forms/code/<FormName>.bas`, and
 MS-OFORMS Designer state becomes the canonical
 `src/forms/specs/<FormName>.yaml`. Nested supported controls retain their
 projected parent relationships. Code sidecars are omitted when the form has no
-code body. The file backend reconciles only these reserved `code` and `specs`
-directories; compatibility `.frm` / `.frx` artifacts elsewhere under the
-forms root are retained and are not claimed to be current. Each generated spec
-contains warning code `compatibility_artifact_unsynchronized`. The shared push
-preflight rejects that marker for both Excel and file backends, including when
-a same-named stale `.frm` remains. Apply the spec with `xlflow form build`, then
-use `xlflow pull --backend excel` to refresh compatibility artifacts before a
-later push. Direct pure-Go FormSpec writing is tracked by parent Issue #876.
+code body. Supported embedded Image pictures are extracted to
+`src/forms/assets/<full-SHA-256>.bmp|jpg` and referenced by project-root-
+relative paths in the FormSpec. Identical asset bytes can be shared. Existing
+asset-path content conflicts fail before publication; old assets are never
+automatically deleted. The file backend reconciles canonical `code` and
+`specs` artifacts and adds assets without garbage-collecting them.
 
-Compatibility `frm` code authority is not supported by the file backend and
-fails with `pull_userform_code_source_unsupported` before source mutation. For
-Windows `auto` selection, module topology is inspected without parsing Designer
+Compatibility `.frm` / `.frx` artifacts elsewhere under the forms root are
+retained and are not claimed to be current. Each generated spec contains
+warning code `compatibility_artifact_unsynchronized`. With canonical FormSpec
+and sidecar code authority, stale compatibility artifacts are ignored as
+import inputs and do not block pure-Go file push. The marker still blocks
+operations that select `.frm` code or compatibility artifacts as import
+authority. Compatibility `frm` code authority is not supported by the file
+pull backend and fails with `pull_userform_code_source_unsupported` before
+source mutation.
+
+Unsupported or unexportable picture resources remain in the saved workbook's
+Designer data. Pull does not emit fabricated asset paths; template-based
+operations preserve omitted resources, and any operation that would discard
+or regenerate unsupported data fails before publication. See
+[`userform-picture-assets.md`](userform-picture-assets.md) for picture limits,
+path rules, and extraction behavior.
+
+For Windows `auto` selection, module topology is inspected without parsing Designer
 streams when `code_source = "frm"`, so the compatibility boundary selects Excel
 even when the pure-Go Designer reader would reject the form. Explicit file
 selection and sidecar-mode auto selection remain strict: malformed Designer
@@ -110,10 +123,15 @@ cannot be mistaken for stale managed source.
 Planning and validation complete before publication. Publication reconciles
 managed `.bas` and `.cls` files under the module, class, and workbook roots,
 plus sidecar `.bas` and canonical `.yaml` form artifacts. Stale `.json` and
-`.yml` form specs are also removed when canonical YAML replaces them.
-Unrelated files and compatibility `.frm` / `.frx` artifacts are retained. If
-writing or stale-file removal fails, xlflow restores every affected prior file
-and reports `pull_source_publish_failed`.
+`.yml` form specs are also removed when canonical YAML replaces them. New
+content-addressed picture assets are staged with those outputs; matching
+existing assets are reused, and conflicting bytes fail before publication.
+Unrelated files and compatibility `.frm` / `.frx` artifacts are retained.
+Picture assets are not automatically collected when no longer referenced.
+Unreferenced files in the reserved assets directory are retained and ignored
+by file push; only assets referenced by canonical FormSpecs are loaded,
+validated, and fingerprinted. If writing or stale-file removal fails, xlflow restores every
+affected prior file and reports `pull_source_publish_failed`.
 
 The guarantees are deliberately distinct:
 
@@ -173,9 +191,17 @@ The gate maintains the Excel pull baseline → file pull → normalized comparis
 class, and document modules, nested folders, CP932/Japanese text, a non-ASCII
 component name, cross-module execution, and ordinary project references. A
 separate UserForm-bearing copy verifies sidecar code and Designer YAML
-publication without launching or attaching to Excel during the file pull.
+publication without launching or attaching to Excel during the file pull. The
+copy verifies supported picture-asset publication as well.
 The script prints both absolute workspace paths, the sentinel, and the Excel/OS
 identity needed for release evidence.
+
+`scripts/test-formspec-file-push-e2e.ps1` also verifies the canonical pull →
+push → pull cycle, spec-only and asset-only changes, malformed-asset rejection
+without publication, blank and template pack, and a real-Excel open/compile/run
+after the source assets are unavailable. The pull fixture also confirms that
+Excel push rejects the unsynchronized compatibility marker while canonical
+sidecar file push succeeds and preserves an unmanaged canary artifact.
 
 ## Stable failures
 

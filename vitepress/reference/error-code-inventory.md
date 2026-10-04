@@ -604,6 +604,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `forbid_unqualified_excel_objects`
 - `form_already_exists`
 - `form_apply_args_invalid`
+- `form_asset`
 - `form_build_args_invalid`
 - `form_code`
 - `form_export_image_args_invalid`
@@ -619,6 +620,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `form_path`
 - `form_snapshot_args_invalid`
 - `form_snapshot_write_failed`
+- `form_spec`
 - `forms_dir`
 - `forms_reference_required`
 - `formula_cell_count`
@@ -1417,6 +1419,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unsupported_inline_suppression_rule`
 - `unsupported_literal`
 - `unsupported_parameter_type`
+- `unsupported_picture_resource`
 - `unsupported_project_layout`
 - `unsupported_properties`
 - `unsupported_property`

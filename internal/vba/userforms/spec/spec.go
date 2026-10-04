@@ -92,9 +92,18 @@ type FormSpecControl struct {
 	List           []string                 `json:"list,omitempty" yaml:"list,omitempty"`
 	Tabs           []FormSpecTab            `json:"tabs" yaml:"tabs"`
 	Unsupported    []string                 `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
+	Picture        *FormSpecPicture         `json:"picture,omitempty" yaml:"picture,omitempty"`
 	Controls       []FormSpecControl        `json:"controls,omitempty" yaml:"controls,omitempty"`
 	Properties     map[string]any           `json:"properties,omitempty" yaml:"properties,omitempty"`
 	Observed       *FormSpecObservedControl `json:"observed,omitempty" yaml:"observed,omitempty"`
+}
+
+// FormSpecPicture describes an Image control picture action. Data contains
+// project-root-resolved source bytes for compiler use and is never serialized.
+type FormSpecPicture struct {
+	Path   string `json:"path,omitempty" yaml:"path,omitempty"`
+	Remove bool   `json:"remove,omitzero" yaml:"remove,omitempty"`
+	Data   []byte `json:"-" yaml:"-"`
 }
 
 func (control FormSpecControl) MarshalYAML() (any, error) {
@@ -585,6 +594,9 @@ func ValidateFormSpecControlIssues(control FormSpecControl, path string) []Valid
 			issues = append(issues, validationIssue("UFV012", SeverityError, fmt.Sprintf("%s.progId %q is for %s, not %s.", path, control.ProgID, progControl.Type, control.Type), path+".progId", "Use the ProgID that matches type or change type to match the ProgID.", ""))
 		}
 	}
+	if control.Picture != nil {
+		issues = append(issues, validatePictureAction(control.Type, control.Picture, path+".picture")...)
+	}
 	if strings.EqualFold(strings.TrimSpace(control.Type), "Page") {
 		for _, field := range []struct {
 			name  string
@@ -852,6 +864,9 @@ func validateRawControlProperties(controlMap map[string]any, controlType, progID
 		addGenericCustomControlProperties(allowed, SupportLevelCustomUnchecked)
 	}
 	issues := validateObjectProperties(controlMap, allowed, path, nil)
+	if value, ok := lookupRawField(controlMap, "picture"); ok {
+		issues = append(issues, validateRawPicture(value, controlType, path+".picture")...)
+	}
 	if rawTabs, ok := lookupRawField(controlMap, "tabs"); ok {
 		issues = append(issues, validateRawFormSpecTabs(rawTabs, path+".tabs")...)
 	}
@@ -874,6 +889,65 @@ func validateRawControlProperties(controlMap map[string]any, controlType, progID
 		}
 	}
 	return issues
+}
+
+func validateRawPicture(value any, controlType, path string) []ValidationIssue {
+	if !strings.EqualFold(strings.TrimSpace(controlType), "Image") {
+		return []ValidationIssue{invalidControlPropertyIssue(path, controlType)}
+	}
+	object, ok := asObjectMap(value)
+	if !ok {
+		return []ValidationIssue{validationIssue("UFV005", SeverityError, fmt.Sprintf("%s must be an object.", path), path, "Use {path: relative-file} or {remove: true}.", "")}
+	}
+	fields := make(map[string]any, len(object))
+	issues := make([]ValidationIssue, 0)
+	for key, item := range object {
+		name := strings.ToLower(strings.TrimSpace(key))
+		if name != "path" && name != "remove" {
+			issues = append(issues, validationIssue("UFV001", SeverityError, fmt.Sprintf("%s.%s is not defined by the picture action.", path, key), path+"."+key, "Use only path or remove.", ""))
+			continue
+		}
+		if _, duplicate := fields[name]; duplicate {
+			issues = append(issues, validationIssue("UFV001", SeverityError, fmt.Sprintf("%s.%s is duplicated ignoring case.", path, key), path+"."+key, "Keep one spelling for each picture action field.", ""))
+			continue
+		}
+		fields[name] = item
+	}
+	pathValue, hasPath := fields["path"]
+	removeValue, hasRemove := fields["remove"]
+	switch {
+	case hasPath && hasRemove:
+		issues = append(issues, validationIssue("UFV005", SeverityError, fmt.Sprintf("%s must contain exactly one of path or remove.", path), path, "Use {path: relative-file} or {remove: true}, not both.", ""))
+	case hasPath:
+		text, ok := pathValue.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			issues = append(issues, validationIssue("UFV005", SeverityError, fmt.Sprintf("%s.path must be a non-empty string.", path), path+".path", "Provide a project-root-relative BMP or JPEG path.", ""))
+		}
+	case hasRemove:
+		remove, ok := removeValue.(bool)
+		if !ok || !remove {
+			issues = append(issues, validationIssue("UFV005", SeverityError, fmt.Sprintf("%s.remove must be true.", path), path+".remove", "Use remove: true to clear the picture.", ""))
+		}
+	default:
+		issues = append(issues, validationIssue("UFV005", SeverityError, fmt.Sprintf("%s must contain path or remove: true.", path), path, "Use {path: relative-file} or {remove: true}.", ""))
+	}
+	return issues
+}
+
+func validatePictureAction(controlType string, picture *FormSpecPicture, path string) []ValidationIssue {
+	if !strings.EqualFold(strings.TrimSpace(controlType), "Image") {
+		return []ValidationIssue{invalidControlPropertyIssue(path, controlType)}
+	}
+	if picture.Remove {
+		if strings.TrimSpace(picture.Path) != "" {
+			return []ValidationIssue{validationIssue("UFV005", SeverityError, fmt.Sprintf("%s cannot combine path and remove.", path), path, "Use exactly one picture action.", "")}
+		}
+		return nil
+	}
+	if strings.TrimSpace(picture.Path) == "" {
+		return []ValidationIssue{validationIssue("UFV005", SeverityError, fmt.Sprintf("%s.path must be a non-empty string.", path), path+".path", "Provide a project-root-relative BMP or JPEG path.", "")}
+	}
+	return nil
 }
 
 func isRawUnsupportedControlPlaceholder(controlMap map[string]any, controlType, progID string) bool {
