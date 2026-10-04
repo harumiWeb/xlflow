@@ -11,6 +11,8 @@ All notable changes to xlflow will be documented in this file.
 - Fixed pure-Go UserForm projection to omit persisted control properties that
   the control's FormSpec contract does not support. This keeps MultiPage
   file-pull snapshots valid for subsequent pure-Go generation.
+  Non-empty unsupported captions remain visible in snapshot warnings instead
+  of being silently hidden.
 
 - Added Excel bridge support for `MultiPage` Pages and independent `TabStrip`
   tabs in UserForm snapshots and writes. Page hierarchies, tab metadata, and

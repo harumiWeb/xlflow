@@ -118,6 +118,9 @@ Binary masks, padding, TextProps, class tables, opaque tails, stream extents,
 and internal site IDs never enter FormSpec. Semantically meaningful state that
 has no supported FormSpec field is listed in a control's sorted `unsupported`
 array and summarized by one `unsupported_properties` warning per control.
+Non-empty persisted Caption values on controls without caption support are
+reported as unsupported `caption`; empty cached Caption defaults are omitted
+without a warning.
 Non-empty site strings without a FormSpec field—including `Tag`,
 `ControlTipText`, `RuntimeLicKey`, `ControlSource`, and `RowSource`—are named in
 that list rather than silently discarded. Site `Name` is already represented

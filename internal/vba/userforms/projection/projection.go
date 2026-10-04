@@ -387,9 +387,12 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 		}
 	}
 	if control.Record != nil {
+		_, supportsCaption := forms.LookupControlProperty(controlType, "caption")
 		projected := map[string]bool{
-			"Caption": true, "DisplayedSize": true,
-			"Size": true, "VariousPropertyBits": true,
+			// Empty cached captions are defaults, not unmodeled user state.
+			"Caption":       supportsCaption || control.Record.Strings["Caption"].Text == "",
+			"DisplayedSize": true,
+			"Size":          true, "VariousPropertyBits": true,
 		}
 		projected["ListIndex"] = supportsSelectedIndex(controlType)
 		projected["Value"] = supportsControlValue(controlType)

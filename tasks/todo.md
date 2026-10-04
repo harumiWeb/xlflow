@@ -1,3 +1,19 @@
+# PR #913 review follow-up
+
+The persisted-caption finding is valid: caption projection respects the
+control contract, but unsupported-property reporting still treats every
+Caption as projected and hides nonempty unmodeled values.
+
+- [x] Add full-projection regressions for nonempty unsupported captions,
+      empty defaults, and supported captions; confirm the regression fails.
+- [x] Align unsupported Caption reporting with the canonical control contract
+      while keeping empty unsupported defaults silent.
+- [x] Verify affected Go tests, lint/docs and staged formatting.
+
+Publish the verified fix to the existing PR and reply with the regression
+evidence. Test-function docstrings are an advisory suggestion rather than a
+repository requirement and are outside this behavior fix.
+
 # PR #907 review follow-up
 
 All five comments are valid presentation/projection defects; retain global
