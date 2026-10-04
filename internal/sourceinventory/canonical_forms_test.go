@@ -80,6 +80,30 @@ func TestCanonicalLegacyFormsRemainRecursiveAndAttachSidecars(t *testing.T) {
 	}
 }
 
+func TestCanonicalCaseDistinctAssetsDirectory(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "src", "forms")
+	writeInventoryFile(t, root, "src/forms/assets", "ignored.frm", "retained opaque asset")
+	if _, err := os.Stat(filepath.Join(base, "Assets")); err == nil {
+		t.Skip("requires a case-sensitive filesystem")
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	frm := "VERSION 5.00\nAttribute VB_Name = \"Legacy\"\nOption Explicit\n"
+	writeInventoryFile(t, root, "src/forms/Assets", "Legacy.frm", frm)
+	writeInventoryFile(t, root, "src/forms/code", "Legacy.bas", "Public Sub KeepMe()\nEnd Sub\n")
+	items, err := collectCanonicalForms(root, base, Options{Config: config.Default(), AllowLegacyFormArtifacts: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Name != "Legacy" || !strings.HasSuffix(items[0].SourcePath, "Assets/Legacy.frm") {
+		t.Fatalf("case-distinct nested form lost: %+v", items)
+	}
+	if _, ok := items[0].Artifact("src/forms/code/Legacy.bas"); !ok {
+		t.Fatalf("case-distinct nested form lost sidecar: %+v", items[0].RelatedPaths())
+	}
+}
+
 func TestCanonicalLegacySidecarRejectsAmbiguousNestedForms(t *testing.T) {
 	root := t.TempDir()
 	base := filepath.Join(root, "src", "forms")

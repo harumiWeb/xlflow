@@ -62,10 +62,6 @@ func canonicalPathKey(path string) string {
 	return sourcepath.Key(path)
 }
 
-func samePath(left, right string) bool {
-	return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
-}
-
 // discoverSourceFiles ports VbaSourceHelper.DiscoverSourceFiles: plain
 // recursive extension matching under each configured root, with the reserved
 // src/forms/code directory excluded from the "form" enumeration only in
@@ -142,7 +138,7 @@ func filesFromDir(dir, kind, ext, excludedDir string) ([]discoveredFile, error) 
 			return &SourceReadError{Path: path, Err: walkErr}
 		}
 		if entry.IsDir() {
-			if kind == "form" && samePath(path, filepath.Join(dir, "assets")) {
+			if kind == "form" && canonicalPathKey(path) == canonicalPathKey(filepath.Join(dir, "assets")) {
 				return filepath.SkipDir
 			}
 			return nil

@@ -186,6 +186,12 @@ collection or ordinary source validation. The CLI regression verifies both
 commands preserve that sidecar and reject its invalid encoding before
 publication.
 
+The reserved `assets/` directory exclusion uses the same host path key. On
+case-sensitive hosts, a separate `Assets/` directory remains eligible for
+nested legacy forms. Inventory and file-push regressions verify that these
+forms, their sidecar code and fingerprints are retained, while unreferenced
+files in the reserved lowercase directory remain excluded.
+
 The CLI regression exercises both commands through publication, verifies the
 persisted decoded BMP bytes, and then proves an invalid ordinary VBA module
 still fails validation without changing the published workbook. Referenced

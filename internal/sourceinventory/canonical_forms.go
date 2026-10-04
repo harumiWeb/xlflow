@@ -88,7 +88,7 @@ func collectCanonicalForms(root, base string, opts Options) ([]Component, error)
 				// Pull deliberately retains assets after a spec stops referencing
 				// them. The reserved directory is not a source-layout namespace;
 				// referenced files are loaded directly from their FormSpecs.
-				if samePath(path, filepath.Join(base, "assets")) {
+				if canonicalPathKey(path) == canonicalPathKey(filepath.Join(base, "assets")) {
 					return filepath.SkipDir
 				}
 				if samePath(path, filepath.Join(base, "specs")) || samePath(path, filepath.Join(base, "code")) {

@@ -223,6 +223,58 @@ func TestPushUpdatesUserFormCodeBehindFromSidecar(t *testing.T) {
 	}
 }
 
+func TestPushCaseDistinctAssetsDirectory(t *testing.T) {
+	root := newSourceTree(t)
+	formsDir := filepath.Join(root, "src", "forms")
+	writeTestFile(t, filepath.Join(formsDir, "assets", "ignored.frm"), "retained opaque asset")
+	if _, err := os.Stat(filepath.Join(formsDir, "Assets")); err == nil {
+		t.Skip("requires a case-sensitive filesystem")
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	workbook := writeWorkbook(t, root, readFixture(t, "p4_form.bin"))
+	frm := "VERSION 5.00\nBegin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} UserForm1\nEnd\nAttribute VB_Name = \"UserForm1\"\n"
+	writeTestFile(t, filepath.Join(formsDir, "Assets", "UserForm1.frm"), frm)
+	writeTestFile(t, filepath.Join(formsDir, "code", "UserForm1.bas"), "Private Sub KeepMe()\n    Debug.Print \"case-sensitive-directory\"\nEnd Sub\n")
+	cfg := testConfig()
+	cfg.UserForm.CodeSource = "sidecar"
+	files, err := discoverSourceFiles(resolvedRoots(root, cfg), cfg.UserForm.CodeSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foundForm bool
+	for _, file := range files {
+		if file.Kind == "form" {
+			if file.RelativePath != "Assets/UserForm1.frm" {
+				t.Fatalf("reserved asset entered discovery: %+v", file)
+			}
+			foundForm = true
+		}
+	}
+	if !foundForm {
+		t.Fatal("case-distinct nested form missing from source discovery")
+	}
+	result, err := Push(root, cfg, workbook, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta.Form != 1 || !strings.Contains(moduleSourceOf(readProject(t, workbook), "UserForm1"), "KeepMe") {
+		t.Fatal("case-distinct nested form lost during push")
+	}
+	var trackedForm bool
+	for _, entry := range readState(t, result.StatePath).Fingerprint.Files {
+		if entry.Kind == "form" {
+			if entry.Path != "Assets/UserForm1.frm" {
+				t.Fatalf("reserved asset entered fingerprint: %+v", entry)
+			}
+			trackedForm = true
+		}
+	}
+	if !trackedForm {
+		t.Fatal("case-distinct nested form missing from fingerprint")
+	}
+}
+
 func TestPushChangedOnlyTracksFormSpecAndReferencedPictureBytes(t *testing.T) {
 	root := newSourceTree(t)
 	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
