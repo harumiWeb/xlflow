@@ -10,6 +10,33 @@ xlflow form export-image UserForm1 --json
 
 Run `lint` and `form build` preflight before opening Excel. Do not edit generated `.frm` code-behind independently when sidecar mode is authoritative; see the [UserForm specification](../reference/userform-spec).
 
+## Visual layout in VS Code
+
+Open a canonical `.yaml`, `.yml`, or `.json` FormSpec directly under your
+configured forms root's `specs` directory, then use **Reopen Editor With... →
+xlflow UserForm Designer**. Select a control to drag it or resize with one of
+eight handles. Arrow keys move 1 point; Shift+Arrow moves 10 points. Holding
+an arrow key creates one edit when the keys are released. Escape cancels an
+unfinished interaction. Use VS Code Undo/Redo to restore completed edits.
+
+The grid displays 8-point spacing and has a separate snapping toggle. Snapping
+applies to mouse movement and resize; keyboard movement retains its 1/10-point
+steps. Zoom ranges from 50% to 200% and does not change source coordinates.
+These settings and selection are temporary Designer state.
+
+Movement and resize stay inside the parent's displayed content area. Shrinking
+a Frame or MultiPage stops before its children would overflow, including
+children on other Pages. Existing out-of-bounds controls are not automatically
+corrected; controls larger than their parent must be resized to fit before
+moving. Direct source edits remain available for layouts outside these UI
+constraints. Form and Page bounds are not directly editable on the canvas.
+
+Visual operations produce local source edits and retain unrelated formatting.
+Invalid source retains the last valid preview and disables editing until fixed.
+An xlflow LSP advertising UserForm editing is required; older servers can
+still provide a read-only preview. Images remain placeholders, and Toolbox,
+Property Grid, reparenting, and Page collection editing are future features.
+
 ## MultiPage and TabStrip
 
 Keep the authored `controls` list flat and connect a `MultiPage` to its `Page`

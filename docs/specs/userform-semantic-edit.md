@@ -1,9 +1,10 @@
 # Source-Preserving UserForm FormSpec Semantic Editing
 
 This specification defines the host-neutral Go API for applying semantic edits
-to YAML UserForm FormSpecs while retaining the original source as the canonical
-document. It is the Issue #916 editing contract. It does not add an editor, LSP
-method, CLI command, or Excel integration.
+to UserForm FormSpecs while retaining the original source as the canonical
+document. Issue #916 provides the YAML API; Issue #917 adds JSON geometry
+editing and the Designer LSP adapter. The core API remains host-neutral and
+does not invoke Excel or provide a CLI command.
 
 ## Authority and source model
 
@@ -13,9 +14,10 @@ The API is provided by `internal/vba/userforms/spec/edit`:
 func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result, error)
 ```
 
-`Apply` accepts `.yaml` and `.yml` input only. `Operation` values are
-serializable tagged structs; serialization of the operation request does not
-make JSON FormSpecs editable. The supported operation tags are
+`Apply` accepts `.yaml` and `.yml` for all operations, and `.json` for
+`moveControl` and `resizeControl` only. Other JSON operations return a structured
+unsupported-operation error. `Operation` values are serializable tagged structs.
+The supported YAML operation tags are
 `setFormProperty`, `setControlProperty`, `moveControl`, `resizeControl`,
 `addControl`, `removeControl`, `setParent`, and `reorderControl`.
 
@@ -59,6 +61,16 @@ or merge-key expansion, return a structured error; preserve unrelated anchors,
 aliases, and merge keys byte-for-byte.
 
 ## Operation representation
+
+For JSON geometry edits, retain lexical token spans separately from the
+canonical model. Replace only targeted numeric values and insert missing
+geometry members into the owning object, retaining unrelated bytes, key order,
+whitespace and newline style. JSON is never rewritten as YAML or serialized
+from the normalized FormSpec. Reject duplicate member keys that would make
+source targeting ambiguous, including escaped spellings of the same key.
+Canonical parsing, payload validation, atomic failure and numeric no-op
+behavior remain shared with YAML. No additional FormSpec validation authority
+is introduced by the JSON writer.
 
 The operation is a tagged value with optional payload fields. Pointer fields
 distinguish an omitted number from an explicit zero. `Value` is restricted to a
@@ -193,7 +205,9 @@ The implementation is pure Go and must cover these behaviors:
 - Explicit `form` paths update only the named legacy or `build.*` field.
   Unsupported observed fields, property removal, property bags, collections,
   pictures, and non-scalar values are rejected.
-- YAML and YML inputs are accepted; JSON FormSpec input is rejected by this API.
+- YAML/YML inputs support all operations; JSON supports geometry operations,
+  numeric replacement/insertion, escaped keys, duplicate-key rejection and
+  formatting-stable no-ops, with unsupported JSON operations rejected atomically.
 - `Result.Edits` are deterministic, non-overlapping original-byte ranges whose
   application equals `Result.Source`; a no-op returns no edits.
 
@@ -202,8 +216,8 @@ VBE-facing behavior or establish any Excel runtime claim.
 
 ## Out of scope
 
-- JSON FormSpec editing.
-- VS Code, Webview, LSP, or CLI wiring.
+- JSON operations other than move/resize.
+- CLI wiring; VS Code/Webview/LSP adapters are specified separately.
 - Excel, COM, VBIDE, Designer persistence, or VBE validation.
 - Property removal, observed-state authoring, property bags, collection edits,
   and picture editing.
@@ -213,6 +227,8 @@ VBE-facing behavior or establish any Excel runtime claim.
 ## Related
 
 - Issue #916
+- Issue #917
+- `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`
 - `docs/adr/ADR-0065-userform-source-preserving-semantic-edits.md`
 - `docs/specs/userform-designer.md`
 - `docs/specs/ms-oforms.md`

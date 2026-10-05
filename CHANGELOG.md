@@ -4,7 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added an optional read-only VS Code UserForm Designer for canonical FormSpecs
+- Added interactive VS Code UserForm selection, move, eight-direction resize,
+  keyboard movement, grid snapping, and zoom. YAML/YML and JSON geometry edits
+  preserve source formatting and participate in native VS Code undo/redo.
+  Layout interactions remain inside parent content bounds and protect children
+  when shrinking Frame/MultiPage containers.
+- Added an optional VS Code UserForm Designer for canonical FormSpecs
   under the configured forms root. It previews the current TextDocument through
   xlflow LSP and retains the last valid rendering while the source is invalid.
   The preview UI is localized and prefers measured client dimensions and

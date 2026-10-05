@@ -1,6 +1,6 @@
 # VS Code UserForm Designer
 
-This specification defines the read-only UserForm Designer preview in the
+This specification defines the interactive UserForm Designer in the
 xlflow Visual Studio Code extension. The VS Code `TextDocument` remains the
 canonical source. The Designer renders the current document through the xlflow
 Language Server Protocol (LSP); it does not create or persist another source
@@ -67,9 +67,10 @@ rendered document. A later valid document automatically replaces that state.
 The host-to-Webview protocol carries a rendered `document`, an
 `invalidDocument` status, or a `themeChanged` notification. The Webview can
 signal that it is ready and can ask VS Code to open the backing document in the
-normal text editor. It does not send document edits.
+normal text editor. Completed geometry interactions send semantic edits; the
+Webview never serializes or replaces the source document.
 
-## Read-only rendering
+## Rendering
 
 The Webview uses Preact and TypeScript to render the FormSpec form and its
 controls. It displays the built-in controls supported by the FormSpec model,
@@ -120,15 +121,95 @@ The extension host supplies localized UI strings through a `localization`
 message when the Webview reports readiness. These are rendered as text; parser
 diagnostics and workspace-authored captions retain their original wording.
 
-The Designer does not edit the FormSpec, provide zoom controls, allow Page
-selection, or load image assets. Image controls use a placeholder even when a
+The Designer does not allow Page selection or load image assets. Image controls use a placeholder even when a
 picture path is present in the FormSpec.
 
-Source-preserving semantic edits are available through a separate
-host-neutral Go API. This does not change the current read-only Designer or add
-an LSP, Webview, or CLI editing protocol. See
+Source-preserving semantic edits use the host-neutral Go API. See
 [`userform-semantic-edit.md`](userform-semantic-edit.md) and
 [`ADR-0065`](../adr/ADR-0065-userform-source-preserving-semantic-edits.md).
+
+## Interactive geometry
+
+Selection is a transient control ID; clicking the background selects the form.
+Known built-in controls other than Page can move and resize with eight handles.
+Form and Page geometry is not edited on the canvas. Unknown controls remain
+selectable placeholders. No reparenting or structural edit is implicit.
+
+Pointerdown captures the original parent-relative geometry. Pointermove only
+updates local preview state; pointerup emits at most one transaction. North/west
+resize can emit both `moveControl` and `resizeControl` in that transaction.
+Escape, pointer cancellation, capture loss, pointer focus loss and document
+updates cancel unfinished interaction. Pointer cancellation and capture loss
+only cancel the matching active pointer; other pointer IDs cannot discard its
+preview or pending transaction. Ignore additional pointerdown events while a
+pointer gesture is active so that selection and gesture ownership remain with
+the original pointer. Arrows move 1 pt, Shift+Arrow moves
+10 pt; repeats accumulate until all movement keys are released or focus leaves
+the canvas. No-op interactions create no document edit.
+
+Use `96/72` CSS pixels per point and a common inverse transform for pointer
+deltas. Zoom defaults to 100% and offers 50/75/100/125/150/200%. Container
+content insets are point-based and shared by rendering and constraints:
+Frame uses 0.75 pt per edge; MultiPage uses 1.5 pt left/right/bottom and
+18 pt for its tab band. These approximate UI insets are not authored geometry.
+Selection, zoom, grid visibility and snapping are not persisted into FormSpec.
+
+The 8 pt grid is initially visible; snapping is initially off. Snap dragged
+coordinates/resize edges before applying parent boundary constraints, which
+take precedence over the grid. Keyboard steps ignore snapping. Compute geometry
+from initial values and total displacement, with displacement rounded to a
+millionth of a point, rather than repeatedly converting CSS positions.
+
+Completed interactions must fit inside the parent's displayed content area,
+with a 1 pt minimum on both axes. Frame shrink protects immediate children;
+MultiPage shrink protects children on every Page, including hidden/non-selected
+Pages. Empty containers, including MultiPage controls with empty Pages, retain
+the 1 pt outer minimum; child extents plus decoration insets increase that
+minimum only where children require space. Moving a container retains child local coordinates. Existing overflow
+is never fixed on load; fitting moves/resizes are permitted, but an oversized
+control cannot move until resized to fit. A control smaller than 1 pt on either
+axis also cannot move until explicitly resized to meet the minimum; source
+dimensions are never silently enlarged by moving it. If child protection prevents fitting,
+editing that geometry is unavailable; source editing remains available. These
+UI constraints do not add canonical FormSpec validation rules.
+
+Move and resize preserve axes with zero displacement, including when snapping
+is enabled; a zero-displacement gesture produces no edit or history entry.
+Resize also preserves the opposite edge. If that unchanged
+axis or opposite edge already prevents a fitting result, reject the interaction
+rather than silently correcting it; source editing remains available.
+
+## Geometry edit protocol and native history
+
+The LSP advertises `capabilities.experimental.userFormEdit: true`. Preview-only
+servers retain read-only rendering, selection, grid and zoom. Requests use
+`xlflow/userFormEdit` with `{uri, version, text, operations}`. Operations are
+only `moveControl` (both `left`/`top`) and `resizeControl` (both `width`/`height`),
+using control IDs and finite point values. The extension and RPC both accept
+one operation or a move/resize pair for the same control per interaction.
+Empty batches, more than two operations, repeated operation types, and pairs
+targeting different controls are rejected before source edits are generated.
+
+The server validates eligibility and calls `spec/edit.Apply` on the supplied
+unsaved text. It returns `{version, edits, warnings}` or `{version, error}`,
+with standard LSP TextEdit ranges converted from UTF-8 offsets to UTF-16
+positions. Errors retain structured operation diagnostics and canonical codes.
+The server does not apply edits, write files or replace input with saved source.
+
+The host serializes edits per document URI, captures source/version, validates
+returned ranges and applies all edits in one WorkspaceEdit. Reject requests and
+responses obsolete after text, project, configuration, connection, visibility
+or disposal changes. Native custom text editor history owns undo/redo; there
+is no Webview history or automatic save. Text edits, undo/redo and other panels
+refresh through the preview synchronizer. Invalid source or unavailable
+connections disable editing while retaining the last valid rendering. Rejected
+operations revert preview and display an error without automatic retry/rebase.
+
+Webview messages add `edit` with request ID/version/operations. Host messages
+add edit results and availability; document messages carry editable capability.
+YAML/YML and JSON share geometry interactions; JSON support is limited to these
+geometry operations. Delete, Property Grid, Toolbox, Page collection editing,
+reparenting, multiple selection and form resizing are separate issues.
 
 ## Webview security
 
@@ -142,6 +223,8 @@ interpolated into the HTML document.
 ## Related
 
 - Issue #915
+- Issue #917
+- `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`
 - `docs/specs/ms-oforms.md`
 - `docs/specs/userform-picture-assets.md`

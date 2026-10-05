@@ -97,8 +97,11 @@ func (e *Error) Unwrap() error {
 // temporarily violate FormSpec constraints, enabling atomic structural changes.
 // A failure always returns a zero Result; neither source nor payload is mutated.
 func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result, error) {
+	if input.Format == "json" {
+		return applyJSON(input, source, operations)
+	}
 	if input.Format != "yaml" {
-		return Result{}, failure(-1, Operation{}, "UFE001", "Only YAML/YML semantic editing is supported.", "Use a YAML FormSpec.")
+		return Result{}, failure(-1, Operation{}, "UFE001", "Unsupported FormSpec source format.", "Use YAML/YML, or JSON for geometry edits.")
 	}
 	_, err := spec.ParseFormSpec(input, source)
 	if err != nil {

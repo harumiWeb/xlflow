@@ -19,8 +19,12 @@ const sizes: Record<string, [number, number]> = {
   tabstrip: [240, 48],
 };
 
-export function pointsToPixels(points: number): number {
-  return (points * 96) / 72;
+export function pointsToPixels(points: number, zoom = 1): number {
+  return (points * 96 * zoom) / 72;
+}
+
+export function pixelsToPoints(pixels: number, zoom = 1): number {
+  return (pixels * 72) / (96 * zoom);
 }
 
 export function designerDocument(spec: PreviewDocument, warnings: string[] = []): DesignerDocument {

@@ -54,6 +54,7 @@ export class PreviewSynchronizer {
       this.lastDocument = {
         type: "document",
         version,
+        editable: result.editable ?? false,
         document: designerDocument(
           result.document,
           (result.warnings ?? []).map((w) => w.message),

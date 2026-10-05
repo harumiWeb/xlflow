@@ -26,7 +26,7 @@ button {
 .form-shell {
   display: inline-block;
   border: 1px solid var(--vscode-panel-border);
-  margin: 8px;
+  transform-origin: top left;
 }
 .form-title {
   padding: 6px 10px;
@@ -109,7 +109,7 @@ button {
 }
 .frame,
 .multipage {
-  border: 1px solid #aaa;
+  box-shadow: inset 0 0 0 1px #aaa;
 }
 .frame-caption {
   position: absolute;
@@ -148,6 +148,23 @@ button {
 }
 .page-content {
   position: absolute;
-  inset: 24px 2px 2px;
   overflow: hidden;
 }
+.container-content { position: absolute; }
+.designer-toolbar { display: flex; gap: 16px; align-items: center; margin: 8px 0 16px; }
+.designer-toolbar label { display: flex; gap: 6px; align-items: center; }
+.designer-toolbar select { color: var(--vscode-input-foreground); background: var(--vscode-input-background); }
+.designer-viewport { position: relative; margin: 8px; user-select: none; touch-action: none; }
+.designer-viewport:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 4px; }
+.show-grid { background-image: radial-gradient(#a0a0a0 0.6px, transparent 0.6px); }
+.form-selected { outline: 1px dashed var(--vscode-focusBorder); outline-offset: -1px; }
+.selection-outline { position: absolute; box-sizing: border-box; outline: 1px solid #0078d4; z-index: 100000; pointer-events: none; }
+.resize-handle { position: absolute; width: 8px; height: 8px; background: #fff; border: 1px solid #0078d4; box-sizing: border-box; pointer-events: auto; z-index: 1; }
+.handle-nw { left: 0; top: 0; cursor: nwse-resize; }
+.handle-n { left: 50%; top: 0; cursor: ns-resize; }
+.handle-ne { left: 100%; top: 0; cursor: nesw-resize; }
+.handle-w { left: 0; top: 50%; cursor: ew-resize; }
+.handle-e { left: 100%; top: 50%; cursor: ew-resize; }
+.handle-sw { left: 0; top: 100%; cursor: nesw-resize; }
+.handle-s { left: 50%; top: 100%; cursor: ns-resize; }
+.handle-se { left: 100%; top: 100%; cursor: nwse-resize; }

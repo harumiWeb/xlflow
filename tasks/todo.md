@@ -1,3 +1,21 @@
+# PR #926 review follow-up
+
+- [x] CodeRabbit: reproduce secondary pointerdown replacing the active gesture; reject new pointerdown until that gesture ends and verify primary commit.
+- [x] Verify full VSCode/lint/docs/format checks and publish the correction with an evidence reply.
+
+- [x] Verify empty Frame/MultiPage minimum size and secondary-pointer cancellation with regressions.
+- [x] Apply child extents plus insets separately from the outer 1pt minimum; preserve active pointer ownership for cancellation/capture loss.
+- [x] Run VSCode/lint/docs/format checks; publish the verified fixes on existing PR with evidence replies and persisted body verification.
+
+# Issue #917 final review follow-up
+
+- [x] Preserve unchanged axes during move/snap and reject gestures that leave existing overflow; add geometry regressions.
+- [x] Enforce a single move/resize operation or distinct move+resize pair for one control at the RPC boundary; test rejected raw RPC batches and accepted pairs.
+- [x] Run affected Go and VS Code checks, preserve Pass 1 evidence and clean up review resources.
+- [x] Commit the fixes and run independent Pass 2 against the full Issue #917 change; both Pass 1 findings resolved.
+- [x] Reject moves of existing sub-point controls; verify explicit resize repair and real Webview no-edit behavior.
+- [x] Preserve Pass 2 report and clean up its resources; stop the full review loop at two passes and verify the isolated P2 correction through regression tests/self-review.
+
 # PR #925 review follow-up
 
 - [x] 操作エラーの中間状態検証による上書きを防ぐ。

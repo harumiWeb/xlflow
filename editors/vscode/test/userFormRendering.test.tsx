@@ -4,9 +4,11 @@ import { DesignerCanvas, ControlGlyph } from "../webview/userFormDesigner/Design
 import { designerDocument } from "../src/userFormEditor/model";
 import type { SpecControl } from "../src/userFormEditor/protocol";
 import { runUserFormEditorAssertions } from "./suite/userFormEditor.test";
+import { runUserFormGeometryAssertions } from "./suite/userFormGeometry.test";
 
 async function run() {
   await runUserFormEditorAssertions();
+  runUserFormGeometryAssertions();
   const mixed = {
     name: "Mixed",
     build: { width: 300, height: 240 },

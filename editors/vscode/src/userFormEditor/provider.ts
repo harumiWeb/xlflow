@@ -5,10 +5,12 @@ import { readFormsRootFromToml } from "../sidebar";
 import { isFormSpecPath, PreviewSynchronizer } from "./document";
 import { isWebviewMessage } from "./protocol";
 import type { HostMessage } from "./protocol";
+import { DocumentEditQueue } from "./edits";
 
 export const designerViewType = "xlflow.userFormDesigner";
 
 export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
+  private readonly edits = new DocumentEditQueue();
   public constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly clients: XlflowLanguageClientManager,
@@ -26,14 +28,19 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
     let ready = false;
     let disposed = false;
     let timer: NodeJS.Timeout | undefined;
+    let editable = false;
+    let generation = 0;
     const send = (message: HostMessage) => {
+      if (message.type === "document") editable = message.editable === true;
+      if (message.type === "invalidDocument" || message.type === "editingUnavailable")
+        editable = false;
       if (ready && !disposed && panel.visible) void panel.webview.postMessage(message);
     };
     const sendLocalization = () =>
       send({
         type: "localization",
         strings: {
-          header: vscode.l10n.t("xlflow UserForm Designer · Read-only preview"),
+          header: vscode.l10n.t("xlflow UserForm Designer"),
           openText: vscode.l10n.t("Open text editor"),
           lastValid: vscode.l10n.t("Showing the last valid document."),
           loading: vscode.l10n.t("Loading FormSpec…"),
@@ -41,6 +48,13 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
             "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.",
           ),
           approximateBounds: vscode.l10n.t("approximate bounds"),
+          grid: vscode.l10n.t("Show grid"),
+          snap: vscode.l10n.t("Snap to grid"),
+          zoom: vscode.l10n.t("Zoom"),
+          readOnly: vscode.l10n.t("Editing requires an xlflow version supporting UserForm edits."),
+          cannotMove: vscode.l10n.t(
+            "This control is larger than its parent. Resize it to fit before moving.",
+          ),
         },
       });
     const update = async () => {
@@ -93,6 +107,8 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
       );
     };
     const schedule = () => {
+      generation++;
+      send({ type: "editingUnavailable" });
       sync.invalidate();
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
@@ -125,8 +141,18 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
           sendLocalization();
           sync.replay(send);
           void update();
-        } else {
+        } else if (message.type === "openText") {
           void vscode.commands.executeCommand("vscode.openWith", document.uri, "default");
+        } else {
+          const editGeneration = generation;
+          const permitted = () =>
+            !disposed && panel.visible && editable && generation === editGeneration;
+          void this.edits
+            .run(document, message.version, message.operations, this.clients, permitted)
+            .then(async (error) => {
+              send({ type: "editResult", requestId: message.requestId, error });
+              await update();
+            });
         }
       }),
     ];

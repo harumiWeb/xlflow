@@ -43,6 +43,7 @@ export interface PreviewDocument {
 
 export interface PreviewResult {
   version: number;
+  editable?: boolean;
   document?: PreviewDocument;
   warnings?: { code: string; message: string }[];
   error?: DesignerError;
@@ -67,29 +68,84 @@ export interface DesignerDocument {
 }
 
 export const designerStrings = {
-  header: "xlflow UserForm Designer · Read-only preview",
+  header: "xlflow UserForm Designer",
   openText: "Open text editor",
   lastValid: "Showing the last valid document.",
   loading: "Loading FormSpec…",
   approximate:
     "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.",
   approximateBounds: "approximate bounds",
+  grid: "Show grid",
+  snap: "Snap to grid",
+  zoom: "Zoom",
+  readOnly: "Editing requires an xlflow version supporting UserForm edits.",
+  cannotMove: "This control is larger than its parent. Resize it to fit before moving.",
 };
 export type DesignerStrings = typeof designerStrings;
 
 export type HostMessage =
   | { type: "localization"; strings: DesignerStrings }
-  | { type: "document"; version: number; document: DesignerDocument }
+  | { type: "document"; version: number; document: DesignerDocument; editable?: boolean }
   | { type: "invalidDocument"; version: number; error: DesignerError }
+  | { type: "editResult"; requestId: number; error?: DesignerError }
+  | { type: "editingUnavailable" }
   | { type: "themeChanged" };
 
-export type WebviewMessage = { type: "ready" } | { type: "openText" };
+export type GeometryOperation =
+  | { type: "moveControl"; controlId: string; left: number; top: number }
+  | { type: "resizeControl"; controlId: string; width: number; height: number };
+
+export interface SourceTextEdit {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } };
+  newText: string;
+}
+export interface EditResult {
+  version: number;
+  edits?: SourceTextEdit[];
+  error?: DesignerError;
+}
+export type WebviewMessage =
+  | { type: "ready" }
+  | { type: "openText" }
+  | { type: "edit"; requestId: number; version: number; operations: GeometryOperation[] };
+
+export function isGeometryOperation(value: unknown): value is GeometryOperation {
+  if (typeof value !== "object" || value === null) return false;
+  const op = value as Record<string, unknown>;
+  if (typeof op.controlId !== "string" || !op.controlId) return false;
+  const fields =
+    op.type === "moveControl"
+      ? ["left", "top"]
+      : op.type === "resizeControl"
+        ? ["width", "height"]
+        : [];
+  return (
+    fields.length === 2 &&
+    Object.keys(op).every((key) => ["type", "controlId", ...fields].includes(key)) &&
+    fields.every((key) => typeof op[key] === "number" && Number.isFinite(op[key]))
+  );
+}
 
 export function isWebviewMessage(value: unknown): value is WebviewMessage {
+  if (typeof value !== "object" || value === null) return false;
+  const message = value as Record<string, unknown>;
+  if (message.type === "ready" || message.type === "openText")
+    return Object.keys(message).length === 1;
+  const operations = message.operations;
   return (
-    typeof value === "object" &&
-    value !== null &&
-    "type" in value &&
-    (value.type === "ready" || value.type === "openText")
+    message.type === "edit" &&
+    Object.keys(message).every((key) =>
+      ["type", "requestId", "version", "operations"].includes(key),
+    ) &&
+    Number.isSafeInteger(message.requestId) &&
+    Number(message.requestId) >= 0 &&
+    Number.isSafeInteger(message.version) &&
+    Number(message.version) >= 0 &&
+    Array.isArray(operations) &&
+    operations.length >= 1 &&
+    operations.length <= 2 &&
+    operations.every(isGeometryOperation) &&
+    operations.every((op) => op.controlId === operations[0].controlId) &&
+    new Set(operations.map((op) => op.type)).size === operations.length
   );
 }
