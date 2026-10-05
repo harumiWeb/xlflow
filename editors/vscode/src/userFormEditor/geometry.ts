@@ -69,7 +69,13 @@ export function moveGeometry(
   parent: Bounds,
   snapping = false,
 ): Geometry | undefined {
-  if (start.width > parent.width || start.height > parent.height) return undefined;
+  if (
+    start.width < minimumSize ||
+    start.height < minimumSize ||
+    start.width > parent.width ||
+    start.height > parent.height
+  )
+    return undefined;
   const moveAxis = (position: number, delta: number, limit: number) => {
     const displacement = stableDelta(delta);
     if (displacement === 0) return position >= 0 && position <= limit ? position : undefined;

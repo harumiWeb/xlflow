@@ -25,6 +25,20 @@ export function runUserFormGeometryAssertions(): void {
   const overflowX = { left: 50, top: 10, width: 100, height: 20 };
   const square = { width: 100, height: 100 };
   const minimum = { width: 1, height: 1 };
+  for (const size of [-1, 0, 0.5]) {
+    for (const tiny of [
+      { ...start, width: size },
+      { ...start, height: size },
+    ]) {
+      for (const snapping of [false, true])
+        assert.strictEqual(moveGeometry(tiny, 1, 0, bounds, snapping), undefined);
+      assert.strictEqual(moveGeometry(tiny, 0, 1, bounds), undefined);
+    }
+  }
+  const tiny = { left: 5, top: 5, width: 0.5, height: 0.5 };
+  const repaired = resizeGeometry(tiny, "se", 0.5, 0.5, square, minimum)!;
+  assert.deepStrictEqual(repaired, { ...tiny, width: 1, height: 1 });
+  assert.deepStrictEqual(moveGeometry(repaired, 1, 0, square), { ...repaired, left: 6 });
   assert.strictEqual(moveGeometry(overflowX, 0, 5, square), undefined);
   assert.strictEqual(moveGeometry({ ...overflowX, left: -5 }, 0, 5, square), undefined);
   assert.deepStrictEqual(moveGeometry(overflowX, -50, 5, square), {

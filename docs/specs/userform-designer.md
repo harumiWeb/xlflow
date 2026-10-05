@@ -161,7 +161,9 @@ with a 1 pt minimum on both axes. Frame shrink protects immediate children;
 MultiPage shrink protects children on every Page, including hidden/non-selected
 Pages. Moving a container retains child local coordinates. Existing overflow
 is never fixed on load; fitting moves/resizes are permitted, but an oversized
-control cannot move until resized to fit. If child protection prevents fitting,
+control cannot move until resized to fit. A control smaller than 1 pt on either
+axis also cannot move until explicitly resized to meet the minimum; source
+dimensions are never silently enlarged by moving it. If child protection prevents fitting,
 editing that geometry is unavailable; source editing remains available. These
 UI constraints do not add canonical FormSpec validation rules.
 

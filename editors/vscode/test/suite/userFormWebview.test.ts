@@ -416,6 +416,39 @@ window.addEventListener("message", e => {
     });
     assert.strictEqual((pointerCancelled.editMessages as unknown[]).length, 5);
     assert.strictEqual(pointerCancelled.left, "40px");
+    interactive.controls[0] = { ...interactive.controls[0], width: 0.5, height: 0.5 };
+    await snapshot({ type: "document", version: 23, document: interactive, editable: true });
+    const tinyMove = await snapshot({
+      type: "testAction",
+      version: 24,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "1" } },
+        {
+          selector: ".designer-toolbar label:nth-child(2) input",
+          event: "change",
+          props: { checked: false },
+        },
+        pointer(".control.label", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointermove", 48, 48),
+        pointer(".designer-viewport", "pointerup", 48, 48),
+        key("keydown", "ArrowRight"),
+        key("keyup", "ArrowRight"),
+      ],
+    });
+    assert.strictEqual((tinyMove.editMessages as unknown[]).length, 5, "tiny control cannot move");
+    assert.strictEqual(tinyMove.left, "40px");
+    const tinyResize = await snapshot({
+      type: "testAction",
+      version: 25,
+      actions: [
+        pointer(".handle-se", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointermove", 48, 48),
+        pointer(".designer-viewport", "pointerup", 48, 48),
+      ],
+    });
+    assert.deepStrictEqual((tinyResize.editMessages as { operations: unknown[] }[])[5].operations, [
+      { type: "resizeControl", controlId: "label", width: 6.5, height: 6.5 },
+    ]);
   } finally {
     subscription.dispose();
     panel.dispose();

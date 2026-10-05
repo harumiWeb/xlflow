@@ -3,7 +3,9 @@
 - [x] Preserve unchanged axes during move/snap and reject gestures that leave existing overflow; add geometry regressions.
 - [x] Enforce a single move/resize operation or distinct move+resize pair for one control at the RPC boundary; test rejected raw RPC batches and accepted pairs.
 - [x] Run affected Go and VS Code checks, preserve Pass 1 evidence and clean up review resources.
-- [ ] Commit the fixes and run independent Pass 2 against the full Issue #917 change.
+- [x] Commit the fixes and run independent Pass 2 against the full Issue #917 change; both Pass 1 findings resolved.
+- [x] Reject moves of existing sub-point controls; verify explicit resize repair and real Webview no-edit behavior.
+- [x] Preserve Pass 2 report and clean up its resources; stop the full review loop at two passes and verify the isolated P2 correction through regression tests/self-review.
 
 # PR #925 review follow-up
 
