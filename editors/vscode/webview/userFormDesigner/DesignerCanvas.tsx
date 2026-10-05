@@ -207,7 +207,7 @@ export function DesignerCanvas({
     setPreview({ id: current.control.id, geometry: end });
   };
   const pointerDown = (event: JSX.TargetedPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || gesture.current?.pointerId !== undefined) return;
     if (gesture.current?.keys) finish();
     const target = event.target as Element;
     const id = target.closest<HTMLElement>("[data-control-id]")?.dataset.controlId;

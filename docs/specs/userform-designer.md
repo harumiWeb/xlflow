@@ -141,7 +141,9 @@ resize can emit both `moveControl` and `resizeControl` in that transaction.
 Escape, pointer cancellation, capture loss, pointer focus loss and document
 updates cancel unfinished interaction. Pointer cancellation and capture loss
 only cancel the matching active pointer; other pointer IDs cannot discard its
-preview or pending transaction. Arrows move 1 pt, Shift+Arrow moves
+preview or pending transaction. Ignore additional pointerdown events while a
+pointer gesture is active so that selection and gesture ownership remain with
+the original pointer. Arrows move 1 pt, Shift+Arrow moves
 10 pt; repeats accumulate until all movement keys are released or focus leaves
 the canvas. No-op interactions create no document edit.
 

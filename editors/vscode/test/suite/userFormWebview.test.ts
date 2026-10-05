@@ -463,6 +463,7 @@ window.addEventListener("message", e => {
       actions: [
         pointer(".control.label", "pointerdown", 40, 40),
         pointer(".designer-viewport", "pointermove", 48, 48),
+        pointer(".control.label", "pointerdown", 80, 80, 2),
         pointer(".designer-viewport", "pointercancel", 80, 80, 2),
         pointer(".designer-viewport", "lostpointercapture", 80, 80, 2),
       ],
