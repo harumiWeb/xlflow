@@ -9,6 +9,10 @@ All notable changes to xlflow will be documented in this file.
   xlflow LSP and retains the last valid rendering while the source is invalid.
   The preview UI is localized and prefers measured client dimensions and
   explicit ComboBox values; Page selection follows compiler sibling ordering.
+- Added a host-neutral Go FormSpec semantic edit engine with eight operations,
+  atomic validation, structured diagnostics, and localized YAML source edits.
+  It follows `ParseFormSpec`: authored control IDs are required (`UFV004`),
+  with no implicit-ID editing; writer-specific constraints remain downstream.
 
 ## v0.35.0
 

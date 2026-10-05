@@ -124,6 +124,12 @@ The Designer does not edit the FormSpec, provide zoom controls, allow Page
 selection, or load image assets. Image controls use a placeholder even when a
 picture path is present in the FormSpec.
 
+Source-preserving semantic edits are available through a separate
+host-neutral Go API. This does not change the current read-only Designer or add
+an LSP, Webview, or CLI editing protocol. See
+[`userform-semantic-edit.md`](userform-semantic-edit.md) and
+[`ADR-0065`](../adr/ADR-0065-userform-source-preserving-semantic-edits.md).
+
 ## Webview security
 
 Each Webview document uses a fresh random nonce for its bundled script. Its
