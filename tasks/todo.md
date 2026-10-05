@@ -1,3 +1,10 @@
+# Issue #916 final review follow-up
+
+- [x] 明示タグ付き引用 scalar の境界検出を修正する。
+- [x] 引用内の #、エスケープ、flow 区切り、LF/CRLF のコメント保持を回帰テストする。
+- [x] 関連 Go テストと vet を確認し、Pass 1 の報告と再現コードを保持してレビュー環境を cleanup する。
+- [ ] 修正をコミットして独立レビュー Pass 2 を実行する。
+
 # Issue #915 designer review follow-up
 
 - [x] PR #924: prefer client/inside dimensions on both axes; render explicit ComboBox values including empty strings; localize Webview UI through host l10n messages.

@@ -187,6 +187,26 @@ func (e *engine) end(n *yaml.Node) int {
 	if start >= len(e.source) {
 		return start
 	}
+	// yaml.Node starts at an explicit tag, rather than at the scalar body.
+	// Skip that property before choosing quoted/plain scanning; otherwise a
+	// quoted '#' or flow delimiter would incorrectly terminate the value.
+	if n.Style&(yaml.SingleQuotedStyle|yaml.DoubleQuotedStyle) != 0 && e.source[start] == '!' {
+		if start+1 < len(e.source) && e.source[start+1] == '<' {
+			if close := bytes.IndexByte(e.source[start+2:], '>'); close >= 0 {
+				start += close + 3
+			}
+		} else {
+			for start < len(e.source) && !strings.ContainsRune(" \t\r\n,]}", rune(e.source[start])) {
+				start++
+			}
+		}
+		for start < len(e.source) && strings.ContainsRune(" \t\r\n", rune(e.source[start])) {
+			start++
+		}
+		if start >= len(e.source) {
+			return start
+		}
+	}
 	quote := e.source[start]
 	if quote == '\'' || quote == '"' {
 		for i := start + 1; i < len(e.source); i++ {

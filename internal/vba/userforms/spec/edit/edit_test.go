@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -85,6 +86,36 @@ func TestScalarEditsPreserveSource(t *testing.T) {
 				t.Fatalf("format churn: %+v", again.Edits)
 			}
 		})
+	}
+}
+
+func TestTaggedScalarEditsPreserveComments(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n"} {
+		for _, token := range []string{
+			`!!str "alpha # omega"`,
+			`!!str 'alpha '' # omega'`,
+			`!<tag:yaml.org,2002:str> "alpha \" # omega"`,
+			`!!str "alpha , ] } # omega"`,
+		} {
+			for _, flow := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%q/%s/flow=%t", newline, token, flow), func(t *testing.T) {
+					source := strings.Replace(base, "'Submit'", token, 1)
+					if flow {
+						source = "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform: {name: Main}\ncontrols: [{id: submit, name: Submit, type: CommandButton, caption: " + token + ", left: 100}] # inline\n"
+					}
+					source = strings.ReplaceAll(source, "\n", newline)
+					result := applyOK(t, source, Operation{Type: SetControlProperty, ControlID: "submit", Field: "caption", Value: "changed"})
+					quote := `"`
+					if strings.Contains(token, "'alpha") {
+						quote = "'"
+					}
+					want := strings.Replace(source, token, quote+"changed"+quote, 1)
+					if string(result.Source) != want {
+						t.Fatalf("tagged scalar changed unrelated bytes:\n%s\nwant:\n%s", result.Source, want)
+					}
+				})
+			}
+		}
 	}
 }
 
