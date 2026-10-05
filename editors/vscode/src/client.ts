@@ -18,6 +18,7 @@ import {
   StartupTelemetry,
 } from "./startupTelemetry";
 import { resolveWorkspaceRoot } from "./xlflow";
+import type { PreviewResult } from "./userFormEditor/protocol";
 
 class StartupLanguageClient extends LanguageClient {
   public constructor(
@@ -42,6 +43,35 @@ export function userFormSpecLSPGlob(formsRoot = "src/forms"): string {
 }
 
 export class XlflowLanguageClientManager implements vscode.Disposable {
+  private readonly previewState = new vscode.EventEmitter<void>();
+  public readonly onDidChangePreviewConnection = this.previewState.event;
+  private previewGeneration = 0;
+
+  public async requestUserFormPreview(document: vscode.TextDocument): Promise<PreviewResult> {
+    const client = this.client;
+    const generation = this.previewGeneration;
+    const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+    if (!client || !client.isRunning())
+      throw new Error(vscode.l10n.t("Enable xlflow LSP to use the UserForm Designer."));
+    if (folder?.uri.toString() !== this.workspaceFolderKey) {
+      throw new Error(
+        vscode.l10n.t("Select this form's project in xlflow before opening its designer."),
+      );
+    }
+    const experimental = client.initializeResult?.capabilities.experimental as
+      | { userFormPreview?: boolean }
+      | undefined;
+    if (experimental?.userFormPreview !== true)
+      throw new Error(vscode.l10n.t("Update xlflow to a version supporting UserForm previews."));
+    const result = await client.sendRequest<PreviewResult>("xlflow/userFormPreview", {
+      uri: document.uri.toString(),
+      version: document.version,
+      text: document.getText(),
+    });
+    if (generation !== this.previewGeneration || client !== this.client)
+      throw new Error("The language server connection changed.");
+    return result;
+  }
   private client: LanguageClient | undefined;
   private workspaceFolderKey: string | undefined;
   private suggestTimer: NodeJS.Timeout | undefined;
@@ -174,6 +204,8 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     this.client = client;
     let processStartObserved = false;
     const stateSubscription = client.onDidChangeState((event) => {
+      this.previewGeneration++;
+      this.previewState.fire();
       // State.Starting is the closest public boundary to child-process spawn;
       // the language-client package does not expose the enum from its node entrypoint.
       if (event.newState === 3) {
@@ -209,6 +241,8 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       startAttemptTelemetry?.mark("initializeRequestSent");
       await startPromise;
       this.workspaceFolderKey = workspaceFolderKey;
+      this.previewGeneration++;
+      this.previewState.fire();
       await client.setTrace(toProtocolTrace(config.lspTraceServer));
       this.notifyActiveDocument(vscode.window.activeTextEditor?.document);
       const logDescription = args.includes("--log-file")
@@ -233,6 +267,8 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
   }
 
   public async stop(): Promise<void> {
+    this.previewGeneration++;
+    this.previewState.fire();
     const client = this.client;
     this.client = undefined;
     this.workspaceFolderKey = undefined;
@@ -311,6 +347,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
   public dispose(): void {
     this.clearPendingSuggest();
     void this.stop();
+    this.previewState.dispose();
   }
 
   private clearPendingSuggest(): void {

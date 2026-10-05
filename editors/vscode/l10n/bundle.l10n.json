@@ -1,4 +1,10 @@
 {
+  "xlflow UserForm Designer · Read-only preview": "xlflow UserForm Designer · Read-only preview",
+  "Open text editor": "Open text editor",
+  "Showing the last valid document.": "Showing the last valid document.",
+  "Loading FormSpec…": "Loading FormSpec…",
+  "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.": "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.",
+  "approximate bounds": "approximate bounds",
   "Select the workspace folder for xlflow commands": "Select the workspace folder for xlflow commands",
   "{label} requires an open workspace folder.": "{label} requires an open workspace folder.",
   "{label} failed: {message}": "{label} failed: {message}",
@@ -294,5 +300,11 @@
   "xlflow module new {name}": "xlflow module new {name}",
   "xlflow form new {name}": "xlflow form new {name}",
   "xlflow run {target}": "xlflow run {target}",
-  "xlflow test {target}": "xlflow test {target}"
+  "xlflow test {target}": "xlflow test {target}",
+  "Enable xlflow LSP to use the UserForm Designer.": "Enable xlflow LSP to use the UserForm Designer.",
+  "Select this form's project in xlflow before opening its designer.": "Select this form's project in xlflow before opening its designer.",
+  "Update xlflow to a version supporting UserForm previews.": "Update xlflow to a version supporting UserForm previews.",
+  "Open a FormSpec in an xlflow project.": "Open a FormSpec in an xlflow project.",
+  "This workspace has no xlflow.toml.": "This workspace has no xlflow.toml.",
+  "Open a FormSpec directly under the configured forms root's specs directory.": "Open a FormSpec directly under the configured forms root's specs directory."
 }

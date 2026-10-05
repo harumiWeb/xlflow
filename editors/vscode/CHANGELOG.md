@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- UserForm Designer prefers measured client dimensions, displays explicit ComboBox
+  values, and localizes its preview UI. Page selection retains compiler zIndex ordering.
+
+- Added an optional read-only UserForm Designer for canonical YAML, YML, and
+  JSON FormSpecs. It previews the current TextDocument through xlflow LSP and
+  retains the last valid rendering while the source is invalid.
+  Button captions are centered horizontally and vertically, including multiline text.
+  Buttons use classic raised edges, and ComboBox previews have a recessed field
+  with a full-height raised dropdown button.
+
 ## v0.12.0
 
 - Added UserForm Image `picture` field intelligence for project-relative BMP

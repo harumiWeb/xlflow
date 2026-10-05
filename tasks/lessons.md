@@ -150,3 +150,9 @@
 - Performance comparison helpers must reject missing project/mode groups and asymmetric metric sets before comparing medians, while resolver fallback indexes shared by parallel realtime workers require synchronized cache access; keyword-prefix heuristics must use identifier boundaries.
 - For Resume Next array-value probes, bind an Err.Number guard to the exact assignment statement, invalidate it across non-observation mutations, and allow only narrow Err status observations before Boolean capture; verify generated scaffolds, the full corpus, race safety, and cold/warm performance before merging.
 - For Excel-authored picture fixtures, inspect the saved resource bytes before assigning format expectations: Excel can normalize JPEG input to BMP. Verify a compiler-generated native JPEG artifact separately in Excel before claiming direct JPEG persistence support.
+
+# UserForm preview alignment
+
+- Verify preview collection order against the canonical compiler before changing selectedIndex semantics; source order and zIndex order may differ. Test mixed inner/outer dimensions and explicit empty values, and route Webview UI strings through extension localization.
+- When matching control text placement, verify both axes in the actual Webview with single-line and multiline captions. CSS text-align alone does not verify vertical placement; preserve control-specific layout rather than centering every control.
+- When reproducing MSForms control chrome from a reference image, model dropdown buttons as sized elements and distinguish raised button edges from recessed input edges; a text arrow alone does not reproduce the control.

@@ -1,4 +1,10 @@
 {
+  "xlflow UserForm Designer · Read-only preview": "xlflow UserForm Designer · 読み取り専用プレビュー",
+  "Open text editor": "テキストエディターを開く",
+  "Showing the last valid document.": "最後に有効だったドキュメントを表示しています。",
+  "Loading FormSpec…": "FormSpec を読み込み中…",
+  "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.": "近似プレビューです。未指定の寸法には表示用の既定値を使い、Page の範囲は MultiPage から決まります。",
+  "approximate bounds": "近似の範囲",
   "Select the workspace folder for xlflow commands": "xlflowコマンドを実行するワークスペースフォルダーを選択",
   "{label} requires an open workspace folder.": "{label}には開いているワークスペースフォルダーが必要です。",
   "{label} failed: {message}": "{label}に失敗しました: {message}",
@@ -294,5 +300,11 @@
   "xlflow run {target}": "xlflow run {target}",
   "xlflow test {target}": "xlflow test {target}",
   "Run xlflow session attach": "xlflow session attachを実行",
+  "Enable xlflow LSP to use the UserForm Designer.": "UserForm Designerを使うにはxlflow LSPを有効にしてください。",
+  "Select this form's project in xlflow before opening its designer.": "デザイナーを開く前に、xlflowでこのUserFormのプロジェクトを選択してください。",
+  "Update xlflow to a version supporting UserForm previews.": "UserFormプレビューに対応したバージョンのxlflowへ更新してください。",
+  "Open a FormSpec in an xlflow project.": "xlflowプロジェクト内のFormSpecを開いてください。",
+  "This workspace has no xlflow.toml.": "このワークスペースにxlflow.tomlがありません。",
+  "Open a FormSpec directly under the configured forms root's specs directory.": "設定されたフォームルートのspecsディレクトリ直下にあるFormSpecを開いてください。",
   "xlflow session attach": "開いているワークブックに接続"
 }
