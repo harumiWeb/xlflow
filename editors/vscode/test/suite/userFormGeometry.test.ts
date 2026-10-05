@@ -25,6 +25,28 @@ export function runUserFormGeometryAssertions(): void {
   const overflowX = { left: 50, top: 10, width: 100, height: 20 };
   const square = { width: 100, height: 100 };
   const minimum = { width: 1, height: 1 };
+  for (const type of ["Frame", "MultiPage"]) {
+    const empty = designerDocument({
+      form: { name: "Empty", width: 200, height: 100 },
+      controls: [
+        { id: "container", name: "Container", type, width: 50, height: 50 },
+        ...(type === "MultiPage"
+          ? [{ id: "page", name: "Page", type: "Page", parentId: "container" }]
+          : []),
+      ],
+    });
+    const container = empty.controls[0];
+    assert.deepStrictEqual(requiredSize(empty, container), minimum, `empty ${type} outer minimum`);
+    const shrunk = resizeGeometry(
+      container,
+      "se",
+      -100,
+      -100,
+      bounds,
+      requiredSize(empty, container),
+    )!;
+    assert.deepStrictEqual([shrunk.width, shrunk.height], [1, 1]);
+  }
   for (const size of [-1, 0, 0.5]) {
     for (const tiny of [
       { ...start, width: size },

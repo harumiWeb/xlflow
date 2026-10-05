@@ -139,7 +139,9 @@ Pointerdown captures the original parent-relative geometry. Pointermove only
 updates local preview state; pointerup emits at most one transaction. North/west
 resize can emit both `moveControl` and `resizeControl` in that transaction.
 Escape, pointer cancellation, capture loss, pointer focus loss and document
-updates cancel unfinished interaction. Arrows move 1 pt, Shift+Arrow moves
+updates cancel unfinished interaction. Pointer cancellation and capture loss
+only cancel the matching active pointer; other pointer IDs cannot discard its
+preview or pending transaction. Arrows move 1 pt, Shift+Arrow moves
 10 pt; repeats accumulate until all movement keys are released or focus leaves
 the canvas. No-op interactions create no document edit.
 
@@ -159,7 +161,9 @@ millionth of a point, rather than repeatedly converting CSS positions.
 Completed interactions must fit inside the parent's displayed content area,
 with a 1 pt minimum on both axes. Frame shrink protects immediate children;
 MultiPage shrink protects children on every Page, including hidden/non-selected
-Pages. Moving a container retains child local coordinates. Existing overflow
+Pages. Empty containers, including MultiPage controls with empty Pages, retain
+the 1 pt outer minimum; child extents plus decoration insets increase that
+minimum only where children require space. Moving a container retains child local coordinates. Existing overflow
 is never fixed on load; fitting moves/resizes are permitted, but an oversized
 control cannot move until resized to fit. A control smaller than 1 pt on either
 axis also cannot move until explicitly resized to meet the minimum; source

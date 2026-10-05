@@ -51,10 +51,14 @@ export function requiredSize(document: DesignerDocument, control: DesignerContro
   );
   const inset = contentInsets(control.type);
   return {
-    width:
-      Math.max(minimumSize, ...children.map((c) => c.left + c.width)) + inset.left + inset.right,
-    height:
-      Math.max(minimumSize, ...children.map((c) => c.top + c.height)) + inset.top + inset.bottom,
+    width: Math.max(
+      minimumSize,
+      ...children.map((c) => c.left + c.width + inset.left + inset.right),
+    ),
+    height: Math.max(
+      minimumSize,
+      ...children.map((c) => c.top + c.height + inset.top + inset.bottom),
+    ),
   };
 }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));

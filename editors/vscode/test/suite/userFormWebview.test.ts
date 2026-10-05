@@ -251,10 +251,16 @@ window.addEventListener("message", e => {
       height: 18,
     };
     await snapshot({ type: "document", version: 4, document: interactive, editable: true });
-    const pointer = (selector: string, event: string, clientX: number, clientY: number) => ({
+    const pointer = (
+      selector: string,
+      event: string,
+      clientX: number,
+      clientY: number,
+      pointerId = 1,
+    ) => ({
       selector,
       event,
-      props: { pointerId: 1, button: 0, clientX, clientY },
+      props: { pointerId, button: 0, clientX, clientY },
     });
     const dragged = await snapshot({
       type: "testAction",
@@ -449,6 +455,42 @@ window.addEventListener("message", e => {
     assert.deepStrictEqual((tinyResize.editMessages as { operations: unknown[] }[])[5].operations, [
       { type: "resizeControl", controlId: "label", width: 6.5, height: 6.5 },
     ]);
+    interactive.controls[0] = { ...interactive.controls[0], width: 66, height: 15 };
+    await snapshot({ type: "document", version: 26, document: interactive, editable: true });
+    const secondaryCancelled = await snapshot({
+      type: "testAction",
+      version: 27,
+      actions: [
+        pointer(".control.label", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointermove", 48, 48),
+        pointer(".designer-viewport", "pointercancel", 80, 80, 2),
+        pointer(".designer-viewport", "lostpointercapture", 80, 80, 2),
+      ],
+    });
+    assert.strictEqual(secondaryCancelled.left, "48px", "secondary pointer leaves preview intact");
+    assert.strictEqual((secondaryCancelled.editMessages as unknown[]).length, 6);
+    const primaryReleased = await snapshot({
+      type: "testAction",
+      version: 28,
+      actions: [pointer(".designer-viewport", "pointerup", 48, 48)],
+    });
+    assert.deepStrictEqual(
+      (primaryReleased.editMessages as { operations: unknown[] }[])[6].operations,
+      [{ type: "moveControl", controlId: "label", left: 36, top: 27 }],
+    );
+    await snapshot({ type: "document", version: 29, document: interactive, editable: true });
+    const primaryCaptureLost = await snapshot({
+      type: "testAction",
+      version: 30,
+      actions: [
+        pointer(".control.label", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointermove", 48, 48),
+        pointer(".designer-viewport", "lostpointercapture", 48, 48),
+        pointer(".designer-viewport", "pointerup", 48, 48),
+      ],
+    });
+    assert.strictEqual((primaryCaptureLost.editMessages as unknown[]).length, 7);
+    assert.strictEqual(primaryCaptureLost.left, "40px", "active pointer capture loss cancels");
   } finally {
     subscription.dispose();
     panel.dispose();

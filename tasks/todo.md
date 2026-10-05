@@ -1,3 +1,9 @@
+# PR #926 review follow-up
+
+- [x] Verify empty Frame/MultiPage minimum size and secondary-pointer cancellation with regressions.
+- [x] Apply child extents plus insets separately from the outer 1pt minimum; preserve active pointer ownership for cancellation/capture loss.
+- [x] Run VSCode/lint/docs/format checks; publish the verified fixes on existing PR with evidence replies and persisted body verification.
+
 # Issue #917 final review follow-up
 
 - [x] Preserve unchanged axes during move/snap and reject gestures that leave existing overflow; add geometry regressions.

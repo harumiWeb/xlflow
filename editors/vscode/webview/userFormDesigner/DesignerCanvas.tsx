@@ -131,6 +131,9 @@ export function DesignerCanvas({
     gesture.current = undefined;
     setPreview(undefined);
   };
+  const cancelPointer = (event: JSX.TargetedPointerEvent<HTMLDivElement>) => {
+    if (gesture.current?.pointerId === event.pointerId) cancel();
+  };
   const finish = () => {
     const current = gesture.current;
     gesture.current = undefined;
@@ -396,10 +399,8 @@ export function DesignerCanvas({
               event.currentTarget.releasePointerCapture(event.pointerId);
           }
         }}
-        onPointerCancel={cancel}
-        onLostPointerCapture={() => {
-          if (gesture.current?.pointerId !== undefined) cancel();
-        }}
+        onPointerCancel={cancelPointer}
+        onLostPointerCapture={cancelPointer}
         onKeyDown={keyDown}
         onKeyUp={(event) => {
           const current = gesture.current;
