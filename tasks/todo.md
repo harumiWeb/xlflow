@@ -1,3 +1,11 @@
+# PR #925 review follow-up
+
+- [x] 操作エラーの中間状態検証による上書きを防ぐ。
+- [x] ID 重複診断を canonical validator に委譲し、追加対象 ID の文脈を保持する。
+- [x] 複数行引用 scalar のコメント二重化と indentless sequence の最後の要素削除を修正する。
+- [x] reorder は整数 gap を利用し、必要な最小連続範囲だけを変更する。
+- [x] 回帰テスト・vet・docs チェックを確認する。
+
 # Issue #916 final review follow-up
 
 - [x] 明示タグ付き引用 scalar の境界検出を修正する。

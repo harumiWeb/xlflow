@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"reflect"
 	"slices"
@@ -111,11 +112,6 @@ func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result,
 	for index, op := range operations {
 		previous := e.model.Controls
 		if err := e.apply(op); err != nil {
-			if _, structured := errors.AsType[*Error](err); !structured {
-				if _, validationErr := spec.ParseFormSpec(input, e.source); validationErr != nil {
-					return Result{}, validationError(index, op, validationErr)
-				}
-			}
 			return Result{}, annotate(index, op, err)
 		}
 		id := op.ControlID
@@ -200,7 +196,14 @@ func (e *engine) controlIDForField(path string) string {
 }
 
 func failure(index int, op Operation, code, message, suggestion string) *Error {
-	return &Error{Diagnostics: []Diagnostic{{OperationIndex: index, Operation: op.Type, ControlID: op.ControlID, Field: op.Field, Code: code, Message: message, Suggestion: suggestion}}}
+	return &Error{Diagnostics: []Diagnostic{{OperationIndex: index, Operation: op.Type, ControlID: operationControlID(op), Field: op.Field, Code: code, Message: message, Suggestion: suggestion}}}
+}
+
+func operationControlID(op Operation) string {
+	if op.Type == AddControl && op.Control != nil {
+		return op.Control.ID
+	}
+	return op.ControlID
 }
 
 func annotate(index int, op Operation, err error) error {
@@ -209,7 +212,7 @@ func annotate(index int, op Operation, err error) error {
 			d := &editErr.Diagnostics[i]
 			d.OperationIndex, d.Operation = index, op.Type
 			if d.ControlID == "" {
-				d.ControlID = op.ControlID
+				d.ControlID = operationControlID(op)
 			}
 			if d.Field == "" {
 				d.Field = op.Field
@@ -230,7 +233,7 @@ func validationError(index int, op Operation, err error) *Error {
 				if issue.Severity != spec.SeverityError {
 					continue
 				}
-				result.Diagnostics = append(result.Diagnostics, Diagnostic{OperationIndex: index, Operation: op.Type, ControlID: op.ControlID, Field: issue.Field, Code: issue.Code, Message: issue.Message, Suggestion: issue.Suggestion})
+				result.Diagnostics = append(result.Diagnostics, Diagnostic{OperationIndex: index, Operation: op.Type, ControlID: operationControlID(op), Field: issue.Field, Code: issue.Code, Message: issue.Message, Suggestion: issue.Suggestion})
 			}
 		} else {
 			result.Diagnostics[0].Code = cmp.Or(specErr.Code, "UFE002")
@@ -311,9 +314,6 @@ func (e *engine) apply(op Operation) error {
 	case AddControl:
 		if op.Control == nil || op.Control.ID == "" || op.Control.Name == "" || op.Control.Type == "" || len(op.Control.Controls) > 0 {
 			return failure(-1, op, "UFE003", "AddControl requires an explicit ID, name, type and a single flat control.", "Supply control.id, control.name and control.type.")
-		}
-		if _, ok := e.controls[op.Control.ID]; ok {
-			return failure(-1, op, "UFV007", "Control ID already exists.", "Choose a unique ID.")
 		}
 		if _, err := json.Marshal(op.Control); err != nil {
 			return failure(-1, op, "UFE003", "Control payload is not serializable: "+err.Error(), "Supply serializable FormSpec control fields.")
@@ -607,13 +607,43 @@ func (e *engine) reorder(op Operation) error {
 	moved := siblings[old]
 	siblings = slices.Delete(siblings, old, old+1)
 	siblings = slices.Insert(siblings, *op.Index, moved)
-	for i, c := range siblings {
-		if c.ZIndex != nil && *c.ZIndex == i {
-			continue
-		}
-		if err := e.setControl(c.ID, "zIndex", i); err != nil {
-			return err
+	// First try changing only the moved control. Expand to the shortest
+	// contiguous range that can fit between unchanged neighbors when needed.
+	// Big integers keep capacity checks safe even at the int limits.
+	for size := 1; size <= len(siblings); size++ {
+		for left := max(0, *op.Index-size+1); left <= min(*op.Index, len(siblings)-size); left++ {
+			right := left + size
+			low, high := math.MinInt, math.MaxInt
+			if left > 0 {
+				if *siblings[left-1].ZIndex == math.MaxInt {
+					continue
+				}
+				low = *siblings[left-1].ZIndex + 1
+			}
+			if right < len(siblings) {
+				if *siblings[right].ZIndex == math.MinInt {
+					continue
+				}
+				high = *siblings[right].ZIndex - 1
+			}
+			capacity := new(big.Int).Sub(big.NewInt(int64(high)), big.NewInt(int64(low)))
+			if capacity.Cmp(big.NewInt(int64(size-1))) < 0 {
+				continue
+			}
+			first := low
+			if left == 0 {
+				first = 0
+				if right < len(siblings) {
+					first = high - (size - 1)
+				}
+			}
+			for i := range size {
+				if err := e.setControl(siblings[left+i].ID, "zIndex", first+i); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 	}
-	return nil
+	return fmt.Errorf("cannot assign sibling zIndex values")
 }

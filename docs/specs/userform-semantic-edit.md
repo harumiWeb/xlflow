@@ -165,6 +165,18 @@ The implementation is pure Go and must cover these behaviors:
 - Applying each of the eight operation types, including sequential operations,
   default and disabled cascading removal, parent-relative reparenting, and
   stable sibling reorder without changing `tabIndex`.
+- Operation errors must retain their own cause even after an earlier operation
+  temporarily invalidates a relationship. Duplicate-ID diagnostics must come
+  from the canonical validator, including its message and suggestion; add
+  failures retain the ID from the control payload.
+- Multiline quoted scalar replacement must leave its trailing comment outside
+  the replacement, even when identical comment text occurs inside the value.
+  Empty flow sequences replacing the last item of an indentless block sequence
+  must be indented beyond the owning key, including nested legacy controls.
+- Reorder uses an available integer gap before touching other siblings. When
+  no gap exists, assign ordered values in the shortest contiguous sibling range
+  containing the moved control, retaining outside values and `tabIndex`. Cover
+  ties and integer limits without overflow.
 - Flow mappings and sequences regenerate only the smallest required
   container. Targeted unsafe anchors, aliases, and merge keys fail atomically;
   unrelated uses remain unchanged.

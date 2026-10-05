@@ -376,7 +376,9 @@ func (e *engine) set(mapping *yaml.Node, key string, value *yaml.Node) error {
 			return err
 		}
 		edit := SourceEdit{Start: e.offset(old), End: e.end(old), Text: text}
-		if old.LineComment != "" && edit.End > e.lineEnd(edit.Start) {
+		if old.LineComment != "" && edit.End > e.lineEnd(edit.Start) &&
+			old.Style&(yaml.SingleQuotedStyle|yaml.DoubleQuotedStyle) == 0 &&
+			bytes.Contains(e.source[edit.Start:edit.End], []byte(old.LineComment)) {
 			// A block/plain multiline scalar's header comment is inside its
 			// replacement range; relocate it onto the new single-line scalar.
 			edit.Text += " " + old.LineComment
@@ -499,8 +501,20 @@ func (e *engine) removeItem(c controlRef) error {
 		}
 	}
 	if len(seq.Content) == 1 {
-		// Leave the empty sequence on the original sequence indentation line.
-		text := strings.Repeat(" ", max(0, seq.Column-1)) + "[]"
+		// An indentless block sequence is legal, but its empty flow replacement
+		// must be indented beyond the owning mapping key.
+		indent := max(0, seq.Column-1)
+		if owner := e.parent(seq); owner != nil && owner.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(owner.Content); i += 2 {
+				if owner.Content[i+1] == seq {
+					if owner.Content[i].Column >= seq.Column {
+						indent = owner.Content[i].Column + 1
+					}
+					break
+				}
+			}
+		}
+		text := strings.Repeat(" ", indent) + "[]"
 		if end > 0 && e.source[end-1] == '\n' {
 			text += e.newline()
 		}
