@@ -1,4 +1,10 @@
 {
+  "xlflow UserForm Designer · Read-only preview": "xlflow UserForm Designer · 読み取り専用プレビュー",
+  "Open text editor": "テキストエディターを開く",
+  "Showing the last valid document.": "最後に有効だったドキュメントを表示しています。",
+  "Loading FormSpec…": "FormSpec を読み込み中…",
+  "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.": "近似プレビューです。未指定の寸法には表示用の既定値を使い、Page の範囲は MultiPage から決まります。",
+  "approximate bounds": "近似の範囲",
   "Select the workspace folder for xlflow commands": "xlflowコマンドを実行するワークスペースフォルダーを選択",
   "{label} requires an open workspace folder.": "{label}には開いているワークスペースフォルダーが必要です。",
   "{label} failed: {message}": "{label}に失敗しました: {message}",

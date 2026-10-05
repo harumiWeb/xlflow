@@ -29,6 +29,20 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
     const send = (message: HostMessage) => {
       if (ready && !disposed && panel.visible) void panel.webview.postMessage(message);
     };
+    const sendLocalization = () =>
+      send({
+        type: "localization",
+        strings: {
+          header: vscode.l10n.t("xlflow UserForm Designer · Read-only preview"),
+          openText: vscode.l10n.t("Open text editor"),
+          lastValid: vscode.l10n.t("Showing the last valid document."),
+          loading: vscode.l10n.t("Loading FormSpec…"),
+          approximate: vscode.l10n.t(
+            "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.",
+          ),
+          approximateBounds: vscode.l10n.t("approximate bounds"),
+        },
+      });
     const update = async () => {
       if (disposed || token.isCancellationRequested) return;
       const version = document.version;
@@ -99,6 +113,7 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
       vscode.window.onDidChangeActiveColorTheme(() => send({ type: "themeChanged" })),
       panel.onDidChangeViewState(() => {
         if (panel.visible && ready) {
+          sendLocalization();
           sync.replay(send);
           schedule();
         }
@@ -107,6 +122,7 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
         if (!isWebviewMessage(message)) return;
         if (message.type === "ready") {
           ready = true;
+          sendLocalization();
           sync.replay(send);
           void update();
         } else {

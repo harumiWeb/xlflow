@@ -66,7 +66,19 @@ export interface DesignerDocument {
   warnings: string[];
 }
 
+export const designerStrings = {
+  header: "xlflow UserForm Designer · Read-only preview",
+  openText: "Open text editor",
+  lastValid: "Showing the last valid document.",
+  loading: "Loading FormSpec…",
+  approximate:
+    "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.",
+  approximateBounds: "approximate bounds",
+};
+export type DesignerStrings = typeof designerStrings;
+
 export type HostMessage =
+  | { type: "localization"; strings: DesignerStrings }
   | { type: "document"; version: number; document: DesignerDocument }
   | { type: "invalidDocument"; version: number; error: DesignerError }
   | { type: "themeChanged" };

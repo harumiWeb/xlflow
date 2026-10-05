@@ -109,6 +109,17 @@ Page tabs are omitted, but selection indexes retain the full ordered Page
 collection. A selected invisible Page does not fall through to a different
 Page. Omitted visibility defaults to visible.
 
+Page collection order follows stable sibling `zIndex` order, matching the
+pure-Go generation and topology compiler. Selection is applied before hiding
+invisible Pages. Explicit build client dimensions take precedence over observed
+client/inside dimensions, which take precedence over outer dimensions. Either
+axis relying on outer dimensions remains approximate. ComboBox display prefers
+explicit text, then value (including empty strings), then the first list item.
+
+The extension host supplies localized UI strings through a `localization`
+message when the Webview reports readiness. These are rendered as text; parser
+diagnostics and workspace-authored captions retain their original wording.
+
 The Designer does not edit the FormSpec, provide zoom controls, allow Page
 selection, or load image assets. Image controls use a placeholder even when a
 picture path is present in the FormSpec.

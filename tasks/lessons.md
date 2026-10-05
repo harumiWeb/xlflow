@@ -153,5 +153,6 @@
 
 # UserForm preview alignment
 
+- Verify preview collection order against the canonical compiler before changing selectedIndex semantics; source order and zIndex order may differ. Test mixed inner/outer dimensions and explicit empty values, and route Webview UI strings through extension localization.
 - When matching control text placement, verify both axes in the actual Webview with single-line and multiline captions. CSS text-align alone does not verify vertical placement; preserve control-specific layout rather than centering every control.
 - When reproducing MSForms control chrome from a reference image, model dropdown buttons as sized elements and distinguish raised button edges from recessed input edges; a text arrow alone does not reproduce the control.

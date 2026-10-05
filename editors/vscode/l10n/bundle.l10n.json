@@ -1,4 +1,10 @@
 {
+  "xlflow UserForm Designer · Read-only preview": "xlflow UserForm Designer · Read-only preview",
+  "Open text editor": "Open text editor",
+  "Showing the last valid document.": "Showing the last valid document.",
+  "Loading FormSpec…": "Loading FormSpec…",
+  "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.": "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.",
+  "approximate bounds": "approximate bounds",
   "Select the workspace folder for xlflow commands": "Select the workspace folder for xlflow commands",
   "{label} requires an open workspace folder.": "{label} requires an open workspace folder.",
   "{label} failed: {message}": "{label} failed: {message}",

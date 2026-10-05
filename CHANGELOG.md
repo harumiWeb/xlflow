@@ -7,6 +7,8 @@ All notable changes to xlflow will be documented in this file.
 - Added an optional read-only VS Code UserForm Designer for canonical FormSpecs
   under the configured forms root. It previews the current TextDocument through
   xlflow LSP and retains the last valid rendering while the source is invalid.
+  The preview UI is localized and prefers measured client dimensions and
+  explicit ComboBox values; Page selection follows compiler sibling ordering.
 
 ## v0.35.0
 

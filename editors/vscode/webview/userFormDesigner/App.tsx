@@ -6,6 +6,7 @@ import type {
   WebviewMessage,
 } from "../../src/userFormEditor/protocol";
 import { DesignerCanvas } from "./DesignerCanvas";
+import { designerStrings } from "../../src/userFormEditor/protocol";
 import "./app.css";
 
 declare function acquireVsCodeApi(): {
@@ -15,6 +16,7 @@ declare function acquireVsCodeApi(): {
 };
 const bridge = acquireVsCodeApi();
 function App() {
+  const [strings, setStrings] = useState(designerStrings);
   const [document, setDocument] = useState<DesignerDocument>();
   const [error, setError] = useState<string>();
   const restored = useRef(false);
@@ -27,6 +29,7 @@ function App() {
   useEffect(() => {
     const listener = (event: MessageEvent<HostMessage>) => {
       const message = event.data;
+      if (message.type === "localization") setStrings(message.strings);
       if (message.type === "document") {
         setDocument(message.document);
         setError(undefined);
@@ -45,30 +48,27 @@ function App() {
   return (
     <>
       <header>
-        xlflow UserForm Designer · Read-only preview
-        <button onClick={() => bridge.postMessage({ type: "openText" })}>Open text editor</button>
+        {strings.header}
+        <button onClick={() => bridge.postMessage({ type: "openText" })}>{strings.openText}</button>
       </header>
       {error && (
         <div role="alert" class="error">
           {error}
-          {document && <p>Showing the last valid document.</p>}
+          {document && <p>{strings.lastValid}</p>}
         </div>
       )}
-      {!document && !error && <p>Loading FormSpec…</p>}
+      {!document && !error && <p>{strings.loading}</p>}
       {document && (
         <>
           {(document.approximate || document.controls.some((c) => c.approximate)) && (
-            <p class="notice">
-              Approximate preview. Missing dimensions use display defaults; Page bounds derive from
-              MultiPage.
-            </p>
+            <p class="notice">{strings.approximate}</p>
           )}
           {document.warnings.map((warning, index) => (
             <p class="notice" key={index}>
               {warning}
             </p>
           ))}
-          <DesignerCanvas document={document} />
+          <DesignerCanvas document={document} approximateBounds={strings.approximateBounds} />
         </>
       )}
     </>

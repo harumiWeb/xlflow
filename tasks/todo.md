@@ -1,5 +1,9 @@
 # Issue #915 designer review follow-up
 
+- [x] PR #924: prefer client/inside dimensions on both axes; render explicit ComboBox values including empty strings; localize Webview UI through host l10n messages.
+- [x] Preserve zIndex-ordered MultiPage selection to match pure-Go generation/topology; add reordered Page regression and explain unsupported source-order recommendation.
+- [x] Run renderer and real Webview tests, lint/docs checks; publish with regression evidence. Docstring coverage is advisory, not a repository gate.
+
 - [x] Honor explicit visibility for controls and Page tabs, retaining original Page collection indexes.
 - [x] Add hidden-parent and hidden-Page selection regressions and rerun Designer/Windows Webview checks.
 

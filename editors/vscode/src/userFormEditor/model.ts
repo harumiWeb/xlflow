@@ -29,17 +29,17 @@ export function designerDocument(spec: PreviewDocument, warnings: string[] = [])
   const observed = form.observed ?? {};
   const width =
     build.clientWidth ??
-    build.width ??
-    form.width ??
     observed.clientWidth ??
     observed.insideWidth ??
+    build.width ??
+    form.width ??
     observed.width;
   const height =
     build.clientHeight ??
-    build.height ??
-    form.height ??
     observed.clientHeight ??
     observed.insideHeight ??
+    build.height ??
+    form.height ??
     observed.height;
   return {
     name: form.name,
@@ -51,7 +51,10 @@ export function designerDocument(spec: PreviewDocument, warnings: string[] = [])
       height === undefined ||
       (build.clientWidth === undefined &&
         observed.clientWidth === undefined &&
-        observed.insideWidth === undefined),
+        observed.insideWidth === undefined) ||
+      (build.clientHeight === undefined &&
+        observed.clientHeight === undefined &&
+        observed.insideHeight === undefined),
     warnings,
     controls: spec.controls.map((control) => {
       const effective = { ...control.observed, ...control };

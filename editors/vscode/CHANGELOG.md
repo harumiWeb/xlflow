@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- UserForm Designer prefers measured client dimensions, displays explicit ComboBox
+  values, and localizes its preview UI. Page selection retains compiler zIndex ordering.
+
 - Added an optional read-only UserForm Designer for canonical YAML, YML, and
   JSON FormSpecs. It previews the current TextDocument through xlflow LSP and
   retains the last valid rendering while the source is invalid.

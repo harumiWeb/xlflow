@@ -1,11 +1,58 @@
 import * as assert from "assert";
 import { renderToString } from "preact-render-to-string";
-import { DesignerCanvas } from "../webview/userFormDesigner/DesignerCanvas";
+import { DesignerCanvas, ControlGlyph } from "../webview/userFormDesigner/DesignerCanvas";
 import { designerDocument } from "../src/userFormEditor/model";
+import type { SpecControl } from "../src/userFormEditor/protocol";
 import { runUserFormEditorAssertions } from "./suite/userFormEditor.test";
 
 async function run() {
   await runUserFormEditorAssertions();
+  const mixed = {
+    name: "Mixed",
+    build: { width: 300, height: 240 },
+    observed: { insideWidth: 280, insideHeight: 210 },
+  };
+  const measured = designerDocument({ form: mixed, controls: [] });
+  assert.deepStrictEqual(
+    [measured.width, measured.height, measured.approximate],
+    [280, 210, false],
+  );
+  const explicit = designerDocument({
+    form: { ...mixed, build: { ...mixed.build, clientWidth: 260, clientHeight: 190 } },
+    controls: [],
+  });
+  assert.deepStrictEqual(
+    [explicit.width, explicit.height, explicit.approximate],
+    [260, 190, false],
+  );
+  assert.strictEqual(
+    designerDocument({
+      form: { name: "OuterHeight", build: { clientWidth: 260, height: 200 } },
+      controls: [],
+    }).approximate,
+    true,
+  );
+  for (const [fields, expected] of [
+    [{ value: "West", list: ["East", "West"] }, "West"],
+    [{ value: "West" }, "West"],
+    [{ value: "", list: ["East"] }, ""],
+    [{ text: "", value: "West" }, ""],
+    [{ value: 0, list: ["East"] }, "0"],
+  ] as [Partial<SpecControl>, string][]) {
+    const control = {
+      id: "combo",
+      type: "ComboBox",
+      name: "Combo",
+      left: 0,
+      top: 0,
+      width: 120,
+      height: 18,
+      approximate: false,
+      ...fields,
+    };
+    const rendered = renderToString(<ControlGlyph control={control} />);
+    assert.ok(rendered.includes(`<span class="combo-text">${expected}</span>`));
+  }
   const types = [
     "Label",
     "TextBox",
@@ -131,6 +178,15 @@ async function run() {
     !hiddenSelected.includes("page-content"),
     "hidden selected Page must not select a different Page",
   );
+  hidden.controls[1].visible = true;
+  hidden.controls[1].zIndex = 1;
+  hidden.controls[2].zIndex = 0;
+  const reordered = renderToString(<DesignerCanvas document={hidden} />);
+  assert.ok(
+    reordered.includes("Visible page child"),
+    "selection matches compiler zIndex-ordered Page collection",
+  );
+  assert.ok(!reordered.includes("Hidden page child"));
   console.log("UserForm synchronization and rendering assertions passed.");
 }
 void run().catch((error) => {

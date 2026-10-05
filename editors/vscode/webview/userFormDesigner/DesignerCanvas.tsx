@@ -19,7 +19,9 @@ export function ControlGlyph({ control }: { control: DesignerControl }) {
     case "combobox":
       return (
         <>
-          <span class="combo-text">{control.text ?? control.list?.[0] ?? ""}</span>
+          <span class="combo-text">
+            {control.text ?? String(control.value ?? control.list?.[0] ?? "")}
+          </span>
           <span class="combo-arrow" aria-hidden="true">
             <span class="combo-chevron" />
           </span>
@@ -71,7 +73,13 @@ export function ControlGlyph({ control }: { control: DesignerControl }) {
   }
 }
 
-export function DesignerCanvas({ document }: { document: DesignerDocument }) {
+export function DesignerCanvas({
+  document,
+  approximateBounds = "approximate bounds",
+}: {
+  document: DesignerDocument;
+  approximateBounds?: string;
+}) {
   const children = (parentId?: string): DesignerControl[] =>
     document.controls
       .filter((control) => (control.parentId || undefined) === parentId)
@@ -88,7 +96,7 @@ export function DesignerCanvas({ document }: { document: DesignerDocument }) {
       <div
         key={control.id}
         class={`control ${type} ${control.enabled === false ? "disabled" : ""}`}
-        title={`${control.name} (${control.type})${control.approximate ? " — approximate bounds" : ""}`}
+        title={`${control.name} (${control.type})${control.approximate ? ` — ${approximateBounds}` : ""}`}
         style={{
           left: px(control.left),
           top: px(control.top),

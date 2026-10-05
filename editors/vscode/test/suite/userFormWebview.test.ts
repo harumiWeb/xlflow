@@ -5,6 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import { designerHTML, designerViewType } from "../../src/userFormEditor/provider";
 import { designerDocument } from "../../src/userFormEditor/model";
+import { designerStrings } from "../../src/userFormEditor/protocol";
 import type { HostMessage } from "../../src/userFormEditor/protocol";
 
 // Exercise the shipped renderer inside a real VS Code Webview, including CSP
@@ -50,6 +51,7 @@ window.addEventListener("message", e => {
       type: "testSnapshot", version: e.data.version,
       count: document.querySelectorAll(".control").length,
       title: document.querySelector(".form-title")?.textContent,
+      header: document.querySelector("header")?.textContent,
       error: document.querySelector('[role="alert"]')?.textContent,
       left: label && getComputedStyle(label).left,
       width: label && getComputedStyle(label).width,
@@ -91,7 +93,7 @@ window.addEventListener("message", e => {
         },
       );
     });
-  const snapshot = async (message: Exclude<HostMessage, { type: "themeChanged" }>) => {
+  const snapshot = async (message: Extract<HostMessage, { version: number }>) => {
     const response = new Promise<Record<string, unknown>>((resolve) =>
       pending.set(message.version, resolve),
     );
@@ -103,6 +105,15 @@ window.addEventListener("message", e => {
   try {
     panel.webview.html = html.replace("<body>", "<body>" + harness);
     await timeout(readiness);
+    await panel.webview.postMessage({
+      type: "localization",
+      strings: {
+        ...designerStrings,
+        header: "読み取り専用プレビュー",
+        openText: "テキストエディターを開く",
+        lastValid: "最後の有効な表示です。",
+      },
+    });
     const document = designerDocument({
       form: {
         name: "Main",
@@ -150,6 +161,8 @@ window.addEventListener("message", e => {
     });
     const valid = await snapshot({ type: "document", version: 1, document });
     assert.strictEqual(valid.count, 4);
+    assert.ok(String(valid.header).includes("読み取り専用プレビュー"));
+    assert.ok(String(valid.header).includes("テキストエディターを開く"));
     const centers = valid.buttonCenters as {
       type: string;
       delta: number;
@@ -192,6 +205,7 @@ window.addEventListener("message", e => {
     });
     assert.strictEqual(invalid.count, 4);
     assert.ok(String(invalid.error).includes("Invalid YAML"));
+    assert.ok(String(invalid.error).includes("最後の有効な表示です。"));
     const recovered = await snapshot({
       type: "document",
       version: 3,
