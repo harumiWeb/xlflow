@@ -82,6 +82,7 @@ capability boundary while the visual editor remains read-only.
 
 ## Related
 
+- Interactive geometry is supplemented by `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`.
 - Issue #915
 - `docs/specs/userform-designer.md`
 - `docs/specs/ms-oforms.md`

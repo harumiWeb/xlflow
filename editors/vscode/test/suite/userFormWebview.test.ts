@@ -25,12 +25,24 @@ export async function runUserFormWebviewAssertions(extensionUri: vscode.Uri): Pr
   const nonce = html.match(/script-src 'nonce-([^']+)'/)![1];
   const harness = `<script nonce="${nonce}">
 const testApi = acquireVsCodeApi();
-window.acquireVsCodeApi = () => testApi;
+const editMessages = [];
+window.acquireVsCodeApi = () => ({
+  postMessage(message) { if (message.type === "edit") editMessages.push(message); testApi.postMessage(message); },
+  getState: () => testApi.getState(), setState: (state) => testApi.setState(state)
+});
 const violations = [];
 window.addEventListener("securitypolicyviolation", e => violations.push(e.violatedDirective));
 window.addEventListener("message", e => {
-  if (e.data.type !== "document" && e.data.type !== "invalidDocument") return;
-  setTimeout(() => {
+  if (!["document", "invalidDocument", "testAction"].includes(e.data.type)) return;
+  setTimeout(async () => {
+    for (const action of e.data.actions ?? []) {
+      const target = document.querySelector(action.selector);
+      if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: action.selector}); return; }
+      const props = { bubbles: true, cancelable: true, ...action.props };
+      if (action.event === "change") { if ("value" in props) target.value = props.value; if ("checked" in props) target.checked = props.checked; }
+      target.dispatchEvent(action.event === "change" ? new Event("change", props) : action.event.startsWith("key") ? new KeyboardEvent(action.event, props) : new PointerEvent(action.event, props));
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
     const label = document.querySelector(".control.label");
     const buttonCenters = [...document.querySelectorAll(".commandbutton, .togglebutton")].map(button => {
       const bounds = button.getBoundingClientRect();
@@ -55,6 +67,10 @@ window.addEventListener("message", e => {
       error: document.querySelector('[role="alert"]')?.textContent,
       left: label && getComputedStyle(label).left,
       width: label && getComputedStyle(label).width,
+      top: label && getComputedStyle(label).top,
+      height: label && getComputedStyle(label).height,
+      handles: document.querySelectorAll(".resize-handle").length,
+      editMessages,
       images: document.querySelectorAll("img").length,
       buttonCenters,
       combo: comboBounds && arrowBounds && {
@@ -93,7 +109,15 @@ window.addEventListener("message", e => {
         },
       );
     });
-  const snapshot = async (message: Extract<HostMessage, { version: number }>) => {
+  const snapshot = async (
+    message:
+      | Extract<HostMessage, { version: number }>
+      | {
+          type: "testAction";
+          version: number;
+          actions: { selector: string; event: string; props?: Record<string, unknown> }[];
+        },
+  ) => {
     const response = new Promise<Record<string, unknown>>((resolve) =>
       pending.set(message.version, resolve),
     );
@@ -214,6 +238,184 @@ window.addEventListener("message", e => {
     assert.strictEqual(recovered.title, "Recovered");
     assert.strictEqual(recovered.error, undefined);
     assert.deepStrictEqual(recovered.violations, []);
+
+    const interactive = {
+      ...document,
+      controls: document.controls.map((control) => ({ ...control })),
+    };
+    interactive.controls[0] = {
+      ...interactive.controls[0],
+      left: 12,
+      top: 12,
+      width: 72,
+      height: 18,
+    };
+    await snapshot({ type: "document", version: 4, document: interactive, editable: true });
+    const pointer = (selector: string, event: string, clientX: number, clientY: number) => ({
+      selector,
+      event,
+      props: { pointerId: 1, button: 0, clientX, clientY },
+    });
+    const dragged = await snapshot({
+      type: "testAction",
+      version: 5,
+      actions: [
+        pointer(".control.label", "pointerdown", 30, 30),
+        pointer(".designer-viewport", "pointermove", 46, 38),
+      ],
+    });
+    assert.strictEqual(dragged.left, "32px");
+    assert.strictEqual(dragged.top, "24px");
+    assert.strictEqual(dragged.handles, 8);
+    assert.deepStrictEqual(dragged.editMessages, [], "drag preview sends no edits");
+    const moved = await snapshot({
+      type: "testAction",
+      version: 6,
+      actions: [pointer(".designer-viewport", "pointerup", 46, 38)],
+    });
+    const moveMessages = moved.editMessages as { version: number; operations: unknown[] }[];
+    assert.strictEqual(moveMessages.length, 1);
+    assert.strictEqual(moveMessages[0].version, 4);
+    assert.deepStrictEqual(moveMessages[0].operations, [
+      { type: "moveControl", controlId: "label", left: 24, top: 18 },
+    ]);
+    interactive.controls[0] = { ...interactive.controls[0], left: 24, top: 18 };
+    await snapshot({ type: "document", version: 7, document: interactive, editable: true });
+    await snapshot({
+      type: "testAction",
+      version: 8,
+      actions: [
+        pointer(".control.label", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointerup", 40, 40),
+      ],
+    });
+    const resizing = await snapshot({
+      type: "testAction",
+      version: 9,
+      actions: [
+        pointer(".handle-nw", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointermove", 48, 44),
+      ],
+    });
+    assert.strictEqual((resizing.editMessages as unknown[]).length, 1);
+    const resized = await snapshot({
+      type: "testAction",
+      version: 10,
+      actions: [pointer(".designer-viewport", "pointerup", 48, 44)],
+    });
+    assert.deepStrictEqual((resized.editMessages as { operations: unknown[] }[])[1].operations, [
+      { type: "moveControl", controlId: "label", left: 30, top: 21 },
+      { type: "resizeControl", controlId: "label", width: 66, height: 15 },
+    ]);
+    interactive.controls[0] = {
+      ...interactive.controls[0],
+      left: 30,
+      top: 21,
+      width: 66,
+      height: 15,
+    };
+    await snapshot({ type: "document", version: 11, document: interactive, editable: true });
+    const key = (event: string, key: string, shiftKey = false) => ({
+      selector: ".designer-viewport",
+      event,
+      props: { key, shiftKey },
+    });
+    const repeating = await snapshot({
+      type: "testAction",
+      version: 12,
+      actions: [
+        key("keydown", "ArrowRight"),
+        key("keydown", "ArrowRight"),
+        key("keydown", "ArrowDown", true),
+      ],
+    });
+    assert.strictEqual((repeating.editMessages as unknown[]).length, 2);
+    const nudged = await snapshot({
+      type: "testAction",
+      version: 13,
+      actions: [key("keyup", "ArrowRight"), key("keyup", "ArrowDown")],
+    });
+    assert.deepStrictEqual((nudged.editMessages as { operations: unknown[] }[])[2].operations, [
+      { type: "moveControl", controlId: "label", left: 32, top: 31 },
+    ]);
+    await snapshot({ type: "document", version: 14, document: interactive, editable: true });
+    const cancelled = await snapshot({
+      type: "testAction",
+      version: 15,
+      actions: [
+        pointer(".control.label", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointermove", 100, 100),
+        key("keydown", "Escape"),
+        pointer(".designer-viewport", "pointerup", 100, 100),
+      ],
+    });
+    assert.strictEqual((cancelled.editMessages as unknown[]).length, 3);
+    assert.strictEqual(cancelled.left, "40px");
+    assert.deepStrictEqual(cancelled.violations, []);
+
+    await snapshot({ type: "document", version: 16, document: interactive, editable: true });
+    const zoomed = await snapshot({
+      type: "testAction",
+      version: 17,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "2" } },
+        pointer(".control.label", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointermove", 56, 48),
+        pointer(".designer-viewport", "pointerup", 56, 48),
+      ],
+    });
+    assert.deepStrictEqual(
+      (zoomed.editMessages as { operations: unknown[] }[])[3].operations,
+      [{ type: "moveControl", controlId: "label", left: 36, top: 24 }],
+      "200% zoom uses inverse point transform",
+    );
+    await snapshot({ type: "document", version: 18, document: interactive, editable: true });
+    const snapped = await snapshot({
+      type: "testAction",
+      version: 19,
+      actions: [
+        {
+          selector: ".designer-toolbar input:nth-of-type(1)",
+          event: "change",
+          props: { checked: true },
+        },
+      ],
+    });
+    assert.strictEqual(
+      (snapped.editMessages as unknown[]).length,
+      4,
+      "grid display is not an edit",
+    );
+    const gridSnap = await snapshot({
+      type: "testAction",
+      version: 20,
+      actions: [
+        {
+          selector: ".designer-toolbar label:nth-child(2) input",
+          event: "change",
+          props: { checked: true },
+        },
+        pointer(".control.label", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointermove", 48, 40),
+        pointer(".designer-viewport", "pointerup", 48, 40),
+      ],
+    });
+    assert.deepStrictEqual((gridSnap.editMessages as { operations: unknown[] }[])[4].operations, [
+      { type: "moveControl", controlId: "label", left: 32, top: 24 },
+    ]);
+    await snapshot({ type: "document", version: 21, document: interactive, editable: true });
+    const pointerCancelled = await snapshot({
+      type: "testAction",
+      version: 22,
+      actions: [
+        pointer(".control.label", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointermove", 80, 80),
+        pointer(".designer-viewport", "pointercancel", 80, 80),
+        pointer(".designer-viewport", "pointerup", 80, 80),
+      ],
+    });
+    assert.strictEqual((pointerCancelled.editMessages as unknown[]).length, 5);
+    assert.strictEqual(pointerCancelled.left, "40px");
   } finally {
     subscription.dispose();
     panel.dispose();

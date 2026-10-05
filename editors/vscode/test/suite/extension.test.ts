@@ -1,5 +1,6 @@
 import * as assert from "assert";
 import { runUserFormEditorAssertions } from "./userFormEditor.test";
+import { runUserFormEditAssertions } from "./userFormEdits.test";
 import {
   runUserFormWebviewAssertions,
   runCustomEditorRegistrationAssertions,
@@ -122,6 +123,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assertLocalizationResources(extension.extensionPath);
   await runUserFormWebviewAssertions(extension.extensionUri);
   await runCustomEditorRegistrationAssertions();
+  await runUserFormEditAssertions();
   assert.deepStrictEqual([...initWorkbookExtensions], ["xlsm", "xlam", "xlsb"]);
   assert.ok(newProjectWorkbookPlaceholder.includes(".xlsb"));
   assert.ok(newProjectWorkbookPlaceholder.includes(".xlam"));

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -387,7 +388,7 @@ func TestWriterValidationRemainsSeparate(t *testing.T) {
 	}
 }
 
-func TestSerializableOperationsAndJSONRejection(t *testing.T) {
+func TestSerializableOperationsAndJSONGeometry(t *testing.T) {
 	var op Operation
 	if err := json.Unmarshal([]byte(`{"type":"moveControl","controlId":"submit","left":120,"top":180}`), &op); err != nil {
 		t.Fatal(err)
@@ -397,10 +398,139 @@ func TestSerializableOperationsAndJSONRejection(t *testing.T) {
 		t.Fatal("protocol operation failed")
 	}
 	jsonBody, _ := spec.MarshalSnapshot("json", result.Document)
+	op.Left, op.Top = new(140.0), new(190.0)
 	res, err := Apply(spec.SpecInput{Format: "json"}, jsonBody, []Operation{op})
-	if err == nil || !reflect.DeepEqual(res, Result{}) {
-		t.Fatal("JSON was not rejected atomically")
+	if err != nil {
+		t.Fatalf("JSON geometry edit: %v", err)
 	}
+	if *res.Document.Controls[0].Left != 140 || *res.Document.Controls[0].Top != 190 || len(res.Edits) != 2 {
+		t.Fatalf("JSON geometry result: document=%+v edits=%+v", res.Document.Controls[0], res.Edits)
+	}
+	res, err = Apply(spec.SpecInput{Format: "json"}, jsonBody, []Operation{{Type: SetControlProperty, ControlID: "submit", Field: "caption", Value: "x"}})
+	if err == nil || !reflect.DeepEqual(res, Result{}) {
+		t.Fatal("unsupported JSON operation was not rejected atomically")
+	}
+}
+
+func TestJSONGeometryPreservesBytesAndInsertsLocally(t *testing.T) {
+	source := []byte("{\r\n  \"schemaVersion\":1,\r\n  \"kind\":\"xlflow.userform\",\r\n  \"basis\":\"designer\",\r\n  \"form\":{\"name\":\"日本😀\",\"width\":240,\"height\":180},\r\n  \"controls\":[{\"id\":\"submit\",\"type\":\"CommandButton\",\"name\":\"送信😀\",\"left\":1,\"top\":2}]\r\n}\r\n")
+	result, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{{Type: ResizeControl, ControlID: "submit", Width: new(80.0), Height: new(30.0)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(string(source), `"top":2}`, `"top":2,"width":80,"height":30}`, 1)
+	if string(result.Source) != want {
+		t.Fatalf("unexpected source diff\n got: %s\nwant: %s", result.Source, want)
+	}
+	if len(result.Edits) != 1 || result.Edits[0].Start != result.Edits[0].End {
+		t.Fatalf("expected one local insertion, got %+v", result.Edits)
+	}
+	if !bytes.Equal(source, []byte(strings.Replace(want, `,"width":80,"height":30`, "", 1))) {
+		t.Fatal("source bytes were mutated")
+	}
+}
+
+func TestJSONGeometryInsertionPreservesPrettyJSONStyle(t *testing.T) {
+	source := []byte("{\r\n  \"schemaVersion\": 1,\r\n  \"kind\": \"xlflow.userform\",\r\n  \"basis\": \"designer\",\r\n  \"form\": {\"name\": \"\u65e5\u672c\U0001F600\", \"width\": 240, \"height\": 180},\r\n  \"controls\": [\r\n    {\r\n      \"id\": \"submit\",\r\n      \"type\": \"CommandButton\",\r\n      \"name\": \"\u9001\u4fe1\U0001F600\",\r\n      \"left\": 1,\r\n      \"top\": 2\r\n    }\r\n  ]\r\n}\r\n")
+	result, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{{Type: ResizeControl, ControlID: "submit", Width: new(80.0), Height: new(30.0)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Edits) != 1 {
+		t.Fatalf("expected one grouped insertion, got %+v", result.Edits)
+	}
+	edit := result.Edits[0]
+	wantInsertion := ",\r\n      \"width\": 80,\r\n      \"height\": 30"
+	if edit.Text != wantInsertion {
+		t.Fatalf("insertion formatting = %q, want %q", edit.Text, wantInsertion)
+	}
+	want := string(source[:edit.Start]) + edit.Text + string(source[edit.End:])
+	if string(result.Source) != want {
+		t.Fatalf("source changed outside the insertion\n got: %s\nwant: %s", result.Source, want)
+	}
+}
+
+func TestJSONGeometryRejectsAmbiguousAndInvalidInputAtomically(t *testing.T) {
+	source := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"submit","type":"CommandButton","name":"Submit","left":1,"left":2,"top":3}]}`)
+	op := Operation{Type: MoveControl, ControlID: "submit", Left: new(10.0), Top: new(20.0)}
+	if result, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{op}); err == nil || !reflect.DeepEqual(result, Result{}) {
+		t.Fatal("duplicate target key was accepted")
+	}
+	valid := []byte(strings.Replace(string(source), `,"left":2`, "", 1))
+	op.Left = new(math.Inf(1))
+	if result, err := Apply(spec.SpecInput{Format: "json"}, valid, []Operation{op}); err == nil || !reflect.DeepEqual(result, Result{}) {
+		t.Fatal("non-finite geometry was accepted")
+	}
+	op.Left = new(10.0)
+	missing := Operation{Type: MoveControl, ControlID: "submit", Left: new(10.0)}
+	if result, err := Apply(spec.SpecInput{Format: "json"}, valid, []Operation{op, missing}); err == nil || !reflect.DeepEqual(result, Result{}) {
+		t.Fatal("partial geometry batch was accepted")
+	}
+}
+
+func TestJSONGeometryNumericNoopAndMoveResizeBatch(t *testing.T) {
+	source := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"submit","type":"CommandButton","name":"Submit","left":1e1,"top":2,"width":10,"height":8}]}`)
+	noop, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{{Type: MoveControl, ControlID: "submit", Left: new(10.0), Top: new(2.0)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(noop.Edits) != 0 || !bytes.Equal(noop.Source, source) {
+		t.Fatalf("numeric semantic no-op rewrote source: edits=%+v source=%s", noop.Edits, noop.Source)
+	}
+	result, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{
+		{Type: MoveControl, ControlID: "submit", Left: new(12.0), Top: new(4.0)},
+		{Type: ResizeControl, ControlID: "submit", Width: new(30.0), Height: new(16.0)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Edits) != 4 || *result.Document.Controls[0].Left != 12 || *result.Document.Controls[0].Top != 4 || *result.Document.Controls[0].Width != 30 || *result.Document.Controls[0].Height != 16 {
+		t.Fatalf("move+resize batch was not applied atomically: edits=%+v control=%+v", result.Edits, result.Document.Controls[0])
+	}
+	if rebuilt := applySourceEdits(source, result.Edits); !bytes.Equal(rebuilt, result.Source) {
+		t.Fatalf("reported JSON edits do not produce result source: %s", rebuilt)
+	}
+}
+
+func TestJSONGeometryResolvesNestedControlByExplicitID(t *testing.T) {
+	source := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"frame","type":"Frame","name":"Frame1","controls":[{"id":"child","type":"TextBox","name":"Child","left":1,"top":2}]}]}`)
+	result, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{{Type: MoveControl, ControlID: "child", Left: new(5.0), Top: new(6.0)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var child *spec.FormSpecControl
+	for i := range result.Document.Controls {
+		if result.Document.Controls[i].ID == "child" {
+			child = &result.Document.Controls[i]
+		}
+	}
+	if child == nil || *child.Left != 5 || *child.Top != 6 || len(result.Edits) != 2 {
+		t.Fatalf("nested explicit ID was not edited: control=%+v edits=%+v", child, result.Edits)
+	}
+}
+
+func TestJSONGeometryReportsEscapedDuplicateKey(t *testing.T) {
+	source := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"submit","\u0069d":"other","type":"CommandButton","name":"Submit","left":1,"top":2}]}`)
+	result, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{{Type: MoveControl, ControlID: "other", Left: new(5.0), Top: new(6.0)}})
+	editError, ok := errors.AsType[*Error](err)
+	if err == nil || !ok || !reflect.DeepEqual(result, Result{}) || len(editError.Diagnostics) == 0 || editError.Diagnostics[0].Code != "UFE008" {
+		t.Fatalf("escaped duplicate key result=%+v error=%#v", result, err)
+	}
+}
+
+func TestJSONGeometryUsesFinalCanonicalPageValidation(t *testing.T) {
+	source := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"multi","type":"MultiPage","name":"Pages","controls":[{"id":"page","type":"Page","name":"Page1"}]}]}`)
+	result, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{{Type: MoveControl, ControlID: "page", Left: new(5.0), Top: new(6.0)}})
+	editError, ok := errors.AsType[*Error](err)
+	if err == nil || !ok || !reflect.DeepEqual(result, Result{}) {
+		t.Fatalf("Page geometry result=%+v error=%#v", result, err)
+	}
+	for _, diagnostic := range editError.Diagnostics {
+		if diagnostic.Code == "UFV005" {
+			return
+		}
+	}
+	t.Fatalf("canonical Page geometry diagnostic missing: %+v", editError.Diagnostics)
 }
 
 func FuzzScalarSourceEdits(f *testing.F) {

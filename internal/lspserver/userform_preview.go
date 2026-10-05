@@ -31,20 +31,12 @@ type userFormPreviewResult struct {
 
 func (s *Server) userFormPreview(params userFormPreviewParams) userFormPreviewResult {
 	result := userFormPreviewResult{Version: params.Version}
-	path, err := fileURIToPath(params.URI)
-	if err != nil || !isUserFormSpecPath(s.opts.RootDir, s.opts.Config.Src.Forms, path) {
-		result.Error = &userFormPreviewError{Code: "notFormSpec", Message: "Open a FormSpec directly under the configured forms root's specs directory."}
+	input, previewError := s.userFormSpecInput(params.URI)
+	if previewError != nil {
+		result.Error = previewError
 		return result
 	}
-	kind := DetectDocumentKind(s.opts.RootDir, s.opts.Config.Src.Forms, path, "")
-	format := "yaml"
-	if kind == DocumentKindUserFormJSON {
-		format = "json"
-	} else if kind != DocumentKindUserFormYAML {
-		result.Error = &userFormPreviewError{Code: "notFormSpec", Message: "Unsupported FormSpec extension."}
-		return result
-	}
-	doc, err := forms.ParseFormSpec(forms.SpecInput{DisplayPath: path, Format: format}, []byte(params.Text))
+	doc, err := forms.ParseFormSpec(input, []byte(params.Text))
 	if err != nil {
 		result.Error = &userFormPreviewError{Code: "invalidDocument", Message: err.Error()}
 		if detail, ok := errors.AsType[*forms.SpecError](err); ok {
@@ -56,7 +48,26 @@ func (s *Server) userFormPreview(params userFormPreviewParams) userFormPreviewRe
 	return result
 }
 
+func (s *Server) userFormSpecInput(uri string) (forms.SpecInput, *userFormPreviewError) {
+	path, err := fileURIToPath(uri)
+	if err != nil || !isUserFormSpecPath(s.opts.RootDir, s.opts.Config.Src.Forms, path) {
+		return forms.SpecInput{}, &userFormPreviewError{Code: "notFormSpec", Message: "Open a FormSpec directly under the configured forms root's specs directory."}
+	}
+	kind := DetectDocumentKind(s.opts.RootDir, s.opts.Config.Src.Forms, path, "")
+	format := "yaml"
+	if kind == DocumentKindUserFormJSON {
+		format = "json"
+	} else if kind != DocumentKindUserFormYAML {
+		return forms.SpecInput{}, &userFormPreviewError{Code: "notFormSpec", Message: "Unsupported FormSpec extension."}
+	}
+	return forms.SpecInput{DisplayPath: path, Format: format}, nil
+}
+
 func (s *Server) dispatchRequest(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) bool {
+	if req.Method == userFormEditMethod {
+		s.dispatchUserFormEdit(ctx, conn, req)
+		return true
+	}
 	if req.Method != "xlflow/userFormPreview" {
 		return s.dispatchCodeAction(ctx, conn, req)
 	}

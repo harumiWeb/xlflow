@@ -2,10 +2,14 @@
 
 ## Unreleased
 
+- Added UserForm selection, mouse movement, eight-direction resize, grouped
+  arrow-key movement, 8-point grid/snapping toggles, and 50–200% zoom. Completed
+  YAML/YML and JSON interactions create one localized, native undoable edit;
+  parent bounds and container children constrain layout operations.
 - UserForm Designer prefers measured client dimensions, displays explicit ComboBox
   values, and localizes its preview UI. Page selection retains compiler zIndex ordering.
 
-- Added an optional read-only UserForm Designer for canonical YAML, YML, and
+- Added an optional UserForm Designer for canonical YAML, YML, and
   JSON FormSpecs. It previews the current TextDocument through xlflow LSP and
   retains the last valid rendering while the source is invalid.
   Button captions are centered horizontally and vertically, including multiline text.

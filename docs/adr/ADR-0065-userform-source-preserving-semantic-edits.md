@@ -131,6 +131,7 @@ requirements, are specified in
 
 ## Related
 
+- JSON geometry editing and the LSP adapter are supplemented by `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`.
 - Issue #916 (parent: Issue #914)
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`
 - `docs/specs/userform-semantic-edit.md`
