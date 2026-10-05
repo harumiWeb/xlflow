@@ -401,7 +401,7 @@ window.addEventListener("message", e => {
       ],
     });
     assert.deepStrictEqual((gridSnap.editMessages as { operations: unknown[] }[])[4].operations, [
-      { type: "moveControl", controlId: "label", left: 32, top: 24 },
+      { type: "moveControl", controlId: "label", left: 32, top: 21 },
     ]);
     await snapshot({ type: "document", version: 21, document: interactive, editable: true });
     const pointerCancelled = await snapshot({

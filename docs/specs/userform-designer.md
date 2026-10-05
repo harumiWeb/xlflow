@@ -165,7 +165,9 @@ control cannot move until resized to fit. If child protection prevents fitting,
 editing that geometry is unavailable; source editing remains available. These
 UI constraints do not add canonical FormSpec validation rules.
 
-Resize preserves the opposite edge and the unoperated axis. If that unchanged
+Move and resize preserve axes with zero displacement, including when snapping
+is enabled; a zero-displacement gesture produces no edit or history entry.
+Resize also preserves the opposite edge. If that unchanged
 axis or opposite edge already prevents a fitting result, reject the interaction
 rather than silently correcting it; source editing remains available.
 
@@ -175,8 +177,10 @@ The LSP advertises `capabilities.experimental.userFormEdit: true`. Preview-only
 servers retain read-only rendering, selection, grid and zoom. Requests use
 `xlflow/userFormEdit` with `{uri, version, text, operations}`. Operations are
 only `moveControl` (both `left`/`top`) and `resizeControl` (both `width`/`height`),
-using control IDs and finite point values. The extension accepts one operation
-or a move/resize pair for the same control per interaction.
+using control IDs and finite point values. The extension and RPC both accept
+one operation or a move/resize pair for the same control per interaction.
+Empty batches, more than two operations, repeated operation types, and pairs
+targeting different controls are rejected before source edits are generated.
 
 The server validates eligibility and calls `spec/edit.Apply` on the supplied
 unsaved text. It returns `{version, edits, warnings}` or `{version, error}`,

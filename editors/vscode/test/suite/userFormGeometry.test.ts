@@ -25,6 +25,34 @@ export function runUserFormGeometryAssertions(): void {
   const overflowX = { left: 50, top: 10, width: 100, height: 20 };
   const square = { width: 100, height: 100 };
   const minimum = { width: 1, height: 1 };
+  assert.strictEqual(moveGeometry(overflowX, 0, 5, square), undefined);
+  assert.strictEqual(moveGeometry({ ...overflowX, left: -5 }, 0, 5, square), undefined);
+  assert.deepStrictEqual(moveGeometry(overflowX, -50, 5, square), {
+    ...overflowX,
+    left: 0,
+    top: 15,
+  });
+  for (const snapping of [false, true]) {
+    assert.deepStrictEqual(moveGeometry(start, 0, 4, bounds, snapping), {
+      ...start,
+      top: snapping ? 16 : 16.5,
+    });
+    assert.deepStrictEqual(moveGeometry(start, 4, 0, bounds, snapping), {
+      ...start,
+      left: snapping ? 16 : start.left + 4,
+    });
+    assert.deepStrictEqual(moveGeometry(start, 0, 0, bounds, snapping), start);
+    assert.deepStrictEqual(resizeGeometry(start, "nw", 0, 3, bounds, minimum, snapping), {
+      ...start,
+      top: snapping ? 16 : 15.5,
+      height: snapping ? 26.5 : 27,
+    });
+    assert.deepStrictEqual(resizeGeometry(start, "se", 4, 0, bounds, minimum, snapping), {
+      ...start,
+      width: snapping ? 64 - start.left : 54,
+    });
+    assert.deepStrictEqual(resizeGeometry(start, "nw", 0, 0, bounds, minimum, snapping), start);
+  }
   for (const handle of ["n", "s"] as const)
     assert.strictEqual(
       resizeGeometry(overflowX, handle, 0, 10, square, minimum),
@@ -32,6 +60,8 @@ export function runUserFormGeometryAssertions(): void {
       "vertical resize cannot silently correct horizontal overflow",
     );
   const overflowY = { left: 10, top: 50, width: 20, height: 100 };
+  assert.strictEqual(moveGeometry(overflowY, 5, 0, square), undefined);
+  assert.strictEqual(resizeGeometry(overflowX, "nw", 0, 5, square, minimum), undefined);
   for (const handle of ["e", "w"] as const)
     assert.strictEqual(
       resizeGeometry(overflowY, handle, 10, 0, square, minimum),

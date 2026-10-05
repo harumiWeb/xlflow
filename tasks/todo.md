@@ -1,3 +1,10 @@
+# Issue #917 final review follow-up
+
+- [x] Preserve unchanged axes during move/snap and reject gestures that leave existing overflow; add geometry regressions.
+- [x] Enforce a single move/resize operation or distinct move+resize pair for one control at the RPC boundary; test rejected raw RPC batches and accepted pairs.
+- [x] Run affected Go and VS Code checks, preserve Pass 1 evidence and clean up review resources.
+- [ ] Commit the fixes and run independent Pass 2 against the full Issue #917 change.
+
 # PR #925 review follow-up
 
 - [x] 操作エラーの中間状態検証による上書きを防ぐ。

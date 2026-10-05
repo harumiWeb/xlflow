@@ -90,6 +90,41 @@ func TestUserFormEditRPCAndUTF16Ranges(t *testing.T) {
 	if result.Edits[1].Range.Start.Line != 5 || result.Edits[1].NewText != "30" {
 		t.Fatalf("height edit position: %+v", result.Edits[1])
 	}
+	move := map[string]any{"type": "moveControl", "controlId": "submit", "left": 4, "top": 5}
+	resize := map[string]any{"type": "resizeControl", "controlId": "submit", "width": 20, "height": 30}
+	other := map[string]any{"type": "resizeControl", "controlId": "other", "width": 20, "height": 30}
+	for _, test := range []struct {
+		name       string
+		operations []any
+		valid      bool
+	}{
+		{"empty", []any{}, false},
+		{"three operations", []any{move, resize, move}, false},
+		{"repeated move", []any{move, move}, false},
+		{"repeated resize", []any{resize, resize}, false},
+		{"mixed targets", []any{move, other}, false},
+		{"single move", []any{move}, true},
+		{"move resize pair", []any{move, resize}, true},
+		{"resize move pair", []any{resize, move}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			params["operations"] = test.operations
+			var batch userFormEditResult
+			if err := clientConn.Call(ctx, userFormEditMethod, params, &batch); err != nil {
+				t.Fatal(err)
+			}
+			if batch.Version != 17 {
+				t.Fatalf("version not preserved: %+v", batch)
+			}
+			if test.valid {
+				if batch.Error != nil || len(batch.Edits) == 0 {
+					t.Fatalf("valid transaction rejected: %+v", batch)
+				}
+			} else if batch.Error == nil || batch.Error.Code != compiler.Invalid || len(batch.Edits) != 0 {
+				t.Fatalf("invalid transaction produced edits: %+v", batch)
+			}
+		})
+	}
 	diskSource, err := os.ReadFile(diskPath)
 	if err != nil || string(diskSource) != "disk source is not the request buffer" {
 		t.Fatalf("server changed disk source: %q, %v", diskSource, err)
@@ -234,11 +269,11 @@ func TestUserFormEditStructuredFailuresAreAtomic(t *testing.T) {
 		URI: uri, Version: 2, Text: source,
 		Operations: []formsedit.Operation{
 			{Type: formsedit.MoveControl, ControlID: "submit", Left: new(4.0), Top: new(5.0)},
-			{Type: formsedit.ResizeControl, ControlID: "missing", Width: new(20.0), Height: new(30.0)},
+			{Type: formsedit.ResizeControl, ControlID: "submit", Width: new(20.0)},
 		},
 	}
 	result := s.userFormEdit(params)
-	if result.Error == nil || result.Error.Code != compiler.Conflict || len(result.Edits) != 0 {
+	if result.Error == nil || result.Error.Code != compiler.Invalid || len(result.Edits) != 0 {
 		t.Fatalf("partial batch result: %+v", result)
 	}
 	if len(result.Error.Diagnostics) == 0 {
@@ -291,21 +326,25 @@ func TestUserFormEditRequestPayloadValidation(t *testing.T) {
 func TestUserFormEditURIEligibilityMatchesPreview(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{opts: Options{RootDir: root, Config: config.Default()}}
-	jsonSource := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[]}`
+	jsonSource := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"submit","type":"CommandButton","name":"Submit"}]}`
+	yamlSource := strings.Replace(previewSource, "controls: []", "controls:\n  - id: submit\n    type: CommandButton\n    name: Submit", 1)
 	for _, test := range []struct {
 		path   string
 		source string
 		ok     bool
 	}{
 		{path: "src/forms/specs/Main.json", source: jsonSource, ok: true},
-		{path: "src/forms/specs/Main.yaml", source: previewSource, ok: true},
+		{path: "src/forms/specs/Main.yaml", source: yamlSource, ok: true},
 		{path: "src/forms/specs/nested/Main.json", source: jsonSource},
 		{path: "src/forms/Main.json", source: jsonSource},
 		{path: "src/forms/specs/Main.txt", source: jsonSource},
 	} {
 		uri := pathToFileURI(filepath.Join(root, filepath.FromSlash(test.path)))
 		preview := s.userFormPreview(userFormPreviewParams{URI: uri, Version: 5, Text: test.source})
-		edit := s.userFormEdit(userFormEditParams{URI: uri, Version: 5, Text: test.source})
+		edit := s.userFormEdit(userFormEditParams{
+			URI: uri, Version: 5, Text: test.source,
+			Operations: []formsedit.Operation{{Type: formsedit.MoveControl, ControlID: "submit", Left: new(4.0), Top: new(5.0)}},
+		})
 		if test.ok && (preview.Error != nil || edit.Error != nil) {
 			t.Fatalf("%s eligible mismatch: preview=%+v edit=%+v", test.path, preview.Error, edit.Error)
 		}

@@ -62,6 +62,10 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 			return result
 		}
 	}
+	if requestError := validateUserFormEditTransaction(params.Operations); requestError != nil {
+		result.Error = requestError
+		return result
+	}
 	changed, err := formsedit.Apply(input, []byte(params.Text), params.Operations)
 	if err != nil {
 		result.Error = userFormEditErrorFrom(err)
@@ -136,7 +140,20 @@ func parseUserFormEditParams(raw []byte) (userFormEditParams, *userFormEditError
 		}
 		params.Operations = append(params.Operations, operation)
 	}
+	if requestError := validateUserFormEditTransaction(params.Operations); requestError != nil {
+		return params, requestError
+	}
 	return params, nil
+}
+
+func validateUserFormEditTransaction(operations []formsedit.Operation) *userFormEditError {
+	if len(operations) < 1 || len(operations) > 2 {
+		return invalidUserFormEditParams(fmt.Errorf("a transaction requires one geometry operation or one move/resize pair"))
+	}
+	if len(operations) == 2 && (operations[0].ControlID != operations[1].ControlID || operations[0].Type == operations[1].Type) {
+		return invalidUserFormEditParams(fmt.Errorf("a move/resize pair must target one control with distinct operation types"))
+	}
+	return nil
 }
 
 func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditError) {

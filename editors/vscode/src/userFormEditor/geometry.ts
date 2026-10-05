@@ -70,10 +70,18 @@ export function moveGeometry(
   snapping = false,
 ): Geometry | undefined {
   if (start.width > parent.width || start.height > parent.height) return undefined;
+  const moveAxis = (position: number, delta: number, limit: number) => {
+    const displacement = stableDelta(delta);
+    if (displacement === 0) return position >= 0 && position <= limit ? position : undefined;
+    return clamp(snap(position + displacement, snapping), 0, limit);
+  };
+  const left = moveAxis(start.left, dx, parent.width - start.width);
+  const top = moveAxis(start.top, dy, parent.height - start.height);
+  if (left === undefined || top === undefined) return undefined;
   return {
     ...start,
-    left: clamp(snap(start.left + stableDelta(dx), snapping), 0, parent.width - start.width),
-    top: clamp(snap(start.top + stableDelta(dy), snapping), 0, parent.height - start.height),
+    left,
+    top,
   };
 }
 export function resizeGeometry(
@@ -94,7 +102,7 @@ export function resizeGeometry(
     limit: number,
     minSize: number,
   ) => {
-    if (!near && !far)
+    if ((!near && !far) || stableDelta(delta) === 0)
       return position >= 0 && size >= minimumSize && position + size <= limit
         ? { position, size }
         : undefined;
