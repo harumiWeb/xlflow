@@ -1,3 +1,11 @@
+# Issue #918 Property Grid
+
+- [x] Extend YAML/JSON scalar editing and expose source-based property metadata through LSP.
+- [x] Add localized Property Grid with shared selection, draft validation and semantic commits.
+- [x] Verify source preservation, real Webview behavior, native undo/redo and geometry regressions.
+- [x] Record the design contract, update user documentation/changelogs and complete self-review.
+- [x] Review follow-up: preserve empty multiline JSON build layout and retain rejected drafts/field diagnostics across selection changes; verify regressions and the full VS Code suite.
+
 # PR #926 review follow-up
 
 - [x] CodeRabbit: reproduce secondary pointerdown replacing the active gesture; reject new pointerdown until that gesture ends and verify primary commit.

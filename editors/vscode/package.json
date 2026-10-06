@@ -38,8 +38,8 @@
     "bundle": "node esbuild.js",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
-    "test": "pnpm run compile && node ./dist/test/userFormRendering.test.js && node ./dist/test/runTest.js",
-    "test:designer": "pnpm run compile && node ./dist/test/userFormRendering.test.js",
+    "test": "pnpm run compile && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/runTest.js",
+    "test:designer": "pnpm run compile && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js",
     "lint": "oxlint ."
   },
   "dependencies": {
@@ -52,6 +52,7 @@
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1",
+    "jsdom": "^26.1.0",
     "oxlint": "^1.71.0",
     "preact-render-to-string": "^6.8.0",
     "typescript": "^5.9.0"

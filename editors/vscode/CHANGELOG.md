@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Added a UserForm Property Grid driven by the running LSP's field metadata.
+  Select the form, a control or a Page tab to edit supported authored scalars
+  in YAML/YML/JSON with one native undoable edit per confirmation. Unset fields,
+  explicit null, empty strings, false and zero remain distinct; invalid input
+  retains its field error without changing source. Property editing requires
+  the new capability; existing geometry support remains available on older
+  geometry-capable servers.
+
 - Added UserForm selection, mouse movement, eight-direction resize, grouped
   arrow-key movement, 8-point grid/snapping toggles, and 50–200% zoom. Completed
   YAML/YML and JSON interactions create one localized, native undoable edit;

@@ -1,12 +1,12 @@
 import * as vscode from "vscode";
-import type { DesignerError, EditResult, GeometryOperation, SourceTextEdit } from "./protocol";
+import type { DesignerError, EditResult, SemanticOperation, SourceTextEdit } from "./protocol";
 
 export interface EditClient {
   requestUserFormEdit(
     document: vscode.TextDocument,
     version: number,
     text: string,
-    operations: GeometryOperation[],
+    operations: SemanticOperation[],
   ): Promise<EditResult>;
 }
 // Shared across panels: no concurrent edit generation/application for one URI.
@@ -15,7 +15,7 @@ export class DocumentEditQueue {
   async run(
     document: vscode.TextDocument,
     version: number,
-    operations: GeometryOperation[],
+    operations: SemanticOperation[],
     client: EditClient,
     current: () => boolean,
   ): Promise<DesignerError | undefined> {
@@ -55,9 +55,13 @@ export class DocumentEditQueue {
             };
           if (!edits.length) return undefined;
           const edit = new vscode.WorkspaceEdit();
-          const label = operations.some((op) => op.type === "resizeControl")
-            ? vscode.l10n.t("Resize control")
-            : vscode.l10n.t("Move control");
+          const label = operations.some(
+            (op) => op.type === "setFormProperty" || op.type === "setControlProperty",
+          )
+            ? vscode.l10n.t("Edit UserForm property")
+            : operations.some((op) => op.type === "resizeControl")
+              ? vscode.l10n.t("Resize control")
+              : vscode.l10n.t("Move control");
           edit.set(
             document.uri,
             edits.map((e): [vscode.TextEdit, vscode.WorkspaceEditEntryMetadata] => [

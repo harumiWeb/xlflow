@@ -18,7 +18,7 @@ import {
   StartupTelemetry,
 } from "./startupTelemetry";
 import { resolveWorkspaceRoot } from "./xlflow";
-import type { PreviewResult, EditResult, GeometryOperation } from "./userFormEditor/protocol";
+import type { PreviewResult, EditResult, SemanticOperation } from "./userFormEditor/protocol";
 
 class StartupLanguageClient extends LanguageClient {
   public constructor(
@@ -59,7 +59,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       );
     }
     const experimental = client.initializeResult?.capabilities.experimental as
-      | { userFormPreview?: boolean; userFormEdit?: boolean }
+      | { userFormPreview?: boolean; userFormEdit?: boolean; userFormPropertyEdit?: boolean }
       | undefined;
     if (experimental?.userFormPreview !== true)
       throw new Error(vscode.l10n.t("Update xlflow to a version supporting UserForm previews."));
@@ -70,14 +70,19 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     });
     if (generation !== this.previewGeneration || client !== this.client)
       throw new Error("The language server connection changed.");
-    return { ...result, editable: experimental.userFormEdit === true };
+    return {
+      ...result,
+      editable: experimental.userFormEdit === true,
+      propertyEditable:
+        experimental.userFormPropertyEdit === true && result.propertyGrid !== undefined,
+    };
   }
 
   public async requestUserFormEdit(
     document: vscode.TextDocument,
     version: number,
     text: string,
-    operations: GeometryOperation[],
+    operations: SemanticOperation[],
   ): Promise<EditResult> {
     const client = this.client;
     const generation = this.previewGeneration;
@@ -87,10 +92,17 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
         vscode.l10n.t("Select this form's project and enable xlflow LSP to edit the form."),
       );
     const experimental = client.initializeResult?.capabilities.experimental as
-      | { userFormEdit?: boolean }
+      | { userFormEdit?: boolean; userFormPropertyEdit?: boolean }
       | undefined;
     if (!experimental?.userFormEdit)
       throw new Error(vscode.l10n.t("Update xlflow to a version supporting UserForm edits."));
+    if (
+      operations.some((op) => op.type === "setFormProperty" || op.type === "setControlProperty") &&
+      experimental.userFormPropertyEdit !== true
+    )
+      throw new Error(
+        vscode.l10n.t("Update xlflow to a version supporting UserForm property edits."),
+      );
     const result = await client.sendRequest<EditResult>("xlflow/userFormEdit", {
       uri: document.uri.toString(),
       version,

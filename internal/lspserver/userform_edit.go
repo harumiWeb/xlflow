@@ -48,7 +48,7 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 		return result
 	}
 	for index, operation := range params.Operations {
-		if operation.Type != formsedit.MoveControl && operation.Type != formsedit.ResizeControl {
+		if operation.Type != formsedit.MoveControl && operation.Type != formsedit.ResizeControl && operation.Type != formsedit.SetFormProperty && operation.Type != formsedit.SetControlProperty {
 			result.Error = &userFormEditError{
 				Code:    compiler.Unsupported,
 				Message: fmt.Sprintf("operation %q is not exposed by the LSP edit method", operation.Type),
@@ -56,7 +56,7 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 					OperationIndex: index,
 					Operation:      operation.Type,
 					Code:           "UFE007",
-					Message:        "The LSP edit method supports only moveControl and resizeControl.",
+					Message:        "The LSP edit method supports geometry and scalar property operations.",
 				}},
 			}
 			return result
@@ -147,11 +147,19 @@ func parseUserFormEditParams(raw []byte) (userFormEditParams, *userFormEditError
 }
 
 func validateUserFormEditTransaction(operations []formsedit.Operation) *userFormEditError {
-	if len(operations) < 1 || len(operations) > 2 {
-		return invalidUserFormEditParams(fmt.Errorf("a transaction requires one geometry operation or one move/resize pair"))
+	if len(operations) == 1 && (operations[0].Type == formsedit.SetFormProperty || operations[0].Type == formsedit.SetControlProperty) {
+		return nil
 	}
-	if len(operations) == 2 && (operations[0].ControlID != operations[1].ControlID || operations[0].Type == operations[1].Type) {
-		return invalidUserFormEditParams(fmt.Errorf("a move/resize pair must target one control with distinct operation types"))
+	if len(operations) < 1 || len(operations) > 2 {
+		return invalidUserFormEditParams(fmt.Errorf("a transaction requires one property operation, one geometry operation or one move/resize pair"))
+	}
+	if len(operations) == 2 {
+		first, second := operations[0], operations[1]
+		moveResize := first.Type == formsedit.MoveControl && second.Type == formsedit.ResizeControl
+		resizeMove := first.Type == formsedit.ResizeControl && second.Type == formsedit.MoveControl
+		if first.ControlID != second.ControlID || (!moveResize && !resizeMove) {
+			return invalidUserFormEditParams(fmt.Errorf("a move/resize pair must target one control with distinct operation types"))
+		}
 	}
 	return nil
 }
@@ -172,11 +180,43 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		allowed = []string{"type", "controlId", "left", "top"}
 	case formsedit.ResizeControl:
 		allowed = []string{"type", "controlId", "width", "height"}
+	case formsedit.SetFormProperty:
+		allowed = []string{"type", "field", "value"}
+	case formsedit.SetControlProperty:
+		allowed = []string{"type", "controlId", "field", "value"}
 	default:
 		return formsedit.Operation{}, &userFormEditError{Code: compiler.Unsupported, Message: fmt.Sprintf("operation %q is not exposed by the LSP edit method", operationType)}
 	}
 	if err := validateJSONFields(fields, allowed); err != nil {
 		return formsedit.Operation{}, invalidUserFormEditParams(err)
+	}
+	if operationType == formsedit.SetFormProperty || operationType == formsedit.SetControlProperty {
+		var field string
+		if bytes.Equal(bytes.TrimSpace(fields["field"]), []byte("null")) || json.Unmarshal(fields["field"], &field) != nil || field == "" {
+			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("field must be a non-empty string"))
+		}
+		decoder := json.NewDecoder(bytes.NewReader(fields["value"]))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(err)
+		}
+		switch scalar := value.(type) {
+		case nil, string, bool:
+		case json.Number:
+			if _, err := decodeFiniteJSONNumber([]byte(scalar)); err != nil {
+				return formsedit.Operation{}, invalidUserFormEditParams(err)
+			}
+		default:
+			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("value must be a scalar or null"))
+		}
+		op := formsedit.Operation{Type: operationType, Field: field, Value: value, ValuePresent: true}
+		if operationType == formsedit.SetControlProperty {
+			if bytes.Equal(bytes.TrimSpace(fields["controlId"]), []byte("null")) || json.Unmarshal(fields["controlId"], &op.ControlID) != nil || op.ControlID == "" {
+				return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("controlId must be a non-empty string"))
+			}
+		}
+		return op, nil
 	}
 	controlIDJSON, ok := fields["controlId"]
 	var controlID string

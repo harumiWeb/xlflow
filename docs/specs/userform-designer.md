@@ -121,7 +121,8 @@ The extension host supplies localized UI strings through a `localization`
 message when the Webview reports readiness. These are rendered as text; parser
 diagnostics and workspace-authored captions retain their original wording.
 
-The Designer does not allow Page selection or load image assets. Image controls use a placeholder even when a
+Page tabs can select a Page for property inspection. The Designer does not
+load image assets. Image controls use a placeholder even when a
 picture path is present in the FormSpec.
 
 Source-preserving semantic edits use the host-neutral Go API. See
@@ -179,16 +180,90 @@ Resize also preserves the opposite edge. If that unchanged
 axis or opposite edge already prevents a fitting result, reject the interaction
 rather than silently correcting it; source editing remains available.
 
-## Geometry edit protocol and native history
+## Property Grid and authored source states
+
+The running LSP supplies `propertyGrid` alongside the canonical preview
+document. The form and each explicit control ID have a property target:
+
+```json
+{
+  "propertyGrid": {
+    "form": {
+      "descriptors": [
+        { "field": "caption", "valueType": "string", "required": false, "nullable": true }
+      ],
+      "values": { "caption": { "present": false, "value": null } }
+    },
+    "controls": {
+      "submit": {
+        "descriptors": [
+          { "field": "enabled", "valueType": "boolean", "required": false, "nullable": true }
+        ],
+        "values": { "enabled": { "present": true, "value": false } }
+      }
+    }
+  }
+}
+```
+
+This example shows a subset of descriptors. Each descriptor contains `field`,
+`valueType`, `required`, `nullable` and optional `allowedValues`. Field paths
+are relative to the form or selected control. Descriptors derive from the Go
+FormSpec contract and scalar edit support for that target; TypeScript owns
+labels, categories and display order, not another validation/applicability
+schema. The UI supports string, number, integer, boolean and enum inputs;
+scalar `value` retains its chosen type, including string `"false"` versus
+boolean `false`.
+
+`values` comes from original source syntax, not the normalized document or
+renderer. `{present: false, value: null}` means absent;
+`{present: true, value: null}` means explicit null. Empty string, false and zero
+remain explicit values. Observed values and approximate display defaults are
+never used to fill or persist authored fields. A preview-valid source whose
+authored state cannot be determined safely returns optional `propertyError`
+(using the preview error shape) without discarding its valid `document`.
+Property editing is unavailable without usable metadata.
+
+Background selection shows form fields; control selection shows that control's
+fields. Page selection uses its tab and excludes Page geometry. Form fields
+include `name`, `caption`, `width`, `height` and the supported `build.*` paths;
+legacy and build fields are separate and never redirect to each other.
+Control fields are limited to supported authored scalars for their type.
+Observed/snapshot values, identity/type/parent topology, collections, pictures
+and arbitrary property bags are outside the grid. Changing `form.name` does
+not rename the source file, code sidecar or VBA references.
+
+Text/number inputs confirm on Enter or blur, with at most one request when both
+occur; Escape cancels the draft. Boolean/enum changes confirm on selection.
+Keep invalid input with a field-level error without changing source; preserve
+structured field/code/message diagnostics from the server. Drafts belong to
+target ID, field and document version. External source edits invalidate old
+drafts rather than applying or rebasing them automatically. Switching selection
+preserves dirty drafts and their matching edit replies, including field-level
+rejection diagnostics, until corrected or canceled. Source edits and
+undo/redo refresh values from source. Selection and rendering alone never
+produce source edits. Explicit null is allowed only for nullable fields
+accepted by canonical validation; there is no property removal action.
+
+## Semantic edit protocol and native history
 
 The LSP advertises `capabilities.experimental.userFormEdit: true`. Preview-only
 servers retain read-only rendering, selection, grid and zoom. Requests use
 `xlflow/userFormEdit` with `{uri, version, text, operations}`. Operations are
-only `moveControl` (both `left`/`top`) and `resizeControl` (both `width`/`height`),
-using control IDs and finite point values. The extension and RPC both accept
+`moveControl` (both `left`/`top`) and `resizeControl` (both `width`/`height`),
+using control IDs and finite point values, or one `setFormProperty` /
+`setControlProperty` operation. Property editing additionally requires
+`capabilities.experimental.userFormPropertyEdit: true`; older geometry-capable
+servers retain geometry editing with the grid disabled. Preview-only servers
+retain read-only rendering. The extension and RPC both accept
 one operation or a move/resize pair for the same control per interaction.
 Empty batches, more than two operations, repeated operation types, and pairs
 targeting different controls are rejected before source edits are generated.
+A property operation cannot be batched with another property or geometry edit.
+Its payload supplies `field` and an explicit scalar `value`, plus `controlId`
+for `setControlProperty`. Missing `value` is invalid; explicit null must survive
+transport as a present value. Both Webview boundary and RPC validate payload
+shape, while canonical parsing/validation decides FormSpec semantics.
 
 The server validates eligibility and calls `spec/edit.Apply` on the supplied
 unsaved text. It returns `{version, edits, warnings}` or `{version, error}`,
@@ -207,9 +282,23 @@ operations revert preview and display an error without automatic retry/rebase.
 
 Webview messages add `edit` with request ID/version/operations. Host messages
 add edit results and availability; document messages carry editable capability.
-YAML/YML and JSON share geometry interactions; JSON support is limited to these
-geometry operations. Delete, Property Grid, Toolbox, Page collection editing,
-reparenting, multiple selection and form resizing are separate issues.
+YAML/YML and JSON share geometry and scalar property interactions, preserving
+unrelated source formatting. Delete, Toolbox, Page collection editing,
+reparenting, multiple selection and canvas form resizing are separate issues.
+
+## Property editing verification
+
+Go/LSP checks cover per-type descriptors, absent/null/empty/false/zero states,
+Page geometry exclusion, ambiguous-source `propertyError` with valid preview,
+canonical rejection, value presence, transaction shape and capability fallback.
+Source tests cover YAML/YML/JSON local insertion/replacement, missing `build`,
+CRLF and multibyte offsets, escaped/duplicate JSON keys, no-ops and atomic
+failure. Webview checks cover selection, typed input, Enter/blur deduplication,
+Escape, invalid draft retention and draft invalidation on source updates.
+Verify in real VS Code that one confirmation creates one native undo/redo
+step, multiple panels synchronize, stale versions/connections cannot overwrite
+source and older servers retain their advertised behavior. These source edits
+do not change COM/VBE semantics and require no Excel or VBE oracle run.
 
 ## Webview security
 
@@ -224,6 +313,8 @@ interpolated into the HTML document.
 
 - Issue #915
 - Issue #917
+- Issue #918
+- `docs/adr/ADR-0067-userform-designer-property-metadata.md`
 - `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`
 - `docs/specs/ms-oforms.md`

@@ -6,7 +6,7 @@
 
 - xlflowプロジェクトのステータス確認が可能
 - `xlflow.toml`で設定したフォームルートの`specs`直下にあるYAML、YML、JSON形式の
-  UserForm FormSpecを、任意の読み取り専用デザイナーでプレビューできます。
+  UserForm FormSpecを、任意のデザイナーでプレビューし、対応するプロパティを編集できます。
   開いているドキュメントに追従し、ソースにエラーがある間も最後に正常表示
   できた状態を保持します。
 - VBAモジュールのインポートとエクスポート機能を実装
@@ -314,8 +314,17 @@ WSL連携を利用する場合は、プロジェクトがWindows側からもWSL�
 ## 既知の制限事項
 
 - この拡張機能では`xlflow`のインストールまたはバンドルは行いません。
-- UserForm Designerは近似表示の読み取り専用プレビューです。編集、ズーム、Pageの選択、
-  画像アセットの読み込みには対応せず、選択中プロジェクトの対応するxlflow LSPが必要です。
+- UserForm Designerは近似表示で、選択中プロジェクトの対応するxlflow LSPが必要です。
+  YAML/YML/JSONの移動・リサイズと、LSPメタデータに基づくフォーム／コントロールの
+  scalarプロパティ編集に対応します。背景・コントロール・Pageタブを選択すると
+  対応するプロパティが表示されます。各確定はVS Codeのundo/redoで戻せます。
+  プロパティ編集には`userFormPropertyEdit`が必要です。古いgeometry対応サーバーは
+  移動・リサイズを維持し、previewのみのサーバーは読み取り専用です。
+  未設定・null・空文字・false・0を区別し、optionalフィールドの明示的nullに対応しますが、
+  キーの削除は行いません。フォーム名の変更はファイルやsidecarを改名しません。
+  ソース編集にExcelは不要です。Toolbox、親変更、Pageコレクション編集、canvasでの
+  フォーム／Pageリサイズ、画像アセット読み込みには対応しません。
+  詳細は[UserFormガイド](https://harumiweb.github.io/xlflow/guides/userforms)を参照してください。
 - マクロ選択はまだインタラクティブな操作に対応していません。`xlflow: Run Macro`を実行すると、設定済みのデフォルトマクロが実行されます。引数なしで使える`Sub`プロシージャは、CodeLensから起動可能です。
 - `xlflow: New Project`および`xlflow: 既存ブックをプロジェクト化`では、基本CLIワークフローのみが表示され、`--with-skill`、`--with-module`、`--agent`、`--json`オプションを選択するためのピッカーは提供されません。
 - この拡張機能自体は、VBAコードの解析、診断、フォーマット、補完候補表示、シンボル分析を独自実装していません。これらの機能は `xlflow` CLI および `xlflow-lsp` に委譲されます。

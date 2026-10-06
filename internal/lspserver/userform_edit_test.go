@@ -46,7 +46,7 @@ func TestUserFormEditRPCAndUTF16Ranges(t *testing.T) {
 	if err := clientConn.Call(ctx, "initialize", protocol.InitializeParams{}, &initialized); err != nil {
 		t.Fatal(err)
 	}
-	if initialized.Capabilities.Experimental["userFormEdit"] != true {
+	if initialized.Capabilities.Experimental["userFormEdit"] != true || initialized.Capabilities.Experimental["userFormPropertyEdit"] != true {
 		t.Fatalf("edit capability: %+v", initialized.Capabilities.Experimental)
 	}
 	if err := clientConn.Notify(ctx, "initialized", map[string]any{}); err != nil {
@@ -124,6 +124,22 @@ func TestUserFormEditRPCAndUTF16Ranges(t *testing.T) {
 				t.Fatalf("invalid transaction produced edits: %+v", batch)
 			}
 		})
+	}
+	params["operations"] = []any{map[string]any{"type": "setControlProperty", "controlId": "submit", "field": "caption", "value": "送信 😀"}}
+	var property userFormEditResult
+	if err := clientConn.Call(ctx, userFormEditMethod, params, &property); err != nil {
+		t.Fatal(err)
+	}
+	if property.Error != nil || property.Version != 17 || len(property.Edits) == 0 {
+		t.Fatalf("property RPC response: %+v", property)
+	}
+	edited, err := applyLSPTextEdits(source, property.Edits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := spec.ParseFormSpec(spec.SpecInput{Format: "json"}, []byte(edited))
+	if err != nil || doc.Controls[0].Caption == nil || *doc.Controls[0].Caption != "送信 😀" {
+		t.Fatalf("property RPC source: %s: %v", edited, err)
 	}
 	diskSource, err := os.ReadFile(diskPath)
 	if err != nil || string(diskSource) != "disk source is not the request buffer" {
@@ -287,7 +303,7 @@ func TestUserFormEditStructuredFailuresAreAtomic(t *testing.T) {
 	}
 
 	unsupported := params.Operations[:1]
-	unsupported[0].Type = formsedit.SetControlProperty
+	unsupported[0].Type = formsedit.SetParent
 	yamlURI := pathToFileURI(filepath.Join(root, "src/forms/specs/Main.yaml"))
 	result = s.userFormEdit(userFormEditParams{URI: yamlURI, Version: 4, Text: previewSource, Operations: unsupported})
 	if result.Error == nil || result.Error.Code != compiler.Unsupported || len(result.Edits) != 0 {
@@ -311,7 +327,7 @@ func TestUserFormEditRequestPayloadValidation(t *testing.T) {
 		{name: "duplicate operation field", body: strings.Replace(valid, `"left":1`, `"left":1,"left":2`, 1), code: compiler.Invalid},
 		{name: "nonnumeric geometry", body: strings.Replace(valid, `"left":1`, `"left":"1"`, 1), code: compiler.Invalid},
 		{name: "nonfinite geometry", body: strings.Replace(valid, `"left":1`, `"left":1e400`, 1), code: compiler.Invalid},
-		{name: "backend-only operation", body: strings.Replace(valid, `"type":"moveControl"`, `"type":"setControlProperty"`, 1), code: compiler.Unsupported},
+		{name: "backend-only operation", body: strings.Replace(valid, `"type":"moveControl"`, `"type":"setParent"`, 1), code: compiler.Unsupported},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

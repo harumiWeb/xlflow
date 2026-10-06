@@ -406,7 +406,7 @@ func TestSerializableOperationsAndJSONGeometry(t *testing.T) {
 	if *res.Document.Controls[0].Left != 140 || *res.Document.Controls[0].Top != 190 || len(res.Edits) != 2 {
 		t.Fatalf("JSON geometry result: document=%+v edits=%+v", res.Document.Controls[0], res.Edits)
 	}
-	res, err = Apply(spec.SpecInput{Format: "json"}, jsonBody, []Operation{{Type: SetControlProperty, ControlID: "submit", Field: "caption", Value: "x"}})
+	res, err = Apply(spec.SpecInput{Format: "json"}, jsonBody, []Operation{{Type: SetParent, ControlID: "submit", ParentID: "other"}})
 	if err == nil || !reflect.DeepEqual(res, Result{}) {
 		t.Fatal("unsupported JSON operation was not rejected atomically")
 	}

@@ -99,6 +99,8 @@ export function DesignerCanvas({
   showGrid = true,
   snapping = false,
   cannotMove = "This control is larger than its parent. Resize it to fit before moving.",
+  selectedId: externalSelected,
+  onSelectionChange,
   onCommit = () => {},
 }: {
   document: DesignerDocument;
@@ -109,9 +111,13 @@ export function DesignerCanvas({
   showGrid?: boolean;
   snapping?: boolean;
   cannotMove?: string;
+  selectedId?: string;
+  onSelectionChange?: (id: string | undefined) => void;
   onCommit?: (operations: GeometryOperation[]) => void;
 }) {
-  const [selected, setSelected] = useState<string>();
+  const [localSelected, setLocalSelected] = useState<string>();
+  const selected = onSelectionChange ? externalSelected : localSelected;
+  const setSelected = onSelectionChange ?? setLocalSelected;
   const [preview, setPreview] = useState<{ id: string; geometry: Geometry }>();
   const [notice, setNotice] = useState<string>();
   const gesture = useRef<{
@@ -144,7 +150,19 @@ export function DesignerCanvas({
   };
   useEffect(() => {
     cancel();
-    if (selected && !isControlVisible(document, selected)) setSelected(undefined);
+    if (
+      selected &&
+      !isControlVisible(document, selected) &&
+      !document.controls.some(
+        (c) =>
+          c.id === selected &&
+          c.type.toLowerCase() === "page" &&
+          c.visible !== false &&
+          !!c.parentId &&
+          isControlVisible(document, c.parentId),
+      )
+    )
+      setSelected(undefined);
   }, [document]);
   useEffect(() => {
     if (!editable) {
@@ -210,6 +228,7 @@ export function DesignerCanvas({
     if (event.button !== 0 || gesture.current?.pointerId !== undefined) return;
     if (gesture.current?.keys) finish();
     const target = event.target as Element;
+    if (target.closest("[data-page-tab]")) return;
     const id = target.closest<HTMLElement>("[data-control-id]")?.dataset.controlId;
     const control = document.controls.find((c) => c.id === id);
     setSelected(control?.id);
@@ -305,9 +324,20 @@ export function DesignerCanvas({
                 {pages.map(
                   (p, index) =>
                     p.visible !== false && (
-                      <span key={p.id} class={index === selected ? "active" : ""}>
+                      <button
+                        type="button"
+                        key={p.id}
+                        data-page-tab={p.id}
+                        class={`${index === selected ? "active" : ""} ${selectedId === p.id ? "selected-page" : ""}`}
+                        aria-pressed={selectedId === p.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          cancel();
+                          setSelected(p.id);
+                        }}
+                      >
                         {p.caption ?? p.name}
-                      </span>
+                      </button>
                     ),
                 )}
               </div>

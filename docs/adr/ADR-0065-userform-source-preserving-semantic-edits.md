@@ -131,6 +131,8 @@ requirements, are specified in
 
 ## Related
 
+- Scalar property editing across YAML/YML/JSON and explicit optional null are supplemented by `docs/adr/ADR-0067-userform-designer-property-metadata.md`.
+
 - JSON geometry editing and the LSP adapter are supplemented by `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`.
 - Issue #916 (parent: Issue #914)
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`

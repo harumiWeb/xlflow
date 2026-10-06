@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
+	formsedit "github.com/harumiWeb/xlflow/internal/vba/userforms/spec/edit"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -23,10 +24,12 @@ type userFormPreviewError struct {
 }
 
 type userFormPreviewResult struct {
-	Version  int                     `json:"version"`
-	Document *forms.FormSpec         `json:"document,omitempty"`
-	Warnings []forms.ValidationIssue `json:"warnings,omitempty"`
-	Error    *userFormPreviewError   `json:"error,omitempty"`
+	Version       int                         `json:"version"`
+	Document      *forms.FormSpec             `json:"document,omitempty"`
+	Warnings      []forms.ValidationIssue     `json:"warnings,omitempty"`
+	Error         *userFormPreviewError       `json:"error,omitempty"`
+	PropertyGrid  *formsedit.PropertyGridData `json:"propertyGrid,omitempty"`
+	PropertyError *userFormPreviewError       `json:"propertyError,omitempty"`
 }
 
 func (s *Server) userFormPreview(params userFormPreviewParams) userFormPreviewResult {
@@ -45,6 +48,14 @@ func (s *Server) userFormPreview(params userFormPreviewParams) userFormPreviewRe
 		return result
 	}
 	result.Document, result.Warnings = &doc, doc.ValidationWarnings
+	grid, err := formsedit.PropertyGrid(input, []byte(params.Text))
+	if err != nil {
+		// A preview-valid source can be ambiguous for source-preserving edits.
+		// Retain rendering, but do not publish guessed authoring values.
+		result.PropertyError = &userFormPreviewError{Code: "propertyUnavailable", Message: err.Error()}
+	} else {
+		result.PropertyGrid = &grid
+	}
 	return result
 }
 

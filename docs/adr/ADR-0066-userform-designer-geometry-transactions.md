@@ -58,6 +58,8 @@ and stale interactions must not overwrite concurrent source edits.
 
 ## Related
 
+- Property transactions and their separate capability are supplemented by `docs/adr/ADR-0067-userform-designer-property-metadata.md`.
+
 - Issue #917 (parent: Issue #914)
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`
 - `docs/adr/ADR-0065-userform-source-preserving-semantic-edits.md`

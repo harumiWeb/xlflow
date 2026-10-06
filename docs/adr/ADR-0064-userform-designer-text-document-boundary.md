@@ -82,6 +82,8 @@ capability boundary while the visual editor remains read-only.
 
 ## Related
 
+- Property metadata and authored states are supplemented by `docs/adr/ADR-0067-userform-designer-property-metadata.md`.
+
 - Interactive geometry is supplemented by `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`.
 - Issue #915
 - `docs/specs/userform-designer.md`

@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added a metadata-driven UserForm Property Grid for form/control scalar edits
+  in YAML/YML/JSON. The running LSP supplies field contracts and authored
+  presence/value states separately from preview defaults. Edits preserve source
+  formatting, validate canonically and use native VS Code undo/redo; explicit
+  optional null is supported without property deletion. Older servers retain
+  their advertised preview/geometry support through a separate capability.
+
 - Added interactive VS Code UserForm selection, move, eight-direction resize,
   keyboard movement, grid snapping, and zoom. YAML/YML and JSON geometry edits
   preserve source formatting and participate in native VS Code undo/redo.

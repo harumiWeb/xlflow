@@ -2,12 +2,13 @@ package edit
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -56,128 +57,233 @@ func (e *duplicateJSONKeyError) Error() string {
 }
 
 func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Result, error) {
-	if !json.Valid(source) {
-		return Result{}, failure(-1, Operation{}, "UFE002", "Invalid JSON FormSpec syntax.", "Correct the JSON syntax and retry.")
-	}
-	if _, err := spec.ParseFormSpec(input, source); err != nil {
-		return Result{}, validationError(-1, Operation{}, err)
-	}
-	root, err := parseJSONSource(source)
+	originalRoot, err := parseJSONSource(source)
 	if err != nil {
 		if _, duplicate := errors.AsType[*duplicateJSONKeyError](err); duplicate {
-			return Result{}, failure(-1, Operation{}, "UFE008", err.Error(), "Remove duplicate keys so the target and geometry fields are unambiguous.")
+			return Result{}, failure(-1, Operation{}, "UFE008", err.Error(), "Remove duplicate object keys.")
 		}
-		return Result{}, failure(-1, Operation{}, "UFE002", "Invalid JSON FormSpec: "+err.Error(), "Correct the JSON syntax and remove duplicate object keys.")
+		return Result{}, validationError(-1, Operation{}, err)
 	}
-	if root.kind != jsonSourceObject {
-		return Result{}, failure(-1, Operation{}, "UFE002", "The JSON FormSpec root must be an object.", "Supply a FormSpec object.")
+	model, err := spec.ParseFormSpec(input, source)
+	if err != nil {
+		return Result{}, validationError(-1, Operation{}, err)
 	}
-
-	nodesByID := map[string][]*jsonSourceNode{}
-	controls := jsonSourceMemberValue(root, "controls")
-	indexJSONControls(controls, nodesByID)
-
-	changes := map[*jsonSourceNode]map[string]float64{}
-	changedObjects := make([]*jsonSourceNode, 0)
+	updated := bytes.Clone(source)
+	pieces := pieceTable{{start: 0, end: len(source)}}
+	types := map[string]string{}
+	originalControls := map[string][]*jsonSourceNode{}
+	indexJSONControls(jsonSourceMemberValue(originalRoot, "controls"), originalControls)
+	for _, control := range model.Controls {
+		types[control.ID] = control.Type
+	}
 	for index, op := range operations {
-		if op.Type != MoveControl && op.Type != ResizeControl {
-			return Result{}, failure(index, op, "UFE007", "JSON FormSpecs support only moveControl and resizeControl edits.", "Use moveControl or resizeControl for JSON geometry edits.")
-		}
 		if err := checkPayload(op); err != nil {
 			return Result{}, annotate(index, op, err)
 		}
-		var fields []struct {
-			name  string
-			value *float64
+		root, err := parseJSONSource(updated)
+		if err != nil {
+			return Result{}, annotate(index, op, err)
 		}
-		switch op.Type {
-		case MoveControl:
-			if op.Left == nil || op.Top == nil {
-				return Result{}, annotate(index, op, missingGeometry(op))
+		nodes := map[string][]*jsonSourceNode{}
+		indexJSONControls(jsonSourceMemberValue(root, "controls"), nodes)
+		var target *jsonSourceNode
+		var originalTarget *jsonSourceNode
+		values := map[string]json.RawMessage{}
+		keys := []string{}
+		put := func(key string, value any) error {
+			encoded, err := marshalJSONScalar(value)
+			if err != nil {
+				return err
 			}
-			fields = []struct {
-				name  string
-				value *float64
-			}{{"left", op.Left}, {"top", op.Top}}
-		case ResizeControl:
-			if op.Width == nil || op.Height == nil {
-				return Result{}, annotate(index, op, missingGeometry(op))
+			if old := jsonSourceMemberValue(originalTarget, key); old != nil && old.kind != jsonSourceObject && old.kind != jsonSourceArray {
+				original := source[old.start:old.end]
+				equal, err := equalJSONScalar(original, encoded)
+				if err != nil {
+					return err
+				}
+				if equal {
+					encoded = bytes.Clone(original)
+				}
 			}
-			fields = []struct {
-				name  string
-				value *float64
-			}{{"width", op.Width}, {"height", op.Height}}
+			keys = append(keys, key)
+			values[key] = encoded
+			return nil
 		}
-
-		targets := nodesByID[op.ControlID]
-		if len(targets) != 1 {
-			return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID from the current FormSpec.")
+		if op.Type == SetFormProperty {
+			contract, ok := EditableFormProperties()[op.Field]
+			if !ok {
+				return Result{}, annotate(index, op, unsupportedProperty(op))
+			}
+			if err := checkPropertyValue(op, contract); err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			target = jsonSourceMemberValue(root, "form")
+			originalTarget = jsonSourceMemberValue(originalRoot, "form")
+			key := op.Field
+			if nested, ok := strings.CutPrefix(key, "build."); ok {
+				build := jsonSourceMemberValue(target, "build")
+				if build == nil {
+					encodedValue, err := marshalJSONScalar(op.Value)
+					if err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+					encoded, err := json.Marshal(map[string]json.RawMessage{nested: encodedValue})
+					if err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+					keys, values["build"] = []string{"build"}, encoded
+				} else {
+					target = build
+					originalTarget = jsonSourceMemberValue(originalTarget, "build")
+					if err := put(nested, op.Value); err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+				}
+			} else if err := put(key, op.Value); err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+		} else {
+			if op.Type != MoveControl && op.Type != ResizeControl && op.Type != SetControlProperty {
+				return Result{}, failure(index, op, "UFE007", "Unsupported JSON semantic operation.", "Use a scalar property or geometry edit.")
+			}
+			if len(nodes[op.ControlID]) != 1 {
+				return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+			}
+			target = nodes[op.ControlID][0]
+			if len(originalControls[op.ControlID]) == 1 {
+				originalTarget = originalControls[op.ControlID][0]
+			}
+			switch op.Type {
+			case SetControlProperty:
+				contract, ok := EditableControlProperties(types[op.ControlID])[op.Field]
+				if !ok {
+					return Result{}, annotate(index, op, unsupportedProperty(op))
+				}
+				if err := checkPropertyValue(op, contract); err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+				if err := put(op.Field, op.Value); err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+			case MoveControl, ResizeControl:
+				var axes []struct {
+					key   string
+					value *float64
+				}
+				if op.Type == MoveControl {
+					axes = []struct {
+						key   string
+						value *float64
+					}{{"left", op.Left}, {"top", op.Top}}
+				} else {
+					axes = []struct {
+						key   string
+						value *float64
+					}{{"width", op.Width}, {"height", op.Height}}
+				}
+				for _, axis := range axes {
+					if axis.value == nil {
+						return Result{}, annotate(index, op, missingGeometry(op))
+					}
+					if math.IsNaN(*axis.value) || math.IsInf(*axis.value, 0) {
+						return Result{}, failure(index, op, "UFE003", "Geometry values must be finite numbers.", "Supply finite numbers for both geometry axes.")
+					}
+					if err := put(axis.key, *axis.value); err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+				}
+			}
 		}
-		target := targets[0]
-		for _, geometry := range fields {
-			if math.IsNaN(*geometry.value) || math.IsInf(*geometry.value, 0) {
-				return Result{}, failure(index, op, "UFE003", "Geometry values must be finite numbers.", "Supply finite JSON numbers for both geometry axes.")
-			}
-			if _, exists := changes[target]; !exists {
-				changes[target] = map[string]float64{}
-				changedObjects = append(changedObjects, target)
-			}
-			changes[target][geometry.name] = *geometry.value
+		edits, err := jsonPropertyEdits(updated, target, keys, values)
+		if err != nil {
+			return Result{}, annotate(index, op, err)
+		}
+		// Apply backwards so all ranges remain relative to this source snapshot.
+		for i := len(edits) - 1; i >= 0; i-- {
+			edit := edits[i]
+			pieces = pieces.replace(edit)
+			updated = applySourceEdits(updated, []SourceEdit{edit})
 		}
 	}
-
-	edits := make([]SourceEdit, 0, len(changes)*2)
-	for _, object := range changedObjects {
-		values := changes[object]
-		missing := make([]string, 0, len(values))
-		for _, key := range []string{"left", "top", "width", "height"} {
-			value, requested := values[key]
-			if !requested {
-				continue
-			}
-			old := jsonSourceMemberValue(object, key)
-			if old == nil {
-				missing = append(missing, key)
-				continue
-			}
-			if old.kind != jsonSourceNumber {
-				return Result{}, failure(-1, Operation{}, "UFE002", "Existing geometry must be a JSON number.", "Correct the targeted geometry value and retry.")
-			}
-			oldValue, err := strconv.ParseFloat(old.text, 64)
-			if err == nil && oldValue == value {
-				continue
-			}
-			edits = append(edits, SourceEdit{Start: old.start, End: old.end, Text: strconv.FormatFloat(value, 'g', -1, 64)})
-		}
-		if len(missing) > 0 {
-			edits = append(edits, jsonObjectInsertion(source, object, missing, values))
-		}
-	}
-	slices.SortFunc(edits, func(a, b SourceEdit) int {
-		if a.Start != b.Start {
-			return a.Start - b.Start
-		}
-		if a.End != b.End {
-			return a.End - b.End
-		}
-		return strings.Compare(a.Text, b.Text)
-	})
-	for i := 1; i < len(edits); i++ {
-		if edits[i-1].End > edits[i].Start {
-			return Result{}, failure(-1, Operation{}, "UFE009", "Generated JSON source edits overlap.", "Keep the source unchanged and report this edit.")
-		}
-	}
-
-	updated := applySourceEdits(source, edits)
 	after, err := spec.ParseFormSpec(input, updated)
 	if err != nil {
-		lastIndex, last := -1, Operation{}
+		index, op := -1, Operation{}
 		if len(operations) > 0 {
-			lastIndex, last = len(operations)-1, operations[len(operations)-1]
+			index, op = len(operations)-1, operations[len(operations)-1]
 		}
-		return Result{}, validationError(lastIndex, last, err)
+		return Result{}, validationError(index, op, err)
 	}
-	return Result{Source: updated, Document: after, Edits: edits, Warnings: after.ValidationWarnings}, nil
+	return Result{Source: updated, Document: after, Edits: pieces.edits(source), Warnings: after.ValidationWarnings}, nil
+}
+
+func marshalJSONScalar(value any) ([]byte, error) {
+	node, err := scalar(value)
+	if err != nil {
+		return nil, err
+	}
+	// Encode the scalar, not arbitrary MarshalJSON methods on named Go values.
+	var plain any
+	if err := node.Decode(&plain); err != nil {
+		return nil, err
+	}
+	if number, ok := value.(json.Number); ok {
+		plain = number
+	}
+	return json.Marshal(plain)
+}
+
+func jsonPropertyEdits(source []byte, object *jsonSourceNode, keys []string, values map[string]json.RawMessage) ([]SourceEdit, error) {
+	if object == nil || object.kind != jsonSourceObject {
+		return nil, failure(-1, Operation{}, "UFE005", "Property target must be an object.", "Supply an explicit authoring object.")
+	}
+	var edits []SourceEdit
+	var missing []string
+	for _, key := range keys {
+		old := jsonSourceMemberValue(object, key)
+		if old == nil {
+			missing = append(missing, key)
+			continue
+		}
+		if old.kind == jsonSourceObject || old.kind == jsonSourceArray {
+			return nil, failure(-1, Operation{}, "UFE005", "Cannot replace a non-scalar authoring field.", "Use a scalar field.")
+		}
+		equal, err := equalJSONScalar(source[old.start:old.end], values[key])
+		if err != nil {
+			return nil, err
+		}
+		if equal {
+			continue
+		}
+		edits = append(edits, SourceEdit{Start: old.start, End: old.end, Text: string(values[key])})
+	}
+	if len(missing) > 0 {
+		edits = append(edits, jsonObjectInsertion(source, object, missing, values))
+	}
+	slices.SortFunc(edits, func(a, b SourceEdit) int { return cmp.Compare(a.Start, b.Start) })
+	return edits, nil
+}
+
+func equalJSONScalar(left, right []byte) (bool, error) {
+	decode := func(data []byte) (any, error) {
+		var value any
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		err := decoder.Decode(&value)
+		return value, err
+	}
+	a, err := decode(left)
+	if err != nil {
+		return false, err
+	}
+	b, err := decode(right)
+	if err != nil {
+		return false, err
+	}
+	if reflect.DeepEqual(a, b) {
+		return true, nil
+	}
+	an, bn := rational(a), rational(b)
+	return an != nil && bn != nil && an.Cmp(bn) == 0, nil
 }
 
 func parseJSONSource(source []byte) (*jsonSourceNode, error) {
@@ -381,7 +487,7 @@ func indexJSONControls(sequence *jsonSourceNode, nodesByID map[string][]*jsonSou
 	}
 }
 
-func jsonObjectInsertion(source []byte, object *jsonSourceNode, keys []string, values map[string]float64) SourceEdit {
+func jsonObjectInsertion(source []byte, object *jsonSourceNode, keys []string, values map[string]json.RawMessage) SourceEdit {
 	position := object.start + 1
 	style := jsonObjectStyle(source, object)
 	var text strings.Builder
@@ -401,7 +507,7 @@ func jsonObjectInsertion(source []byte, object *jsonSourceNode, keys []string, v
 		encodedKey, _ := json.Marshal(key)
 		text.Write(encodedKey)
 		text.WriteString(style.colon)
-		text.WriteString(strconv.FormatFloat(values[key], 'g', -1, 64))
+		text.Write(values[key])
 	}
 	return SourceEdit{Start: position, End: position, Text: text.String()}
 }
@@ -416,6 +522,11 @@ type jsonObjectFormatting struct {
 
 func jsonObjectStyle(source []byte, object *jsonSourceNode) jsonObjectFormatting {
 	style := jsonObjectFormatting{colon: ":", newline: "\n"}
+	if len(object.members) == 0 && bytes.ContainsAny(source[object.start+1:object.end-1], "\r\n") {
+		style.multiline = true
+		style.newline = jsonNewlineIn(source[object.start+1 : object.end-1])
+		style.indent = jsonIndentForKey(source, object.end-1) + "  "
+	}
 	for _, member := range object.members {
 		if style.colon == ":" {
 			style.colon = string(source[member.keyEnd:member.value.start])

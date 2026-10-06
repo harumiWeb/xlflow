@@ -29,11 +29,15 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
     let disposed = false;
     let timer: NodeJS.Timeout | undefined;
     let editable = false;
+    let propertyEditable = false;
     let generation = 0;
     const send = (message: HostMessage) => {
       if (message.type === "document") editable = message.editable === true;
-      if (message.type === "invalidDocument" || message.type === "editingUnavailable")
+      if (message.type === "document") propertyEditable = message.propertyEditable === true;
+      if (message.type === "invalidDocument" || message.type === "editingUnavailable") {
         editable = false;
+        propertyEditable = false;
+      }
       if (ready && !disposed && panel.visible) void panel.webview.postMessage(message);
     };
     const sendLocalization = () =>
@@ -54,6 +58,48 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
           readOnly: vscode.l10n.t("Editing requires an xlflow version supporting UserForm edits."),
           cannotMove: vscode.l10n.t(
             "This control is larger than its parent. Resize it to fit before moving.",
+          ),
+          properties: vscode.l10n.t("Properties"),
+          identity: vscode.l10n.t("Identity"),
+          appearance: vscode.l10n.t("Appearance"),
+          layout: vscode.l10n.t("Layout"),
+          behavior: vscode.l10n.t("Behavior"),
+          navigation: vscode.l10n.t("Navigation"),
+          advanced: vscode.l10n.t("Advanced"),
+          propertyName: vscode.l10n.t("Name"),
+          propertyCaption: vscode.l10n.t("Caption"),
+          propertyText: vscode.l10n.t("Text"),
+          propertyValue: vscode.l10n.t("Value"),
+          propertyLeft: vscode.l10n.t("Left"),
+          propertyTop: vscode.l10n.t("Top"),
+          propertyWidth: vscode.l10n.t("Width"),
+          propertyHeight: vscode.l10n.t("Height"),
+          propertyTabIndex: vscode.l10n.t("TabIndex"),
+          propertySelectedIndex: vscode.l10n.t("SelectedIndex"),
+          propertyEnabled: vscode.l10n.t("Enabled"),
+          propertyVisible: vscode.l10n.t("Visible"),
+          propertyTag: vscode.l10n.t("Tag"),
+          propertyControlTipText: vscode.l10n.t("ControlTipText"),
+          propertyAccelerator: vscode.l10n.t("Accelerator"),
+          propertyBuildCaption: vscode.l10n.t("Build caption"),
+          propertyBuildWidth: vscode.l10n.t("Build width"),
+          propertyBuildHeight: vscode.l10n.t("Build height"),
+          propertyClientWidth: vscode.l10n.t("Client width"),
+          propertyClientHeight: vscode.l10n.t("Client height"),
+          unset: vscode.l10n.t("Not set"),
+          nullValue: vscode.l10n.t("null"),
+          valueType: vscode.l10n.t("Value type"),
+          typeString: vscode.l10n.t("String"),
+          typeNumber: vscode.l10n.t("Number"),
+          typeBoolean: vscode.l10n.t("Boolean"),
+          invalidNumber: vscode.l10n.t("Enter a finite number."),
+          invalidInteger: vscode.l10n.t("Enter a safe integer."),
+          invalidValue: vscode.l10n.t("Enter a valid value."),
+          staleProperty: vscode.l10n.t(
+            "The document changed. Re-enter this value on the updated form.",
+          ),
+          propertyReadOnly: vscode.l10n.t(
+            "Property editing requires an xlflow version supporting UserForm property edits.",
           ),
         },
       });
@@ -145,8 +191,14 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
           void vscode.commands.executeCommand("vscode.openWith", document.uri, "default");
         } else {
           const editGeneration = generation;
+          const property =
+            message.operations[0].type === "setFormProperty" ||
+            message.operations[0].type === "setControlProperty";
           const permitted = () =>
-            !disposed && panel.visible && editable && generation === editGeneration;
+            !disposed &&
+            panel.visible &&
+            (property ? propertyEditable : editable) &&
+            generation === editGeneration;
           void this.edits
             .run(document, message.version, message.operations, this.clients, permitted)
             .then(async (error) => {

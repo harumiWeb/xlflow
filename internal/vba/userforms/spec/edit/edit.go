@@ -33,20 +33,21 @@ const (
 )
 
 // Operation is a tagged, serializable semantic edit. Geometry is in points,
-// relative to the owning parent. Value must be a non-null scalar.
+// relative to the owning parent. Explicit null requires ValuePresent.
 type Operation struct {
-	Type      OperationType         `json:"type"`
-	ControlID string                `json:"controlId,omitempty"`
-	Field     string                `json:"field,omitempty"`
-	Value     any                   `json:"value,omitempty"`
-	Left      *float64              `json:"left,omitempty"`
-	Top       *float64              `json:"top,omitempty"`
-	Width     *float64              `json:"width,omitempty"`
-	Height    *float64              `json:"height,omitempty"`
-	Control   *spec.FormSpecControl `json:"control,omitempty"`
-	ParentID  string                `json:"parentId,omitempty"`
-	Index     *int                  `json:"index,omitempty"`
-	Cascade   bool                  `json:"cascade,omitzero"`
+	Type         OperationType         `json:"type"`
+	ControlID    string                `json:"controlId,omitempty"`
+	Field        string                `json:"field,omitempty"`
+	Value        any                   `json:"value,omitempty"`
+	ValuePresent bool                  `json:"-"`
+	Left         *float64              `json:"left,omitempty"`
+	Top          *float64              `json:"top,omitempty"`
+	Width        *float64              `json:"width,omitempty"`
+	Height       *float64              `json:"height,omitempty"`
+	Control      *spec.FormSpecControl `json:"control,omitempty"`
+	ParentID     string                `json:"parentId,omitempty"`
+	Index        *int                  `json:"index,omitempty"`
+	Cascade      bool                  `json:"cascade,omitzero"`
 }
 
 // SourceEdit replaces [Start, End) in the original UTF-8 source with Text.
@@ -101,7 +102,7 @@ func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result,
 		return applyJSON(input, source, operations)
 	}
 	if input.Format != "yaml" {
-		return Result{}, failure(-1, Operation{}, "UFE001", "Unsupported FormSpec source format.", "Use YAML/YML, or JSON for geometry edits.")
+		return Result{}, failure(-1, Operation{}, "UFE001", "Unsupported FormSpec source format.", "Use YAML/YML or JSON.")
 	}
 	_, err := spec.ParseFormSpec(input, source)
 	if err != nil {
@@ -342,9 +343,12 @@ func (e *engine) apply(op Operation) error {
 			if op.Field == "id" || op.Field == "type" || op.Field == "parentId" || op.Field == "zIndex" {
 				return failure(-1, op, "UFE005", "This structural field cannot be set as a property.", "Use a structural operation; ID and type are immutable.")
 			}
-			contract, ok := spec.ControlProperties(c.model.Type)[op.Field]
-			if !ok || !contract.IncludeInAuthoring || !scalarContract(contract) {
+			contract, ok := EditableControlProperties(c.model.Type)[op.Field]
+			if !ok {
 				return unsupportedProperty(op)
+			}
+			if err := checkPropertyValue(op, contract); err != nil {
+				return err
 			}
 			return e.setControl(op.ControlID, op.Field, op.Value)
 		case MoveControl:
@@ -413,7 +417,7 @@ func checkPayload(op Operation) error {
 	present := []struct {
 		name string
 		set  bool
-	}{{"controlId", op.ControlID != ""}, {"field", op.Field != ""}, {"value", op.Value != nil}, {"left", op.Left != nil}, {"top", op.Top != nil}, {"width", op.Width != nil}, {"height", op.Height != nil}, {"control", op.Control != nil}, {"parentId", op.ParentID != ""}, {"index", op.Index != nil}, {"cascade", op.Cascade}}
+	}{{"controlId", op.ControlID != ""}, {"field", op.Field != ""}, {"value", op.Value != nil || op.ValuePresent}, {"left", op.Left != nil}, {"top", op.Top != nil}, {"width", op.Width != nil}, {"height", op.Height != nil}, {"control", op.Control != nil}, {"parentId", op.ParentID != ""}, {"index", op.Index != nil}, {"cascade", op.Cascade}}
 	for _, p := range present {
 		if p.set && !allowed[p.name] {
 			return failure(-1, op, "UFE003", "Unexpected payload field: "+p.name+".", "Supply only fields belonging to this operation.")
@@ -467,7 +471,7 @@ func (e *engine) unsafeTarget(n *yaml.Node) bool {
 
 func scalar(value any) (*yaml.Node, error) {
 	if value == nil {
-		return nil, fmt.Errorf("null is not a scalar edit value")
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}, nil
 	}
 	if number, ok := value.(json.Number); ok {
 		if integer, err := number.Int64(); err == nil {
@@ -506,17 +510,12 @@ func scalar(value any) (*yaml.Node, error) {
 
 func (e *engine) setForm(op Operation) error {
 	parts := strings.Split(op.Field, ".")
-	var contract spec.PropertyContract
-	var ok bool
-	if len(parts) == 1 {
-		contract, ok = spec.UserFormContract().FormProperties[op.Field]
-	} else if len(parts) == 2 && parts[0] == "build" {
-		contract, ok = spec.LookupFormBuildProperty(parts[1])
-		// Operations name source fields, not case-insensitive metadata aliases.
-		ok = ok && hasYAMLField(reflect.TypeFor[spec.FormSpecBuildForm](), parts[1])
-	}
-	if !ok || (len(parts) == 1 && !contract.IncludeInAuthoring) || !scalarContract(contract) {
+	contract, ok := EditableFormProperties()[op.Field]
+	if !ok {
 		return unsupportedProperty(op)
+	}
+	if err := checkPropertyValue(op, contract); err != nil {
+		return err
 	}
 	form := field(e.root, "form")
 	if e.unsafeTarget(form) {
@@ -575,6 +574,12 @@ func equalNode(a, b *yaml.Node) bool {
 
 func rational(value any) *big.Rat {
 	switch n := value.(type) {
+	case json.Number:
+		result, ok := new(big.Rat).SetString(string(n))
+		if ok {
+			return result
+		}
+		return nil
 	case int:
 		return new(big.Rat).SetInt64(int64(n))
 	case int64:
