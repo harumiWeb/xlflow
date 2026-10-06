@@ -333,7 +333,7 @@ export function PropertyGrid(props: Props) {
               <legend>{props.strings[category]}</legend>
               {descriptors.map((descriptor) => (
                 <PropertyRow
-                  key={`${props.controlId ?? "form"}:${descriptor.field}`}
+                  key={JSON.stringify([props.controlId ?? null, descriptor.field])}
                   {...props}
                   descriptor={descriptor}
                 />

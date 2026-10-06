@@ -37,6 +37,84 @@ func applyFormatOK(t *testing.T, format, source string, operations ...Operation)
 	return result
 }
 
+func TestPropertyEditsRejectNumericConversionLoss(t *testing.T) {
+	for _, format := range []string{"yaml", "json"} {
+		source := base
+		if format == "json" {
+			source = propertyJSON
+		}
+		for _, number := range []string{"0.1000000000000000001", "18446744073709551616", "1e-400"} {
+			input := []byte(source)
+			original := bytes.Clone(input)
+			result, err := Apply(spec.SpecInput{Format: format}, input, []Operation{
+				{Type: SetFormProperty, Field: "caption", Value: "Temporary"},
+				{Type: SetControlProperty, ControlID: "other", Field: "value", Value: json.Number(number)},
+			})
+			structured, ok := errors.AsType[*Error](err)
+			if !ok || len(structured.Diagnostics) == 0 || structured.Diagnostics[0].Code != "UFE003" || structured.Diagnostics[0].OperationIndex != 1 || structured.Diagnostics[0].ControlID != "other" || structured.Diagnostics[0].Field != "value" || !reflect.DeepEqual(result, Result{}) || !bytes.Equal(input, original) {
+				t.Fatalf("rounded payload %s/%s: %+v %v", format, number, result, err)
+			}
+		}
+		for _, number := range []string{"0.1", "1.00", "1e2", "9007199254740993", "9223372036854775807"} {
+			result := applyFormatOK(t, format, source, Operation{Type: SetControlProperty, ControlID: "other", Field: "value", Value: json.Number(number)})
+			var value any
+			if format == "yaml" {
+				engine, err := newEngine(result.Source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := field(engine.controls["other"].node, "value").Decode(&value); err != nil {
+					t.Fatal(err)
+				}
+				// Compare shortest decimal, rather than exact binary float, for fractional values.
+				encoded, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				value = json.Number(encoded)
+			} else {
+				root, err := parseJSONSource(result.Source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				nodes := map[string][]*jsonSourceNode{}
+				indexJSONControls(jsonSourceMemberValue(root, "controls"), nodes)
+				node := jsonSourceMemberValue(nodes["other"][0], "value")
+				value = json.Number(result.Source[node.start:node.end])
+			}
+			if rational(value).Cmp(rational(json.Number(number))) != 0 {
+				t.Fatalf("accepted decimal changed: %s/%s %v", format, number, value)
+			}
+		}
+	}
+}
+
+func TestCustomControlCommonPropertyEdits(t *testing.T) {
+	for _, format := range []string{"yaml", "json"} {
+		source := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform: {name: Main}\ncontrols:\n  - {id: widget, name: Widget1, type: VendorWidget, progId: Vendor.Widget.1}\n"
+		if format == "json" {
+			source = `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"widget","name":"Widget1","type":"VendorWidget","progId":"Vendor.Widget.1"}]}`
+		}
+		result := applyFormatOK(t, format, source,
+			Operation{Type: SetControlProperty, ControlID: "widget", Field: "name", Value: "Renamed"},
+			Operation{Type: SetControlProperty, ControlID: "widget", Field: "enabled", Value: false},
+		)
+		grid, err := PropertyGrid(spec.SpecInput{Format: format}, result.Source)
+		if err != nil || grid.Controls["widget"].Values["enabled"] != (PropertyState{Present: true, Value: false}) || grid.Controls["widget"].Values["name"] != (PropertyState{Present: true, Value: "Renamed"}) {
+			t.Fatalf("custom common metadata: %+v %v", grid, err)
+		}
+		for _, name := range []string{"text", "selectedIndex", "caption", "properties", "progId", "observed", "id", "type"} {
+			if _, ok := grid.Controls["widget"].Values[name]; ok {
+				t.Fatalf("custom type-specific/non-authoring field exposed: %s", name)
+			}
+		}
+		_, err = Apply(spec.SpecInput{Format: format}, []byte(source), []Operation{{Type: SetControlProperty, ControlID: "widget", Field: "text", Value: "Unsupported"}})
+		if err == nil {
+			t.Fatal("unsupported custom field accepted")
+		}
+	}
+}
+
 func TestPropertyGridNumericPrecision(t *testing.T) {
 	for _, format := range []string{"json", "yaml"} {
 		for _, number := range []string{"9007199254740993", "0.100000000000000000001", "1e-400", "0.1", "1.00", "1e2", "9007199254740992"} {
@@ -405,8 +483,8 @@ func TestEditablePropertiesMatchTypedAuthoring(t *testing.T) {
 			t.Fatalf("Page geometry exposed: %s", name)
 		}
 	}
-	if len(EditableControlProperties("Unknown")) != 0 {
-		t.Fatal("unknown control editable")
+	if len(EditableControlProperties("Unknown")) == 0 {
+		t.Fatal("custom control lost common scalar properties")
 	}
 	props := EditableControlProperties("TextBox")
 	delete(props, "text")

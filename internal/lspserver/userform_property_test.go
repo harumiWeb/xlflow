@@ -65,6 +65,71 @@ func TestUserFormPropertyEditsAndAuthoringStates(t *testing.T) {
 	}
 }
 
+func TestUserFormPropertyRPCNumericPrecision(t *testing.T) {
+	s := &Server{opts: Options{RootDir: t.TempDir(), Config: config.Default()}}
+	for _, format := range []string{"yaml", "json"} {
+		source := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform: {name: Main}\ncontrols: [{id: text, type: TextBox, name: Text1, value: 0}]\n"
+		if format == "json" {
+			source = `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"text","type":"TextBox","name":"Text1","value":0}]}`
+		}
+		uri := pathToFileURI(filepath.Join(s.opts.RootDir, "src/forms/specs/Main."+format))
+		for _, number := range []string{"0.1000000000000000001", "18446744073709551616", "1e-400", "0.1", "1e2", "9007199254740993"} {
+			body, err := json.Marshal(map[string]any{"uri": uri, "version": 1, "text": source, "operations": []any{map[string]any{"type": "setControlProperty", "controlId": "text", "field": "value", "value": json.RawMessage(number)}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			params, requestError := parseUserFormEditParams(body)
+			if requestError != nil {
+				t.Fatalf("raw numeric request decode: %v", requestError)
+			}
+			result := s.userFormEdit(params)
+			unsafe := number == "0.1000000000000000001" || number == "18446744073709551616" || number == "1e-400"
+			if unsafe {
+				if result.Error == nil || len(result.Edits) != 0 || len(result.Error.Diagnostics) == 0 || result.Error.Diagnostics[0].Code != "UFE003" || result.Error.Diagnostics[0].Field != "value" || result.Error.Diagnostics[0].ControlID != "text" {
+					t.Fatalf("rounded RPC %s/%s: %+v", format, number, result)
+				}
+			} else if result.Error != nil || len(result.Edits) == 0 {
+				t.Fatalf("exact RPC rejected %s/%s: %+v", format, number, result)
+			}
+		}
+	}
+}
+
+func TestUserFormCustomControlCommonPropertyRPC(t *testing.T) {
+	s := &Server{opts: Options{RootDir: t.TempDir(), Config: config.Default()}}
+	for _, format := range []string{"yaml", "json"} {
+		source := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform: {name: Main}\ncontrols: [{id: widget, type: VendorWidget, progId: Vendor.Widget.1, name: Widget1}]\n"
+		if format == "json" {
+			source = `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"widget","type":"VendorWidget","progId":"Vendor.Widget.1","name":"Widget1"}]}`
+		}
+		uri := pathToFileURI(filepath.Join(s.opts.RootDir, "src/forms/specs/Main."+format))
+		preview := s.userFormPreview(userFormPreviewParams{URI: uri, Version: 1, Text: source})
+		if preview.Error != nil || preview.PropertyError != nil || preview.PropertyGrid == nil || len(preview.PropertyGrid.Controls["widget"].Descriptors) == 0 {
+			t.Fatalf("custom metadata: %+v", preview)
+		}
+		body, err := json.Marshal(map[string]any{"uri": uri, "version": 1, "text": source, "operations": []any{map[string]any{"type": "setControlProperty", "controlId": "widget", "field": "enabled", "value": false}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		params, requestError := parseUserFormEditParams(body)
+		if requestError != nil {
+			t.Fatal(requestError)
+		}
+		result := s.userFormEdit(params)
+		if result.Error != nil || len(result.Edits) == 0 {
+			t.Fatalf("custom RPC: %+v", result)
+		}
+		updated, err := applyLSPTextEdits(source, result.Edits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc, err := spec.ParseFormSpec(spec.SpecInput{Format: format}, []byte(updated))
+		if err != nil || doc.Controls[0].Enabled == nil || *doc.Controls[0].Enabled || doc.Controls[0].ProgID != "Vendor.Widget.1" {
+			t.Fatalf("custom RPC result: %+v %v", doc, err)
+		}
+	}
+}
+
 func TestUserFormPropertyPayloadValidation(t *testing.T) {
 	valid := `{"uri":"file:///x/src/forms/specs/Main.yaml","version":1,"text":"{}","operations":[{"type":"setControlProperty","controlId":"label","field":"caption","value":"hello"}]}`
 	for _, body := range []string{

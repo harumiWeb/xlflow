@@ -238,6 +238,8 @@ fields. Page selection uses its tab and excludes Page geometry. Form fields
 include `name`, `caption`, `width`, `height` and the supported `build.*` paths;
 legacy and build fields are separate and never redirect to each other.
 Control fields are limited to supported authored scalars for their type.
+Valid custom ProgID controls retain canonical common scalar fields, without
+acquiring built-in type-specific fields.
 Observed/snapshot values, identity/type/parent topology, collections, pictures
 and arbitrary property bags are outside the grid. Changing `form.name` does
 not rename the source file, code sidecar or VBA references.
@@ -246,7 +248,9 @@ Text/number inputs confirm on Enter or blur, with at most one request when both
 occur; Escape cancels the draft. Boolean/enum changes confirm on selection.
 Keep invalid input with a field-level error without changing source; preserve
 structured field/code/message diagnostics from the server. Drafts belong to
-target ID, field and document version. External source edits invalidate old
+target kind, target ID, field and document version. Form identity is distinct
+from every control ID, including a control literally named `form`, in both
+component keys and draft/reply storage. External source edits invalidate old
 drafts rather than applying or rebasing them automatically. Switching selection
 preserves dirty drafts and their matching edit replies, including field-level
 rejection diagnostics, until corrected or canceled. Source edits and

@@ -136,6 +136,19 @@ property values are not edit targets. Page and TabStrip collection operations
 are outside this contract. Existing FormSpec validation still decides whether
 a scalar value or resulting control hierarchy is valid.
 
+Custom controls with an explicit ProgID retain the canonical common scalar
+authoring fields, such as `name`, geometry, `enabled` and `visible`. Unknown
+control types do not acquire built-in type-specific properties or property-bag
+editing; the same contract filters govern their metadata and semantic edits.
+
+Property payloads containing `json.Number` must not lose decimal precision
+during scalar conversion. Exact int64 literals remain supported; other numeric
+literals must match their shortest float64 decimal representation. Reject a
+lossy payload atomically with `UFE003` in both YAML and JSON edits. Ordinary
+decimals such as `0.1` remain supported; comparing exact binary float rationals
+would incorrectly reject them. This writer constraint does not reject existing
+high-precision source tokens or alter unrelated tokens during other edits.
+
 ## Property metadata and authored-state extraction
 
 The host-neutral edit layer exposes supported scalar properties from Go

@@ -196,7 +196,7 @@ export function App() {
             (selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form) ? (
               <PropertyGrid
                 drafts={drafts.current}
-                key={selectedId ?? "form"}
+                key={selectedId === undefined ? "form" : `control:${selectedId}`}
                 target={selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form}
                 controlId={selectedId}
                 title={document.controls.find((c) => c.id === selectedId)?.name ?? document.name}

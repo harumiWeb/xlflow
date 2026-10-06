@@ -75,6 +75,7 @@ const target = (): PropertyTarget => ({
 const model = designerDocument({
   form: { name: "Main", width: 240, height: 180 },
   controls: [
+    { id: "form", name: "FormIDLabel", type: "Label", caption: "Control render" },
     { id: "label", name: "Label1", type: "Label", caption: "Render caption" },
     { id: "multi", name: "Multi", type: "MultiPage", selectedIndex: 0 },
     {
@@ -115,7 +116,12 @@ const pageTarget = (): PropertyTarget => ({
 });
 let grid: PropertyGridData = {
   form: target(),
-  controls: { label: target(), first: pageTarget(), second: pageTarget() },
+  controls: {
+    label: target(),
+    first: pageTarget(),
+    second: pageTarget(),
+    form: { ...pageTarget(), values: { caption: { present: true, value: "Control source" } } },
+  },
 };
 const edits = () =>
   messages.filter((m): m is Extract<WebviewMessage, { type: "edit" }> => m.type === "edit");
@@ -573,6 +579,57 @@ async function run() {
   assert.equal(input("caption").value, "Hidden panel draft");
   assert.ok(row("caption").textContent?.includes("staleDocument: Hidden edit is stale"));
   await key("caption", "Escape");
+  await act(() => {
+    root
+      .querySelector(".form")!
+      .dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+  });
+  await choose("caption", "string");
+  await type("caption", "Form-only draft");
+  const beforeIdentity = edits().length;
+  await act(() => {
+    root
+      .querySelector('[data-control-id="form"]')!
+      .dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+  });
+  assert.ok(root.querySelector(".property-grid h2")!.textContent?.includes("FormIDLabel"));
+  assert.equal(
+    input("caption").value,
+    "Control source",
+    "form draft cannot populate control ID form",
+  );
+  await key("caption", "Enter");
+  assert.equal(edits().length, beforeIdentity, "selection cannot submit another target's draft");
+  await type("caption", "Control-only draft");
+  await key("caption", "Enter");
+  assert.deepEqual(edits().at(-1)!.operations, [
+    {
+      type: "setControlProperty",
+      controlId: "form",
+      field: "caption",
+      value: "Control-only draft",
+    },
+  ]);
+  await acknowledge({ code: "invalid", message: "Control rejected" });
+  await act(() => {
+    root
+      .querySelector(".form")!
+      .dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+  });
+  assert.equal(input("caption").value, "Form-only draft");
+  await key("caption", "Enter");
+  assert.deepEqual(edits().at(-1)!.operations, [
+    { type: "setFormProperty", field: "caption", value: "Form-only draft" },
+  ]);
+  await acknowledge({ code: "invalid", message: "Form rejected" });
+  await act(() => {
+    root
+      .querySelector('[data-control-id="form"]')!
+      .dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+  });
+  assert.equal(input("caption").value, "Control-only draft");
+  assert.ok(row("caption").textContent?.includes("Control rejected"));
+  assert.ok(!row("caption").textContent?.includes("Form rejected"));
   await act(() => {
     render(null, root);
   });

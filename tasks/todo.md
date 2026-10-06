@@ -1,3 +1,10 @@
+# PR #927 review follow-up
+
+- [x] Reproduce and isolate form/control draft identity when a control ID is `form`.
+- [x] Restore canonical common scalar edits/metadata for custom ProgID controls without exposing type-specific fields.
+- [x] Reject property number payloads whose scalar conversion would change their decimal value; retain exact int64 and ordinary decimal edits.
+- [x] Verify source/RPC/DOM regressions, full related Go/LSP (134.548s), real VS Code 1.140.0, lint/docs, vet and formatting; prepare the verified fixes and evidence replies for the existing PR.
+
 # Issue #918 final review follow-up
 
 - [x] Pass 2: validate independent property capability at the client request boundary and protect authored numeric precision at the Webview boundary.

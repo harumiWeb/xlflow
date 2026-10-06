@@ -75,9 +75,6 @@ func EditableFormProperties() map[string]spec.PropertyContract {
 // which the typed authoring DTO cannot retain.
 func EditableControlProperties(typeName string) map[string]spec.PropertyContract {
 	result := map[string]spec.PropertyContract{}
-	if _, ok := spec.LookupControlContract(typeName); !ok {
-		return result
-	}
 	for name, contract := range spec.ControlProperties(typeName) {
 		if slices.Contains([]string{"id", "type", "parentId", "zIndex"}, name) {
 			continue
@@ -95,6 +92,13 @@ func checkPropertyValue(op Operation, contract spec.PropertyContract) error {
 	}
 	if op.Value == nil && contract.Required {
 		return failure(-1, op, "UFE003", "A required property cannot be null.", "Supply a non-null scalar value.")
+	}
+	if number, ok := op.Value.(json.Number); ok {
+		// Int64 payloads retain their exact integer representation in both
+		// writers. Other numbers pass through float64 when writing YAML.
+		if _, err := number.Int64(); err != nil && !propertyNumberRoundTrips(number) {
+			return failure(-1, op, "UFE003", "The number cannot be written without precision loss.", "Use the source editor for this value.")
+		}
 	}
 	_, err := scalar(op.Value)
 	return err
