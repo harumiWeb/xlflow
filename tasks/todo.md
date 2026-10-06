@@ -1,3 +1,9 @@
+# Issue #918 final review follow-up
+
+- [x] Reproduce hidden-panel property reply loss; retain/replay edit results without applying hidden stale edits.
+- [x] Verify source safety, no-op/error/success replies, resumed Property Grid and real VS Code regressions.
+- [x] Preserve Pass 1 evidence, clean up review resources and prepare the verified fix for bounded Pass 2.
+
 # Issue #918 Property Grid
 
 - [x] Extend YAML/JSON scalar editing and expose source-based property metadata through LSP.

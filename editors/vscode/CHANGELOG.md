@@ -9,6 +9,8 @@
   retains its field error without changing source. Property editing requires
   the new capability; existing geometry support remains available on older
   geometry-capable servers.
+  Edit results survive hiding and restoring the same Designer panel, so an
+  interrupted property edit cannot leave it stuck waiting for a response.
 
 - Added UserForm selection, mouse movement, eight-direction resize, grouped
   arrow-key movement, 8-point grid/snapping toggles, and 50–200% zoom. Completed

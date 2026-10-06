@@ -10,6 +10,8 @@ All notable changes to xlflow will be documented in this file.
   formatting, validate canonically and use native VS Code undo/redo; explicit
   optional null is supported without property deletion. Older servers retain
   their advertised preview/geometry support through a separate capability.
+  Designer edit results are retained across panel visibility changes to
+  release pending edits when the panel is shown again.
 
 - Added interactive VS Code UserForm selection, move, eight-direction resize,
   keyboard movement, grid snapping, and zoom. YAML/YML and JSON geometry edits

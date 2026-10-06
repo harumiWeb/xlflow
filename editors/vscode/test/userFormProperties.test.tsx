@@ -534,6 +534,17 @@ async function run() {
   assert.equal(edits().length, afterRejection, "returning to rejected draft never retries it");
   await key("caption", "Escape");
   assert.equal(input("caption").value, "Concurrent external caption");
+  await type("caption", "Hidden panel draft");
+  await key("caption", "Enter");
+  // Showing a retained Webview replays its current document before the
+  // provider's queued editResult; property pending must survive this replay.
+  await refresh(7);
+  assert.equal(input("caption").disabled, true);
+  await acknowledge({ code: "staleDocument", message: "Hidden edit is stale" });
+  assert.equal(input("caption").disabled, false, "replayed reply releases the busy state");
+  assert.equal(input("caption").value, "Hidden panel draft");
+  assert.ok(row("caption").textContent?.includes("staleDocument: Hidden edit is stale"));
+  await key("caption", "Escape");
   await act(() => {
     render(null, root);
   });

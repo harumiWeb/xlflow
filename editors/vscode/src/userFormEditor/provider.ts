@@ -31,6 +31,27 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
     let editable = false;
     let propertyEditable = false;
     let generation = 0;
+    let contextGeneration = 0;
+    const replies = new Map<
+      number,
+      { message: Extract<HostMessage, { type: "editResult" }>; sending: boolean }
+    >();
+    const flushReplies = () => {
+      if (!ready || disposed || !panel.visible) return;
+      for (const [id, reply] of replies) {
+        if (reply.sending) continue;
+        reply.sending = true;
+        void panel.webview.postMessage(reply.message).then(
+          (delivered) => {
+            reply.sending = false;
+            if (delivered && replies.get(id) === reply) replies.delete(id);
+          },
+          () => {
+            reply.sending = false;
+          },
+        );
+      }
+    };
     const send = (message: HostMessage) => {
       if (message.type === "document") editable = message.editable === true;
       if (message.type === "document") propertyEditable = message.propertyEditable === true;
@@ -177,12 +198,17 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
         if (panel.visible && ready) {
           sendLocalization();
           sync.replay(send);
+          flushReplies();
           schedule();
         }
       }),
       panel.webview.onDidReceiveMessage((message: unknown) => {
         if (!isWebviewMessage(message)) return;
         if (message.type === "ready") {
+          // A new App has no pending requests and starts request IDs over.
+          // Never deliver an old context's reply to its replacement.
+          contextGeneration++;
+          replies.clear();
           ready = true;
           sendLocalization();
           sync.replay(send);
@@ -191,18 +217,25 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
           void vscode.commands.executeCommand("vscode.openWith", document.uri, "default");
         } else {
           const editGeneration = generation;
+          const editContext = contextGeneration;
           const property =
             message.operations[0].type === "setFormProperty" ||
             message.operations[0].type === "setControlProperty";
           const permitted = () =>
             !disposed &&
+            contextGeneration === editContext &&
             panel.visible &&
             (property ? propertyEditable : editable) &&
             generation === editGeneration;
           void this.edits
             .run(document, message.version, message.operations, this.clients, permitted)
             .then(async (error) => {
-              send({ type: "editResult", requestId: message.requestId, error });
+              if (disposed || contextGeneration !== editContext) return;
+              replies.set(message.requestId, {
+                message: { type: "editResult", requestId: message.requestId, error },
+                sending: false,
+              });
+              flushReplies();
               await update();
             });
         }
@@ -210,6 +243,7 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
     ];
     const dispose = () => {
       disposed = true;
+      replies.clear();
       if (timer) clearTimeout(timer);
       sync.dispose();
       subscriptions.forEach((subscription) => subscription.dispose());

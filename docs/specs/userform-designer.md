@@ -245,6 +245,14 @@ undo/redo refresh values from source. Selection and rendering alone never
 produce source edits. Explicit null is allowed only for nullable fields
 accepted by canonical validation; there is no property removal action.
 
+The host retains edit results while the panel is hidden and replays them when
+the same Webview becomes visible. A failed message delivery keeps its result
+queued for the next replay. A new Webview `ready` starts a new request context:
+queued results from the old context are discarded, and old in-flight edits
+cannot apply or acknowledge new requests whose IDs restart from one. Visibility
+still participates in the queue's stale-edit guard; retaining an error reply
+never authorizes a hidden or otherwise obsolete source edit.
+
 ## Semantic edit protocol and native history
 
 The LSP advertises `capabilities.experimental.userFormEdit: true`. Preview-only
