@@ -17,6 +17,33 @@ export async function runUserFormEditorAssertions(): Promise<void> {
   assert.ok(isWebviewMessage({ type: "ready" }));
   assert.ok(!isWebviewMessage({ type: "moveControl" }));
   assert.ok(!isWebviewMessage(null));
+  const property = { type: "setFormProperty", field: "caption", value: "" };
+  const edit = { type: "edit", requestId: 1, version: 1, operations: [property] };
+  for (const value of [null, "", 0, false, "false", 12.5]) {
+    assert.ok(isWebviewMessage({ ...edit, operations: [{ ...property, value }] }));
+  }
+  assert.ok(
+    isWebviewMessage({
+      ...edit,
+      operations: [
+        { type: "setControlProperty", controlId: "label", field: "caption", value: "hi" },
+      ],
+    }),
+  );
+  for (const value of [undefined, NaN, Infinity, {}, []]) {
+    assert.ok(!isWebviewMessage({ ...edit, operations: [{ ...property, value }] }));
+  }
+  assert.ok(
+    !isWebviewMessage({ ...edit, operations: [{ type: "setFormProperty", field: "caption" }] }),
+  );
+  assert.ok(!isWebviewMessage({ ...edit, operations: [{ ...property, controlId: "label" }] }));
+  assert.ok(!isWebviewMessage({ ...edit, operations: [property, property] }));
+  assert.ok(
+    !isWebviewMessage({
+      ...edit,
+      operations: [property, { type: "moveControl", controlId: "label", left: 1, top: 2 }],
+    }),
+  );
   assert.strictEqual(pointsToPixels(0.75), 1);
   const document = {
     form: { name: "Main", build: { clientWidth: 123.5, clientHeight: 100 } },
@@ -49,6 +76,24 @@ export async function runUserFormEditorAssertions(): Promise<void> {
     send,
   );
   assert.strictEqual(messages.at(-1)?.type, "document");
+  const propertyGrid = {
+    form: { descriptors: [], values: { caption: { present: true, value: "" } } },
+    controls: {},
+  };
+  await sync.update(
+    1,
+    async () => ({ version: 1, document, editable: true, propertyEditable: true, propertyGrid }),
+    () => version,
+    send,
+  );
+  const propertyMessage = messages.at(-1);
+  assert.ok(propertyMessage?.type === "document");
+  assert.strictEqual(propertyMessage.propertyEditable, true);
+  assert.deepStrictEqual(
+    propertyMessage.propertyGrid,
+    propertyGrid,
+    "authored values survive renderer normalization",
+  );
   version = 2;
   await sync.update(
     2,

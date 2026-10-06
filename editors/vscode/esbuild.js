@@ -21,6 +21,14 @@ Promise.all([
     outfile: "dist/test/userFormRendering.test.js",
   }),
   esbuild.build({
+    ...common,
+    jsx: "automatic",
+    jsxImportSource: "preact",
+    entryPoints: ["test/userFormProperties.test.tsx"],
+    outfile: "dist/test/userFormProperties.test.js",
+    external: [...common.external, "jsdom"],
+  }),
+  esbuild.build({
     bundle: true,
     platform: "browser",
     format: "iife",

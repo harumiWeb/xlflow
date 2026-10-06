@@ -3,7 +3,8 @@
 This specification defines the host-neutral Go API for applying semantic edits
 to UserForm FormSpecs while retaining the original source as the canonical
 document. Issue #916 provides the YAML API; Issue #917 adds JSON geometry
-editing and the Designer LSP adapter. The core API remains host-neutral and
+editing and the Designer LSP adapter; Issue #918 adds scalar property editing
+across YAML/YML/JSON and authored-state metadata. The core API remains host-neutral and
 does not invoke Excel or provide a CLI command.
 
 ## Authority and source model
@@ -15,7 +16,8 @@ func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result,
 ```
 
 `Apply` accepts `.yaml` and `.yml` for all operations, and `.json` for
-`moveControl` and `resizeControl` only. Other JSON operations return a structured
+`moveControl`, `resizeControl`, `setFormProperty` and `setControlProperty`.
+Other JSON operations return a structured
 unsupported-operation error. `Operation` values are serializable tagged structs.
 The supported YAML operation tags are
 `setFormProperty`, `setControlProperty`, `moveControl`, `resizeControl`,
@@ -62,9 +64,9 @@ aliases, and merge keys byte-for-byte.
 
 ## Operation representation
 
-For JSON geometry edits, retain lexical token spans separately from the
-canonical model. Replace only targeted numeric values and insert missing
-geometry members into the owning object, retaining unrelated bytes, key order,
+For JSON geometry and property edits, retain lexical token spans separately from the
+canonical model. Replace only targeted scalar values and insert missing
+members into the owning object, retaining unrelated bytes, key order,
 whitespace and newline style. JSON is never rewritten as YAML or serialized
 from the normalized FormSpec. Reject duplicate member keys that would make
 source targeting ambiguous, including escaped spellings of the same key.
@@ -72,9 +74,17 @@ Canonical parsing, payload validation, atomic failure and numeric no-op
 behavior remain shared with YAML. No additional FormSpec validation authority
 is introduced by the JSON writer.
 
+Setting a supported `build.*` path may insert the missing `form.build` object;
+only the required local object/member is added. Legacy fields and build fields
+remain independent. `form.name` changes only that field, without renaming files,
+sidecars or VBA references.
+
 The operation is a tagged value with optional payload fields. Pointer fields
 distinguish an omitted number from an explicit zero. `Value` is restricted to a
-scalar value accepted by the selected FormSpec field.
+scalar value accepted by the selected FormSpec field. Presence is tracked
+independently from a nil value: `ValuePresent` is required for explicit null,
+while non-nil values establish presence for existing Go callers. Wire decoding
+records whether `value` exists; encoding preserves explicit null.
 
 ```go
 type OperationType string
@@ -84,6 +94,7 @@ type Operation struct {
 	ControlID string              `json:"controlId,omitempty"`
 	Field     string              `json:"field,omitempty"`
 	Value     any                 `json:"value,omitempty"`
+	ValuePresent bool             `json:"-"`
 	Left      *float64            `json:"left,omitempty"`
 	Top       *float64            `json:"top,omitempty"`
 	Width     *float64            `json:"width,omitempty"`
@@ -112,11 +123,42 @@ ID fails parsing with `UFV004` before any operation is applied.
 | `setParent`          | Set `parentId`, or make the control a root when it is empty. Optional `left` and `top` replace parent-relative coordinates; omitted values retain the existing local coordinates. Reparenting does not preserve or compute a world-space position.                                                                                                                                                                                                                       |
 | `reorderControl`     | Move the target to the zero-based `index` among its current siblings. Sibling order uses stable `zIndex` order, preserving source order for ties. Only sibling `zIndex` values needed for the requested order are updated; `tabIndex` is unchanged.                                                                                                                                                                                                                      |
 
+For property operations a missing `value` is invalid. Explicit null is supported
+only for an optional scalar field whose resulting source passes canonical
+validation; required fields cannot be null. Null replaces or inserts the
+source scalar and never deletes its key. Absent, null, empty string, false and
+zero are distinct authored states. An explicit value matching a normalized
+default must not be mistaken for an absent-field no-op.
+
 Property removal is unsupported. `observed` fields, property bags,
 collections (including lists and tabs), picture data/actions, and non-scalar
 property values are not edit targets. Page and TabStrip collection operations
 are outside this contract. Existing FormSpec validation still decides whether
 a scalar value or resulting control hierarchy is valid.
+
+Custom controls with an explicit ProgID retain the canonical common scalar
+authoring fields, such as `name`, geometry, `enabled` and `visible`. Unknown
+control types do not acquire built-in type-specific properties or property-bag
+editing; the same contract filters govern their metadata and semantic edits.
+
+Property payloads containing `json.Number` must not lose decimal precision
+during scalar conversion. Exact int64 literals remain supported; other numeric
+literals must match their shortest float64 decimal representation. Reject a
+lossy payload atomically with `UFE003` in both YAML and JSON edits. Ordinary
+decimals such as `0.1` remain supported; comparing exact binary float rationals
+would incorrectly reject them. This writer constraint does not reject existing
+high-precision source tokens or alter unrelated tokens during other edits.
+
+## Property metadata and authored-state extraction
+
+The host-neutral edit layer exposes supported scalar properties from Go
+FormSpec contracts and extracts presence/value from original syntax for the
+LSP preview adapter. The Property Grid payload and optional `propertyError`
+are specified in [`userform-designer.md`](userform-designer.md). Normalized,
+observed and renderer values are not substitutes for authored values. Unsafe
+or ambiguous syntax must not produce guessed metadata; the adapter can retain
+its valid canonical preview while reporting property metadata unavailable.
+No frontend validation rules replace canonical parsing and validation.
 
 ## Transaction and identity rules
 
@@ -135,8 +177,9 @@ produce model-only IDs for an in-memory value; those IDs are not source targets
 for this API.
 
 A semantic no-op returns the original source bytes unchanged and an empty edit
-list. This includes setting a field to its existing canonical value. The
-resulting YAML is parsed again through `spec.ParseFormSpec`; its normalized
+list. For scalar properties this requires matching authored presence and value,
+not merely matching a normalized default. The resulting YAML or JSON is parsed
+again through `spec.ParseFormSpec`; its normalized
 document and validation warnings are returned with the generated source.
 
 ## Result and errors
@@ -205,9 +248,13 @@ The implementation is pure Go and must cover these behaviors:
 - Explicit `form` paths update only the named legacy or `build.*` field.
   Unsupported observed fields, property removal, property bags, collections,
   pictures, and non-scalar values are rejected.
-- YAML/YML inputs support all operations; JSON supports geometry operations,
-  numeric replacement/insertion, escaped keys, duplicate-key rejection and
+- YAML/YML inputs support all operations; JSON supports geometry and scalar
+  property operations, replacement/insertion including missing `build`, escaped keys, duplicate-key rejection and
   formatting-stable no-ops, with unsupported JSON operations rejected atomically.
+- Authored metadata distinguishes absent/null/empty/false/zero without exposing
+  observed or renderer defaults as authored values. Cover missing `value`,
+  explicit optional null round-trip, required-null rejection and insertion of
+  explicit values that happen to match normalized defaults.
 - `Result.Edits` are deterministic, non-overlapping original-byte ranges whose
   application equals `Result.Source`; a no-op returns no edits.
 
@@ -216,7 +263,7 @@ VBE-facing behavior or establish any Excel runtime claim.
 
 ## Out of scope
 
-- JSON operations other than move/resize.
+- JSON structural operations other than geometry and scalar property edits.
 - CLI wiring; VS Code/Webview/LSP adapters are specified separately.
 - Excel, COM, VBIDE, Designer persistence, or VBE validation.
 - Property removal, observed-state authoring, property bags, collection edits,
@@ -225,6 +272,9 @@ VBE-facing behavior or establish any Excel runtime claim.
   targeting, and ID/type changes.
 
 ## Related
+
+- Issue #918
+- `docs/adr/ADR-0067-userform-designer-property-metadata.md`
 
 - Issue #916
 - Issue #917

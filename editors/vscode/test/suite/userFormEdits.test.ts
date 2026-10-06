@@ -8,6 +8,7 @@ import { designerViewType } from "../../src/userFormEditor/provider";
 import type {
   EditResult,
   GeometryOperation,
+  SemanticOperation,
   SourceTextEdit,
 } from "../../src/userFormEditor/protocol";
 
@@ -22,6 +23,7 @@ const formSource = [
 
 export async function runUserFormEditAssertions(): Promise<void> {
   await assertGeometryTransactionsUndoAndRedo();
+  await assertPropertyTransactionsUndoAndRedo();
   await assertStaleResponsesAreDiscarded();
   await assertConnectionInvalidationIsDiscarded();
   await assertConcurrentPanelsAreSerialized();
@@ -90,6 +92,59 @@ async function assertGeometryTransactionsUndoAndRedo(): Promise<void> {
     assert.strictEqual(document.getText(), afterNorthWestResize);
     await vscode.commands.executeCommand("redo");
     assert.strictEqual(document.getText(), afterSecondTransaction);
+  });
+}
+
+async function assertPropertyTransactionsUndoAndRedo(): Promise<void> {
+  await withDesignerDocument("property-undo-redo", formSource, async (document) => {
+    const queue = new DocumentEditQueue();
+    const initial = document.getText();
+    const client = fakeClient((_doc, version, text, operations) => {
+      const op = operations[0];
+      assert.strictEqual(op.type, "setFormProperty");
+      const old = '"😀 Café"';
+      const start = text.indexOf(old);
+      assert.ok(start >= 0);
+      const from = document.positionAt(start);
+      const to = document.positionAt(start + old.length);
+      return {
+        version,
+        edits: [{ range: { start: from, end: to }, newText: JSON.stringify("編集済み 😀") }],
+      };
+    });
+    const op: SemanticOperation = {
+      type: "setFormProperty",
+      field: "caption",
+      value: "編集済み 😀",
+    };
+    assert.strictEqual(
+      await queue.run(document, document.version, [op], client, () => true),
+      undefined,
+    );
+    const edited = initial.replace('"😀 Café"', '"編集済み 😀"');
+    assert.strictEqual(document.getText(), edited);
+    await vscode.commands.executeCommand("undo");
+    assert.strictEqual(document.getText(), initial, "property edit is one native undo step");
+    await vscode.commands.executeCommand("redo");
+    assert.strictEqual(document.getText(), edited);
+    const error = {
+      code: "invalid",
+      message: "Invalid property",
+      diagnostics: [
+        { operationIndex: 0, field: "caption", code: "UFV001", message: "Invalid caption" },
+      ],
+    };
+    assert.deepStrictEqual(
+      await queue.run(
+        document,
+        document.version,
+        [op],
+        fakeClient((_, version) => ({ version, edits: [], error })),
+        () => true,
+      ),
+      error,
+    );
+    assert.strictEqual(document.getText(), edited, "field diagnostics do not mutate source");
   });
 }
 
@@ -355,7 +410,12 @@ async function withDesignerDocument(
 function geometryClient(): EditClient {
   return fakeClient((_, version, text, operations) => ({
     version,
-    edits: geometryEdits(text, operations),
+    edits: geometryEdits(
+      text,
+      operations.filter(
+        (op): op is GeometryOperation => op.type === "moveControl" || op.type === "resizeControl",
+      ),
+    ),
   }));
 }
 
@@ -422,7 +482,7 @@ function fakeClient(
     document: vscode.TextDocument,
     version: number,
     text: string,
-    operations: GeometryOperation[],
+    operations: SemanticOperation[],
   ) => EditResult | Promise<EditResult>,
 ): EditClient {
   return {

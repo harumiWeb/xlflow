@@ -35,7 +35,33 @@ Visual operations produce local source edits and retain unrelated formatting.
 Invalid source retains the last valid preview and disables editing until fixed.
 An xlflow LSP advertising UserForm editing is required; older servers can
 still provide a read-only preview. Images remain placeholders, and Toolbox,
-Property Grid, reparenting, and Page collection editing are future features.
+reparenting and Page collection editing are future features.
+
+### Edit properties
+
+Select the background for form properties, a control for its properties, or a
+Page tab for Page properties. The Property Grid shows supported scalar fields
+from the running LSP. Form legacy fields and `build.*` fields are separate;
+changing `form.name` does not rename the file, code sidecar or VBA references.
+Page geometry, observed fields, lists/tabs, pictures and property bags are not
+edited in this grid.
+
+Confirm text/number input with Enter or by leaving the field; Escape cancels
+the draft. Boolean/enum choices confirm immediately. Each confirmation creates
+one native undoable source edit in YAML, YML or JSON. Invalid input keeps its
+field error without changing source. A source update invalidates an older
+draft; re-enter it against the refreshed document.
+
+Unset, explicit null, empty string, false and zero are distinct. The grid does
+not fill authored fields from measured or preview defaults. Explicit null is
+available only for supported optional fields; it does not remove the key. To
+restore an unset field, remove its key in the text editor. Ambiguous authored
+state can disable the grid while the valid preview remains visible.
+
+Property editing requires the LSP's `userFormPropertyEdit` capability. Older
+geometry-capable servers still allow move/resize; preview-only servers remain
+read-only. Editing FormSpec source does not require Excel and does not apply
+changes to a workbook automatically.
 
 ## MultiPage and TabStrip
 

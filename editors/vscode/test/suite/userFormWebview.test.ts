@@ -39,8 +39,8 @@ window.addEventListener("message", e => {
       const target = document.querySelector(action.selector);
       if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: action.selector}); return; }
       const props = { bubbles: true, cancelable: true, ...action.props };
-      if (action.event === "change") { if ("value" in props) target.value = props.value; if ("checked" in props) target.checked = props.checked; }
-      target.dispatchEvent(action.event === "change" ? new Event("change", props) : action.event.startsWith("key") ? new KeyboardEvent(action.event, props) : new PointerEvent(action.event, props));
+      if (action.event === "change" || action.event === "input") { if ("value" in props) target.value = props.value; if ("checked" in props) target.checked = props.checked; }
+      target.dispatchEvent(["change", "input"].includes(action.event) ? new Event(action.event, props) : action.event.startsWith("key") ? new KeyboardEvent(action.event, props) : action.event === "focusout" ? new FocusEvent("blur", props) : new PointerEvent(action.event, props));
       await new Promise(resolve => setTimeout(resolve, 30));
     }
     const label = document.querySelector(".control.label");
@@ -72,6 +72,14 @@ window.addEventListener("message", e => {
       handles: document.querySelectorAll(".resize-handle").length,
       editMessages,
       images: document.querySelectorAll("img").length,
+      propertyTitle: document.querySelector(".property-grid h2")?.textContent,
+      propertyRows: [...document.querySelectorAll("[data-property-field]")].map(row => ({
+        field: row.dataset.propertyField,
+        value: row.querySelector("input")?.value,
+        disabled: row.querySelector("input")?.disabled,
+        text: row.textContent,
+        error: row.querySelector('[role="alert"]')?.textContent
+      })),
       buttonCenters,
       combo: comboBounds && arrowBounds && {
         height: comboBounds.height,
@@ -492,6 +500,180 @@ window.addEventListener("message", e => {
     });
     assert.strictEqual((primaryCaptureLost.editMessages as unknown[]).length, 7);
     assert.strictEqual(primaryCaptureLost.left, "40px", "active pointer capture loss cancels");
+
+    const propertyGrid = {
+      form: {
+        descriptors: [
+          { field: "caption", valueType: "string" as const, required: false, nullable: true },
+          { field: "width", valueType: "number" as const, required: false, nullable: true },
+          {
+            field: "build.clientWidth",
+            valueType: "number" as const,
+            required: false,
+            nullable: true,
+          },
+        ],
+        values: {
+          caption: { present: true, value: "Authored caption" },
+          width: { present: true, value: 240 },
+          "build.clientWidth": { present: false, value: null },
+        },
+      },
+      controls: {
+        label: {
+          descriptors: [
+            { field: "caption", valueType: "string" as const, required: false, nullable: true },
+          ],
+          values: { caption: { present: true, value: "Authored label" } },
+        },
+      },
+    };
+    const propertyDocument = () => ({
+      type: "document" as const,
+      version: 40,
+      document: interactive,
+      editable: true,
+      propertyEditable: true,
+      propertyGrid,
+    });
+    await snapshot(propertyDocument());
+    const formSelected = await snapshot({
+      type: "testAction",
+      version: 41,
+      actions: [
+        pointer(".form", "pointerdown", 0, 0),
+        pointer(".designer-viewport", "pointerup", 0, 0),
+      ],
+    });
+    assert.ok(String(formSelected.propertyTitle).includes("Main"));
+    const field = (name: string) => `[data-property-field="${name}"] input`;
+    const changedCaption = await snapshot({
+      type: "testAction",
+      version: 42,
+      actions: [
+        { selector: field("caption"), event: "input", props: { value: "新しいキャプション 😀" } },
+        { selector: field("caption"), event: "keydown", props: { key: "Enter" } },
+        { selector: field("caption"), event: "focusout" },
+      ],
+    });
+    const propertyEdits = changedCaption.editMessages as {
+      requestId: number;
+      operations: unknown[];
+    }[];
+    assert.strictEqual(propertyEdits.length, 8, "Enter and blur create exactly one property edit");
+    assert.deepStrictEqual(propertyEdits.at(-1)!.operations, [
+      { type: "setFormProperty", field: "caption", value: "新しいキャプション 😀" },
+    ]);
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: propertyEdits.at(-1)!.requestId,
+      error: {
+        code: "invalid",
+        message: "Rejected property",
+        diagnostics: [
+          { operationIndex: 0, field: "caption", code: "UFV001", message: "Invalid caption" },
+        ],
+      },
+    });
+    const rejected = await snapshot({
+      type: "testAction",
+      version: 43,
+      actions: [{ selector: field("caption"), event: "focusout" }],
+    });
+    const rejectedRows = rejected.propertyRows as {
+      field: string;
+      value: string;
+      error?: string;
+    }[];
+    assert.strictEqual(
+      rejectedRows.find((r) => r.field === "caption")!.value,
+      "新しいキャプション 😀",
+      "rejection retains the input",
+    );
+    assert.ok(rejectedRows.find((r) => r.field === "caption")!.error?.includes("UFV001"));
+    assert.strictEqual(
+      (rejected.editMessages as unknown[]).length,
+      8,
+      "rejected draft is not resent on blur",
+    );
+    const invalidNumber = await snapshot({
+      type: "testAction",
+      version: 44,
+      actions: [
+        { selector: field("width"), event: "input", props: { value: "invalid" } },
+        { selector: field("width"), event: "keydown", props: { key: "Enter" } },
+      ],
+    });
+    assert.strictEqual((invalidNumber.editMessages as unknown[]).length, 8);
+    assert.ok(
+      (invalidNumber.propertyRows as { field: string; error?: string }[]).find(
+        (r) => r.field === "width",
+      )!.error,
+    );
+    const staleDraft = await snapshot({
+      type: "document",
+      version: 45,
+      document: interactive,
+      editable: true,
+      propertyEditable: true,
+      propertyGrid,
+    });
+    assert.ok(
+      (staleDraft.propertyRows as { field: string; error?: string }[])
+        .find((r) => r.field === "caption")!
+        .error?.includes(designerStrings.staleProperty),
+    );
+    const retry = await snapshot({
+      type: "testAction",
+      version: 46,
+      actions: [
+        { selector: field("caption"), event: "input", props: { value: "Retry caption" } },
+        { selector: field("caption"), event: "focusout" },
+      ],
+    });
+    const retryEdits = retry.editMessages as { requestId: number; operations: unknown[] }[];
+    assert.strictEqual(retryEdits.length, 9);
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: retryEdits.at(-1)!.requestId,
+    });
+    await snapshot({
+      type: "document",
+      version: 47,
+      document: interactive,
+      editable: true,
+      propertyEditable: true,
+      propertyGrid,
+    });
+    const controlSelected = await snapshot({
+      type: "testAction",
+      version: 48,
+      actions: [
+        pointer(".control.label", "pointerdown", 40, 40),
+        pointer(".designer-viewport", "pointerup", 40, 40),
+      ],
+    });
+    assert.ok(String(controlSelected.propertyTitle).includes("Label1"));
+    const controlEdit = await snapshot({
+      type: "testAction",
+      version: 49,
+      actions: [
+        { selector: field("caption"), event: "input", props: { value: "Control caption" } },
+        { selector: field("caption"), event: "keydown", props: { key: "Enter" } },
+      ],
+    });
+    assert.deepStrictEqual(
+      (controlEdit.editMessages as { operations: unknown[] }[]).at(-1)!.operations,
+      [
+        {
+          type: "setControlProperty",
+          controlId: "label",
+          field: "caption",
+          value: "Control caption",
+        },
+      ],
+    );
+    assert.deepStrictEqual(controlEdit.violations, []);
   } finally {
     subscription.dispose();
     panel.dispose();

@@ -1,3 +1,27 @@
+# PR #927 review follow-up
+
+- [x] Reproduce and isolate form/control draft identity when a control ID is `form`.
+- [x] Restore canonical common scalar edits/metadata for custom ProgID controls without exposing type-specific fields.
+- [x] Reject property number payloads whose scalar conversion would change their decimal value; retain exact int64 and ordinary decimal edits.
+- [x] Verify source/RPC/DOM regressions, full related Go/LSP (134.548s), real VS Code 1.140.0, lint/docs, vet and formatting; prepare the verified fixes and evidence replies for the existing PR.
+
+# Issue #918 final review follow-up
+
+- [x] Pass 2: validate independent property capability at the client request boundary and protect authored numeric precision at the Webview boundary.
+- [x] Verify both regressions, preserve Pass 2 report and cleanup resources; stop the full review loop at two passes. Full spec/LSP, real VS Code 1.140.0, lint/docs, format and vet pass; the final corrections receive coordinator verification, not a third independent review.
+
+- [x] Reproduce hidden-panel property reply loss; retain/replay edit results without applying hidden stale edits.
+- [x] Verify source safety, no-op/error/success replies, resumed Property Grid and real VS Code regressions.
+- [x] Preserve Pass 1 evidence, clean up review resources and prepare the verified fix for bounded Pass 2.
+
+# Issue #918 Property Grid
+
+- [x] Extend YAML/JSON scalar editing and expose source-based property metadata through LSP.
+- [x] Add localized Property Grid with shared selection, draft validation and semantic commits.
+- [x] Verify source preservation, real Webview behavior, native undo/redo and geometry regressions.
+- [x] Record the design contract, update user documentation/changelogs and complete self-review.
+- [x] Review follow-up: preserve empty multiline JSON build layout and retain rejected drafts/field diagnostics across selection changes; verify regressions and the full VS Code suite.
+
 # PR #926 review follow-up
 
 - [x] CodeRabbit: reproduce secondary pointerdown replacing the active gesture; reject new pointerdown until that gesture ends and verify primary commit.

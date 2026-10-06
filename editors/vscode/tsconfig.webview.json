@@ -13,6 +13,7 @@
   "include": [
     "webview/**/*.tsx",
     "test/userFormRendering.test.tsx",
+    "test/userFormProperties.test.tsx",
     "src/userFormEditor/protocol.ts",
     "src/userFormEditor/model.ts"
   ]

@@ -117,3 +117,21 @@ func TestUserFormPreviewJSONAndWarnings(t *testing.T) {
 		t.Fatalf("warning preview: %+v", result)
 	}
 }
+
+func TestUserFormPreviewKeepsRenderingWhenNumberLosesPrecision(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{opts: Options{RootDir: root, Config: config.Default()}}
+	for _, format := range []string{"json", "yaml"} {
+		for _, number := range []string{"9007199254740993", "0.100000000000000000001", "1e-400"} {
+			source := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"text","name":"Text1","type":"TextBox","value":` + number + `}]}`
+			if format == "yaml" {
+				source = strings.Replace(previewSource, "controls: []", "controls:\n  - id: text\n    name: Text1\n    type: TextBox\n    value: "+number, 1)
+			}
+			params := userFormPreviewParams{URI: pathToFileURI(filepath.Join(root, "src/forms/specs/Main."+format)), Version: 9, Text: source}
+			result := s.userFormPreview(params)
+			if result.Error != nil || result.Document == nil || result.PropertyGrid != nil || result.PropertyError == nil || result.PropertyError.Code != "propertyUnavailable" || result.Version != 9 {
+				t.Fatalf("preview fallback %s/%s: %+v", format, number, result)
+			}
+		}
+	}
+}

@@ -73,7 +73,8 @@ The main features include:
 - Project recognition based on `xlflow.toml` configuration
 - Opens canonical YAML, YML, and JSON UserForm FormSpecs in an optional
   visual editor with selection, move, resize, keyboard movement, grid snapping,
-  and zoom. Each completed interaction is one VS Code undoable edit. The preview follows the current document and keeps
+  zoom, and an LSP metadata-driven Property Grid for supported form/control
+  scalars. Each completed interaction is one VS Code undoable edit. The preview follows the current document and keeps
   its last valid rendering while the source has errors.
 - Imports VBA modules from Excel workbooks
 - Applies edited VBA modules back to Excel workbooks
@@ -300,9 +301,13 @@ Additionally, ensure that both Windows and WSL instances can execute xlflow succ
 
 - This extension does not install or bundle `xlflow` itself.
 - The UserForm Designer is approximate and requires a compatible xlflow LSP
-  for the selected project; older preview-capable servers remain read-only.
-  It does not provide a Property Grid, Toolbox, reparenting, Page selection,
-  form/Page resizing, or image asset loading.
+  for the selected project. Property editing needs `userFormPropertyEdit`;
+  older geometry-capable servers retain move/resize and preview-only servers
+  remain read-only. The grid distinguishes unset/null/empty/false/zero and
+  supports explicit optional null, not key deletion. Form name edits do not
+  rename files or code sidecars. Source editing requires no Excel.
+  Toolbox, reparenting, Page collection editing, canvas form/Page resizing and
+  image asset loading are unavailable. See the [UserForm guide](https://harumiweb.github.io/xlflow/guides/userforms).
 - Macro selection functionality currently does not support interactive operations. Running `xlflow: Run Macro` will execute the configured default macro. Standalone `Sub` procedures without arguments can be invoked via CodeLens.
 - Both `xlflow: New Project` and `xlflow: Initialize Project` only display basic CLI workflows and do not provide a picker for selecting options like `--with-skill`, `--with-module`, `--agent`, or `--json`.
 - This extension itself does not implement VBA code analysis, diagnostics, formatting, suggestion displays, or symbol analysis. These functionalities are delegated to the `xlflow` CLI and `xlflow-lsp` components.
