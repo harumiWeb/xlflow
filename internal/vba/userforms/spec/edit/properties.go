@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
@@ -134,11 +135,39 @@ func propertyTarget(properties map[string]spec.PropertyContract, lookup func(str
 			if _, err := scalar(value); err != nil {
 				return PropertyTarget{}, failure(-1, Operation{Field: name}, "UFE005", "Authored property is not a scalar value.", "Use the source editor for this property.")
 			}
+			if !propertyNumberRoundTrips(value) {
+				return PropertyTarget{}, propertyPrecisionError(name)
+			}
 		}
 		target.Descriptors = append(target.Descriptors, PropertyDescriptor{Field: name, ValueType: contract.ValueType, Required: contract.Required, Nullable: !contract.Required, AllowedValues: slices.Clone(contract.AllowedValues)})
 		target.Values[name] = PropertyState{Present: present, Value: value}
 	}
 	return target, nil
+}
+
+func propertyPrecisionError(field string) error {
+	return failure(-1, Operation{Field: field}, "UFE005", "Authored number cannot be represented without precision loss in the Property Grid.", "Use the source editor for this property.")
+}
+
+// Compare decimal values before and after the JavaScript number wire boundary.
+// Ordinary decimals such as 0.1 remain usable; extra authored precision does not.
+func propertyNumberRoundTrips(value any) bool {
+	switch value.(type) {
+	case json.Number, int, int64, uint64, float64:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return false
+		}
+		number, err := strconv.ParseFloat(string(encoded), 64)
+		if err != nil {
+			return false
+		}
+		original := rational(json.Number(encoded))
+		roundtrip := rational(json.Number(strconv.FormatFloat(number, 'g', -1, 64)))
+		return original != nil && roundtrip != nil && original.Cmp(roundtrip) == 0
+	default:
+		return true
+	}
 }
 
 // PropertyGrid reports authored presence and scalar values from original syntax,
@@ -211,6 +240,15 @@ func PropertyGrid(input spec.SpecInput, source []byte) (PropertyGridData, error)
 			}
 			var value any
 			err := node.Decode(&value)
+			if err == nil && node.Kind == yaml.ScalarNode && node.Tag == "!!float" {
+				// YAML Decode already rounds floats, so inspect original syntax too.
+				original := rational(json.Number(strings.ReplaceAll(node.Value, "_", "")))
+				encoded, encodeErr := json.Marshal(value)
+				decoded := rational(json.Number(encoded))
+				if encodeErr != nil || original == nil || decoded == nil || original.Cmp(decoded) != 0 {
+					return nil, true, propertyPrecisionError(path)
+				}
+			}
 			return value, true, err
 		}
 	}

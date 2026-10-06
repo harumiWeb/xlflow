@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import type { XlflowLanguageClientManager } from "../../src/client";
+import { XlflowLanguageClientManager } from "../../src/client";
 import { UserFormEditorProvider } from "../../src/userFormEditor/provider";
 import type { DocumentEditQueue } from "../../src/userFormEditor/edits";
 import type { DesignerError, HostMessage, WebviewMessage } from "../../src/userFormEditor/protocol";
@@ -8,6 +8,7 @@ import type { DesignerError, HostMessage, WebviewMessage } from "../../src/userF
 // Use the real provider and VS Code events with a controllable panel transport
 // and deferred queue result, so visibility cannot race the test driver.
 export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): Promise<void> {
+  await runClientCapabilityAssertions();
   const incoming = new vscode.EventEmitter<WebviewMessage>();
   const view = new vscode.EventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>();
   const disposed = new vscode.EventEmitter<void>();
@@ -143,5 +144,50 @@ export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): P
     disposed.dispose();
     connection.dispose();
     cancel.dispose();
+  }
+}
+
+async function runClientCapabilityAssertions(): Promise<void> {
+  const document = await vscode.workspace.openTextDocument({ content: "form: {name: Main}" });
+  const property = { type: "setFormProperty", field: "caption", value: "New" } as const;
+  const geometry = { type: "moveControl", controlId: "button", left: 1, top: 2 } as const;
+  for (const userFormEdit of [undefined, false, true]) {
+    for (const userFormPropertyEdit of [undefined, false, true]) {
+      let requests = 0;
+      const response = { edits: [] };
+      const manager = Object.assign(Object.create(XlflowLanguageClientManager.prototype), {
+        previewGeneration: 0,
+        workspaceFolderKey: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString(),
+        client: {
+          isRunning: () => true,
+          initializeResult: {
+            capabilities: { experimental: { userFormEdit, userFormPropertyEdit } },
+          },
+          sendRequest: async () => {
+            requests++;
+            return response;
+          },
+        },
+      }) as XlflowLanguageClientManager;
+      for (const operations of [[property], [geometry], [property, geometry]]) {
+        const before = requests;
+        const allowed = operations.every((op) =>
+          op.type === "setFormProperty" ? userFormPropertyEdit === true : userFormEdit === true,
+        );
+        const request = manager.requestUserFormEdit(
+          document,
+          document.version,
+          document.getText(),
+          operations,
+        );
+        if (allowed) assert.strictEqual(await request, response);
+        else await assert.rejects(request);
+        assert.strictEqual(
+          requests,
+          before + Number(allowed),
+          "only required capabilities gate transport",
+        );
+      }
+    }
   }
 }

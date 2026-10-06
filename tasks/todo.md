@@ -1,5 +1,8 @@
 # Issue #918 final review follow-up
 
+- [x] Pass 2: validate independent property capability at the client request boundary and protect authored numeric precision at the Webview boundary.
+- [x] Verify both regressions, preserve Pass 2 report and cleanup resources; stop the full review loop at two passes. Full spec/LSP, real VS Code 1.140.0, lint/docs, format and vet pass; the final corrections receive coordinator verification, not a third independent review.
+
 - [x] Reproduce hidden-panel property reply loss; retain/replay edit results without applying hidden stale edits.
 - [x] Verify source safety, no-op/error/success replies, resumed Property Grid and real VS Code regressions.
 - [x] Preserve Pass 1 evidence, clean up review resources and prepare the verified fix for bounded Pass 2.

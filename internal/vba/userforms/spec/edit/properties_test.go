@@ -7,6 +7,7 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -34,6 +35,54 @@ func applyFormatOK(t *testing.T, format, source string, operations ...Operation)
 		t.Fatalf("noncanonical result: %v", err)
 	}
 	return result
+}
+
+func TestPropertyGridNumericPrecision(t *testing.T) {
+	for _, format := range []string{"json", "yaml"} {
+		for _, number := range []string{"9007199254740993", "0.100000000000000000001", "1e-400", "0.1", "1.00", "1e2", "9007199254740992"} {
+			t.Run(format+"/"+number, func(t *testing.T) {
+				source := strings.Replace(propertyJSON, `"text":""`, `"text":"","value":`+number, 1)
+				if format == "yaml" {
+					source = strings.Replace(base, "text: keep", "text: keep\n    value: "+number, 1)
+				}
+				input := spec.SpecInput{Format: format}
+				if _, err := spec.ParseFormSpec(input, []byte(source)); err != nil {
+					t.Fatalf("canonical fixture: %v", err)
+				}
+				grid, err := PropertyGrid(input, []byte(source))
+				unsafe := number == "9007199254740993" || number == "0.100000000000000000001" || number == "1e-400"
+				if unsafe {
+					structured, ok := errors.AsType[*Error](err)
+					if !ok || len(structured.Diagnostics) == 0 || structured.Diagnostics[0].Field != "value" || !reflect.DeepEqual(grid, PropertyGridData{}) {
+						t.Fatalf("precision loss not refused: %+v %v", grid, err)
+					}
+				} else {
+					if err != nil {
+						t.Fatal(err)
+					}
+					encoded, err := json.Marshal(grid.Controls["other"].Values["value"])
+					if err != nil {
+						t.Fatal(err)
+					}
+					var wire struct {
+						Present bool
+						Value   float64
+					}
+					if err := json.Unmarshal(encoded, &wire); err != nil {
+						t.Fatal(err)
+					}
+					if !wire.Present || rational(json.Number(number)).Cmp(rational(json.Number(strconv.FormatFloat(wire.Value, 'g', -1, 64)))) != 0 {
+						t.Fatalf("wire value changed: %s", encoded)
+					}
+				}
+				// Metadata restrictions must not restrict canonical source edits.
+				result := applyFormatOK(t, format, source, Operation{Type: SetFormProperty, Field: "caption", Value: "New"})
+				if !bytes.Contains(result.Source, []byte(number)) {
+					t.Fatal("unrelated numeric token changed")
+				}
+			})
+		}
+	}
 }
 
 func TestPropertyGridRejectsNonScalarAny(t *testing.T) {

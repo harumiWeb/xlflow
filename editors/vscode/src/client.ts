@@ -94,11 +94,14 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     const experimental = client.initializeResult?.capabilities.experimental as
       | { userFormEdit?: boolean; userFormPropertyEdit?: boolean }
       | undefined;
-    if (!experimental?.userFormEdit)
+    if (
+      operations.some((op) => op.type !== "setFormProperty" && op.type !== "setControlProperty") &&
+      experimental?.userFormEdit !== true
+    )
       throw new Error(vscode.l10n.t("Update xlflow to a version supporting UserForm edits."));
     if (
       operations.some((op) => op.type === "setFormProperty" || op.type === "setControlProperty") &&
-      experimental.userFormPropertyEdit !== true
+      experimental?.userFormPropertyEdit !== true
     )
       throw new Error(
         vscode.l10n.t("Update xlflow to a version supporting UserForm property edits."),

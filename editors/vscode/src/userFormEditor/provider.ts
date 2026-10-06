@@ -114,6 +114,9 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
           typeNumber: vscode.l10n.t("Number"),
           typeBoolean: vscode.l10n.t("Boolean"),
           invalidNumber: vscode.l10n.t("Enter a finite number."),
+          invalidNumberPrecision: vscode.l10n.t(
+            "This number would lose precision. Use the source editor.",
+          ),
           invalidInteger: vscode.l10n.t("Enter a safe integer."),
           invalidValue: vscode.l10n.t("Enter a valid value."),
           staleProperty: vscode.l10n.t(

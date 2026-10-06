@@ -147,6 +147,7 @@ export const designerStrings = {
   typeNumber: "Number",
   typeBoolean: "Boolean",
   invalidNumber: "Enter a finite number.",
+  invalidNumberPrecision: "This number would lose precision. Use the source editor.",
   invalidInteger: "Enter a safe integer.",
   invalidValue: "Enter a valid value.",
   staleProperty: "The document changed. Re-enter this value on the updated form.",

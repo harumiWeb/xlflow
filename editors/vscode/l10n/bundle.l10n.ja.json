@@ -33,6 +33,7 @@
   "Number": "数値",
   "Boolean": "真偽値",
   "Enter a finite number.": "有限の数値を入力してください。",
+  "This number would lose precision. Use the source editor.": "この数値は精度が失われます。ソースエディターで編集してください。",
   "Enter a safe integer.": "安全に表現できる整数を入力してください。",
   "Enter a valid value.": "有効な値を入力してください。",
   "The document changed. Re-enter this value on the updated form.": "ドキュメントが変更されました。更新されたフォームで値を再入力してください。",

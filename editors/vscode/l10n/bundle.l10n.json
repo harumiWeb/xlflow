@@ -33,6 +33,7 @@
   "Number": "Number",
   "Boolean": "Boolean",
   "Enter a finite number.": "Enter a finite number.",
+  "This number would lose precision. Use the source editor.": "This number would lose precision. Use the source editor.",
   "Enter a safe integer.": "Enter a safe integer.",
   "Enter a valid value.": "Enter a valid value.",
   "The document changed. Re-enter this value on the updated form.": "The document changed. Re-enter this value on the updated form.",

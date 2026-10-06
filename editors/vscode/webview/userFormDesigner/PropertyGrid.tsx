@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { numberRoundTrips } from "./numbers";
 import type {
   DesignerError,
   DesignerStrings,
@@ -166,6 +167,10 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
       }
       if (descriptor.valueType === "integer" && !Number.isSafeInteger(value)) {
         update({ ...d, error: strings.invalidInteger });
+        return;
+      }
+      if (!numberRoundTrips(d.text, value)) {
+        update({ ...d, error: strings.invalidNumberPrecision });
         return;
       }
     }

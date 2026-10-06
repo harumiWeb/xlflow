@@ -224,6 +224,15 @@ authored state cannot be determined safely returns optional `propertyError`
 (using the preview error shape) without discarding its valid `document`.
 Property editing is unavailable without usable metadata.
 
+Authored numeric values must survive the JavaScript number wire boundary without
+changing their decimal value. Metadata that would round a large integer,
+high-precision decimal, or underflowing value is unavailable with a structured
+property error; the render preview remains available. Numeric input applies the
+same decimal round-trip check before sending an edit and retains rejected drafts.
+Ordinary decimal and exponent spellings (for example `0.1` and `1e2`) remain
+editable. These restrictions apply to the Property Grid, not canonical FormSpec
+source validation or source-editor edits.
+
 Background selection shows form fields; control selection shows that control's
 fields. Page selection uses its tab and excludes Page geometry. Form fields
 include `name`, `caption`, `width`, `height` and the supported `build.*` paths;

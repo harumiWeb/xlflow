@@ -12,6 +12,8 @@ All notable changes to xlflow will be documented in this file.
   their advertised preview/geometry support through a separate capability.
   Designer edit results are retained across panel visibility changes to
   release pending edits when the panel is shown again.
+  Property-only server capabilities are accepted independently of geometry,
+  and numeric metadata/input guards prevent silent precision loss.
 
 - Added interactive VS Code UserForm selection, move, eight-direction resize,
   keyboard movement, grid snapping, and zoom. YAML/YML and JSON geometry edits

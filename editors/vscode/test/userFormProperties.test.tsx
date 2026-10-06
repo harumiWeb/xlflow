@@ -534,6 +534,34 @@ async function run() {
   assert.equal(edits().length, afterRejection, "returning to rejected draft never retries it");
   await key("caption", "Escape");
   assert.equal(input("caption").value, "Concurrent external caption");
+  for (const field of ["width", "tabIndex"]) {
+    const before = edits().length;
+    await type(field, "9007199254740993");
+    await key(field, "Enter");
+    assert.equal(edits().length, before, "typed numeric descriptors cannot round input");
+    assert.ok(row(field).querySelector('[role="alert"]'));
+    await key(field, "Escape");
+  }
+  await choose("value", "number");
+  for (const value of ["9007199254740993", "0.100000000000000000001", "1e-400"]) {
+    const before = edits().length;
+    await type("value", value);
+    await key("value", "Enter");
+    await blur("value");
+    assert.equal(edits().length, before, "precision loss cannot write rounded source");
+    assert.equal(input("value").value, value, "exact rejected draft is retained");
+    assert.ok(row("value").querySelector('[role="alert"]'));
+  }
+  for (const value of ["0.1", "+01.00", ".5", "1e2", "9007199254740992"]) {
+    const before = edits().length;
+    await type("value", value);
+    await key("value", "Enter");
+    assert.equal(edits().length, before + 1);
+    assert.equal((edits().at(-1)!.operations[0] as { value: number }).value, Number(value));
+    await acknowledge();
+    await choose("value", "number");
+  }
+  await key("value", "Escape");
   await type("caption", "Hidden panel draft");
   await key("caption", "Enter");
   // Showing a retained Webview replays its current document before the
