@@ -264,6 +264,34 @@ button {
   align-items: flex-start;
   gap: 20px;
 }
+.toolbox {
+  width: 160px;
+  flex-shrink: 0;
+  border: 1px solid var(--vscode-panel-border);
+  padding: 12px;
+  box-sizing: border-box;
+}
+.toolbox h2 {
+  font-size: inherit;
+  margin: 0 0 8px;
+}
+.toolbox button {
+  display: block;
+  width: 100%;
+  margin: 4px 0;
+  text-align: left;
+}
+.toolbox button[aria-pressed="true"] {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.placing-control .form {
+  cursor: crosshair;
+}
 .property-grid {
   width: 300px;
   min-width: 240px;

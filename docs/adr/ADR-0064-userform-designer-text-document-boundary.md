@@ -83,6 +83,7 @@ capability boundary while the visual editor remains read-only.
 ## Related
 
 - Property metadata and authored states are supplemented by `docs/adr/ADR-0067-userform-designer-property-metadata.md`.
+- Structural control creation and deletion are supplemented by `docs/adr/ADR-0068-userform-designer-structural-control-edits.md`.
 
 - Interactive geometry is supplemented by `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`.
 - Issue #915

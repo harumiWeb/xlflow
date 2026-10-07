@@ -1,7 +1,9 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { XlflowLanguageClientManager } from "../../src/client";
-import { UserFormEditorProvider } from "../../src/userFormEditor/provider";
+import { UserFormEditorProvider, prepareStructuralEdit } from "../../src/userFormEditor/provider";
+import { designerDocument } from "../../src/userFormEditor/model";
+import { createControl } from "../../src/userFormEditor/toolbox";
 import type { DocumentEditQueue } from "../../src/userFormEditor/edits";
 import type { DesignerError, HostMessage, WebviewMessage } from "../../src/userFormEditor/protocol";
 
@@ -9,6 +11,7 @@ import type { DesignerError, HostMessage, WebviewMessage } from "../../src/userF
 // and deferred queue result, so visibility cannot race the test driver.
 export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): Promise<void> {
   await runClientCapabilityAssertions();
+  await runStructuralPreparationAssertions();
   const incoming = new vscode.EventEmitter<WebviewMessage>();
   const view = new vscode.EventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>();
   const disposed = new vscode.EventEmitter<void>();
@@ -151,43 +154,114 @@ async function runClientCapabilityAssertions(): Promise<void> {
   const document = await vscode.workspace.openTextDocument({ content: "form: {name: Main}" });
   const property = { type: "setFormProperty", field: "caption", value: "New" } as const;
   const geometry = { type: "moveControl", controlId: "button", left: 1, top: 2 } as const;
+  const structural = { type: "removeControl", controlId: "button", cascade: true } as const;
   for (const userFormEdit of [undefined, false, true]) {
     for (const userFormPropertyEdit of [undefined, false, true]) {
-      let requests = 0;
-      const response = { edits: [] };
-      const manager = Object.assign(Object.create(XlflowLanguageClientManager.prototype), {
-        previewGeneration: 0,
-        workspaceFolderKey: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString(),
-        client: {
-          isRunning: () => true,
-          initializeResult: {
-            capabilities: { experimental: { userFormEdit, userFormPropertyEdit } },
+      for (const userFormStructuralEdit of [undefined, false, true]) {
+        let requests = 0;
+        const response = { edits: [] };
+        const manager = Object.assign(Object.create(XlflowLanguageClientManager.prototype), {
+          previewGeneration: 0,
+          workspaceFolderKey: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString(),
+          client: {
+            isRunning: () => true,
+            initializeResult: {
+              capabilities: {
+                experimental: { userFormEdit, userFormPropertyEdit, userFormStructuralEdit },
+              },
+            },
+            sendRequest: async () => {
+              requests++;
+              return response;
+            },
           },
-          sendRequest: async () => {
-            requests++;
-            return response;
-          },
-        },
-      }) as XlflowLanguageClientManager;
-      for (const operations of [[property], [geometry], [property, geometry]]) {
-        const before = requests;
-        const allowed = operations.every((op) =>
-          op.type === "setFormProperty" ? userFormPropertyEdit === true : userFormEdit === true,
-        );
-        const request = manager.requestUserFormEdit(
-          document,
-          document.version,
-          document.getText(),
-          operations,
-        );
-        if (allowed) assert.strictEqual(await request, response);
-        else await assert.rejects(request);
-        assert.strictEqual(
-          requests,
-          before + Number(allowed),
-          "only required capabilities gate transport",
-        );
+        }) as XlflowLanguageClientManager;
+        for (const operations of [[property], [geometry], [structural], [property, geometry]]) {
+          const before = requests;
+          const allowed = operations.every((op) =>
+            op.type === "setFormProperty"
+              ? userFormPropertyEdit === true
+              : op.type === "removeControl"
+                ? userFormStructuralEdit === true
+                : userFormEdit === true,
+          );
+          const request = manager.requestUserFormEdit(
+            document,
+            document.version,
+            document.getText(),
+            operations,
+          );
+          if (allowed) assert.strictEqual(await request, response);
+          else await assert.rejects(request);
+          assert.strictEqual(
+            requests,
+            before + Number(allowed),
+            "only required capabilities gate transport",
+          );
+        }
       }
     }
   }
+}
+
+async function runStructuralPreparationAssertions(): Promise<void> {
+  const document = designerDocument({
+    form: { name: "Main", width: 480, height: 360 },
+    controls: [
+      { id: "frame", type: "Frame", name: "Frame1" },
+      { id: "nested", type: "Frame", name: "Frame2", parentId: "frame" },
+      { id: "child", type: "TextBox", name: "TextBox1", parentId: "nested" },
+      { id: "other", type: "Label", name: "Label1" },
+      { id: "page", type: "Page", name: "Page1", parentId: "multi" },
+      { id: "multi", type: "MultiPage", name: "MultiPage1" },
+    ],
+  });
+  const snapshot = { version: 7, document };
+  const operation = { type: "removeControl", controlId: "frame", cascade: true } as const;
+  let confirmations = 0;
+  const confirm = async (name: string, count: number) => {
+    confirmations++;
+    assert.strictEqual(name, "Frame1");
+    assert.strictEqual(count, 2, "all descendants, excluding siblings, are shown");
+    return true;
+  };
+  assert.strictEqual(await prepareStructuralEdit(operation, snapshot, 7, confirm), undefined);
+  assert.strictEqual(confirmations, 1);
+  assert.strictEqual(
+    (await prepareStructuralEdit(operation, snapshot, 7, async () => false))?.code,
+    "editCancelled",
+  );
+  assert.strictEqual(
+    (await prepareStructuralEdit(operation, snapshot, 8, confirm))?.code,
+    "staleDocument",
+  );
+  assert.strictEqual(
+    (await prepareStructuralEdit(operation, undefined, 7, confirm))?.code,
+    "staleDocument",
+  );
+  assert.strictEqual(
+    await prepareStructuralEdit({ ...operation, controlId: "other" }, snapshot, 7, confirm),
+    undefined,
+  );
+  assert.strictEqual(confirmations, 1, "leaf deletion does not open a confirmation");
+  for (const controlId of ["missing", "page"])
+    assert.strictEqual(
+      (await prepareStructuralEdit({ ...operation, controlId }, snapshot, 7, confirm))?.code,
+      "unsupportedDeletion",
+    );
+  const control = createControl(document, "Label", 0, 0, false, () => "fresh")!;
+  assert.strictEqual(
+    await prepareStructuralEdit({ type: "addControl", control }, snapshot, 7, confirm),
+    undefined,
+  );
+  for (const conflict of [
+    { ...control, id: "child" },
+    { ...control, name: "LABEL1" },
+    { ...control, name: "MAIN" },
+  ])
+    assert.strictEqual(
+      (await prepareStructuralEdit({ type: "addControl", control: conflict }, snapshot, 7, confirm))
+        ?.code,
+      "controlConflict",
+    );
 }

@@ -180,6 +180,59 @@ Resize also preserves the opposite edge. If that unchanged
 axis or opposite edge already prevents a fitting result, reject the interaction
 rather than silently correcting it; source editing remains available.
 
+## Toolbox and structural control edits
+
+The Toolbox contains Pointer and these 14 built-in control types: Label,
+TextBox, ComboBox, ListBox, CommandButton, CheckBox, OptionButton,
+ToggleButton, SpinButton, ScrollBar, Image, Frame, MultiPage, and TabStrip.
+Page is not a Toolbox item. Pointer is the normal selection tool. Selecting a
+control type arms placement; clicking the canvas inserts one control at the
+click position. Drag-to-create is not part of this interaction.
+
+New controls are always root controls. The placement UI does not target an
+existing container or assign `parentId`, and it does not infer containment
+from overlap. Use the same centralized per-type width and height defaults listed under Rendering;
+creation and preview must not maintain separate size tables. Convert the
+canvas click to FormSpec points. With snapping off, normalize each coordinate
+with the TypeScript `stableDelta` helper (six decimal places) to suppress
+floating-point micro-error; with snapping on, use the existing 8 pt grid. Then
+clamp `left` and `top` so the default-size control fits within the current form
+bounds. If either form dimension is smaller than the new control's default
+dimension, reject the insertion without changing the source.
+
+Generate the ID as `control-<UUID>`, independently of its current name, and
+ensure it does not collide with an existing ID. Renaming a control leaves this
+ID unchanged. Generate a familiar VBA name from the control type's prefix by
+choosing the smallest positive integer suffix whose full name is unused when
+compared case-insensitively against every control name and the form name. Before
+dispatching an addition, the extension host rechecks the new ID and checks the
+name case-insensitively against the current form and control names. These
+Toolbox allocation and host-add checks are the Designer's name-conflict guards;
+Go `Apply` and canonical FormSpec validation do not add global control-name
+uniqueness validation.
+
+A new MultiPage has no Page child controls and `selectedIndex: -1`. A new
+TabStrip has `tabs: []` and `selectedIndex: -1`. Inserting either control does
+not create or edit Pages or tabs. On successful insertion, select the new
+control and return the Toolbox to Pointer. Escape cancels pending placement
+without a source edit.
+
+The Designer offers a Delete toolbar action and handles Delete when the canvas
+has focus. It must not intercept Delete from a focused text or property input.
+A control with no descendants is removed immediately. If descendants exist,
+the host first shows a modal confirmation containing the selected control's
+name and descendant count. Confirmed removal deletes the selected control and
+all descendants with `cascade: true` in one semantic edit and one VS Code
+`WorkspaceEdit`; Undo/Redo therefore restores or removes the whole subtree as
+one native history step. Direct deletion of a selected Page is disabled.
+
+Structural edits apply only to the open FormSpec `TextDocument`. They do not
+edit code-behind or save the document automatically. The host captures the
+source and version associated with an add request or pending delete
+confirmation. If the document text/version, project, or LSP connection changes
+before the edit is submitted or applied, discard the stale action and refresh
+from the current document; do not replay it against newer text.
+
 ## Property Grid and authored source states
 
 The running LSP supplies `propertyGrid` alongside the canonical preview
@@ -278,6 +331,14 @@ using control IDs and finite point values, or one `setFormProperty` /
 servers retain geometry editing with the grid disabled. Preview-only servers
 retain read-only rendering. The extension and RPC both accept
 one operation or a move/resize pair for the same control per interaction.
+Adding and removing controls additionally require the separate
+`capabilities.experimental.userFormStructuralEdit: true` capability. This
+capability gates `addControl` and `removeControl` without changing the
+independent geometry and property capability checks. An older server that does
+not advertise it keeps the preview and whichever existing edit capabilities it
+advertises; structural actions are unavailable.
+Each Toolbox insertion or deletion sends one structural operation; it is not
+combined with geometry or property operations in the same transaction.
 Empty batches, more than two operations, repeated operation types, and pairs
 targeting different controls are rejected before source edits are generated.
 A property operation cannot be batched with another property or geometry edit.
@@ -304,8 +365,36 @@ operations revert preview and display an error without automatic retry/rebase.
 Webview messages add `edit` with request ID/version/operations. Host messages
 add edit results and availability; document messages carry editable capability.
 YAML/YML and JSON share geometry and scalar property interactions, preserving
-unrelated source formatting. Delete, Toolbox, Page collection editing,
-reparenting, multiple selection and canvas form resizing are separate issues.
+unrelated source formatting. Multiple selection and canvas form resizing remain
+outside this contract. Root-only insertion does not include placement inside a
+Frame or reparenting (#920); Page and Tab collection editing remain out of
+scope (#921).
+Structural add/remove use the separate capability above.
+
+## Structural edit verification requirements
+
+Implementation checks should cover the 14 Toolbox types and Pointer, click-to-
+place and Escape cancellation, centralized default dimensions, stableDelta
+precision and grid snapping, position clamping and undersized-form rejection,
+UUID/name collision handling at Toolbox allocation and host add preflight,
+stable ID after rename, and the empty MultiPage/TabStrip states. Designer checks
+should cover root-only insertion, selection followed by return to Pointer,
+disabled direct Page deletion, canvas-only Delete handling, immediate leaf
+deletion, confirmation content and cancellation for controls with descendants,
+descendant cascade, a single native Undo/Redo step, and pending-confirmation/
+version invalidation.
+
+Keep coverage in `editors/vscode/test/userFormStructure.test.tsx`, the actual
+Webview interaction suite `editors/vscode/test/suite/userFormWebview.test.ts`,
+and host preparation checks in `editors/vscode/test/suite/userFormProvider.test.ts`.
+
+Go and LSP checks should cover JSON add/remove source edits, source formatting
+preservation, removal of descendants represented by legacy nested source, and
+final canonical validation without a new global name-uniqueness rule. Verify
+that older servers retain their separately advertised geometry/property
+behavior and do not expose structural actions without
+`userFormStructuralEdit`. These checks concern source editing and do not claim
+Excel, COM, VBIDE or VBE behavior.
 
 ## Property editing verification
 
@@ -335,6 +424,8 @@ interpolated into the HTML document.
 - Issue #915
 - Issue #917
 - Issue #918
+- Issue #919
+- `docs/adr/ADR-0068-userform-designer-structural-control-edits.md`
 - `docs/adr/ADR-0067-userform-designer-property-metadata.md`
 - `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`

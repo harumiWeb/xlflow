@@ -1,3 +1,6 @@
+import { controlMetadata } from "./toolbox";
+import type { NewControl } from "./toolbox";
+
 export interface DesignerError {
   code: string;
   message: string;
@@ -75,6 +78,7 @@ export interface PreviewResult {
   version: number;
   editable?: boolean;
   propertyEditable?: boolean;
+  structuralEditable?: boolean;
   propertyGrid?: PropertyGridData;
   propertyError?: DesignerError;
   document?: PreviewDocument;
@@ -153,6 +157,14 @@ export const designerStrings = {
   staleProperty: "The document changed. Re-enter this value on the updated form.",
   propertyReadOnly:
     "Property editing requires an xlflow version supporting UserForm property edits.",
+  toolbox: "Toolbox",
+  pointer: "Pointer",
+  deleteControl: "Delete control",
+  structuralReadOnly:
+    "Adding and deleting controls requires an xlflow version supporting structural edits.",
+  cannotInsert: "This control's default size is larger than the form.",
+  placement:
+    "Click the form to place the control. Escape cancels. Controls are added at the form root.",
 };
 export type DesignerStrings = typeof designerStrings;
 
@@ -164,6 +176,7 @@ export type HostMessage =
       document: DesignerDocument;
       editable?: boolean;
       propertyEditable?: boolean;
+      structuralEditable?: boolean;
       propertyGrid?: PropertyGridData;
       propertyError?: DesignerError;
     }
@@ -179,7 +192,61 @@ export type GeometryOperation =
 export type PropertyOperation =
   | { type: "setFormProperty"; field: string; value: ScalarValue }
   | { type: "setControlProperty"; controlId: string; field: string; value: ScalarValue };
-export type SemanticOperation = GeometryOperation | PropertyOperation;
+export type StructuralOperation =
+  | { type: "addControl"; control: NewControl }
+  | { type: "removeControl"; controlId: string; cascade: boolean };
+export type SemanticOperation = GeometryOperation | PropertyOperation | StructuralOperation;
+
+export function isStructuralOperation(value: unknown): value is StructuralOperation {
+  if (typeof value !== "object" || value === null) return false;
+  const op = value as Record<string, unknown>;
+  if (op.type === "removeControl")
+    return (
+      Object.keys(op).length === 3 &&
+      Object.keys(op).every((key) => ["type", "controlId", "cascade"].includes(key)) &&
+      typeof op.controlId === "string" &&
+      op.controlId.length > 0 &&
+      typeof op.cascade === "boolean"
+    );
+  if (
+    op.type !== "addControl" ||
+    Object.keys(op).length !== 2 ||
+    typeof op.control !== "object" ||
+    op.control === null ||
+    Array.isArray(op.control)
+  )
+    return false;
+  const control = op.control as Record<string, unknown>;
+  return (
+    Object.keys(control).every((key) =>
+      [
+        "id",
+        "name",
+        "type",
+        "left",
+        "top",
+        "width",
+        "height",
+        "caption",
+        "selectedIndex",
+        "tabs",
+      ].includes(key),
+    ) &&
+    typeof control.id === "string" &&
+    control.id.length > 0 &&
+    typeof control.name === "string" &&
+    /^[A-Za-z][A-Za-z0-9_]*$/.test(control.name) &&
+    controlMetadata.some((m) => m.type === control.type) &&
+    ["left", "top", "width", "height"].every(
+      (key) => typeof control[key] === "number" && Number.isFinite(control[key]),
+    ) &&
+    Number(control.width) > 0 &&
+    Number(control.height) > 0 &&
+    (!Object.hasOwn(control, "caption") || typeof control.caption === "string") &&
+    (!Object.hasOwn(control, "selectedIndex") || control.selectedIndex === -1) &&
+    (!Object.hasOwn(control, "tabs") || (Array.isArray(control.tabs) && control.tabs.length === 0))
+  );
+}
 
 export function isPropertyOperation(value: unknown): value is PropertyOperation {
   if (typeof value !== "object" || value === null) return false;
@@ -249,7 +316,8 @@ export function isWebviewMessage(value: unknown): value is WebviewMessage {
     Array.isArray(operations) &&
     operations.length >= 1 &&
     operations.length <= 2 &&
-    ((operations.length === 1 && isPropertyOperation(operations[0])) ||
+    ((operations.length === 1 &&
+      (isPropertyOperation(operations[0]) || isStructuralOperation(operations[0]))) ||
       (operations.every(isGeometryOperation) &&
         operations.every((op) => op.controlId === operations[0].controlId) &&
         new Set(operations.map((op) => op.type)).size === operations.length))

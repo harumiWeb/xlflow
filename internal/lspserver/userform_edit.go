@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
+	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -48,7 +50,7 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 		return result
 	}
 	for index, operation := range params.Operations {
-		if operation.Type != formsedit.MoveControl && operation.Type != formsedit.ResizeControl && operation.Type != formsedit.SetFormProperty && operation.Type != formsedit.SetControlProperty {
+		if operation.Type != formsedit.MoveControl && operation.Type != formsedit.ResizeControl && operation.Type != formsedit.SetFormProperty && operation.Type != formsedit.SetControlProperty && operation.Type != formsedit.AddControl && operation.Type != formsedit.RemoveControl {
 			result.Error = &userFormEditError{
 				Code:    compiler.Unsupported,
 				Message: fmt.Sprintf("operation %q is not exposed by the LSP edit method", operation.Type),
@@ -56,7 +58,7 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 					OperationIndex: index,
 					Operation:      operation.Type,
 					Code:           "UFE007",
-					Message:        "The LSP edit method supports geometry and scalar property operations.",
+					Message:        "The LSP edit method supports geometry, scalar property, and add/remove operations.",
 				}},
 			}
 			return result
@@ -147,11 +149,16 @@ func parseUserFormEditParams(raw []byte) (userFormEditParams, *userFormEditError
 }
 
 func validateUserFormEditTransaction(operations []formsedit.Operation) *userFormEditError {
-	if len(operations) == 1 && (operations[0].Type == formsedit.SetFormProperty || operations[0].Type == formsedit.SetControlProperty) {
-		return nil
+	if len(operations) == 1 {
+		switch operations[0].Type {
+		case formsedit.SetFormProperty, formsedit.SetControlProperty,
+			formsedit.MoveControl, formsedit.ResizeControl,
+			formsedit.AddControl, formsedit.RemoveControl:
+			return nil
+		}
 	}
 	if len(operations) < 1 || len(operations) > 2 {
-		return invalidUserFormEditParams(fmt.Errorf("a transaction requires one property operation, one geometry operation or one move/resize pair"))
+		return invalidUserFormEditParams(fmt.Errorf("a transaction requires one property, geometry or structural operation, or one move/resize pair"))
 	}
 	if len(operations) == 2 {
 		first, second := operations[0], operations[1]
@@ -184,11 +191,39 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		allowed = []string{"type", "field", "value"}
 	case formsedit.SetControlProperty:
 		allowed = []string{"type", "controlId", "field", "value"}
+	case formsedit.AddControl:
+		allowed = []string{"type", "control"}
+	case formsedit.RemoveControl:
+		allowed = []string{"type", "controlId", "cascade"}
 	default:
 		return formsedit.Operation{}, &userFormEditError{Code: compiler.Unsupported, Message: fmt.Sprintf("operation %q is not exposed by the LSP edit method", operationType)}
 	}
-	if err := validateJSONFields(fields, allowed); err != nil {
+	if operationType == formsedit.RemoveControl {
+		if err := validateJSONFieldSet(fields, []string{"type", "controlId"}, []string{"cascade"}); err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(err)
+		}
+	} else if err := validateJSONFields(fields, allowed); err != nil {
 		return formsedit.Operation{}, invalidUserFormEditParams(err)
+	}
+	if operationType == formsedit.AddControl {
+		control, err := decodeUserFormControl(fields["control"])
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("control: %w", err))
+		}
+		return formsedit.Operation{Type: operationType, Control: control}, nil
+	}
+	if operationType == formsedit.RemoveControl {
+		controlID, err := decodeRequiredJSONString(fields, "controlId")
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(err)
+		}
+		operation := formsedit.Operation{Type: operationType, ControlID: controlID}
+		if cascade, ok := fields["cascade"]; ok {
+			if bytes.Equal(bytes.TrimSpace(cascade), []byte("null")) || json.Unmarshal(cascade, &operation.Cascade) != nil {
+				return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("cascade must be a boolean"))
+			}
+		}
+		return operation, nil
 	}
 	if operationType == formsedit.SetFormProperty || operationType == formsedit.SetControlProperty {
 		var field string
@@ -248,6 +283,153 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 	return op, nil
 }
 
+func decodeUserFormControl(raw json.RawMessage) (*spec.FormSpecControl, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := rejectDuplicateJSONFields(raw); err != nil {
+		return nil, err
+	}
+	if err := validateJSONStructPayload(raw, reflect.TypeFor[spec.FormSpecControl]()); err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"id", "name", "type"} {
+		if _, err := decodeRequiredJSONString(fields, key); err != nil {
+			return nil, err
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	var control spec.FormSpecControl
+	if err := decoder.Decode(&control); err != nil {
+		return nil, err
+	}
+	if len(control.Controls) > 0 {
+		return nil, fmt.Errorf("must contain exactly one flat control")
+	}
+	return &control, nil
+}
+
+func validateJSONStructPayload(raw json.RawMessage, valueType reflect.Type) error {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("null cannot be represented in the control payload")
+	}
+	for valueType.Kind() == reflect.Pointer {
+		valueType = valueType.Elem()
+	}
+	switch valueType.Kind() {
+	case reflect.Struct:
+		fields, err := decodeJSONObject(raw)
+		if err != nil {
+			return err
+		}
+		known := make(map[string]reflect.Type, valueType.NumField())
+		for index := range valueType.NumField() {
+			field := valueType.Field(index)
+			if !field.IsExported() {
+				continue
+			}
+			name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+			if name == "-" {
+				continue
+			}
+			if name == "" {
+				name = field.Name
+			}
+			known[name] = field.Type
+		}
+		for name, fieldValue := range fields {
+			fieldType, ok := known[name]
+			if !ok {
+				return fmt.Errorf("unknown or noncanonical field %q", name)
+			}
+			if err := validateJSONStructPayload(fieldValue, fieldType); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		var values []json.RawMessage
+		if err := json.Unmarshal(raw, &values); err != nil {
+			return err
+		}
+		for index, item := range values {
+			if err := validateJSONStructPayload(item, valueType.Elem()); err != nil {
+				return fmt.Errorf("[%d]: %w", index, err)
+			}
+		}
+	}
+	return nil
+}
+
+func decodeRequiredJSONString(fields map[string]json.RawMessage, key string) (string, error) {
+	raw, ok := fields[key]
+	var value string
+	if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &value) != nil || value == "" {
+		return "", fmt.Errorf("%s must be a non-empty string", key)
+	}
+	return value, nil
+}
+
+func rejectDuplicateJSONFields(raw []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if err := consumeJSONValue(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func consumeJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := map[string]struct{}{}
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return fmt.Errorf("object key must be a string")
+			}
+			if _, duplicate := seen[key]; duplicate {
+				return fmt.Errorf("duplicate field %q", key)
+			}
+			seen[key] = struct{}{}
+			if err := consumeJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	case '[':
+		for decoder.More() {
+			if err := consumeJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delimiter)
+	}
+}
+
 func decodeJSONObject(raw []byte) (map[string]json.RawMessage, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	token, err := decoder.Token()
@@ -290,8 +472,15 @@ func decodeJSONObject(raw []byte) (map[string]json.RawMessage, error) {
 }
 
 func validateJSONFields(fields map[string]json.RawMessage, allowed []string) error {
-	allowedSet := make(map[string]struct{}, len(allowed))
-	for _, key := range allowed {
+	return validateJSONFieldSet(fields, allowed, nil)
+}
+
+func validateJSONFieldSet(fields map[string]json.RawMessage, required, optional []string) error {
+	allowedSet := make(map[string]struct{}, len(required)+len(optional))
+	for _, key := range required {
+		allowedSet[key] = struct{}{}
+	}
+	for _, key := range optional {
 		allowedSet[key] = struct{}{}
 	}
 	for key := range fields {
@@ -299,7 +488,7 @@ func validateJSONFields(fields map[string]json.RawMessage, allowed []string) err
 			return fmt.Errorf("unexpected payload field %q", key)
 		}
 	}
-	for _, key := range allowed {
+	for _, key := range required {
 		if _, ok := fields[key]; !ok {
 			return fmt.Errorf("missing payload field %q", key)
 		}

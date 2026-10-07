@@ -1,3 +1,19 @@
+# Issue #919 Toolbox and structural editing
+
+- [x] Add shared control metadata, click placement and stable ID/name generation.
+- [x] Expose source-preserving YAML/JSON add/delete via structural LSP capability.
+- [x] Confirm subtree deletion in the URI edit queue and retain stale/undo guarantees.
+- [x] Verify generation, UI, compiler, RPC, native undo/redo and source preservation.
+- [x] Document the contract, update changelogs and complete self-review.
+
+Validation: `rtk pnpm --dir editors/vscode test` passed, including real VS Code
+1.140.0 Webview and native Undo/Redo. Related Go checks passed with
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/vba/userforms/... ./internal/lspserver`
+(LSP: 132.554s); the corresponding `vet` also passed. Lint, docs checks,
+changed-file Oxfmt, Go formatting and `git diff --check` passed. Focused read-only
+UI and Go reviews found no confirmed defects. Excel device tests and remote CI
+were not run; this change edits source documents and does not alter COM/VBIDE.
+
 # PR #927 review follow-up
 
 - [x] Reproduce and isolate form/control draft identity when a control ID is `form`.

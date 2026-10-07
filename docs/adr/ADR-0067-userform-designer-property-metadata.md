@@ -73,6 +73,7 @@ frontend property schema can also disagree with the running LSP version.
 ## Related
 
 - Issue #918 (parent: Issue #914)
+- Structural operation capability negotiation is supplemented by `docs/adr/ADR-0068-userform-designer-structural-control-edits.md`.
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`
 - `docs/adr/ADR-0065-userform-source-preserving-semantic-edits.md`
 - `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`

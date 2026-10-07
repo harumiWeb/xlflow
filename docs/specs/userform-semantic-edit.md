@@ -4,8 +4,10 @@ This specification defines the host-neutral Go API for applying semantic edits
 to UserForm FormSpecs while retaining the original source as the canonical
 document. Issue #916 provides the YAML API; Issue #917 adds JSON geometry
 editing and the Designer LSP adapter; Issue #918 adds scalar property editing
-across YAML/YML/JSON and authored-state metadata. The core API remains host-neutral and
-does not invoke Excel or provide a CLI command.
+across YAML/YML/JSON and authored-state metadata; Issue #919 adds Toolbox
+insertion and subtree deletion, with confirmation only when descendants exist,
+including JSON structural edits. The core API remains host-neutral and does not
+invoke Excel or provide a CLI command.
 
 ## Authority and source model
 
@@ -16,8 +18,8 @@ func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result,
 ```
 
 `Apply` accepts `.yaml` and `.yml` for all operations, and `.json` for
-`moveControl`, `resizeControl`, `setFormProperty` and `setControlProperty`.
-Other JSON operations return a structured
+`moveControl`, `resizeControl`, `setFormProperty`, `setControlProperty`,
+`addControl` and `removeControl`. Other JSON operations return a structured
 unsupported-operation error. `Operation` values are serializable tagged structs.
 The supported YAML operation tags are
 `setFormProperty`, `setControlProperty`, `moveControl`, `resizeControl`,
@@ -74,6 +76,14 @@ Canonical parsing, payload validation, atomic failure and numeric no-op
 behavior remain shared with YAML. No additional FormSpec validation authority
 is introduced by the JSON writer.
 
+JSON `addControl` inserts one control into the source `controls` sequence, and
+`removeControl` removes the selected control's source subtree when
+`cascade: true`. Resolve legacy nested control source as well as canonical
+`parentId` relationships so a cascade removes descendants without orphaning
+them. Keep each change local to the affected sequence or subtree and preserve
+unrelated JSON bytes; do not serialize the normalized model to produce the
+result. JSON `setParent` and `reorderControl` remain unsupported.
+
 Setting a supported `build.*` path may insert the missing `form.build` object;
 only the required local object/member is added. Legacy fields and build fields
 remain independent. `form.name` changes only that field, without renaming files,
@@ -118,8 +128,8 @@ ID fails parsing with `UFV004` before any operation is applied.
 | `setControlProperty` | Set one supported scalar field named relative to the selected control. Supported fields include `name`, `caption`, `tag`, `controlTipText`, `accelerator`, `text`, scalar `value`, `left`, `top`, `width`, `height`, `tabIndex`, `selectedIndex`, `enabled`, and `visible`. `progId` is not an authorable field. `id` and `type` are immutable. Geometry can be set individually with this operation; `moveControl` and `resizeControl` are the paired-field operations. |
 | `moveControl`        | Set both `left` and `top` on `controlId`; both pointers are required.                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `resizeControl`      | Set both `width` and `height`; both pointers are required.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `addControl`         | Add exactly one control from `control`. It must have an explicit `id`, `name`, and `type`, and must not contain a nested `controls` tree. `Control.ParentID` supplies the optional parent relationship. `Operation.ParentID` is irrelevant and must be empty; a non-empty value is rejected. The canonical validator checks the resulting control and topology.                                                                                                          |
-| `removeControl`      | Remove the target control. `cascade` defaults to false; if descendants remain, an absent or false value rejects removal. `cascade: true` removes the target and its descendants.                                                                                                                                                                                                                                                                                         |
+| `addControl`         | Add exactly one control from `control`. It must have an explicit `id`, `name`, and `type`, and must not contain a nested `controls` tree. `Control.ParentID` supplies the optional parent relationship. `Operation.ParentID` is irrelevant and must be empty; a non-empty value is rejected. The canonical validator checks the resulting control and topology. Supported for YAML/YML and JSON source.                                                                  |
+| `removeControl`      | Remove the target control. `cascade` defaults to false; if descendants remain, an absent or false value rejects removal. `cascade: true` removes the target and its descendants, including descendants represented by legacy nested source. Supported for YAML/YML and JSON source.                                                                                                                                                                                      |
 | `setParent`          | Set `parentId`, or make the control a root when it is empty. Optional `left` and `top` replace parent-relative coordinates; omitted values retain the existing local coordinates. Reparenting does not preserve or compute a world-space position.                                                                                                                                                                                                                       |
 | `reorderControl`     | Move the target to the zero-based `index` among its current siblings. Sibling order uses stable `zIndex` order, preserving source order for ties. Only sibling `zIndex` values needed for the requested order are updated; `tabIndex` is unchanged.                                                                                                                                                                                                                      |
 
@@ -239,18 +249,22 @@ The implementation is pure Go and must cover these behaviors:
   before operations; model-only IDs produced by `NormalizeFormSpec` are not
   inserted or addressable. No-ops preserve bytes.
 - Duplicate control names are not rejected by canonical source validation and
-  must not become an edit-engine validation rule. Verify that writer-specific
-  name constraints remain the responsibility of downstream compiler or
-  generator checks.
+  must not become an edit-engine validation rule. The Designer allocates a free
+  name in the Toolbox and the extension host rechecks it case-insensitively
+  against the current form and control names before adding. Go `Apply` adds no
+  global name-uniqueness rule; writer-specific constraints remain the
+  responsibility of downstream compiler or generator checks.
 - Final-state validation returns canonical `UFVxxx` issues and never publishes
   a partial source. Error data identifies the failing operation and preserves
   validation codes, messages, and suggestions.
 - Explicit `form` paths update only the named legacy or `build.*` field.
   Unsupported observed fields, property removal, property bags, collections,
   pictures, and non-scalar values are rejected.
-- YAML/YML inputs support all operations; JSON supports geometry and scalar
-  property operations, replacement/insertion including missing `build`, escaped keys, duplicate-key rejection and
-  formatting-stable no-ops, with unsupported JSON operations rejected atomically.
+- YAML/YML inputs support all operations; JSON supports geometry, scalar
+  property, add and remove operations, replacement/insertion including missing
+  `build`, escaped keys, duplicate-key rejection and formatting-stable no-ops.
+  JSON `removeControl` covers legacy nested source cascades; unsupported JSON
+  operations are rejected atomically.
 - Authored metadata distinguishes absent/null/empty/false/zero without exposing
   observed or renderer defaults as authored values. Cover missing `value`,
   explicit optional null round-trip, required-null rejection and insertion of
@@ -263,7 +277,7 @@ VBE-facing behavior or establish any Excel runtime claim.
 
 ## Out of scope
 
-- JSON structural operations other than geometry and scalar property edits.
+- JSON `setParent` and `reorderControl` operations.
 - CLI wiring; VS Code/Webview/LSP adapters are specified separately.
 - Excel, COM, VBIDE, Designer persistence, or VBE validation.
 - Property removal, observed-state authoring, property bags, collection edits,
@@ -272,6 +286,9 @@ VBE-facing behavior or establish any Excel runtime claim.
   targeting, and ID/type changes.
 
 ## Related
+
+- Issue #919
+- `docs/adr/ADR-0068-userform-designer-structural-control-edits.md`
 
 - Issue #918
 - `docs/adr/ADR-0067-userform-designer-property-metadata.md`

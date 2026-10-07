@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added the UserForm Designer Toolbox and structural control editing for
+  click-to-place root controls, immediate leaf deletion, and confirmed subtree
+  deletion. YAML/JSON source-preserving add/remove uses a separate LSP
+  capability with stale-document guards and native undo/redo. Placement inside
+  Frames/reparenting and Page/Tab editing remain in Issues #920/#921.
+
 - Added a metadata-driven UserForm Property Grid for form/control scalar edits
   in YAML/YML/JSON. The running LSP supplies field contracts and authored
   presence/value states separately from preview defaults. Edits preserve source

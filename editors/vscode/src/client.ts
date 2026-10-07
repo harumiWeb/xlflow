@@ -59,7 +59,12 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       );
     }
     const experimental = client.initializeResult?.capabilities.experimental as
-      | { userFormPreview?: boolean; userFormEdit?: boolean; userFormPropertyEdit?: boolean }
+      | {
+          userFormPreview?: boolean;
+          userFormEdit?: boolean;
+          userFormPropertyEdit?: boolean;
+          userFormStructuralEdit?: boolean;
+        }
       | undefined;
     if (experimental?.userFormPreview !== true)
       throw new Error(vscode.l10n.t("Update xlflow to a version supporting UserForm previews."));
@@ -75,6 +80,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       editable: experimental.userFormEdit === true,
       propertyEditable:
         experimental.userFormPropertyEdit === true && result.propertyGrid !== undefined,
+      structuralEditable: experimental.userFormStructuralEdit === true,
     };
   }
 
@@ -92,13 +98,20 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
         vscode.l10n.t("Select this form's project and enable xlflow LSP to edit the form."),
       );
     const experimental = client.initializeResult?.capabilities.experimental as
-      | { userFormEdit?: boolean; userFormPropertyEdit?: boolean }
+      | { userFormEdit?: boolean; userFormPropertyEdit?: boolean; userFormStructuralEdit?: boolean }
       | undefined;
     if (
-      operations.some((op) => op.type !== "setFormProperty" && op.type !== "setControlProperty") &&
+      operations.some((op) => op.type === "moveControl" || op.type === "resizeControl") &&
       experimental?.userFormEdit !== true
     )
       throw new Error(vscode.l10n.t("Update xlflow to a version supporting UserForm edits."));
+    if (
+      operations.some((op) => op.type === "addControl" || op.type === "removeControl") &&
+      experimental?.userFormStructuralEdit !== true
+    )
+      throw new Error(
+        vscode.l10n.t("Update xlflow to a version supporting UserForm structural edits."),
+      );
     if (
       operations.some((op) => op.type === "setFormProperty" || op.type === "setControlProperty") &&
       experimental?.userFormPropertyEdit !== true
