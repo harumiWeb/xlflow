@@ -68,6 +68,28 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 		result.Error = requestError
 		return result
 	}
+	for _, operation := range params.Operations {
+		if operation.Type == formsedit.AddControl {
+			if requestError := validateDesignerControlAddition(operation.Control); requestError != nil {
+				result.Error = requestError
+				return result
+			}
+		}
+		if operation.Type == formsedit.RemoveControl {
+			// Resolve legacy nested Pages through the canonical flattened model.
+			// Invalid source remains Apply's responsibility so its structured
+			// validation diagnostics and ambiguity checks are preserved.
+			document, err := spec.ParseFormSpec(input, []byte(params.Text))
+			if err == nil {
+				for _, control := range document.Controls {
+					if control.ID == operation.ControlID && strings.EqualFold(strings.TrimSpace(control.Type), "Page") {
+						result.Error = &userFormEditError{Code: compiler.Unsupported, Message: "direct Page deletion is not exposed by the Designer edit method"}
+						return result
+					}
+				}
+			}
+		}
+	}
 	changed, err := formsedit.Apply(input, []byte(params.Text), params.Operations)
 	if err != nil {
 		result.Error = userFormEditErrorFrom(err)
@@ -210,6 +232,9 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		if err != nil {
 			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("control: %w", err))
 		}
+		if requestError := validateDesignerControlAddition(control); requestError != nil {
+			return formsedit.Operation{}, requestError
+		}
 		return formsedit.Operation{Type: operationType, Control: control}, nil
 	}
 	if operationType == formsedit.RemoveControl {
@@ -281,6 +306,17 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		op.Width, op.Height = new(width), new(height)
 	}
 	return op, nil
+}
+
+func validateDesignerControlAddition(control *spec.FormSpecControl) *userFormEditError {
+	if control == nil {
+		return invalidUserFormEditParams(fmt.Errorf("control must be an object"))
+	}
+	contract, known := spec.LookupControlContract(control.Type)
+	if control.ParentID != "" || len(control.Controls) != 0 || !known || contract.Type == "Page" {
+		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer insertion supports only root built-in controls other than Page"}
+	}
+	return nil
 }
 
 func decodeUserFormControl(raw json.RawMessage) (*spec.FormSpecControl, error) {

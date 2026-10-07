@@ -1,3 +1,16 @@
+# Issue #919 final review follow-up
+
+- [x] Reproduce Pass 1 RPC bypass of root-only insertion and Page exclusion.
+- [x] Enforce the Designer structural scope at the LSP boundary while preserving the shared edit API.
+- [x] Verify YAML/JSON rejection, subtree deletion and existing edit contracts; prepare the verified fixes for Pass 2.
+- [x] Preserve the Pass 1 report and complete review resource cleanup.
+
+Pass 1 P2 verified and fixed at the Designer RPC boundary. Focused UserForm edit
+tests passed; full related UserForm/LSP tests passed (LSP 127.468s), along with
+vet, lint, docs and formatting. Generic parent/Page/custom edit API and allowed
+MultiPage cascade/child deletion are protected by regression tests. Report and
+cleanup evidence: `tmp_workspaces/final-review/issue919/pass-1-disposition.md`.
+
 # Issue #919 Toolbox and structural editing
 
 - [x] Add shared control metadata, click placement and stable ID/name generation.

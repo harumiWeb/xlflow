@@ -389,6 +389,9 @@ func TestUserFormEditStructuralPayloadValidation(t *testing.T) {
 	}{
 		{name: "valid add", raw: validAdd},
 		{name: "property bag remains open", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","properties":{"Vendor.Key":null}`, 1)},
+		{name: "parented insertion remains unsupported", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","parentId":"frame"`, 1), code: compiler.Unsupported},
+		{name: "root Page insertion remains unsupported", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"pAgE"`, 1), code: compiler.Unsupported},
+		{name: "custom insertion remains unsupported", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"VendorControl","progId":"Vendor.Control"`, 1), code: compiler.Unsupported},
 		{name: "unknown operation field", raw: strings.Replace(validAdd, `"control":`, `"extra":true,"control":`, 1), code: compiler.Invalid},
 		{name: "unknown control field", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","mystery":1`, 1), code: compiler.Invalid},
 		{name: "duplicate control field", raw: strings.Replace(validAdd, `"name":"NewLabel"`, `"name":"NewLabel","name":"Other"`, 1), code: compiler.Invalid},
@@ -513,6 +516,73 @@ func TestUserFormEditStructuralYAMLAndJSON(t *testing.T) {
 			document, err = spec.ParseFormSpec(input, []byte(removedSource))
 			if err != nil || len(document.Controls) != 1 || document.Controls[0].ID != "status" {
 				t.Fatalf("cascade result: %+v, %v\n%s", document.Controls, err, removedSource)
+			}
+		})
+	}
+}
+
+func TestUserFormEditStructuralScope(t *testing.T) {
+	root := t.TempDir()
+	server := &Server{opts: Options{RootDir: root, Config: config.Default()}}
+	fixtures := []struct {
+		format string
+		source string
+	}{
+		{format: "json", source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"frame","name":"Frame1","type":"Frame"},{"id":"multi","name":"MultiPage1","type":"MultiPage","selectedIndex":0},{"id":"page1","name":"Page1","type":"Page","parentId":"multi"},{"id":"page2","name":"Page2","type":"pAgE","parentId":"multi"},{"id":"leaf","name":"Label1","type":"Label","parentId":"page2"}]}`},
+		{format: "yaml", source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\ncontrols:\n  - id: frame\n    name: Frame1\n    type: Frame\n  - id: multi\n    name: MultiPage1\n    type: MultiPage\n    selectedIndex: 0\n    controls:\n      - id: page1\n        name: Page1\n        type: Page\n      - id: page2\n        name: Page2\n        type: pAgE\n        controls:\n          - id: leaf\n            name: Label1\n            type: Label\n"},
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.format, func(t *testing.T) {
+			uri := pathToFileURI(filepath.Join(root, "src/forms/specs/Main."+fixture.format))
+			for _, test := range []struct {
+				name string
+				op   formsedit.Operation
+			}{
+				{name: "Frame child insertion", op: formsedit.Operation{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "Label2", Type: "Label", ParentID: "frame"}}},
+				{name: "Page insertion", op: formsedit.Operation{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "Page3", Type: "pAgE", ParentID: "multi"}}},
+				{name: "custom insertion", op: formsedit.Operation{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "Custom1", Type: "VendorControl", ProgID: "Vendor.Control"}}},
+				{name: "Page direct removal", op: formsedit.Operation{Type: formsedit.RemoveControl, ControlID: "page2", Cascade: true}},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					// These are valid generic semantic edits. Only the Designer RPC
+					// boundary must exclude them until hierarchy/Page authoring lands.
+					if _, err := formsedit.Apply(spec.SpecInput{Format: fixture.format}, []byte(fixture.source), []formsedit.Operation{test.op}); err != nil {
+						t.Fatalf("generic edit unexpectedly rejected: %v", err)
+					}
+					params := userFormEditParams{URI: uri, Version: 41, Text: fixture.source, Operations: []formsedit.Operation{test.op}}
+					result := server.userFormEdit(params)
+					if result.Error == nil || result.Error.Code != compiler.Unsupported || result.Version != 41 || len(result.Edits) != 0 {
+						t.Fatalf("out-of-scope handler edit: %+v", result)
+					}
+					raw, err := json.Marshal(map[string]any{"uri": uri, "version": 41, "text": fixture.source, "operations": params.Operations})
+					if err != nil {
+						t.Fatal(err)
+					}
+					decoded, requestError := parseUserFormEditParams(raw)
+					if requestError != nil {
+						if requestError.Code != compiler.Unsupported {
+							t.Fatalf("wrong RPC rejection: %+v", requestError)
+						}
+						return
+					}
+					result = server.userFormEdit(decoded)
+					if result.Error == nil || result.Error.Code != compiler.Unsupported || len(result.Edits) != 0 {
+						t.Fatalf("out-of-scope raw RPC edit: %+v", result)
+					}
+				})
+			}
+			for _, id := range []string{"leaf", "multi"} {
+				result := server.userFormEdit(userFormEditParams{URI: uri, Version: 41, Text: fixture.source, Operations: []formsedit.Operation{{Type: formsedit.RemoveControl, ControlID: id, Cascade: true}}})
+				if result.Error != nil || len(result.Edits) == 0 {
+					t.Fatalf("supported deletion of %s failed: %+v", id, result)
+				}
+				updated, err := applyLSPTextEdits(fixture.source, result.Edits)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := spec.ParseFormSpec(spec.SpecInput{Format: fixture.format}, []byte(updated)); err != nil {
+					t.Fatalf("supported deletion produced invalid source: %v", err)
+				}
 			}
 		})
 	}

@@ -339,6 +339,13 @@ not advertise it keeps the preview and whichever existing edit capabilities it
 advertises; structural actions are unavailable.
 Each Toolbox insertion or deletion sends one structural operation; it is not
 combined with geometry or property operations in the same transaction.
+The RPC also enforces this structural scope: insertion accepts only a root
+built-in control other than Page, and direct Page deletion returns
+`unsupported` without edits. Page targets resolve through the canonical
+flattened source model, including legacy nested input. Deleting a MultiPage
+with `cascade: true` may still remove its Pages and their descendants. These
+restrictions belong to the Designer adapter; the shared semantic edit API
+retains its general parent and Page operations.
 Empty batches, more than two operations, repeated operation types, and pairs
 targeting different controls are rejected before source edits are generated.
 A property operation cannot be batched with another property or geometry edit.
