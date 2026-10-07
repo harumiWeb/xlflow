@@ -38,8 +38,8 @@
     "bundle": "node esbuild.js",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
-    "test": "pnpm run compile && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/runTest.js",
-    "test:designer": "pnpm run compile && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js",
+    "test": "pnpm run compile && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/runTest.js",
+    "test:designer": "pnpm run compile && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js",
     "lint": "oxlint ."
   },
   "dependencies": {

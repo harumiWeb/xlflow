@@ -73,9 +73,11 @@ The main features include:
 - Project recognition based on `xlflow.toml` configuration
 - Opens canonical YAML, YML, and JSON UserForm FormSpecs in an optional
   visual editor with selection, move, resize, keyboard movement, grid snapping,
-  zoom, and an LSP metadata-driven Property Grid for supported form/control
-  scalars. Each completed interaction is one VS Code undoable edit. The preview follows the current document and keeps
-  its last valid rendering while the source has errors.
+  zoom, an LSP metadata-driven Property Grid, and a Toolbox for click-to-place
+  root controls. Leaf controls delete immediately; controls with descendants
+  require confirmation and are removed as one undoable subtree edit. The preview
+  follows the current document and keeps its last valid rendering while the
+  source has errors.
 - Imports VBA modules from Excel workbooks
 - Applies edited VBA modules back to Excel workbooks
 - Starts and stops xlflow sessions
@@ -306,8 +308,11 @@ Additionally, ensure that both Windows and WSL instances can execute xlflow succ
   remain read-only. The grid distinguishes unset/null/empty/false/zero and
   supports explicit optional null, not key deletion. Form name edits do not
   rename files or code sidecars. Source editing requires no Excel.
-  Toolbox, reparenting, Page collection editing, canvas form/Page resizing and
-  image asset loading are unavailable. See the [UserForm guide](https://harumiweb.github.io/xlflow/guides/userforms).
+  Toolbox insertion and deletion need `userFormStructuralEdit`; older servers
+  keep only the edit families they advertise. Insertion is root-only. Placement
+  inside Frames, reparenting, Page collection editing, canvas form/Page resizing
+  and image asset loading are unavailable. Source edits do not save
+  automatically or change code-behind. See the [UserForm guide](https://harumiweb.github.io/xlflow/guides/userforms).
 - Macro selection functionality currently does not support interactive operations. Running `xlflow: Run Macro` will execute the configured default macro. Standalone `Sub` procedures without arguments can be invoked via CodeLens.
 - Both `xlflow: New Project` and `xlflow: Initialize Project` only display basic CLI workflows and do not provide a picker for selecting options like `--with-skill`, `--with-module`, `--agent`, or `--json`.
 - This extension itself does not implement VBA code analysis, diagnostics, formatting, suggestion displays, or symbol analysis. These functionalities are delegated to the `xlflow` CLI and `xlflow-lsp` components.

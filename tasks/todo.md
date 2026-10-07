@@ -1,3 +1,32 @@
+# Issue #919 final review follow-up
+
+- [x] Reproduce Pass 1 RPC bypass of root-only insertion and Page exclusion.
+- [x] Enforce the Designer structural scope at the LSP boundary while preserving the shared edit API.
+- [x] Verify YAML/JSON rejection, subtree deletion and existing edit contracts; prepare the verified fixes for Pass 2.
+- [x] Preserve the Pass 1 report and complete review resource cleanup.
+
+Pass 1 P2 verified and fixed at the Designer RPC boundary. Focused UserForm edit
+tests passed; full related UserForm/LSP tests passed (LSP 127.468s), along with
+vet, lint, docs and formatting. Generic parent/Page/custom edit API and allowed
+MultiPage cascade/child deletion are protected by regression tests. Report and
+cleanup evidence: `tmp_workspaces/final-review/issue919/pass-1-disposition.md`.
+
+# Issue #919 Toolbox and structural editing
+
+- [x] Add shared control metadata, click placement and stable ID/name generation.
+- [x] Expose source-preserving YAML/JSON add/delete via structural LSP capability.
+- [x] Confirm subtree deletion in the URI edit queue and retain stale/undo guarantees.
+- [x] Verify generation, UI, compiler, RPC, native undo/redo and source preservation.
+- [x] Document the contract, update changelogs and complete self-review.
+
+Validation: `rtk pnpm --dir editors/vscode test` passed, including real VS Code
+1.140.0 Webview and native Undo/Redo. Related Go checks passed with
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/vba/userforms/... ./internal/lspserver`
+(LSP: 132.554s); the corresponding `vet` also passed. Lint, docs checks,
+changed-file Oxfmt, Go formatting and `git diff --check` passed. Focused read-only
+UI and Go reviews found no confirmed defects. Excel device tests and remote CI
+were not run; this change edits source documents and does not alter COM/VBIDE.
+
 # PR #927 review follow-up
 
 - [x] Reproduce and isolate form/control draft identity when a control ID is `form`.

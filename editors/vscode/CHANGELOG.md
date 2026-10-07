@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added a UserForm Designer Toolbox for click-to-place root controls and
+  structural deletion, with immediate leaf removal and confirmation before
+  removing descendants. YAML/JSON edits use a separate LSP capability, stale
+  document guards, and native undo/redo. Placement inside Frames/reparenting
+  and Page/Tab editing remain in Issues #920/#921.
+
 - Added a UserForm Property Grid driven by the running LSP's field metadata.
   Select the form, a control or a Page tab to edit supported authored scalars
   in YAML/YML/JSON with one native undoable edit per confirmation. Unset fields,

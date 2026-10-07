@@ -102,6 +102,10 @@ export function DesignerCanvas({
   selectedId: externalSelected,
   onSelectionChange,
   onCommit = () => {},
+  placing = false,
+  onPlace,
+  onCancelPlacement,
+  onDelete,
 }: {
   document: DesignerDocument;
   approximateBounds?: string;
@@ -114,6 +118,10 @@ export function DesignerCanvas({
   selectedId?: string;
   onSelectionChange?: (id: string | undefined) => void;
   onCommit?: (operations: GeometryOperation[]) => void;
+  placing?: boolean;
+  onPlace?: (left: number, top: number) => void;
+  onCancelPlacement?: () => void;
+  onDelete?: () => void;
 }) {
   const [localSelected, setLocalSelected] = useState<string>();
   const selected = onSelectionChange ? externalSelected : localSelected;
@@ -228,6 +236,20 @@ export function DesignerCanvas({
     if (event.button !== 0 || gesture.current?.pointerId !== undefined) return;
     if (gesture.current?.keys) finish();
     const target = event.target as Element;
+    if (placing) {
+      const form = canvas.current?.querySelector<HTMLElement>(".form");
+      if (form && form.contains(target) && !busy) {
+        event.preventDefault();
+        cancel();
+        canvas.current?.focus();
+        const bounds = form.getBoundingClientRect();
+        onPlace?.(
+          pixelsToPoints(event.clientX - bounds.left, zoom),
+          pixelsToPoints(event.clientY - bounds.top, zoom),
+        );
+      }
+      return;
+    }
     if (target.closest("[data-page-tab]")) return;
     const id = target.closest<HTMLElement>("[data-control-id]")?.dataset.controlId;
     const control = document.controls.find((c) => c.id === id);
@@ -253,12 +275,31 @@ export function DesignerCanvas({
     }
   };
   const keyDown = (event: JSX.TargetedKeyboardEvent<HTMLDivElement>) => {
+    if ((event.target as Element).closest("input, textarea, select, [contenteditable='true']"))
+      return;
     if (event.key === "Escape") {
       event.preventDefault();
       cancel();
+      onCancelPlacement?.();
       return;
     }
     if (
+      event.key === "Delete" &&
+      !busy &&
+      !placing &&
+      !event.repeat &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      onDelete
+    ) {
+      event.preventDefault();
+      cancel();
+      onDelete();
+      return;
+    }
+    if (
+      placing ||
       !editable ||
       busy ||
       event.ctrlKey ||
@@ -405,7 +446,7 @@ export function DesignerCanvas({
       )}
       <div
         ref={canvas}
-        class="designer-viewport"
+        class={`designer-viewport ${placing ? "placing-control" : ""}`}
         tabIndex={0}
         aria-label={document.name}
         onPointerDown={pointerDown}

@@ -46,7 +46,7 @@ func TestUserFormEditRPCAndUTF16Ranges(t *testing.T) {
 	if err := clientConn.Call(ctx, "initialize", protocol.InitializeParams{}, &initialized); err != nil {
 		t.Fatal(err)
 	}
-	if initialized.Capabilities.Experimental["userFormEdit"] != true || initialized.Capabilities.Experimental["userFormPropertyEdit"] != true {
+	if initialized.Capabilities.Experimental["userFormEdit"] != true || initialized.Capabilities.Experimental["userFormPropertyEdit"] != true || initialized.Capabilities.Experimental["userFormStructuralEdit"] != true {
 		t.Fatalf("edit capability: %+v", initialized.Capabilities.Experimental)
 	}
 	if err := clientConn.Notify(ctx, "initialized", map[string]any{}); err != nil {
@@ -140,6 +140,47 @@ func TestUserFormEditRPCAndUTF16Ranges(t *testing.T) {
 	doc, err := spec.ParseFormSpec(spec.SpecInput{Format: "json"}, []byte(edited))
 	if err != nil || doc.Controls[0].Caption == nil || *doc.Controls[0].Caption != "送信 😀" {
 		t.Fatalf("property RPC source: %s: %v", edited, err)
+	}
+	controlPayload := map[string]any{
+		"id": "status", "name": "StatusLabel", "type": "Label",
+		"left": 12, "top": 18, "width": 90, "height": 18,
+	}
+	params["operations"] = []any{map[string]any{"type": "addControl", "control": controlPayload}}
+	var structural userFormEditResult
+	if err := clientConn.Call(ctx, userFormEditMethod, params, &structural); err != nil {
+		t.Fatal(err)
+	}
+	if structural.Error != nil || structural.Version != 17 || len(structural.Edits) == 0 {
+		t.Fatalf("structural RPC response: %+v", structural)
+	}
+	structuralSource, err := applyLSPTextEdits(source, structural.Edits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	structuralDoc, err := spec.ParseFormSpec(spec.SpecInput{Format: "json"}, []byte(structuralSource))
+	if err != nil || len(structuralDoc.Controls) != 2 || structuralDoc.Controls[1].ID != "status" {
+		t.Fatalf("structural RPC source: %s: %v", structuralSource, err)
+	}
+	structuralOperation := formsedit.Operation{
+		Type: formsedit.AddControl,
+		Control: &spec.FormSpecControl{
+			ID: "status", Name: "StatusLabel", Type: "Label",
+			Left: new(12.0), Top: new(18.0), Width: new(90.0), Height: new(18.0),
+		},
+	}
+	wantStructural, err := formsedit.Apply(spec.SpecInput{Format: "json"}, []byte(source), []formsedit.Operation{structuralOperation})
+	if err != nil || len(wantStructural.Edits) != len(structural.Edits) {
+		t.Fatalf("expected structural source edits: %+v, %v", wantStructural.Edits, err)
+	}
+	for i, edit := range structural.Edits {
+		start, err := byteOffsetAtLSPPosition(source, edit.Range.Start)
+		if err != nil || start != wantStructural.Edits[i].Start {
+			t.Fatalf("structural edit %d start maps to %d, want %d: %v", i, start, wantStructural.Edits[i].Start, err)
+		}
+		end, err := byteOffsetAtLSPPosition(source, edit.Range.End)
+		if err != nil || end != wantStructural.Edits[i].End {
+			t.Fatalf("structural edit %d end maps to %d, want %d: %v", i, end, wantStructural.Edits[i].End, err)
+		}
 	}
 	diskSource, err := os.ReadFile(diskPath)
 	if err != nil || string(diskSource) != "disk source is not the request buffer" {
@@ -336,6 +377,307 @@ func TestUserFormEditRequestPayloadValidation(t *testing.T) {
 				t.Fatalf("parse result: %+v", requestError)
 			}
 		})
+	}
+}
+
+func TestUserFormEditStructuralPayloadValidation(t *testing.T) {
+	validAdd := `{"type":"addControl","control":{"id":"new","name":"NewLabel","type":"Label"}}`
+	for _, test := range []struct {
+		name string
+		raw  string
+		code string
+	}{
+		{name: "valid add", raw: validAdd},
+		{name: "property bag remains open", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","properties":{"Vendor.Key":null}`, 1)},
+		{name: "parented insertion remains unsupported", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","parentId":"frame"`, 1), code: compiler.Unsupported},
+		{name: "root Page insertion remains unsupported", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"pAgE"`, 1), code: compiler.Unsupported},
+		{name: "custom insertion remains unsupported", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"VendorControl","progId":"Vendor.Control"`, 1), code: compiler.Unsupported},
+		{name: "unknown operation field", raw: strings.Replace(validAdd, `"control":`, `"extra":true,"control":`, 1), code: compiler.Invalid},
+		{name: "unknown control field", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","mystery":1`, 1), code: compiler.Invalid},
+		{name: "duplicate control field", raw: strings.Replace(validAdd, `"name":"NewLabel"`, `"name":"NewLabel","name":"Other"`, 1), code: compiler.Invalid},
+		{name: "case alias for id", raw: strings.Replace(validAdd, `"id":"new"`, `"id":"new","ID":"other"`, 1), code: compiler.Invalid},
+		{name: "case alias for name", raw: strings.Replace(validAdd, `"name":"NewLabel"`, `"name":"NewLabel","Name":"Other"`, 1), code: compiler.Invalid},
+		{name: "case alias for type", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","Type":"TextBox"`, 1), code: compiler.Invalid},
+		{name: "nested duplicate field", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","tabs":[{"name":"A","name":"B"}]`, 1), code: compiler.Invalid},
+		{name: "nested noncanonical tab field", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","tabs":[{"name":"A","Caption":"A"}]`, 1), code: compiler.Invalid},
+		{name: "nested noncanonical observed field", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","observed":{"Width":10}`, 1), code: compiler.Invalid},
+		{name: "null control", raw: `{"type":"addControl","control":null}`, code: compiler.Invalid},
+		{name: "missing id", raw: `{"type":"addControl","control":{"name":"NewLabel","type":"Label"}}`, code: compiler.Invalid},
+		{name: "null id", raw: `{"type":"addControl","control":{"id":null,"name":"NewLabel","type":"Label"}}`, code: compiler.Invalid},
+		{name: "empty name", raw: `{"type":"addControl","control":{"id":"new","name":"","type":"Label"}}`, code: compiler.Invalid},
+		{name: "null type", raw: `{"type":"addControl","control":{"id":"new","name":"NewLabel","type":null}}`, code: compiler.Invalid},
+		{name: "null optional field", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","caption":null`, 1), code: compiler.Invalid},
+		{name: "null tabs", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","tabs":null`, 1), code: compiler.Invalid},
+		{name: "null selected index", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","selectedIndex":null`, 1), code: compiler.Invalid},
+		{name: "nested controls", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","controls":[{"id":"child","name":"Child","type":"Label"}]`, 1), code: compiler.Invalid},
+		{name: "remove null cascade", raw: `{"type":"removeControl","controlId":"frame","cascade":null}`, code: compiler.Invalid},
+		{name: "remove non-boolean cascade", raw: `{"type":"removeControl","controlId":"frame","cascade":1}`, code: compiler.Invalid},
+		{name: "set parent remains unsupported", raw: `{"type":"setParent","controlId":"new","parentId":"frame"}`, code: compiler.Unsupported},
+		{name: "reorder remains unsupported", raw: `{"type":"reorderControl","controlId":"new","index":0}`, code: compiler.Unsupported},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			operation, requestError := parseUserFormEditOperation([]byte(test.raw))
+			if test.code != "" {
+				if requestError == nil || requestError.Code != test.code {
+					t.Fatalf("parse result = %+v, want error code %s (operation %+v)", requestError, test.code, operation)
+				}
+				return
+			}
+			if requestError != nil || operation.Type != formsedit.AddControl || operation.Control == nil {
+				t.Fatalf("parse result = %+v, %+v", operation, requestError)
+			}
+		})
+	}
+
+	for _, controlType := range []string{"MultiPage", "TabStrip"} {
+		t.Run("empty "+controlType+" explicit payload", func(t *testing.T) {
+			extra := `,"selectedIndex":-1`
+			if controlType == "TabStrip" {
+				extra = `,"tabs":[]` + extra
+			}
+			raw := []byte(fmt.Sprintf(`{"type":"addControl","control":{"id":"empty","name":"Empty","type":%q%s}}`, controlType, extra))
+			operation, requestError := parseUserFormEditOperation(raw)
+			if requestError != nil || operation.Control == nil {
+				t.Fatalf("parse result = %+v, %+v", operation, requestError)
+			}
+			if (controlType == "TabStrip" && operation.Control.Tabs == nil) || (controlType == "MultiPage" && operation.Control.Tabs != nil) || operation.Control.SelectedIndex == nil || *operation.Control.SelectedIndex != -1 {
+				t.Fatalf("empty %s payload lost canonical defaults: %+v", controlType, operation.Control)
+			}
+		})
+	}
+	for _, controlType := range []string{"MultiPage", "TabStrip"} {
+		raw := []byte(fmt.Sprintf(`{"type":"addControl","control":{"id":"empty","name":"Empty","type":%q}}`, controlType))
+		operation, requestError := parseUserFormEditOperation(raw)
+		if requestError != nil || operation.Control == nil || operation.Control.SelectedIndex != nil || operation.Control.Tabs != nil {
+			t.Fatalf("omitted %s fields were rewritten: %+v, %+v", controlType, operation.Control, requestError)
+		}
+	}
+	for _, operations := range [][]formsedit.Operation{
+		{{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "New", Type: "Label"}}, {Type: formsedit.MoveControl, ControlID: "old", Left: new(1.0), Top: new(2.0)}},
+		{{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "New", Type: "Label"}}, {Type: formsedit.RemoveControl, ControlID: "old"}},
+		{{Type: formsedit.RemoveControl, ControlID: "old"}, {Type: formsedit.SetControlProperty, ControlID: "other", Field: "visible", Value: true, ValuePresent: true}},
+	} {
+		if requestError := validateUserFormEditTransaction(operations); requestError == nil || requestError.Code != compiler.Invalid {
+			t.Fatalf("mixed structural transaction accepted: %+v", requestError)
+		}
+	}
+}
+
+func TestUserFormEditStructuralYAMLAndJSON(t *testing.T) {
+	root := t.TempDir()
+	server := &Server{opts: Options{RootDir: root, Config: config.Default()}}
+	fixtures := []struct {
+		name   string
+		format string
+		source string
+	}{
+		{
+			name: "yaml", format: "yaml",
+			source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\n  build:\n    clientWidth: 320\n    clientHeight: 240\ncontrols:\n  - id: frame\n    name: Frame1\n    type: Frame\n    left: 0\n    top: 0\n    width: 160\n    height: 100\n  - id: child\n    parentId: frame\n    name: ChildLabel\n    type: Label\n    left: 4\n    top: 4\n    width: 80\n    height: 16\n",
+		},
+		{
+			name: "json", format: "json",
+			source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main","build":{"clientWidth":320,"clientHeight":240}},"controls":[{"id":"frame","name":"Frame1","type":"Frame","left":0,"top":0,"width":160,"height":100},{"id":"child","parentId":"frame","name":"ChildLabel","type":"Label","left":4,"top":4,"width":80,"height":16}]}`,
+		},
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			uri := pathToFileURI(filepath.Join(root, "src/forms/specs/Main."+fixture.format))
+			add, requestError := parseUserFormEditOperation([]byte(`{"type":"addControl","control":{"id":"status","name":"StatusLabel","type":"Label","left":12,"top":18,"width":90,"height":18}}`))
+			if requestError != nil {
+				t.Fatal(requestError)
+			}
+			added := server.userFormEdit(userFormEditParams{URI: uri, Version: 31, Text: fixture.source, Operations: []formsedit.Operation{add}})
+			if added.Error != nil || added.Version != 31 || len(added.Edits) == 0 {
+				t.Fatalf("add control result: %+v", added)
+			}
+			addedSource, err := applyLSPTextEdits(fixture.source, added.Edits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input := spec.SpecInput{Format: fixture.format}
+			document, err := spec.ParseFormSpec(input, []byte(addedSource))
+			if err != nil || len(document.Controls) != 3 || document.Controls[2].ID != "status" {
+				t.Fatalf("added %s document: %+v, %v\n%s", fixture.format, document.Controls, err, addedSource)
+			}
+
+			remove, requestError := parseUserFormEditOperation([]byte(`{"type":"removeControl","controlId":"frame","cascade":true}`))
+			if requestError != nil {
+				t.Fatal(requestError)
+			}
+			removed := server.userFormEdit(userFormEditParams{URI: uri, Version: 32, Text: addedSource, Operations: []formsedit.Operation{remove}})
+			if removed.Error != nil || removed.Version != 32 || len(removed.Edits) == 0 {
+				t.Fatalf("cascade remove result: %+v", removed)
+			}
+			removedSource, err := applyLSPTextEdits(addedSource, removed.Edits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, err = spec.ParseFormSpec(input, []byte(removedSource))
+			if err != nil || len(document.Controls) != 1 || document.Controls[0].ID != "status" {
+				t.Fatalf("cascade result: %+v, %v\n%s", document.Controls, err, removedSource)
+			}
+		})
+	}
+}
+
+func TestUserFormEditStructuralScope(t *testing.T) {
+	root := t.TempDir()
+	server := &Server{opts: Options{RootDir: root, Config: config.Default()}}
+	fixtures := []struct {
+		format string
+		source string
+	}{
+		{format: "json", source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"frame","name":"Frame1","type":"Frame"},{"id":"multi","name":"MultiPage1","type":"MultiPage","selectedIndex":0},{"id":"page1","name":"Page1","type":"Page","parentId":"multi"},{"id":"page2","name":"Page2","type":"pAgE","parentId":"multi"},{"id":"leaf","name":"Label1","type":"Label","parentId":"page2"}]}`},
+		{format: "yaml", source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\ncontrols:\n  - id: frame\n    name: Frame1\n    type: Frame\n  - id: multi\n    name: MultiPage1\n    type: MultiPage\n    selectedIndex: 0\n    controls:\n      - id: page1\n        name: Page1\n        type: Page\n      - id: page2\n        name: Page2\n        type: pAgE\n        controls:\n          - id: leaf\n            name: Label1\n            type: Label\n"},
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.format, func(t *testing.T) {
+			uri := pathToFileURI(filepath.Join(root, "src/forms/specs/Main."+fixture.format))
+			for _, test := range []struct {
+				name string
+				op   formsedit.Operation
+			}{
+				{name: "Frame child insertion", op: formsedit.Operation{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "Label2", Type: "Label", ParentID: "frame"}}},
+				{name: "Page insertion", op: formsedit.Operation{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "Page3", Type: "pAgE", ParentID: "multi"}}},
+				{name: "custom insertion", op: formsedit.Operation{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "Custom1", Type: "VendorControl", ProgID: "Vendor.Control"}}},
+				{name: "Page direct removal", op: formsedit.Operation{Type: formsedit.RemoveControl, ControlID: "page2", Cascade: true}},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					// These are valid generic semantic edits. Only the Designer RPC
+					// boundary must exclude them until hierarchy/Page authoring lands.
+					if _, err := formsedit.Apply(spec.SpecInput{Format: fixture.format}, []byte(fixture.source), []formsedit.Operation{test.op}); err != nil {
+						t.Fatalf("generic edit unexpectedly rejected: %v", err)
+					}
+					params := userFormEditParams{URI: uri, Version: 41, Text: fixture.source, Operations: []formsedit.Operation{test.op}}
+					result := server.userFormEdit(params)
+					if result.Error == nil || result.Error.Code != compiler.Unsupported || result.Version != 41 || len(result.Edits) != 0 {
+						t.Fatalf("out-of-scope handler edit: %+v", result)
+					}
+					raw, err := json.Marshal(map[string]any{"uri": uri, "version": 41, "text": fixture.source, "operations": params.Operations})
+					if err != nil {
+						t.Fatal(err)
+					}
+					decoded, requestError := parseUserFormEditParams(raw)
+					if requestError != nil {
+						if requestError.Code != compiler.Unsupported {
+							t.Fatalf("wrong RPC rejection: %+v", requestError)
+						}
+						return
+					}
+					result = server.userFormEdit(decoded)
+					if result.Error == nil || result.Error.Code != compiler.Unsupported || len(result.Edits) != 0 {
+						t.Fatalf("out-of-scope raw RPC edit: %+v", result)
+					}
+				})
+			}
+			for _, id := range []string{"leaf", "multi"} {
+				result := server.userFormEdit(userFormEditParams{URI: uri, Version: 41, Text: fixture.source, Operations: []formsedit.Operation{{Type: formsedit.RemoveControl, ControlID: id, Cascade: true}}})
+				if result.Error != nil || len(result.Edits) == 0 {
+					t.Fatalf("supported deletion of %s failed: %+v", id, result)
+				}
+				updated, err := applyLSPTextEdits(fixture.source, result.Edits)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := spec.ParseFormSpec(spec.SpecInput{Format: fixture.format}, []byte(updated)); err != nil {
+					t.Fatalf("supported deletion produced invalid source: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestUserFormEditNewBuiltInControlsCompile(t *testing.T) {
+	formats := []struct {
+		name   string
+		input  spec.SpecInput
+		source string
+	}{
+		{
+			name: "yaml", input: spec.SpecInput{Format: "yaml"},
+			source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\n  build:\n    clientWidth: 320\n    clientHeight: 240\ncontrols: []\n",
+		},
+		{
+			name: "json", input: spec.SpecInput{Format: "json"},
+			source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main","build":{"clientWidth":320,"clientHeight":240}},"controls":[]}`,
+		},
+	}
+	types := []struct {
+		name          string
+		width, height float64
+		caption       bool
+		selectedIndex bool
+		emptyTabStrip bool
+	}{
+		{name: "Label", width: 72, height: 18, caption: true},
+		{name: "TextBox", width: 120, height: 18},
+		{name: "ComboBox", width: 120, height: 18},
+		{name: "ListBox", width: 120, height: 72},
+		{name: "CommandButton", width: 72, height: 24, caption: true},
+		{name: "CheckBox", width: 72, height: 18, caption: true},
+		{name: "OptionButton", width: 72, height: 18, caption: true},
+		{name: "ToggleButton", width: 72, height: 18, caption: true},
+		{name: "SpinButton", width: 18, height: 36},
+		{name: "ScrollBar", width: 120, height: 18},
+		{name: "Image", width: 72, height: 72},
+		{name: "Frame", width: 144, height: 108, caption: true},
+		{name: "MultiPage", width: 240, height: 180, selectedIndex: true},
+		{name: "TabStrip", width: 240, height: 48, selectedIndex: true, emptyTabStrip: true},
+	}
+	for _, format := range formats {
+		for _, controlType := range types {
+			t.Run(format.name+"/"+controlType.name, func(t *testing.T) {
+				id := "new-" + strings.ToLower(controlType.name)
+				name := controlType.name + "1"
+				payloadControl := map[string]any{
+					"id": id, "name": name, "type": controlType.name,
+					"left": 0, "top": 0, "width": controlType.width, "height": controlType.height,
+				}
+				if controlType.caption {
+					payloadControl["caption"] = name
+				}
+				if controlType.selectedIndex {
+					payloadControl["selectedIndex"] = -1
+				}
+				if controlType.emptyTabStrip {
+					payloadControl["tabs"] = []any{}
+				}
+				payload, err := json.Marshal(map[string]any{
+					"type":    "addControl",
+					"control": payloadControl,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				operation, requestError := parseUserFormEditOperation(payload)
+				if requestError != nil {
+					t.Fatal(requestError)
+				}
+				result, err := formsedit.Apply(format.input, []byte(format.source), []formsedit.Operation{operation})
+				if err != nil {
+					t.Fatalf("Apply: %v", err)
+				}
+				if len(result.Document.Controls) != 1 {
+					t.Fatalf("Apply controls = %+v", result.Document.Controls)
+				}
+				control := result.Document.Controls[0]
+				if control.ID != id || control.Name != name || control.Type != controlType.name || control.Width == nil || *control.Width != controlType.width || control.Height == nil || *control.Height != controlType.height {
+					t.Fatalf("Apply control payload changed: %+v", control)
+				}
+				if controlType.selectedIndex {
+					if control.SelectedIndex == nil || *control.SelectedIndex != -1 {
+						t.Fatalf("empty %s defaults: %+v", controlType.name, control)
+					}
+				}
+				if controlType.emptyTabStrip && (control.Tabs == nil || len(control.Tabs) != 0) {
+					t.Fatalf("empty TabStrip tabs were not preserved: %+v", control)
+				}
+				if _, err := compiler.CompileNew(result.Document, 932); err != nil {
+					t.Fatalf("CompileNew: %v", err)
+				}
+			})
+		}
 	}
 }
 
