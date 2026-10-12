@@ -228,6 +228,41 @@ func TestParentAndCascade(t *testing.T) {
 	assertFailure(t, hierarchy, []Operation{{Type: SetParent, ControlID: "frame", ParentID: "child"}}, "UFV010")
 }
 
+func TestSetParentPreservesLegacySubtreeAndSiblingRelationships(t *testing.T) {
+	yamlSource := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform: {name: Main}\ncontrols:\n  - id: frameA\n    name: FrameA\n    type: Frame\n    controls:\n      - {id: before, name: Before, type: Label}\n      - id: moving\n        name: MovingFrame\n        type: Frame\n        left: 4\n        top: 8\n        controls:\n          - {id: inside, name: Inside, type: Label}\n          - {id: relinked, parentId: frameA, name: Relinked, type: Label}\n      - {id: remains, name: Remains, type: Label}\n  - {id: frameB, name: FrameB, type: Frame}\n  - {id: flat, parentId: frameA, name: Flat, type: Label}\n"
+	jsonSource := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"frameA","name":"FrameA","type":"Frame","controls":[{"id":"before","name":"Before","type":"Label"},{"id":"moving","name":"MovingFrame","type":"Frame","left":4,"top":8,"controls":[{"id":"inside","name":"Inside","type":"Label"},{"id":"relinked","parentId":"frameA","name":"Relinked","type":"Label"}]},{"id":"remains","name":"Remains","type":"Label"}]},{"id":"frameB","name":"FrameB","type":"Frame"},{"id":"flat","parentId":"frameA","name":"Flat","type":"Label"}]}`)
+	for _, test := range []struct {
+		name   string
+		format string
+		source []byte
+	}{
+		{name: "yaml", format: "yaml", source: []byte(yamlSource)},
+		{name: "json", format: "json", source: jsonSource},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := Apply(spec.SpecInput{Format: test.format}, test.source, []Operation{{Type: SetParent, ControlID: "moving", ParentID: "frameB", Left: new(16.0)}})
+			if err != nil {
+				t.Fatalf("SetParent: %v", err)
+			}
+			controls := make(map[string]spec.FormSpecControl, len(result.Document.Controls))
+			for _, control := range result.Document.Controls {
+				controls[control.ID] = control
+			}
+			moving := controls["moving"]
+			if moving.ParentID != "frameB" || moving.Left == nil || *moving.Left != 16 || moving.Top == nil || *moving.Top != 8 || moving.ZIndex == nil || *moving.ZIndex != 1 {
+				t.Fatalf("moved control lost parent, optional-axis value, or effective zIndex: %+v", moving)
+			}
+			if controls["inside"].ParentID != "moving" || controls["relinked"].ParentID != "frameA" || controls["before"].ParentID != "frameA" || controls["remains"].ParentID != "frameA" || controls["flat"].ParentID != "frameA" {
+				t.Fatalf("reparent changed a descendant or unrelated relationship: %+v", controls)
+			}
+			again, err := Apply(spec.SpecInput{Format: test.format}, result.Source, []Operation{{Type: SetParent, ControlID: "moving", ParentID: "frameB", Left: new(16.0)}})
+			if err != nil || len(again.Edits) != 0 || !bytes.Equal(again.Source, result.Source) {
+				t.Fatalf("same-parent edit was not byte-stable: edits=%+v err=%v", again.Edits, err)
+			}
+		})
+	}
+}
+
 func TestReorderUsesSiblingZOrder(t *testing.T) {
 	source := strings.Replace(base, "    left: 100", "    zIndex: 5\n    tabIndex: 9\n    left: 100", 1)
 	result := applyOK(t, source, Operation{Type: ReorderControl, ControlID: "submit", Index: new(0)})
@@ -406,9 +441,42 @@ func TestSerializableOperationsAndJSONGeometry(t *testing.T) {
 	if *res.Document.Controls[0].Left != 140 || *res.Document.Controls[0].Top != 190 || len(res.Edits) != 2 {
 		t.Fatalf("JSON geometry result: document=%+v edits=%+v", res.Document.Controls[0], res.Edits)
 	}
-	res, err = Apply(spec.SpecInput{Format: "json"}, jsonBody, []Operation{{Type: SetParent, ControlID: "submit", ParentID: "other"}})
-	if err == nil || !reflect.DeepEqual(res, Result{}) {
-		t.Fatal("unsupported JSON operation was not rejected atomically")
+	res, err = Apply(spec.SpecInput{Format: "json"}, jsonBody, []Operation{{Type: SetParent, ControlID: "submit", Left: new(140.0), Top: new(190.0)}})
+	if err != nil {
+		t.Fatalf("JSON SetParent: %v", err)
+	}
+	if res.Document.Controls[0].ParentID != "" || res.Document.Controls[0].Left == nil || *res.Document.Controls[0].Left != 140 || res.Document.Controls[0].Top == nil || *res.Document.Controls[0].Top != 190 {
+		t.Fatalf("JSON SetParent result: %+v", res.Document.Controls[0])
+	}
+}
+
+func TestJSONSetParentFlatControlsAndFinalValidation(t *testing.T) {
+	source := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"frameA","type":"Frame","name":"FrameA"},{"id":"frameB","type":"Frame","name":"FrameB"},{"id":"child","parentId":"frameA","type":"Label","name":"Child","left":4,"top":8}]}`)
+	result := applyJSONOK(t, source, Operation{Type: SetParent, ControlID: "child", ParentID: "frameB", Left: new(12.0)})
+	child := result.Document.Controls[2]
+	if child.ParentID != "frameB" || child.Left == nil || *child.Left != 12 || child.Top == nil || *child.Top != 8 {
+		t.Fatalf("flat reparent did not preserve optional top: %+v", child)
+	}
+	root := applyJSONOK(t, result.Source, Operation{Type: SetParent, ControlID: "child", Left: new(12.0), Top: new(8.0)})
+	if root.Document.Controls[2].ParentID != "" || root.Document.Controls[2].Left == nil || *root.Document.Controls[2].Left != 12 || len(root.Edits) == 0 {
+		t.Fatalf("flat root reparent result: %+v edits=%+v", root.Document.Controls[2], root.Edits)
+	}
+	noop, err := Apply(spec.SpecInput{Format: "json"}, root.Source, []Operation{{Type: SetParent, ControlID: "child", ParentID: "", Left: new(12.0), Top: new(8.0)}})
+	if err != nil || len(noop.Edits) != 0 || !bytes.Equal(noop.Source, root.Source) {
+		t.Fatalf("root reparent no-op changed source: edits=%+v err=%v", noop.Edits, err)
+	}
+	for _, test := range []struct {
+		parentID string
+		code     string
+	}{
+		{parentID: "missing", code: "UFV008"},
+		{parentID: "child", code: "UFV009"},
+	} {
+		failed, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{{Type: SetParent, ControlID: "child", ParentID: test.parentID}})
+		editErr, ok := errors.AsType[*Error](err)
+		if err == nil || !ok || !reflect.DeepEqual(failed, Result{}) || !slices.ContainsFunc(editErr.Diagnostics, func(d Diagnostic) bool { return d.Code == test.code }) {
+			t.Fatalf("invalid parent %q was not rejected atomically by canonical validation: result=%+v err=%#v", test.parentID, failed, err)
+		}
 	}
 }
 

@@ -6,7 +6,8 @@ document. Issue #916 provides the YAML API; Issue #917 adds JSON geometry
 editing and the Designer LSP adapter; Issue #918 adds scalar property editing
 across YAML/YML/JSON and authored-state metadata; Issue #919 adds Toolbox
 insertion and subtree deletion, with confirmation only when descendants exist,
-including JSON structural edits. The core API remains host-neutral and does not
+including JSON structural edits. Issue #920 adds JSON parenting and Frame
+editing through the Designer adapter. The core API remains host-neutral and does not
 invoke Excel or provide a CLI command.
 
 ## Authority and source model
@@ -19,7 +20,7 @@ func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result,
 
 `Apply` accepts `.yaml` and `.yml` for all operations, and `.json` for
 `moveControl`, `resizeControl`, `setFormProperty`, `setControlProperty`,
-`addControl` and `removeControl`. Other JSON operations return a structured
+`addControl`, `removeControl` and `setParent`. Other JSON operations return a structured
 unsupported-operation error. `Operation` values are serializable tagged structs.
 The supported YAML operation tags are
 `setFormProperty`, `setControlProperty`, `moveControl`, `resizeControl`,
@@ -82,7 +83,12 @@ JSON `addControl` inserts one control into the source `controls` sequence, and
 `parentId` relationships so a cascade removes descendants without orphaning
 them. Keep each change local to the affected sequence or subtree and preserve
 unrelated JSON bytes; do not serialize the normalized model to produce the
-result. JSON `setParent` and `reorderControl` remain unsupported.
+result. JSON `setParent` updates explicit `parentId` and optional parent-local
+coordinates. When a legacy nested item changes parents, relocate only that
+item and its subtree into the root `controls` array, preserving effective
+ordering and unrelated source. A root destination uses an empty `parentId`.
+Like YAML, the generic API does not compute world coordinates. JSON
+`reorderControl` remains unsupported.
 
 Setting a supported `build.*` path may insert the missing `form.build` object;
 only the required local object/member is added. Legacy fields and build fields
@@ -261,7 +267,7 @@ The implementation is pure Go and must cover these behaviors:
   Unsupported observed fields, property removal, property bags, collections,
   pictures, and non-scalar values are rejected.
 - YAML/YML inputs support all operations; JSON supports geometry, scalar
-  property, add and remove operations, replacement/insertion including missing
+  property, add, remove and parent operations, replacement/insertion including missing
   `build`, escaped keys, duplicate-key rejection and formatting-stable no-ops.
   JSON `removeControl` covers legacy nested source cascades; unsupported JSON
   operations are rejected atomically.
@@ -277,7 +283,7 @@ VBE-facing behavior or establish any Excel runtime claim.
 
 ## Out of scope
 
-- JSON `setParent` and `reorderControl` operations.
+- JSON `reorderControl` operations.
 - CLI wiring; VS Code/Webview/LSP adapters are specified separately.
 - Excel, COM, VBIDE, Designer persistence, or VBE validation.
 - Property removal, observed-state authoring, property bags, collection edits,

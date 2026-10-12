@@ -29,6 +29,133 @@ export function contentBounds(control: DesignerControl): Bounds {
     height: Math.max(0, control.height - inset.top - inset.bottom),
   };
 }
+
+export interface Point {
+  left: number;
+  top: number;
+}
+export interface DropTarget {
+  parentId: string;
+  origin: Point;
+  bounds: Bounds;
+}
+
+// All origins are measured in form-content points, including decoration insets.
+export function parentOrigin(
+  document: DesignerDocument,
+  parentId?: string,
+  visited = new Set<string>(),
+): Point {
+  if (!parentId || visited.has(parentId)) return { left: 0, top: 0 };
+  visited.add(parentId);
+  const parent = document.controls.find((c) => c.id === parentId);
+  if (!parent) return { left: 0, top: 0 };
+  const origin = parentOrigin(document, parent.parentId, visited);
+  if (parent.type.toLowerCase() === "page") return origin;
+  const inset = contentInsets(parent.type);
+  return { left: origin.left + parent.left + inset.left, top: origin.top + parent.top + inset.top };
+}
+
+export function worldGeometry(document: DesignerDocument, control: DesignerControl): Geometry {
+  const origin = parentOrigin(document, control.parentId);
+  return {
+    left: origin.left + control.left,
+    top: origin.top + control.top,
+    width: control.width,
+    height: control.height,
+  };
+}
+
+export function selectionPath(document: DesignerDocument, id?: string): DesignerControl[] {
+  const path: DesignerControl[] = [];
+  const visited = new Set<string>();
+  while (id && !visited.has(id)) {
+    visited.add(id);
+    const control = document.controls.find((c) => c.id === id);
+    if (!control) break;
+    path.unshift(control);
+    id = control.parentId;
+  }
+  return path;
+}
+
+export function orderedChildren(document: DesignerDocument, parentId?: string): DesignerControl[] {
+  return document.controls
+    .filter((c) => (c.parentId || undefined) === parentId)
+    .map((control, index) => ({ control, index }))
+    .sort((a, b) => (a.control.zIndex ?? a.index) - (b.control.zIndex ?? b.index))
+    .map(({ control }) => control);
+}
+
+// Hit testing uses the same hierarchy, clipping and sibling order as rendering.
+// Leaf controls inherit the destination of their containing Frame. Page content
+// blocks a root fallback, but an existing Frame inside it can be targeted.
+export function dropTarget(
+  document: DesignerDocument,
+  point: Point,
+  excluded = new Set<string>(),
+): DropTarget | undefined {
+  const contains = (origin: Point, bounds: Bounds) =>
+    point.left >= origin.left &&
+    point.top >= origin.top &&
+    point.left < origin.left + bounds.width &&
+    point.top < origin.top + bounds.height;
+  const root: DropTarget = {
+    parentId: "",
+    origin: { left: 0, top: 0 },
+    bounds: { width: document.width, height: document.height },
+  };
+  if (!contains(root.origin, root.bounds)) return;
+  const visit = (
+    parentId: string | undefined,
+    fallback: DropTarget | undefined,
+  ): DropTarget | undefined => {
+    const siblings = orderedChildren(document, parentId);
+    for (const control of siblings.reverse()) {
+      if (excluded.has(control.id) || !isControlVisible(document, control.id)) continue;
+      if (!contains(worldGeometry(document, control), control)) continue;
+      const type = control.type.toLowerCase();
+      if (type === "frame") {
+        const target = {
+          parentId: control.id,
+          origin: parentOrigin(document, control.id),
+          bounds: contentBounds(control),
+        };
+        return contains(target.origin, target.bounds) ? visit(control.id, target) : fallback;
+      }
+      if (type === "multipage") {
+        const pages = orderedChildren(document, control.id);
+        const page = pages[control.selectedIndex ?? (pages.length ? 0 : -1)];
+        const origin = parentOrigin(document, control.id);
+        return page && page.visible !== false && contains(origin, contentBounds(control))
+          ? visit(page.id, undefined)
+          : undefined;
+      }
+      return fallback;
+    }
+    return fallback;
+  };
+  return visit(undefined, root);
+}
+
+export function placeGeometry(
+  geometry: Geometry,
+  bounds: Bounds,
+  snapping = false,
+): Geometry | undefined {
+  if (
+    geometry.width < minimumSize ||
+    geometry.height < minimumSize ||
+    geometry.width > bounds.width ||
+    geometry.height > bounds.height
+  )
+    return;
+  return {
+    ...geometry,
+    left: clamp(snap(stableDelta(geometry.left), snapping), 0, bounds.width - geometry.width),
+    top: clamp(snap(stableDelta(geometry.top), snapping), 0, bounds.height - geometry.height),
+  };
+}
 export function parentBounds(document: DesignerDocument, control: DesignerControl): Bounds {
   const parent = document.controls.find((candidate) => candidate.id === control.parentId);
   if (!parent) return { width: document.width, height: document.height };

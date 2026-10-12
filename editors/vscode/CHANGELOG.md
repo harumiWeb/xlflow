@@ -2,11 +2,15 @@
 
 ## Unreleased
 
+- Added Frame placement, drag reparenting and clickable hierarchy breadcrumbs.
+  Drop previews preserve apparent positions with boundary clamping, reject
+  invalid destinations, and commit YAML/JSON parent and coordinate updates as
+  one undoable edit. Older servers retain root placement and existing movement.
+
 - Added a UserForm Designer Toolbox for click-to-place root controls and
   structural deletion, with immediate leaf removal and confirmation before
   removing descendants. YAML/JSON edits use a separate LSP capability, stale
-  document guards, and native undo/redo. Placement inside Frames/reparenting
-  and Page/Tab editing remain in Issues #920/#921.
+  document guards, and native undo/redo. Page/Tab editing remains in Issue #921.
   Canvas Delete ignores focused Page-tab buttons to protect the previous
   control selection when keyboard focus moves to a tab.
 

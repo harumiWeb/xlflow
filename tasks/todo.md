@@ -1,3 +1,22 @@
+# Issue #920 Frame parenting and hierarchy
+
+- [x] Extend source-preserving YAML/JSON parenting and enforce Designer RPC scope.
+- [x] Negotiate parent-edit capability and preserve stale-document/Undo guards.
+- [x] Add container targeting, world-space drag previews, Frame placement and breadcrumbs.
+- [x] Verify engine, host, DOM and real VS Code regressions; review the complete diff.
+- [x] Record parenting decisions/specifications and update public docs/changelogs.
+- [x] Review follow-up: return focus to the canvas after breadcrumb selection and verify keyboard movement in DOM and real Webview tests.
+
+Validation: `rtk pnpm --dir editors/vscode test` passed with real VS Code
+1.141.0 Webview parenting/placement, coordinate alignment, breadcrumb keyboard
+selection and native Undo/Redo. The complete UserForms/LSP command
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/vba/userforms/... ./internal/lspserver`
+passed; the uncached final LSP run took 129.871s. Matching `vet`, `rtk task lint`,
+changed-file Oxfmt/Go formatting and `rtk git diff --check` passed. The focused
+read-only UI review found the breadcrumb focus issue, now fixed and covered.
+Excel/COM/VBE and remote CI were not run; this feature edits FormSpec source
+and does not change workbook-backed behavior. No Excel `tmp_workspaces` were used.
+
 # PR #928 review follow-up
 
 - [x] Reproduce Delete bubbling from a focused Page tab and custom ProgID insertion through the Designer RPC.

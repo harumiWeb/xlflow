@@ -134,7 +134,8 @@ Source-preserving semantic edits use the host-neutral Go API. See
 Selection is a transient control ID; clicking the background selects the form.
 Known built-in controls other than Page can move and resize with eight handles.
 Form and Page geometry is not edited on the canvas. Unknown controls remain
-selectable placeholders. No reparenting or structural edit is implicit.
+selectable placeholders. Only a completed parent-changing pointer drag can
+commit a new relationship; overlap alone never changes source.
 
 Pointerdown captures the original parent-relative geometry. Pointermove only
 updates local preview state; pointerup emits at most one transaction. North/west
@@ -189,15 +190,16 @@ Page is not a Toolbox item. Pointer is the normal selection tool. Selecting a
 control type arms placement; clicking the canvas inserts one control at the
 click position. Drag-to-create is not part of this interaction.
 
-New controls are always root controls. The placement UI does not target an
-existing container or assign `parentId`, and it does not infer containment
-from overlap. Use the same centralized per-type width and height defaults listed under Rendering;
+With `userFormParentEdit`, placement targets the innermost visible Frame under
+the pointer, or the form background. Without it, new controls remain root
+controls. Frame placement explicitly assigns `parentId`; overlap does not
+change existing relationships. Use the same centralized per-type width and height defaults listed under Rendering;
 creation and preview must not maintain separate size tables. Convert the
 canvas click to FormSpec points. With snapping off, normalize each coordinate
 with the TypeScript `stableDelta` helper (six decimal places) to suppress
 floating-point micro-error; with snapping on, use the existing 8 pt grid. Then
 clamp `left` and `top` so the default-size control fits within the current form
-bounds. If either form dimension is smaller than the new control's default
+bounds (or the target Frame's content bounds). If either destination dimension is smaller than the new control's default
 dimension, reject the insertion without changing the source.
 
 Generate the ID as `control-<UUID>`, independently of its current name, and
@@ -234,6 +236,51 @@ source and version associated with an add request or pending delete
 confirmation. If the document text/version, project, or LSP connection changes
 before the edit is submitted or applied, discard the stale action and refresh
 from the current document; do not replay it against newer text.
+
+## Frame parenting and hierarchy
+
+The LSP advertises `capabilities.experimental.userFormParentEdit: true`.
+The extension forwards it as `parentEditable`. Parent-changing pointer drags
+require both parent and geometry capability; additions with `parentId` require
+both parent and structural capability. Missing capability retains the existing
+same-parent movement and root-only placement.
+
+Hit testing follows rendering's stable sibling z-order and visible hierarchy.
+The innermost Frame content region beneath the pointer is the destination;
+ordinary children inherit their Frame destination. The moving control and its
+descendants are excluded. Page content cannot become a direct destination or
+silently fall back to root. An existing Frame inside a Page can still be an
+explicit Frame destination. The form background permits root parenting.
+
+World-space origin conversion includes every ancestor's local position and
+content insets. Page origins derive from MultiPage content. The drag preview
+uses a form-coordinate overlay, preserving the pointer offset and all child
+local coordinates. On changing parents, convert to destination-local points,
+apply grid snapping and six-decimal normalization, then clamp to fit. Oversized
+or sub-1-point controls cannot be dropped. Invalid drops cancel without edits;
+unchanged clicks do not reparent. Resize and keyboard movement retain their
+current parent and existing constraints.
+
+A completed parent change sends exactly one semantic operation:
+
+```json
+{ "type": "setParent", "controlId": "label", "parentId": "frame", "left": 12, "top": 18 }
+```
+
+All five fields are required by the Designer RPC; `parentId: ""` means the
+form root. Same-parent movement uses `moveControl`. Frame movement updates only
+that Frame, while children retain their local geometry. LSP and host reject
+Page subjects, custom controls, non-Frame destinations and changes to a direct
+Page parent relationship. Canonical validation rejects invalid references and
+cycles atomically. Generic Go edits retain their broader existing contract.
+
+A clickable breadcrumb shows the form and selected control's ancestors.
+Clicking the form or an ancestor selects it without editing source. New UI
+strings use the extension localization channel. Selection, destination
+highlighting and preview geometry are transient state. A stale document or
+connection, Escape, pointer cancellation or capture loss discards the gesture.
+
+See [ADR-0069](../adr/ADR-0069-userform-designer-frame-parenting.md).
 
 ## Property Grid and authored source states
 
@@ -341,8 +388,8 @@ not advertise it keeps the preview and whichever existing edit capabilities it
 advertises; structural actions are unavailable.
 Each Toolbox insertion or deletion sends one structural operation; it is not
 combined with geometry or property operations in the same transaction.
-The RPC also enforces this structural scope: insertion accepts only a root
-built-in control other than Page. An omitted or empty ProgID uses the built-in
+The RPC also enforces this structural scope: insertion accepts only a root or
+Frame-parented built-in control other than Page. An omitted or empty ProgID uses the built-in
 type contract; an explicit nonempty ProgID must match that contract's ProgID
 case-insensitively, without trimming whitespace. Custom ProgIDs are rejected
 before source edits are generated. Direct Page deletion returns
@@ -378,8 +425,8 @@ Webview messages add `edit` with request ID/version/operations. Host messages
 add edit results and availability; document messages carry editable capability.
 YAML/YML and JSON share geometry and scalar property interactions, preserving
 unrelated source formatting. Multiple selection and canvas form resizing remain
-outside this contract. Root-only insertion does not include placement inside a
-Frame or reparenting (#920); Page and Tab collection editing remain out of
+outside this contract. Frame placement and reparenting use the separate parent
+capability described above; Page and Tab collection editing remain out of
 scope (#921).
 Structural add/remove use the separate capability above.
 
@@ -390,7 +437,7 @@ place and Escape cancellation, centralized default dimensions, stableDelta
 precision and grid snapping, position clamping and undersized-form rejection,
 UUID/name collision handling at Toolbox allocation and host add preflight,
 stable ID after rename, and the empty MultiPage/TabStrip states. Designer checks
-should cover root-only insertion, selection followed by return to Pointer,
+should cover root and Frame insertion, selection followed by return to Pointer,
 disabled direct Page deletion, canvas-only Delete handling, immediate leaf
 deletion, confirmation content and cancellation for controls with descendants,
 descendant cascade, a single native Undo/Redo step, and pending-confirmation/
@@ -400,7 +447,7 @@ Keep coverage in `editors/vscode/test/userFormStructure.test.tsx`, the actual
 Webview interaction suite `editors/vscode/test/suite/userFormWebview.test.ts`,
 and host preparation checks in `editors/vscode/test/suite/userFormProvider.test.ts`.
 
-Go and LSP checks should cover JSON add/remove source edits, source formatting
+Go and LSP checks should cover JSON add/remove/parent source edits, source formatting
 preservation, removal of descendants represented by legacy nested source, and
 final canonical validation without a new global name-uniqueness rule. Verify
 that older servers retain their separately advertised geometry/property

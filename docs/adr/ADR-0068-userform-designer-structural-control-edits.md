@@ -91,6 +91,9 @@ remaining useful before container and Page-specific editing arrive in Issues
 
 ## Related
 
+- Frame placement and parenting are supplemented by
+  `docs/adr/ADR-0069-userform-designer-frame-parenting.md`.
+
 - Issue #919 (parent: Issue #914)
 - Issue #920 (container parenting and hierarchy)
 - Issue #921 (MultiPage, Page, and TabStrip editing)

@@ -37,9 +37,9 @@ FormSpec のソース編集に Excel は不要で、ブックへ自動適用は�
 Toolbox には Pointer と、Label、TextBox、ComboBox、ListBox、CommandButton、
 CheckBox、OptionButton、ToggleButton、SpinButton、ScrollBar、Image、Frame、
 MultiPage、TabStrip の14種類を表示します。Page は一覧に含めません。
-種類を選んでキャンバスをクリックすると、フォーム直下にコントロールを追加します。
-ドラッグ追加やFrame／Page内への配置は行いません。描画と同じ種類別の既定サイズを使い、
-フォーム内に収まるよう位置を補正します。フォームが既定サイズより小さい場合は追加を拒否します。
+種類を選んでキャンバスをクリックすると、フォーム直下または対象 Frame 内にコントロールを追加します。
+ドラッグ追加は行いません。描画と同じ種類別の既定サイズを使い、
+配置先に収まるよう位置を補正します。配置先が既定サイズより小さい場合は追加を拒否します。
 
 追加したコントロールには`control-<UUID>` IDと、既存コントロール名およびフォーム名に
 大文字・小文字を区別せず重複しない最小の正整数suffixを使った名前を割り当てます。名前を変更してもIDは変わりません。
@@ -54,7 +54,15 @@ Pointerに戻します。配置中のEscapeは追加を取り消します。
 geometry／property編集は各capabilityが示す範囲で利用できます。ソース編集は自動保存せず、
 code-behindも変更しません。
 
-Frameへの配置・親変更は[Issue #920](https://github.com/harumiWeb/xlflow/issues/920)、
-PageやTabの編集は[Issue #921](https://github.com/harumiWeb/xlflow/issues/921)の範囲です。
+コントロールを Frame 内またはフォーム背景へ通常ドラッグすると、親を変更します。
+配置先の強調表示とプレビューで確定位置を確認できます。座標は新しい親の座標系へ変換し、
+グリッドと境界補正を適用します。配置先より大きい場合はドロップを拒否します。
+Frame の移動では子も一緒に動きます。リサイズとキーボード移動は現在の親を維持します。
+キャンバス上のパンくずから祖先 Frame をクリックして選択できます。
+
+Frame 配置には追加で `userFormParentEdit`、ドラッグによる親変更には親編集と geometry の
+両 capability が必要です。旧サーバーではルート配置と現在の親内の移動を維持します。
+Page を直接の親とする関係の変更や Page／Tab の編集は
+[Issue #921](https://github.com/harumiWeb/xlflow/issues/921)の範囲です。
 
 [英語の VS Code 詳細](../vscode/) には設定一覧と機能別の制約を掲載しています。

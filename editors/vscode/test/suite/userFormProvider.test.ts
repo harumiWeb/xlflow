@@ -1,7 +1,11 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { XlflowLanguageClientManager } from "../../src/client";
-import { UserFormEditorProvider, prepareStructuralEdit } from "../../src/userFormEditor/provider";
+import {
+  UserFormEditorProvider,
+  prepareParentEdit,
+  prepareStructuralEdit,
+} from "../../src/userFormEditor/provider";
 import { designerDocument } from "../../src/userFormEditor/model";
 import { createControl } from "../../src/userFormEditor/toolbox";
 import type { DocumentEditQueue } from "../../src/userFormEditor/edits";
@@ -155,49 +159,115 @@ async function runClientCapabilityAssertions(): Promise<void> {
   const property = { type: "setFormProperty", field: "caption", value: "New" } as const;
   const geometry = { type: "moveControl", controlId: "button", left: 1, top: 2 } as const;
   const structural = { type: "removeControl", controlId: "button", cascade: true } as const;
+  const rootAdd = {
+    type: "addControl",
+    control: { id: "root", name: "Label1", type: "Label", left: 1, top: 2, width: 72, height: 18 },
+  } as const;
+  const parentedAdd = {
+    type: "addControl",
+    control: {
+      id: "nested",
+      name: "Label2",
+      type: "Label",
+      left: 1,
+      top: 2,
+      width: 72,
+      height: 18,
+      parentId: "frame",
+    },
+  } as const;
+  const parent = {
+    type: "setParent",
+    controlId: "button",
+    parentId: "",
+    left: 0,
+    top: 0,
+  } as const;
+  for (const userFormParentEdit of [undefined, false, true]) {
+    const manager = Object.assign(Object.create(XlflowLanguageClientManager.prototype), {
+      previewGeneration: 0,
+      workspaceFolderKey: undefined,
+      client: {
+        isRunning: () => true,
+        initializeResult: {
+          capabilities: {
+            experimental: { userFormPreview: true, userFormParentEdit },
+          },
+        },
+        sendRequest: async () => ({
+          version: document.version,
+          document: { form: { name: "Main" }, controls: [] },
+        }),
+      },
+    }) as XlflowLanguageClientManager;
+    const preview = await manager.requestUserFormPreview(document);
+    assert.strictEqual(preview.parentEditable, userFormParentEdit === true);
+  }
   for (const userFormEdit of [undefined, false, true]) {
     for (const userFormPropertyEdit of [undefined, false, true]) {
       for (const userFormStructuralEdit of [undefined, false, true]) {
-        let requests = 0;
-        const response = { edits: [] };
-        const manager = Object.assign(Object.create(XlflowLanguageClientManager.prototype), {
-          previewGeneration: 0,
-          workspaceFolderKey: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString(),
-          client: {
-            isRunning: () => true,
-            initializeResult: {
-              capabilities: {
-                experimental: { userFormEdit, userFormPropertyEdit, userFormStructuralEdit },
+        for (const userFormParentEdit of [undefined, false, true]) {
+          let requests = 0;
+          const response = { edits: [] };
+          const manager = Object.assign(Object.create(XlflowLanguageClientManager.prototype), {
+            previewGeneration: 0,
+            workspaceFolderKey: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString(),
+            client: {
+              isRunning: () => true,
+              initializeResult: {
+                capabilities: {
+                  experimental: {
+                    userFormEdit,
+                    userFormPropertyEdit,
+                    userFormStructuralEdit,
+                    userFormParentEdit,
+                  },
+                },
+              },
+              sendRequest: async () => {
+                requests++;
+                return response;
               },
             },
-            sendRequest: async () => {
-              requests++;
-              return response;
-            },
-          },
-        }) as XlflowLanguageClientManager;
-        for (const operations of [[property], [geometry], [structural], [property, geometry]]) {
-          const before = requests;
-          const allowed = operations.every((op) =>
-            op.type === "setFormProperty"
-              ? userFormPropertyEdit === true
-              : op.type === "removeControl"
-                ? userFormStructuralEdit === true
-                : userFormEdit === true,
-          );
-          const request = manager.requestUserFormEdit(
-            document,
-            document.version,
-            document.getText(),
-            operations,
-          );
-          if (allowed) assert.strictEqual(await request, response);
-          else await assert.rejects(request);
-          assert.strictEqual(
-            requests,
-            before + Number(allowed),
-            "only required capabilities gate transport",
-          );
+          }) as XlflowLanguageClientManager;
+          for (const operations of [
+            [property],
+            [geometry],
+            [structural],
+            [rootAdd],
+            [parentedAdd],
+            [parent],
+            [property, geometry],
+          ]) {
+            const before = requests;
+            const allowed = operations.every((op) => {
+              if (op.type === "setFormProperty") return userFormPropertyEdit === true;
+              if (op.type === "setParent")
+                return userFormEdit === true && userFormParentEdit === true;
+              if (op.type === "addControl")
+                return (
+                  userFormStructuralEdit === true &&
+                  (!("parentId" in op.control) ||
+                    op.control.parentId === undefined ||
+                    userFormParentEdit === true)
+                );
+              if (op.type === "removeControl") return userFormStructuralEdit === true;
+              return userFormEdit === true;
+            });
+            const request = manager.requestUserFormEdit(
+              document,
+              document.version,
+              document.getText(),
+              operations,
+            );
+            if (allowed) assert.strictEqual(await request, response);
+            else await assert.rejects(request);
+            assert.strictEqual(
+              requests,
+              before + Number(allowed),
+              "only required capabilities gate transport",
+            );
+          }
         }
       }
     }
@@ -263,5 +333,69 @@ async function runStructuralPreparationAssertions(): Promise<void> {
       (await prepareStructuralEdit({ type: "addControl", control: conflict }, snapshot, 7, confirm))
         ?.code,
       "controlConflict",
+    );
+
+  const parentOperation = {
+    type: "setParent",
+    controlId: "child",
+    parentId: "frame",
+    left: 12,
+    top: 16,
+  } as const;
+  assert.strictEqual(prepareParentEdit(parentOperation, snapshot, 7), undefined);
+  assert.strictEqual(
+    prepareParentEdit({ ...parentOperation, parentId: "" }, snapshot, 7),
+    undefined,
+    "empty parentId explicitly reparents to the form root",
+  );
+  for (const parentId of ["missing", "other", "child"])
+    assert.strictEqual(
+      prepareParentEdit({ ...parentOperation, parentId }, snapshot, 7)?.code,
+      "invalidParent",
+    );
+  assert.strictEqual(
+    prepareParentEdit({ ...parentOperation, controlId: "frame", parentId: "nested" }, snapshot, 7)
+      ?.code,
+    "invalidParent",
+    "a descendant cannot become its ancestor's parent",
+  );
+  for (const controlId of ["missing", "page"])
+    assert.strictEqual(
+      prepareParentEdit({ ...parentOperation, controlId }, snapshot, 7)?.code,
+      "invalidParent",
+    );
+  assert.strictEqual(prepareParentEdit(parentOperation, snapshot, 8)?.code, "staleDocument");
+  const orphan = designerDocument({
+    form: { name: "Main" },
+    controls: [
+      { id: "frame", type: "Frame", name: "Frame1" },
+      { id: "child", type: "Label", name: "Label1", parentId: "missing" },
+    ],
+  });
+  assert.strictEqual(
+    prepareParentEdit(parentOperation, { version: 7, document: orphan }, 7)?.code,
+    "invalidParent",
+    "the current direct parent must resolve to root or a Frame",
+  );
+  assert.strictEqual(
+    await prepareStructuralEdit(
+      { type: "addControl", control: { ...control, parentId: "frame" } },
+      snapshot,
+      7,
+      confirm,
+    ),
+    undefined,
+  );
+  for (const parentId of ["missing", "other", "page"])
+    assert.strictEqual(
+      (
+        await prepareStructuralEdit(
+          { type: "addControl", control: { ...control, parentId } },
+          snapshot,
+          7,
+          confirm,
+        )
+      )?.code,
+      "invalidParent",
     );
 }
