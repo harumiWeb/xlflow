@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added Frame placement, drag reparenting and clickable hierarchy breadcrumbs.
+- Clipped Frame children to their content bounds so overflow cannot become an unintended root drag target.
   Drop previews preserve apparent positions with boundary clamping, reject
   invalid destinations, and commit YAML/JSON parent and coordinate updates as
   one undoable edit. Older servers retain root placement and existing movement.

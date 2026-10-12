@@ -89,6 +89,17 @@ window.addEventListener("message", e => {
         const scale = 96 * Number(document.querySelector(".designer-toolbar select").value) / 72;
         return { id: c.dataset.controlId, left: (bounds.left - form.left) / scale, top: (bounds.top - form.top) / scale };
       }),
+      overflowHits: (() => {
+        const child = document.querySelector('[data-control-id="overflow-child"]');
+        if (!child) return undefined;
+        const bounds = child.getBoundingClientRect();
+        const content = child.parentElement.getBoundingClientRect();
+        const y = (bounds.top + bounds.bottom) / 2;
+        return {
+          inside: document.elementFromPoint((bounds.left + content.right) / 2, y)?.closest('[data-control-id]')?.dataset.controlId,
+          outside: document.elementFromPoint((content.right + bounds.right) / 2, y)?.closest('[data-control-id]')?.dataset.controlId,
+        };
+      })(),
       editMessages,
       images: document.querySelectorAll("img").length,
       propertyTitle: document.querySelector(".property-grid h2")?.textContent,
@@ -970,6 +981,46 @@ window.addEventListener("message", e => {
       ["frame", 9.25, 9.25],
     );
     assert.deepStrictEqual(frameAddition.violations, []);
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: (frameAddition.editMessages as { requestId: number }[]).at(-1)!.requestId,
+      error: { code: "editCancelled", message: "Cancelled" },
+    });
+    const overflow = designerDocument({
+      form: { name: "Overflow", build: { clientWidth: 400, clientHeight: 300 } },
+      controls: [
+        { id: "frame", name: "Frame1", type: "Frame", left: 20, top: 20, width: 100, height: 80 },
+        {
+          id: "overflow-child",
+          parentId: "frame",
+          name: "Child",
+          type: "Label",
+          left: 90,
+          top: 10,
+          width: 20,
+          height: 18,
+        },
+      ],
+    });
+    const clipped = await snapshot({ ...parentingDocument(72), document: overflow });
+    assert.deepStrictEqual(clipped.overflowHits, { inside: "overflow-child" });
+    assert.strictEqual(overflow.controls[1].left, 90, "load preserves overflow source geometry");
+    const adjusted = await snapshot({
+      type: "testAction",
+      version: 73,
+      actions: [
+        key("keydown", "Escape"),
+        parentPointer('.control[data-control-id="overflow-child"]', "pointerdown", 115, 31),
+        parentPointer(".designer-viewport", "pointerup", 116, 31),
+      ],
+    });
+    const overflowEdits = adjusted.editMessages as { operations: unknown[] }[];
+    assert.deepStrictEqual(
+      overflowEdits.at(-1)!.operations,
+      [{ type: "moveControl", controlId: "overflow-child", left: 78.5, top: 10 }],
+      "a short drag from the visible part retains the Frame parent and clamps geometry",
+    );
+    assert.deepStrictEqual(adjusted.violations, []);
   } finally {
     subscription.dispose();
     panel.dispose();

@@ -168,7 +168,9 @@ MultiPage shrink protects children on every Page, including hidden/non-selected
 Pages. Empty containers, including MultiPage controls with empty Pages, retain
 the 1 pt outer minimum; child extents plus decoration insets increase that
 minimum only where children require space. Moving a container retains child local coordinates. Existing overflow
-is never fixed on load; fitting moves/resizes are permitted, but an oversized
+is never fixed on load. Container children are visually clipped to the parent's
+content bounds so visible pointer targets agree with drop hit testing; source
+coordinates remain unchanged. Fitting moves/resizes are permitted, but an oversized
 control cannot move until resized to fit. A control smaller than 1 pt on either
 axis also cannot move until explicitly resized to meet the minimum; source
 dimensions are never silently enlarged by moving it. If child protection prevents fitting,

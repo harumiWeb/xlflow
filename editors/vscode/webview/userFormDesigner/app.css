@@ -169,6 +169,7 @@ button {
 }
 .container-content {
   position: absolute;
+  overflow: hidden;
 }
 .designer-toolbar {
   display: flex;
