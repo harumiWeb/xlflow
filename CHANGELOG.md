@@ -4,14 +4,19 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added Frame-aware UserForm Designer placement and drag reparenting, with
+  destination previews, parent-relative coordinate conversion and clickable
+  hierarchy breadcrumbs. YAML/JSON parent edits preserve source and use one
+  native Undo/Redo transaction; a separate LSP capability protects older servers.
+
 - Updated the Go patch baseline to 1.26.9 to include standard-library security
   fixes detected by the CI vulnerability scan.
 
 - Added the UserForm Designer Toolbox and structural control editing for
   click-to-place root controls, immediate leaf deletion, and confirmed subtree
   deletion. YAML/JSON source-preserving add/remove uses a separate LSP
-  capability with stale-document guards and native undo/redo. Placement inside
-  Frames/reparenting and Page/Tab editing remain in Issues #920/#921.
+  capability with stale-document guards and native undo/redo. Page/Tab editing
+  remains in Issue #921.
   Canvas Delete ignores focused Page-tab buttons, and Designer insertion
   rejects custom ProgIDs on built-in control types.
 

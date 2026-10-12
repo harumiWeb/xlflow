@@ -100,7 +100,7 @@ function testGeneration() {
     operations,
   });
   for (const payload of [
-    { ...control, parentId: "frame" },
+    { ...control, parentId: null },
     { ...control, id: "" },
     { ...control, name: "1Invalid" },
     { ...control, type: "Page" },

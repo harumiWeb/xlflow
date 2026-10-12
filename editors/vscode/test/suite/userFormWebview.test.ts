@@ -79,6 +79,27 @@ window.addEventListener("message", e => {
       toolboxDisabled: document.querySelector('[data-toolbox-type="Label"]')?.disabled,
       placing: !!document.querySelector(".placing-control"),
       selectedId: document.querySelector(".selection-outline")?.dataset.controlId,
+      canvasFocused: document.activeElement === document.querySelector(".designer-viewport"),
+      dropParentId: document.querySelector("[data-drop-parent-id]")?.dataset.dropParentId,
+      floating: !!document.querySelector(".drag-preview"),
+      selectionPath: [...document.querySelectorAll(".selection-path button")].map(b => b.textContent),
+      worldPositions: [...document.querySelectorAll(".control[data-control-id]")].map(c => {
+        const bounds = c.getBoundingClientRect();
+        const form = document.querySelector(".form").getBoundingClientRect();
+        const scale = 96 * Number(document.querySelector(".designer-toolbar select").value) / 72;
+        return { id: c.dataset.controlId, left: (bounds.left - form.left) / scale, top: (bounds.top - form.top) / scale };
+      }),
+      overflowHits: (() => {
+        const child = document.querySelector('[data-control-id="overflow-child"]');
+        if (!child) return undefined;
+        const bounds = child.getBoundingClientRect();
+        const content = child.parentElement.getBoundingClientRect();
+        const y = (bounds.top + bounds.bottom) / 2;
+        return {
+          inside: document.elementFromPoint((bounds.left + content.right) / 2, y)?.closest('[data-control-id]')?.dataset.controlId,
+          outside: document.elementFromPoint((content.right + bounds.right) / 2, y)?.closest('[data-control-id]')?.dataset.controlId,
+        };
+      })(),
       editMessages,
       images: document.querySelectorAll("img").length,
       propertyTitle: document.querySelector(".property-grid h2")?.textContent,
@@ -774,6 +795,232 @@ window.addEventListener("message", e => {
     assert.strictEqual(afterDeletion.count, 4);
     assert.strictEqual(afterDeletion.selectedId, undefined);
     assert.deepStrictEqual(afterDeletion.violations, []);
+
+    const parenting = designerDocument({
+      form: { name: "Main", build: { clientWidth: 600, clientHeight: 400 } },
+      controls: [
+        { id: "label", name: "Label1", type: "Label", left: 10, top: 10, width: 20, height: 10 },
+        {
+          id: "frame",
+          name: "Frame1",
+          type: "Frame",
+          left: 200,
+          top: 100,
+          width: 180,
+          height: 160,
+        },
+        {
+          id: "nested",
+          parentId: "frame",
+          name: "Frame2",
+          type: "Frame",
+          left: 20,
+          top: 30,
+          width: 70,
+          height: 60,
+        },
+        {
+          id: "child",
+          parentId: "nested",
+          name: "Child",
+          type: "Label",
+          left: 5,
+          top: 6,
+          width: 20,
+          height: 10,
+        },
+      ],
+    });
+    const parentingDocument = (version: number) => ({
+      type: "document" as const,
+      version,
+      document: parenting,
+      editable: true,
+      structuralEditable: true,
+      parentEditable: true,
+    });
+    const parentPointer = (selector: string, event: string, left: number, top: number) => ({
+      selector,
+      event,
+      props: { button: 0, pointerId: 1, formPoints: [left, top] },
+    });
+    const position = (result: Record<string, unknown>, id: string) =>
+      (result.worldPositions as { id: string; left: number; top: number }[]).find(
+        (c) => c.id === id,
+      )!;
+    await snapshot(parentingDocument(60));
+    const parentPreview = await snapshot({
+      type: "testAction",
+      version: 61,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "1" } },
+        { selector: ".snap-toggle input", event: "change", props: { checked: false } },
+        parentPointer('.control[data-control-id="label"]', "pointerdown", 12, 12),
+        parentPointer(".designer-viewport", "pointermove", 220, 120),
+      ],
+    });
+    assert.strictEqual(parentPreview.dropParentId, "frame");
+    assert.strictEqual(parentPreview.floating, true);
+    assert.ok(Math.abs(position(parentPreview, "label").left - 218) < 0.1);
+    const parentDrop = await snapshot({
+      type: "testAction",
+      version: 62,
+      actions: [parentPointer(".designer-viewport", "pointerup", 220, 120)],
+    });
+    const parentEdits = parentDrop.editMessages as { requestId: number; operations: unknown[] }[];
+    assert.deepStrictEqual(parentEdits.at(-1)!.operations, [
+      { type: "setParent", controlId: "label", parentId: "frame", left: 17.25, top: 17.25 },
+    ]);
+    parenting.controls[0] = {
+      ...parenting.controls[0],
+      parentId: "frame",
+      left: 17.25,
+      top: 17.25,
+    };
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: parentEdits.at(-1)!.requestId,
+    });
+    const parented = await snapshot(parentingDocument(63));
+    assert.ok(
+      Math.abs(position(parented, "label").left - position(parentPreview, "label").left) < 0.1,
+      "preview and nested canonical rendering agree",
+    );
+    assert.deepStrictEqual(parented.selectionPath, ["Main", "Frame1", "Label1"]);
+    const unparent = await snapshot({
+      type: "testAction",
+      version: 64,
+      actions: [
+        parentPointer('.control[data-control-id="label"]', "pointerdown", 220, 120),
+        parentPointer(".designer-viewport", "pointerup", 100, 50),
+      ],
+    });
+    const unparentEdits = unparent.editMessages as { requestId: number; operations: unknown[] }[];
+    assert.deepStrictEqual(unparentEdits.at(-1)!.operations, [
+      { type: "setParent", controlId: "label", parentId: "", left: 98, top: 48 },
+    ]);
+    parenting.controls[0] = { ...parenting.controls[0], parentId: undefined, left: 98, top: 48 };
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: unparentEdits.at(-1)!.requestId,
+    });
+    await snapshot(parentingDocument(65));
+    const nestedPreview = await snapshot({
+      type: "testAction",
+      version: 66,
+      actions: [
+        parentPointer('.control[data-control-id="nested"]', "pointerdown", 222, 132),
+        parentPointer(".designer-viewport", "pointermove", 100, 50),
+      ],
+    });
+    assert.strictEqual(nestedPreview.floating, true);
+    assert.ok(
+      Math.abs(
+        position(nestedPreview, "child").left - position(nestedPreview, "nested").left - 5.75,
+      ) < 0.1,
+      "floating Frame preserves descendant local coordinates",
+    );
+    const cancelNested = await snapshot({
+      type: "testAction",
+      version: 67,
+      actions: [
+        key("keydown", "Escape"),
+        parentPointer(".designer-viewport", "pointerup", 100, 50),
+      ],
+    });
+    assert.strictEqual((cancelNested.editMessages as unknown[]).length, unparentEdits.length);
+    assert.strictEqual(cancelNested.floating, false);
+    const nestedSelected = await snapshot({
+      type: "testAction",
+      version: 68,
+      actions: [
+        parentPointer('.control[data-control-id="child"]', "pointerdown", 228.5, 139.5),
+        parentPointer(".designer-viewport", "pointerup", 228.5, 139.5),
+        { selector: ".selection-path > span button", event: "click" },
+      ],
+    });
+    assert.strictEqual(nestedSelected.selectedId, "frame");
+    assert.strictEqual(nestedSelected.canvasFocused, true);
+    const breadcrumbMove = await snapshot({
+      type: "testAction",
+      version: 69,
+      actions: [key("keydown", "ArrowRight"), key("keyup", "ArrowRight")],
+    });
+    const breadcrumbEdits = breadcrumbMove.editMessages as {
+      requestId: number;
+      operations: unknown[];
+    }[];
+    assert.deepStrictEqual(breadcrumbEdits.at(-1)!.operations, [
+      { type: "moveControl", controlId: "frame", left: 201, top: 100 },
+    ]);
+    parenting.controls[1] = { ...parenting.controls[1], left: 201 };
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: breadcrumbEdits.at(-1)!.requestId,
+    });
+    await snapshot(parentingDocument(70));
+    const frameAddition = await snapshot({
+      type: "testAction",
+      version: 71,
+      actions: [
+        { selector: '[data-toolbox-type="TextBox"]', event: "click" },
+        parentPointer(".form", "pointerdown", 211, 110),
+      ],
+    });
+    const frameAddEdits = frameAddition.editMessages as {
+      requestId: number;
+      operations: { type: string; control: { parentId: string; left: number; top: number } }[];
+    }[];
+    assert.strictEqual(frameAddEdits.at(-1)!.operations[0].type, "addControl");
+    assert.deepStrictEqual(
+      [
+        frameAddEdits.at(-1)!.operations[0].control.parentId,
+        frameAddEdits.at(-1)!.operations[0].control.left,
+        frameAddEdits.at(-1)!.operations[0].control.top,
+      ],
+      ["frame", 9.25, 9.25],
+    );
+    assert.deepStrictEqual(frameAddition.violations, []);
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: (frameAddition.editMessages as { requestId: number }[]).at(-1)!.requestId,
+      error: { code: "editCancelled", message: "Cancelled" },
+    });
+    const overflow = designerDocument({
+      form: { name: "Overflow", build: { clientWidth: 400, clientHeight: 300 } },
+      controls: [
+        { id: "frame", name: "Frame1", type: "Frame", left: 20, top: 20, width: 100, height: 80 },
+        {
+          id: "overflow-child",
+          parentId: "frame",
+          name: "Child",
+          type: "Label",
+          left: 90,
+          top: 10,
+          width: 20,
+          height: 18,
+        },
+      ],
+    });
+    const clipped = await snapshot({ ...parentingDocument(72), document: overflow });
+    assert.deepStrictEqual(clipped.overflowHits, { inside: "overflow-child" });
+    assert.strictEqual(overflow.controls[1].left, 90, "load preserves overflow source geometry");
+    const adjusted = await snapshot({
+      type: "testAction",
+      version: 73,
+      actions: [
+        key("keydown", "Escape"),
+        parentPointer('.control[data-control-id="overflow-child"]', "pointerdown", 115, 31),
+        parentPointer(".designer-viewport", "pointerup", 116, 31),
+      ],
+    });
+    const overflowEdits = adjusted.editMessages as { operations: unknown[] }[];
+    assert.deepStrictEqual(
+      overflowEdits.at(-1)!.operations,
+      [{ type: "moveControl", controlId: "overflow-child", left: 78.5, top: 10 }],
+      "a short drag from the visible part retains the Frame parent and clamps geometry",
+    );
+    assert.deepStrictEqual(adjusted.violations, []);
   } finally {
     subscription.dispose();
     panel.dispose();

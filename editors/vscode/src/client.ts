@@ -64,6 +64,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
           userFormEdit?: boolean;
           userFormPropertyEdit?: boolean;
           userFormStructuralEdit?: boolean;
+          userFormParentEdit?: boolean;
         }
       | undefined;
     if (experimental?.userFormPreview !== true)
@@ -81,6 +82,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       propertyEditable:
         experimental.userFormPropertyEdit === true && result.propertyGrid !== undefined,
       structuralEditable: experimental.userFormStructuralEdit === true,
+      parentEditable: experimental.userFormParentEdit === true,
     };
   }
 
@@ -98,10 +100,17 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
         vscode.l10n.t("Select this form's project and enable xlflow LSP to edit the form."),
       );
     const experimental = client.initializeResult?.capabilities.experimental as
-      | { userFormEdit?: boolean; userFormPropertyEdit?: boolean; userFormStructuralEdit?: boolean }
+      | {
+          userFormEdit?: boolean;
+          userFormPropertyEdit?: boolean;
+          userFormStructuralEdit?: boolean;
+          userFormParentEdit?: boolean;
+        }
       | undefined;
     if (
-      operations.some((op) => op.type === "moveControl" || op.type === "resizeControl") &&
+      operations.some(
+        (op) => op.type === "moveControl" || op.type === "resizeControl" || op.type === "setParent",
+      ) &&
       experimental?.userFormEdit !== true
     )
       throw new Error(vscode.l10n.t("Update xlflow to a version supporting UserForm edits."));
@@ -111,6 +120,17 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     )
       throw new Error(
         vscode.l10n.t("Update xlflow to a version supporting UserForm structural edits."),
+      );
+    if (
+      operations.some(
+        (op) =>
+          op.type === "setParent" ||
+          (op.type === "addControl" && op.control.parentId !== undefined),
+      ) &&
+      experimental?.userFormParentEdit !== true
+    )
+      throw new Error(
+        vscode.l10n.t("Changing parents requires an xlflow version supporting parent edits."),
       );
     if (
       operations.some((op) => op.type === "setFormProperty" || op.type === "setControlProperty") &&

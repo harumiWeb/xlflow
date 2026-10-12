@@ -2,7 +2,11 @@ import * as assert from "assert";
 import * as path from "path";
 import { isFormSpecPath, PreviewSynchronizer } from "../../src/userFormEditor/document";
 import { designerDocument, pointsToPixels } from "../../src/userFormEditor/model";
-import { isWebviewMessage } from "../../src/userFormEditor/protocol";
+import {
+  isParentOperation,
+  isStructuralOperation,
+  isWebviewMessage,
+} from "../../src/userFormEditor/protocol";
 import type { HostMessage, PreviewResult } from "../../src/userFormEditor/protocol";
 
 export async function runUserFormEditorAssertions(): Promise<void> {
@@ -17,6 +21,41 @@ export async function runUserFormEditorAssertions(): Promise<void> {
   assert.ok(isWebviewMessage({ type: "ready" }));
   assert.ok(!isWebviewMessage({ type: "moveControl" }));
   assert.ok(!isWebviewMessage(null));
+  const parent = { type: "setParent", controlId: "child", parentId: "frame", left: 4, top: 5 };
+  assert.ok(isParentOperation(parent));
+  assert.ok(
+    isParentOperation({ ...parent, parentId: "" }),
+    "an empty parent selects the form root",
+  );
+  assert.ok(!isParentOperation({ ...parent, extra: true }));
+  assert.ok(!isParentOperation({ ...parent, top: Infinity }));
+  assert.ok(isWebviewMessage({ type: "edit", requestId: 1, version: 1, operations: [parent] }));
+  assert.ok(
+    !isWebviewMessage({
+      type: "edit",
+      requestId: 1,
+      version: 1,
+      operations: [parent, { type: "moveControl", controlId: "child", left: 4, top: 5 }],
+    }),
+    "parent changes are single-operation transactions",
+  );
+  const newControl = {
+    id: "new",
+    name: "Label1",
+    type: "Label",
+    left: 0,
+    top: 0,
+    width: 72,
+    height: 18,
+  };
+  assert.ok(isStructuralOperation({ type: "addControl", control: newControl }));
+  assert.ok(
+    isStructuralOperation({ type: "addControl", control: { ...newControl, parentId: "frame" } }),
+  );
+  assert.ok(
+    !isStructuralOperation({ type: "addControl", control: { ...newControl, parentId: "" } }),
+    "an empty optional parent is not a valid add target",
+  );
   const property = { type: "setFormProperty", field: "caption", value: "" };
   const edit = { type: "edit", requestId: 1, version: 1, operations: [property] };
   for (const value of [null, "", 0, false, "false", 12.5]) {
@@ -82,13 +121,21 @@ export async function runUserFormEditorAssertions(): Promise<void> {
   };
   await sync.update(
     1,
-    async () => ({ version: 1, document, editable: true, propertyEditable: true, propertyGrid }),
+    async () => ({
+      version: 1,
+      document,
+      editable: true,
+      propertyEditable: true,
+      parentEditable: true,
+      propertyGrid,
+    }),
     () => version,
     send,
   );
   const propertyMessage = messages.at(-1);
   assert.ok(propertyMessage?.type === "document");
   assert.strictEqual(propertyMessage.propertyEditable, true);
+  assert.strictEqual(propertyMessage.parentEditable, true);
   assert.deepStrictEqual(
     propertyMessage.propertyGrid,
     propertyGrid,
@@ -136,6 +183,8 @@ export async function runUserFormEditorAssertions(): Promise<void> {
     restored.map((m) => m.type),
     ["document"],
   );
+  assert.ok(restored[0].type === "document");
+  assert.strictEqual(restored[0].parentEditable, false, "missing capability resets to read-only");
   const pendingConnection = sync.update(
     3,
     () =>

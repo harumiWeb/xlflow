@@ -74,13 +74,15 @@ export class DocumentEditQueue {
               ? vscode.l10n.t("Add control")
               : operations[0].type === "removeControl"
                 ? vscode.l10n.t("Delete control")
-                : operations.some(
-                      (op) => op.type === "setFormProperty" || op.type === "setControlProperty",
-                    )
-                  ? vscode.l10n.t("Edit UserForm property")
-                  : operations.some((op) => op.type === "resizeControl")
-                    ? vscode.l10n.t("Resize control")
-                    : vscode.l10n.t("Move control");
+                : operations[0].type === "setParent"
+                  ? vscode.l10n.t("Reparent control")
+                  : operations.some(
+                        (op) => op.type === "setFormProperty" || op.type === "setControlProperty",
+                      )
+                    ? vscode.l10n.t("Edit UserForm property")
+                    : operations.some((op) => op.type === "resizeControl")
+                      ? vscode.l10n.t("Resize control")
+                      : vscode.l10n.t("Move control");
           edit.set(
             document.uri,
             edits.map((e): [vscode.TextEdit, vscode.WorkspaceEditEntryMetadata] => [

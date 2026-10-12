@@ -36,9 +36,9 @@ Invalid source retains the last valid preview and disables editing until fixed.
 The Toolbox contains Pointer and Label, TextBox, ComboBox, ListBox,
 CommandButton, CheckBox, OptionButton, ToggleButton, SpinButton, ScrollBar,
 Image, Frame, MultiPage, and TabStrip. Choose a type, then click the canvas to
-insert a root control; Escape cancels placement. The Designer uses the same
+insert a root control or target a Frame; Escape cancels placement. The Designer uses the same
 type-specific default sizes as its preview and clamps the position to fit the
-form. A form smaller than the default control size rejects insertion. New
+destination. A destination smaller than the default control size rejects insertion. New
 controls have stable `control-<UUID>` IDs and conflict-free generated VBA names.
 Insertion selects the new control and returns to Pointer. A new MultiPage has
 no Pages and `selectedIndex: -1`; a new TabStrip has `tabs: []` and
@@ -54,10 +54,19 @@ of a Page is disabled. Structural editing requires the LSP's separate
 geometry/property support and do not offer structural actions. Source edits do
 not change code-behind or save automatically.
 
-Placement inside Frames, reparenting, and Page or Tab collection editing remain
-future work tracked by [Issue #920](https://github.com/harumiWeb/xlflow/issues/920) and
-[Issue #921](https://github.com/harumiWeb/xlflow/issues/921). Images remain
-placeholders.
+Drag an existing control into a Frame or onto the form background to change
+its parent. The highlighted destination and drag preview show the final
+position before dropping. Coordinates are converted to the new parent's
+space, snapped when enabled, then clamped to its content area. A control too
+large for the destination cannot be dropped. Moving a Frame carries its
+children; resizing and keyboard movement retain the current parent. Use the
+clickable selection path above the canvas to select ancestor Frames.
+
+Frame placement additionally requires `userFormParentEdit`; reparenting
+requires both that capability and geometry support. Older servers retain
+root placement and same-parent movement. Page/Tab collection editing and
+direct Page-parent changes remain future work tracked by
+[Issue #921](https://github.com/harumiWeb/xlflow/issues/921). Images remain placeholders.
 
 ### Edit properties
 
