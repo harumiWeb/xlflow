@@ -277,6 +277,45 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 			types = jsonControlTypes(model)
 			continue
 		}
+		if op.Type == ReorderControl {
+			if op.Index == nil {
+				return Result{}, failure(index, op, "UFE003", "ReorderControl requires an index.", "Supply a zero-based sibling index.")
+			}
+			control, ok := controlByID(model, op.ControlID)
+			if !ok || len(nodes[op.ControlID]) != 1 {
+				return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+			}
+			siblings := orderedChildren(model.Controls, control.ParentID, "")
+			if *op.Index < 0 || *op.Index >= len(siblings) {
+				return Result{}, failure(index, op, "UFE003", "Sibling index is out of range.", "Use an index within the sibling collection.")
+			}
+			updates, err := reorderedZIndexes(siblings, op.ControlID, *op.Index)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			edits := make([]SourceEdit, 0, len(updates))
+			for _, sibling := range siblings {
+				if zIndex, changed := updates[sibling.ID]; changed {
+					if len(nodes[sibling.ID]) != 1 {
+						return Result{}, failure(index, op, "UFE004", "Sibling ID did not resolve to exactly one JSON control.", "Use unique explicit control IDs.")
+					}
+					propertyEdits, err := jsonScalarEdits(updated, nodes[sibling.ID][0], map[string]any{"zIndex": zIndex})
+					if err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+					edits = append(edits, propertyEdits...)
+				}
+			}
+			if err := applyEdits(edits); err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			model, err = normalizedJSONModel(updated)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			types = jsonControlTypes(model)
+			continue
+		}
 		if op.Type == AddTab || op.Type == RemoveTab || op.Type == ReorderTab || op.Type == SetTabProperty {
 			control, ok := controlByID(model, op.ControlID)
 			if !ok || len(nodes[op.ControlID]) != 1 {

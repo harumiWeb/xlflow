@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added UserForm Designer sibling multi-selection and group movement,
+  alignment/distribution, anchor sizing, z-order, shared in-memory Cut/Copy/Paste
+  and Duplicate, and parent-local tab-order editing. YAML/YML/JSON edits
+  preserve authored source values and use one native Undo step per action.
+
 - Added visual MultiPage/Page and TabStrip editing to the UserForm Designer,
   including Page/tab collection operations, metadata-driven properties, active
   Page navigation and control placement/reparenting. Source-preserving YAML/JSON

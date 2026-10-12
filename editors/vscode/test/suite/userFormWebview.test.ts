@@ -26,8 +26,9 @@ export async function runUserFormWebviewAssertions(extensionUri: vscode.Uri): Pr
   const harness = `<script nonce="${nonce}">
 const testApi = acquireVsCodeApi();
 const editMessages = [];
+const clipboardMessages = [];
 window.acquireVsCodeApi = () => ({
-  postMessage(message) { if (message.type === "edit") editMessages.push(message); testApi.postMessage(message); },
+  postMessage(message) { if (message.type === "edit") editMessages.push(message); if (message.type === "clipboard") clipboardMessages.push(message); testApi.postMessage(message); },
   getState: () => testApi.getState(), setState: (state) => testApi.setState(state)
 });
 const violations = [];
@@ -82,6 +83,8 @@ window.addEventListener("message", e => {
       toolboxDisabled: document.querySelector('[data-toolbox-type="Label"]')?.disabled,
       placing: !!document.querySelector(".placing-control"),
       selectedId: document.querySelector(".selection-outline")?.dataset.controlId,
+      selectedIds: [...document.querySelectorAll(".selection-outline")].map(c => c.dataset.controlId),
+      groupSelection: !!document.querySelector(".group-selection-outline"),
       canvasFocused: document.activeElement === document.querySelector(".designer-viewport"),
       dropParentId: document.querySelector("[data-drop-parent-id]")?.dataset.dropParentId,
       floating: !!document.querySelector(".drag-preview"),
@@ -104,6 +107,7 @@ window.addEventListener("message", e => {
         };
       })(),
       editMessages,
+      clipboardMessages,
       images: document.querySelectorAll("img").length,
       propertyTitle: document.querySelector(".property-grid h2")?.textContent,
       propertyRows: [...document.querySelectorAll("[data-property-field]")].map(row => ({
@@ -1158,6 +1162,139 @@ window.addEventListener("message", e => {
       },
     ]);
     assert.deepStrictEqual(tabSelected.violations, []);
+    await panel.webview.postMessage({ type: "editResult", requestId: tabRequest.requestId });
+    const productivityDocument = designerDocument({
+      form: { name: "Productivity", build: { clientWidth: 400, clientHeight: 240 } },
+      controls: [
+        { id: "a", name: "Label1", type: "Label", left: 20, top: 20, width: 60, height: 18 },
+        { id: "b", name: "Label2", type: "Label", left: 110, top: 20, width: 60, height: 18 },
+      ],
+    });
+    const productivityMessage = (version: number): Extract<HostMessage, { type: "document" }> => ({
+      type: "document",
+      version,
+      document: productivityDocument,
+      editable: true,
+      productivityEditable: true,
+      structuralEditable: true,
+      propertyEditable: true,
+      propertyGrid: {
+        form: { descriptors: [], values: {} },
+        controls: {
+          a: {
+            descriptors: [
+              { field: "tabIndex", valueType: "integer", nullable: true, required: false },
+            ],
+            values: { tabIndex: { present: false, value: null } },
+          },
+          b: {
+            descriptors: [
+              { field: "tabIndex", valueType: "integer", nullable: true, required: false },
+            ],
+            values: { tabIndex: { present: true, value: 8 } },
+          },
+        },
+      },
+    });
+    const beforeGroup = await snapshot(productivityMessage(100));
+    const selectedGroup = await snapshot({
+      type: "testAction",
+      version: 101,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "1" } },
+        { selector: ".snap-toggle input", event: "change", props: { checked: false } },
+        parentPointer('.control[data-control-id="a"]', "pointerdown", 25, 25),
+        parentPointer(".designer-viewport", "pointerup", 25, 25),
+        {
+          ...parentPointer('.control[data-control-id="b"]', "pointerdown", 115, 25),
+          props: { pointerId: 1, button: 0, formPoints: [115, 25], ctrlKey: true },
+        },
+        parentPointer(".designer-viewport", "pointerup", 115, 25),
+      ],
+    });
+    assert.deepStrictEqual((selectedGroup.selectedIds as string[]).sort(), ["a", "b"]);
+    assert.strictEqual(selectedGroup.groupSelection, true);
+    assert.strictEqual(selectedGroup.handles, 0, "group selection has no group resize handles");
+    const groupDragged = await snapshot({
+      type: "testAction",
+      version: 102,
+      actions: [
+        parentPointer('.control[data-control-id="a"]', "pointerdown", 25, 25),
+        parentPointer(".designer-viewport", "pointermove", 37, 31),
+        parentPointer(".designer-viewport", "pointerup", 37, 31),
+      ],
+    });
+    const groupRequests = groupDragged.editMessages as {
+      requestId: number;
+      operations: unknown[];
+    }[];
+    assert.strictEqual(groupRequests.length, (beforeGroup.editMessages as unknown[]).length + 1);
+    const groupOperation = groupRequests.at(-1)!.operations[0] as {
+      type: string;
+      moves: { controlId: string; left: number; top: number }[];
+    };
+    assert.strictEqual(groupRequests.at(-1)!.operations.length, 1);
+    assert.deepStrictEqual(
+      [
+        {
+          ...groupOperation,
+          moves: [...groupOperation.moves].sort((a, b) => a.controlId.localeCompare(b.controlId)),
+        },
+      ],
+      [
+        {
+          type: "moveControls",
+          moves: [
+            { controlId: "a", left: 32, top: 26 },
+            { controlId: "b", left: 122, top: 26 },
+          ],
+        },
+      ],
+    );
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: groupRequests.at(-1)!.requestId,
+    });
+    await snapshot(productivityMessage(103));
+    const copiedGroup = await snapshot({
+      type: "testAction",
+      version: 104,
+      actions: [
+        { selector: ".designer-viewport", event: "keydown", props: { key: "c", ctrlKey: true } },
+      ],
+    });
+    const copyRequests = copiedGroup.clipboardMessages as {
+      requestId: number;
+      action: string;
+      controlIds: string[];
+    }[];
+    assert.strictEqual(copyRequests.at(-1)!.action, "copy");
+    assert.deepStrictEqual([...copyRequests.at(-1)!.controlIds].sort(), ["a", "b"]);
+    assert.strictEqual(
+      (copiedGroup.editMessages as unknown[]).length,
+      groupRequests.length,
+      "copy emits no source edit",
+    );
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: copyRequests.at(-1)!.requestId,
+    });
+    const assignedTabs = await snapshot({
+      type: "testAction",
+      version: 105,
+      actions: [
+        { selector: ".productivity-toolbar details:last-of-type summary", event: "click" },
+        { selector: ".tab-order-editor > button", event: "click" },
+      ],
+    });
+    const tabOrderRequest = (
+      assignedTabs.editMessages as { requestId: number; operations: unknown[] }[]
+    ).at(-1)!;
+    assert.deepStrictEqual(tabOrderRequest.operations, [
+      { type: "setTabOrder", parentId: "", controlIds: ["b", "a"] },
+    ]);
+    assert.deepStrictEqual(assignedTabs.violations, []);
+    assert.deepStrictEqual(assignedTabs.runtimeErrors, []);
   } finally {
     subscription.dispose();
     panel.dispose();

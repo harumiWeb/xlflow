@@ -1,3 +1,24 @@
+# Issue #922 Designer productivity
+
+- [x] Extend atomic source-preserving semantic operations and copy RPC for YAML/YML/JSON.
+- [x] Add sibling selection, group layout, clipboard, z-order and Tab order UI.
+- [x] Integrate capability negotiation, shared host clipboard and stale-safe edit queue.
+- [x] Verify Go/RPC, Webview and native VS Code Undo/Redo regressions; review complete diff.
+- [x] Record ADR/spec/user documentation and changelog updates.
+
+Validation: `rtk pnpm --dir editors/vscode test` passed with VS Code 1.141.0,
+including group gestures, shared clipboard, custom-editor Undo/Redo, reversed
+Copy completions, stale source, capability gates, failed/cancelled Cut clipboard
+retention and successful Cut publication. The full
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/vba/userforms/spec/... ./internal/lspserver -count=1`
+passed (LSP: 186.776s); final focused UserForm/productivity tests and matching
+`vet` passed after backend refinements. `rtk task lint`, documentation checks,
+docs build, changed-file formatting and `rtk git diff --check` passed.
+Read-only host/UI reviews were completed; the confirmed custom-ProgID marquee
+inconsistency was fixed and covered, and fractional group translation preserves
+source precision. Excel/COM/VBE and remote CI were not run. No Excel
+`tmp_workspaces` were used; this change edits FormSpec source only.
+
 # Issue #921 final review follow-up
 
 ## PR #931 review comments

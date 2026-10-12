@@ -18,6 +18,13 @@ import type { PropertyDraftStore, PropertyReply } from "./PropertyGrid";
 import { designerStrings } from "../../src/userFormEditor/protocol";
 import "./app.css";
 import { orderedChildren, zoomLevels } from "../../src/userFormEditor/geometry";
+import {
+  defaultDuplicateParent,
+  defaultPasteParent,
+  siblingSelection,
+} from "../../src/userFormEditor/productivity";
+import { ProductivityToolbar } from "./ProductivityToolbar";
+import type { ProductivityClipboardAction } from "./ProductivityToolbar";
 
 declare function acquireVsCodeApi(): {
   postMessage(message: WebviewMessage): void;
@@ -37,16 +44,21 @@ export function App() {
   const [parentEditable, setParentEditable] = useState(false);
   const [pageEditable, setPageEditable] = useState(false);
   const [tabEditable, setTabEditable] = useState(false);
+  const [productivityEditable, setProductivityEditable] = useState(false);
   const [activePages, setActivePages] = useState<ActivePages>({});
   const [tool, setTool] = useState<ToolboxType>();
   const [propertyGrid, setPropertyGrid] = useState<PropertyGridData>();
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selectedId = selectedIds.at(-1);
+  const setSelectedId = (id?: string) => setSelectedIds(id ? [id] : []);
   const [documentVersion, setDocumentVersion] = useState(0);
   const [reply, setReply] = useState<PropertyReply>();
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [showGrid, setShowGrid] = useState(true);
   const [snapping, setSnapping] = useState(false);
+  const [clipboardAvailable, setClipboardAvailable] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number }>();
   const version = useRef(0);
   const nextRequest = useRef(0);
   const pending = useRef<PropertyReply>();
@@ -54,6 +66,11 @@ export function App() {
   const pendingStructural = useRef(false);
   const pendingActive = useRef<{ owner: string; page: string }>();
   const pendingSelection = useRef<{ id: string; parentId?: string }>();
+  const pendingSelectionIds = useRef<string[]>();
+  const pendingClipboardVersion = useRef<number>();
+  const documentAfterClipboard = useRef(false);
+  const propertiesPane = useRef<HTMLDivElement>(null);
+  const currentDocument = useRef<DesignerDocument>();
   const drafts = useRef<PropertyDraftStore>({ values: new Map(), replies: new Map() });
   const restored = useRef(false);
   useEffect(() => {
@@ -75,6 +92,13 @@ export function App() {
         )
           pending.current = undefined;
         version.current = message.version;
+        currentDocument.current = message.document;
+        if (
+          pendingClipboardVersion.current !== undefined &&
+          message.version !== pendingClipboardVersion.current
+        )
+          documentAfterClipboard.current = true;
+        setContextMenu(undefined);
         setDocumentVersion(message.version);
         setDocument(message.document);
         setEditable(message.editable === true);
@@ -84,6 +108,7 @@ export function App() {
         setParentEditable(message.parentEditable === true);
         setPageEditable(message.pageEditable === true);
         setTabEditable(message.tabEditable === true);
+        setProductivityEditable(message.productivityEditable === true);
         if (pendingAdd.current) {
           const added = message.document.controls.find((c) => c.id === pendingAdd.current);
           if (added?.type.toLowerCase() === "page" && added.parentId)
@@ -102,13 +127,22 @@ export function App() {
           setActivePages((current) => ({ ...current, [owner]: page }));
         }
         setPropertyError(message.propertyError?.message);
-        setSelectedId((id) =>
-          selectedControl
-            ? selectedControl.id
-            : message.document.controls.some((c) => c.id === id)
-              ? id
-              : undefined,
-        );
+        const pendingIds = pendingSelectionIds.current;
+        if (pendingIds !== undefined) {
+          setSelectedIds(
+            pendingIds.filter((id) => message.document.controls.some((c) => c.id === id)),
+          );
+          pendingSelectionIds.current = undefined;
+        } else if (selectedControl) setSelectedIds([selectedControl.id]);
+        else
+          setSelectedIds((ids) => {
+            const existing = ids.filter((id) =>
+              message.document!.controls.some((c) => c.id === id),
+            );
+            if (existing.length <= 1) return existing;
+            const controls = siblingSelection(message.document!, existing);
+            return controls.length === existing.length ? existing : existing.slice(-1);
+          });
         if (selectedControl) pendingSelection.current = undefined;
         if (!pending.current) setBusy(false);
         setError(undefined);
@@ -121,6 +155,8 @@ export function App() {
         setParentEditable(false);
         setPageEditable(false);
         setTabEditable(false);
+        setProductivityEditable(false);
+        setContextMenu(undefined);
         setTool(undefined);
         version.current = message.version;
         setDocumentVersion(message.version);
@@ -133,11 +169,27 @@ export function App() {
         setParentEditable(false);
         setPageEditable(false);
         setTabEditable(false);
+        setProductivityEditable(false);
       }
       if (message.type === "editResult" && message.requestId === pending.current?.requestId) {
         const response = { ...pending.current, requestId: message.requestId, error: message.error };
         if (response.field !== undefined) drafts.current.replies.set(response.requestId, response);
         setReply(response);
+        if (!message.error && message.selectionIds !== undefined) {
+          if (documentAfterClipboard.current) {
+            const availableIds = message.selectionIds.filter((id) =>
+              currentDocument.current?.controls.some((control) => control.id === id),
+            );
+            if (
+              message.selectionIds.length === 0 ||
+              availableIds.length === message.selectionIds.length
+            ) {
+              setSelectedIds(availableIds);
+              pendingSelectionIds.current = undefined;
+            } else pendingSelectionIds.current = message.selectionIds;
+          } else pendingSelectionIds.current = message.selectionIds;
+        }
+        if (message.error) pendingSelectionIds.current = undefined;
         pending.current = undefined;
         if (!message.error && pendingAdd.current) {
           setSelectedId(pendingAdd.current);
@@ -151,12 +203,15 @@ export function App() {
         pendingActive.current = undefined;
         pendingAdd.current = undefined;
         pendingStructural.current = false;
+        pendingClipboardVersion.current = undefined;
+        documentAfterClipboard.current = false;
         setBusy(false);
         if (message.error && message.error.code !== "editCancelled") {
           setEditError(message.error.message);
           setBusy(false);
         } else setEditError(undefined);
       }
+      if (message.type === "clipboardState") setClipboardAvailable(message.available);
     };
     window.addEventListener("message", listener);
     const save = () => bridge.setState({ scrollX: window.scrollX, scrollY: window.scrollY });
@@ -173,10 +228,26 @@ export function App() {
     const property =
       operation.type === "setFormProperty" ||
       operation.type === "setControlProperty" ||
-      operation.type === "setTabProperty";
-    const structural = operation.type === "addControl" || operation.type === "removeControl";
+      operation.type === "setTabProperty" ||
+      operation.type === "setTabOrder";
+    const structural =
+      operation.type === "addControl" ||
+      operation.type === "removeControl" ||
+      operation.type === "removeControls" ||
+      operation.type === "pasteControls";
     const page = ["addPage", "removePage", "reorderPage"].includes(operation.type);
     const tab = ["addTab", "removeTab", "reorderTab", "setTabProperty"].includes(operation.type);
+    const productivity = [
+      "moveControls",
+      "alignControls",
+      "distributeControls",
+      "sameSizeControls",
+      "removeControls",
+      "reorderControls",
+      "setTabOrder",
+      "pasteControls",
+    ].includes(operation.type);
+    if (productivity && !productivityEditable) return;
     if (
       page
         ? !pageEditable
@@ -191,8 +262,22 @@ export function App() {
       return;
     if (
       (operation.type === "setParent" ||
-        (operation.type === "addControl" && operation.control.parentId)) &&
+        (operation.type === "addControl" && operation.control.parentId) ||
+        (operation.type === "pasteControls" &&
+          operation.parentId &&
+          document?.controls
+            .find((control) => control.id === operation.parentId)
+            ?.type.toLowerCase() !== "page")) &&
       !parentEditable
+    )
+      return;
+    if (
+      operation.type === "pasteControls" &&
+      operation.parentId &&
+      document?.controls
+        .find((control) => control.id === operation.parentId)
+        ?.type.toLowerCase() === "page" &&
+      !pageEditable
     )
       return;
     const requestId = ++nextRequest.current;
@@ -216,7 +301,8 @@ export function App() {
         : operation.type === "setParent"
           ? { id: operation.controlId, parentId: operation.parentId }
           : undefined;
-    pendingStructural.current = structural || page || tab || operation.type === "setParent";
+    pendingStructural.current =
+      structural || page || tab || operation.type === "setParent" || productivity;
     pendingActive.current = undefined;
     if (operation.type === "addPage" && operation.control.parentId)
       pendingActive.current = { owner: operation.control.parentId, page: operation.control.id };
@@ -241,15 +327,96 @@ export function App() {
     }
     return requestId;
   };
+  const currentProductivitySelection = document
+    ? siblingSelection(document, selectedIds).map((control) => control.id)
+    : [];
+  const selectedCanDelete =
+    !!selectedId &&
+    !!document?.controls.some(
+      (control) => control.id === selectedId && control.type.toLowerCase() !== "page",
+    );
   const canDelete =
     structuralEditable &&
     !error &&
     !busy &&
-    !!selectedId &&
-    document?.controls.some((c) => c.id === selectedId && c.type.toLowerCase() !== "page");
+    (productivityEditable
+      ? currentProductivitySelection.length > 0 || selectedCanDelete
+      : selectedCanDelete);
   const remove = () => {
-    if (canDelete && selectedId)
-      commit([{ type: "removeControl", controlId: selectedId, cascade: true }]);
+    if (!canDelete || !selectedId) return;
+    if (productivityEditable && currentProductivitySelection.length > 0)
+      commit([{ type: "removeControls", controlIds: currentProductivitySelection, cascade: true }]);
+    else commit([{ type: "removeControl", controlId: selectedId, cascade: true }]);
+  };
+  const canPasteInto = (parentId: string) => {
+    if (!parentId) return true;
+    const parent = document?.controls.find((control) => control.id === parentId);
+    if (!parent) return false;
+    return parent.type.toLowerCase() === "page" ? pageEditable : parentEditable;
+  };
+  const requestClipboard = (
+    action: ProductivityClipboardAction,
+    controlIds: string[],
+    parentId: string,
+  ) => {
+    if (!document || !productivityEditable || busy || error) return;
+    if (action === "paste") {
+      if (!clipboardAvailable || !structuralEditable || !canPasteInto(parentId)) return;
+    } else {
+      if (!siblingSelection(document, controlIds).length) return;
+      if (action !== "copy" && !structuralEditable) return;
+      if (action === "duplicate" && !canPasteInto(parentId)) return;
+    }
+    const requestId = ++nextRequest.current;
+    pending.current = { requestId };
+    pendingClipboardVersion.current = version.current;
+    documentAfterClipboard.current = false;
+    pendingStructural.current = true;
+    pendingSelection.current = undefined;
+    pendingAdd.current = undefined;
+    pendingActive.current = undefined;
+    setEditError(undefined);
+    setContextMenu(undefined);
+    setBusy(true);
+    bridge.postMessage({
+      type: "clipboard",
+      requestId,
+      version: version.current,
+      action,
+      controlIds: action === "paste" ? [] : controlIds,
+      parentId,
+    });
+  };
+  const handleShortcut = (action: "copy" | "cut" | "paste" | "duplicate" | "delete") => {
+    if (!productivityEditable || busy || error) return false;
+    const parentId = document ? defaultPasteParent(document, selectedIds) : "";
+    if (action === "delete") {
+      if (!canDelete) return false;
+      remove();
+      return true;
+    }
+    if (action === "paste") {
+      if (!clipboardAvailable || !structuralEditable || !canPasteInto(parentId)) return false;
+      requestClipboard(action, [], parentId);
+      return true;
+    }
+    const ids = currentProductivitySelection;
+    if (!ids.length || (action !== "copy" && !structuralEditable)) return false;
+    const targetParent =
+      action === "duplicate" && document ? defaultDuplicateParent(document, ids) : parentId;
+    if (action === "duplicate" && !canPasteInto(targetParent)) return false;
+    requestClipboard(action, ids, targetParent);
+    return true;
+  };
+  const openProperties = () => {
+    setContextMenu(undefined);
+    window.requestAnimationFrame(() =>
+      propertiesPane.current
+        ?.querySelector<HTMLElement>(
+          ".property-grid input, .property-grid select, .property-grid textarea, .property-grid button",
+        )
+        ?.focus(),
+    );
   };
   return (
     <>
@@ -257,10 +424,33 @@ export function App() {
         {strings.header}
         <button onClick={() => bridge.postMessage({ type: "openText" })}>{strings.openText}</button>
       </header>
+      {document && productivityEditable && (
+        <ProductivityToolbar
+          document={document}
+          selectionIds={selectedIds}
+          propertyGrid={propertyGrid}
+          strings={strings}
+          enabled={editable && !error}
+          structuralEnabled={structuralEditable && !error}
+          duplicateEditable={!error && canPasteInto(defaultDuplicateParent(document, selectedIds))}
+          tabEnabled={propertyEditable && !error}
+          clipboardAvailable={clipboardAvailable}
+          canPaste={
+            structuralEditable && !error && canPasteInto(defaultPasteParent(document, selectedIds))
+          }
+          busy={busy}
+          contextMenu={contextMenu}
+          onOperation={(operation) => commit([operation])}
+          onClipboard={requestClipboard}
+          onProperties={openProperties}
+          onCloseMenu={() => setContextMenu(undefined)}
+        />
+      )}
       <div class="designer-toolbar">
         <button
           type="button"
           class="delete-control"
+          hidden={productivityEditable}
           disabled={!canDelete || !!tool}
           onClick={remove}
         >
@@ -336,6 +526,7 @@ export function App() {
               editable={editable}
               parentEditable={parentEditable && !error}
               pageEditable={pageEditable && !error}
+              productivityEditable={productivityEditable && !error}
               activePages={activePages}
               onActivePageChange={(owner, page) =>
                 setActivePages((current) => ({ ...current, [owner]: page }))
@@ -350,8 +541,14 @@ export function App() {
               dropTargetLabel={strings.dropTarget}
               placementSize={controlMetadata.find((m) => m.type === tool)}
               selectedId={selectedId}
-              onSelectionChange={setSelectedId}
+              selectedIds={selectedIds}
+              onSelectionChangeMany={setSelectedIds}
               onCommit={commit}
+              onContextMenu={(id, x, y) => {
+                if (productivityEditable) setContextMenu({ x, y });
+                else setSelectedId(id);
+              }}
+              onShortcut={handleShortcut}
               placing={!!tool && structuralEditable && !error}
               onCancelPlacement={() => setTool(undefined)}
               onDelete={canDelete ? remove : undefined}
@@ -374,7 +571,7 @@ export function App() {
                 commit([{ type: "addControl", control }]);
               }}
             />
-            <div class="properties-pane">
+            <div class="properties-pane" ref={propertiesPane}>
               <CollectionEditor
                 document={document}
                 selectedId={selectedId}

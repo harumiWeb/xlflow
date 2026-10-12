@@ -37,6 +37,14 @@ const (
 	RemoveTab          OperationType = "removeTab"
 	ReorderTab         OperationType = "reorderTab"
 	SetTabProperty     OperationType = "setTabProperty"
+	MoveControls       OperationType = "moveControls"
+	AlignControls      OperationType = "alignControls"
+	DistributeControls OperationType = "distributeControls"
+	SameSizeControls   OperationType = "sameSizeControls"
+	RemoveControls     OperationType = "removeControls"
+	ReorderControls    OperationType = "reorderControls"
+	SetTabOrder        OperationType = "setTabOrder"
+	PasteControls      OperationType = "pasteControls"
 )
 
 // Operation is a tagged, serializable semantic edit. Geometry is in points,
@@ -57,6 +65,39 @@ type Operation struct {
 	Index        *int                  `json:"index,omitempty"`
 	ToIndex      *int                  `json:"toIndex,omitempty"`
 	Cascade      bool                  `json:"cascade,omitzero"`
+	Moves        []ControlMove         `json:"moves,omitempty"`
+	ControlIDs   []string              `json:"controlIds,omitempty"`
+	AnchorID     string                `json:"anchorId,omitempty"`
+	Alignment    string                `json:"alignment,omitempty"`
+	Axis         string                `json:"axis,omitempty"`
+	Dimension    string                `json:"dimension,omitempty"`
+	Command      string                `json:"command,omitempty"`
+	Snapshot     *ClipboardSnapshot    `json:"snapshot,omitempty"`
+	Allocations  []ControlAllocation   `json:"allocations,omitempty"`
+	Offset       *GeometryOffset       `json:"offset,omitempty"`
+}
+
+type ControlMove struct {
+	ControlID string  `json:"controlId"`
+	Left      float64 `json:"left"`
+	Top       float64 `json:"top"`
+}
+
+type ClipboardSnapshot struct {
+	Format     string   `json:"format"`
+	Text       string   `json:"text"`
+	ControlIDs []string `json:"controlIds"`
+}
+
+type ControlAllocation struct {
+	SourceID string `json:"sourceId"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+}
+
+type GeometryOffset struct {
+	Left float64 `json:"left"`
+	Top  float64 `json:"top"`
 }
 
 // SourceEdit replaces [Start, End) in the original UTF-8 source with Text.
@@ -107,6 +148,17 @@ func (e *Error) Unwrap() error {
 // temporarily violate FormSpec constraints, enabling atomic structural changes.
 // A failure always returns a zero Result; neither source nor payload is mutated.
 func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result, error) {
+	if strings.EqualFold(input.Format, "yml") {
+		input.Format = "yaml"
+	}
+	for _, operation := range operations {
+		if isProductivityOperation(operation.Type) {
+			if len(operations) != 1 {
+				return Result{}, failure(-1, operation, "UFE003", "A productivity operation must be the only operation in its transaction.", "Submit one complete productivity operation.")
+			}
+			return applyProductivity(input, source, operation)
+		}
+	}
 	if input.Format == "json" {
 		return applyJSON(input, source, operations)
 	}
@@ -183,6 +235,16 @@ func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result,
 		return Result{}, failure(lastIndex, last, "UFE009", "Generated source does not match the intended FormSpec.", "Keep the source unchanged and report this edit.")
 	}
 	return Result{Source: bytes.Clone(e.source), Document: after, Edits: e.pieces.edits(source), Warnings: after.ValidationWarnings}, nil
+}
+
+func isProductivityOperation(operationType OperationType) bool {
+	switch operationType {
+	case MoveControls, AlignControls, DistributeControls, SameSizeControls,
+		RemoveControls, ReorderControls, SetTabOrder, PasteControls:
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *engine) controlIDForField(path string) string {

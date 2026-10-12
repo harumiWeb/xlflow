@@ -2,6 +2,7 @@ import * as assert from "assert";
 import { runUserFormEditorAssertions } from "./userFormEditor.test";
 import { runUserFormEditAssertions } from "./userFormEdits.test";
 import { runUserFormProviderAssertions } from "./userFormProvider.test";
+import { runUserFormClipboardAssertions } from "./userFormClipboard.test";
 import {
   runUserFormWebviewAssertions,
   runCustomEditorRegistrationAssertions,
@@ -1096,6 +1097,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     ),
     ["formulaEmpty"],
   );
+  await runUserFormClipboardAssertions(extension.extensionUri);
 }
 
 async function assertRulesRegistryBehavior(): Promise<void> {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added sibling multi-selection, marquee selection, group movement,
+  alignment/distribution, same-size and z-order commands, shared Cut/Copy/Paste
+  and Duplicate, and parent-local tab-order editing. Actions negotiate
+  `userFormProductivityEdit` and preserve native Undo/Redo transactions.
+
 - Added Page-list add/delete/rename/caption/reorder actions, transient active
   Page navigation, control placement and movement between Pages, and TabStrip
   tab collection/property editing. YAML/JSON edits preserve source, explicit

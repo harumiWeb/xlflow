@@ -69,6 +69,12 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 		return result
 	}
 	for _, operation := range params.Operations {
+		if isUserFormProductivityOperation(operation.Type) {
+			if requestError := validateDesignerProductivity(input, []byte(params.Text), operation); requestError != nil {
+				result.Error = requestError
+				return result
+			}
+		}
 		if operation.Type == formsedit.AddControl {
 			if requestError := validateDesignerControlAddition(operation.Control); requestError != nil {
 				result.Error = requestError
@@ -137,6 +143,9 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 }
 
 func isUserFormEditOperation(operationType formsedit.OperationType) bool {
+	if isUserFormProductivityOperation(operationType) {
+		return true
+	}
 	switch operationType {
 	case formsedit.MoveControl, formsedit.ResizeControl,
 		formsedit.SetFormProperty, formsedit.SetControlProperty,
@@ -212,6 +221,9 @@ func parseUserFormEditParams(raw []byte) (userFormEditParams, *userFormEditError
 }
 
 func validateUserFormEditTransaction(operations []formsedit.Operation) *userFormEditError {
+	if len(operations) == 1 && isUserFormProductivityOperation(operations[0].Type) {
+		return nil
+	}
 	if len(operations) == 1 {
 		switch operations[0].Type {
 		case formsedit.SetFormProperty, formsedit.SetControlProperty,
@@ -247,6 +259,9 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("type must be a non-empty string"))
 	}
 	var allowed []string
+	if isUserFormProductivityOperation(operationType) {
+		return parseUserFormProductivityOperation(raw, fields, operationType)
+	}
 	switch operationType {
 	case formsedit.MoveControl:
 		allowed = []string{"type", "controlId", "left", "top"}

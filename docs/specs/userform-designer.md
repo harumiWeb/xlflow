@@ -187,6 +187,74 @@ Resize also preserves the opposite edge. If that unchanged
 axis or opposite edge already prevents a fitting result, reject the interaction
 rather than silently correcting it; source editing remains available.
 
+## Multi-selection and productivity commands
+
+Group selection is limited to ordinary built-in controls that are immediate
+siblings under one parent: the form root, one Frame, or one Page. Ctrl/Cmd-click
+and Shift-click toggle eligible siblings in or out of the group. Custom
+controls remain selectable alone but cannot join a group. A marquee selects
+only visible, ordinary built-in immediate children whose entire displayed
+bounds are inside the marquee. A group cannot span parents. Show a group
+boundary for multi-selection; keep the last selected control as the explicit
+anchor. Changing to a different parent starts a new selection.
+
+Dragging a multi-selection applies the same parent-relative translation to
+every member, preserving the parent and all relative geometry. Multi-selection
+drag has no resize handles and never resizes its members. The move stays within
+the current parent's content bounds; apply any boundary correction to the
+whole group so relative geometry remains fixed. Reject a group that cannot fit.
+
+Provide Align Left, Center, Right, Top, Middle, and Bottom. Each aligns selected
+siblings to the corresponding edge or center of the last selected anchor.
+Provide Make Same Width, Make Same Height, and Make Same Size using the anchor's
+current dimensions. Provide Distribute Horizontally and Distribute Vertically
+for at least three siblings: order by left or top coordinate, using stable
+z-order to break ties; retain the first and last controls' positions on the
+chosen axis and divide the intervening edge-to-edge gaps equally. Provide
+Bring to Front, Bring Forward, Send Backward, and Send to Back. These z-order
+commands preserve the selected controls' relative order and do not alter
+`tabIndex`. Layout operations are atomic and must reject a result that cannot
+meet the existing parent-bound constraints without changing its requested
+alignment, size, or distribution.
+
+Expose Cut, Copy, Paste, Delete, Duplicate, z-order commands, and Properties in
+the selection context menu. Copy and Cut request source records through the
+LSP. A successful Copy replaces the shared in-memory `ClipboardSnapshot`; Cut
+keeps its captured snapshot provisional until deletion succeeds. Paste and
+Duplicate allocate new IDs and names and create one source edit. A copied Frame
+includes descendants. A copied MultiPage includes its
+Page controls and their descendants; a Page cannot be copied directly. Reject
+an unsupported custom-control subtree as a whole. Preserve source-present
+fields and observations exactly, distinguishing absent, null, empty string,
+false, and zero; do not manufacture preview or normalization defaults. TabStrip
+`tabs` stay attached to their TabStrip control. Image bytes, event handlers,
+and code-behind are never copied. Same-project authored picture paths remain
+unchanged; reject a cross-project paste when the copied subtree contains one.
+
+Offset each repeated paste by 8 pt on both axes. Translate the complete copied
+group uniformly to fit the destination's content bounds; reject it if the full
+group cannot fit. Do not resize pasted controls. Paste uses a selected Frame or
+Page as its destination only when exactly one control is selected; otherwise it
+uses the selection's owning parent. Duplicate always uses the original
+selection's owning parent, so a Frame is not duplicated inside itself.
+
+Cut captures a valid source snapshot first, then asks one confirmation with the
+aggregate descendant count for all selected roots in the same per-URI edit
+queue. Leaf-only Cut needs no descendant confirmation. If confirmed and still
+current, Cut submits one atomic `removeControls` cascade edit. Only after that
+edit succeeds does the host publish the captured snapshot to the shared
+clipboard.
+Cancellation, stale source, failed capture, or failed deletion leaves both the
+source and previous clipboard unchanged. A request superseded before deletion
+is rejected without deleting its source.
+
+Each command is one productivity semantic operation and one native VS Code
+`WorkspaceEdit`/Undo step. Copy extraction is read-only. Cut captures its
+snapshot before confirmation, keeps that snapshot private during confirmation,
+and publishes it only after the single cascade edit succeeds. Productivity
+operations are not combined with each other or legacy operations in one
+`userFormEdit` transaction.
+
 ## Toolbox and structural control edits
 
 The Toolbox contains Pointer and these 14 built-in control types: Label,
@@ -455,6 +523,24 @@ server validates the final FormSpec after applying the transaction; a failure
 returns no partial edit. These operations do not change Excel, COM, VBIDE, or
 runtime semantics.
 
+## Parent-local tab order
+
+Provide an editor for each parent whose direct controls expose editable
+`tabIndex` metadata from the LSP. Include hidden and disabled controls. Exclude
+Page controls and TabStrip tab records. The root form uses `parentId: ""`;
+Frame and Page lists use their stable control IDs. Up/down changes are local
+draft state; Apply sends the complete ordered list of eligible sibling IDs and
+assigns contiguous zero-based `tabIndex` values in one source edit.
+When LSP metadata yields no eligible controls for the selected parent, show the
+localized `noEditableTabOrder` empty-state string.
+
+Initialize the list from explicitly authored numeric `tabIndex` values in
+ascending order. Ties follow stable z-order, preserving source order for
+z-order ties. Missing and explicit-null indexes follow numeric entries in
+z-order. Observed or normalized indexes do not become authored values. If the
+source document changes before Apply, discard the local order and rebuild it
+from the current document; do not merge or rebase it.
+
 ## Semantic edit protocol and native history
 
 The LSP advertises `capabilities.experimental.userFormEdit: true`. Preview-only
@@ -492,9 +578,10 @@ source model, including legacy nested input. Deleting a MultiPage with
 semantic edit API retains generic valid Page relationships and collection
 operations; the Designer adapter enforces its capability and interaction
 scope.
-Empty batches, more than two operations, repeated operation types, and pairs
-targeting different controls are rejected before source edits are generated.
-A property operation cannot be batched with another property or geometry edit.
+For existing operation families, empty batches, more than two operations,
+repeated operation types, and pairs targeting different controls are rejected
+before source edits are generated. A property operation cannot be batched with
+another property or geometry edit. These legacy restrictions are unchanged.
 Its payload supplies `field` and an explicit scalar `value`, plus `controlId`
 for `setControlProperty`. Missing `value` is invalid; explicit null must survive
 transport as a present value. Both Webview boundary and RPC validate payload
@@ -517,15 +604,86 @@ operations revert preview and display an error without automatic retry/rebase.
 
 Webview messages add `edit` with request ID/version/operations. Host messages
 add edit results and availability; document messages carry editable capability.
-YAML/YML and JSON share geometry, scalar properties, Page collection edits,
-and TabStrip collection edits, preserving unrelated source formatting.
-Multiple selection and canvas form resizing remain outside this contract.
+YAML, YML, and JSON support the semantic operations in
+[`userform-semantic-edit.md`](userform-semantic-edit.md), including JSON
+`reorderControl`, while preserving unrelated source formatting. Canvas form
+resizing remains outside this contract.
 Frame and Page placement/reparenting use the separate parent and Page
 capabilities described above. Page and TabStrip operation details and
 `selectedIndex` identity rules are specified in
 [`userform-semantic-edit.md`](userform-semantic-edit.md) and
 [`userform-multipage-tabstrip.md`](userform-multipage-tabstrip.md).
 Structural control add/remove continues to use the separate capability above.
+
+The LSP advertises `capabilities.experimental.userFormProductivityEdit: true`
+independently of existing capabilities. Each `userFormEdit` request containing
+`moveControls`, `alignControls`, `distributeControls`, `sameSizeControls`,
+`reorderControls`, `removeControls`, `setTabOrder`, or `pasteControls` contains
+exactly that one operation. Do not combine a productivity operation with a
+legacy operation or another productivity operation. Each successful
+productivity action is applied by the extension host as one `WorkspaceEdit`.
+The new capability does not imply another edit family: movement, layout, and
+z-order also require `userFormEdit`; `setTabOrder` also requires
+`userFormPropertyEdit`; `removeControls` and `pasteControls` also require
+`userFormStructuralEdit`. A paste that sets parent relationships additionally
+requires `userFormParentEdit`; creating or placing Page controls requires
+`userFormPageEdit`. The host and LSP enforce all applicable gates separately.
+Older servers keep only the other edit families they already advertise.
+
+The extension host sends `xlflow/userFormCopy` with
+`{uri, version, text, controlIds}` using the current unsaved TextDocument. The
+request requires `userFormProductivityEdit`. A successful response is
+`{version, snapshot, document, hasPicturePaths:boolean}`. An error response
+contains `{version, error}` and may also contain `hasPicturePaths:boolean`; that
+field has no meaning without a successful snapshot. `hasPicturePaths` is
+required on success, including when false. `ClipboardSnapshot` is
+`{format: 'yaml'|'json', text, controlIds}`. The `controlIds` and copied root
+records follow stable sibling stacking order regardless of selection order; authored
+`zIndex` fields remain source data. The backend determines the exact
+same-source records in `text`, preserving source presence and observations and distinguishing
+absent, null, empty, false, and zero without synthesizing normalized defaults.
+Stale source/version results are discarded.
+
+A successful Copy publishes its snapshot to the shared clipboard. Cut keeps
+its captured snapshot provisional through confirmation and deletion, and
+publishes it only after the atomic removal succeeds.
+
+Each Copy or Cut selection request receives a global monotonically increasing
+ticket. Only the latest valid requested selection may publish its snapshot;
+discard an older response that arrives late. A Cut must still hold the current
+ticket before cascade deletion; if a newer request supersedes it first, reject
+the Cut and leave its source unchanged. Replacing the clipboard snapshot resets
+paste repetition offsets for every destination URI/parent pair. A paste may
+finish with the snapshot it captured before a replacement, but it must not
+advance the replacement snapshot's offsets.
+
+The host proposes one new stable ID and case-insensitively unique name for every
+copied control record, including descendants, and sends
+`pasteControls{snapshot,allocations:[{sourceId,id,name}],parentId,offset:{left,top}}`.
+The LSP rewrites internal IDs and parent references, assigns copied roots to
+the requested parent, and validates the final FormSpec atomically. The host
+adds an 8 pt offset on both axes for each repeat and applies only a uniform
+translation to fit the complete group; it rejects a group that cannot fit.
+Page is excluded as a direct copy root, while a copied MultiPage includes its
+Page subtree. Unsupported custom subtrees fail as a whole. Same-project
+project-root-relative picture paths remain unchanged; cross-project paste
+rejects a subtree containing one. Image files, event handlers, and code-behind
+are not copied. Cut captures a valid snapshot, confirms the aggregate
+descendant count in the same URI queue, then submits one atomic `removeControls`
+edit with cascade enabled. Only successful deletion publishes the captured
+snapshot; cancellation or failure preserves the source and previous clipboard.
+Duplicate uses the same snapshot path and one paste operation in the original
+selection's owning parent. Paste uses a selected Frame or Page as destination
+only for a single selected control; otherwise it uses the selection's owning
+parent.
+
+The tab-order editor is parent-local and lists only controls whose LSP metadata
+exposes editable `tabIndex`. Hidden and disabled controls remain listed; Page
+controls and TabStrip tab records are excluded. It initializes explicit
+numeric indexes ascending, ties by z-order, and absent/null indexes last by
+z-order. Apply sends `setTabOrder{parentId,controlIds}` with the complete
+ordered list; the LSP assigns zero-based indexes in one edit. A source change
+discards a pending local order instead of rebasing it.
 
 ## Structural edit verification requirements
 
@@ -582,6 +740,31 @@ capability gates, localized YAML/YML/JSON edits, observed-data preservation,
 and atomic final-validation failure. These checks do not establish runtime,
 Excel, COM, or VBE behavior.
 
+## Productivity verification requirements
+
+Plan implementation coverage in three layers. First, run the focused Go
+semantic-edit and LSP checks through `scripts/dev/go.ps1` for YAML, YML, and
+JSON, including JSON `reorderControl`, one-operation transaction enforcement,
+source preservation, stale copy versions, and atomic rejection. Cover
+selection scoping, movement, six alignments, fixed-endpoint distribution,
+anchor sizing, all four z-order commands, complete tab-order lists, and
+recursive copy/paste rewriting and allocation.
+
+Second, run the VS Code Designer tests for built-in-only group selection,
+standalone custom-control selection, marquee inclusion of fully contained
+visible built-in siblings, group movement without resizing, context actions,
+Cut snapshot-confirm-delete ordering and cancellation preservation,
+single-container Paste and owning-parent Duplicate destinations, cross-panel
+clipboard use, same-project and cross-project picture paths, and tab-order
+initialization, Apply, and discard after source changes. Include malformed,
+unsupported custom, direct-Page, and out-of-bounds copy/paste cases.
+
+Third, verify in the VS Code host that each successful productivity action is
+one native Undo step and Redo restores the complete action. Exercise cut,
+paste, alignment, distribution, z-order, and tab-order separately. These are
+source/editor checks; do not report them as Excel, COM, VBIDE, VBE, compiler,
+or runtime validation.
+
 ## Webview security
 
 Each Webview document uses a fresh random nonce for its bundled script. Its
@@ -597,9 +780,14 @@ interpolated into the HTML document.
 - Issue #917
 - Issue #918
 - Issue #919
+- Issue #920
+- Issue #921
+- Issue #922
 - `docs/adr/ADR-0068-userform-designer-structural-control-edits.md`
 - `docs/adr/ADR-0067-userform-designer-property-metadata.md`
 - `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`
+- `docs/adr/ADR-0070-userform-designer-page-tab-collection-editing.md`
+- `docs/adr/ADR-0071-userform-designer-productivity-edits.md`
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`
 - `docs/specs/ms-oforms.md`
 - `docs/specs/userform-picture-assets.md`

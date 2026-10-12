@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import type { XlflowLanguageClientManager } from "../client";
 import { readFormsRootFromToml } from "../sidebar";
 import { isFormSpecPath, PreviewSynchronizer } from "./document";
-import { isWebviewMessage } from "./protocol";
+import { designerStrings, isProductivityOperation, isWebviewMessage } from "./protocol";
 import type {
   HostMessage,
   DesignerDocument,
@@ -12,11 +12,25 @@ import type {
   DesignerError,
   PageOperation,
   TabOperation,
+  DesignerStrings,
+  ProductivityOperation,
+  SemanticOperation,
+  WebviewMessage,
 } from "./protocol";
 import { DocumentEditQueue } from "./edits";
 import { controlMetadata, subtreeIds } from "./toolbox";
 import { isDesignerFrame, isDesignerPage } from "./geometry";
 import { isPageOperation, isTabOperation } from "./protocol";
+import {
+  DesignerClipboard,
+  pasteOperation,
+  prepareProductivityDeletion,
+  projectKey,
+  siblingSelection,
+  validCopyResult,
+} from "./clipboard";
+import type { ClipboardContent } from "./clipboard";
+import { designerDocument } from "./model";
 
 export type DeleteConfirmation = (name: string, descendants: number) => PromiseLike<boolean>;
 const confirmSubtreeDeletion: DeleteConfirmation = async (name, descendants) => {
@@ -177,13 +191,18 @@ export async function prepareCollectionEdit(
 
 export const designerViewType = "xlflow.userFormDesigner";
 
-export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
+export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
   private readonly edits = new DocumentEditQueue();
+  private readonly clipboard = new DesignerClipboard();
   public constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly clients: XlflowLanguageClientManager,
     private readonly confirmDeletion: DeleteConfirmation = confirmSubtreeDeletion,
   ) {}
+
+  dispose(): void {
+    this.clipboard.dispose();
+  }
 
   public async resolveCustomTextEditor(
     document: vscode.TextDocument,
@@ -203,6 +222,7 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
     let parentEditable = false;
     let pageEditable = false;
     let tabEditable = false;
+    let productivityEditable = false;
     let latestDocument: { version: number; document: DesignerDocument } | undefined;
     let generation = 0;
     let contextGeneration = 0;
@@ -234,6 +254,7 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
         parentEditable = message.parentEditable === true;
         pageEditable = message.pageEditable === true;
         tabEditable = message.tabEditable === true;
+        productivityEditable = message.productivityEditable === true;
         latestDocument = { version: message.version, document: message.document };
       }
       if (message.type === "invalidDocument" || message.type === "editingUnavailable") {
@@ -243,111 +264,16 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
         parentEditable = false;
         pageEditable = false;
         tabEditable = false;
+        productivityEditable = false;
       }
       if (ready && !disposed && panel.visible) void panel.webview.postMessage(message);
     };
     const sendLocalization = () =>
       send({
         type: "localization",
-        strings: {
-          pages: vscode.l10n.t("Pages"),
-          tabs: vscode.l10n.t("Tabs"),
-          addPage: vscode.l10n.t("Add Page"),
-          addTab: vscode.l10n.t("Add tab"),
-          deleteItem: vscode.l10n.t("Delete"),
-          moveUp: vscode.l10n.t("Move up"),
-          moveDown: vscode.l10n.t("Move down"),
-          moveToPage: vscode.l10n.t("Move to Page"),
-          choosePage: vscode.l10n.t("Choose destination Page"),
-          collectionReadOnly: vscode.l10n.t(
-            "Collection editing requires an xlflow version supporting Page or tab edits.",
-          ),
-          pagePlacement: vscode.l10n.t(
-            "Click the form, a Frame or the active Page to place the control. Escape cancels.",
-          ),
-          header: vscode.l10n.t("xlflow UserForm Designer"),
-          toolbox: vscode.l10n.t("Toolbox"),
-          pointer: vscode.l10n.t("Pointer"),
-          deleteControl: vscode.l10n.t("Delete control"),
-          structuralReadOnly: vscode.l10n.t(
-            "Adding and deleting controls requires an xlflow version supporting structural edits.",
-          ),
-          cannotInsert: vscode.l10n.t("This control's default size is larger than the form."),
-          placement: vscode.l10n.t(
-            "Click the form to place the control. Escape cancels. Controls are added at the form root.",
-          ),
-          hierarchy: vscode.l10n.t("Selection path"),
-          invalidDrop: vscode.l10n.t("This control cannot be placed in this container."),
-          dropTarget: vscode.l10n.t("Drop target"),
-          parentReadOnly: vscode.l10n.t(
-            "Changing parents requires an xlflow version supporting parent edits.",
-          ),
-          parentPlacement: vscode.l10n.t(
-            "Click the form or a Frame to place the control. Escape cancels.",
-          ),
-          cannotInsertContainer: vscode.l10n.t(
-            "This control's default size is larger than the container.",
-          ),
-          openText: vscode.l10n.t("Open text editor"),
-          lastValid: vscode.l10n.t("Showing the last valid document."),
-          loading: vscode.l10n.t("Loading FormSpec…"),
-          approximate: vscode.l10n.t(
-            "Approximate preview. Missing dimensions use display defaults; Page bounds derive from MultiPage.",
-          ),
-          approximateBounds: vscode.l10n.t("approximate bounds"),
-          grid: vscode.l10n.t("Show grid"),
-          snap: vscode.l10n.t("Snap to grid"),
-          zoom: vscode.l10n.t("Zoom"),
-          readOnly: vscode.l10n.t("Editing requires an xlflow version supporting UserForm edits."),
-          cannotMove: vscode.l10n.t(
-            "This control is larger than its parent. Resize it to fit before moving.",
-          ),
-          properties: vscode.l10n.t("Properties"),
-          identity: vscode.l10n.t("Identity"),
-          appearance: vscode.l10n.t("Appearance"),
-          layout: vscode.l10n.t("Layout"),
-          behavior: vscode.l10n.t("Behavior"),
-          navigation: vscode.l10n.t("Navigation"),
-          advanced: vscode.l10n.t("Advanced"),
-          propertyName: vscode.l10n.t("Name"),
-          propertyCaption: vscode.l10n.t("Caption"),
-          propertyText: vscode.l10n.t("Text"),
-          propertyValue: vscode.l10n.t("Value"),
-          propertyLeft: vscode.l10n.t("Left"),
-          propertyTop: vscode.l10n.t("Top"),
-          propertyWidth: vscode.l10n.t("Width"),
-          propertyHeight: vscode.l10n.t("Height"),
-          propertyTabIndex: vscode.l10n.t("TabIndex"),
-          propertySelectedIndex: vscode.l10n.t("SelectedIndex"),
-          propertyEnabled: vscode.l10n.t("Enabled"),
-          propertyVisible: vscode.l10n.t("Visible"),
-          propertyTag: vscode.l10n.t("Tag"),
-          propertyControlTipText: vscode.l10n.t("ControlTipText"),
-          propertyAccelerator: vscode.l10n.t("Accelerator"),
-          propertyBuildCaption: vscode.l10n.t("Build caption"),
-          propertyBuildWidth: vscode.l10n.t("Build width"),
-          propertyBuildHeight: vscode.l10n.t("Build height"),
-          propertyClientWidth: vscode.l10n.t("Client width"),
-          propertyClientHeight: vscode.l10n.t("Client height"),
-          unset: vscode.l10n.t("Not set"),
-          nullValue: vscode.l10n.t("null"),
-          valueType: vscode.l10n.t("Value type"),
-          typeString: vscode.l10n.t("String"),
-          typeNumber: vscode.l10n.t("Number"),
-          typeBoolean: vscode.l10n.t("Boolean"),
-          invalidNumber: vscode.l10n.t("Enter a finite number."),
-          invalidNumberPrecision: vscode.l10n.t(
-            "This number would lose precision. Use the source editor.",
-          ),
-          invalidInteger: vscode.l10n.t("Enter a safe integer."),
-          invalidValue: vscode.l10n.t("Enter a valid value."),
-          staleProperty: vscode.l10n.t(
-            "The document changed. Re-enter this value on the updated form.",
-          ),
-          propertyReadOnly: vscode.l10n.t(
-            "Property editing requires an xlflow version supporting UserForm property edits.",
-          ),
-        },
+        strings: Object.fromEntries(
+          Object.entries(designerStrings).map(([key, value]) => [key, vscode.l10n.t(value)]),
+        ) as DesignerStrings,
       });
     const update = async () => {
       if (disposed || token.isCancellationRequested) return;
@@ -408,6 +334,158 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
         void update();
       }, 100);
     };
+    const sendClipboardState = () =>
+      send({ type: "clipboardState", available: this.clipboard.available });
+    const handleClipboard = async (
+      message: Extract<WebviewMessage, { type: "clipboard" }>,
+    ): Promise<{ error?: DesignerError; selectionIds?: string[] }> => {
+      const editContext = contextGeneration;
+      const editGeneration = generation;
+      const key = projectKey(document);
+      let copyRequest: number | undefined;
+      const current = () =>
+        !disposed &&
+        panel.visible &&
+        contextGeneration === editContext &&
+        generation === editGeneration &&
+        productivityEditable &&
+        (message.action === "copy" || structuralEditable) &&
+        (message.action !== "cut" ||
+          copyRequest === undefined ||
+          this.clipboard.isCurrentCopy(copyRequest));
+      const stale: DesignerError = {
+        code: "staleDocument",
+        message: vscode.l10n.t("The document changed. Retry the operation on the updated form."),
+      };
+      if (!key || !current() || latestDocument?.version !== message.version)
+        return { error: stale };
+      if (message.action !== "paste") {
+        const invalid = siblingSelection(latestDocument.document, message.controlIds);
+        if (invalid) return { error: invalid };
+      }
+      const destinationParent =
+        message.action === "duplicate"
+          ? (latestDocument.document.controls.find((c) => c.id === message.controlIds[0])
+              ?.parentId ?? "")
+          : message.parentId;
+      copyRequest =
+        message.action === "copy" || message.action === "cut"
+          ? this.clipboard.beginCopy()
+          : undefined;
+      const capture = async (text: string): Promise<ClipboardContent | DesignerError> => {
+        const selectionError = siblingSelection(latestDocument!.document, message.controlIds);
+        if (selectionError) return selectionError;
+        const result = await this.clients.requestUserFormCopy(
+          document,
+          message.version,
+          text,
+          message.controlIds,
+        );
+        if (result.error) return result.error;
+        if (!validCopyResult(result, message.version))
+          return {
+            code: "invalidResponse",
+            message: vscode.l10n.t("The language server returned an invalid control snapshot."),
+          };
+        return {
+          snapshot: result.snapshot!,
+          document: designerDocument(result.document!),
+          projectKey: key,
+          hasPicturePaths: result.hasPicturePaths!,
+        };
+      };
+      if (message.action === "copy") {
+        const result = await this.edits.capture(document, message.version, current, capture);
+        if (result.error) return { error: result.error };
+        if (!result.value) return { error: stale };
+        if ("code" in result.value) return { error: result.value };
+        if (!this.clipboard.finishCopy(copyRequest!, result.value))
+          return {
+            error: {
+              code: "copySuperseded",
+              message: vscode.l10n.t("A newer copy request replaced this selection."),
+            },
+          };
+        return {};
+      }
+      const operations: SemanticOperation[] = [];
+      let copied: ClipboardContent | undefined;
+      let selectionIds: string[] | undefined;
+      let clipboardGeneration: number | undefined;
+      const prepare = async (): Promise<DesignerError | undefined> => {
+        if (latestDocument?.version !== message.version) return stale;
+        if (message.action !== "paste") {
+          const result = await capture(document.getText());
+          if ("code" in result) return result;
+          copied = result;
+          if (!current() || document.version !== message.version) return stale;
+        }
+        if (message.action === "cut") {
+          const operation: Extract<ProductivityOperation, { type: "removeControls" }> = {
+            type: "removeControls",
+            controlIds: message.controlIds,
+            cascade: true,
+          };
+          const error = await prepareProductivityDeletion(
+            operation,
+            latestDocument.document,
+            this.confirmDeletion,
+          );
+          if (error) return error;
+          operations.push(operation);
+          return;
+        }
+        const content = copied ?? this.clipboard.read();
+        if (!content)
+          return {
+            code: "emptyClipboard",
+            message: vscode.l10n.t("Copy controls before pasting."),
+          };
+        if (
+          (destinationParent && !parentEditable) ||
+          (content.document.controls.some((c) => !!c.parentId) && !parentEditable) ||
+          (content.document.controls.some((c) => c.type.toLowerCase() === "page") &&
+            !pageEditable) ||
+          (destinationParent &&
+            latestDocument.document.controls.some(
+              (c) => c.id === destinationParent && c.type.toLowerCase() === "page",
+            ) &&
+            !pageEditable)
+        )
+          return {
+            code: "unsupportedPaste",
+            message: vscode.l10n.t("Update xlflow to support this container hierarchy."),
+          };
+        clipboardGeneration = this.clipboard.generation;
+        const operation = pasteOperation(
+          content,
+          latestDocument.document,
+          key,
+          destinationParent,
+          message.action === "duplicate"
+            ? 8
+            : this.clipboard.nextOffset(document.uri.toString(), destinationParent),
+          pageEditable,
+        );
+        if ("code" in operation) return operation;
+        const roots = new Set(content.snapshot.controlIds);
+        selectionIds = operation.allocations.filter((a) => roots.has(a.sourceId)).map((a) => a.id);
+        operations.push(operation);
+      };
+      const error = await this.edits.run(
+        document,
+        message.version,
+        operations,
+        this.clients,
+        current,
+        prepare,
+      );
+      if (error) return { error };
+      if (message.action === "cut" && copied) this.clipboard.finishCopy(copyRequest!, copied);
+      if (message.action === "paste")
+        this.clipboard.pasted(document.uri.toString(), destinationParent, clipboardGeneration);
+      return { selectionIds };
+    };
     const watcher = vscode.workspace.createFileSystemWatcher("**/xlflow.toml");
     const subscriptions: vscode.Disposable[] = [
       watcher,
@@ -418,10 +496,12 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
         if (event.document.uri.toString() === document.uri.toString()) schedule();
       }),
       this.clients.onDidChangePreviewConnection(schedule),
+      this.clipboard.onDidChange(sendClipboardState),
       vscode.window.onDidChangeActiveColorTheme(() => send({ type: "themeChanged" })),
       panel.onDidChangeViewState(() => {
         if (panel.visible && ready) {
           sendLocalization();
+          sendClipboardState();
           sync.replay(send);
           flushReplies();
           schedule();
@@ -436,10 +516,26 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
           replies.clear();
           ready = true;
           sendLocalization();
+          sendClipboardState();
           sync.replay(send);
           void update();
         } else if (message.type === "openText") {
           void vscode.commands.executeCommand("vscode.openWith", document.uri, "default");
+        } else if (message.type === "clipboard") {
+          const editContext = contextGeneration;
+          void handleClipboard(message)
+            .catch((error) => ({
+              error: { code: "copyUnavailable", message: String(error) },
+            }))
+            .then(async (result) => {
+              if (disposed || contextGeneration !== editContext) return;
+              replies.set(message.requestId, {
+                message: { type: "editResult", requestId: message.requestId, ...result },
+                sending: false,
+              });
+              flushReplies();
+              await update();
+            });
         } else {
           const editGeneration = generation;
           const editContext = contextGeneration;
@@ -453,6 +549,15 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
             operation.type === "addControl" && operation.control.parentId !== undefined;
           const page = isPageOperation(operation);
           const tab = isTabOperation(operation);
+          const productivity = isProductivityOperation(operation);
+          const productivityAllowed = () => {
+            if (!productivity || !productivityEditable) return false;
+            if (operation.type === "removeControls") return structuralEditable;
+            if (operation.type === "setTabOrder") return propertyEditable;
+            // Paste snapshots belong to the host clipboard, never an untrusted Webview.
+            if (operation.type === "pasteControls") return false;
+            return editable;
+          };
           const pageParent =
             parentOperation || parentedAdd
               ? latestDocument?.document.controls.some(
@@ -474,41 +579,60 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
             contextGeneration === editContext &&
             panel.visible &&
             (!pageParent || pageEditable) &&
-            (page
-              ? pageEditable
-              : tab
-                ? tabEditable
-                : parentOperation
-                  ? editable && parentEditable
-                  : parentedAdd
-                    ? structuralEditable && parentEditable
-                    : structural
-                      ? structuralEditable
-                      : property
-                        ? propertyEditable
-                        : editable) &&
+            (productivity
+              ? productivityAllowed()
+              : page
+                ? pageEditable
+                : tab
+                  ? tabEditable
+                  : parentOperation
+                    ? editable && parentEditable
+                    : parentedAdd
+                      ? structuralEditable && parentEditable
+                      : structural
+                        ? structuralEditable
+                        : property
+                          ? propertyEditable
+                          : editable) &&
             generation === editGeneration;
-          const prepare = structural
-            ? () =>
-                prepareStructuralEdit(
-                  operation,
-                  latestDocument,
-                  message.version,
-                  this.confirmDeletion,
-                  pageEditable,
-                )
-            : parentOperation
-              ? async () =>
-                  prepareParentEdit(operation, latestDocument, message.version, pageEditable)
-              : page || tab
-                ? () =>
-                    prepareCollectionEdit(
-                      operation as PageOperation | TabOperation,
-                      latestDocument,
-                      message.version,
-                      this.confirmDeletion,
-                    )
-                : undefined;
+          const prepare = productivity
+            ? async () => {
+                if (latestDocument?.version !== message.version)
+                  return {
+                    code: "staleDocument",
+                    message: vscode.l10n.t(
+                      "The document changed. Retry the operation on the updated form.",
+                    ),
+                  };
+                if (operation.type === "removeControls")
+                  return prepareProductivityDeletion(
+                    operation,
+                    latestDocument.document,
+                    this.confirmDeletion,
+                  );
+                return undefined;
+              }
+            : structural
+              ? () =>
+                  prepareStructuralEdit(
+                    operation,
+                    latestDocument,
+                    message.version,
+                    this.confirmDeletion,
+                    pageEditable,
+                  )
+              : parentOperation
+                ? async () =>
+                    prepareParentEdit(operation, latestDocument, message.version, pageEditable)
+                : page || tab
+                  ? () =>
+                      prepareCollectionEdit(
+                        operation as PageOperation | TabOperation,
+                        latestDocument,
+                        message.version,
+                        this.confirmDeletion,
+                      )
+                  : undefined;
           void this.edits
             .run(document, message.version, message.operations, this.clients, permitted, prepare)
             .then(async (error) => {

@@ -94,6 +94,7 @@ export interface PreviewResult {
   parentEditable?: boolean;
   pageEditable?: boolean;
   tabEditable?: boolean;
+  productivityEditable?: boolean;
   propertyGrid?: PropertyGridData;
   propertyError?: DesignerError;
   document?: PreviewDocument;
@@ -197,6 +198,36 @@ export const designerStrings = {
   choosePage: "Choose destination Page",
   collectionReadOnly: "Collection editing requires an xlflow version supporting Page or tab edits.",
   pagePlacement: "Click the form, a Frame or the active Page to place the control. Escape cancels.",
+  productivity: "Productivity",
+  align: "Align",
+  alignLeft: "Align Left",
+  alignCenter: "Align Center",
+  alignRight: "Align Right",
+  alignTop: "Align Top",
+  alignMiddle: "Align Middle",
+  alignBottom: "Align Bottom",
+  distribute: "Distribute",
+  distributeHorizontal: "Distribute Horizontally",
+  distributeVertical: "Distribute Vertically",
+  sameSize: "Same size",
+  sameWidth: "Make Same Width",
+  sameHeight: "Make Same Height",
+  sameDimensions: "Make Same Size",
+  cut: "Cut",
+  copy: "Copy",
+  paste: "Paste",
+  duplicate: "Duplicate",
+  bringToFront: "Bring to Front",
+  bringForward: "Bring Forward",
+  sendBackward: "Send Backward",
+  sendToBack: "Send to Back",
+  tabOrder: "Tab order",
+  tabOrderParent: "Parent",
+  applyTabOrder: "Apply tab order",
+  noEditableTabOrder: "No controls with an editable TabIndex exist under this parent.",
+  selectionCount: "Selected controls",
+  propertiesAction: "Properties",
+  selectControls: "Select controls",
 };
 export type DesignerStrings = typeof designerStrings;
 
@@ -212,11 +243,13 @@ export type HostMessage =
       parentEditable?: boolean;
       pageEditable?: boolean;
       tabEditable?: boolean;
+      productivityEditable?: boolean;
       propertyGrid?: PropertyGridData;
       propertyError?: DesignerError;
     }
   | { type: "invalidDocument"; version: number; error: DesignerError }
-  | { type: "editResult"; requestId: number; error?: DesignerError }
+  | { type: "editResult"; requestId: number; error?: DesignerError; selectionIds?: string[] }
+  | { type: "clipboardState"; available: boolean }
   | { type: "editingUnavailable" }
   | { type: "themeChanged" };
 
@@ -246,13 +279,55 @@ export type TabOperation =
   | { type: "removeTab"; controlId: string; index: number }
   | { type: "reorderTab"; controlId: string; index: number; toIndex: number }
   | { type: "setTabProperty"; controlId: string; index: number; field: string; value: ScalarValue };
+export interface ClipboardSnapshot {
+  format: "yaml" | "json";
+  text: string;
+  controlIds: string[];
+}
+export interface CopyResult {
+  version: number;
+  snapshot?: ClipboardSnapshot;
+  document?: PreviewDocument;
+  hasPicturePaths?: boolean;
+  error?: DesignerError;
+}
+export type ProductivityOperation =
+  | { type: "moveControls"; moves: { controlId: string; left: number; top: number }[] }
+  | {
+      type: "alignControls";
+      controlIds: string[];
+      anchorId: string;
+      alignment: "left" | "center" | "right" | "top" | "middle" | "bottom";
+    }
+  | { type: "distributeControls"; controlIds: string[]; axis: "horizontal" | "vertical" }
+  | {
+      type: "sameSizeControls";
+      controlIds: string[];
+      anchorId: string;
+      dimension: "width" | "height" | "size";
+    }
+  | { type: "removeControls"; controlIds: string[]; cascade: boolean }
+  | {
+      type: "reorderControls";
+      controlIds: string[];
+      command: "front" | "forward" | "backward" | "back";
+    }
+  | { type: "setTabOrder"; parentId: string; controlIds: string[] }
+  | {
+      type: "pasteControls";
+      snapshot: ClipboardSnapshot;
+      allocations: { sourceId: string; id: string; name: string }[];
+      parentId: string;
+      offset: { left: number; top: number };
+    };
 export type SemanticOperation =
   | GeometryOperation
   | PropertyOperation
   | StructuralOperation
   | ParentOperation
   | PageOperation
-  | TabOperation;
+  | TabOperation
+  | ProductivityOperation;
 
 export function isPageOperation(value: unknown): value is PageOperation {
   if (typeof value !== "object" || value === null) return false;
@@ -323,6 +398,144 @@ export function isTabOperation(value: unknown): value is TabOperation {
       typeof op.value === "string" ||
       typeof op.value === "boolean" ||
       (typeof op.value === "number" && Number.isFinite(op.value)))
+  );
+}
+
+const isStringArray = (value: unknown, minimumLength = 0): value is string[] =>
+  Array.isArray(value) &&
+  value.length >= minimumLength &&
+  value.every((item) => typeof item === "string" && item.length > 0);
+
+export function isProductivityOperation(value: unknown): value is ProductivityOperation {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const op = value as Record<string, unknown>;
+  const exactKeys = (keys: string[]) =>
+    Object.keys(op).length === keys.length && Object.keys(op).every((key) => keys.includes(key));
+  const finite = (n: unknown) => typeof n === "number" && Number.isFinite(n);
+  if (op.type === "moveControls") {
+    return (
+      exactKeys(["type", "moves"]) &&
+      Array.isArray(op.moves) &&
+      op.moves.length >= 2 &&
+      op.moves.every((move) => {
+        if (typeof move !== "object" || move === null || Array.isArray(move)) return false;
+        const item = move as Record<string, unknown>;
+        return (
+          Object.keys(item).length === 3 &&
+          Object.keys(item).every((key) => ["controlId", "left", "top"].includes(key)) &&
+          typeof item.controlId === "string" &&
+          item.controlId.length > 0 &&
+          finite(item.left) &&
+          finite(item.top)
+        );
+      }) &&
+      new Set((op.moves as { controlId: string }[]).map((move) => move.controlId)).size ===
+        (op.moves as unknown[]).length
+    );
+  }
+  if (op.type === "alignControls")
+    return (
+      exactKeys(["type", "controlIds", "anchorId", "alignment"]) &&
+      isStringArray(op.controlIds, 2) &&
+      new Set(op.controlIds).size === op.controlIds.length &&
+      typeof op.anchorId === "string" &&
+      op.controlIds.includes(op.anchorId) &&
+      ["left", "center", "right", "top", "middle", "bottom"].includes(String(op.alignment))
+    );
+  if (op.type === "distributeControls")
+    return (
+      exactKeys(["type", "controlIds", "axis"]) &&
+      isStringArray(op.controlIds, 3) &&
+      new Set(op.controlIds).size === op.controlIds.length &&
+      ["horizontal", "vertical"].includes(String(op.axis))
+    );
+  if (op.type === "sameSizeControls")
+    return (
+      exactKeys(["type", "controlIds", "anchorId", "dimension"]) &&
+      isStringArray(op.controlIds, 2) &&
+      new Set(op.controlIds).size === op.controlIds.length &&
+      typeof op.anchorId === "string" &&
+      op.controlIds.includes(op.anchorId) &&
+      ["width", "height", "size"].includes(String(op.dimension))
+    );
+  if (op.type === "removeControls")
+    return (
+      exactKeys(["type", "controlIds", "cascade"]) &&
+      isStringArray(op.controlIds, 1) &&
+      new Set(op.controlIds).size === op.controlIds.length &&
+      typeof op.cascade === "boolean"
+    );
+  if (op.type === "reorderControls")
+    return (
+      exactKeys(["type", "controlIds", "command"]) &&
+      isStringArray(op.controlIds, 1) &&
+      new Set(op.controlIds).size === op.controlIds.length &&
+      ["front", "forward", "backward", "back"].includes(String(op.command))
+    );
+  if (op.type === "setTabOrder")
+    return (
+      exactKeys(["type", "parentId", "controlIds"]) &&
+      typeof op.parentId === "string" &&
+      isStringArray(op.controlIds) &&
+      new Set(op.controlIds).size === op.controlIds.length
+    );
+  if (op.type === "pasteControls") {
+    const snapshot = op.snapshot as Record<string, unknown> | null;
+    const offset = op.offset as Record<string, unknown> | null;
+    return (
+      exactKeys(["type", "snapshot", "allocations", "parentId", "offset"]) &&
+      typeof snapshot === "object" &&
+      snapshot !== null &&
+      Object.keys(snapshot).length === 3 &&
+      Object.keys(snapshot).every((key) => ["format", "text", "controlIds"].includes(key)) &&
+      ["yaml", "json"].includes(String(snapshot.format)) &&
+      typeof snapshot.text === "string" &&
+      isStringArray(snapshot.controlIds, 1) &&
+      new Set(snapshot.controlIds).size === snapshot.controlIds.length &&
+      Array.isArray(op.allocations) &&
+      op.allocations.length >= 1 &&
+      op.allocations.every((allocation) => {
+        if (typeof allocation !== "object" || allocation === null || Array.isArray(allocation))
+          return false;
+        const item = allocation as Record<string, unknown>;
+        return (
+          Object.keys(item).length === 3 &&
+          Object.keys(item).every((key) => ["sourceId", "id", "name"].includes(key)) &&
+          typeof item.sourceId === "string" &&
+          item.sourceId.length > 0 &&
+          typeof item.id === "string" &&
+          item.id.length > 0 &&
+          typeof item.name === "string" &&
+          /^[A-Za-z][A-Za-z0-9_]*$/.test(item.name)
+        );
+      }) &&
+      typeof op.parentId === "string" &&
+      typeof offset === "object" &&
+      offset !== null &&
+      Object.keys(offset).length === 2 &&
+      Object.keys(offset).every((key) => ["left", "top"].includes(key)) &&
+      finite(offset.left) &&
+      finite(offset.top)
+    );
+  }
+  return false;
+}
+
+function isClipboardMessage(value: Record<string, unknown>): boolean {
+  return (
+    value.type === "clipboard" &&
+    Object.keys(value).length === 6 &&
+    Object.keys(value).every((key) =>
+      ["type", "requestId", "version", "action", "controlIds", "parentId"].includes(key),
+    ) &&
+    Number.isSafeInteger(value.requestId) &&
+    Number(value.requestId) >= 0 &&
+    Number.isSafeInteger(value.version) &&
+    Number(value.version) >= 0 &&
+    ["copy", "cut", "paste", "duplicate"].includes(String(value.action)) &&
+    isStringArray(value.controlIds) &&
+    new Set(value.controlIds).size === value.controlIds.length &&
+    typeof value.parentId === "string"
   );
 }
 
@@ -407,10 +620,19 @@ export interface EditResult {
   version: number;
   edits?: SourceTextEdit[];
   error?: DesignerError;
+  selectionIds?: string[];
 }
 export type WebviewMessage =
   | { type: "ready" }
   | { type: "openText" }
+  | {
+      type: "clipboard";
+      requestId: number;
+      version: number;
+      action: "copy" | "cut" | "paste" | "duplicate";
+      controlIds: string[];
+      parentId: string;
+    }
   | { type: "edit"; requestId: number; version: number; operations: SemanticOperation[] };
 
 export function isGeometryOperation(value: unknown): value is GeometryOperation {
@@ -454,6 +676,7 @@ export function isWebviewMessage(value: unknown): value is WebviewMessage {
   const message = value as Record<string, unknown>;
   if (message.type === "ready" || message.type === "openText")
     return Object.keys(message).length === 1;
+  if (message.type === "clipboard") return isClipboardMessage(message);
   const operations = message.operations;
   return (
     message.type === "edit" &&
@@ -472,7 +695,8 @@ export function isWebviewMessage(value: unknown): value is WebviewMessage {
         isStructuralOperation(operations[0]) ||
         isParentOperation(operations[0]) ||
         isPageOperation(operations[0]) ||
-        isTabOperation(operations[0]))) ||
+        isTabOperation(operations[0]) ||
+        (isProductivityOperation(operations[0]) && operations[0].type !== "pasteControls"))) ||
       (operations.every(isGeometryOperation) &&
         operations.every((op) => op.controlId === operations[0].controlId) &&
         new Set(operations.map((op) => op.type)).size === operations.length))

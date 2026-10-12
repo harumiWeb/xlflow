@@ -12,6 +12,42 @@ export interface EditClient {
 // Shared across panels: no concurrent edit generation/application for one URI.
 export class DocumentEditQueue {
   private pending = new Map<string, Promise<unknown>>();
+  async capture<T>(
+    document: vscode.TextDocument,
+    version: number,
+    current: () => boolean,
+    read: (text: string) => Promise<T>,
+  ): Promise<{ value?: T; error?: DesignerError }> {
+    const key = document.uri.toString();
+    const previous = this.pending.get(key) ?? Promise.resolve();
+    const job = previous
+      .catch(() => {})
+      .then(async () => {
+        const text = document.getText();
+        const stale = () =>
+          !current() ||
+          document.isClosed ||
+          document.version !== version ||
+          document.getText() !== text;
+        const error: DesignerError = {
+          code: "staleDocument",
+          message: vscode.l10n.t("The document changed. Retry the operation on the updated form."),
+        };
+        if (stale()) return { error };
+        try {
+          const value = await read(text);
+          return stale() ? { error } : { value };
+        } catch (cause) {
+          return { error: { code: "copyUnavailable", message: String(cause) } };
+        }
+      });
+    this.pending.set(key, job);
+    try {
+      return await job;
+    } finally {
+      if (this.pending.get(key) === job) this.pending.delete(key);
+    }
+  }
   async run(
     document: vscode.TextDocument,
     version: number,
@@ -69,8 +105,19 @@ export class DocumentEditQueue {
             };
           if (!edits.length) return undefined;
           const edit = new vscode.WorkspaceEdit();
+          const productivityLabels: Record<string, string> = {
+            moveControls: vscode.l10n.t("Move controls"),
+            alignControls: vscode.l10n.t("Align controls"),
+            distributeControls: vscode.l10n.t("Distribute controls"),
+            sameSizeControls: vscode.l10n.t("Make controls the same size"),
+            removeControls: vscode.l10n.t("Delete controls"),
+            pasteControls: vscode.l10n.t("Paste controls"),
+            reorderControls: vscode.l10n.t("Reorder controls"),
+            setTabOrder: vscode.l10n.t("Set tab order"),
+          };
           const label =
-            operations[0].type === "addPage"
+            productivityLabels[operations[0].type] ??
+            (operations[0].type === "addPage"
               ? vscode.l10n.t("Add Page")
               : operations[0].type === "removePage"
                 ? vscode.l10n.t("Delete Page")
@@ -93,7 +140,7 @@ export class DocumentEditQueue {
                             ? vscode.l10n.t("Edit UserForm property")
                             : operations.some((op) => op.type === "resizeControl")
                               ? vscode.l10n.t("Resize control")
-                              : vscode.l10n.t("Move control");
+                              : vscode.l10n.t("Move control"));
           edit.set(
             document.uri,
             edits.map((e): [vscode.TextEdit, vscode.WorkspaceEditEntryMetadata] => [

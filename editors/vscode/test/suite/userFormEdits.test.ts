@@ -23,6 +23,8 @@ const formSource = [
 
 export async function runUserFormEditAssertions(): Promise<void> {
   await assertGeometryTransactionsUndoAndRedo();
+  await assertProductivityTransactionsUndoAndRedo();
+  await assertCopyReadSharesEditQueue();
   await assertPropertyTransactionsUndoAndRedo();
   await assertStructuralTransactionsUndoAndRedo();
   await assertPageCollectionUndoAndRedo();
@@ -34,6 +36,122 @@ export async function runUserFormEditAssertions(): Promise<void> {
   await assertUnicodeAndCRLFRanges();
   await assertInvalidRangesAreRejectedAtomically();
   await assertStructuredRejectionPreservesSource();
+}
+
+async function assertProductivityTransactionsUndoAndRedo(): Promise<void> {
+  const source = [
+    "schemaVersion: 1",
+    "kind: xlflow.userform",
+    "form: {name: Main}",
+    "controls:",
+    "  - {id: a, name: Label1, type: Label, left: 10, top: 20}",
+    "  - {id: b, name: Label2, type: Label, left: 100, top: 40}",
+    "",
+  ].join("\r\n");
+  await withDesignerDocument("productivity-undo", source, async (document) => {
+    const queue = new DocumentEditQueue();
+    const client = fakeClient((doc, version, _text, operations) => {
+      assert.strictEqual(operations.length, 1);
+      const operation = operations[0];
+      assert.strictEqual(operation.type, "moveControls");
+      const edits = (operation as Extract<SemanticOperation, { type: "moveControls" }>).moves.map(
+        (move) => {
+          const line = Array.from({ length: doc.lineCount }, (_, index) => doc.lineAt(index)).find(
+            (candidate) => candidate.text.includes(`id: ${move.controlId},`),
+          )!;
+          return {
+            range: line.range,
+            newText: line.text
+              .replace(/left: \d+/, `left: ${move.left}`)
+              .replace(/top: \d+/, `top: ${move.top}`),
+          };
+        },
+      );
+      return { version, edits };
+    });
+    const operation: SemanticOperation = {
+      type: "moveControls",
+      moves: [
+        { controlId: "a", left: 18, top: 28 },
+        { controlId: "b", left: 108, top: 48 },
+      ],
+    };
+    assert.strictEqual(
+      await queue.run(document, document.version, [operation], client, () => true),
+      undefined,
+    );
+    const moved = document.getText();
+    assert.ok(moved.includes("left: 18") && moved.includes("left: 108"));
+    assertActiveDesigner(document.uri);
+    await vscode.commands.executeCommand("undo");
+    assert.strictEqual(document.getText(), source, "one Undo restores every selected control");
+    await vscode.commands.executeCommand("redo");
+    assert.strictEqual(document.getText(), moved);
+  });
+}
+
+async function assertCopyReadSharesEditQueue(): Promise<void> {
+  await withDesignerDocument("clipboard-queue", formSource, async (document) => {
+    const queue = new DocumentEditQueue();
+    const version = document.version;
+    const started = deferred<void>();
+    const reply = deferred<EditResult>();
+    const operation: GeometryOperation = {
+      type: "moveControl",
+      controlId: "😀Box",
+      left: 18,
+      top: 28,
+    };
+    const moving = queue.run(
+      document,
+      version,
+      [operation],
+      fakeClient(() => {
+        started.resolve();
+        return reply.promise;
+      }),
+      () => true,
+    );
+    await withTimeout(started.promise, "edit did not reach the client");
+    let reads = 0;
+    const copying = queue.capture(
+      document,
+      version,
+      () => true,
+      async (text) => {
+        reads++;
+        return text;
+      },
+    );
+    assert.strictEqual(reads, 0, "copy must wait for same-URI edits");
+    reply.resolve({ version, edits: geometryEdits(document.getText(), [operation]) });
+    assert.strictEqual(await moving, undefined);
+    assert.strictEqual((await copying).error?.code, "staleDocument");
+    assert.strictEqual(reads, 0, "a copy based on the old version never reads source");
+
+    const copyStarted = deferred<void>();
+    const copyReply = deferred<string>();
+    let current = true;
+    const pending = queue.capture(
+      document,
+      document.version,
+      () => current,
+      async () => {
+        copyStarted.resolve();
+        return copyReply.promise;
+      },
+    );
+    await withTimeout(copyStarted.promise, "copy did not reach the client");
+    current = false;
+    copyReply.resolve("stale snapshot");
+    const result = await pending;
+    assert.strictEqual(result.error?.code, "staleDocument");
+    assert.strictEqual(
+      result.value,
+      undefined,
+      "a retired Webview cannot publish a clipboard snapshot",
+    );
+  });
 }
 
 async function assertPageCollectionUndoAndRedo(): Promise<void> {

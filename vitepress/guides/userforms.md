@@ -64,9 +64,53 @@ clickable selection path above the canvas to select ancestor Frames.
 
 Frame placement additionally requires `userFormParentEdit`; reparenting
 requires both that capability and geometry support. Older servers retain
-root placement and same-parent movement. Page/Tab collection editing and
-direct Page-parent changes remain future work tracked by
-[Issue #921](https://github.com/harumiWeb/xlflow/issues/921). Images remain placeholders.
+root placement and same-parent movement. Page and TabStrip collection editing
+is available when the LSP advertises `userFormPageEdit` and
+`userFormTabEdit`, respectively. See the sections below for Page placement,
+tab editing, and tab order.
+
+### Selection and layout productivity
+
+Ctrl/Cmd-click or Shift-click toggles ordinary built-in sibling controls in a
+group selection under the form, one Frame, or one Page. Custom controls remain
+selectable alone but cannot join a group. Marquee selection includes only
+visible, ordinary built-in immediate children whose complete displayed bounds
+are inside the marquee. Dragging a group preserves its parent and relative
+geometry; group dragging does not resize controls.
+
+Use Align Left/Center/Right or Top/Middle/Bottom to align to the last selected
+control. Make Same Width, Same Height, or Same Size also uses that anchor.
+Distribute Horizontally or Vertically requires at least three controls and
+keeps the first and last positions fixed while making the edge gaps equal. The
+Designer sorts by left/top position and uses z-order to break ties.
+Bring to Front, Bring Forward, Send Backward, and Send to Back preserve the
+selected controls' relative order and leave `tabIndex` unchanged.
+
+The selection context menu offers Cut, Copy, Paste, Delete, Duplicate, z-order
+commands, and Properties. Copy publishes its successful snapshot to an
+in-memory clipboard shared by Designer panels. Copying a Frame includes its
+children; copying a MultiPage includes its Pages and their descendants. A Page
+cannot be copied directly, and unsupported custom-control subtrees are
+rejected. Paste uses a selected Frame or Page as its destination only when it
+is the sole selected control; otherwise, including a multi-selection, it uses
+the selection's owning parent. Duplicate always uses the original selection's
+owning parent, so a Frame is not duplicated inside itself. Each repeated paste
+starts 8 points down and right; a new clipboard snapshot restarts this offset
+for each destination form and parent. The Designer shifts the entire pasted
+group to fit its destination or rejects it if it cannot fit without resizing.
+Same-project picture paths stay unchanged; a cross-project paste containing
+one is rejected. Image files, events, and code-behind are not copied.
+
+Cut first captures a valid source snapshot, then asks one confirmation for the
+aggregate descendant count across selected controls; leaf-only Cut needs no
+descendant confirmation. After confirmation, it removes the selection as one
+undoable edit and publishes the captured snapshot to the shared clipboard only
+if deletion succeeds. Cancellation or failure leaves the source and previous
+clipboard unchanged. Each completed
+layout, z-order, paste/duplicate, delete/cut, or tab-order Apply action is one
+VS Code Undo step. Copy alone does not edit the document. Productivity actions
+require the LSP's `userFormProductivityEdit` plus the applicable existing
+geometry, property, structural, parent, or Page capability.
 
 ### Edit properties
 
@@ -109,6 +153,14 @@ normalized no-selection value is `-1`, including when the collection is empty.
 Page geometry comes from its owning MultiPage, so do not author Page
 `left`/`top`/`width`/`height`. See the [UserForm specification](../reference/userform-spec)
 for the complete schema, snapshot shape, and generation details.
+
+The Designer's tab-order editor lists direct controls for one form, Frame, or
+Page parent when the LSP metadata exposes `tabIndex`. Hidden and disabled
+controls remain in the list; Page controls and TabStrip tab records do not.
+Initial order uses authored numeric `tabIndex`, ascending, then z-order for
+ties; absent or null indexes follow in z-order. Apply assigns contiguous
+zero-based indexes in one edit. If the source changes before Apply, the pending
+order is discarded and rebuilt from the document.
 
 ## Image pictures
 

@@ -8,7 +8,9 @@ across YAML/YML/JSON and authored-state metadata; Issue #919 adds Toolbox
 insertion and subtree deletion, including JSON structural edits. Issue #920
 adds JSON parenting and Frame editing through the Designer adapter. Issue #921
 adds Page and TabStrip collection operations across YAML/YML/JSON. The core API
-remains host-neutral and does not invoke Excel or provide a CLI command.
+remains host-neutral and does not invoke Excel or provide a CLI command. Issue
+#922 adds sibling productivity operations, source-fragment copy/paste, and
+parent-local tab-order editing.
 
 ## Authority and source model
 
@@ -18,15 +20,15 @@ The API is provided by `internal/vba/userforms/spec/edit`:
 func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result, error)
 ```
 
-`Apply` accepts `.yaml` and `.yml` for all operations, and `.json` for
-`moveControl`, `resizeControl`, `setFormProperty`, `setControlProperty`,
-`addControl`, `removeControl`, `setParent`, `addPage`, `removePage`,
-`reorderPage`, `addTab`, `removeTab`, `reorderTab`, and `setTabProperty`.
-Other JSON operations return a structured unsupported-operation error.
+`Apply` accepts `.yaml` and `.yml` for all operations, and `.json` for every
+operation listed below, including `reorderControl` and the productivity
+operations. Unsupported operations return a structured error.
 `Operation` values are serializable tagged structs.
 The supported YAML operation tags are
 `setFormProperty`, `setControlProperty`, `moveControl`, `resizeControl`,
 `addControl`, `removeControl`, `setParent`, `reorderControl`, `addPage`,
+`moveControls`, `alignControls`, `distributeControls`, `sameSizeControls`,
+`reorderControls`, `removeControls`, `setTabOrder`, `pasteControls`,
 `removePage`, `reorderPage`, `addTab`, `removeTab`, `reorderTab`, and
 `setTabProperty`.
 
@@ -92,7 +94,7 @@ coordinates. When a legacy nested item changes parents, relocate only that
 item and its subtree into the root `controls` array, preserving effective
 ordering and unrelated source. A root destination uses an empty `parentId`.
 Like YAML, the generic API does not compute world coordinates. JSON
-`reorderControl` remains unsupported.
+`reorderControl` updates sibling order locally and preserves `tabIndex`.
 
 Setting a supported `build.*` path may insert the missing `form.build` object;
 only the required local object/member is added. Legacy fields and build fields
@@ -120,9 +122,41 @@ type Operation struct {
 	Width     *float64            `json:"width,omitempty"`
 	Height    *float64            `json:"height,omitempty"`
 	Control   *spec.FormSpecControl `json:"control,omitempty"`
+	Tab       *spec.FormSpecTab    `json:"tab,omitempty"`
 	ParentID  string              `json:"parentId,omitempty"`
 	Index     *int                `json:"index,omitempty"`
+	ToIndex   *int                `json:"toIndex,omitempty"`
 	Cascade   bool                `json:"cascade,omitzero"`
+	ControlIDs  []string              `json:"controlIds,omitempty"`
+	Moves       []ControlMove         `json:"moves,omitempty"`
+	AnchorID    string                `json:"anchorId,omitempty"`
+	Alignment   string                `json:"alignment,omitempty"`
+	Axis        string                `json:"axis,omitempty"`
+	Dimension   string                `json:"dimension,omitempty"`
+	Command     string                `json:"command,omitempty"`
+	Snapshot    *ClipboardSnapshot    `json:"snapshot,omitempty"`
+	Allocations []ControlAllocation   `json:"allocations,omitempty"`
+	Offset      *GeometryOffset       `json:"offset,omitempty"`
+}
+
+type ControlMove struct {
+	ControlID string  `json:"controlId"`
+	Left      float64 `json:"left"`
+	Top       float64 `json:"top"`
+}
+type ClipboardSnapshot struct {
+	Format    string   `json:"format"`
+	Text      string   `json:"text"`
+	ControlIDs []string `json:"controlIds"`
+}
+type ControlAllocation struct {
+	SourceID string `json:"sourceId"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+}
+type GeometryOffset struct {
+	Left float64 `json:"left"`
+	Top  float64 `json:"top"`
 }
 ```
 
@@ -142,6 +176,14 @@ ID fails parsing with `UFV004` before any operation is applied.
 | `removeControl`      | Remove the target control. `cascade` defaults to false; if descendants remain, an absent or false value rejects removal. `cascade: true` removes the target and its descendants, including descendants represented by legacy nested source. Supported for YAML/YML and JSON source.                                                                                                                                                                                      |
 | `setParent`          | Set `parentId`, or make the control a root when it is empty. Optional `left` and `top` replace parent-relative coordinates; omitted values retain the existing local coordinates. Reparenting does not preserve or compute a world-space position.                                                                                                                                                                                                                       |
 | `reorderControl`     | Move the target to the zero-based `index` among its current siblings. Sibling order uses stable `zIndex` order, preserving source order for ties. Only sibling `zIndex` values needed for the requested order are updated; `tabIndex` is unchanged.                                                                                                                                                                                                                      |
+| `moveControls`       | Move all listed immediate siblings using one common translation. Each `{controlId,left,top}` supplies a final parent-relative position; the parent and pairwise geometry remain unchanged. Duplicate IDs, mixed parents, or positions that do not represent one translation are rejected. Group dragging never resizes controls.                                                                                                                                         |
+| `alignControls`      | Align at least two sibling `controlIds` to `anchorId` using `left`, `center`, `right`, `top`, `middle`, or `bottom`. The anchor must be selected.                                                                                                                                                                                                                                                                                                                        |
+| `distributeControls` | Distribute at least three siblings on `axis: "horizontal"` or `"vertical"`. Order by `left` or `top`, using stable z-order for equal leading coordinates. The first and last controls on that axis keep their positions; the intervening edge-to-edge gaps become equal.                                                                                                                                                                                                 |
+| `sameSizeControls`   | Copy `width`, `height`, or both (`dimension: "size"`) from selected `anchorId` to every other listed sibling. The anchor must be selected.                                                                                                                                                                                                                                                                                                                               |
+| `reorderControls`    | Reorder selected siblings with `command: "front"`, `"forward"`, `"backward"`, or `"back"`. Their relative order is preserved and their `tabIndex` values are unchanged.                                                                                                                                                                                                                                                                                                  |
+| `removeControls`     | Remove all selected sibling roots atomically. `cascade: true` also removes each root's descendants; overlapping descendant sets are counted and removed once. If descendants exist, the Designer confirms their aggregate count before dispatch; leaf-only removal is immediate.                                                                                                                                                                                         |
+| `setTabOrder`        | Set a complete ordered list of metadata-eligible sibling IDs for `parentId`; an empty `parentId` denotes the form root. Assign zero-based `tabIndex` in list order. Page controls and TabStrip tab records are not eligible; hidden and disabled controls remain included.                                                                                                                                                                                               |
+| `pasteControls`      | Paste a `snapshot` under `parentId` using one `{sourceId,id,name}` allocation for every copied control record, including descendants, and an `{left,top}` `offset`. The operation rewrites IDs and internal parent references, assigns copied roots to `parentId`, preserves nested relationships, and validates the complete result atomically.                                                                                                                         |
 | `addPage`            | Append one `Page` control from `control` to its referenced MultiPage. The control requires explicit `id`, `name`, `type: Page`, and a valid MultiPage `parentId`; it cannot contain nested `controls`. The canonical validator checks the final topology.                                                                                                                                                                                                                |
 | `removePage`         | Remove the Page identified by `controlId`. `cascade` defaults to false; if the Page has descendants, an absent or false value rejects removal. `cascade: true` removes the Page and its descendants. The Designer confirms deletion of a Page with descendants; empty Pages are deleted immediately.                                                                                                                                                                     |
 | `reorderPage`        | Move the Page identified by `controlId` to the zero-based `index` within its current owning MultiPage. A Page cannot change MultiPage owner through reordering.                                                                                                                                                                                                                                                                                                          |
@@ -149,6 +191,79 @@ ID fails parsing with `UFV004` before any operation is applied.
 | `removeTab`          | Remove the TabStrip entry at the zero-based `index` on `controlId`.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `reorderTab`         | Move the TabStrip entry at `index` to `toIndex` on `controlId`; both are zero-based indexes in the same collection.                                                                                                                                                                                                                                                                                                                                                      |
 | `setTabProperty`     | Set one supported metadata field on the TabStrip entry at `index`. `field` and value applicability come from LSP metadata and canonical FormSpec validation. A missing `value` is invalid; explicit null is distinct from omission and accepted only when canonical validation permits it.                                                                                                                                                                               |
+
+## Designer copy protocol
+
+Copy extraction is a read-only LSP request, separate from `Apply`:
+
+The host-neutral extractor reads only the supplied source:
+
+```go
+func CopyControls(input spec.SpecInput, source []byte, controlIDs []string) (ClipboardSnapshot, spec.FormSpec, error)
+```
+
+```json
+{
+  "method": "xlflow/userFormCopy",
+  "params": {
+    "uri": "file:///project/src/forms/specs/Main.yaml",
+    "version": 12,
+    "text": "...unsaved FormSpec source...",
+    "controlIds": ["frame-a", "button-b"]
+  }
+}
+```
+
+The request requires `userFormProductivityEdit`. On success the response is
+`{version, snapshot, document, hasPicturePaths:boolean}`. A failure response
+contains `{version, error}` and may also contain `hasPicturePaths:boolean`; that
+field has no meaning without a successful snapshot. `hasPicturePaths` is
+required on every successful response, including when false, and reports
+whether the copied subtree has authored picture paths. The parsed `document` is a preview/validation view; it does not
+replace the snapshot text as the clipboard source. The snapshot shape is
+`{format: "yaml"|"json", text, controlIds}`; `controlIds` and the copied root
+records follow stable sibling stacking order, independently of request
+selection order. Authored `zIndex` fields remain part of their source
+records. The requested roots must be direct siblings with explicit IDs. The
+snapshot text is opaque to the extension host. The
+backend defines its exact same-source record contents and extracts from the
+supplied text, not saved files. It preserves source-present values and
+observations while distinguishing absent, null, empty string, false, and zero;
+normalized or preview-only defaults are never inserted. The RPC echoes the
+supplied version. The host checks source/version and editing context before
+and after capture; stale results are rejected without publishing a snapshot.
+
+The host publishes a successful Copy snapshot to its in-memory clipboard and
+shares it across Designer documents. A Cut keeps its captured snapshot
+provisional until deletion succeeds. Copy includes each selected root's
+recursive control subtree; a MultiPage copy therefore includes its Page controls
+and their descendants. A Page is not a valid direct copy root. If any requested
+subtree contains an unsupported custom control, reject the complete copy.
+TabStrip `tabs` remain records on their control and are not control children.
+Picture path text may remain in a same-project snapshot, but image bytes, event
+handlers, and code-behind are not part of the snapshot.
+
+Paste uses the target document's format writer. The host offsets each repeated
+paste by 8 pt on both axes. It may translate the complete pasted group to fit
+the destination bounds; if the group cannot fit without resizing, reject the
+paste. A picture path in a pasted subtree is rejected when source and target
+belong to different projects; in the same project the authored project-root-
+relative path is unchanged. Copying into a different YAML/JSON format does not
+change the snapshot's source format tag or the target writer's authority.
+
+Cut first captures a valid source snapshot, then asks one confirmation with the
+aggregate descendant count for the selected roots in the same per-URI edit
+queue. Leaf-only Cut skips descendant confirmation. On confirmation, it submits
+one `removeControls` operation to remove the roots and descendants atomically.
+Only after that edit succeeds does the host publish the captured snapshot to the
+shared clipboard. Cancellation, stale source, failed capture, or failed edit
+leaves both the source and previous clipboard unchanged. A request superseded
+before deletion is rejected without deleting its source. Duplicate captures a
+source snapshot and submits one `pasteControls` operation with newly allocated
+IDs and names, always targeting the original selection's owning parent. Paste
+uses a selected Frame or Page as its destination only when exactly one control
+is selected; otherwise, including a multi-selection, it targets the selection's
+owning parent.
 
 For property operations a missing `value` is invalid. Explicit null is supported
 only for an optional scalar field whose resulting source passes canonical
@@ -245,6 +360,13 @@ the complete final state with the canonical FormSpec parser and validators
 before producing the result; a sequence may temporarily violate a relationship
 that a later operation repairs.
 
+Each Issue #922 productivity operation (`moveControls`, `alignControls`,
+`distributeControls`, `sameSizeControls`, `reorderControls`, `removeControls`,
+`setTabOrder`, or `pasteControls`) is the sole operation in its transaction.
+Do not combine it with a legacy operation or another productivity operation.
+Existing geometry, property, structural, parent, and Page/Tab operation-family
+and batching restrictions remain unchanged.
+
 `Apply` parses and validates the source before processing operations. A missing
 control `id` therefore fails with `UFV004`, and no operation can repair that
 input by inserting or addressing an implicit ID. `NormalizeFormSpec` may
@@ -292,7 +414,7 @@ The implementation is pure Go and must cover these behaviors:
 - Replacing a scalar and inserting a missing property changes only the local
   source span and preserves unrelated comments, spacing, key order, and
   controls. Include CRLF input and multibyte text to verify UTF-8 byte offsets.
-- Applying each of the eight operation types, including sequential operations,
+- Applying every operation type, including sequential legacy operations,
   default and disabled cascading removal, parent-relative reparenting, and
   stable sibling reorder without changing `tabIndex`.
 - Operation errors must retain their own cause even after an earlier operation
@@ -325,11 +447,11 @@ The implementation is pure Go and must cover these behaviors:
 - Explicit `form` paths update only the named legacy or `build.*` field.
   Unsupported observed fields, property removal, property bags, collections,
   pictures, and non-scalar values are rejected.
-- YAML/YML inputs support all operations; JSON supports geometry, scalar
-  property, add, remove and parent operations, replacement/insertion including missing
-  `build`, escaped keys, duplicate-key rejection and formatting-stable no-ops.
-  JSON `removeControl` covers legacy nested source cascades; unsupported JSON
-  operations are rejected atomically.
+- YAML/YML/JSON support all operations, including single-control
+  `reorderControl` and every productivity operation. Cover local edits,
+  replacement/insertion including missing `build`, escaped keys, duplicate-key
+  rejection, legacy nested source cascades, formatting-stable no-ops and
+  atomic rejection of unsupported or malformed payloads.
 - Authored metadata distinguishes absent/null/empty/false/zero without exposing
   observed or renderer defaults as authored values. Cover missing `value`,
   explicit optional null round-trip, required-null rejection and insertion of
@@ -339,6 +461,82 @@ The implementation is pure Go and must cover these behaviors:
 
 These tests require no Excel, COM, or VBE oracle. The API does not change
 VBE-facing behavior or establish any Excel runtime claim.
+
+## Productivity operation verification requirements
+
+Go source-edit checks should cover each productivity operation in YAML, YML,
+and JSON, including JSON `reorderControl`; localized edits; preservation of
+comments, ordering, authored presence/null/empty/false/zero and source-present
+observations; same-parent rejection; equal common deltas; anchor behavior;
+fixed-endpoint edge-gap distribution; z-order relative ordering without
+`tabIndex` changes; complete tab-order permutations; recursive ID/parent
+rewrites; unique names; paste offsets and whole-group bounds; and zero partial
+edits on any failure. Copy extraction checks should use the supplied unsaved
+source/version, preserve the exact source states, keep multiple roots in
+stable sibling stacking order in both `controlIds` and the snapshot record list,
+and reject a stale version, direct Page root, or
+unsupported custom subtree.
+
+LSP/host checks should verify `userFormProductivityEdit` independently from
+existing capabilities and enforce the applicable geometry, property,
+structural, parent, and Page gates. Confirm Cut captures a valid snapshot,
+confirms aggregate descendants in the same URI queue, then submits one atomic
+remove; cancellation or failure preserves the previous clipboard and source.
+Also cover required `hasPicturePaths`, cross-project picture-path rejection,
+same-project path retention, globally ticketed Copy/Cut races, superseded-Cut
+source preservation, and captured-snapshot paste offset isolation.
+Designer tests should cover built-in-only group selection, standalone custom
+selection, fully contained visible built-in-child marquee selection, same-parent
+scope, group movement without resizing, anchor layout commands, z-order,
+tab-order initialization and stale-draft discard,
+cross-panel clipboard use, Cut snapshot-confirm-delete ordering and cancellation
+preservation, single-container Paste destinations, and owning-parent Duplicate
+destinations. Run Go checks through `scripts/dev/go.ps1`, then the
+VS Code Designer tests, and verify in the VS Code host that each completed edit
+is one native Undo/Redo step. These checks establish source/editor behavior
+only; they do not establish Excel, COM, VBIDE, VBE, compiler, or runtime
+behavior.
+
+## Parent-local tab order
+
+`setTabOrder` requires the complete permutation of direct sibling controls for
+which the LSP's property metadata exposes editable `tabIndex`. Every eligible
+control appears exactly once. Hidden and disabled controls remain eligible;
+Page controls and TabStrip `tabs` records are excluded. The operation assigns
+contiguous zero-based indexes in list order. The root form is `parentId: ""`;
+Frame and Page lists use their stable control IDs.
+
+The Designer initializes the order with explicitly authored numeric
+`tabIndex` values ascending; equal indexes use stable z-order, preserving source
+order for z-order ties. Absent and explicit-null indexes come after numeric
+indexes, also in z-order. A local reorder is only a draft until Apply. If the
+source document changes first, discard the draft and rebuild from the new
+source; do not merge or rebase the old order.
+
+## Copy and paste source rules
+
+`pasteControls.allocations` contains one mapping for every copied control
+record, including nested Frame and Page descendants. New IDs are stable and
+unique in the destination. Allocated names are unique case-insensitively
+against `form.name`, every existing control name, and every name in the pasted
+subtree. The receiver rewrites each copied `id`, internal `parentId` references,
+and root parent assignment without modifying source records outside the paste.
+
+The host selects a destination parent and adds a repeated-paste offset of 8 pt
+per axis. It translates the complete group uniformly to fit the parent; if its
+extents cannot fit, the request is rejected. Same-project authored picture
+paths are copied verbatim; cross-project paste of a subtree with an authored
+picture path is rejected because no image bytes are copied. No code-behind or
+event handlers are copied. Observed-state editing remains unsupported; a copy
+preserves only observations actually present in the selected source records
+and never materializes normalized observations or preview defaults.
+
+The shared Designer clipboard assigns Copy and Cut selection requests a global,
+monotonically increasing ticket. A late response for an older valid selection
+is discarded; a Cut superseded before cascade deletion is rejected without
+deleting its source. A new snapshot resets repeat-paste offsets keyed by target
+URI and parent. An in-flight paste may complete from its captured snapshot,
+but advances offsets only while that snapshot is still current.
 
 ## Page and TabStrip verification requirements
 
@@ -356,11 +554,11 @@ VBIDE, or VBE behavior.
 
 ## Out of scope
 
-- JSON `reorderControl` operations.
 - CLI wiring; VS Code/Webview/LSP adapters are specified separately.
 - Excel, COM, VBIDE, Designer persistence, or VBE validation.
-- Property removal, observed-state authoring, property bags, collections other
-  than the specified Page and TabStrip operations, and picture editing.
+- Property removal, editing observed state, property bags, collections other
+  than the specified Page, TabStrip, and clipboard subtree operations, and
+  copying image asset files.
 - Recursive control construction in `addControl`, implicit ID insertion or
   targeting, and ID/type changes.
 
@@ -374,8 +572,10 @@ VBIDE, or VBE behavior.
 
 - Issue #916
 - Issue #917
+- Issue #922
 - `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`
 - `docs/adr/ADR-0065-userform-source-preserving-semantic-edits.md`
+- `docs/adr/ADR-0071-userform-designer-productivity-edits.md`
 - `docs/specs/userform-designer.md`
 - `docs/specs/ms-oforms.md`
 - `internal/vba/userforms/spec/spec.go`

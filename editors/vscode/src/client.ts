@@ -18,7 +18,13 @@ import {
   StartupTelemetry,
 } from "./startupTelemetry";
 import { resolveWorkspaceRoot } from "./xlflow";
-import type { PreviewResult, EditResult, SemanticOperation } from "./userFormEditor/protocol";
+import type {
+  PreviewResult,
+  EditResult,
+  CopyResult,
+  SemanticOperation,
+} from "./userFormEditor/protocol";
+import { isProductivityOperation } from "./userFormEditor/protocol";
 
 class StartupLanguageClient extends LanguageClient {
   public constructor(
@@ -67,6 +73,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
           userFormParentEdit?: boolean;
           userFormPageEdit?: boolean;
           userFormTabEdit?: boolean;
+          userFormProductivityEdit?: boolean;
         }
       | undefined;
     if (experimental?.userFormPreview !== true)
@@ -87,6 +94,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       parentEditable: experimental.userFormParentEdit === true,
       pageEditable: experimental.userFormPageEdit === true,
       tabEditable: experimental.userFormTabEdit === true,
+      productivityEditable: experimental.userFormProductivityEdit === true,
     };
   }
 
@@ -111,8 +119,47 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
           userFormParentEdit?: boolean;
           userFormPageEdit?: boolean;
           userFormTabEdit?: boolean;
+          userFormProductivityEdit?: boolean;
         }
       | undefined;
+    if (operations.some(isProductivityOperation) && experimental?.userFormProductivityEdit !== true)
+      throw new Error(
+        vscode.l10n.t("Update xlflow to a version supporting Designer productivity edits."),
+      );
+    if (
+      operations.some((op) =>
+        [
+          "moveControls",
+          "alignControls",
+          "distributeControls",
+          "sameSizeControls",
+          "reorderControls",
+        ].includes(op.type),
+      ) &&
+      experimental?.userFormEdit !== true
+    )
+      throw new Error(vscode.l10n.t("Update xlflow to a version supporting UserForm edits."));
+    if (
+      operations.some((op) => op.type === "removeControls" || op.type === "pasteControls") &&
+      experimental?.userFormStructuralEdit !== true
+    )
+      throw new Error(
+        vscode.l10n.t("Update xlflow to a version supporting UserForm structural edits."),
+      );
+    if (
+      operations.some((op) => op.type === "setTabOrder") &&
+      experimental?.userFormPropertyEdit !== true
+    )
+      throw new Error(
+        vscode.l10n.t("Update xlflow to a version supporting UserForm property edits."),
+      );
+    if (
+      operations.some((op) => op.type === "pasteControls" && op.parentId !== "") &&
+      experimental?.userFormParentEdit !== true
+    )
+      throw new Error(
+        vscode.l10n.t("Changing parents requires an xlflow version supporting parent edits."),
+      );
     if (
       operations.some(
         (op) => op.type === "moveControl" || op.type === "resizeControl" || op.type === "setParent",
@@ -170,6 +217,36 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       version,
       text,
       operations,
+    });
+    if (generation !== this.previewGeneration || client !== this.client)
+      throw new Error(vscode.l10n.t("The language server connection changed."));
+    return result;
+  }
+  public async requestUserFormCopy(
+    document: vscode.TextDocument,
+    version: number,
+    text: string,
+    controlIds: string[],
+  ): Promise<CopyResult> {
+    const client = this.client;
+    const generation = this.previewGeneration;
+    const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+    if (!client?.isRunning() || folder?.uri.toString() !== this.workspaceFolderKey)
+      throw new Error(
+        vscode.l10n.t("Select this form's project and enable xlflow LSP to edit the form."),
+      );
+    const experimental = client.initializeResult?.capabilities.experimental as
+      | { userFormProductivityEdit?: boolean }
+      | undefined;
+    if (experimental?.userFormProductivityEdit !== true)
+      throw new Error(
+        vscode.l10n.t("Update xlflow to a version supporting Designer productivity edits."),
+      );
+    const result = await client.sendRequest<CopyResult>("xlflow/userFormCopy", {
+      uri: document.uri.toString(),
+      version,
+      text,
+      controlIds,
     });
     if (generation !== this.previewGeneration || client !== this.client)
       throw new Error(vscode.l10n.t("The language server connection changed."));
