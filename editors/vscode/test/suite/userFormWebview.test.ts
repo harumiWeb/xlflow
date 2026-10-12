@@ -46,9 +46,12 @@ window.addEventListener("message", e => {
       if (props.formPoints) {
         // Establish focus/scroll before computing synthetic pointer coordinates;
         // the real pointer-down handler focuses the canvas and may scroll it.
-        const canvas = document.querySelector('.designer-viewport');
-        canvas.focus();
-        canvas.scrollIntoView({ block: 'start', inline: 'start', behavior: 'instant' });
+        if (action.event === 'pointerdown') {
+          const canvas = document.querySelector('.designer-viewport');
+          canvas.focus({ preventScroll: true });
+          canvas.scrollIntoView({ block: 'start', inline: 'start', behavior: 'instant' });
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
         const bounds = document.querySelector(".form").getBoundingClientRect();
         const zoom = Number(document.querySelector(".designer-toolbar select").value);
         props.clientX = bounds.left + props.formPoints[0] * 96 * zoom / 72;
