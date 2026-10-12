@@ -169,6 +169,7 @@ button {
 }
 .container-content {
   position: absolute;
+  overflow: hidden;
 }
 .designer-toolbar {
   display: flex;
@@ -263,6 +264,44 @@ button {
   display: flex;
   align-items: flex-start;
   gap: 20px;
+}
+.designer-canvas {
+  flex-shrink: 0;
+}
+.selection-path {
+  margin: 0 8px;
+  max-width: 600px;
+  overflow-wrap: anywhere;
+}
+.selection-path button {
+  color: var(--vscode-textLink-foreground);
+  background: transparent;
+  border: 0;
+  padding: 4px;
+}
+.selection-path button[aria-current="true"] {
+  font-weight: bold;
+}
+.drop-target {
+  position: absolute;
+  box-sizing: border-box;
+  outline: 2px dashed var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+  z-index: 100001;
+  pointer-events: none;
+}
+.drop-target.invalid {
+  outline-color: var(--vscode-inputValidation-errorBorder, #d33);
+}
+.drag-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 100002;
+  opacity: 0.8;
+}
+.drag-preview,
+.drag-preview * {
+  pointer-events: none !important;
 }
 .toolbox {
   width: 160px;

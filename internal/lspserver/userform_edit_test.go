@@ -46,7 +46,7 @@ func TestUserFormEditRPCAndUTF16Ranges(t *testing.T) {
 	if err := clientConn.Call(ctx, "initialize", protocol.InitializeParams{}, &initialized); err != nil {
 		t.Fatal(err)
 	}
-	if initialized.Capabilities.Experimental["userFormEdit"] != true || initialized.Capabilities.Experimental["userFormPropertyEdit"] != true || initialized.Capabilities.Experimental["userFormStructuralEdit"] != true {
+	if initialized.Capabilities.Experimental["userFormEdit"] != true || initialized.Capabilities.Experimental["userFormPropertyEdit"] != true || initialized.Capabilities.Experimental["userFormStructuralEdit"] != true || initialized.Capabilities.Experimental["userFormParentEdit"] != true {
 		t.Fatalf("edit capability: %+v", initialized.Capabilities.Experimental)
 	}
 	if err := clientConn.Notify(ctx, "initialized", map[string]any{}); err != nil {
@@ -343,12 +343,11 @@ func TestUserFormEditStructuredFailuresAreAtomic(t *testing.T) {
 		t.Fatalf("ambiguous source result: %+v", result)
 	}
 
-	unsupported := params.Operations[:1]
-	unsupported[0].Type = formsedit.SetParent
 	yamlURI := pathToFileURI(filepath.Join(root, "src/forms/specs/Main.yaml"))
-	result = s.userFormEdit(userFormEditParams{URI: yamlURI, Version: 4, Text: previewSource, Operations: unsupported})
-	if result.Error == nil || result.Error.Code != compiler.Unsupported || len(result.Edits) != 0 {
-		t.Fatalf("unsupported operation result: %+v", result)
+	missingCoordinates := formsedit.Operation{Type: formsedit.SetParent, ControlID: "submit"}
+	result = s.userFormEdit(userFormEditParams{URI: yamlURI, Version: 4, Text: previewSource, Operations: []formsedit.Operation{missingCoordinates}})
+	if result.Error == nil || result.Error.Code != compiler.Invalid || len(result.Edits) != 0 {
+		t.Fatalf("typed SetParent accepted omitted coordinates: %+v", result)
 	}
 }
 
@@ -368,7 +367,7 @@ func TestUserFormEditRequestPayloadValidation(t *testing.T) {
 		{name: "duplicate operation field", body: strings.Replace(valid, `"left":1`, `"left":1,"left":2`, 1), code: compiler.Invalid},
 		{name: "nonnumeric geometry", body: strings.Replace(valid, `"left":1`, `"left":"1"`, 1), code: compiler.Invalid},
 		{name: "nonfinite geometry", body: strings.Replace(valid, `"left":1`, `"left":1e400`, 1), code: compiler.Invalid},
-		{name: "backend-only operation", body: strings.Replace(valid, `"type":"moveControl"`, `"type":"setParent"`, 1), code: compiler.Unsupported},
+		{name: "backend-only operation", body: strings.Replace(valid, `"type":"moveControl"`, `"type":"reorderControl"`, 1), code: compiler.Unsupported},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -389,7 +388,7 @@ func TestUserFormEditStructuralPayloadValidation(t *testing.T) {
 	}{
 		{name: "valid add", raw: validAdd},
 		{name: "property bag remains open", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","properties":{"Vendor.Key":null}`, 1)},
-		{name: "parented insertion remains unsupported", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","parentId":"frame"`, 1), code: compiler.Unsupported},
+		{name: "Frame parent insertion", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","parentId":"frame"`, 1)},
 		{name: "root Page insertion remains unsupported", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"pAgE"`, 1), code: compiler.Unsupported},
 		{name: "custom insertion remains unsupported", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"VendorControl","progId":"Vendor.Control"`, 1), code: compiler.Unsupported},
 		{name: "unknown operation field", raw: strings.Replace(validAdd, `"control":`, `"extra":true,"control":`, 1), code: compiler.Invalid},
@@ -412,7 +411,7 @@ func TestUserFormEditStructuralPayloadValidation(t *testing.T) {
 		{name: "nested controls", raw: strings.Replace(validAdd, `"type":"Label"`, `"type":"Label","controls":[{"id":"child","name":"Child","type":"Label"}]`, 1), code: compiler.Invalid},
 		{name: "remove null cascade", raw: `{"type":"removeControl","controlId":"frame","cascade":null}`, code: compiler.Invalid},
 		{name: "remove non-boolean cascade", raw: `{"type":"removeControl","controlId":"frame","cascade":1}`, code: compiler.Invalid},
-		{name: "set parent remains unsupported", raw: `{"type":"setParent","controlId":"new","parentId":"frame"}`, code: compiler.Unsupported},
+		{name: "set parent requires coordinates", raw: `{"type":"setParent","controlId":"new","parentId":"frame"}`, code: compiler.Invalid},
 		{name: "reorder remains unsupported", raw: `{"type":"reorderControl","controlId":"new","index":0}`, code: compiler.Unsupported},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -535,23 +534,36 @@ func TestUserFormEditStructuralScope(t *testing.T) {
 		t.Run(fixture.format, func(t *testing.T) {
 			uri := pathToFileURI(filepath.Join(root, "src/forms/specs/Main."+fixture.format))
 			for _, test := range []struct {
-				name string
-				op   formsedit.Operation
+				name    string
+				op      formsedit.Operation
+				allowed bool
 			}{
-				{name: "Frame child insertion", op: formsedit.Operation{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "Label2", Type: "Label", ParentID: "frame"}}},
+				{name: "Frame child insertion", op: formsedit.Operation{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "Label2", Type: "Label", ParentID: "frame"}}, allowed: true},
 				{name: "Page insertion", op: formsedit.Operation{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "Page3", Type: "pAgE", ParentID: "multi"}}},
 				{name: "custom insertion", op: formsedit.Operation{Type: formsedit.AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "Custom1", Type: "VendorControl", ProgID: "Vendor.Control"}}},
 				{name: "Page direct removal", op: formsedit.Operation{Type: formsedit.RemoveControl, ControlID: "page2", Cascade: true}},
 			} {
 				t.Run(test.name, func(t *testing.T) {
-					// These are valid generic semantic edits. Only the Designer RPC
-					// boundary must exclude them until hierarchy/Page authoring lands.
+					// These are valid generic semantic edits. Frame children are
+					// supported by the Designer boundary; Page and custom edits are not.
 					if _, err := formsedit.Apply(spec.SpecInput{Format: fixture.format}, []byte(fixture.source), []formsedit.Operation{test.op}); err != nil {
 						t.Fatalf("generic edit unexpectedly rejected: %v", err)
 					}
 					params := userFormEditParams{URI: uri, Version: 41, Text: fixture.source, Operations: []formsedit.Operation{test.op}}
 					result := server.userFormEdit(params)
-					if result.Error == nil || result.Error.Code != compiler.Unsupported || result.Version != 41 || len(result.Edits) != 0 {
+					if test.allowed {
+						if result.Error != nil || result.Version != 41 || len(result.Edits) == 0 {
+							t.Fatalf("supported handler edit failed: %+v", result)
+						}
+						updated, err := applyLSPTextEdits(fixture.source, result.Edits)
+						if err != nil {
+							t.Fatal(err)
+						}
+						document, err := spec.ParseFormSpec(spec.SpecInput{Format: fixture.format}, []byte(updated))
+						if err != nil || len(document.Controls) == 0 || document.Controls[len(document.Controls)-1].ParentID != "frame" {
+							t.Fatalf("Frame child parent was not retained: controls=%+v err=%v", document.Controls, err)
+						}
+					} else if result.Error == nil || result.Error.Code != compiler.Unsupported || result.Version != 41 || len(result.Edits) != 0 {
 						t.Fatalf("out-of-scope handler edit: %+v", result)
 					}
 					raw, err := json.Marshal(map[string]any{"uri": uri, "version": 41, "text": fixture.source, "operations": params.Operations})
@@ -566,7 +578,11 @@ func TestUserFormEditStructuralScope(t *testing.T) {
 						return
 					}
 					result = server.userFormEdit(decoded)
-					if result.Error == nil || result.Error.Code != compiler.Unsupported || len(result.Edits) != 0 {
+					if test.allowed {
+						if result.Error != nil || len(result.Edits) == 0 {
+							t.Fatalf("supported raw RPC edit failed: %+v", result)
+						}
+					} else if result.Error == nil || result.Error.Code != compiler.Unsupported || len(result.Edits) != 0 {
 						t.Fatalf("out-of-scope raw RPC edit: %+v", result)
 					}
 				})

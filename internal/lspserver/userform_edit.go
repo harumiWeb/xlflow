@@ -50,7 +50,7 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 		return result
 	}
 	for index, operation := range params.Operations {
-		if operation.Type != formsedit.MoveControl && operation.Type != formsedit.ResizeControl && operation.Type != formsedit.SetFormProperty && operation.Type != formsedit.SetControlProperty && operation.Type != formsedit.AddControl && operation.Type != formsedit.RemoveControl {
+		if operation.Type != formsedit.MoveControl && operation.Type != formsedit.ResizeControl && operation.Type != formsedit.SetFormProperty && operation.Type != formsedit.SetControlProperty && operation.Type != formsedit.AddControl && operation.Type != formsedit.RemoveControl && operation.Type != formsedit.SetParent {
 			result.Error = &userFormEditError{
 				Code:    compiler.Unsupported,
 				Message: fmt.Sprintf("operation %q is not exposed by the LSP edit method", operation.Type),
@@ -58,7 +58,7 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 					OperationIndex: index,
 					Operation:      operation.Type,
 					Code:           "UFE007",
-					Message:        "The LSP edit method supports geometry, scalar property, and add/remove operations.",
+					Message:        "The LSP edit method supports geometry, scalar property, add/remove, and parent operations.",
 				}},
 			}
 			return result
@@ -71,6 +71,16 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 	for _, operation := range params.Operations {
 		if operation.Type == formsedit.AddControl {
 			if requestError := validateDesignerControlAddition(operation.Control); requestError != nil {
+				result.Error = requestError
+				return result
+			}
+			if requestError := validateDesignerFrameParent(input, []byte(params.Text), operation.Control.ParentID, operation.Control.ID); requestError != nil {
+				result.Error = requestError
+				return result
+			}
+		}
+		if operation.Type == formsedit.SetParent {
+			if requestError := validateDesignerSetParent(input, []byte(params.Text), operation); requestError != nil {
 				result.Error = requestError
 				return result
 			}
@@ -175,7 +185,7 @@ func validateUserFormEditTransaction(operations []formsedit.Operation) *userForm
 		switch operations[0].Type {
 		case formsedit.SetFormProperty, formsedit.SetControlProperty,
 			formsedit.MoveControl, formsedit.ResizeControl,
-			formsedit.AddControl, formsedit.RemoveControl:
+			formsedit.AddControl, formsedit.RemoveControl, formsedit.SetParent:
 			return nil
 		}
 	}
@@ -217,6 +227,8 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		allowed = []string{"type", "control"}
 	case formsedit.RemoveControl:
 		allowed = []string{"type", "controlId", "cascade"}
+	case formsedit.SetParent:
+		allowed = []string{"type", "controlId", "parentId", "left", "top"}
 	default:
 		return formsedit.Operation{}, &userFormEditError{Code: compiler.Unsupported, Message: fmt.Sprintf("operation %q is not exposed by the LSP edit method", operationType)}
 	}
@@ -249,6 +261,26 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 			}
 		}
 		return operation, nil
+	}
+	if operationType == formsedit.SetParent {
+		controlID, err := decodeRequiredJSONString(fields, "controlId")
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(err)
+		}
+		parentIDJSON, ok := fields["parentId"]
+		var parentID string
+		if !ok || bytes.Equal(bytes.TrimSpace(parentIDJSON), []byte("null")) || json.Unmarshal(parentIDJSON, &parentID) != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("parentId must be a string"))
+		}
+		left, err := decodeFiniteJSONNumber(fields["left"])
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("left: %w", err))
+		}
+		top, err := decodeFiniteJSONNumber(fields["top"])
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("top: %w", err))
+		}
+		return formsedit.Operation{Type: operationType, ControlID: controlID, ParentID: parentID, Left: new(left), Top: new(top)}, nil
 	}
 	if operationType == formsedit.SetFormProperty || operationType == formsedit.SetControlProperty {
 		var field string
@@ -313,13 +345,74 @@ func validateDesignerControlAddition(control *spec.FormSpecControl) *userFormEdi
 		return invalidUserFormEditParams(fmt.Errorf("control must be an object"))
 	}
 	contract, known := spec.LookupControlContract(control.Type)
-	if control.ParentID != "" || len(control.Controls) != 0 || !known || contract.Type == "Page" {
-		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer insertion supports only root built-in controls other than Page"}
+	if len(control.Controls) != 0 || !known || contract.Type == "Page" {
+		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer insertion supports only flat built-in controls other than Page"}
 	}
 	if control.ProgID != "" && !strings.EqualFold(control.ProgID, contract.ProgID) {
 		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer insertion does not support custom ProgIDs"}
 	}
 	return nil
+}
+
+func validateDesignerSetParent(input spec.SpecInput, source []byte, operation formsedit.Operation) *userFormEditError {
+	if operation.Left == nil || operation.Top == nil || math.IsNaN(*operation.Left) || math.IsInf(*operation.Left, 0) || math.IsNaN(*operation.Top) || math.IsInf(*operation.Top, 0) {
+		return invalidUserFormEditParams(fmt.Errorf("setParent requires finite left and top coordinates"))
+	}
+	document, err := spec.ParseFormSpec(input, source)
+	if err != nil {
+		return nil
+	}
+	var subject *spec.FormSpecControl
+	controlsByID := make(map[string]spec.FormSpecControl, len(document.Controls))
+	for index := range document.Controls {
+		control := &document.Controls[index]
+		controlsByID[control.ID] = *control
+		if control.ID == operation.ControlID {
+			subject = control
+		}
+	}
+	if subject == nil {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(subject.Type), "Page") || !isDesignerBuiltInControl(*subject) {
+		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer reparenting does not support Page or custom controls"}
+	}
+	if subject.ParentID != "" {
+		parent, ok := controlsByID[subject.ParentID]
+		if ok && !isDesignerFrame(parent) {
+			return &userFormEditError{Code: compiler.Unsupported, Message: "Designer reparenting supports controls whose current parent is root or Frame"}
+		}
+	}
+	return validateDesignerFrameParent(input, source, operation.ParentID, operation.ControlID)
+}
+
+func validateDesignerFrameParent(input spec.SpecInput, source []byte, parentID, subjectID string) *userFormEditError {
+	if parentID == "" || parentID == subjectID {
+		return nil
+	}
+	document, err := spec.ParseFormSpec(input, source)
+	if err != nil {
+		return nil
+	}
+	for _, control := range document.Controls {
+		if control.ID == parentID && !isDesignerFrame(control) {
+			return &userFormEditError{Code: compiler.Unsupported, Message: "Designer reparenting supports only Frame destinations"}
+		}
+	}
+	return nil
+}
+
+func isDesignerBuiltInControl(control spec.FormSpecControl) bool {
+	contract, ok := spec.LookupControlContract(control.Type)
+	if !ok {
+		return false
+	}
+	return control.ProgID == "" || strings.EqualFold(control.ProgID, contract.ProgID)
+}
+
+func isDesignerFrame(control spec.FormSpecControl) bool {
+	contract, ok := spec.LookupControlContract(control.Type)
+	return ok && strings.EqualFold(contract.Type, "Frame") && isDesignerBuiltInControl(control)
 }
 
 func decodeUserFormControl(raw json.RawMessage) (*spec.FormSpecControl, error) {

@@ -10,7 +10,7 @@ import type {
 import { DesignerCanvas } from "./DesignerCanvas";
 import { PropertyGrid } from "./PropertyGrid";
 import { Toolbox } from "./Toolbox";
-import { createControl } from "../../src/userFormEditor/toolbox";
+import { createControl, controlMetadata } from "../../src/userFormEditor/toolbox";
 import type { ToolboxType } from "../../src/userFormEditor/toolbox";
 import type { PropertyDraftStore, PropertyReply } from "./PropertyGrid";
 import { designerStrings } from "../../src/userFormEditor/protocol";
@@ -32,6 +32,7 @@ export function App() {
   const [editable, setEditable] = useState(false);
   const [propertyEditable, setPropertyEditable] = useState(false);
   const [structuralEditable, setStructuralEditable] = useState(false);
+  const [parentEditable, setParentEditable] = useState(false);
   const [tool, setTool] = useState<ToolboxType>();
   const [propertyGrid, setPropertyGrid] = useState<PropertyGridData>();
   const [selectedId, setSelectedId] = useState<string>();
@@ -73,6 +74,7 @@ export function App() {
         setPropertyGrid(message.propertyGrid);
         setPropertyEditable(message.propertyEditable === true);
         setStructuralEditable(message.structuralEditable === true);
+        setParentEditable(message.parentEditable === true);
         setPropertyError(message.propertyError?.message);
         setSelectedId((id) =>
           message.document.controls.some((c) => c.id === pendingAdd.current)
@@ -89,6 +91,7 @@ export function App() {
         setEditable(false);
         setPropertyEditable(false);
         setStructuralEditable(false);
+        setParentEditable(false);
         setTool(undefined);
         version.current = message.version;
         setDocumentVersion(message.version);
@@ -98,6 +101,7 @@ export function App() {
         setEditable(false);
         setPropertyEditable(false);
         setStructuralEditable(false);
+        setParentEditable(false);
       }
       if (message.type === "editResult" && message.requestId === pending.current?.requestId) {
         const response = { ...pending.current, requestId: message.requestId, error: message.error };
@@ -133,6 +137,12 @@ export function App() {
       operation.type === "setFormProperty" || operation.type === "setControlProperty";
     const structural = operation.type === "addControl" || operation.type === "removeControl";
     if (structural ? !structuralEditable : property ? !propertyEditable : !editable) return;
+    if (
+      (operation.type === "setParent" ||
+        (operation.type === "addControl" && operation.control.parentId)) &&
+      !parentEditable
+    )
+      return;
     const requestId = ++nextRequest.current;
     pending.current = {
       requestId,
@@ -140,7 +150,7 @@ export function App() {
       controlId: operation.type === "setControlProperty" ? operation.controlId : undefined,
     };
     pendingAdd.current = operation.type === "addControl" ? operation.control.id : undefined;
-    pendingStructural.current = structural;
+    pendingStructural.current = structural || operation.type === "setParent";
     setEditError(undefined);
     setBusy(true);
     bridge.postMessage({ type: "edit", requestId, version: version.current, operations });
@@ -223,6 +233,7 @@ export function App() {
           ))}
           <div class="designer-workspace">
             <Toolbox
+              parentEditable={parentEditable}
               selected={tool}
               disabled={!structuralEditable || busy || !!error}
               strings={strings}
@@ -232,22 +243,35 @@ export function App() {
               document={document}
               approximateBounds={strings.approximateBounds}
               editable={editable}
+              parentEditable={parentEditable && !error}
               busy={busy}
               zoom={zoom}
               showGrid={showGrid}
               snapping={snapping}
               cannotMove={strings.cannotMove}
+              hierarchy={strings.hierarchy}
+              invalidDrop={strings.invalidDrop}
+              dropTargetLabel={strings.dropTarget}
+              placementSize={controlMetadata.find((m) => m.type === tool)}
               selectedId={selectedId}
               onSelectionChange={setSelectedId}
               onCommit={commit}
               placing={!!tool && structuralEditable && !error}
               onCancelPlacement={() => setTool(undefined)}
               onDelete={canDelete ? remove : undefined}
-              onPlace={(left, top) => {
+              onPlace={(left, top, parentId) => {
                 if (!tool) return;
-                const control = createControl(document, tool, left, top, snapping);
+                const control = createControl(
+                  document,
+                  tool,
+                  left,
+                  top,
+                  snapping,
+                  undefined,
+                  parentId,
+                );
                 if (!control) {
-                  setEditError(strings.cannotInsert);
+                  setEditError(parentId ? strings.cannotInsertContainer : strings.cannotInsert);
                   return;
                 }
                 commit([{ type: "addControl", control }]);

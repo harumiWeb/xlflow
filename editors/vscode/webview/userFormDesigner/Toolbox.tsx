@@ -5,11 +5,13 @@ import type { DesignerStrings } from "../../src/userFormEditor/protocol";
 export function Toolbox({
   selected,
   disabled,
+  parentEditable = false,
   strings,
   onSelect,
 }: {
   selected?: ToolboxType;
   disabled: boolean;
+  parentEditable?: boolean;
   strings: DesignerStrings;
   onSelect: (type?: ToolboxType) => void;
 }) {
@@ -43,7 +45,7 @@ export function Toolbox({
       {disabled && <p class="notice">{strings.structuralReadOnly}</p>}
       {selected && (
         <p class="notice" role="status">
-          {strings.placement}
+          {parentEditable ? strings.parentPlacement : strings.placement}
         </p>
       )}
     </aside>

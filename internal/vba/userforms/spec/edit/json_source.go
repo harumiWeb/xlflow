@@ -112,6 +112,90 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 		}
 		nodes := map[string][]*jsonSourceNode{}
 		indexJSONControls(jsonSourceMemberValue(root, "controls"), nodes)
+		if op.Type == SetParent {
+			if len(nodes[op.ControlID]) != 1 {
+				return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+			}
+			controlIndex := slices.IndexFunc(model.Controls, func(control spec.FormSpecControl) bool {
+				return control.ID == op.ControlID
+			})
+			if controlIndex < 0 {
+				return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+			}
+			control := model.Controls[controlIndex]
+			target := nodes[op.ControlID][0]
+			rootControls := jsonSourceMemberValue(root, "controls")
+			sourceArray := jsonControlArray(rootControls, target)
+			if sourceArray == nil {
+				return Result{}, fmt.Errorf("control array for JSON source node was not found")
+			}
+			legacyNested := sourceArray != rootControls
+
+			keys := make([]string, 0, 4)
+			values := make(map[string]json.RawMessage, 4)
+			put := func(key string, value any) error {
+				encoded, err := marshalJSONScalar(value)
+				if err != nil {
+					return err
+				}
+				keys = append(keys, key)
+				values[key] = encoded
+				return nil
+			}
+			parentChanged := control.ParentID != op.ParentID
+			if parentChanged {
+				if err := put("parentId", op.ParentID); err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+				if legacyNested && jsonSourceMemberValue(target, "zIndex") == nil && control.ZIndex != nil {
+					if err := put("zIndex", *control.ZIndex); err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+				}
+			}
+			if op.Left != nil {
+				if err := put("left", *op.Left); err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+			}
+			if op.Top != nil {
+				if err := put("top", *op.Top); err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+			}
+			edits, err := jsonPropertyEdits(updated, target, keys, values)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			applyEdits(edits)
+
+			if parentChanged && legacyNested {
+				currentRoot, err := parseJSONSource(updated)
+				if err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+				currentNodes := map[string][]*jsonSourceNode{}
+				indexJSONControls(jsonSourceMemberValue(currentRoot, "controls"), currentNodes)
+				if len(currentNodes[op.ControlID]) != 1 {
+					return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+				}
+				currentRootControls := jsonSourceMemberValue(currentRoot, "controls")
+				currentTarget := currentNodes[op.ControlID][0]
+				encoded := bytes.Clone(updated[currentTarget.start:currentTarget.end])
+				remove, err := jsonControlItemRemovalEdit(currentRoot, currentTarget)
+				if err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+				appendEdit := jsonArrayAppendEdit(updated, currentRootControls, currentRoot, encoded)
+				applyEdits([]SourceEdit{remove, appendEdit})
+			}
+			model, err = normalizedJSONModel(updated)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			types = jsonControlTypes(model)
+			continue
+		}
 		if op.Type == RemoveControl {
 			if len(nodes[op.ControlID]) != 1 {
 				return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
@@ -796,6 +880,10 @@ func jsonRemoveControlEdit(source []byte, root, target *jsonSourceNode, removeSe
 	if jsonHasUnselectedNestedControl(target, removeSet) {
 		return SourceEdit{}, failure(-1, Operation{}, "UFE006", "Removing this JSON control would also remove a nested control outside the canonical removal set.", "Resolve the nested control relationship before retrying.")
 	}
+	return jsonControlItemRemovalEdit(root, target)
+}
+
+func jsonControlItemRemovalEdit(root, target *jsonSourceNode) (SourceEdit, error) {
 	array := jsonControlArray(jsonSourceMemberValue(root, "controls"), target)
 	if array == nil {
 		return SourceEdit{}, fmt.Errorf("control array for JSON source node was not found")

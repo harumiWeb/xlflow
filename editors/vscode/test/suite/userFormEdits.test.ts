@@ -25,6 +25,7 @@ export async function runUserFormEditAssertions(): Promise<void> {
   await assertGeometryTransactionsUndoAndRedo();
   await assertPropertyTransactionsUndoAndRedo();
   await assertStructuralTransactionsUndoAndRedo();
+  await assertParentTransactionUndoAndRedo();
   await assertConfirmationRejectsStaleAndCancelledEdits();
   await assertStaleResponsesAreDiscarded();
   await assertConnectionInvalidationIsDiscarded();
@@ -117,6 +118,56 @@ async function assertStructuralTransactionsUndoAndRedo(): Promise<void> {
     assert.strictEqual(document.getText(), added);
     await vscode.commands.executeCommand("redo");
     assert.strictEqual(document.getText(), removed);
+  });
+}
+
+async function assertParentTransactionUndoAndRedo(): Promise<void> {
+  const source = [
+    "schemaVersion: 1",
+    "kind: xlflow.userform",
+    "form: {name: Main, build: {clientWidth: 480, clientHeight: 360}}",
+    "controls:",
+    "  - {id: frame, name: Frame1, type: Frame}",
+    "  - {id: child, parentId: frame, name: TextBox1, type: TextBox}",
+    "",
+  ].join("\r\n");
+  await withDesignerDocument("parent-undo", source, async (document) => {
+    const queue = new DocumentEditQueue();
+    const initial = document.getText();
+    const oldLine = "  - {id: child, parentId: frame, name: TextBox1, type: TextBox}";
+    const newLine = "  - {id: child, name: TextBox1, type: TextBox}";
+    const client = fakeClient((doc, version, text, operations) => {
+      assert.strictEqual(operations.length, 1);
+      assert.strictEqual(operations[0].type, "setParent");
+      const startOffset = text.indexOf(oldLine);
+      assert.ok(startOffset >= 0);
+      return {
+        version,
+        edits: [
+          {
+            range: {
+              start: doc.positionAt(startOffset),
+              end: doc.positionAt(startOffset + oldLine.length),
+            },
+            newText: newLine,
+          },
+        ],
+      };
+    });
+    const result = await queue.run(
+      document,
+      document.version,
+      [{ type: "setParent", controlId: "child", parentId: "", left: 24, top: 18 }],
+      client,
+      () => true,
+    );
+    assert.strictEqual(result, undefined);
+    const reparented = document.getText();
+    assert.ok(!reparented.includes("parentId: frame"));
+    await vscode.commands.executeCommand("undo");
+    assert.strictEqual(document.getText(), initial, "one undo restores the previous parent");
+    await vscode.commands.executeCommand("redo");
+    assert.strictEqual(document.getText(), reparented);
   });
 }
 

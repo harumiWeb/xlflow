@@ -4,9 +4,16 @@ import type { XlflowLanguageClientManager } from "../client";
 import { readFormsRootFromToml } from "../sidebar";
 import { isFormSpecPath, PreviewSynchronizer } from "./document";
 import { isWebviewMessage } from "./protocol";
-import type { HostMessage, DesignerDocument, StructuralOperation, DesignerError } from "./protocol";
+import type {
+  HostMessage,
+  DesignerDocument,
+  StructuralOperation,
+  ParentOperation,
+  DesignerError,
+} from "./protocol";
 import { DocumentEditQueue } from "./edits";
-import { subtreeIds } from "./toolbox";
+import { controlMetadata, subtreeIds } from "./toolbox";
+import { isDesignerFrame } from "./geometry";
 
 export type DeleteConfirmation = (name: string, descendants: number) => PromiseLike<boolean>;
 const confirmSubtreeDeletion: DeleteConfirmation = async (name, descendants) => {
@@ -42,6 +49,14 @@ export async function prepareStructuralEdit(
         code: "controlConflict",
         message: vscode.l10n.t("The new control ID or name is already in use."),
       };
+    if (operation.control.parentId !== undefined) {
+      const parent = controls.find((control) => control.id === operation.control.parentId);
+      if (!parent || !isDesignerFrame(parent))
+        return {
+          code: "invalidParent",
+          message: vscode.l10n.t("This control cannot be placed in this container."),
+        };
+    }
     return;
   }
   const control = controls.find((c) => c.id === operation.controlId);
@@ -53,6 +68,40 @@ export async function prepareStructuralEdit(
   const descendants = subtreeIds(controls, control.id).size - 1;
   if (descendants && !(await confirm(control.name, descendants)))
     return { code: "editCancelled", message: vscode.l10n.t("Control deletion cancelled.") };
+}
+
+export function prepareParentEdit(
+  operation: ParentOperation,
+  snapshot: { version: number; document: DesignerDocument } | undefined,
+  version: number,
+): DesignerError | undefined {
+  if (!snapshot || snapshot.version !== version)
+    return {
+      code: "staleDocument",
+      message: vscode.l10n.t("The document changed. Retry the operation on the updated form."),
+    };
+
+  const { controls } = snapshot.document;
+  const control = controls.find((candidate) => candidate.id === operation.controlId);
+  const invalid = (): DesignerError => ({
+    code: "invalidParent",
+    message: vscode.l10n.t("This control cannot be placed in this container."),
+  });
+  if (
+    !control ||
+    !controlMetadata.some((metadata) => metadata.type.toLowerCase() === control.type.toLowerCase())
+  )
+    return invalid();
+
+  if (control.parentId) {
+    const currentParent = controls.find((candidate) => candidate.id === control.parentId);
+    if (!currentParent || !isDesignerFrame(currentParent)) return invalid();
+  }
+
+  if (operation.parentId === "") return;
+  const parent = controls.find((candidate) => candidate.id === operation.parentId);
+  if (!parent || !isDesignerFrame(parent)) return invalid();
+  if (subtreeIds(controls, control.id).has(parent.id)) return invalid();
 }
 
 export const designerViewType = "xlflow.userFormDesigner";
@@ -80,6 +129,7 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
     let editable = false;
     let propertyEditable = false;
     let structuralEditable = false;
+    let parentEditable = false;
     let latestDocument: { version: number; document: DesignerDocument } | undefined;
     let generation = 0;
     let contextGeneration = 0;
@@ -108,12 +158,14 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
       if (message.type === "document") propertyEditable = message.propertyEditable === true;
       if (message.type === "document") {
         structuralEditable = message.structuralEditable === true;
+        parentEditable = message.parentEditable === true;
         latestDocument = { version: message.version, document: message.document };
       }
       if (message.type === "invalidDocument" || message.type === "editingUnavailable") {
         editable = false;
         propertyEditable = false;
         structuralEditable = false;
+        parentEditable = false;
       }
       if (ready && !disposed && panel.visible) void panel.webview.postMessage(message);
     };
@@ -131,6 +183,18 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
           cannotInsert: vscode.l10n.t("This control's default size is larger than the form."),
           placement: vscode.l10n.t(
             "Click the form to place the control. Escape cancels. Controls are added at the form root.",
+          ),
+          hierarchy: vscode.l10n.t("Selection path"),
+          invalidDrop: vscode.l10n.t("This control cannot be placed in this container."),
+          dropTarget: vscode.l10n.t("Drop target"),
+          parentReadOnly: vscode.l10n.t(
+            "Changing parents requires an xlflow version supporting parent edits.",
+          ),
+          parentPlacement: vscode.l10n.t(
+            "Click the form or a Frame to place the control. Escape cancels.",
+          ),
+          cannotInsertContainer: vscode.l10n.t(
+            "This control's default size is larger than the container.",
           ),
           openText: vscode.l10n.t("Open text editor"),
           lastValid: vscode.l10n.t("Showing the last valid document."),
@@ -292,11 +356,22 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
             message.operations[0].type === "setControlProperty";
           const operation = message.operations[0];
           const structural = operation.type === "addControl" || operation.type === "removeControl";
+          const parentOperation = operation.type === "setParent";
+          const parentedAdd =
+            operation.type === "addControl" && operation.control.parentId !== undefined;
           const permitted = () =>
             !disposed &&
             contextGeneration === editContext &&
             panel.visible &&
-            (structural ? structuralEditable : property ? propertyEditable : editable) &&
+            (parentOperation
+              ? editable && parentEditable
+              : parentedAdd
+                ? structuralEditable && parentEditable
+                : structural
+                  ? structuralEditable
+                  : property
+                    ? propertyEditable
+                    : editable) &&
             generation === editGeneration;
           const prepare = structural
             ? () =>
@@ -306,7 +381,9 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
                   message.version,
                   this.confirmDeletion,
                 )
-            : undefined;
+            : parentOperation
+              ? async () => prepareParentEdit(operation, latestDocument, message.version)
+              : undefined;
           void this.edits
             .run(document, message.version, message.operations, this.clients, permitted, prepare)
             .then(async (error) => {

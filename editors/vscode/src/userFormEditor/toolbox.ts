@@ -1,5 +1,5 @@
 import type { DesignerDocument, SpecControl } from "./protocol";
-import { gridSize, stableDelta } from "./geometry";
+import { contentBounds, gridSize, isDesignerFrame, stableDelta } from "./geometry";
 
 // Shared by rendering fallback and Toolbox creation. Dimensions are points,
 // matching the pure-Go compiler's built-in generation defaults.
@@ -21,7 +21,10 @@ export const controlMetadata = [
 ] as const;
 
 export type ToolboxType = (typeof controlMetadata)[number]["type"];
-export type NewControl = Pick<SpecControl, "id" | "name" | "caption" | "selectedIndex" | "tabs"> & {
+export type NewControl = Pick<
+  SpecControl,
+  "id" | "parentId" | "name" | "caption" | "selectedIndex" | "tabs"
+> & {
   type: ToolboxType;
   left: number;
   top: number;
@@ -45,14 +48,18 @@ export function createControl(
   top: number,
   snapping: boolean,
   uuid: () => string = () => crypto.randomUUID(),
+  parentId?: string,
 ): NewControl | undefined {
   const metadata = controlMetadata.find((m) => m.type === type);
+  const parent = document.controls.find((c) => c.id === parentId);
+  if (parentId && (!parent || !isDesignerFrame(parent))) return;
+  const bounds = parent ? contentBounds(parent) : document;
   if (
     !metadata ||
     !Number.isFinite(left) ||
     !Number.isFinite(top) ||
-    metadata.width > document.width ||
-    metadata.height > document.height
+    metadata.width > bounds.width ||
+    metadata.height > bounds.height
   )
     return;
   const names = new Set(
@@ -75,11 +82,12 @@ export function createControl(
       id,
       name: `${type}${suffix}`,
       type,
-      left: position(left, document.width - metadata.width),
-      top: position(top, document.height - metadata.height),
+      left: position(left, bounds.width - metadata.width),
+      top: position(top, bounds.height - metadata.height),
       width: metadata.width,
       height: metadata.height,
     };
+    if (parentId) control.parentId = parentId;
     if ("caption" in metadata && metadata.caption) control.caption = control.name;
     if (type === "MultiPage" || type === "TabStrip") control.selectedIndex = -1;
     if (type === "TabStrip") control.tabs = [];

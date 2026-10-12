@@ -1,3 +1,34 @@
+# Issue #920 Frame parenting and hierarchy
+
+## PR #929 review follow-up
+
+- [x] Fix CHANGELOG continuation placement after validating the Markdown grouping.
+- [x] Carry preview ProgID and share the built-in Frame predicate across targeting, placement and host preflight; reject custom destinations before dispatch.
+- [x] Cover implicit/matching/custom ProgIDs and custom-parent host rejection; full extension suite and `task lint` PASS. Push to the existing PR after commit checks.
+
+- [x] Validate Pass 1 P2: visible Frame overflow disagreed with drop hit testing.
+- [x] Align container rendering with content-bound hit tests and preserve source coordinates; add real Webview clipping and short-drag regressions.
+- [x] Verify review fix with `rtk pnpm --dir editors/vscode test` and `rtk task lint`; both PASS.
+- [x] Preserve Pass 1 report/probes in `tmp_workspaces/final-review/issue920/` and remove its review worktree and four review-specific terminal tabs.
+- [x] Run Pass 2 against `2fb768e`: PASS, no confirmed findings; reviewer independently reran the full VS Code suite. Preserve report and remove Pass 2 review resources.
+
+- [x] Extend source-preserving YAML/JSON parenting and enforce Designer RPC scope.
+- [x] Negotiate parent-edit capability and preserve stale-document/Undo guards.
+- [x] Add container targeting, world-space drag previews, Frame placement and breadcrumbs.
+- [x] Verify engine, host, DOM and real VS Code regressions; review the complete diff.
+- [x] Record parenting decisions/specifications and update public docs/changelogs.
+- [x] Review follow-up: return focus to the canvas after breadcrumb selection and verify keyboard movement in DOM and real Webview tests.
+
+Validation: `rtk pnpm --dir editors/vscode test` passed with real VS Code
+1.141.0 Webview parenting/placement, coordinate alignment, breadcrumb keyboard
+selection and native Undo/Redo. The complete UserForms/LSP command
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/vba/userforms/... ./internal/lspserver`
+passed; the uncached final LSP run took 129.871s. Matching `vet`, `rtk task lint`,
+changed-file Oxfmt/Go formatting and `rtk git diff --check` passed. The focused
+read-only UI review found the breadcrumb focus issue, now fixed and covered.
+Excel/COM/VBE and remote CI were not run; this feature edits FormSpec source
+and does not change workbook-backed behavior. No Excel `tmp_workspaces` were used.
+
 # PR #928 review follow-up
 
 - [x] Reproduce Delete bubbling from a focused Page tab and custom ProgID insertion through the Designer RPC.
