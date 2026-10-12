@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added Page-list add/delete/rename/caption/reorder actions, transient active
+  Page navigation, control placement and movement between Pages, and TabStrip
+  tab collection/property editing. YAML/JSON edits preserve source, explicit
+  selection identity and native Undo/Redo. The running LSP must advertise
+  `userFormPageEdit` or `userFormTabEdit` for the corresponding actions;
+  Page placement/reparenting also retains existing capability requirements.
+
 - Added Frame placement, drag reparenting and clickable hierarchy breadcrumbs.
   Drop previews preserve apparent positions with boundary clamping, reject
   invalid destinations, and commit YAML/JSON parent and coordinate updates as
@@ -14,7 +21,7 @@
 - Added a UserForm Designer Toolbox for click-to-place root controls and
   structural deletion, with immediate leaf removal and confirmation before
   removing descendants. YAML/JSON edits use a separate LSP capability, stale
-  document guards, and native undo/redo. Page/Tab editing remains in Issue #921.
+  document guards, and native undo/redo.
   Canvas Delete ignores focused Page-tab buttons to protect the previous
   control selection when keyboard focus moves to a tab.
 

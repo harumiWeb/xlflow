@@ -31,6 +31,9 @@ window.acquireVsCodeApi = () => ({
   getState: () => testApi.getState(), setState: (state) => testApi.setState(state)
 });
 const violations = [];
+const runtimeErrors = [];
+window.addEventListener("error", e => runtimeErrors.push(e.message));
+window.addEventListener("unhandledrejection", e => runtimeErrors.push(String(e.reason)));
 window.addEventListener("securitypolicyviolation", e => violations.push(e.violatedDirective));
 window.addEventListener("message", e => {
   if (!["document", "invalidDocument", "testAction"].includes(e.data.type)) return;
@@ -120,6 +123,7 @@ window.addEventListener("message", e => {
         arrowShadow: getComputedStyle(arrow).boxShadow
       },
       violations
+      , runtimeErrors
     });
   }, 100);
 });
@@ -1021,6 +1025,139 @@ window.addEventListener("message", e => {
       "a short drag from the visible part retains the Frame parent and clamps geometry",
     );
     assert.deepStrictEqual(adjusted.violations, []);
+    const collections = designerDocument({
+      form: { name: "Collections", build: { clientWidth: 600, clientHeight: 400 } },
+      controls: [
+        {
+          id: "multi",
+          type: "MultiPage",
+          name: "Multi",
+          left: 40,
+          top: 40,
+          width: 240,
+          height: 180,
+          selectedIndex: 0,
+        },
+        { id: "page-a", type: "Page", name: "PageA", parentId: "multi", zIndex: 0 },
+        { id: "page-b", type: "Page", name: "PageB", parentId: "multi", zIndex: 1 },
+        { id: "child-a", type: "Label", name: "ChildA", parentId: "page-a", left: 10, top: 10 },
+        { id: "child-b", type: "Label", name: "ChildB", parentId: "page-b", left: 10, top: 10 },
+        {
+          id: "tabs",
+          type: "TabStrip",
+          name: "Tabs",
+          left: 300,
+          top: 40,
+          tabs: [{ name: "General" }],
+        },
+      ],
+    });
+    const collectionDocument = (version: number): Extract<HostMessage, { type: "document" }> => ({
+      type: "document",
+      version,
+      document: collections,
+      editable: true,
+      parentEditable: true,
+      structuralEditable: true,
+      pageEditable: true,
+      tabEditable: true,
+      propertyGrid: {
+        form: { descriptors: [], values: {} },
+        controls: {},
+        tabs: {
+          tabs: [
+            {
+              descriptors: [
+                { field: "caption", valueType: "string", nullable: true, required: false },
+              ],
+              values: { caption: { present: false, value: null } },
+            },
+          ],
+        },
+      },
+    });
+    const beforePageSwitch = await snapshot(collectionDocument(80));
+    assert.strictEqual(
+      beforePageSwitch.title,
+      "Collections",
+      "source replacement cancels a preview whose control was removed",
+    );
+    assert.deepStrictEqual(beforePageSwitch.runtimeErrors, []);
+    const pageSwitch = await snapshot({
+      type: "testAction",
+      version: 81,
+      actions: [{ selector: '[data-page-tab="page-b"]', event: "click" }],
+    });
+    assert.strictEqual(pageSwitch.missingTarget, undefined);
+    assert.strictEqual(
+      (pageSwitch.editMessages as unknown[]).length,
+      (beforePageSwitch.editMessages as unknown[]).length,
+    );
+    const shownIds = (pageSwitch.worldPositions as { id: string }[]).map((c) => c.id);
+    assert.ok(shownIds.includes("child-b"));
+    assert.ok(!shownIds.includes("child-a"));
+    assert.strictEqual(collections.controls[0].selectedIndex, 0);
+    const pageDeleteProtected = await snapshot({
+      type: "testAction",
+      version: 81,
+      actions: [
+        { selector: '.selection-path button[aria-current="true"]', event: "click" },
+        key("keydown", "Delete"),
+        { selector: ".delete-control", event: "click" },
+      ],
+    });
+    assert.strictEqual(pageDeleteProtected.missingTarget, undefined);
+    assert.strictEqual(
+      (pageDeleteProtected.editMessages as unknown[]).length,
+      (pageSwitch.editMessages as unknown[]).length,
+      "canvas and toolbar Delete leave the selected Page intact",
+    );
+    const reorderedPage = await snapshot({
+      type: "testAction",
+      version: 82,
+      actions: [
+        { selector: '.collection-editor button[aria-label="Move up: PageB"]', event: "click" },
+      ],
+    });
+    const pageRequest = (
+      reorderedPage.editMessages as { requestId: number; operations: unknown[] }[]
+    ).at(-1)!;
+    assert.deepStrictEqual(pageRequest.operations, [
+      { type: "reorderPage", controlId: "page-b", index: 0 },
+    ]);
+    await panel.webview.postMessage({ type: "editResult", requestId: pageRequest.requestId });
+    await snapshot(collectionDocument(83));
+    const tabSelected = await snapshot({
+      type: "testAction",
+      version: 84,
+      actions: [
+        parentPointer('.control[data-control-id="tabs"]', "pointerdown", 310, 45),
+        parentPointer(".designer-viewport", "pointerup", 310, 45),
+        {
+          selector: '.collection-editor[aria-label="Tabs"] [data-property-field="caption"] input',
+          event: "input",
+          props: { value: "<script>caption</script>" },
+        },
+        {
+          selector: '.collection-editor[aria-label="Tabs"] [data-property-field="caption"] input',
+          event: "keydown",
+          props: { key: "Enter" },
+        },
+      ],
+    });
+    const tabRequest = (
+      tabSelected.editMessages as { requestId: number; operations: unknown[] }[]
+    ).at(-1)!;
+    assert.deepStrictEqual(tabRequest.operations, [
+      {
+        type: "setTabProperty",
+        controlId: "tabs",
+        index: 0,
+        field: "caption",
+        value: "<script>caption</script>",
+      },
+    ]);
+    assert.deepStrictEqual(tabSelected.violations, []);
   } finally {
     subscription.dispose();
     panel.dispose();

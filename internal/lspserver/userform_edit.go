@@ -50,7 +50,7 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 		return result
 	}
 	for index, operation := range params.Operations {
-		if operation.Type != formsedit.MoveControl && operation.Type != formsedit.ResizeControl && operation.Type != formsedit.SetFormProperty && operation.Type != formsedit.SetControlProperty && operation.Type != formsedit.AddControl && operation.Type != formsedit.RemoveControl && operation.Type != formsedit.SetParent {
+		if !isUserFormEditOperation(operation.Type) {
 			result.Error = &userFormEditError{
 				Code:    compiler.Unsupported,
 				Message: fmt.Sprintf("operation %q is not exposed by the LSP edit method", operation.Type),
@@ -58,7 +58,7 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 					OperationIndex: index,
 					Operation:      operation.Type,
 					Code:           "UFE007",
-					Message:        "The LSP edit method supports geometry, scalar property, add/remove, and parent operations.",
+					Message:        "The LSP edit method supports geometry, scalar properties, control and Page structure, and tab collection operations.",
 				}},
 			}
 			return result
@@ -74,13 +74,31 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 				result.Error = requestError
 				return result
 			}
-			if requestError := validateDesignerFrameParent(input, []byte(params.Text), operation.Control.ParentID, operation.Control.ID); requestError != nil {
+			if requestError := validateDesignerContainerParent(input, []byte(params.Text), operation.Control.ParentID, operation.Control.ID); requestError != nil {
 				result.Error = requestError
 				return result
 			}
 		}
 		if operation.Type == formsedit.SetParent {
 			if requestError := validateDesignerSetParent(input, []byte(params.Text), operation); requestError != nil {
+				result.Error = requestError
+				return result
+			}
+		}
+		if operation.Type == formsedit.AddPage {
+			if requestError := validateDesignerPageAddition(input, []byte(params.Text), operation.Control); requestError != nil {
+				result.Error = requestError
+				return result
+			}
+		}
+		if operation.Type == formsedit.RemovePage || operation.Type == formsedit.ReorderPage {
+			if requestError := validateDesignerPageTarget(input, []byte(params.Text), operation.ControlID); requestError != nil {
+				result.Error = requestError
+				return result
+			}
+		}
+		if operation.Type == formsedit.AddTab || operation.Type == formsedit.RemoveTab || operation.Type == formsedit.ReorderTab || operation.Type == formsedit.SetTabProperty {
+			if requestError := validateDesignerTabTarget(input, []byte(params.Text), operation.ControlID); requestError != nil {
 				result.Error = requestError
 				return result
 			}
@@ -116,6 +134,19 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 		})
 	}
 	return result
+}
+
+func isUserFormEditOperation(operationType formsedit.OperationType) bool {
+	switch operationType {
+	case formsedit.MoveControl, formsedit.ResizeControl,
+		formsedit.SetFormProperty, formsedit.SetControlProperty,
+		formsedit.AddControl, formsedit.RemoveControl, formsedit.SetParent,
+		formsedit.AddPage, formsedit.RemovePage, formsedit.ReorderPage,
+		formsedit.AddTab, formsedit.RemoveTab, formsedit.ReorderTab, formsedit.SetTabProperty:
+		return true
+	default:
+		return false
+	}
 }
 
 func userFormEditErrorFrom(err error) *userFormEditError {
@@ -185,7 +216,9 @@ func validateUserFormEditTransaction(operations []formsedit.Operation) *userForm
 		switch operations[0].Type {
 		case formsedit.SetFormProperty, formsedit.SetControlProperty,
 			formsedit.MoveControl, formsedit.ResizeControl,
-			formsedit.AddControl, formsedit.RemoveControl, formsedit.SetParent:
+			formsedit.AddControl, formsedit.RemoveControl, formsedit.SetParent,
+			formsedit.AddPage, formsedit.RemovePage, formsedit.ReorderPage,
+			formsedit.AddTab, formsedit.RemoveTab, formsedit.ReorderTab, formsedit.SetTabProperty:
 			return nil
 		}
 	}
@@ -229,10 +262,24 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		allowed = []string{"type", "controlId", "cascade"}
 	case formsedit.SetParent:
 		allowed = []string{"type", "controlId", "parentId", "left", "top"}
+	case formsedit.AddPage:
+		allowed = []string{"type", "control"}
+	case formsedit.RemovePage:
+		allowed = []string{"type", "controlId", "cascade"}
+	case formsedit.ReorderPage:
+		allowed = []string{"type", "controlId", "index"}
+	case formsedit.AddTab:
+		allowed = []string{"type", "controlId", "tab"}
+	case formsedit.RemoveTab:
+		allowed = []string{"type", "controlId", "index"}
+	case formsedit.ReorderTab:
+		allowed = []string{"type", "controlId", "index", "toIndex"}
+	case formsedit.SetTabProperty:
+		allowed = []string{"type", "controlId", "index", "field", "value"}
 	default:
 		return formsedit.Operation{}, &userFormEditError{Code: compiler.Unsupported, Message: fmt.Sprintf("operation %q is not exposed by the LSP edit method", operationType)}
 	}
-	if operationType == formsedit.RemoveControl {
+	if operationType == formsedit.RemoveControl || operationType == formsedit.RemovePage {
 		if err := validateJSONFieldSet(fields, []string{"type", "controlId"}, []string{"cascade"}); err != nil {
 			return formsedit.Operation{}, invalidUserFormEditParams(err)
 		}
@@ -249,7 +296,25 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		}
 		return formsedit.Operation{Type: operationType, Control: control}, nil
 	}
-	if operationType == formsedit.RemoveControl {
+	if operationType == formsedit.AddPage {
+		control, err := decodeUserFormPage(fields["control"])
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("control: %w", err))
+		}
+		return formsedit.Operation{Type: operationType, Control: control}, nil
+	}
+	if operationType == formsedit.AddTab {
+		controlID, err := decodeRequiredJSONString(fields, "controlId")
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(err)
+		}
+		tab, err := decodeUserFormTab(fields["tab"])
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("tab: %w", err))
+		}
+		return formsedit.Operation{Type: operationType, ControlID: controlID, Tab: tab}, nil
+	}
+	if operationType == formsedit.RemoveControl || operationType == formsedit.RemovePage {
 		controlID, err := decodeRequiredJSONString(fields, "controlId")
 		if err != nil {
 			return formsedit.Operation{}, invalidUserFormEditParams(err)
@@ -261,6 +326,36 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 			}
 		}
 		return operation, nil
+	}
+	if operationType == formsedit.RemoveTab || operationType == formsedit.ReorderTab || operationType == formsedit.ReorderPage || operationType == formsedit.SetTabProperty {
+		controlID, err := decodeRequiredJSONString(fields, "controlId")
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(err)
+		}
+		index, err := decodeRequiredJSONInt(fields, "index")
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(err)
+		}
+		op := formsedit.Operation{Type: operationType, ControlID: controlID, Index: new(index)}
+		if operationType == formsedit.ReorderTab {
+			toIndex, err := decodeRequiredJSONInt(fields, "toIndex")
+			if err != nil {
+				return formsedit.Operation{}, invalidUserFormEditParams(err)
+			}
+			op.ToIndex = new(toIndex)
+		}
+		if operationType == formsedit.SetTabProperty {
+			field, err := decodeRequiredJSONString(fields, "field")
+			if err != nil {
+				return formsedit.Operation{}, invalidUserFormEditParams(err)
+			}
+			value, err := decodeJSONScalar(fields, "value")
+			if err != nil {
+				return formsedit.Operation{}, invalidUserFormEditParams(err)
+			}
+			op.Field, op.Value, op.ValuePresent = field, value, true
+		}
+		return op, nil
 	}
 	if operationType == formsedit.SetParent {
 		controlID, err := decodeRequiredJSONString(fields, "controlId")
@@ -283,24 +378,13 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		return formsedit.Operation{Type: operationType, ControlID: controlID, ParentID: parentID, Left: new(left), Top: new(top)}, nil
 	}
 	if operationType == formsedit.SetFormProperty || operationType == formsedit.SetControlProperty {
-		var field string
-		if bytes.Equal(bytes.TrimSpace(fields["field"]), []byte("null")) || json.Unmarshal(fields["field"], &field) != nil || field == "" {
-			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("field must be a non-empty string"))
-		}
-		decoder := json.NewDecoder(bytes.NewReader(fields["value"]))
-		decoder.UseNumber()
-		var value any
-		if err := decoder.Decode(&value); err != nil {
+		field, err := decodeRequiredJSONString(fields, "field")
+		if err != nil {
 			return formsedit.Operation{}, invalidUserFormEditParams(err)
 		}
-		switch scalar := value.(type) {
-		case nil, string, bool:
-		case json.Number:
-			if _, err := decodeFiniteJSONNumber([]byte(scalar)); err != nil {
-				return formsedit.Operation{}, invalidUserFormEditParams(err)
-			}
-		default:
-			return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("value must be a scalar or null"))
+		value, err := decodeJSONScalar(fields, "value")
+		if err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(err)
 		}
 		op := formsedit.Operation{Type: operationType, Field: field, Value: value, ValuePresent: true}
 		if operationType == formsedit.SetControlProperty {
@@ -379,14 +463,14 @@ func validateDesignerSetParent(input spec.SpecInput, source []byte, operation fo
 	}
 	if subject.ParentID != "" {
 		parent, ok := controlsByID[subject.ParentID]
-		if ok && !isDesignerFrame(parent) {
-			return &userFormEditError{Code: compiler.Unsupported, Message: "Designer reparenting supports controls whose current parent is root or Frame"}
+		if ok && !isDesignerFrame(parent) && !isDesignerPage(parent) {
+			return &userFormEditError{Code: compiler.Unsupported, Message: "Designer reparenting supports controls whose current parent is root, Frame or Page"}
 		}
 	}
-	return validateDesignerFrameParent(input, source, operation.ParentID, operation.ControlID)
+	return validateDesignerContainerParent(input, source, operation.ParentID, operation.ControlID)
 }
 
-func validateDesignerFrameParent(input spec.SpecInput, source []byte, parentID, subjectID string) *userFormEditError {
+func validateDesignerContainerParent(input spec.SpecInput, source []byte, parentID, subjectID string) *userFormEditError {
 	if parentID == "" || parentID == subjectID {
 		return nil
 	}
@@ -395,8 +479,73 @@ func validateDesignerFrameParent(input spec.SpecInput, source []byte, parentID, 
 		return nil
 	}
 	for _, control := range document.Controls {
-		if control.ID == parentID && !isDesignerFrame(control) {
-			return &userFormEditError{Code: compiler.Unsupported, Message: "Designer reparenting supports only Frame destinations"}
+		if control.ID == parentID && !isDesignerFrame(control) && !isDesignerPage(control) {
+			return &userFormEditError{Code: compiler.Unsupported, Message: "Designer reparenting supports only Frame or Page destinations"}
+		}
+	}
+	return nil
+}
+
+func validateDesignerPageAddition(input spec.SpecInput, source []byte, control *spec.FormSpecControl) *userFormEditError {
+	if control == nil {
+		return invalidUserFormEditParams(fmt.Errorf("control must be an object"))
+	}
+	if !isDesignerPage(*control) {
+		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer page insertion supports only the built-in Page control"}
+	}
+	if control.ID == "" || control.Name == "" || control.ParentID == "" || len(control.Controls) != 0 || len(control.Tabs) != 0 || control.Left != nil || control.Top != nil || control.Width != nil || control.Height != nil {
+		return invalidUserFormEditParams(fmt.Errorf("addPage requires a flat Page with id, name and parentId and no geometry"))
+	}
+	return validateDesignerMultiPageParent(input, source, control.ParentID)
+}
+
+func validateDesignerPageTarget(input spec.SpecInput, source []byte, pageID string) *userFormEditError {
+	document, err := spec.ParseFormSpec(input, source)
+	if err != nil {
+		return nil
+	}
+	controlsByID := make(map[string]spec.FormSpecControl, len(document.Controls))
+	for _, control := range document.Controls {
+		controlsByID[control.ID] = control
+	}
+	page, ok := controlsByID[pageID]
+	if !ok {
+		return nil
+	}
+	if !isDesignerPage(page) {
+		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer page operations support only built-in Page controls"}
+	}
+	parent, ok := controlsByID[page.ParentID]
+	if !ok {
+		return nil
+	}
+	if !isDesignerMultiPage(parent) {
+		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer page operations require a built-in MultiPage parent"}
+	}
+	return nil
+}
+
+func validateDesignerMultiPageParent(input spec.SpecInput, source []byte, parentID string) *userFormEditError {
+	document, err := spec.ParseFormSpec(input, source)
+	if err != nil {
+		return nil
+	}
+	for _, control := range document.Controls {
+		if control.ID == parentID && !isDesignerMultiPage(control) {
+			return &userFormEditError{Code: compiler.Unsupported, Message: "Designer pages require a built-in MultiPage parent"}
+		}
+	}
+	return nil
+}
+
+func validateDesignerTabTarget(input spec.SpecInput, source []byte, controlID string) *userFormEditError {
+	document, err := spec.ParseFormSpec(input, source)
+	if err != nil {
+		return nil
+	}
+	for _, control := range document.Controls {
+		if control.ID == controlID && !isDesignerTabStrip(control) {
+			return &userFormEditError{Code: compiler.Unsupported, Message: "Designer tab operations support only the built-in TabStrip control"}
 		}
 	}
 	return nil
@@ -413,6 +562,83 @@ func isDesignerBuiltInControl(control spec.FormSpecControl) bool {
 func isDesignerFrame(control spec.FormSpecControl) bool {
 	contract, ok := spec.LookupControlContract(control.Type)
 	return ok && strings.EqualFold(contract.Type, "Frame") && isDesignerBuiltInControl(control)
+}
+
+func isDesignerPage(control spec.FormSpecControl) bool {
+	contract, ok := spec.LookupControlContract(control.Type)
+	return ok && strings.EqualFold(contract.Type, "Page") && isDesignerBuiltInControl(control)
+}
+
+func isDesignerMultiPage(control spec.FormSpecControl) bool {
+	contract, ok := spec.LookupControlContract(control.Type)
+	return ok && strings.EqualFold(contract.Type, "MultiPage") && isDesignerBuiltInControl(control)
+}
+
+func isDesignerTabStrip(control spec.FormSpecControl) bool {
+	contract, ok := spec.LookupControlContract(control.Type)
+	return ok && strings.EqualFold(contract.Type, "TabStrip") && isDesignerBuiltInControl(control)
+}
+
+func decodeUserFormPage(raw json.RawMessage) (*spec.FormSpecControl, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := rejectDuplicateJSONFields(raw); err != nil {
+		return nil, err
+	}
+	if err := validateJSONFieldSet(fields, []string{"id", "name", "type", "parentId"}, []string{"caption"}); err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"id", "name", "parentId"} {
+		if _, err := decodeRequiredJSONString(fields, key); err != nil {
+			return nil, err
+		}
+	}
+	typeName, err := decodeRequiredJSONString(fields, "type")
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(typeName, "Page") {
+		return nil, fmt.Errorf("type must be Page")
+	}
+	if err := validateJSONStructPayload(raw, reflect.TypeFor[spec.FormSpecControl]()); err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	var control spec.FormSpecControl
+	if err := decoder.Decode(&control); err != nil {
+		return nil, err
+	}
+	return &control, nil
+}
+
+func decodeUserFormTab(raw json.RawMessage) (*spec.FormSpecTab, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := rejectDuplicateJSONFields(raw); err != nil {
+		return nil, err
+	}
+	if err := validateJSONFieldSet(fields, []string{"name"}, []string{"caption", "controlTipText", "tag", "accelerator", "enabled", "visible"}); err != nil {
+		return nil, err
+	}
+	if _, err := decodeRequiredJSONString(fields, "name"); err != nil {
+		return nil, err
+	}
+	if err := validateJSONStructPayload(raw, reflect.TypeFor[spec.FormSpecTab]()); err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var tab spec.FormSpecTab
+	if err := decoder.Decode(&tab); err != nil {
+		return nil, err
+	}
+	return &tab, nil
 }
 
 func decodeUserFormControl(raw json.RawMessage) (*spec.FormSpecControl, error) {
@@ -500,6 +726,38 @@ func decodeRequiredJSONString(fields map[string]json.RawMessage, key string) (st
 	var value string
 	if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &value) != nil || value == "" {
 		return "", fmt.Errorf("%s must be a non-empty string", key)
+	}
+	return value, nil
+}
+
+func decodeRequiredJSONInt(fields map[string]json.RawMessage, key string) (int, error) {
+	raw, ok := fields[key]
+	var value int
+	if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &value) != nil {
+		return 0, fmt.Errorf("%s must be an integer", key)
+	}
+	return value, nil
+}
+
+func decodeJSONScalar(fields map[string]json.RawMessage, key string) (any, error) {
+	raw, ok := fields[key]
+	if !ok {
+		return nil, fmt.Errorf("missing payload field %q", key)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	switch scalar := value.(type) {
+	case nil, string, bool:
+	case json.Number:
+		if _, err := decodeFiniteJSONNumber([]byte(scalar)); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("%s must be a scalar or null", key)
 	}
 	return value, nil
 }

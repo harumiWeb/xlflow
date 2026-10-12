@@ -427,36 +427,7 @@ func (e *engine) appendControl(node *yaml.Node) error {
 	if seq == nil || seq.Kind != yaml.SequenceNode {
 		return fmt.Errorf("controls must be a sequence")
 	}
-	if seq.Anchor != "" {
-		return unsupported()
-	}
-	if seq.Style&yaml.FlowStyle != 0 {
-		start, end := e.offset(seq), e.end(seq)
-		seq.Content = append(seq.Content, node)
-		if unsafe(seq) {
-			return unsupported()
-		}
-		text, err := encodeContainer(seq, e.newline())
-		if err != nil {
-			return err
-		}
-		return e.publish(SourceEdit{Start: start, End: end, Text: text})
-	}
-	indent := max(0, seq.Column-1)
-	text, err := encode(&yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{node}}, 2, e.newline())
-	if err != nil {
-		return err
-	}
-	padding := strings.Repeat(" ", indent)
-	text = padding + strings.ReplaceAll(text, e.newline(), e.newline()+padding)
-	pos := e.lineEnd(e.end(seq))
-	if pos > 0 && e.source[pos-1] != '\n' {
-		text = e.newline() + text
-	} else {
-		text += e.newline()
-	}
-	seq.Content = append(seq.Content, node)
-	return e.publish(SourceEdit{Start: pos, End: pos, Text: text})
+	return e.appendSequenceItem(seq, node)
 }
 
 func (e *engine) removeItem(c controlRef) error {

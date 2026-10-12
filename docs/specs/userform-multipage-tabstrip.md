@@ -35,6 +35,66 @@ define the requested collection; omitted optional metadata on retained tabs
 can be preserved by matching the tab name. MultiPage pages are authored as
 Page controls in the flat control list, not as a TabStrip `tabs` array.
 
+## Designer collection editing
+
+The VS Code Designer retains these canonical shapes. Its active Page is
+transient UI state keyed by the Page control's stable `id`; clicking a rendered
+Page header or Page-list entry changes the preview only and does not write
+`selectedIndex`. The Page list identifies each Page by control ID. Page
+`name` and `caption` use the existing LSP property metadata and authored-value
+contract. Page `left`, `top`, `width`, and `height` remain derived and are not
+editable properties.
+
+Page collection operations are `addPage(control)`,
+`removePage(controlId, cascade)`, and `reorderPage(controlId, index)`. Adding
+appends a Page to its referenced MultiPage. Deleting a Page with descendants
+requires explicit Designer confirmation and removes its descendants with
+`cascade: true` as one source edit. Empty Pages are deleted immediately.
+Reordering uses explicit up/down actions within the same
+MultiPage; it does not move the Page to another MultiPage or use hover-tab
+dragging. Ordinary controls can be inserted into the active Page, dropped on a
+Page, or assigned to a Page through the destination picker. Those controls may
+change Page parent; Page controls themselves cannot be reparented.
+
+TabStrip editing keeps tabs as independent records and presents every record,
+including entries with `visible: false`. The editor uses LSP metadata and
+authored source values for `name`, `caption`, `enabled`, `visible`, `tag`,
+`controlTipText`, and `accelerator`. The operations are `addTab(controlId,
+tab)` (append), `removeTab(controlId, index)`,
+`reorderTab(controlId, index, toIndex)`, and
+`setTabProperty(controlId, index, field, value)`. Tab records never appear as
+Page or child controls. TabStrip control-level `selectedIndex` remains an
+ordinary property edit through the existing property metadata path.
+
+The LSP advertises Page operations with the independent
+`capabilities.experimental.userFormPageEdit` capability and TabStrip
+collection/property operations with
+`capabilities.experimental.userFormTabEdit`. Page `name`/`caption` and
+MultiPage or TabStrip control-level `selectedIndex` use
+`userFormPropertyEdit`. Insertion into a Page requires `userFormPageEdit`,
+`userFormStructuralEdit`, and `userFormParentEdit`. Changing an ordinary
+control's direct Page parent requires `userFormPageEdit`, `userFormParentEdit`,
+and the geometry capability `userFormEdit` for the `setParent` coordinates,
+both for pointer dragging and the destination picker. These gates are
+independent so clients keep each edit family a server advertises.
+
+Collection operations preserve the selected member by identity when an
+explicit numeric `selectedIndex` is authored. Reordering updates the numeric
+index to keep that same Page or tab selected. Deleting the selected member
+falls back to index zero if members remain, or logical `-1` when the collection
+is empty. Adding the first member changes an explicitly authored `-1` to zero.
+An absent or explicit-null `selectedIndex` remains absent or null; preview-only
+Page selection never authors the field. Observed values and normalized
+defaults are not copied into authored source.
+
+Page and Tab operations make localized YAML/YML/JSON source edits. They retain
+unrelated comments, whitespace, and ordering, and leave observed data
+untouched. A transaction is validated against the canonical FormSpec after
+all requested operations have been applied. A failed target resolution, source
+edit, or final validation returns no edit and publishes no partial result.
+These Designer operations change FormSpec source only and add no Excel, COM,
+VBIDE, compiler, or runtime semantics.
+
 ## Excel bridge and inspection shape
 
 The Designer writer creates Page controls through the MultiPage Pages

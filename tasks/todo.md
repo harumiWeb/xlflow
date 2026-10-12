@@ -1,3 +1,17 @@
+# Issue #921 final review follow-up
+
+## PR #931 review comments
+
+- [x] Restrict canvas/toolbar deletion to ordinary controls and cover Page-header/list/breadcrumb selection, while preserving Page-list deletion.
+- [x] Remove duplicate Delete keys in both localization bundles and verify key uniqueness.
+- [x] Describe the implemented Page/TabStrip feature in both changelogs and remove stale Issue #921 deferrals.
+- [x] Verify Designer/full VS Code tests, docs/format/lint checks and localization key uniqueness; prepare the fixes for the existing PR.
+
+- [x] Validate Pass 1 P2 against the accepted Designer capability contract and implementation.
+- [x] Align MultiPage/TabStrip documentation: require geometry for both pointer and picker reparenting, explicitly name cumulative Page capability, and distinguish childful from empty Page deletion.
+- [x] Verify documentation/format checks and preserve the independent review report and disposition.
+- [x] Acknowledge the settled review worker; release retained its external terminal, so explicitly close review-only terminals and remove the worktree after preserving evidence.
+
 # Issue #920 Frame parenting and hierarchy
 
 ## PR #929 review follow-up

@@ -1,7 +1,9 @@
 import type { DesignerControl, DesignerDocument } from "../../src/userFormEditor/protocol";
 import { pointsToPixels } from "../../src/userFormEditor/model";
 import { pixelsToPoints } from "../../src/userFormEditor/model";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { displayPages } from "../../src/userFormEditor/collections";
+import type { ActivePages } from "../../src/userFormEditor/collections";
 import type { JSX } from "preact";
 import type { GeometryOperation, ParentOperation } from "../../src/userFormEditor/protocol";
 import { subtreeIds } from "../../src/userFormEditor/toolbox";
@@ -9,6 +11,7 @@ import {
   canEditGeometry,
   isControlVisible,
   isDesignerFrame,
+  isDesignerPage,
   contentInsets,
   geometryOperations,
   gridSize,
@@ -98,10 +101,13 @@ export function ControlGlyph({ control }: { control: DesignerControl }) {
 }
 
 export function DesignerCanvas({
-  document,
+  document: sourceDocument,
   approximateBounds = "approximate bounds",
   editable = false,
   parentEditable = false,
+  pageEditable = false,
+  activePages,
+  onActivePageChange,
   busy = false,
   zoom = 1,
   showGrid = true,
@@ -123,6 +129,9 @@ export function DesignerCanvas({
   approximateBounds?: string;
   editable?: boolean;
   parentEditable?: boolean;
+  pageEditable?: boolean;
+  activePages?: ActivePages;
+  onActivePageChange?: (ownerId: string, pageId: string) => void;
   busy?: boolean;
   zoom?: number;
   showGrid?: boolean;
@@ -140,6 +149,11 @@ export function DesignerCanvas({
   dropTargetLabel?: string;
   placementSize?: { width: number; height: number };
 }) {
+  const [localActivePages, setLocalActivePages] = useState<ActivePages>({});
+  const document = useMemo(
+    () => displayPages(sourceDocument, activePages ?? localActivePages),
+    [sourceDocument, activePages, localActivePages],
+  );
   const [localSelected, setLocalSelected] = useState<string>();
   const selected = onSelectionChange ? externalSelected : localSelected;
   const setSelected = onSelectionChange ?? setLocalSelected;
@@ -205,9 +219,8 @@ export function DesignerCanvas({
         (c) =>
           c.id === selected &&
           c.type.toLowerCase() === "page" &&
-          c.visible !== false &&
           !!c.parentId &&
-          isControlVisible(document, c.parentId),
+          document.controls.some((owner) => owner.id === c.parentId),
       )
     )
       setSelected(undefined);
@@ -220,7 +233,7 @@ export function DesignerCanvas({
   }, [editable, busy]);
   useEffect(() => {
     cancel();
-  }, [parentEditable, placing]);
+  }, [parentEditable, pageEditable, placing]);
   useEffect(() => {
     if (!busy && !gesture.current) cancel();
   }, [busy]);
@@ -262,7 +275,9 @@ export function DesignerCanvas({
       parentEditable &&
       !current.handle &&
       !current.keys &&
-      (!oldParent || isDesignerFrame(oldParent)) &&
+      (!oldParent ||
+        isDesignerFrame(oldParent) ||
+        (pageEditable && isDesignerPage(document, oldParent))) &&
       (dx !== 0 || dy !== 0)
     ) {
       const form = canvas.current?.querySelector<HTMLElement>(".form");
@@ -272,7 +287,12 @@ export function DesignerCanvas({
         left: pixelsToPoints(current.x - rect.left, zoom) + dx,
         top: pixelsToPoints(current.y - rect.top, zoom) + dy,
       };
-      const target = dropTarget(document, point, subtreeIds(document.controls, current.control.id));
+      const target = dropTarget(
+        document,
+        point,
+        subtreeIds(document.controls, current.control.id),
+        pageEditable,
+      );
       const startWorld = worldGeometry(document, current.control);
       const world = { ...startWorld, left: startWorld.left + dx, top: startWorld.top + dy };
       const end =
@@ -345,7 +365,7 @@ export function DesignerCanvas({
           top: pixelsToPoints(event.clientY - bounds.top, zoom),
         };
         const target = parentEditable
-          ? dropTarget(document, point)
+          ? dropTarget(document, point, new Set(), pageEditable)
           : { parentId: "", origin: { left: 0, top: 0 }, bounds: document };
         if (!target) {
           setNotice(invalidDrop);
@@ -440,8 +460,8 @@ export function DesignerCanvas({
     updateGesture(current.dx, current.dy);
   };
   const children = (parentId?: string) => orderedChildren(document, parentId);
-  const draw = (control: DesignerControl, floating = false): JSX.Element | null => {
-    if (control.visible === false) return null;
+  const draw = (control: DesignerControl | undefined, floating = false): JSX.Element | null => {
+    if (!control || control.visible === false) return null;
     if (preview?.floating && preview.id === control.id && !floating) return null;
     const type = control.type.toLowerCase();
     const pages = type === "multipage" ? children(control.id) : [];
@@ -480,6 +500,9 @@ export function DesignerCanvas({
                         onClick={(event) => {
                           event.stopPropagation();
                           cancel();
+                          if (onActivePageChange) onActivePageChange(control.id, p.id);
+                          else
+                            setLocalActivePages((current) => ({ ...current, [control.id]: p.id }));
                           setSelected(p.id);
                         }}
                       >
@@ -593,10 +616,15 @@ export function DesignerCanvas({
             const form = canvas.current?.querySelector<HTMLElement>(".form");
             if (form) {
               const rect = form.getBoundingClientRect();
-              const target = dropTarget(document, {
-                left: pixelsToPoints(event.clientX - rect.left, zoom),
-                top: pixelsToPoints(event.clientY - rect.top, zoom),
-              });
+              const target = dropTarget(
+                document,
+                {
+                  left: pixelsToPoints(event.clientX - rect.left, zoom),
+                  top: pixelsToPoints(event.clientY - rect.top, zoom),
+                },
+                new Set(),
+                pageEditable,
+              );
               const valid =
                 !!target &&
                 (!placementSize ||
@@ -667,7 +695,10 @@ export function DesignerCanvas({
             )}
             {preview?.floating && (
               <div class="drag-preview" aria-hidden="true">
-                {draw(document.controls.find((c) => c.id === preview.id)!, true)}
+                {draw(
+                  document.controls.find((c) => c.id === preview.id),
+                  true,
+                )}
               </div>
             )}
           </div>

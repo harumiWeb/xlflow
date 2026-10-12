@@ -308,11 +308,18 @@ Additionally, ensure that both Windows and WSL instances can execute xlflow succ
   remain read-only. The grid distinguishes unset/null/empty/false/zero and
   supports explicit optional null, not key deletion. Form name edits do not
   rename files or code sidecars. Source editing requires no Excel.
-  Toolbox insertion and deletion need `userFormStructuralEdit`; older servers
-  keep only the edit families they advertise. Insertion is root-only. Placement
-  inside Frames, reparenting, Page collection editing, canvas form/Page resizing
-  and image asset loading are unavailable. Source edits do not save
-  automatically or change code-behind. See the [UserForm guide](https://harumiweb.github.io/xlflow/guides/userforms).
+  Toolbox insertion and deletion need `userFormStructuralEdit`; Frame placement
+  and reparenting need `userFormParentEdit`. Page and TabStrip collection
+  actions are exposed only when the extension implements the editor and the
+  selected LSP advertises the matching capability (`userFormPageEdit` or
+  `userFormTabEdit`). Page navigation uses
+  transient Page IDs and does not edit `selectedIndex`; Page geometry remains
+  derived. The TabStrip editor lists all tabs, including hidden entries, and
+  uses LSP metadata for tab fields. Adding ordinary controls to Pages also
+  needs `userFormPageEdit`, `userFormStructuralEdit`, and `userFormParentEdit`.
+  Canvas form/Page resizing and
+  image asset loading are unavailable. Source edits do not save automatically
+  or change code-behind. See the [UserForm guide](https://harumiweb.github.io/xlflow/guides/userforms).
 - Macro selection functionality currently does not support interactive operations. Running `xlflow: Run Macro` will execute the configured default macro. Standalone `Sub` procedures without arguments can be invoked via CodeLens.
 - Both `xlflow: New Project` and `xlflow: Initialize Project` only display basic CLI workflows and do not provide a picker for selecting options like `--with-skill`, `--with-module`, `--agent`, or `--json`.
 - This extension itself does not implement VBA code analysis, diagnostics, formatting, suggestion displays, or symbol analysis. These functionalities are delegated to the `xlflow` CLI and `xlflow-lsp` components.

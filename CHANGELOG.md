@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added visual MultiPage/Page and TabStrip editing to the UserForm Designer,
+  including Page/tab collection operations, metadata-driven properties, active
+  Page navigation and control placement/reparenting. Source-preserving YAML/JSON
+  edits retain selection identity and native Undo/Redo; independent
+  `userFormPageEdit` and `userFormTabEdit` LSP capabilities protect older servers.
+
 - Added Frame-aware UserForm Designer placement and drag reparenting, with
   destination previews, parent-relative coordinate conversion and clickable
   hierarchy breadcrumbs. YAML/JSON parent edits preserve source and use one
@@ -15,8 +21,7 @@ All notable changes to xlflow will be documented in this file.
 - Added the UserForm Designer Toolbox and structural control editing for
   click-to-place root controls, immediate leaf deletion, and confirmed subtree
   deletion. YAML/JSON source-preserving add/remove uses a separate LSP
-  capability with stale-document guards and native undo/redo. Page/Tab editing
-  remains in Issue #921.
+  capability with stale-document guards and native undo/redo.
   Canvas Delete ignores focused Page-tab buttons, and Designer insertion
   rejects custom ProgIDs on built-in control types.
 

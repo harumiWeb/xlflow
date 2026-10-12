@@ -70,19 +70,30 @@ export class DocumentEditQueue {
           if (!edits.length) return undefined;
           const edit = new vscode.WorkspaceEdit();
           const label =
-            operations[0].type === "addControl"
-              ? vscode.l10n.t("Add control")
-              : operations[0].type === "removeControl"
-                ? vscode.l10n.t("Delete control")
-                : operations[0].type === "setParent"
-                  ? vscode.l10n.t("Reparent control")
-                  : operations.some(
-                        (op) => op.type === "setFormProperty" || op.type === "setControlProperty",
+            operations[0].type === "addPage"
+              ? vscode.l10n.t("Add Page")
+              : operations[0].type === "removePage"
+                ? vscode.l10n.t("Delete Page")
+                : operations[0].type === "reorderPage"
+                  ? vscode.l10n.t("Reorder Pages")
+                  : ["addTab", "removeTab", "reorderTab", "setTabProperty"].includes(
+                        operations[0].type,
                       )
-                    ? vscode.l10n.t("Edit UserForm property")
-                    : operations.some((op) => op.type === "resizeControl")
-                      ? vscode.l10n.t("Resize control")
-                      : vscode.l10n.t("Move control");
+                    ? vscode.l10n.t("Edit tabs")
+                    : operations[0].type === "addControl"
+                      ? vscode.l10n.t("Add control")
+                      : operations[0].type === "removeControl"
+                        ? vscode.l10n.t("Delete control")
+                        : operations[0].type === "setParent"
+                          ? vscode.l10n.t("Reparent control")
+                          : operations.some(
+                                (op) =>
+                                  op.type === "setFormProperty" || op.type === "setControlProperty",
+                              )
+                            ? vscode.l10n.t("Edit UserForm property")
+                            : operations.some((op) => op.type === "resizeControl")
+                              ? vscode.l10n.t("Resize control")
+                              : vscode.l10n.t("Move control");
           edit.set(
             document.uri,
             edits.map((e): [vscode.TextEdit, vscode.WorkspaceEditEntryMetadata] => [

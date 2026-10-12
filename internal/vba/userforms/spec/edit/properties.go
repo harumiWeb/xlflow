@@ -86,6 +86,17 @@ func EditableControlProperties(typeName string) map[string]spec.PropertyContract
 	return result
 }
 
+// EditableTabProperties returns scalar authoring fields represented by FormSpecTab.
+func EditableTabProperties() map[string]spec.PropertyContract {
+	result := map[string]spec.PropertyContract{}
+	for name, contract := range spec.UserFormContract().TabProperties {
+		if contract.IncludeInAuthoring && scalarContract(contract) && hasYAMLField(reflect.TypeFor[spec.FormSpecTab](), name) {
+			result[name] = contract
+		}
+	}
+	return result
+}
+
 func checkPropertyValue(op Operation, contract spec.PropertyContract) error {
 	if op.Value == nil && !op.ValuePresent {
 		return failure(-1, op, "UFE003", "A property value is required.", "Supply value; use explicit null only for an optional field.")
@@ -123,8 +134,9 @@ type PropertyTarget struct {
 }
 
 type PropertyGridData struct {
-	Form     PropertyTarget            `json:"form"`
-	Controls map[string]PropertyTarget `json:"controls"`
+	Form     PropertyTarget              `json:"form"`
+	Controls map[string]PropertyTarget   `json:"controls"`
+	Tabs     map[string][]PropertyTarget `json:"tabs,omitempty"`
 }
 
 func propertyTarget(properties map[string]spec.PropertyContract, lookup func(string) (any, bool, error)) (PropertyTarget, error) {
@@ -218,6 +230,24 @@ func PropertyGrid(input spec.SpecInput, source []byte) (PropertyGridData, error)
 				return PropertyGridData{}, err
 			}
 			result.Controls[control.ID] = target
+			if strings.EqualFold(control.Type, "TabStrip") {
+				tabs := jsonSourceMemberValue(nodes[control.ID][0], "tabs")
+				targets := make([]PropertyTarget, 0)
+				if tabs != nil && tabs.kind == jsonSourceArray {
+					targets = make([]PropertyTarget, 0, len(tabs.elements))
+					for _, tab := range tabs.elements {
+						target, err := propertyTarget(EditableTabProperties(), lookup(tab))
+						if err != nil {
+							return PropertyGridData{}, err
+						}
+						targets = append(targets, target)
+					}
+				}
+				if result.Tabs == nil {
+					result.Tabs = map[string][]PropertyTarget{}
+				}
+				result.Tabs[control.ID] = targets
+			}
 		}
 		return result, nil
 	}
@@ -269,6 +299,24 @@ func PropertyGrid(input spec.SpecInput, source []byte) (PropertyGridData, error)
 			return PropertyGridData{}, err
 		}
 		result.Controls[id] = target
+		if strings.EqualFold(control.model.Type, "TabStrip") {
+			tabs := field(control.node, "tabs")
+			targets := make([]PropertyTarget, 0)
+			if tabs != nil && tabs.Kind == yaml.SequenceNode {
+				targets = make([]PropertyTarget, 0, len(tabs.Content))
+				for _, tab := range tabs.Content {
+					target, err := propertyTarget(EditableTabProperties(), lookup(tab))
+					if err != nil {
+						return PropertyGridData{}, err
+					}
+					targets = append(targets, target)
+				}
+			}
+			if result.Tabs == nil {
+				result.Tabs = map[string][]PropertyTarget{}
+			}
+			result.Tabs[id] = targets
+		}
 	}
 	return result, nil
 }

@@ -101,14 +101,18 @@ these display defaults, in points:
 If the form has no usable dimensions, its display size defaults to 240 × 180
 points. The preview marks dimensions supplied by these defaults as approximate.
 Page content is laid out inside its parent MultiPage; the Page is not rendered
-as an independently positioned top-level control. The selected Page from the
-FormSpec is displayed, defaulting to the first Page when no selection is
-recorded.
+as an independently positioned top-level control. Visible Page headers switch
+the active preview Page. A Page list in the property region exposes Pages by
+stable control ID, including Pages whose headers are hidden. Selecting a header
+or list entry updates only transient `activePageId`; it does not edit source or
+write `selectedIndex`. The preview initially follows authored selection, or
+defaults to the first Page when no selection is recorded.
 
 Explicitly invisible controls and their descendants are not rendered. Invisible
-Page tabs are omitted, but selection indexes retain the full ordered Page
-collection. A selected invisible Page does not fall through to a different
-Page. Omitted visibility defaults to visible.
+Page headers are omitted, but the Page list can still select those Pages for
+inspection and property editing. Selection indexes retain the full ordered
+Page collection. A selected invisible Page does not fall through to a
+different Page. Omitted visibility defaults to visible.
 
 Page collection order follows stable sibling `zIndex` order, matching the
 pure-Go generation and topology compiler. Selection is applied before hiding
@@ -193,15 +197,17 @@ control type arms placement; clicking the canvas inserts one control at the
 click position. Drag-to-create is not part of this interaction.
 
 With `userFormParentEdit`, placement targets the innermost visible Frame under
-the pointer, or the form background. Without it, new controls remain root
-controls. Frame placement explicitly assigns `parentId`; overlap does not
-change existing relationships. Use the same centralized per-type width and height defaults listed under Rendering;
+the pointer, or the form background. When `userFormPageEdit` is also
+advertised, insertion on the active Page targets that Page. Without the needed
+parent/Page capabilities, new controls remain root controls. Frame and Page
+placement explicitly assign `parentId`; overlap does not change existing
+relationships. Use the same centralized per-type width and height defaults listed under Rendering;
 creation and preview must not maintain separate size tables. Convert the
 canvas click to FormSpec points. With snapping off, normalize each coordinate
 with the TypeScript `stableDelta` helper (six decimal places) to suppress
 floating-point micro-error; with snapping on, use the existing 8 pt grid. Then
 clamp `left` and `top` so the default-size control fits within the current form
-bounds (or the target Frame's content bounds). If either destination dimension is smaller than the new control's default
+bounds or the target Frame/Page content bounds. If either destination dimension is smaller than the new control's default
 dimension, reject the insertion without changing the source.
 
 Generate the ID as `control-<UUID>`, independently of its current name, and
@@ -230,7 +236,11 @@ the host first shows a modal confirmation containing the selected control's
 name and descendant count. Confirmed removal deletes the selected control and
 all descendants with `cascade: true` in one semantic edit and one VS Code
 `WorkspaceEdit`; Undo/Redo therefore restores or removes the whole subtree as
-one native history step. Direct deletion of a selected Page is disabled.
+one native history step. The canvas Delete action does not delete a Page.
+Page deletion is available from the Page list and always requires explicit
+confirmation identifying the Page and the number of descendant controls; the
+confirmed action removes that Page and its descendants with `cascade: true` in
+one semantic edit and one native history step.
 
 Structural edits apply only to the open FormSpec `TextDocument`. They do not
 edit code-behind or save the document automatically. The host captures the
@@ -249,10 +259,15 @@ same-parent movement and root-only placement.
 
 Hit testing follows rendering's stable sibling z-order and visible hierarchy.
 The innermost Frame content region beneath the pointer is the destination;
-ordinary children inherit their Frame destination. The moving control and its
-descendants are excluded. Page content cannot become a direct destination or
-silently fall back to root. An existing Frame inside a Page can still be an
-explicit Frame destination. The form background permits root parenting.
+ordinary children inherit their Frame destination. With
+`capabilities.experimental.userFormPageEdit`, an active Page is also a valid
+destination for ordinary controls. The moving control and its descendants are
+excluded. A Page can be chosen as the destination by inserting on the active
+Page, dropping into its content, or using the Page destination picker. A Page
+control itself cannot be reparented or moved to another MultiPage. An existing
+Frame inside a Page can still be an explicit Frame destination. The form
+background permits root parenting; invalid destinations never fall back to
+root.
 
 Frame destinations require an omitted/empty ProgID or a case-insensitive match
 to `Forms.Frame.1`. Custom-ProgID Frames remain visible but cannot themselves be
@@ -277,8 +292,9 @@ A completed parent change sends exactly one semantic operation:
 All five fields are required by the Designer RPC; `parentId: ""` means the
 form root. Same-parent movement uses `moveControl`. Frame movement updates only
 that Frame, while children retain their local geometry. LSP and host reject
-Page subjects, custom controls, non-Frame destinations and changes to a direct
-Page parent relationship. Canonical validation rejects invalid references and
+Page subjects, custom controls, and destinations other than built-in Frames or
+Pages. Changing a direct Page parent relationship also requires the Page edit
+capability. Canonical validation rejects invalid references and
 cycles atomically. Generic Go edits retain their broader existing contract.
 
 A clickable breadcrumb shows the form and selected control's ancestors.
@@ -343,15 +359,20 @@ editable. These restrictions apply to the Property Grid, not canonical FormSpec
 source validation or source-editor edits.
 
 Background selection shows form fields; control selection shows that control's
-fields. Page selection uses its tab and excludes Page geometry. Form fields
-include `name`, `caption`, `width`, `height` and the supported `build.*` paths;
+fields. Selecting a Page by its stable ID in the Page list or by a rendered
+header shows that Page's metadata fields and excludes Page geometry. Page
+preview navigation is transient; explicit MultiPage and TabStrip
+`selectedIndex` edits continue through this Property Grid. Form fields include
+`name`, `caption`, `width`, `height` and the supported `build.*` paths;
 legacy and build fields are separate and never redirect to each other.
 Control fields are limited to supported authored scalars for their type.
 Valid custom ProgID controls retain canonical common scalar fields, without
 acquiring built-in type-specific fields.
 Observed/snapshot values, identity/type/parent topology, collections, pictures
-and arbitrary property bags are outside the grid. Changing `form.name` does
-not rename the source file, code sidecar or VBA references.
+and arbitrary property bags are outside the scalar grid. Dedicated Page and
+TabStrip editors manage those collections using their separate operations.
+Changing `form.name` does not rename the source file, code sidecar or VBA
+references.
 
 Text/number inputs confirm on Enter or blur, with at most one request when both
 occur; Escape cancels the draft. Boolean/enum changes confirm on selection.
@@ -375,6 +396,65 @@ cannot apply or acknowledge new requests whose IDs restart from one. Visibility
 still participates in the queue's stale-edit guard; retaining an error reply
 never authorizes a hidden or otherwise obsolete source edit.
 
+## Page and TabStrip editors
+
+Selecting a MultiPage exposes its Page collection in the property region. The
+list identifies Pages by stable control ID and includes Pages with hidden
+headers. Clicking a Page changes transient `activePageId` and the preview; it
+does not issue an edit or persist `selectedIndex`. Visible Page headers provide
+the same navigation. Page `name` and `caption` remain editable through the
+existing LSP property metadata. Page geometry is derived and is never exposed
+as an authoring field.
+
+The Page list provides Add, Delete, and explicit move-up/move-down actions.
+Adding appends a Page to the selected MultiPage. Deleting a Page with descendants requires
+confirmation that names the Page and descendant-control count, then removes
+the Page and its descendants with `cascade: true` in one edit. Empty Pages are
+deleted immediately. Reordering
+changes order only within that MultiPage; hover-tab drag does not reorder.
+Controls can be inserted into the active Page, dropped on a Page, or assigned
+to a Page by the destination picker. The picker changes ordinary controls'
+parent. A Page control cannot be reparented to another MultiPage.
+
+Selecting a TabStrip exposes a separate tab editor. It lists every record,
+including tabs with `visible: false`, and edits `name`, `caption`, `enabled`,
+`visible`, `tag`, `controlTipText`, and `accelerator` using field metadata and
+authored values from the LSP. Tabs remain records in `tabs`; they are not
+controls or Pages. TabStrip `selectedIndex` remains a control property edited
+through the Property Grid.
+
+Tab property drafts use the owning control ID and canonical unique tab name,
+separately from the current index used by the edit protocol. Reordering therefore
+keeps each tab's own draft; submitting resolves the current index. Source version
+changes still mark unsubmitted drafts stale until the user edits or cancels them.
+
+The Page operations are `addPage(control)`, `removePage(controlId, cascade)`,
+and `reorderPage(controlId, index)`. Tab operations are
+`addTab(controlId, tab)` (append), `removeTab(controlId, index)`,
+`reorderTab(controlId, index, toIndex)`, and
+`setTabProperty(controlId, index, field, value)`. Each user action creates one
+semantic edit and one native Undo/Redo step.
+
+`userFormPageEdit` independently gates Page collection operations and Page
+destinations. `userFormTabEdit` independently gates TabStrip collection and
+tab-property operations. Editing Page `name`/`caption` or control-level
+`selectedIndex` uses `userFormPropertyEdit`. Inserting into a Page also needs
+`userFormStructuralEdit` and `userFormParentEdit`; changing a control's Page
+parent by drag or the destination picker also needs the existing geometry
+capability for `setParent` coordinates. Missing capabilities disable only their
+corresponding actions.
+
+Collection edits preserve selected-member identity when an authored numeric
+`selectedIndex` exists. Reordering changes the index to retain that member;
+deleting it selects index zero if entries remain, or logical `-1` for an empty
+collection. Adding the first member changes an explicit `-1` to zero. Absent
+and explicit-null values remain unchanged. Page navigation alone never writes
+`selectedIndex`, and observed or normalized values never become authored
+values. YAML/YML/JSON edits are localized and preserve unrelated source. The
+server validates the final FormSpec after applying the transaction; a failure
+returns no partial edit. These operations do not change Excel, COM, VBIDE, or
+runtime semantics.
+
 ## Semantic edit protocol and native history
 
 The LSP advertises `capabilities.experimental.userFormEdit: true`. Preview-only
@@ -387,24 +467,31 @@ using control IDs and finite point values, or one `setFormProperty` /
 servers retain geometry editing with the grid disabled. Preview-only servers
 retain read-only rendering. The extension and RPC both accept
 one operation or a move/resize pair for the same control per interaction.
-Adding and removing controls additionally require the separate
+Adding and removing ordinary controls additionally require the separate
 `capabilities.experimental.userFormStructuralEdit: true` capability. This
 capability gates `addControl` and `removeControl` without changing the
-independent geometry and property capability checks. An older server that does
-not advertise it keeps the preview and whichever existing edit capabilities it
-advertises; structural actions are unavailable.
+independent geometry and property capability checks. Page collection operations
+require `capabilities.experimental.userFormPageEdit: true`; TabStrip collection
+and tab-property operations require
+`capabilities.experimental.userFormTabEdit: true`. These capabilities are
+independent of one another and of `userFormPropertyEdit` and
+`userFormParentEdit`. An older server that omits a capability keeps its other
+advertised edit families and does not expose the unsupported actions.
 Each Toolbox insertion or deletion sends one structural operation; it is not
 combined with geometry or property operations in the same transaction.
-The RPC also enforces this structural scope: insertion accepts only a root or
-Frame-parented built-in control other than Page. An omitted or empty ProgID uses the built-in
-type contract; an explicit nonempty ProgID must match that contract's ProgID
-case-insensitively, without trimming whitespace. Custom ProgIDs are rejected
-before source edits are generated. Direct Page deletion returns
-`unsupported` without edits. Page targets resolve through the canonical
-flattened source model, including legacy nested input. Deleting a MultiPage
-with `cascade: true` may still remove its Pages and their descendants. These
-restrictions belong to the Designer adapter; the shared semantic edit API
-retains its general parent and Page operations.
+The RPC also enforces structural scope: `addControl` accepts a root, Frame, or
+eligible Page destination, but not a Page control. A Page destination requires
+structural, parent, and Page capabilities. An omitted or empty ProgID uses the
+built-in type contract; an explicit nonempty ProgID must match that contract's
+ProgID case-insensitively, without trimming whitespace. Custom ProgIDs are
+rejected before source edits are generated. `removeControl` continues to reject
+a Page target; `removePage` is the dedicated Page deletion operation and
+requires Page capability. Page targets resolve through the canonical flattened
+source model, including legacy nested input. Deleting a MultiPage with
+`cascade: true` may still remove its Pages and their descendants. The shared
+semantic edit API retains generic valid Page relationships and collection
+operations; the Designer adapter enforces its capability and interaction
+scope.
 Empty batches, more than two operations, repeated operation types, and pairs
 targeting different controls are rejected before source edits are generated.
 A property operation cannot be batched with another property or geometry edit.
@@ -430,12 +517,15 @@ operations revert preview and display an error without automatic retry/rebase.
 
 Webview messages add `edit` with request ID/version/operations. Host messages
 add edit results and availability; document messages carry editable capability.
-YAML/YML and JSON share geometry and scalar property interactions, preserving
-unrelated source formatting. Multiple selection and canvas form resizing remain
-outside this contract. Frame placement and reparenting use the separate parent
-capability described above; Page and Tab collection editing remain out of
-scope (#921).
-Structural add/remove use the separate capability above.
+YAML/YML and JSON share geometry, scalar properties, Page collection edits,
+and TabStrip collection edits, preserving unrelated source formatting.
+Multiple selection and canvas form resizing remain outside this contract.
+Frame and Page placement/reparenting use the separate parent and Page
+capabilities described above. Page and TabStrip operation details and
+`selectedIndex` identity rules are specified in
+[`userform-semantic-edit.md`](userform-semantic-edit.md) and
+[`userform-multipage-tabstrip.md`](userform-multipage-tabstrip.md).
+Structural control add/remove continues to use the separate capability above.
 
 ## Structural edit verification requirements
 
@@ -444,11 +534,12 @@ place and Escape cancellation, centralized default dimensions, stableDelta
 precision and grid snapping, position clamping and undersized-form rejection,
 UUID/name collision handling at Toolbox allocation and host add preflight,
 stable ID after rename, and the empty MultiPage/TabStrip states. Designer checks
-should cover root and Frame insertion, selection followed by return to Pointer,
-disabled direct Page deletion, canvas-only Delete handling, immediate leaf
-deletion, confirmation content and cancellation for controls with descendants,
-descendant cascade, a single native Undo/Redo step, and pending-confirmation/
-version invalidation.
+should cover root, Frame, and active-Page insertion, selection followed by
+return to Pointer, canvas Delete handling that leaves Pages intact, Page-list
+deletion confirmation and cascade, immediate leaf-control deletion,
+confirmation content and cancellation for controls with descendants, descendant
+cascade, a single native Undo/Redo step, and pending-confirmation/version
+invalidation.
 
 Keep coverage in `editors/vscode/test/userFormStructure.test.tsx`, the actual
 Webview interaction suite `editors/vscode/test/suite/userFormWebview.test.ts`,
@@ -475,6 +566,21 @@ Verify in real VS Code that one confirmation creates one native undo/redo
 step, multiple panels synchronize, stale versions/connections cannot overwrite
 source and older servers retain their advertised behavior. These source edits
 do not change COM/VBE semantics and require no Excel or VBE oracle run.
+
+## Page and TabStrip verification requirements
+
+Designer checks should verify that Page-list and rendered-header selection use
+Page IDs, including hidden Pages, and do not edit source or `selectedIndex`.
+Cover Page add, confirmed cascade deletion and cancellation, up/down reorder,
+active-Page insertion/drop, the Page destination picker, rejection of Page
+reparenting, and exclusion of Page geometry. TabStrip checks should list hidden
+and visible records and cover append, remove, reorder, and LSP-metadata-driven
+editing of every supported field. Source/LSP checks should cover explicit
+selection identity through reorder/delete, fallback zero and empty `-1`, first
+addition after explicit `-1`, retained absent/null values, independent
+capability gates, localized YAML/YML/JSON edits, observed-data preservation,
+and atomic final-validation failure. These checks do not establish runtime,
+Excel, COM, or VBE behavior.
 
 ## Webview security
 

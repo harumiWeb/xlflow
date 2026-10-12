@@ -10,12 +10,14 @@ import type {
 import { DesignerCanvas } from "./DesignerCanvas";
 import { PropertyGrid } from "./PropertyGrid";
 import { Toolbox } from "./Toolbox";
+import { CollectionEditor } from "./CollectionEditor";
+import type { ActivePages } from "../../src/userFormEditor/collections";
 import { createControl, controlMetadata } from "../../src/userFormEditor/toolbox";
 import type { ToolboxType } from "../../src/userFormEditor/toolbox";
 import type { PropertyDraftStore, PropertyReply } from "./PropertyGrid";
 import { designerStrings } from "../../src/userFormEditor/protocol";
 import "./app.css";
-import { zoomLevels } from "../../src/userFormEditor/geometry";
+import { orderedChildren, zoomLevels } from "../../src/userFormEditor/geometry";
 
 declare function acquireVsCodeApi(): {
   postMessage(message: WebviewMessage): void;
@@ -33,6 +35,9 @@ export function App() {
   const [propertyEditable, setPropertyEditable] = useState(false);
   const [structuralEditable, setStructuralEditable] = useState(false);
   const [parentEditable, setParentEditable] = useState(false);
+  const [pageEditable, setPageEditable] = useState(false);
+  const [tabEditable, setTabEditable] = useState(false);
+  const [activePages, setActivePages] = useState<ActivePages>({});
   const [tool, setTool] = useState<ToolboxType>();
   const [propertyGrid, setPropertyGrid] = useState<PropertyGridData>();
   const [selectedId, setSelectedId] = useState<string>();
@@ -47,6 +52,8 @@ export function App() {
   const pending = useRef<PropertyReply>();
   const pendingAdd = useRef<string>();
   const pendingStructural = useRef(false);
+  const pendingActive = useRef<{ owner: string; page: string }>();
+  const pendingSelection = useRef<{ id: string; parentId?: string }>();
   const drafts = useRef<PropertyDraftStore>({ values: new Map(), replies: new Map() });
   const restored = useRef(false);
   useEffect(() => {
@@ -75,14 +82,34 @@ export function App() {
         setPropertyEditable(message.propertyEditable === true);
         setStructuralEditable(message.structuralEditable === true);
         setParentEditable(message.parentEditable === true);
+        setPageEditable(message.pageEditable === true);
+        setTabEditable(message.tabEditable === true);
+        if (pendingAdd.current) {
+          const added = message.document.controls.find((c) => c.id === pendingAdd.current);
+          if (added?.type.toLowerCase() === "page" && added.parentId)
+            setActivePages((current) => ({ ...current, [added.parentId!]: added.id }));
+        }
+        const selection = pendingSelection.current;
+        const selectedControl =
+          selection &&
+          message.document.controls.find(
+            (c) =>
+              c.id === selection.id &&
+              (selection.parentId === undefined || (c.parentId ?? "") === selection.parentId),
+          );
+        if (selectedControl && pendingActive.current) {
+          const { owner, page } = pendingActive.current;
+          setActivePages((current) => ({ ...current, [owner]: page }));
+        }
         setPropertyError(message.propertyError?.message);
         setSelectedId((id) =>
-          message.document.controls.some((c) => c.id === pendingAdd.current)
-            ? pendingAdd.current
+          selectedControl
+            ? selectedControl.id
             : message.document.controls.some((c) => c.id === id)
               ? id
               : undefined,
         );
+        if (selectedControl) pendingSelection.current = undefined;
         if (!pending.current) setBusy(false);
         setError(undefined);
       }
@@ -92,6 +119,8 @@ export function App() {
         setPropertyEditable(false);
         setStructuralEditable(false);
         setParentEditable(false);
+        setPageEditable(false);
+        setTabEditable(false);
         setTool(undefined);
         version.current = message.version;
         setDocumentVersion(message.version);
@@ -102,6 +131,8 @@ export function App() {
         setPropertyEditable(false);
         setStructuralEditable(false);
         setParentEditable(false);
+        setPageEditable(false);
+        setTabEditable(false);
       }
       if (message.type === "editResult" && message.requestId === pending.current?.requestId) {
         const response = { ...pending.current, requestId: message.requestId, error: message.error };
@@ -112,6 +143,12 @@ export function App() {
           setSelectedId(pendingAdd.current);
           setTool(undefined);
         }
+        if (!message.error && pendingActive.current) {
+          const { owner, page } = pendingActive.current;
+          setActivePages((current) => ({ ...current, [owner]: page }));
+        }
+        if (message.error) pendingSelection.current = undefined;
+        pendingActive.current = undefined;
         pendingAdd.current = undefined;
         pendingStructural.current = false;
         setBusy(false);
@@ -134,9 +171,24 @@ export function App() {
     if (pending.current || busy || error) return;
     const operation = operations[0];
     const property =
-      operation.type === "setFormProperty" || operation.type === "setControlProperty";
+      operation.type === "setFormProperty" ||
+      operation.type === "setControlProperty" ||
+      operation.type === "setTabProperty";
     const structural = operation.type === "addControl" || operation.type === "removeControl";
-    if (structural ? !structuralEditable : property ? !propertyEditable : !editable) return;
+    const page = ["addPage", "removePage", "reorderPage"].includes(operation.type);
+    const tab = ["addTab", "removeTab", "reorderTab", "setTabProperty"].includes(operation.type);
+    if (
+      page
+        ? !pageEditable
+        : tab
+          ? !tabEditable
+          : structural
+            ? !structuralEditable
+            : property
+              ? !propertyEditable
+              : !editable
+    )
+      return;
     if (
       (operation.type === "setParent" ||
         (operation.type === "addControl" && operation.control.parentId)) &&
@@ -146,14 +198,47 @@ export function App() {
     const requestId = ++nextRequest.current;
     pending.current = {
       requestId,
-      field: property ? operation.field : undefined,
-      controlId: operation.type === "setControlProperty" ? operation.controlId : undefined,
+      field: "field" in operation ? operation.field : undefined,
+      controlId:
+        operation.type === "setTabProperty"
+          ? `tab:${operation.controlId}:${operation.index}`
+          : operation.type === "setControlProperty"
+            ? operation.controlId
+            : undefined,
     };
-    pendingAdd.current = operation.type === "addControl" ? operation.control.id : undefined;
-    pendingStructural.current = structural || operation.type === "setParent";
+    pendingAdd.current =
+      operation.type === "addControl" || operation.type === "addPage"
+        ? operation.control.id
+        : undefined;
+    pendingSelection.current =
+      operation.type === "addControl" || operation.type === "addPage"
+        ? { id: operation.control.id }
+        : operation.type === "setParent"
+          ? { id: operation.controlId, parentId: operation.parentId }
+          : undefined;
+    pendingStructural.current = structural || page || tab || operation.type === "setParent";
+    pendingActive.current = undefined;
+    if (operation.type === "addPage" && operation.control.parentId)
+      pendingActive.current = { owner: operation.control.parentId, page: operation.control.id };
     setEditError(undefined);
     setBusy(true);
     bridge.postMessage({ type: "edit", requestId, version: version.current, operations });
+    if (document && operation.type === "setParent") {
+      const page = document.controls.find(
+        (c) => c.id === operation.parentId && c.type.toLowerCase() === "page",
+      );
+      if (page?.parentId) pendingActive.current = { owner: page.parentId, page: page.id };
+    }
+    if (
+      document &&
+      operation.type === "setControlProperty" &&
+      operation.field === "selectedIndex" &&
+      typeof operation.value === "number"
+    ) {
+      const page = orderedChildren(document, operation.controlId)[operation.value];
+      if (page?.type.toLowerCase() === "page")
+        pendingActive.current = { owner: operation.controlId, page: page.id };
+    }
     return requestId;
   };
   const canDelete =
@@ -218,9 +303,14 @@ export function App() {
         </div>
       )}
       {!document && !error && <p>{strings.loading}</p>}
-      {document && !editable && !propertyEditable && !structuralEditable && !error && !busy && (
-        <p class="notice">{strings.readOnly}</p>
-      )}
+      {document &&
+        !editable &&
+        !propertyEditable &&
+        !structuralEditable &&
+        !pageEditable &&
+        !tabEditable &&
+        !error &&
+        !busy && <p class="notice">{strings.readOnly}</p>}
       {document && (
         <>
           {(document.approximate || document.controls.some((c) => c.approximate)) && (
@@ -234,6 +324,7 @@ export function App() {
           <div class="designer-workspace">
             <Toolbox
               parentEditable={parentEditable}
+              pageEditable={pageEditable}
               selected={tool}
               disabled={!structuralEditable || busy || !!error}
               strings={strings}
@@ -244,6 +335,11 @@ export function App() {
               approximateBounds={strings.approximateBounds}
               editable={editable}
               parentEditable={parentEditable && !error}
+              pageEditable={pageEditable && !error}
+              activePages={activePages}
+              onActivePageChange={(owner, page) =>
+                setActivePages((current) => ({ ...current, [owner]: page }))
+              }
               busy={busy}
               zoom={zoom}
               showGrid={showGrid}
@@ -269,6 +365,7 @@ export function App() {
                   snapping,
                   undefined,
                   parentId,
+                  pageEditable,
                 );
                 if (!control) {
                   setEditError(parentId ? strings.cannotInsertContainer : strings.cannotInsert);
@@ -277,33 +374,56 @@ export function App() {
                 commit([{ type: "addControl", control }]);
               }}
             />
-            {propertyGrid &&
-            (selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form) ? (
-              <PropertyGrid
-                drafts={drafts.current}
-                key={selectedId === undefined ? "form" : `control:${selectedId}`}
-                target={selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form}
-                controlId={selectedId}
-                title={document.controls.find((c) => c.id === selectedId)?.name ?? document.name}
-                version={documentVersion}
-                editable={propertyEditable && !error}
+            <div class="properties-pane">
+              <CollectionEditor
+                document={document}
+                selectedId={selectedId}
+                pageEditable={pageEditable && !error}
+                tabEditable={tabEditable && !error}
+                parentEditable={parentEditable && !error}
+                editable={editable && !error}
                 busy={busy}
                 strings={strings}
-                reply={reply}
-                onCommit={(field, value) =>
-                  commit([
-                    selectedId
-                      ? { type: "setControlProperty", controlId: selectedId, field, value }
-                      : { type: "setFormProperty", field, value },
-                  ])
+                onSelect={setSelectedId}
+                onActivePage={(owner, page) =>
+                  setActivePages((current) => ({ ...current, [owner]: page }))
                 }
+                onCommit={commit}
+                propertyGrid={propertyGrid}
+                drafts={drafts.current}
+                reply={reply}
+                version={documentVersion}
+                snapping={snapping}
+                onInvalidMove={() => setEditError(strings.invalidDrop)}
               />
-            ) : (
-              <aside class="property-grid">
-                <h2>{strings.properties}</h2>
-                <p class="notice">{strings.propertyReadOnly}</p>
-              </aside>
-            )}
+              {propertyGrid &&
+              (selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form) ? (
+                <PropertyGrid
+                  drafts={drafts.current}
+                  key={selectedId === undefined ? "form" : `control:${selectedId}`}
+                  target={selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form}
+                  controlId={selectedId}
+                  title={document.controls.find((c) => c.id === selectedId)?.name ?? document.name}
+                  version={documentVersion}
+                  editable={propertyEditable && !error}
+                  busy={busy}
+                  strings={strings}
+                  reply={reply}
+                  onCommit={(field, value) =>
+                    commit([
+                      selectedId
+                        ? { type: "setControlProperty", controlId: selectedId, field, value }
+                        : { type: "setFormProperty", field, value },
+                    ])
+                  }
+                />
+              ) : (
+                <aside class="property-grid">
+                  <h2>{strings.properties}</h2>
+                  <p class="notice">{strings.propertyReadOnly}</p>
+                </aside>
+              )}
+            </div>
           </div>
         </>
       )}

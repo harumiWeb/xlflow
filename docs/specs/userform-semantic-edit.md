@@ -5,10 +5,10 @@ to UserForm FormSpecs while retaining the original source as the canonical
 document. Issue #916 provides the YAML API; Issue #917 adds JSON geometry
 editing and the Designer LSP adapter; Issue #918 adds scalar property editing
 across YAML/YML/JSON and authored-state metadata; Issue #919 adds Toolbox
-insertion and subtree deletion, with confirmation only when descendants exist,
-including JSON structural edits. Issue #920 adds JSON parenting and Frame
-editing through the Designer adapter. The core API remains host-neutral and does not
-invoke Excel or provide a CLI command.
+insertion and subtree deletion, including JSON structural edits. Issue #920
+adds JSON parenting and Frame editing through the Designer adapter. Issue #921
+adds Page and TabStrip collection operations across YAML/YML/JSON. The core API
+remains host-neutral and does not invoke Excel or provide a CLI command.
 
 ## Authority and source model
 
@@ -20,11 +20,15 @@ func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result,
 
 `Apply` accepts `.yaml` and `.yml` for all operations, and `.json` for
 `moveControl`, `resizeControl`, `setFormProperty`, `setControlProperty`,
-`addControl`, `removeControl` and `setParent`. Other JSON operations return a structured
-unsupported-operation error. `Operation` values are serializable tagged structs.
+`addControl`, `removeControl`, `setParent`, `addPage`, `removePage`,
+`reorderPage`, `addTab`, `removeTab`, `reorderTab`, and `setTabProperty`.
+Other JSON operations return a structured unsupported-operation error.
+`Operation` values are serializable tagged structs.
 The supported YAML operation tags are
 `setFormProperty`, `setControlProperty`, `moveControl`, `resizeControl`,
-`addControl`, `removeControl`, `setParent`, and `reorderControl`.
+`addControl`, `removeControl`, `setParent`, `reorderControl`, `addPage`,
+`removePage`, `reorderPage`, `addTab`, `removeTab`, `reorderTab`, and
+`setTabProperty`.
 
 The canonical `spec.ParseFormSpec` parser and the existing FormSpec validation
 functions remain the authority for parsing, normalization, warnings, and
@@ -138,6 +142,13 @@ ID fails parsing with `UFV004` before any operation is applied.
 | `removeControl`      | Remove the target control. `cascade` defaults to false; if descendants remain, an absent or false value rejects removal. `cascade: true` removes the target and its descendants, including descendants represented by legacy nested source. Supported for YAML/YML and JSON source.                                                                                                                                                                                      |
 | `setParent`          | Set `parentId`, or make the control a root when it is empty. Optional `left` and `top` replace parent-relative coordinates; omitted values retain the existing local coordinates. Reparenting does not preserve or compute a world-space position.                                                                                                                                                                                                                       |
 | `reorderControl`     | Move the target to the zero-based `index` among its current siblings. Sibling order uses stable `zIndex` order, preserving source order for ties. Only sibling `zIndex` values needed for the requested order are updated; `tabIndex` is unchanged.                                                                                                                                                                                                                      |
+| `addPage`            | Append one `Page` control from `control` to its referenced MultiPage. The control requires explicit `id`, `name`, `type: Page`, and a valid MultiPage `parentId`; it cannot contain nested `controls`. The canonical validator checks the final topology.                                                                                                                                                                                                                |
+| `removePage`         | Remove the Page identified by `controlId`. `cascade` defaults to false; if the Page has descendants, an absent or false value rejects removal. `cascade: true` removes the Page and its descendants. The Designer confirms deletion of a Page with descendants; empty Pages are deleted immediately.                                                                                                                                                                     |
+| `reorderPage`        | Move the Page identified by `controlId` to the zero-based `index` within its current owning MultiPage. A Page cannot change MultiPage owner through reordering.                                                                                                                                                                                                                                                                                                          |
+| `addTab`             | Append `tab` to the `tabs` array of the TabStrip identified by `controlId`. The tab requires a canonical tab name; optional metadata is validated by the FormSpec contract.                                                                                                                                                                                                                                                                                              |
+| `removeTab`          | Remove the TabStrip entry at the zero-based `index` on `controlId`.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `reorderTab`         | Move the TabStrip entry at `index` to `toIndex` on `controlId`; both are zero-based indexes in the same collection.                                                                                                                                                                                                                                                                                                                                                      |
+| `setTabProperty`     | Set one supported metadata field on the TabStrip entry at `index`. `field` and value applicability come from LSP metadata and canonical FormSpec validation. A missing `value` is invalid; explicit null is distinct from omission and accepted only when canonical validation permits it.                                                                                                                                                                               |
 
 For property operations a missing `value` is invalid. Explicit null is supported
 only for an optional scalar field whose resulting source passes canonical
@@ -146,11 +157,59 @@ source scalar and never deletes its key. Absent, null, empty string, false and
 zero are distinct authored states. An explicit value matching a normalized
 default must not be mistaken for an absent-field no-op.
 
-Property removal is unsupported. `observed` fields, property bags,
-collections (including lists and tabs), picture data/actions, and non-scalar
-property values are not edit targets. Page and TabStrip collection operations
-are outside this contract. Existing FormSpec validation still decides whether
-a scalar value or resulting control hierarchy is valid.
+Property removal is unsupported. `observed` fields, arbitrary property bags,
+unmodeled collections, picture data/actions, and non-scalar property values are
+not edit targets. Page and TabStrip collection operations are limited to the
+dedicated operations above; they do not make other collections editable.
+Existing FormSpec validation still decides whether a scalar value or resulting
+control hierarchy is valid.
+
+## Page and TabStrip collection editing
+
+The canonical representation remains a flat `controls` sequence for Page
+controls and a `tabs` sequence of records on each TabStrip. `addPage` appends a
+Page under its existing MultiPage; `removePage` targets a Page and, after
+Designer confirmation, cascades through its descendant controls; `reorderPage`
+changes order only within the owning MultiPage. Tab operations append, remove,
+reorder, or update a field on one record. TabStrip tabs never become controls.
+
+The Designer tracks the active Page by stable Page control ID as transient
+preview state. Page selection does not emit an edit or author `selectedIndex`.
+Collection changes preserve the selected member by identity when the source
+has an explicitly authored numeric `selectedIndex`: reorder adjusts the index
+to follow that member, deletion of the selected member falls back to zero when
+members remain, and an empty collection uses logical `-1`. Adding the first
+member changes an explicitly authored `-1` to zero. An absent or explicit-null
+`selectedIndex` is left absent or null; observed and normalized values are
+never promoted to authored source. These rules apply to MultiPage Pages and
+TabStrip tabs.
+
+Page operations require the independent
+`capabilities.experimental.userFormPageEdit` capability. Tab collection and
+tab-property operations require
+`capabilities.experimental.userFormTabEdit`. Page `name`/`caption` and the
+MultiPage/TabStrip control-level `selectedIndex` continue to use
+`userFormPropertyEdit`. Ordinary controls inserted into a Page require
+`userFormStructuralEdit`, `userFormParentEdit`, and `userFormPageEdit`. Changing
+a control's Page parent requires `userFormParentEdit` and `userFormPageEdit`,
+plus the existing geometry capability for `setParent` coordinates in both
+pointer dragging and the destination picker. Capability checks are independent; absence of one
+capability does not disable another edit family.
+
+Page fields, TabStrip control fields, and individual tab fields use the
+existing LSP-authored metadata contract. The UI must preserve absent, explicit
+null, empty string, false, zero, and observed values without copying preview
+defaults into source. `setTabProperty` is limited to the metadata fields
+advertised for that tab by the LSP; current tab metadata includes `name`,
+`caption`, `enabled`, `visible`, `tag`, `controlTipText`, and `accelerator`.
+
+All collection operations are localized YAML/YML/JSON edits. Apply a requested
+batch against the original source, preserving unrelated comments, whitespace,
+ordering, and observed data. Validate the final resulting FormSpec with the
+canonical parser and validators; do not reparse or partially publish temporary
+states between operations. If targeting, source editing, or final validation
+fails, return an error without source edits. Runtime, Excel, COM, VBIDE, and
+VBE behavior are outside this source-edit contract.
 
 Custom controls with an explicit ProgID retain the canonical common scalar
 authoring fields, such as `name`, geometry, `enabled` and `visible`. Unknown
@@ -281,13 +340,27 @@ The implementation is pure Go and must cover these behaviors:
 These tests require no Excel, COM, or VBE oracle. The API does not change
 VBE-facing behavior or establish any Excel runtime claim.
 
+## Page and TabStrip verification requirements
+
+Implementation verification should cover all seven operations for YAML/YML
+and JSON, canonical rejection of invalid ownership/index/property values,
+Page deletion with and without descendants, preservation of unrelated source
+and observed values, and zero returned edits after any final validation
+failure. Selection cases should cover Page/tab identity through reorder and
+deletion, fallback to index zero or logical `-1`, first insertion after an
+explicit `-1`, and exact retention of absent and explicit-null source values.
+LSP checks should verify `userFormPageEdit` and `userFormTabEdit` independently
+from one another and from property, structural, parent, and geometry
+capabilities. These are source-edit checks and do not establish Excel, COM,
+VBIDE, or VBE behavior.
+
 ## Out of scope
 
 - JSON `reorderControl` operations.
 - CLI wiring; VS Code/Webview/LSP adapters are specified separately.
 - Excel, COM, VBIDE, Designer persistence, or VBE validation.
-- Property removal, observed-state authoring, property bags, collection edits,
-  and picture editing.
+- Property removal, observed-state authoring, property bags, collections other
+  than the specified Page and TabStrip operations, and picture editing.
 - Recursive control construction in `addControl`, implicit ID insertion or
   targeting, and ID/type changes.
 

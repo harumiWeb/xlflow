@@ -10,10 +10,13 @@ import type {
   StructuralOperation,
   ParentOperation,
   DesignerError,
+  PageOperation,
+  TabOperation,
 } from "./protocol";
 import { DocumentEditQueue } from "./edits";
 import { controlMetadata, subtreeIds } from "./toolbox";
-import { isDesignerFrame } from "./geometry";
+import { isDesignerFrame, isDesignerPage } from "./geometry";
+import { isPageOperation, isTabOperation } from "./protocol";
 
 export type DeleteConfirmation = (name: string, descendants: number) => PromiseLike<boolean>;
 const confirmSubtreeDeletion: DeleteConfirmation = async (name, descendants) => {
@@ -32,6 +35,7 @@ export async function prepareStructuralEdit(
   snapshot: { version: number; document: DesignerDocument } | undefined,
   version: number,
   confirm: DeleteConfirmation,
+  pageEditable = false,
 ): Promise<DesignerError | undefined> {
   if (!snapshot || snapshot.version !== version)
     return {
@@ -51,7 +55,10 @@ export async function prepareStructuralEdit(
       };
     if (operation.control.parentId !== undefined) {
       const parent = controls.find((control) => control.id === operation.control.parentId);
-      if (!parent || !isDesignerFrame(parent))
+      if (
+        !parent ||
+        (!isDesignerFrame(parent) && !(pageEditable && isDesignerPage(snapshot.document, parent)))
+      )
         return {
           code: "invalidParent",
           message: vscode.l10n.t("This control cannot be placed in this container."),
@@ -74,6 +81,7 @@ export function prepareParentEdit(
   operation: ParentOperation,
   snapshot: { version: number; document: DesignerDocument } | undefined,
   version: number,
+  pageEditable = false,
 ): DesignerError | undefined {
   if (!snapshot || snapshot.version !== version)
     return {
@@ -95,13 +103,76 @@ export function prepareParentEdit(
 
   if (control.parentId) {
     const currentParent = controls.find((candidate) => candidate.id === control.parentId);
-    if (!currentParent || !isDesignerFrame(currentParent)) return invalid();
+    if (
+      !currentParent ||
+      (!isDesignerFrame(currentParent) &&
+        !(pageEditable && isDesignerPage(snapshot.document, currentParent)))
+    )
+      return invalid();
   }
 
   if (operation.parentId === "") return;
   const parent = controls.find((candidate) => candidate.id === operation.parentId);
-  if (!parent || !isDesignerFrame(parent)) return invalid();
+  if (
+    !parent ||
+    (!isDesignerFrame(parent) && !(pageEditable && isDesignerPage(snapshot.document, parent)))
+  )
+    return invalid();
   if (subtreeIds(controls, control.id).has(parent.id)) return invalid();
+}
+
+export async function prepareCollectionEdit(
+  operation: PageOperation | TabOperation,
+  snapshot: { version: number; document: DesignerDocument } | undefined,
+  version: number,
+  confirm: DeleteConfirmation,
+): Promise<DesignerError | undefined> {
+  if (!snapshot || snapshot.version !== version)
+    return {
+      code: "staleDocument",
+      message: vscode.l10n.t("The document changed. Retry the operation on the updated form."),
+    };
+  const { document } = snapshot;
+  const invalid = (): DesignerError => ({
+    code: "invalidCollection",
+    message: vscode.l10n.t("This control cannot be placed in this container."),
+  });
+  if (operation.type === "addPage") {
+    const parent = document.controls.find((c) => c.id === operation.control.parentId);
+    if (
+      !parent ||
+      parent.type.toLowerCase() !== "multipage" ||
+      (parent.progId && parent.progId.toLowerCase() !== "forms.multipage.1")
+    )
+      return invalid();
+    const name = operation.control.name.toLowerCase();
+    if (
+      document.name.toLowerCase() === name ||
+      document.controls.some((c) => c.id === operation.control.id || c.name.toLowerCase() === name)
+    )
+      return {
+        code: "controlConflict",
+        message: vscode.l10n.t("The new control ID or name is already in use."),
+      };
+    return;
+  }
+  const control = document.controls.find((c) => c.id === operation.controlId);
+  if (!control) return invalid();
+  if (operation.type === "removePage" || operation.type === "reorderPage") {
+    if (!isDesignerPage(document, control)) return invalid();
+    if (operation.type === "removePage") {
+      const descendants = subtreeIds(document.controls, control.id).size - 1;
+      if (descendants && !operation.cascade) return invalid();
+      if (descendants && !(await confirm(control.name, descendants)))
+        return { code: "editCancelled", message: vscode.l10n.t("Control deletion cancelled.") };
+    }
+    return;
+  }
+  if (
+    control.type.toLowerCase() !== "tabstrip" ||
+    (control.progId && control.progId.toLowerCase() !== "forms.tabstrip.1")
+  )
+    return invalid();
 }
 
 export const designerViewType = "xlflow.userFormDesigner";
@@ -130,6 +201,8 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
     let propertyEditable = false;
     let structuralEditable = false;
     let parentEditable = false;
+    let pageEditable = false;
+    let tabEditable = false;
     let latestDocument: { version: number; document: DesignerDocument } | undefined;
     let generation = 0;
     let contextGeneration = 0;
@@ -159,6 +232,8 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
       if (message.type === "document") {
         structuralEditable = message.structuralEditable === true;
         parentEditable = message.parentEditable === true;
+        pageEditable = message.pageEditable === true;
+        tabEditable = message.tabEditable === true;
         latestDocument = { version: message.version, document: message.document };
       }
       if (message.type === "invalidDocument" || message.type === "editingUnavailable") {
@@ -166,6 +241,8 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
         propertyEditable = false;
         structuralEditable = false;
         parentEditable = false;
+        pageEditable = false;
+        tabEditable = false;
       }
       if (ready && !disposed && panel.visible) void panel.webview.postMessage(message);
     };
@@ -173,6 +250,21 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
       send({
         type: "localization",
         strings: {
+          pages: vscode.l10n.t("Pages"),
+          tabs: vscode.l10n.t("Tabs"),
+          addPage: vscode.l10n.t("Add Page"),
+          addTab: vscode.l10n.t("Add tab"),
+          deleteItem: vscode.l10n.t("Delete"),
+          moveUp: vscode.l10n.t("Move up"),
+          moveDown: vscode.l10n.t("Move down"),
+          moveToPage: vscode.l10n.t("Move to Page"),
+          choosePage: vscode.l10n.t("Choose destination Page"),
+          collectionReadOnly: vscode.l10n.t(
+            "Collection editing requires an xlflow version supporting Page or tab edits.",
+          ),
+          pagePlacement: vscode.l10n.t(
+            "Click the form, a Frame or the active Page to place the control. Escape cancels.",
+          ),
           header: vscode.l10n.t("xlflow UserForm Designer"),
           toolbox: vscode.l10n.t("Toolbox"),
           pointer: vscode.l10n.t("Pointer"),
@@ -359,19 +451,42 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
           const parentOperation = operation.type === "setParent";
           const parentedAdd =
             operation.type === "addControl" && operation.control.parentId !== undefined;
+          const page = isPageOperation(operation);
+          const tab = isTabOperation(operation);
+          const pageParent =
+            parentOperation || parentedAdd
+              ? latestDocument?.document.controls.some(
+                  (c) =>
+                    c.type.toLowerCase() === "page" &&
+                    (c.id ===
+                      (operation.type === "setParent"
+                        ? operation.parentId
+                        : operation.type === "addControl"
+                          ? operation.control.parentId
+                          : undefined) ||
+                      (operation.type === "setParent" &&
+                        latestDocument?.document.controls.find((s) => s.id === operation.controlId)
+                          ?.parentId === c.id)),
+                )
+              : false;
           const permitted = () =>
             !disposed &&
             contextGeneration === editContext &&
             panel.visible &&
-            (parentOperation
-              ? editable && parentEditable
-              : parentedAdd
-                ? structuralEditable && parentEditable
-                : structural
-                  ? structuralEditable
-                  : property
-                    ? propertyEditable
-                    : editable) &&
+            (!pageParent || pageEditable) &&
+            (page
+              ? pageEditable
+              : tab
+                ? tabEditable
+                : parentOperation
+                  ? editable && parentEditable
+                  : parentedAdd
+                    ? structuralEditable && parentEditable
+                    : structural
+                      ? structuralEditable
+                      : property
+                        ? propertyEditable
+                        : editable) &&
             generation === editGeneration;
           const prepare = structural
             ? () =>
@@ -380,10 +495,20 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
                   latestDocument,
                   message.version,
                   this.confirmDeletion,
+                  pageEditable,
                 )
             : parentOperation
-              ? async () => prepareParentEdit(operation, latestDocument, message.version)
-              : undefined;
+              ? async () =>
+                  prepareParentEdit(operation, latestDocument, message.version, pageEditable)
+              : page || tab
+                ? () =>
+                    prepareCollectionEdit(
+                      operation as PageOperation | TabOperation,
+                      latestDocument,
+                      message.version,
+                      this.confirmDeletion,
+                    )
+                : undefined;
           void this.edits
             .run(document, message.version, message.operations, this.clients, permitted, prepare)
             .then(async (error) => {
