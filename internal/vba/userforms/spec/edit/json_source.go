@@ -74,12 +74,31 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 	originalControls := map[string][]*jsonSourceNode{}
 	indexJSONControls(jsonSourceMemberValue(originalRoot, "controls"), originalControls)
 	newControls := map[string]bool{}
-	applyEdits := func(edits []SourceEdit) {
-		for i := len(edits) - 1; i >= 0; i-- {
-			edit := edits[i]
+	applyEdits := func(edits []SourceEdit) error {
+		ordered := slices.Clone(edits)
+		slices.SortFunc(ordered, func(left, right SourceEdit) int {
+			if start := cmp.Compare(left.Start, right.Start); start != 0 {
+				return start
+			}
+			return cmp.Compare(left.End, right.End)
+		})
+		for index, edit := range ordered {
+			if edit.Start < 0 || edit.End < edit.Start || edit.End > len(updated) {
+				return fmt.Errorf("invalid JSON source edit range [%d:%d]", edit.Start, edit.End)
+			}
+			if index > 0 {
+				previous := ordered[index-1]
+				if edit.Start < previous.End || (edit.Start == previous.Start && edit.Start == edit.End && previous.Start == previous.End) {
+					return fmt.Errorf("overlapping JSON source edits [%d:%d] and [%d:%d]", previous.Start, previous.End, edit.Start, edit.End)
+				}
+			}
+		}
+		for i := len(ordered) - 1; i >= 0; i-- {
+			edit := ordered[i]
 			pieces = pieces.replace(edit)
 			updated = applySourceEdits(updated, []SourceEdit{edit})
 		}
+		return nil
 	}
 	for index, op := range operations {
 		if err := checkPayload(op); err != nil {
@@ -101,7 +120,9 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 			if err != nil {
 				return Result{}, annotate(index, op, err)
 			}
-			applyEdits([]SourceEdit{edit})
+			if err := applyEdits([]SourceEdit{edit}); err != nil {
+				return Result{}, annotate(index, op, err)
+			}
 			newControls[op.Control.ID] = true
 			model, err = normalizedJSONModel(updated)
 			if err != nil {
@@ -112,6 +133,169 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 		}
 		nodes := map[string][]*jsonSourceNode{}
 		indexJSONControls(jsonSourceMemberValue(root, "controls"), nodes)
+		if op.Type == AddPage {
+			if err := validateAddPage(op); err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			parentID := op.Control.ParentID
+			parent, ok := controlByID(model, parentID)
+			if !ok || len(nodes[parentID]) != 1 || !strings.EqualFold(parent.Type, "MultiPage") || jsonSourceMemberValue(nodes[parentID][0], "id") == nil {
+				return Result{}, failure(index, op, "UFE005", "AddPage requires an explicit MultiPage parentId.", "Set control.parentId to a MultiPage control ID.")
+			}
+			pages := orderedChildren(model.Controls, parentID, "Page")
+			zIndex, err := nextPageZIndex(pages, op)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			if selected, changed := selectedAfterAdd(parent.SelectedIndex, len(pages)); changed {
+				edits, err := jsonScalarEdits(updated, nodes[parentID][0], map[string]any{"selectedIndex": selected})
+				if err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+				if err := applyEdits(edits); err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+				root, err = parseJSONSource(updated)
+				if err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+			}
+			page := *op.Control
+			page.ZIndex = new(zIndex)
+			encoded, err := json.Marshal(page)
+			if err != nil {
+				return Result{}, annotate(index, op, failure(-1, op, "UFE003", "Page payload is not serializable: "+err.Error(), "Supply serializable FormSpec Page fields."))
+			}
+			edit, err := jsonAddControlEdit(updated, root, encoded)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			if err := applyEdits([]SourceEdit{edit}); err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			newControls[page.ID] = true
+			model, err = normalizedJSONModel(updated)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			types = jsonControlTypes(model)
+			continue
+		}
+		if op.Type == RemovePage || op.Type == ReorderPage {
+			page, ok := controlByID(model, op.ControlID)
+			if !ok || len(nodes[op.ControlID]) != 1 || !strings.EqualFold(page.Type, "Page") || page.ParentID == "" {
+				return Result{}, failure(index, op, "UFE004", "Page control ID was not found.", "Use a Page control ID from the current FormSpec.")
+			}
+			parent, ok := controlByID(model, page.ParentID)
+			if !ok || !strings.EqualFold(parent.Type, "MultiPage") || len(nodes[parent.ID]) != 1 {
+				return Result{}, failure(index, op, "UFE005", "Page does not have a canonical MultiPage parent.", "Use a Page under a MultiPage control.")
+			}
+			pages := orderedChildren(model.Controls, parent.ID, "Page")
+			oldIndex := slices.IndexFunc(pages, func(candidate spec.FormSpecControl) bool { return candidate.ID == op.ControlID })
+			if oldIndex < 0 {
+				return Result{}, failure(index, op, "UFE004", "Page control ID was not found among its MultiPage children.", "Use a Page control ID from the current FormSpec.")
+			}
+			if op.Type == RemovePage {
+				if selected, changed := selectedAfterRemove(parent.SelectedIndex, oldIndex, len(pages)); changed {
+					edits, err := jsonScalarEdits(updated, nodes[parent.ID][0], map[string]any{"selectedIndex": selected})
+					if err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+					if err := applyEdits(edits); err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+					root, err = parseJSONSource(updated)
+					if err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+					nodes = map[string][]*jsonSourceNode{}
+					indexJSONControls(jsonSourceMemberValue(root, "controls"), nodes)
+				}
+				removeIDs, err := jsonControlRemovalOrder(op, model, root, nodes)
+				if err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+				removeSet := make(map[string]bool, len(removeIDs))
+				for _, id := range removeIDs {
+					removeSet[id] = true
+				}
+				for _, id := range removeIDs {
+					currentRoot, err := parseJSONSource(updated)
+					if err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+					currentNodes := map[string][]*jsonSourceNode{}
+					indexJSONControls(jsonSourceMemberValue(currentRoot, "controls"), currentNodes)
+					if len(currentNodes[id]) != 1 {
+						return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+					}
+					edit, err := jsonRemoveControlEdit(updated, currentRoot, currentNodes[id][0], removeSet)
+					if err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+					if err := applyEdits([]SourceEdit{edit}); err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+					delete(newControls, id)
+				}
+			} else {
+				if op.Index == nil || *op.Index < 0 || *op.Index >= len(pages) {
+					return Result{}, failure(index, op, "UFE003", "Page index is out of range.", "Use an index within the MultiPage pages.")
+				}
+				updates, err := reorderedZIndexes(pages, op.ControlID, *op.Index)
+				if err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+				edits := make([]SourceEdit, 0, len(updates)+1)
+				if selected, changed := selectedAfterReorder(parent.SelectedIndex, oldIndex, *op.Index); changed {
+					selection, err := jsonScalarEdits(updated, nodes[parent.ID][0], map[string]any{"selectedIndex": selected})
+					if err != nil {
+						return Result{}, annotate(index, op, err)
+					}
+					edits = append(edits, selection...)
+				}
+				for _, sibling := range pages {
+					if zIndex, changed := updates[sibling.ID]; changed {
+						if len(nodes[sibling.ID]) != 1 {
+							return Result{}, failure(index, op, "UFE004", "Page control ID did not resolve to exactly one JSON control.", "Use unique explicit page IDs.")
+						}
+						propertyEdits, err := jsonScalarEdits(updated, nodes[sibling.ID][0], map[string]any{"zIndex": zIndex})
+						if err != nil {
+							return Result{}, annotate(index, op, err)
+						}
+						edits = append(edits, propertyEdits...)
+					}
+				}
+				if err := applyEdits(edits); err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+			}
+			model, err = normalizedJSONModel(updated)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			types = jsonControlTypes(model)
+			continue
+		}
+		if op.Type == AddTab || op.Type == RemoveTab || op.Type == ReorderTab || op.Type == SetTabProperty {
+			control, ok := controlByID(model, op.ControlID)
+			if !ok || len(nodes[op.ControlID]) != 1 {
+				return Result{}, failure(index, op, "UFE004", "TabStrip control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+			}
+			edits, err := jsonTabOperation(updated, nodes[op.ControlID][0], control, op)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			if err := applyEdits(edits); err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			model, err = normalizedJSONModel(updated)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			types = jsonControlTypes(model)
+			continue
+		}
 		if op.Type == SetParent {
 			if len(nodes[op.ControlID]) != 1 {
 				return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
@@ -167,7 +351,9 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 			if err != nil {
 				return Result{}, annotate(index, op, err)
 			}
-			applyEdits(edits)
+			if err := applyEdits(edits); err != nil {
+				return Result{}, annotate(index, op, err)
+			}
 
 			if parentChanged && legacyNested {
 				currentRoot, err := parseJSONSource(updated)
@@ -187,7 +373,9 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 					return Result{}, annotate(index, op, err)
 				}
 				appendEdit := jsonArrayAppendEdit(updated, currentRootControls, currentRoot, encoded)
-				applyEdits([]SourceEdit{remove, appendEdit})
+				if err := applyEdits([]SourceEdit{remove, appendEdit}); err != nil {
+					return Result{}, annotate(index, op, err)
+				}
 			}
 			model, err = normalizedJSONModel(updated)
 			if err != nil {
@@ -222,7 +410,9 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 				if err != nil {
 					return Result{}, annotate(index, op, err)
 				}
-				applyEdits([]SourceEdit{edit})
+				if err := applyEdits([]SourceEdit{edit}); err != nil {
+					return Result{}, annotate(index, op, err)
+				}
 				delete(newControls, id)
 			}
 			model, err = normalizedJSONModel(updated)
@@ -344,7 +534,9 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 		if err != nil {
 			return Result{}, annotate(index, op, err)
 		}
-		applyEdits(edits)
+		if err := applyEdits(edits); err != nil {
+			return Result{}, annotate(index, op, err)
+		}
 	}
 	after, err := spec.ParseFormSpec(input, updated)
 	if err != nil {

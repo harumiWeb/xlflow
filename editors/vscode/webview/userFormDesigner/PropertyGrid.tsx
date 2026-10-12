@@ -61,6 +61,8 @@ interface Props {
   drafts: PropertyDraftStore;
   target: PropertyTarget;
   controlId?: string;
+  // A collection entry keeps its draft identity when its wire index changes.
+  draftId?: string;
   title: string;
   version: number;
   editable: boolean;
@@ -86,7 +88,7 @@ export interface PropertyDraftStore {
 }
 function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDescriptor }) {
   const { target, version, editable, busy, strings, reply, controlId, onCommit, drafts } = props;
-  const draftKey = JSON.stringify([controlId ?? null, descriptor.field]);
+  const draftKey = JSON.stringify([props.draftId ?? controlId ?? null, descriptor.field]);
   const source = target.values[descriptor.field];
   const fromSource = (): Draft => {
     const value = source?.present ? source.value : undefined;
@@ -333,7 +335,7 @@ export function PropertyGrid(props: Props) {
               <legend>{props.strings[category]}</legend>
               {descriptors.map((descriptor) => (
                 <PropertyRow
-                  key={JSON.stringify([props.controlId ?? null, descriptor.field])}
+                  key={JSON.stringify([props.draftId ?? props.controlId ?? null, descriptor.field])}
                   {...props}
                   descriptor={descriptor}
                 />

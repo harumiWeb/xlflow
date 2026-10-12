@@ -5,6 +5,7 @@ import {
   UserFormEditorProvider,
   prepareParentEdit,
   prepareStructuralEdit,
+  prepareCollectionEdit,
 } from "../../src/userFormEditor/provider";
 import { designerDocument } from "../../src/userFormEditor/model";
 import { createControl } from "../../src/userFormEditor/toolbox";
@@ -16,6 +17,7 @@ import type { DesignerError, HostMessage, WebviewMessage } from "../../src/userF
 export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): Promise<void> {
   await runClientCapabilityAssertions();
   await runStructuralPreparationAssertions();
+  await runCollectionPreparationAssertions();
   const incoming = new vscode.EventEmitter<WebviewMessage>();
   const view = new vscode.EventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>();
   const disposed = new vscode.EventEmitter<void>();
@@ -152,6 +154,134 @@ export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): P
     connection.dispose();
     cancel.dispose();
   }
+}
+
+async function runCollectionPreparationAssertions(): Promise<void> {
+  const document = designerDocument({
+    form: { name: "Main" },
+    controls: [
+      { id: "multi", name: "Multi", type: "MultiPage" },
+      { id: "page", name: "Page1", type: "Page", parentId: "multi" },
+      { id: "child", name: "Label1", type: "Label", parentId: "page" },
+      { id: "tabs", name: "Tabs", type: "TabStrip", tabs: [] },
+    ],
+  });
+  const snapshot = { version: 7, document };
+  let confirmations = 0;
+  const confirm = async (name: string, count: number) => {
+    confirmations++;
+    assert.strictEqual(name, "Page1");
+    assert.strictEqual(count, 1);
+    return true;
+  };
+  const remove = { type: "removePage", controlId: "page", cascade: true } as const;
+  assert.strictEqual(await prepareCollectionEdit(remove, snapshot, 7, confirm), undefined);
+  assert.strictEqual(confirmations, 1);
+  assert.strictEqual(
+    (await prepareCollectionEdit(remove, snapshot, 7, async () => false))?.code,
+    "editCancelled",
+  );
+  assert.strictEqual(
+    (await prepareCollectionEdit(remove, snapshot, 8, confirm))?.code,
+    "staleDocument",
+  );
+  assert.strictEqual(
+    (await prepareCollectionEdit({ ...remove, cascade: false }, snapshot, 7, confirm))?.code,
+    "invalidCollection",
+  );
+  assert.strictEqual(
+    (await prepareCollectionEdit({ ...remove, controlId: "multi" }, snapshot, 7, confirm))?.code,
+    "invalidCollection",
+  );
+  const add = {
+    type: "addPage",
+    control: { id: "fresh", name: "Page2", type: "Page", parentId: "multi" },
+  } as const;
+  assert.strictEqual(await prepareCollectionEdit(add, snapshot, 7, confirm), undefined);
+  assert.strictEqual(
+    (
+      await prepareCollectionEdit(
+        { ...add, control: { ...add.control, name: "PAGE1" } },
+        snapshot,
+        7,
+        confirm,
+      )
+    )?.code,
+    "controlConflict",
+  );
+  const parent = { type: "setParent", controlId: "child", parentId: "", left: 1, top: 2 } as const;
+  assert.strictEqual(prepareParentEdit(parent, snapshot, 7, true), undefined);
+  assert.strictEqual(prepareParentEdit(parent, snapshot, 7)?.code, "invalidParent");
+  assert.strictEqual(
+    await prepareCollectionEdit(
+      { type: "addTab", controlId: "tabs", tab: { name: "Tab1" } },
+      snapshot,
+      7,
+      confirm,
+    ),
+    undefined,
+  );
+  assert.strictEqual(
+    (
+      await prepareCollectionEdit(
+        { type: "addTab", controlId: "multi", tab: { name: "Tab1" } },
+        snapshot,
+        7,
+        confirm,
+      )
+    )?.code,
+    "invalidCollection",
+  );
+  for (const userFormPageEdit of [undefined, false, true])
+    for (const userFormTabEdit of [undefined, false, true]) {
+      let requests = 0;
+      const doc = await vscode.workspace.openTextDocument({
+        language: "yaml",
+        content: "form: {name: Main}\ncontrols: []\n",
+      });
+      const manager = Object.assign(Object.create(XlflowLanguageClientManager.prototype), {
+        previewGeneration: 0,
+        workspaceFolderKey: undefined,
+        client: {
+          isRunning: () => true,
+          initializeResult: {
+            capabilities: {
+              experimental: { userFormPreview: true, userFormPageEdit, userFormTabEdit },
+            },
+          },
+          sendRequest: async () => {
+            requests++;
+            return {
+              version: doc.version,
+              document: { form: { name: "Main" }, controls: [] },
+              edits: [],
+            };
+          },
+        },
+      }) as XlflowLanguageClientManager;
+      const preview = await manager.requestUserFormPreview(doc);
+      assert.strictEqual(preview.pageEditable, userFormPageEdit === true);
+      assert.strictEqual(preview.tabEditable, userFormTabEdit === true);
+      const before = requests;
+      if (userFormPageEdit === true)
+        await manager.requestUserFormEdit(doc, doc.version, doc.getText(), [add]);
+      else
+        await assert.rejects(manager.requestUserFormEdit(doc, doc.version, doc.getText(), [add]));
+      if (userFormTabEdit === true)
+        await manager.requestUserFormEdit(doc, doc.version, doc.getText(), [
+          { type: "addTab", controlId: "tabs", tab: { name: "Tab1" } },
+        ]);
+      else
+        await assert.rejects(
+          manager.requestUserFormEdit(doc, doc.version, doc.getText(), [
+            { type: "addTab", controlId: "tabs", tab: { name: "Tab1" } },
+          ]),
+        );
+      assert.strictEqual(
+        requests - before,
+        Number(userFormPageEdit === true) + Number(userFormTabEdit === true),
+      );
+    }
 }
 
 async function runClientCapabilityAssertions(): Promise<void> {

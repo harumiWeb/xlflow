@@ -52,6 +52,11 @@ func newUserFormParentRPC(t *testing.T) userFormParentRPC {
 	if initialized.Capabilities.Experimental["userFormParentEdit"] != true {
 		t.Fatalf("parent edit capability was not advertised: %+v", initialized.Capabilities.Experimental)
 	}
+	for _, capability := range []string{"userFormPageEdit", "userFormTabEdit"} {
+		if initialized.Capabilities.Experimental[capability] != true {
+			t.Fatalf("%s capability was not advertised: %+v", capability, initialized.Capabilities.Experimental)
+		}
+	}
 	if err := clientConn.Notify(ctx, "initialized", map[string]any{}); err != nil {
 		t.Fatal(err)
 	}
@@ -59,11 +64,15 @@ func newUserFormParentRPC(t *testing.T) userFormParentRPC {
 }
 
 func (rpc userFormParentRPC) call(t *testing.T, format, source string, operation json.RawMessage) userFormEditResult {
+	return rpc.callOperations(t, format, source, operation)
+}
+
+func (rpc userFormParentRPC) callOperations(t *testing.T, format, source string, operations ...json.RawMessage) userFormEditResult {
 	t.Helper()
 	uri := pathToFileURI(filepath.Join(rpc.root, "src", "forms", "specs", "Main."+format))
 	params, err := json.Marshal(map[string]any{
 		"uri": uri, "version": 23, "text": source,
-		"operations": []json.RawMessage{operation},
+		"operations": operations,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -236,6 +245,147 @@ func TestUserFormParentEditRequiresFiniteCoordinatesAtEveryBoundary(t *testing.T
 	parsed, parseError := parseUserFormEditOperation([]byte(`{"type":"setParent","controlId":"plain","parentId":"","left":1,"top":2}`))
 	if parseError != nil || parsed.ParentID != "" || parsed.Left == nil || parsed.Top == nil {
 		t.Fatalf("explicit empty parentId or finite coordinates were not parsed: %+v, %+v", parsed, parseError)
+	}
+}
+
+func TestUserFormPageAndTabCollectionEditsThroughRawRPC(t *testing.T) {
+	rpc := newUserFormParentRPC(t)
+	source := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"multi","name":"Multi","type":"MultiPage","selectedIndex":0},{"id":"page1","name":"Page1","type":"Page","parentId":"multi","caption":"One","zIndex":0},{"id":"page2","name":"Page2","type":"Page","parentId":"multi","caption":"Two","zIndex":1},{"id":"tabs","name":"Tabs","type":"TabStrip","selectedIndex":0,"tabs":[{"name":"first","caption":"First","tag":"a"},{"name":"second","caption":"Second","enabled":true}]},{"id":"plain","name":"Plain","type":"Label","left":0,"top":0,"width":40,"height":16}]}`
+	if _, err := spec.ParseFormSpec(spec.SpecInput{Format: "json"}, []byte(source)); err != nil {
+		t.Fatalf("invalid collection fixture: %v", err)
+	}
+
+	apply := func(operation string) {
+		t.Helper()
+		result := rpc.call(t, "json", source, json.RawMessage(operation))
+		if result.Error != nil || len(result.Edits) == 0 {
+			t.Fatalf("raw edit %s failed: error=%+v edits=%+v", operation, result.Error, result.Edits)
+		}
+		updated, err := applyLSPTextEdits(source, result.Edits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source = updated
+		if _, err := spec.ParseFormSpec(spec.SpecInput{Format: "json"}, []byte(source)); err != nil {
+			t.Fatalf("raw edit produced invalid FormSpec: %v\n%s", err, source)
+		}
+	}
+
+	apply(`{"type":"addPage","control":{"id":"page3","name":"Page3","type":"Page","parentId":"multi","caption":"Three"}}`)
+	document, err := spec.ParseFormSpec(spec.SpecInput{Format: "json"}, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page3 := controlByID(t, document, "page3")
+	if page3.ParentID != "multi" || page3.Caption == nil || *page3.Caption != "Three" || page3.Left != nil || page3.Top != nil || page3.Width != nil || page3.Height != nil {
+		t.Fatalf("AddPage did not preserve the flat Page payload: %+v", page3)
+	}
+	apply(`{"type":"reorderPage","controlId":"page3","index":0}`)
+	apply(`{"type":"removePage","controlId":"page1","cascade":true}`)
+	apply(`{"type":"addControl","control":{"id":"insidePage","name":"InsidePage","type":"Label","parentId":"page2"}}`)
+	apply(`{"type":"setParent","controlId":"plain","parentId":"page3","left":7,"top":8}`)
+
+	document, err = spec.ParseFormSpec(spec.SpecInput{Format: "json"}, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page2 := controlByID(t, document, "page2")
+	page3 = controlByID(t, document, "page3")
+	if page2.ParentID != "multi" || page2.ZIndex == nil || page3.ParentID != "multi" || page3.ZIndex == nil || *page3.ZIndex >= *page2.ZIndex {
+		t.Fatalf("Page reorder/remove changed the wrong page order: page2=%+v page3=%+v", page2, page3)
+	}
+	if controlByID(t, document, "insidePage").ParentID != "page2" || controlByID(t, document, "plain").ParentID != "page3" {
+		t.Fatalf("Page destinations were not retained: %+v", document.Controls)
+	}
+	apply(`{"type":"addPage","control":{"id":"page4","name":"Page4","type":"Page","parentId":"multi"}}`)
+	document, err = spec.ParseFormSpec(spec.SpecInput{Format: "json"}, []byte(source))
+	if err != nil || controlByID(t, document, "page4").Caption != nil {
+		t.Fatalf("optional Page caption was not accepted as omitted: document=%+v err=%v", document, err)
+	}
+
+	apply(`{"type":"addTab","controlId":"tabs","tab":{"name":"third","caption":"Third"}}`)
+	apply(`{"type":"removeTab","controlId":"tabs","index":1}`)
+	apply(`{"type":"reorderTab","controlId":"tabs","index":1,"toIndex":0}`)
+	apply(`{"type":"setTabProperty","controlId":"tabs","index":0,"field":"caption","value":"Renamed"}`)
+	apply(`{"type":"setTabProperty","controlId":"tabs","index":0,"field":"enabled","value":false}`)
+	apply(`{"type":"setTabProperty","controlId":"tabs","index":0,"field":"tag","value":null}`)
+	document, err = spec.ParseFormSpec(spec.SpecInput{Format: "json"}, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tabs := controlByID(t, document, "tabs")
+	if len(tabs.Tabs) != 2 || tabs.Tabs[0].Name != "third" || tabs.Tabs[0].Caption == nil || *tabs.Tabs[0].Caption != "Renamed" || tabs.Tabs[1].Name != "first" {
+		t.Fatalf("tab add/remove/reorder/property operations produced unexpected tabs: %+v", tabs.Tabs)
+	}
+
+	previewURI := pathToFileURI(filepath.Join(rpc.root, "src", "forms", "specs", "Main.json"))
+	var preview userFormPreviewResult
+	if err := rpc.client.Call(rpc.ctx, "xlflow/userFormPreview", userFormPreviewParams{URI: previewURI, Version: 23, Text: source}, &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.Error != nil || preview.PropertyError != nil || preview.PropertyGrid == nil || len(preview.PropertyGrid.Tabs["tabs"]) != 2 {
+		t.Fatalf("Tab Property Grid metadata was not forwarded by LSP preview: %+v", preview)
+	}
+	if preview.PropertyGrid.Tabs["tabs"][0].Values["caption"] != (formsedit.PropertyState{Present: true, Value: "Renamed"}) {
+		t.Fatalf("tab Property Grid did not preserve the edited caption: %+v", preview.PropertyGrid.Tabs["tabs"])
+	}
+	if preview.PropertyGrid.Tabs["tabs"][0].Values["enabled"] != (formsedit.PropertyState{Present: true, Value: false}) || preview.PropertyGrid.Tabs["tabs"][0].Values["tag"] != (formsedit.PropertyState{Present: true}) {
+		t.Fatalf("tab Property Grid lost false or explicit null values: %+v", preview.PropertyGrid.Tabs["tabs"])
+	}
+
+	unsupported := []string{
+		`{"type":"removeControl","controlId":"page2","cascade":true}`,
+		`{"type":"removePage","controlId":"plain"}`,
+		`{"type":"addTab","controlId":"multi","tab":{"name":"wrong target"}}`,
+	}
+	for _, operation := range unsupported {
+		result := rpc.call(t, "json", source, json.RawMessage(operation))
+		if result.Error == nil || result.Error.Code != compiler.Unsupported || len(result.Edits) != 0 {
+			t.Errorf("out-of-scope Page/Tab operation was not rejected atomically: %s: %+v", operation, result)
+		}
+	}
+
+	invalid := []string{
+		`{"type":"addPage","control":{"id":"bad","name":"Bad","type":"Page","parentId":"multi","left":1}}`,
+		`{"type":"addPage","control":{"id":"bad","name":"Bad","type":"Page","parentId":"multi","progId":"Forms.Page.1"}}`,
+		`{"type":"addPage","control":{"id":"bad","name":"Bad","type":"Label","parentId":"multi"}}`,
+		`{"type":"removePage","controlId":"page2","cascade":"true"}`,
+		`{"type":"reorderPage","controlId":"page2","index":0.5}`,
+		`{"type":"reorderPage","controlId":"page2","index":0,"extra":true}`,
+		`{"type":"addTab","controlId":"tabs","tab":{"name":"bad","extra":true}}`,
+		`{"type":"removeTab","controlId":"tabs"}`,
+		`{"type":"removeTab","controlId":"tabs","index":0.5}`,
+		`{"type":"reorderTab","controlId":"tabs","index":0}`,
+		`{"type":"reorderTab","controlId":"tabs","index":0,"toIndex":null}`,
+		`{"type":"setTabProperty","controlId":"tabs","index":0,"field":"caption","value":{"nested":true}}`,
+		`{"type":"setTabProperty","controlId":"tabs","index":0,"field":"caption","value":[],"extra":true}`,
+	}
+	for _, operation := range invalid {
+		if _, requestError := parseUserFormEditOperation([]byte(operation)); requestError == nil {
+			t.Errorf("malformed collection payload passed strict decoding: %s", operation)
+		}
+		result := rpc.call(t, "json", source, json.RawMessage(operation))
+		if result.Error == nil || result.Error.Code != compiler.Invalid || len(result.Edits) != 0 {
+			t.Errorf("invalid collection payload was not rejected atomically: %s: %+v", operation, result)
+		}
+	}
+	if _, requestError := parseUserFormEditOperation([]byte(`{"type":"addTab","controlId":"tabs","tab":{"name":"bad","name":"duplicate"}}`)); requestError == nil {
+		t.Error("duplicate fields in a nested tab payload passed strict decoding")
+	}
+
+	combined := rpc.callOperations(t, "json", source,
+		json.RawMessage(`{"type":"addTab","controlId":"tabs","tab":{"name":"extra"}}`),
+		json.RawMessage(`{"type":"removeTab","controlId":"tabs","index":0}`),
+	)
+	if combined.Error == nil || combined.Error.Code != compiler.Invalid || len(combined.Edits) != 0 {
+		t.Fatalf("multiple collection operations were not rejected atomically: %+v", combined)
+	}
+	geometryPair := rpc.callOperations(t, "json", source,
+		json.RawMessage(`{"type":"moveControl","controlId":"plain","left":9,"top":10}`),
+		json.RawMessage(`{"type":"resizeControl","controlId":"plain","width":50,"height":20}`),
+	)
+	if geometryPair.Error != nil || len(geometryPair.Edits) == 0 {
+		t.Fatalf("existing move/resize transaction stopped working: %+v", geometryPair)
 	}
 }
 

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Documented the Issue #921 Page and TabStrip editing contract, including
+  capability-gated operations, selection identity, and source preservation.
+  This is a documentation entry; the actions require matching extension and
+  LSP support.
+
 - Added Frame placement, drag reparenting and clickable hierarchy breadcrumbs.
   Drop previews preserve apparent positions with boundary clamping, reject
   invalid destinations, and commit YAML/JSON parent and coordinate updates as

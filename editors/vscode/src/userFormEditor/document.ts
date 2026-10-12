@@ -58,6 +58,8 @@ export class PreviewSynchronizer {
         propertyEditable: result.propertyEditable ?? false,
         structuralEditable: result.structuralEditable ?? false,
         parentEditable: result.parentEditable ?? false,
+        pageEditable: result.pageEditable ?? false,
+        tabEditable: result.tabEditable ?? false,
         propertyGrid: result.propertyGrid,
         propertyError: result.propertyError,
         document: designerDocument(

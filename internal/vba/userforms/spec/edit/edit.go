@@ -27,9 +27,16 @@ const (
 	MoveControl        OperationType = "moveControl"
 	ResizeControl      OperationType = "resizeControl"
 	AddControl         OperationType = "addControl"
+	AddPage            OperationType = "addPage"
 	RemoveControl      OperationType = "removeControl"
+	RemovePage         OperationType = "removePage"
 	SetParent          OperationType = "setParent"
 	ReorderControl     OperationType = "reorderControl"
+	ReorderPage        OperationType = "reorderPage"
+	AddTab             OperationType = "addTab"
+	RemoveTab          OperationType = "removeTab"
+	ReorderTab         OperationType = "reorderTab"
+	SetTabProperty     OperationType = "setTabProperty"
 )
 
 // Operation is a tagged, serializable semantic edit. Geometry is in points,
@@ -45,8 +52,10 @@ type Operation struct {
 	Width        *float64              `json:"width,omitempty"`
 	Height       *float64              `json:"height,omitempty"`
 	Control      *spec.FormSpecControl `json:"control,omitempty"`
+	Tab          *spec.FormSpecTab     `json:"tab,omitempty"`
 	ParentID     string                `json:"parentId,omitempty"`
 	Index        *int                  `json:"index,omitempty"`
+	ToIndex      *int                  `json:"toIndex,omitempty"`
 	Cascade      bool                  `json:"cascade,omitzero"`
 }
 
@@ -125,9 +134,12 @@ func Apply(input spec.SpecInput, source []byte, operations []Operation) (Result,
 		if id != "" {
 			affected[id] = index
 		}
-		if op.Type == AddControl || op.Type == RemoveControl || op.Type == SetParent {
+		if op.Type == AddControl || op.Type == AddPage || op.Type == RemoveControl || op.Type == RemovePage || op.Type == SetParent || op.Type == ReorderPage {
 			for _, c := range previous {
 				if c.ID == id && c.ParentID != "" {
+					affected[c.ParentID] = index
+				}
+				if c.ID == op.ControlID && strings.EqualFold(c.Type, "Page") && c.ParentID != "" {
 					affected[c.ParentID] = index
 				}
 			}
@@ -204,7 +216,7 @@ func failure(index int, op Operation, code, message, suggestion string) *Error {
 }
 
 func operationControlID(op Operation) string {
-	if op.Type == AddControl && op.Control != nil {
+	if (op.Type == AddControl || op.Type == AddPage) && op.Control != nil {
 		return op.Control.ID
 	}
 	return op.ControlID
@@ -324,7 +336,11 @@ func (e *engine) apply(op Operation) error {
 			return err
 		}
 		return e.appendControl(&node)
-	case SetControlProperty, MoveControl, ResizeControl, RemoveControl, SetParent, ReorderControl:
+	case AddPage:
+		return e.addPage(op)
+	case AddTab, RemoveTab, ReorderTab, SetTabProperty:
+		return e.applyTab(op)
+	case SetControlProperty, MoveControl, ResizeControl, RemoveControl, RemovePage, SetParent, ReorderControl, ReorderPage:
 		c, ok := e.controls[op.ControlID]
 		if !ok {
 			return failure(-1, op, "UFE004", "Control ID was not found.", "Use a control ID from the current FormSpec.")
@@ -366,10 +382,14 @@ func (e *engine) apply(op Operation) error {
 			return e.setControl(op.ControlID, "height", *op.Height)
 		case RemoveControl:
 			return e.removeControl(op)
+		case RemovePage:
+			return e.removePage(op)
 		case SetParent:
 			return e.setParent(op)
 		case ReorderControl:
 			return e.reorder(op)
+		case ReorderPage:
+			return e.reorderPage(op)
 		}
 	}
 	return failure(-1, op, "UFE003", "Unknown semantic operation.", "Use a supported operation type.")
@@ -412,19 +432,33 @@ func checkPayload(op Operation) error {
 		allowed["controlId"], allowed["width"], allowed["height"] = true, true, true
 	case AddControl:
 		allowed["control"] = true
+	case AddPage:
+		allowed["control"] = true
 	case RemoveControl:
+		allowed["controlId"], allowed["cascade"] = true, true
+	case RemovePage:
 		allowed["controlId"], allowed["cascade"] = true, true
 	case SetParent:
 		allowed["controlId"], allowed["parentId"], allowed["left"], allowed["top"] = true, true, true, true
 	case ReorderControl:
 		allowed["controlId"], allowed["index"] = true, true
+	case ReorderPage:
+		allowed["controlId"], allowed["index"] = true, true
+	case AddTab:
+		allowed["controlId"], allowed["tab"] = true, true
+	case RemoveTab:
+		allowed["controlId"], allowed["index"] = true, true
+	case ReorderTab:
+		allowed["controlId"], allowed["index"], allowed["toIndex"] = true, true, true
+	case SetTabProperty:
+		allowed["controlId"], allowed["index"], allowed["field"], allowed["value"] = true, true, true, true
 	default:
 		return failure(-1, op, "UFE003", "Unknown semantic operation.", "Use a supported operation type.")
 	}
 	present := []struct {
 		name string
 		set  bool
-	}{{"controlId", op.ControlID != ""}, {"field", op.Field != ""}, {"value", op.Value != nil || op.ValuePresent}, {"left", op.Left != nil}, {"top", op.Top != nil}, {"width", op.Width != nil}, {"height", op.Height != nil}, {"control", op.Control != nil}, {"parentId", op.ParentID != ""}, {"index", op.Index != nil}, {"cascade", op.Cascade}}
+	}{{"controlId", op.ControlID != ""}, {"field", op.Field != ""}, {"value", op.Value != nil || op.ValuePresent}, {"left", op.Left != nil}, {"top", op.Top != nil}, {"width", op.Width != nil}, {"height", op.Height != nil}, {"control", op.Control != nil}, {"tab", op.Tab != nil}, {"parentId", op.ParentID != ""}, {"index", op.Index != nil}, {"toIndex", op.ToIndex != nil}, {"cascade", op.Cascade}}
 	for _, p := range present {
 		if p.set && !allowed[p.name] {
 			return failure(-1, op, "UFE003", "Unexpected payload field: "+p.name+".", "Supply only fields belonging to this operation.")
@@ -605,41 +639,54 @@ func (e *engine) reorder(op Operation) error {
 		return failure(-1, op, "UFE003", "ReorderControl requires an index.", "Supply a zero-based sibling index.")
 	}
 	c := e.controls[op.ControlID]
-	var siblings []spec.FormSpecControl
-	for _, other := range e.model.Controls {
-		if other.ParentID == c.model.ParentID {
-			siblings = append(siblings, other)
-		}
-	}
-	slices.SortStableFunc(siblings, func(a, b spec.FormSpecControl) int { return cmp.Compare(*a.ZIndex, *b.ZIndex) })
+	siblings := orderedChildren(e.model.Controls, c.model.ParentID, "")
 	if *op.Index < 0 || *op.Index >= len(siblings) {
 		return failure(-1, op, "UFE003", "Sibling index is out of range.", "Use an index within the sibling collection.")
 	}
-	old := slices.IndexFunc(siblings, func(c spec.FormSpecControl) bool { return c.ID == op.ControlID })
-	if old == *op.Index {
-		return nil
+	updates, err := reorderedZIndexes(siblings, op.ControlID, *op.Index)
+	if err != nil || len(updates) == 0 {
+		return err
+	}
+	for _, sibling := range siblings {
+		if index, changed := updates[sibling.ID]; changed {
+			if err := e.setControl(sibling.ID, "zIndex", index); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func reorderedZIndexes(siblings []spec.FormSpecControl, controlID string, target int) (map[string]int, error) {
+	old := slices.IndexFunc(siblings, func(control spec.FormSpecControl) bool { return control.ID == controlID })
+	if old < 0 || target < 0 || target >= len(siblings) {
+		return nil, fmt.Errorf("sibling index is out of range")
+	}
+	if old == target {
+		return nil, nil
 	}
 	moved := siblings[old]
-	siblings = slices.Delete(siblings, old, old+1)
-	siblings = slices.Insert(siblings, *op.Index, moved)
+	ordered := slices.Clone(siblings)
+	ordered = slices.Delete(ordered, old, old+1)
+	ordered = slices.Insert(ordered, target, moved)
 	// First try changing only the moved control. Expand to the shortest
 	// contiguous range that can fit between unchanged neighbors when needed.
 	// Big integers keep capacity checks safe even at the int limits.
-	for size := 1; size <= len(siblings); size++ {
-		for left := max(0, *op.Index-size+1); left <= min(*op.Index, len(siblings)-size); left++ {
+	for size := 1; size <= len(ordered); size++ {
+		for left := max(0, target-size+1); left <= min(target, len(ordered)-size); left++ {
 			right := left + size
 			low, high := math.MinInt, math.MaxInt
 			if left > 0 {
-				if *siblings[left-1].ZIndex == math.MaxInt {
+				if *ordered[left-1].ZIndex == math.MaxInt {
 					continue
 				}
-				low = *siblings[left-1].ZIndex + 1
+				low = *ordered[left-1].ZIndex + 1
 			}
-			if right < len(siblings) {
-				if *siblings[right].ZIndex == math.MinInt {
+			if right < len(ordered) {
+				if *ordered[right].ZIndex == math.MinInt {
 					continue
 				}
-				high = *siblings[right].ZIndex - 1
+				high = *ordered[right].ZIndex - 1
 			}
 			capacity := new(big.Int).Sub(big.NewInt(int64(high)), big.NewInt(int64(low)))
 			if capacity.Cmp(big.NewInt(int64(size-1))) < 0 {
@@ -648,17 +695,16 @@ func (e *engine) reorder(op Operation) error {
 			first := low
 			if left == 0 {
 				first = 0
-				if right < len(siblings) {
+				if right < len(ordered) {
 					first = high - (size - 1)
 				}
 			}
+			updates := make(map[string]int, size)
 			for i := range size {
-				if err := e.setControl(siblings[left+i].ID, "zIndex", first+i); err != nil {
-					return err
-				}
+				updates[ordered[left+i].ID] = first + i
 			}
-			return nil
+			return updates, nil
 		}
 	}
-	return fmt.Errorf("cannot assign sibling zIndex values")
+	return nil, fmt.Errorf("cannot assign sibling zIndex values")
 }

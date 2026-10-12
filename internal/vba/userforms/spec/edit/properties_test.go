@@ -237,6 +237,71 @@ func TestNullContainersAreNotGuessedDuringInsertion(t *testing.T) {
 	}
 }
 
+func TestPropertyGridTabsUseOnlyAuthoredSource(t *testing.T) {
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			source := pageTabsYAML
+			if format == "json" {
+				source = pageTabsJSON
+			}
+			source = strings.ReplaceAll(source, "\n", "\r\n")
+			grid, err := PropertyGrid(spec.SpecInput{Format: format}, []byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			absent, ok := grid.Tabs["absent"]
+			if !ok || absent == nil || len(absent) != 0 {
+				t.Fatalf("absent authored tabs must be an empty list despite observed tabs: %#v", grid.Tabs)
+			}
+			authored := grid.Tabs["strip"]
+			if len(authored) != 2 {
+				t.Fatalf("authored tabs missing: %#v", authored)
+			}
+			wantCaption := any("Alpha # keep this comment")
+			if format == "json" {
+				wantCaption = "Bravo"
+			}
+			if authored[0].Values["caption"] != (PropertyState{Present: true, Value: wantCaption}) {
+				t.Fatalf("authored tab value was not read from source: %+v", authored[0])
+			}
+			if !slices.ContainsFunc(authored[0].Descriptors, func(descriptor PropertyDescriptor) bool { return descriptor.Field == "caption" }) {
+				t.Fatalf("tab metadata omitted caption descriptor: %+v", authored[0].Descriptors)
+			}
+			encoded, err := json.Marshal(grid.Tabs)
+			if err != nil || !bytes.Contains(encoded, []byte(`"absent":[]`)) || bytes.Contains(encoded, []byte("ObservedOnly")) {
+				t.Fatalf("wire tabs should contain authored arrays only: %s (%v)", encoded, err)
+			}
+		})
+	}
+}
+
+func TestSetTabPropertyPreservesExplicitNull(t *testing.T) {
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			source := pageTabsYAML
+			if format == "json" {
+				source = pageTabsJSON
+			}
+			result := applyFormatOK(t, format, source, Operation{
+				Type: SetTabProperty, ControlID: "strip", Index: new(0), Field: "caption", Value: nil, ValuePresent: true,
+			})
+			grid, err := PropertyGrid(spec.SpecInput{Format: format}, result.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if grid.Tabs["strip"][0].Values["caption"] != (PropertyState{Present: true, Value: nil}) {
+				t.Fatalf("explicit null was not retained: %+v", grid.Tabs["strip"][0].Values["caption"])
+			}
+			if format == "yaml" && !bytes.Contains(result.Source, []byte("caption: null")) {
+				t.Fatalf("YAML null scalar was not authored: %s", result.Source)
+			}
+			if format == "json" && !bytes.Contains(result.Source, []byte(`"caption":null`)) {
+				t.Fatalf("JSON null scalar was not authored: %s", result.Source)
+			}
+		})
+	}
+}
+
 func TestJSONScalarPropertyPreservesTokenSpans(t *testing.T) {
 	replacement := "新😀 \"quoted\"\n\\"
 	result := applyFormatOK(t, "json", propertyJSON, Operation{Type: SetControlProperty, ControlID: "submit", Field: "caption", Value: replacement})

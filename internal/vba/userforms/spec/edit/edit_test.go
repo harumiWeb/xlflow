@@ -208,6 +208,254 @@ func TestAddRemoveAndEmptySequences(t *testing.T) {
 	}
 }
 
+func TestAddControlBlockSequenceRetainsAnchoredExistingItem(t *testing.T) {
+	source := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform: {name: Main}\ncontrols:\n  - &kept\n    id: kept\n    name: Kept\n    type: Label\n  # retained source comment\n"
+	result := applyOK(t, source, Operation{Type: AddControl, Control: &spec.FormSpecControl{ID: "added", Name: "Added", Type: "Label"}})
+	if len(result.Document.Controls) != 2 || result.Document.Controls[0].ID != "kept" || result.Document.Controls[1].ID != "added" || !strings.Contains(string(result.Source), "&kept") || !strings.Contains(string(result.Source), "# retained source comment") {
+		t.Fatalf("block append changed an unrelated anchored item or comment:\n%s", result.Source)
+	}
+}
+
+const pageTabsYAML = `schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form: {name: Main}
+controls:
+  - id: multi
+    name: Multi
+    type: MultiPage
+    selectedIndex: 1
+    observed:
+      selectedIndex: 1
+  - id: first
+    parentId: multi
+    zIndex: 10
+    name: First
+    type: Page
+  # retain this comment with the second page
+  - id: second
+    parentId: multi
+    zIndex: 20
+    name: Second
+    type: Page
+  - id: child
+    parentId: second
+    name: Child
+    type: Label
+    left: 3
+    top: 4
+  - id: empty
+    name: Empty
+    type: MultiPage
+    selectedIndex: -1
+  - id: strip
+    name: Strip
+    type: TabStrip
+    selectedIndex: 1
+    tabs:
+      - name: Alpha
+        caption: 'Alpha # keep this comment' # tab comment
+      - name: Beta
+  - id: absent
+    name: Absent
+    type: TabStrip
+    observed:
+      selectedIndex: 0
+      tabs:
+        - name: ObservedOnly
+warnings: []
+`
+
+const pageTabsJSON = `{
+  "schemaVersion": 1,
+  "kind": "xlflow.userform",
+  "basis": "designer",
+  "form": {"name": "Main"},
+  "controls": [
+    {"id":"multi","name":"Multi","type":"MultiPage","selectedIndex":1,"observed":{"selectedIndex":1}},
+    {"id":"first","parentId":"multi","zIndex":10,"name":"First","type":"Page"},
+    {"id":"second","parentId":"multi","zIndex":20,"name":"Second","type":"Page"},
+    {"id":"child","parentId":"second","name":"Child","type":"Label","left":3,"top":4},
+    {"id":"empty","name":"Empty","type":"MultiPage","selectedIndex":-1},
+    {"id":"strip","name":"Strip","type":"TabStrip","selectedIndex":1,"tabs":[{"name":"Alpha","caption":"Bravo"},{"name":"Beta"}]},
+    {"id":"absent","name":"Absent","type":"TabStrip","observed":{"selectedIndex":0,"tabs":[{"name":"ObservedOnly"}]}}
+  ]
+}
+`
+
+func TestPageOperationsPreserveSelectionAndCascade(t *testing.T) {
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			source := pageTabsYAML
+			if format == "json" {
+				source = pageTabsJSON
+				source = strings.Replace(source, `,"observed":{"selectedIndex":1}`, "", 1)
+			} else {
+				source = strings.Replace(source, "    observed:\n      selectedIndex: 1\n", "", 1)
+			}
+			source = strings.ReplaceAll(source, "\n", "\r\n")
+			page := spec.FormSpecControl{ID: "added", Name: "Added", Type: "Page", ParentID: "empty"}
+			result := applyFormatOK(t, format, source,
+				Operation{Type: ReorderPage, ControlID: "second", Index: new(0)},
+				Operation{Type: RemovePage, ControlID: "second", Cascade: true},
+				Operation{Type: AddPage, Control: &page},
+			)
+			controls := make(map[string]spec.FormSpecControl, len(result.Document.Controls))
+			for _, control := range result.Document.Controls {
+				controls[control.ID] = control
+			}
+			if controls["multi"].SelectedIndex == nil || *controls["multi"].SelectedIndex != 0 {
+				t.Fatalf("remaining page selection changed unexpectedly: %+v", controls["multi"])
+			}
+			if _, ok := controls["second"]; ok {
+				t.Fatal("removed Page remains")
+			}
+			if _, ok := controls["child"]; ok {
+				t.Fatal("cascaded Page child remains")
+			}
+			if controls["added"].ParentID != "empty" || controls["added"].ZIndex == nil || *controls["added"].ZIndex != 0 || controls["empty"].SelectedIndex == nil || *controls["empty"].SelectedIndex != 0 {
+				t.Fatalf("first page was not appended with selection: %+v / %+v", controls["added"], controls["empty"])
+			}
+			if format == "yaml" && (!strings.Contains(string(result.Source), "# retain this comment with the second page") || !strings.Contains(string(result.Source), "# tab comment") || !strings.Contains(string(result.Source), "\r\n")) {
+				t.Fatalf("YAML comments or CRLF were lost:\n%s", result.Source)
+			}
+		})
+	}
+}
+
+func TestPageRemovalRequiresCascadeAndObservedSelectionCanReject(t *testing.T) {
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			source := pageTabsYAML
+			if format == "json" {
+				source = pageTabsJSON
+			}
+			result, err := Apply(spec.SpecInput{Format: format}, []byte(source), []Operation{{Type: RemovePage, ControlID: "second"}})
+			structured, ok := errors.AsType[*Error](err)
+			if !ok || len(structured.Diagnostics) == 0 || structured.Diagnostics[0].Code != "UFE007" || !reflect.DeepEqual(result, Result{}) {
+				t.Fatalf("removing a Page with children must require cascade: %+v %v", result, err)
+			}
+
+			input := []byte(source)
+			original := bytes.Clone(input)
+			result, err = Apply(spec.SpecInput{Format: format}, input, []Operation{{Type: RemovePage, ControlID: "first", Cascade: true}})
+			structured, ok = errors.AsType[*Error](err)
+			if !ok || len(structured.Diagnostics) == 0 || structured.Diagnostics[0].Code != "UFV020" || !reflect.DeepEqual(result, Result{}) || !bytes.Equal(input, original) {
+				t.Fatalf("observed selected index should reject the transaction: %+v %v", result, err)
+			}
+		})
+	}
+}
+
+func TestTabOperationsPreserveSelectionAndAuthoredNull(t *testing.T) {
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			source := pageTabsYAML
+			if format == "json" {
+				source = pageTabsJSON
+			}
+			source = strings.ReplaceAll(source, "\n", "\r\n")
+			result := applyFormatOK(t, format, source,
+				Operation{Type: ReorderTab, ControlID: "strip", Index: new(1), ToIndex: new(0)},
+				Operation{Type: SetTabProperty, ControlID: "strip", Index: new(0), Field: "caption", Value: nil, ValuePresent: true},
+				Operation{Type: RemoveTab, ControlID: "strip", Index: new(0)},
+				Operation{Type: RemoveTab, ControlID: "strip", Index: new(0)},
+			)
+			strip := result.Document.Controls[slices.IndexFunc(result.Document.Controls, func(control spec.FormSpecControl) bool { return control.ID == "strip" })]
+			if strip.SelectedIndex == nil || *strip.SelectedIndex != -1 || strip.Tabs == nil || len(strip.Tabs) != 0 {
+				t.Fatalf("tab selection or empty collection is wrong: %+v", strip)
+			}
+		})
+	}
+}
+
+func TestTabRemovalLeavesObservedSelectionValidationAuthoritative(t *testing.T) {
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			source := pageTabsYAML
+			if format == "json" {
+				source = pageTabsJSON
+			}
+			needle := "    selectedIndex: 1\n    tabs:"
+			if format == "json" {
+				needle = `"selectedIndex":1,"tabs":`
+			}
+			if format == "yaml" {
+				source = strings.Replace(source, needle, "    selectedIndex: 1\n    observed: {selectedIndex: 1}\n    tabs:", 1)
+			} else {
+				source = strings.Replace(source, needle, `"selectedIndex":1,"observed":{"selectedIndex":1},"tabs":`, 1)
+			}
+			input := []byte(source)
+			original := bytes.Clone(input)
+			result, err := Apply(spec.SpecInput{Format: format}, input, []Operation{{Type: RemoveTab, ControlID: "strip", Index: new(0)}})
+			structured, ok := errors.AsType[*Error](err)
+			if !ok || len(structured.Diagnostics) == 0 || structured.Diagnostics[0].Code != "UFV020" || !reflect.DeepEqual(result, Result{}) || !bytes.Equal(input, original) {
+				t.Fatalf("observed selected index should reject the transaction: %+v %v", result, err)
+			}
+		})
+	}
+}
+
+func TestTabFlowSelectionEditsReloadSequenceBeforeCollectionMutation(t *testing.T) {
+	source := "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform: {name: Main}\ncontrols: [{id: strip, name: Strip, type: TabStrip, selectedIndex: 0, tabs: [{name: Alpha}, {name: Beta}]}]\n"
+	result := applyFormatOK(t, "yaml", source,
+		Operation{Type: ReorderTab, ControlID: "strip", Index: new(1), ToIndex: new(0)},
+		Operation{Type: RemoveTab, ControlID: "strip", Index: new(1)},
+		Operation{Type: RemoveTab, ControlID: "strip", Index: new(0)},
+	)
+	strip := result.Document.Controls[0]
+	if strip.SelectedIndex == nil || *strip.SelectedIndex != -1 || strip.Tabs == nil || len(strip.Tabs) != 0 {
+		t.Fatalf("selection mutation followed by final flow-tab removal did not persist: %+v", strip)
+	}
+	if !strings.Contains(string(result.Source), "tabs: []") {
+		t.Fatalf("final flow collection was not removed cleanly:\n%s", result.Source)
+	}
+}
+
+func TestAddTabCreatesAuthoredCollectionForAbsentOrNullTabs(t *testing.T) {
+	for _, format := range []string{"yaml", "json"} {
+		for _, state := range []string{"absent", "null"} {
+			t.Run(format+"/"+state, func(t *testing.T) {
+				var source string
+				if format == "yaml" {
+					tabs := ""
+					if state == "null" {
+						tabs = "    tabs: null\n"
+					}
+					source = "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform: {name: Main}\ncontrols:\n  - id: strip\n    name: Strip\n    type: TabStrip\n    selectedIndex: -1\n" + tabs
+				} else {
+					tabs := ""
+					if state == "null" {
+						tabs = `,"tabs":null`
+					}
+					source = `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"strip","name":"Strip","type":"TabStrip","selectedIndex":-1` + tabs + `}]}`
+				}
+				result := applyFormatOK(t, format, source, Operation{Type: AddTab, ControlID: "strip", Tab: &spec.FormSpecTab{Name: "New"}})
+				strip := result.Document.Controls[0]
+				if len(strip.Tabs) != 1 || strip.Tabs[0].Name != "New" || strip.SelectedIndex == nil || *strip.SelectedIndex != 0 {
+					t.Fatalf("AddTab did not materialize the authored collection: %+v", strip)
+				}
+			})
+		}
+	}
+}
+
+func TestJSONStructuralEditsSortByOriginalSourceOffset(t *testing.T) {
+	source := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"first","parentId":"multi","zIndex":0,"name":"First","type":"Page"},{"id":"second","parentId":"multi","zIndex":1,"name":"Second","type":"Page"},{"id":"multi","name":"Multi","type":"MultiPage","selectedIndex":1},{"id":"strip","name":"Strip","type":"TabStrip","tabs":[{"name":"Alpha"},{"name":"Beta"}],"selectedIndex":0}]}`)
+	result := applyFormatOK(t, "json", string(source),
+		Operation{Type: ReorderPage, ControlID: "second", Index: new(0)},
+		Operation{Type: ReorderTab, ControlID: "strip", Index: new(0), ToIndex: new(1)},
+		Operation{Type: RemoveTab, ControlID: "strip", Index: new(1)},
+	)
+	controls := make(map[string]spec.FormSpecControl, len(result.Document.Controls))
+	for _, control := range result.Document.Controls {
+		controls[control.ID] = control
+	}
+	if controls["multi"].SelectedIndex == nil || *controls["multi"].SelectedIndex != 0 || controls["strip"].SelectedIndex == nil || *controls["strip"].SelectedIndex != 0 || len(controls["strip"].Tabs) != 1 || controls["strip"].Tabs[0].Name != "Beta" {
+		t.Fatalf("JSON edits were not applied in source order: %+v", controls)
+	}
+}
+
 const hierarchy = "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\ncontrols:\n  - id: frame\n    name: Frame1\n    type: Frame\n    controls:\n      - id: child\n        name: Child\n        type: TextBox\n        left: 5\n        top: 8\n  - id: other\n    name: Other\n    type: Frame\n"
 
 func TestParentAndCascade(t *testing.T) {

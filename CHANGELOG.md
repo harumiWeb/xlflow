@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Documented the Issue #921 Page and TabStrip editing contract in the UserForm
+  specifications, ADR-0070, and VS Code README. This entry records documentation
+  only; runtime support still requires matching extension and LSP capabilities.
+
 - Added Frame-aware UserForm Designer placement and drag reparenting, with
   destination previews, parent-relative coordinate conversion and clickable
   hierarchy breadcrumbs. YAML/JSON parent edits preserve source and use one

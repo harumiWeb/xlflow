@@ -36,6 +36,17 @@ export interface PropertyTarget {
 export interface PropertyGridData {
   form: PropertyTarget;
   controls: Record<string, PropertyTarget>;
+  tabs?: Record<string, PropertyTarget[]>;
+}
+
+export interface SpecTab {
+  name: string;
+  caption?: string;
+  visible?: boolean;
+  enabled?: boolean;
+  tag?: string;
+  controlTipText?: string;
+  accelerator?: string;
 }
 
 export interface SpecControl {
@@ -56,7 +67,7 @@ export interface SpecControl {
   enabled?: boolean;
   visible?: boolean;
   list?: string[];
-  tabs?: { name: string; caption?: string; visible?: boolean; enabled?: boolean }[];
+  tabs?: SpecTab[];
   observed?: Partial<Omit<SpecControl, "observed">>;
 }
 
@@ -81,6 +92,8 @@ export interface PreviewResult {
   propertyEditable?: boolean;
   structuralEditable?: boolean;
   parentEditable?: boolean;
+  pageEditable?: boolean;
+  tabEditable?: boolean;
   propertyGrid?: PropertyGridData;
   propertyError?: DesignerError;
   document?: PreviewDocument;
@@ -173,6 +186,17 @@ export const designerStrings = {
   parentReadOnly: "Changing parents requires an xlflow version supporting parent edits.",
   parentPlacement: "Click the form or a Frame to place the control. Escape cancels.",
   cannotInsertContainer: "This control's default size is larger than the container.",
+  pages: "Pages",
+  tabs: "Tabs",
+  addPage: "Add Page",
+  addTab: "Add tab",
+  deleteItem: "Delete",
+  moveUp: "Move up",
+  moveDown: "Move down",
+  moveToPage: "Move to Page",
+  choosePage: "Choose destination Page",
+  collectionReadOnly: "Collection editing requires an xlflow version supporting Page or tab edits.",
+  pagePlacement: "Click the form, a Frame or the active Page to place the control. Escape cancels.",
 };
 export type DesignerStrings = typeof designerStrings;
 
@@ -186,6 +210,8 @@ export type HostMessage =
       propertyEditable?: boolean;
       structuralEditable?: boolean;
       parentEditable?: boolean;
+      pageEditable?: boolean;
+      tabEditable?: boolean;
       propertyGrid?: PropertyGridData;
       propertyError?: DesignerError;
     }
@@ -211,11 +237,94 @@ export type ParentOperation = {
   left: number;
   top: number;
 };
+export type PageOperation =
+  | { type: "addPage"; control: Pick<SpecControl, "id" | "parentId" | "name" | "type" | "caption"> }
+  | { type: "removePage"; controlId: string; cascade: boolean }
+  | { type: "reorderPage"; controlId: string; index: number };
+export type TabOperation =
+  | { type: "addTab"; controlId: string; tab: SpecTab }
+  | { type: "removeTab"; controlId: string; index: number }
+  | { type: "reorderTab"; controlId: string; index: number; toIndex: number }
+  | { type: "setTabProperty"; controlId: string; index: number; field: string; value: ScalarValue };
 export type SemanticOperation =
   | GeometryOperation
   | PropertyOperation
   | StructuralOperation
-  | ParentOperation;
+  | ParentOperation
+  | PageOperation
+  | TabOperation;
+
+export function isPageOperation(value: unknown): value is PageOperation {
+  if (typeof value !== "object" || value === null) return false;
+  const op = value as Record<string, unknown>;
+  if (op.type === "addPage") {
+    if (Object.keys(op).length !== 2 || typeof op.control !== "object" || op.control === null)
+      return false;
+    const c = op.control as Record<string, unknown>;
+    return (
+      Object.keys(c).every((k) => ["id", "parentId", "name", "type", "caption"].includes(k)) &&
+      typeof c.id === "string" &&
+      !!c.id &&
+      typeof c.parentId === "string" &&
+      !!c.parentId &&
+      typeof c.name === "string" &&
+      /^[A-Za-z][A-Za-z0-9_]*$/.test(c.name) &&
+      c.type === "Page" &&
+      (!Object.hasOwn(c, "caption") || typeof c.caption === "string")
+    );
+  }
+  if (typeof op.controlId !== "string" || !op.controlId) return false;
+  if (op.type === "removePage")
+    return Object.keys(op).length === 3 && typeof op.cascade === "boolean";
+  return (
+    op.type === "reorderPage" &&
+    Object.keys(op).length === 3 &&
+    Number.isSafeInteger(op.index) &&
+    Number(op.index) >= 0
+  );
+}
+
+export function isTabOperation(value: unknown): value is TabOperation {
+  if (typeof value !== "object" || value === null) return false;
+  const op = value as Record<string, unknown>;
+  if (typeof op.controlId !== "string" || !op.controlId) return false;
+  if (op.type === "addTab") {
+    if (
+      Object.keys(op).length !== 3 ||
+      typeof op.tab !== "object" ||
+      op.tab === null ||
+      Array.isArray(op.tab)
+    )
+      return false;
+    const tab = op.tab as Record<string, unknown>;
+    return (
+      typeof tab.name === "string" &&
+      !!tab.name &&
+      Object.entries(tab).every(([key, v]) =>
+        ["enabled", "visible"].includes(key)
+          ? typeof v === "boolean"
+          : ["name", "caption", "tag", "controlTipText", "accelerator"].includes(key) &&
+            typeof v === "string",
+      )
+    );
+  }
+  if (!Number.isSafeInteger(op.index) || Number(op.index) < 0) return false;
+  if (op.type === "removeTab") return Object.keys(op).length === 3;
+  if (op.type === "reorderTab")
+    return (
+      Object.keys(op).length === 4 && Number.isSafeInteger(op.toIndex) && Number(op.toIndex) >= 0
+    );
+  return (
+    op.type === "setTabProperty" &&
+    Object.keys(op).length === 5 &&
+    typeof op.field === "string" &&
+    !!op.field &&
+    (op.value === null ||
+      typeof op.value === "string" ||
+      typeof op.value === "boolean" ||
+      (typeof op.value === "number" && Number.isFinite(op.value)))
+  );
+}
 
 export function isStructuralOperation(value: unknown): value is StructuralOperation {
   if (typeof value !== "object" || value === null) return false;
@@ -361,7 +470,9 @@ export function isWebviewMessage(value: unknown): value is WebviewMessage {
     ((operations.length === 1 &&
       (isPropertyOperation(operations[0]) ||
         isStructuralOperation(operations[0]) ||
-        isParentOperation(operations[0]))) ||
+        isParentOperation(operations[0]) ||
+        isPageOperation(operations[0]) ||
+        isTabOperation(operations[0]))) ||
       (operations.every(isGeometryOperation) &&
         operations.every((op) => op.controlId === operations[0].controlId) &&
         new Set(operations.map((op) => op.type)).size === operations.length))

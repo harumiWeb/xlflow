@@ -48,6 +48,16 @@ export function isDesignerFrame(control: DesignerControl): boolean {
   );
 }
 
+export function isDesignerPage(document: DesignerDocument, control: DesignerControl): boolean {
+  const owner = document.controls.find((c) => c.id === control.parentId);
+  return (
+    control.type.toLowerCase() === "page" &&
+    (!control.progId || control.progId.toLowerCase() === "forms.page.1") &&
+    owner?.type.toLowerCase() === "multipage" &&
+    (!owner.progId || owner.progId.toLowerCase() === "forms.multipage.1")
+  );
+}
+
 // All origins are measured in form-content points, including decoration insets.
 export function parentOrigin(
   document: DesignerDocument,
@@ -102,6 +112,7 @@ export function dropTarget(
   document: DesignerDocument,
   point: Point,
   excluded = new Set<string>(),
+  pageEditable = false,
 ): DropTarget | undefined {
   const contains = (origin: Point, bounds: Bounds) =>
     point.left >= origin.left &&
@@ -141,7 +152,12 @@ export function dropTarget(
         const page = pages[control.selectedIndex ?? (pages.length ? 0 : -1)];
         const origin = parentOrigin(document, control.id);
         return page && page.visible !== false && contains(origin, contentBounds(control))
-          ? visit(page.id, undefined)
+          ? visit(
+              page.id,
+              pageEditable && isDesignerPage(document, page)
+                ? { parentId: page.id, origin, bounds: contentBounds(control) }
+                : undefined,
+            )
           : undefined;
       }
       return fallback;

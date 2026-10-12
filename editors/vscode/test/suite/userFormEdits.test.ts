@@ -25,6 +25,7 @@ export async function runUserFormEditAssertions(): Promise<void> {
   await assertGeometryTransactionsUndoAndRedo();
   await assertPropertyTransactionsUndoAndRedo();
   await assertStructuralTransactionsUndoAndRedo();
+  await assertPageCollectionUndoAndRedo();
   await assertParentTransactionUndoAndRedo();
   await assertConfirmationRejectsStaleAndCancelledEdits();
   await assertStaleResponsesAreDiscarded();
@@ -33,6 +34,55 @@ export async function runUserFormEditAssertions(): Promise<void> {
   await assertUnicodeAndCRLFRanges();
   await assertInvalidRangesAreRejectedAtomically();
   await assertStructuredRejectionPreservesSource();
+}
+
+async function assertPageCollectionUndoAndRedo(): Promise<void> {
+  const source = [
+    "schemaVersion: 1",
+    "kind: xlflow.userform",
+    "form: {name: Main}",
+    "controls:",
+    "  - {id: multi, name: Multi, type: MultiPage, selectedIndex: 1}",
+    "  - {id: keep, name: Page1, type: Page, parentId: multi}",
+    "  - {id: deleted, name: Page2, type: Page, parentId: multi}",
+    "  - {id: child, name: Child, type: Label, parentId: deleted}",
+    "",
+  ].join("\r\n");
+  await withDesignerDocument("page-undo", source, async (document) => {
+    const initial = document.getText();
+    const queue = new DocumentEditQueue();
+    const client = fakeClient((doc, version, text, operations) => {
+      assert.deepStrictEqual(operations, [
+        { type: "removePage", controlId: "deleted", cascade: true },
+      ]);
+      const edits: SourceTextEdit[] = [scalarEdit(text, "selectedIndex", 0)];
+      for (let line = 0; line < doc.lineCount; line++)
+        if (/id: (deleted|child),/.test(doc.lineAt(line).text))
+          edits.push({ range: doc.lineAt(line).rangeIncludingLineBreak, newText: "" });
+      return { version, edits };
+    });
+    assert.strictEqual(
+      await queue.run(
+        document,
+        document.version,
+        [{ type: "removePage", controlId: "deleted", cascade: true }],
+        client,
+        () => true,
+      ),
+      undefined,
+    );
+    const removed = document.getText();
+    assert.ok(removed.includes("selectedIndex: 0") && !removed.includes("id: child"));
+    assertActiveDesigner(document.uri);
+    await vscode.commands.executeCommand("undo");
+    assert.strictEqual(
+      document.getText(),
+      initial,
+      "one Undo restores Page, descendants and selectedIndex",
+    );
+    await vscode.commands.executeCommand("redo");
+    assert.strictEqual(document.getText(), removed);
+  });
 }
 
 async function assertStructuralTransactionsUndoAndRedo(): Promise<void> {

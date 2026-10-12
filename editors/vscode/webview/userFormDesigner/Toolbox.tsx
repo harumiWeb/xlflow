@@ -6,12 +6,14 @@ export function Toolbox({
   selected,
   disabled,
   parentEditable = false,
+  pageEditable = false,
   strings,
   onSelect,
 }: {
   selected?: ToolboxType;
   disabled: boolean;
   parentEditable?: boolean;
+  pageEditable?: boolean;
   strings: DesignerStrings;
   onSelect: (type?: ToolboxType) => void;
 }) {
@@ -45,7 +47,11 @@ export function Toolbox({
       {disabled && <p class="notice">{strings.structuralReadOnly}</p>}
       {selected && (
         <p class="notice" role="status">
-          {parentEditable ? strings.parentPlacement : strings.placement}
+          {parentEditable
+            ? pageEditable
+              ? strings.pagePlacement
+              : strings.parentPlacement
+            : strings.placement}
         </p>
       )}
     </aside>

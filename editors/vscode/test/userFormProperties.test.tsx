@@ -374,10 +374,10 @@ async function run() {
     "Page properties follow server descriptors",
   );
   assert.ok(
-    root.textContent?.includes("Second child"),
-    "selecting a tab preserves compiler page rendering order/index",
+    root.textContent?.includes("First child"),
+    "selecting a tab switches the transient designer Page",
   );
-  assert.ok(!root.textContent?.includes("First child"));
+  assert.ok(!root.textContent?.includes("Second child"));
   assert.equal(edits().length, beforeSelection, "selection is not a semantic edit");
   await act(() => {
     root

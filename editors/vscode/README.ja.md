@@ -324,9 +324,15 @@ WSL連携を利用する場合は、プロジェクトがWindows側からもWSL�
   移動・リサイズを維持し、previewのみのサーバーは読み取り専用です。
   未設定・null・空文字・false・0を区別し、optionalフィールドの明示的nullに対応しますが、
   キーの削除は行いません。フォーム名の変更はファイルやsidecarを改名しません。
-  Toolboxの追加・削除には`userFormStructuralEdit`が必要です。古いサーバーでは、そのサーバーが
-  対応を示す既存の編集機能だけを利用できます。Frame内への配置・親変更、Pageコレクション編集、
-  canvasでのフォーム／Pageリサイズ、画像アセット読み込みには対応しません。
+  Toolboxの追加・削除には`userFormStructuralEdit`、Frame内への配置・親変更には
+  `userFormParentEdit`が必要です。PageとTabStripのコレクション操作は、
+  拡張機能がエディタ機能を実装し、選択中LSPが対応するcapability
+  (`userFormPageEdit`または`userFormTabEdit`)を通知した場合に利用できます。
+  Page一覧の切替はIDに基づく一時状態で、切替だけでは`selectedIndex`を編集しません。
+  Pageのgeometryは導出値です。
+  TabStrip編集一覧には非表示のタブも含まれ、タブ項目はLSPメタデータに従います。
+  Page内へのコントロール追加には`userFormPageEdit`に加え、structuralとparentの両capabilityも必要です。
+  canvasでのフォーム／Pageリサイズと画像アセット読み込みには対応しません。
   ソース編集にExcelは不要で、自動保存やcode-behindの変更は行いません。
   詳細は[UserFormガイド](https://harumiweb.github.io/xlflow/guides/userforms)を参照してください。
 - マクロ選択はまだインタラクティブな操作に対応していません。`xlflow: Run Macro`を実行すると、設定済みのデフォルトマクロが実行されます。引数なしで使える`Sub`プロシージャは、CodeLensから起動可能です。

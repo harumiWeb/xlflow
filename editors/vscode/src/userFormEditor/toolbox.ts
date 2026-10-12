@@ -1,5 +1,5 @@
 import type { DesignerDocument, SpecControl } from "./protocol";
-import { contentBounds, gridSize, isDesignerFrame, stableDelta } from "./geometry";
+import { gridSize, isDesignerFrame, isDesignerPage, parentBounds, stableDelta } from "./geometry";
 
 // Shared by rendering fallback and Toolbox creation. Dimensions are points,
 // matching the pure-Go compiler's built-in generation defaults.
@@ -49,11 +49,16 @@ export function createControl(
   snapping: boolean,
   uuid: () => string = () => crypto.randomUUID(),
   parentId?: string,
+  pageEditable = false,
 ): NewControl | undefined {
   const metadata = controlMetadata.find((m) => m.type === type);
   const parent = document.controls.find((c) => c.id === parentId);
-  if (parentId && (!parent || !isDesignerFrame(parent))) return;
-  const bounds = parent ? contentBounds(parent) : document;
+  if (
+    parentId &&
+    (!parent || (!isDesignerFrame(parent) && !(pageEditable && isDesignerPage(document, parent))))
+  )
+    return;
+  const bounds = parent ? parentBounds(document, { ...parent, parentId: parent.id }) : document;
   if (
     !metadata ||
     !Number.isFinite(left) ||

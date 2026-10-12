@@ -65,6 +65,8 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
           userFormPropertyEdit?: boolean;
           userFormStructuralEdit?: boolean;
           userFormParentEdit?: boolean;
+          userFormPageEdit?: boolean;
+          userFormTabEdit?: boolean;
         }
       | undefined;
     if (experimental?.userFormPreview !== true)
@@ -83,6 +85,8 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
         experimental.userFormPropertyEdit === true && result.propertyGrid !== undefined,
       structuralEditable: experimental.userFormStructuralEdit === true,
       parentEditable: experimental.userFormParentEdit === true,
+      pageEditable: experimental.userFormPageEdit === true,
+      tabEditable: experimental.userFormTabEdit === true,
     };
   }
 
@@ -105,6 +109,8 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
           userFormPropertyEdit?: boolean;
           userFormStructuralEdit?: boolean;
           userFormParentEdit?: boolean;
+          userFormPageEdit?: boolean;
+          userFormTabEdit?: boolean;
         }
       | undefined;
     if (
@@ -138,6 +144,26 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     )
       throw new Error(
         vscode.l10n.t("Update xlflow to a version supporting UserForm property edits."),
+      );
+    if (
+      operations.some((op) => ["addPage", "removePage", "reorderPage"].includes(op.type)) &&
+      experimental?.userFormPageEdit !== true
+    )
+      throw new Error(
+        vscode.l10n.t(
+          "Collection editing requires an xlflow version supporting Page or tab edits.",
+        ),
+      );
+    if (
+      operations.some((op) =>
+        ["addTab", "removeTab", "reorderTab", "setTabProperty"].includes(op.type),
+      ) &&
+      experimental?.userFormTabEdit !== true
+    )
+      throw new Error(
+        vscode.l10n.t(
+          "Collection editing requires an xlflow version supporting Page or tab edits.",
+        ),
       );
     const result = await client.sendRequest<EditResult>("xlflow/userFormEdit", {
       uri: document.uri.toString(),

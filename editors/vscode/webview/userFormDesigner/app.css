@@ -339,6 +339,43 @@ button:disabled {
   padding: 12px;
   box-sizing: border-box;
 }
+.properties-pane {
+  margin-left: auto;
+  width: 300px;
+  flex-shrink: 0;
+}
+.collection-editor {
+  border: 1px solid var(--vscode-panel-border);
+  padding: 12px;
+  margin-bottom: 12px;
+  overflow-wrap: anywhere;
+}
+.collection-editor h2 {
+  font-size: inherit;
+  margin-top: 0;
+}
+.collection-editor ul {
+  list-style: none;
+  padding: 0;
+}
+.collection-editor li {
+  display: flex;
+  gap: 4px;
+  margin: 6px 0;
+}
+.collection-editor li > button:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.collection-editor select {
+  width: 100%;
+}
+.collection-editor .property-grid {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+}
 .property-grid h2 {
   font-size: inherit;
   margin: 0 0 12px;
