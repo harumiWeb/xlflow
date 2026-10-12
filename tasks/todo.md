@@ -4,7 +4,7 @@
 - [x] Align container rendering with content-bound hit tests and preserve source coordinates; add real Webview clipping and short-drag regressions.
 - [x] Verify review fix with `rtk pnpm --dir editors/vscode test` and `rtk task lint`; both PASS.
 - [x] Preserve Pass 1 report/probes in `tmp_workspaces/final-review/issue920/` and remove its review worktree and four review-specific terminal tabs.
-- [ ] Run Pass 2 against the committed review fix.
+- [x] Run Pass 2 against `2fb768e`: PASS, no confirmed findings; reviewer independently reran the full VS Code suite. Preserve report and remove Pass 2 review resources.
 
 - [x] Extend source-preserving YAML/JSON parenting and enforce Designer RPC scope.
 - [x] Negotiate parent-edit capability and preserve stale-document/Undo guards.
