@@ -47,9 +47,10 @@ editable properties.
 
 Page collection operations are `addPage(control)`,
 `removePage(controlId, cascade)`, and `reorderPage(controlId, index)`. Adding
-appends a Page to its referenced MultiPage. Deleting a Page requires explicit
-Designer confirmation and removes its descendants with `cascade: true` as one
-source edit. Reordering uses explicit up/down actions within the same
+appends a Page to its referenced MultiPage. Deleting a Page with descendants
+requires explicit Designer confirmation and removes its descendants with
+`cascade: true` as one source edit. Empty Pages are deleted immediately.
+Reordering uses explicit up/down actions within the same
 MultiPage; it does not move the Page to another MultiPage or use hover-tab
 dragging. Ordinary controls can be inserted into the active Page, dropped on a
 Page, or assigned to a Page through the destination picker. Those controls may
@@ -70,10 +71,11 @@ The LSP advertises Page operations with the independent
 collection/property operations with
 `capabilities.experimental.userFormTabEdit`. Page `name`/`caption` and
 MultiPage or TabStrip control-level `selectedIndex` use
-`userFormPropertyEdit`. Insertion into a Page also needs the existing
-structural and parent capabilities. Changing an ordinary control's Page parent
-needs the existing parent capability and geometry capability for a pointer
-drag; the destination picker does not require geometry. These gates are
+`userFormPropertyEdit`. Insertion into a Page requires `userFormPageEdit`,
+`userFormStructuralEdit`, and `userFormParentEdit`. Changing an ordinary
+control's direct Page parent requires `userFormPageEdit`, `userFormParentEdit`,
+and the geometry capability `userFormEdit` for the `setParent` coordinates,
+both for pointer dragging and the destination picker. These gates are
 independent so clients keep each edit family a server advertises.
 
 Collection operations preserve the selected member by identity when an

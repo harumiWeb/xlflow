@@ -1,3 +1,10 @@
+# Issue #921 final review follow-up
+
+- [x] Validate Pass 1 P2 against the accepted Designer capability contract and implementation.
+- [x] Align MultiPage/TabStrip documentation: require geometry for both pointer and picker reparenting, explicitly name cumulative Page capability, and distinguish childful from empty Page deletion.
+- [x] Verify documentation/format checks and preserve the independent review report and disposition.
+- [x] Acknowledge the settled review worker; release retained its external terminal, so explicitly close review-only terminals and remove the worktree after preserving evidence.
+
 # Issue #920 Frame parenting and hierarchy
 
 ## PR #929 review follow-up
