@@ -44,6 +44,11 @@ window.addEventListener("message", e => {
       if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: action.selector}); return; }
       const props = { bubbles: true, cancelable: true, ...action.props };
       if (props.formPoints) {
+        // Establish focus/scroll before computing synthetic pointer coordinates;
+        // the real pointer-down handler focuses the canvas and may scroll it.
+        const canvas = document.querySelector('.designer-viewport');
+        canvas.focus();
+        canvas.scrollIntoView({ block: 'start', inline: 'start', behavior: 'instant' });
         const bounds = document.querySelector(".form").getBoundingClientRect();
         const zoom = Number(document.querySelector(".designer-toolbar select").value);
         props.clientX = bounds.left + props.formPoints[0] * 96 * zoom / 72;
@@ -1238,6 +1243,7 @@ window.addEventListener("message", e => {
       moves: { controlId: string; left: number; top: number }[];
     };
     assert.strictEqual(groupRequests.at(-1)!.operations.length, 1);
+    assert.strictEqual(groupOperation.type, "moveControls", JSON.stringify(groupRequests.at(-1)));
     assert.deepStrictEqual(
       [
         {
