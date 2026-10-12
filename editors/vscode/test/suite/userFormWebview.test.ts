@@ -33,6 +33,7 @@ window.acquireVsCodeApi = () => ({
 });
 const violations = [];
 const runtimeErrors = [];
+let pointerFormOrigin;
 window.addEventListener("error", e => runtimeErrors.push(e.message));
 window.addEventListener("unhandledrejection", e => runtimeErrors.push(String(e.reason)));
 window.addEventListener("securitypolicyviolation", e => violations.push(e.violatedDirective));
@@ -52,13 +53,18 @@ window.addEventListener("message", e => {
           canvas.scrollIntoView({ block: 'start', inline: 'start', behavior: 'instant' });
           await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         }
-        const bounds = document.querySelector(".form").getBoundingClientRect();
+        const currentBounds = document.querySelector(".form").getBoundingClientRect();
+        if (action.event === 'pointerdown') pointerFormOrigin = currentBounds;
+        // Keep a gesture in one screen coordinate system even when selection
+        // breadcrumbs or notices change the form's position during the drag.
+        const bounds = pointerFormOrigin ?? currentBounds;
         const zoom = Number(document.querySelector(".designer-toolbar select").value);
         props.clientX = bounds.left + props.formPoints[0] * 96 * zoom / 72;
         props.clientY = bounds.top + props.formPoints[1] * 96 * zoom / 72;
       }
       if (action.event === "change" || action.event === "input") { if ("value" in props) target.value = props.value; if ("checked" in props) target.checked = props.checked; }
       target.dispatchEvent(["change", "input"].includes(action.event) ? new Event(action.event, props) : action.event.startsWith("key") ? new KeyboardEvent(action.event, props) : action.event === "focusout" ? new FocusEvent("blur", props) : new PointerEvent(action.event, props));
+      if (action.event === 'pointerup' || action.event === 'pointercancel') pointerFormOrigin = undefined;
       await new Promise(resolve => setTimeout(resolve, 30));
     }
     const label = document.querySelector(".control.label");
