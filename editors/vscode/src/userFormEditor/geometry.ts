@@ -40,6 +40,14 @@ export interface DropTarget {
   bounds: Bounds;
 }
 
+// Match the LSP's built-in Frame parent contract; custom ProgIDs are preview-only.
+export function isDesignerFrame(control: DesignerControl): boolean {
+  return (
+    control.type.toLowerCase() === "frame" &&
+    (!control.progId || control.progId.toLowerCase() === "forms.frame.1")
+  );
+}
+
 // All origins are measured in form-content points, including decoration insets.
 export function parentOrigin(
   document: DesignerDocument,
@@ -121,7 +129,12 @@ export function dropTarget(
           origin: parentOrigin(document, control.id),
           bounds: contentBounds(control),
         };
-        return contains(target.origin, target.bounds) ? visit(control.id, target) : fallback;
+        const destination = isDesignerFrame(control) ? target : undefined;
+        return contains(target.origin, target.bounds)
+          ? visit(control.id, destination)
+          : isDesignerFrame(control)
+            ? fallback
+            : undefined;
       }
       if (type === "multipage") {
         const pages = orderedChildren(document, control.id);

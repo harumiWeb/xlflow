@@ -1,5 +1,11 @@
 # Issue #920 Frame parenting and hierarchy
 
+## PR #929 review follow-up
+
+- [x] Fix CHANGELOG continuation placement after validating the Markdown grouping.
+- [x] Carry preview ProgID and share the built-in Frame predicate across targeting, placement and host preflight; reject custom destinations before dispatch.
+- [x] Cover implicit/matching/custom ProgIDs and custom-parent host rejection; full extension suite and `task lint` PASS. Push to the existing PR after commit checks.
+
 - [x] Validate Pass 1 P2: visible Frame overflow disagreed with drop hit testing.
 - [x] Align container rendering with content-bound hit tests and preserve source coordinates; add real Webview clipping and short-drag regressions.
 - [x] Verify review fix with `rtk pnpm --dir editors/vscode test` and `rtk task lint`; both PASS.

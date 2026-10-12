@@ -343,6 +343,34 @@ async function runStructuralPreparationAssertions(): Promise<void> {
     top: 16,
   } as const;
   assert.strictEqual(prepareParentEdit(parentOperation, snapshot, 7), undefined);
+  for (const progId of ["Forms.Frame.1", "forms.FRAME.1", "Vendor.Frame"]) {
+    const frameSnapshot = {
+      version: 7,
+      document: {
+        ...document,
+        controls: document.controls.map((c) => (c.id === "frame" ? { ...c, progId } : c)),
+      },
+    };
+    const expected = progId === "Vendor.Frame" ? "invalidParent" : undefined;
+    assert.strictEqual(prepareParentEdit(parentOperation, frameSnapshot, 7)?.code, expected);
+    assert.strictEqual(
+      (
+        await prepareStructuralEdit(
+          { type: "addControl", control: { ...control, parentId: "frame" } },
+          frameSnapshot,
+          7,
+          confirm,
+        )
+      )?.code,
+      expected,
+    );
+    assert.strictEqual(
+      prepareParentEdit({ ...parentOperation, controlId: "nested", parentId: "" }, frameSnapshot, 7)
+        ?.code,
+      expected,
+      "current custom Frame parent is also rejected",
+    );
+  }
   assert.strictEqual(
     prepareParentEdit({ ...parentOperation, parentId: "" }, snapshot, 7),
     undefined,

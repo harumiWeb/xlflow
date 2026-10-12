@@ -8,6 +8,7 @@ import { subtreeIds } from "../../src/userFormEditor/toolbox";
 import {
   canEditGeometry,
   isControlVisible,
+  isDesignerFrame,
   contentInsets,
   geometryOperations,
   gridSize,
@@ -261,7 +262,7 @@ export function DesignerCanvas({
       parentEditable &&
       !current.handle &&
       !current.keys &&
-      (!oldParent || oldParent.type.toLowerCase() === "frame") &&
+      (!oldParent || isDesignerFrame(oldParent)) &&
       (dx !== 0 || dy !== 0)
     ) {
       const form = canvas.current?.querySelector<HTMLElement>(".form");

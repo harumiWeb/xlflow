@@ -97,6 +97,30 @@ function geometryAssertions() {
     "Page does not fall back to root",
   );
   assert.equal(dropTarget(model, { left: 700, top: 50 }), undefined);
+  for (const progId of [undefined, "", "Forms.Frame.1", "forms.FRAME.1", "Vendor.Frame"]) {
+    const preview = designerDocument({
+      form: { name: "Main", width: 400, height: 300 },
+      controls: [
+        {
+          id: "frame",
+          name: "Frame1",
+          type: "Frame",
+          left: 20,
+          top: 20,
+          width: 180,
+          height: 160,
+          progId,
+        },
+      ],
+    });
+    assert.equal(preview.controls[0].progId, progId, "preview carries explicit ProgID");
+    const allowed = progId !== "Vendor.Frame";
+    assert.equal(
+      dropTarget(preview, { left: 30, top: 30 })?.parentId,
+      allowed ? "frame" : undefined,
+    );
+    assert.equal(!!createControl(preview, "Label", 1, 1, false, () => "fresh", "frame"), allowed);
+  }
   assert.equal(
     dropTarget(model, { left: 230, top: 140 }, subtreeIds(model.controls, "frame"))?.parentId,
     "",
@@ -239,6 +263,32 @@ async function run() {
   assert.equal(operations.at(-1)?.length, 1, "children require no separate edits");
   await mount();
   const before = operations.length;
+  const custom = {
+    ...model,
+    controls: model.controls.map((c) => (c.id === "frame" ? { ...c, progId: "Vendor.Frame" } : c)),
+  };
+  await act(() =>
+    render(
+      <DesignerCanvas
+        document={custom}
+        editable
+        parentEditable
+        onCommit={(ops) => operations.push(ops)}
+      />,
+      root,
+    ),
+  );
+  await pointer('.control[data-control-id="label"]', "pointerdown", 12, 12);
+  await pointer(".designer-viewport", "pointermove", 210, 110);
+  assert.equal(
+    root.querySelector("[data-drop-parent-id]"),
+    null,
+    "custom Frame has no valid destination highlight",
+  );
+  assert.ok(root.textContent?.includes("cannot be placed"));
+  await pointer(".designer-viewport", "pointerup", 210, 110);
+  assert.equal(operations.length, before, "custom Frame drop never dispatches an edit");
+  await mount();
   await pointer('.control[data-control-id="label"]', "pointerdown", 12, 12);
   await pointer(".designer-viewport", "pointerup", 12, 12);
   assert.equal(operations.length, before, "a click cannot reparent");

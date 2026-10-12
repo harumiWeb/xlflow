@@ -254,6 +254,11 @@ descendants are excluded. Page content cannot become a direct destination or
 silently fall back to root. An existing Frame inside a Page can still be an
 explicit Frame destination. The form background permits root parenting.
 
+Frame destinations require an omitted/empty ProgID or a case-insensitive match
+to `Forms.Frame.1`. Custom-ProgID Frames remain visible but cannot themselves be
+placement or reparenting destinations; preview targeting, creation and host
+preflight share this predicate, with LSP validation remaining authoritative.
+
 World-space origin conversion includes every ancestor's local position and
 content insets. Page origins derive from MultiPage content. The drag preview
 uses a form-coordinate overlay, preserving the pointer offset and all child

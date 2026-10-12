@@ -3,10 +3,13 @@
 ## Unreleased
 
 - Added Frame placement, drag reparenting and clickable hierarchy breadcrumbs.
-- Clipped Frame children to their content bounds so overflow cannot become an unintended root drag target.
   Drop previews preserve apparent positions with boundary clamping, reject
   invalid destinations, and commit YAML/JSON parent and coordinate updates as
   one undoable edit. Older servers retain root placement and existing movement.
+- Clipped Frame children to their content bounds so overflow cannot become an
+  unintended root drag target.
+- Reject custom-ProgID Frame destinations before placement or reparenting is
+  dispatched, matching the server's built-in Frame contract.
 
 - Added a UserForm Designer Toolbox for click-to-place root controls and
   structural deletion, with immediate leaf removal and confirmation before

@@ -13,6 +13,7 @@ import type {
 } from "./protocol";
 import { DocumentEditQueue } from "./edits";
 import { controlMetadata, subtreeIds } from "./toolbox";
+import { isDesignerFrame } from "./geometry";
 
 export type DeleteConfirmation = (name: string, descendants: number) => PromiseLike<boolean>;
 const confirmSubtreeDeletion: DeleteConfirmation = async (name, descendants) => {
@@ -50,7 +51,7 @@ export async function prepareStructuralEdit(
       };
     if (operation.control.parentId !== undefined) {
       const parent = controls.find((control) => control.id === operation.control.parentId);
-      if (!parent || parent.type.toLowerCase() !== "frame")
+      if (!parent || !isDesignerFrame(parent))
         return {
           code: "invalidParent",
           message: vscode.l10n.t("This control cannot be placed in this container."),
@@ -94,12 +95,12 @@ export function prepareParentEdit(
 
   if (control.parentId) {
     const currentParent = controls.find((candidate) => candidate.id === control.parentId);
-    if (!currentParent || currentParent.type.toLowerCase() !== "frame") return invalid();
+    if (!currentParent || !isDesignerFrame(currentParent)) return invalid();
   }
 
   if (operation.parentId === "") return;
   const parent = controls.find((candidate) => candidate.id === operation.parentId);
-  if (!parent || parent.type.toLowerCase() !== "frame") return invalid();
+  if (!parent || !isDesignerFrame(parent)) return invalid();
   if (subtreeIds(controls, control.id).has(parent.id)) return invalid();
 }
 

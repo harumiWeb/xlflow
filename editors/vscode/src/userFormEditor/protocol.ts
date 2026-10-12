@@ -42,6 +42,7 @@ export interface SpecControl {
   id: string;
   parentId?: string;
   type: string;
+  progId?: string;
   name: string;
   caption?: string;
   text?: string;
