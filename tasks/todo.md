@@ -781,3 +781,9 @@ CI or publication is claimed.
 - [x] Refresh forms reference with canonical source authority, containers, pictures and omission semantics; add focused pack reference and architecture discovery.
 - [x] Verify installed reference links across providers and execute the documented examples through blank/template pack and file push with artifact readback. Full agentskill/CLI tests PASS (1.350s/136.836s), lint and skill validator PASS; installed-binary skill smoke PASS in tmp_workspaces/issue912-agent-skill-release/xlflow.
 - [x] Complete self-review and docs/lint checks; prepare the skill update for commit and resume the authorized PR preparation. Validation evidence: tmp_workspaces/final-review/agent-skill-validation.md.
+
+# PR #928 security CI follow-up
+
+- [x] Inspect the failed security job and confirm the fixed Go patch release against the official release and vulnerability feeds.
+- [x] Raise the Go patch baseline to 1.26.9 and verify the complete security scan and Go tests (analyze: 589.162s; LSP: 223.591s).
+- [x] Prepare the verified security fix for the existing PR.

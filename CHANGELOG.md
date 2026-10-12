@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated the Go patch baseline to 1.26.9 to include standard-library security
+  fixes detected by the CI vulnerability scan.
+
 - Added the UserForm Designer Toolbox and structural control editing for
   click-to-place root controls, immediate leaf deletion, and confirmed subtree
   deletion. YAML/JSON source-preserving add/remove uses a separate LSP
