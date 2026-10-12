@@ -2,7 +2,8 @@
 
 - [x] Validate Pass 1 custom-control tab-order finding, align eligibility with Property Grid metadata and add YAML/JSON regressions.
 - [x] Preserve Pass 1 evidence and clean up its review resources; FormSpec tests, focused LSP tests and vet pass.
-- [ ] Run independent Pass 2 on the committed review fix.
+- [x] Run independent Pass 2 on 568a86c: PASS; prior P2 resolved, no additional findings. Preserve report and clean up review resources.
+- [x] Correct native Webview clipping-test viewport preparation after Linux CI failure; full VS Code tests, oxlint, formatting and diff check pass locally. Push correction to PR #932; remote confirmation remains pending.
 
 - [x] Extend atomic source-preserving semantic operations and copy RPC for YAML/YML/JSON.
 - [x] Add sibling selection, group layout, clipboard, z-order and Tab order UI.

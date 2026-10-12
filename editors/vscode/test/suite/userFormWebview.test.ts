@@ -98,6 +98,10 @@ window.addEventListener("message", e => {
       overflowHits: (() => {
         const child = document.querySelector('[data-control-id="overflow-child"]');
         if (!child) return undefined;
+        // Hit testing uses viewport coordinates. Wrapped productivity controls
+        // can push the canvas below the smaller Linux CI Webview viewport.
+        // Scroll the canvas, not the clipped child or its Frame content.
+        document.querySelector('.designer-viewport').scrollIntoView({ block: 'start', inline: 'start', behavior: 'instant' });
         const bounds = child.getBoundingClientRect();
         const content = child.parentElement.getBoundingClientRect();
         const y = (bounds.top + bounds.bottom) / 2;
