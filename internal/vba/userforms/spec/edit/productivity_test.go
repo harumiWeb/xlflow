@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -292,6 +293,49 @@ controls:
 			}
 			if format == "json" && !bytes.Contains(result.Source, []byte(`"top": 3.78901234`)) {
 				t.Fatalf("untouched fractional top was rewritten:\n%s", result.Source)
+			}
+		})
+	}
+}
+
+func TestSetTabOrderIncludesMetadataEligibleCustomControls(t *testing.T) {
+	const sourceYAML = `schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form: {name: Main}
+controls:
+  - {id: ordinary, name: Ordinary, type: Label, tabIndex: 7}
+  - {id: custom, name: Custom, type: VendorWidget, progId: Vendor.Widget.1, tabIndex: null, visible: false, enabled: false}
+  - {id: frame, name: Frame, type: Frame, tabIndex: 9}
+  - {id: child, name: Child, type: VendorWidget, progId: Vendor.Widget.1, parentId: frame, tabIndex: 4}
+`
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			source := sourceInFormat(t, format, sourceYAML)
+			input := spec.SpecInput{Format: format}
+			metadata, err := PropertyGrid(input, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"custom", "child"} {
+				if !slices.ContainsFunc(metadata.Controls[id].Descriptors, func(property PropertyDescriptor) bool { return property.Field == "tabIndex" }) {
+					t.Fatalf("custom control %s lacks editable tabIndex metadata", id)
+				}
+			}
+			assertProductivityFailure(t, format, source, Operation{Type: SetTabOrder, ControlIDs: []string{"ordinary", "frame"}}, "UFE003")
+			assertProductivityFailure(t, format, source, Operation{Type: SetTabOrder, ControlIDs: []string{"custom", "ordinary", "child"}}, "UFE003")
+			result := applyFormatOK(t, format, string(source), Operation{Type: SetTabOrder, ControlIDs: []string{"custom", "ordinary", "frame"}})
+			for index, control := range result.Document.Controls {
+				want := map[string]int{"custom": 0, "ordinary": 1, "frame": 2, "child": 4}[control.ID]
+				if control.TabIndex == nil || *control.TabIndex != want {
+					t.Fatalf("control %d (%s) tabIndex=%v, want %d", index, control.ID, control.TabIndex, want)
+				}
+			}
+			childResult := applyFormatOK(t, format, string(source), Operation{Type: SetTabOrder, ParentID: "frame", ControlIDs: []string{"child"}})
+			for _, control := range childResult.Document.Controls {
+				if control.ID == "child" && (control.TabIndex == nil || *control.TabIndex != 0) {
+					t.Fatalf("custom Frame child tab order was not applied: %+v", control)
+				}
 			}
 		})
 	}

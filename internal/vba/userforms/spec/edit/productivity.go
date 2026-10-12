@@ -424,11 +424,10 @@ func expandTabOrder(model spec.FormSpec, operation Operation) ([]Operation, erro
 	}
 	eligible := make(map[string]bool)
 	for _, control := range model.Controls {
-		if control.ParentID != operation.ParentID || strings.EqualFold(control.Type, "Page") || !isBuiltInControl(control) {
+		if control.ParentID != operation.ParentID || strings.EqualFold(control.Type, "Page") {
 			continue
 		}
-		property, ok := spec.LookupControlProperty(control.Type, "tabIndex")
-		if ok && property.SupportLevel == spec.SupportLevelSupported && property.IncludeInAuthoring {
+		if _, ok := EditableControlProperties(control.Type)["tabIndex"]; ok {
 			eligible[control.ID] = true
 		}
 	}

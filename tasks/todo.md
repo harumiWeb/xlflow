@@ -1,5 +1,9 @@
 # Issue #922 Designer productivity
 
+- [x] Validate Pass 1 custom-control tab-order finding, align eligibility with Property Grid metadata and add YAML/JSON regressions.
+- [x] Preserve Pass 1 evidence and clean up its review resources; FormSpec tests, focused LSP tests and vet pass.
+- [ ] Run independent Pass 2 on the committed review fix.
+
 - [x] Extend atomic source-preserving semantic operations and copy RPC for YAML/YML/JSON.
 - [x] Add sibling selection, group layout, clipboard, z-order and Tab order UI.
 - [x] Integrate capability negotiation, shared host clipboard and stale-safe edit queue.
