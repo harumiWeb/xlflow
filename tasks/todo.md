@@ -1,3 +1,9 @@
+# PR #928 review follow-up
+
+- [x] Reproduce Delete bubbling from a focused Page tab and custom ProgID insertion through the Designer RPC.
+- [x] Restrict canvas Delete to the canvas target; constrain explicit ProgID to the advertised built-in contract without changing shared semantic edits.
+- [x] Verify regressions, existing UI/Undo and Go contracts; prepare the fixes for the existing PR.
+
 # Issue #919 final review follow-up
 
 - [x] Reproduce Pass 1 RPC bypass of root-only insertion and Page exclusion.

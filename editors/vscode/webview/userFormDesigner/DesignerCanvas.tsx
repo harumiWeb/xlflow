@@ -285,6 +285,7 @@ export function DesignerCanvas({
     }
     if (
       event.key === "Delete" &&
+      event.target === event.currentTarget &&
       !busy &&
       !placing &&
       !event.repeat &&

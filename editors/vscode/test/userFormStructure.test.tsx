@@ -230,6 +230,18 @@ async function run() {
   assert.equal(root.querySelector(".placing-control"), null);
 
   await pointer(root.querySelector('[data-control-id="label"]')!);
+  const pageTab = root.querySelector<HTMLButtonElement>('[data-page-tab="page"]')!;
+  await act(() => pageTab.focus());
+  assert.equal(document.activeElement, pageTab);
+  assert.ok(root.querySelector('.selection-outline[data-control-id="label"]'));
+  const beforeFocusedPageDelete = edits().length;
+  await key(pageTab, "Delete");
+  assert.equal(
+    edits().length,
+    beforeFocusedPageDelete,
+    "Delete from a focused Page tab must not delete the previously selected control",
+  );
+  await act(() => (root.querySelector(".designer-viewport") as HTMLElement).focus());
   await key(root.querySelector(".designer-viewport")!, "Delete");
   assert.deepEqual(edits().at(-1)!.operations, [
     { type: "removeControl", controlId: "label", cascade: true },

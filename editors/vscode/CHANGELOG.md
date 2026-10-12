@@ -7,6 +7,8 @@
   removing descendants. YAML/JSON edits use a separate LSP capability, stale
   document guards, and native undo/redo. Placement inside Frames/reparenting
   and Page/Tab editing remain in Issues #920/#921.
+  Canvas Delete ignores focused Page-tab buttons to protect the previous
+  control selection when keyboard focus moves to a tab.
 
 - Added a UserForm Property Grid driven by the running LSP's field metadata.
   Select the form, a control or a Page tab to edit supported authored scalars

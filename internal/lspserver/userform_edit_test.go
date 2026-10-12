@@ -588,6 +588,108 @@ func TestUserFormEditStructuralScope(t *testing.T) {
 	}
 }
 
+func TestUserFormEditDesignerAdditionProgIDValidation(t *testing.T) {
+	builtInProgID, ok := spec.BuiltInControlProgID("Label")
+	if !ok {
+		t.Fatal("Label built-in ProgID is missing")
+	}
+	formats := []struct {
+		name   string
+		input  spec.SpecInput
+		source string
+	}{
+		{
+			name: "yaml", input: spec.SpecInput{Format: "yaml"},
+			source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\ncontrols: []\n",
+		},
+		{
+			name: "json", input: spec.SpecInput{Format: "json"},
+			source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[]}`,
+		},
+	}
+	for _, format := range formats {
+		t.Run(format.name, func(t *testing.T) {
+			root := t.TempDir()
+			server := &Server{opts: Options{RootDir: root, Config: config.Default()}}
+			uri := pathToFileURI(filepath.Join(root, "src/forms/specs/Main."+format.input.Format))
+			marshalAdd := func(progID *string) []byte {
+				control := map[string]any{"id": "new", "name": "NewLabel", "type": "Label"}
+				if progID != nil {
+					control["progId"] = *progID
+				}
+				payload, err := json.Marshal(map[string]any{"type": "addControl", "control": control})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return payload
+			}
+
+			for _, invalid := range []struct {
+				name   string
+				progID string
+			}{
+				{name: "custom", progID: "Vendor.Control"},
+				{name: "whitespace-padded built-in", progID: " " + builtInProgID + " "},
+			} {
+				t.Run("reject "+invalid.name+" ProgID at Designer boundary", func(t *testing.T) {
+					control := &spec.FormSpecControl{ID: "new", Name: "NewLabel", Type: "Label", ProgID: invalid.progID}
+					operation := formsedit.Operation{Type: formsedit.AddControl, Control: control}
+					if _, requestError := parseUserFormEditOperation(marshalAdd(&control.ProgID)); requestError == nil || requestError.Code != compiler.Unsupported {
+						t.Errorf("raw decoder error = %+v, want %s", requestError, compiler.Unsupported)
+					}
+
+					generic, err := formsedit.Apply(format.input, []byte(format.source), []formsedit.Operation{operation})
+					if err != nil {
+						t.Fatalf("generic Apply rejected the semantic edit: %v", err)
+					}
+					if _, err := compiler.CompileNew(generic.Document, 932); err == nil {
+						t.Error("CompileNew accepted a built-in Label with an unsupported ProgID")
+					}
+
+					result := server.userFormEdit(userFormEditParams{URI: uri, Version: 1, Text: format.source, Operations: []formsedit.Operation{operation}})
+					if result.Error == nil || result.Error.Code != compiler.Unsupported || len(result.Edits) != 0 {
+						t.Errorf("direct handler result = %+v, want unsupported with no edits", result)
+					}
+				})
+			}
+
+			for _, variant := range []struct {
+				name   string
+				progID *string
+			}{
+				{name: "omitted"},
+				{name: "exact", progID: &builtInProgID},
+				{name: "case-insensitive", progID: new(strings.ToLower(builtInProgID))},
+			} {
+				t.Run("accept "+variant.name, func(t *testing.T) {
+					operation, requestError := parseUserFormEditOperation(marshalAdd(variant.progID))
+					if requestError != nil {
+						t.Fatalf("raw decoder rejected built-in ProgID variant: %+v", requestError)
+					}
+					result := server.userFormEdit(userFormEditParams{URI: uri, Version: 2, Text: format.source, Operations: []formsedit.Operation{operation}})
+					if result.Error != nil || len(result.Edits) == 0 {
+						t.Fatalf("direct handler rejected built-in ProgID variant: %+v", result)
+					}
+					edited, err := applyLSPTextEdits(format.source, result.Edits)
+					if err != nil {
+						t.Fatal(err)
+					}
+					document, err := spec.ParseFormSpec(format.input, []byte(edited))
+					if err != nil {
+						t.Fatalf("ParseFormSpec: %v", err)
+					}
+					if variant.progID != nil && document.Controls[0].ProgID != *variant.progID {
+						t.Errorf("parsed ProgID = %q, want %q", document.Controls[0].ProgID, *variant.progID)
+					}
+					if _, err := compiler.CompileNew(document, 932); err != nil {
+						t.Fatalf("CompileNew: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestUserFormEditNewBuiltInControlsCompile(t *testing.T) {
 	formats := []struct {
 		name   string

@@ -219,6 +219,8 @@ without a source edit.
 
 The Designer offers a Delete toolbar action and handles Delete when the canvas
 has focus. It must not intercept Delete from a focused text or property input.
+The keyboard event must target the canvas itself: focus on a Page-tab button
+must not delete a previously selected control through event bubbling.
 A control with no descendants is removed immediately. If descendants exist,
 the host first shows a modal confirmation containing the selected control's
 name and descendant count. Confirmed removal deletes the selected control and
@@ -340,7 +342,10 @@ advertises; structural actions are unavailable.
 Each Toolbox insertion or deletion sends one structural operation; it is not
 combined with geometry or property operations in the same transaction.
 The RPC also enforces this structural scope: insertion accepts only a root
-built-in control other than Page, and direct Page deletion returns
+built-in control other than Page. An omitted or empty ProgID uses the built-in
+type contract; an explicit nonempty ProgID must match that contract's ProgID
+case-insensitively, without trimming whitespace. Custom ProgIDs are rejected
+before source edits are generated. Direct Page deletion returns
 `unsupported` without edits. Page targets resolve through the canonical
 flattened source model, including legacy nested input. Deleting a MultiPage
 with `cascade: true` may still remove its Pages and their descendants. These

@@ -316,6 +316,9 @@ func validateDesignerControlAddition(control *spec.FormSpecControl) *userFormEdi
 	if control.ParentID != "" || len(control.Controls) != 0 || !known || contract.Type == "Page" {
 		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer insertion supports only root built-in controls other than Page"}
 	}
+	if control.ProgID != "" && !strings.EqualFold(control.ProgID, contract.ProgID) {
+		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer insertion does not support custom ProgIDs"}
+	}
 	return nil
 }
 
