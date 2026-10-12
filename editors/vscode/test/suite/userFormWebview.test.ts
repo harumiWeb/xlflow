@@ -1097,6 +1097,21 @@ window.addEventListener("message", e => {
     assert.ok(shownIds.includes("child-b"));
     assert.ok(!shownIds.includes("child-a"));
     assert.strictEqual(collections.controls[0].selectedIndex, 0);
+    const pageDeleteProtected = await snapshot({
+      type: "testAction",
+      version: 81,
+      actions: [
+        { selector: '.selection-path button[aria-current="true"]', event: "click" },
+        key("keydown", "Delete"),
+        { selector: ".delete-control", event: "click" },
+      ],
+    });
+    assert.strictEqual(pageDeleteProtected.missingTarget, undefined);
+    assert.strictEqual(
+      (pageDeleteProtected.editMessages as unknown[]).length,
+      (pageSwitch.editMessages as unknown[]).length,
+      "canvas and toolbar Delete leave the selected Page intact",
+    );
     const reorderedPage = await snapshot({
       type: "testAction",
       version: 82,

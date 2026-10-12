@@ -153,6 +153,24 @@ async function run() {
   assert.equal(edits().length, 0, "page switching is transient");
   assert.equal(model.controls[0].selectedIndex, 0, "source model is unchanged");
   assert.equal(root.querySelectorAll(".resize-handle").length, 0, "Page has no geometry handles");
+  const pageDeleteCount = edits().length;
+  for (const selector of [
+    '[data-page-tab="second"]',
+    '.collection-editor[aria-label="Pages"] li:nth-child(2) > button:first-child',
+    '.selection-path button[aria-current="true"]',
+  ]) {
+    await click(selector);
+    assert.equal(root.querySelector<HTMLButtonElement>(".delete-control")!.disabled, true);
+    await click(".delete-control");
+    await act(() => {
+      const canvas = root.querySelector<HTMLElement>(".designer-viewport")!;
+      canvas.focus();
+      canvas.dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", { bubbles: true, key: "Delete" }),
+      );
+    });
+    assert.equal(edits().length, pageDeleteCount, "Page deletion is only available in its list");
+  }
   const projected = displayPages(model, { multi: "second" });
   assert.equal(isControlVisible(projected, "first-child"), false);
   assert.equal(dropTarget(projected, { left: 70, top: 80 }, new Set(), true)?.parentId, "second");

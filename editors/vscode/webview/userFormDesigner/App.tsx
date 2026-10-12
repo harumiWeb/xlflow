@@ -242,25 +242,14 @@ export function App() {
     return requestId;
   };
   const canDelete =
-    (document?.controls.find((c) => c.id === selectedId)?.type.toLowerCase() === "page"
-      ? pageEditable
-      : structuralEditable) &&
+    structuralEditable &&
     !error &&
     !busy &&
     !!selectedId &&
-    document?.controls.some((c) => c.id === selectedId);
+    document?.controls.some((c) => c.id === selectedId && c.type.toLowerCase() !== "page");
   const remove = () => {
     if (canDelete && selectedId)
-      commit([
-        {
-          type:
-            document?.controls.find((c) => c.id === selectedId)?.type.toLowerCase() === "page"
-              ? "removePage"
-              : "removeControl",
-          controlId: selectedId,
-          cascade: true,
-        },
-      ]);
+      commit([{ type: "removeControl", controlId: selectedId, cascade: true }]);
   };
   return (
     <>
