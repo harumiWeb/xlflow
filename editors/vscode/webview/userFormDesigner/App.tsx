@@ -9,6 +9,9 @@ import type {
 } from "../../src/userFormEditor/protocol";
 import { DesignerCanvas } from "./DesignerCanvas";
 import { PropertyGrid } from "./PropertyGrid";
+import { Toolbox } from "./Toolbox";
+import { createControl } from "../../src/userFormEditor/toolbox";
+import type { ToolboxType } from "../../src/userFormEditor/toolbox";
 import type { PropertyDraftStore, PropertyReply } from "./PropertyGrid";
 import { designerStrings } from "../../src/userFormEditor/protocol";
 import "./app.css";
@@ -28,6 +31,8 @@ export function App() {
   const [propertyError, setPropertyError] = useState<string>();
   const [editable, setEditable] = useState(false);
   const [propertyEditable, setPropertyEditable] = useState(false);
+  const [structuralEditable, setStructuralEditable] = useState(false);
+  const [tool, setTool] = useState<ToolboxType>();
   const [propertyGrid, setPropertyGrid] = useState<PropertyGridData>();
   const [selectedId, setSelectedId] = useState<string>();
   const [documentVersion, setDocumentVersion] = useState(0);
@@ -39,6 +44,8 @@ export function App() {
   const version = useRef(0);
   const nextRequest = useRef(0);
   const pending = useRef<PropertyReply>();
+  const pendingAdd = useRef<string>();
+  const pendingStructural = useRef(false);
   const drafts = useRef<PropertyDraftStore>({ values: new Map(), replies: new Map() });
   const restored = useRef(false);
   useEffect(() => {
@@ -55,6 +62,7 @@ export function App() {
         if (
           pending.current &&
           pending.current.field === undefined &&
+          !pendingStructural.current &&
           message.version !== version.current
         )
           pending.current = undefined;
@@ -64,9 +72,14 @@ export function App() {
         setEditable(message.editable === true);
         setPropertyGrid(message.propertyGrid);
         setPropertyEditable(message.propertyEditable === true);
+        setStructuralEditable(message.structuralEditable === true);
         setPropertyError(message.propertyError?.message);
         setSelectedId((id) =>
-          message.document.controls.some((c) => c.id === id) ? id : undefined,
+          message.document.controls.some((c) => c.id === pendingAdd.current)
+            ? pendingAdd.current
+            : message.document.controls.some((c) => c.id === id)
+              ? id
+              : undefined,
         );
         if (!pending.current) setBusy(false);
         setError(undefined);
@@ -75,6 +88,8 @@ export function App() {
         setError(message.error.message);
         setEditable(false);
         setPropertyEditable(false);
+        setStructuralEditable(false);
+        setTool(undefined);
         version.current = message.version;
         setDocumentVersion(message.version);
         setBusy(false);
@@ -82,14 +97,21 @@ export function App() {
       if (message.type === "editingUnavailable") {
         setEditable(false);
         setPropertyEditable(false);
+        setStructuralEditable(false);
       }
       if (message.type === "editResult" && message.requestId === pending.current?.requestId) {
         const response = { ...pending.current, requestId: message.requestId, error: message.error };
         if (response.field !== undefined) drafts.current.replies.set(response.requestId, response);
         setReply(response);
         pending.current = undefined;
+        if (!message.error && pendingAdd.current) {
+          setSelectedId(pendingAdd.current);
+          setTool(undefined);
+        }
+        pendingAdd.current = undefined;
+        pendingStructural.current = false;
         setBusy(false);
-        if (message.error) {
+        if (message.error && message.error.code !== "editCancelled") {
           setEditError(message.error.message);
           setBusy(false);
         } else setEditError(undefined);
@@ -109,17 +131,30 @@ export function App() {
     const operation = operations[0];
     const property =
       operation.type === "setFormProperty" || operation.type === "setControlProperty";
-    if (property ? !propertyEditable : !editable) return;
+    const structural = operation.type === "addControl" || operation.type === "removeControl";
+    if (structural ? !structuralEditable : property ? !propertyEditable : !editable) return;
     const requestId = ++nextRequest.current;
     pending.current = {
       requestId,
       field: property ? operation.field : undefined,
       controlId: operation.type === "setControlProperty" ? operation.controlId : undefined,
     };
+    pendingAdd.current = operation.type === "addControl" ? operation.control.id : undefined;
+    pendingStructural.current = structural;
     setEditError(undefined);
     setBusy(true);
     bridge.postMessage({ type: "edit", requestId, version: version.current, operations });
     return requestId;
+  };
+  const canDelete =
+    structuralEditable &&
+    !error &&
+    !busy &&
+    !!selectedId &&
+    document?.controls.some((c) => c.id === selectedId && c.type.toLowerCase() !== "page");
+  const remove = () => {
+    if (canDelete && selectedId)
+      commit([{ type: "removeControl", controlId: selectedId, cascade: true }]);
   };
   return (
     <>
@@ -128,7 +163,15 @@ export function App() {
         <button onClick={() => bridge.postMessage({ type: "openText" })}>{strings.openText}</button>
       </header>
       <div class="designer-toolbar">
-        <label>
+        <button
+          type="button"
+          class="delete-control"
+          disabled={!canDelete || !!tool}
+          onClick={remove}
+        >
+          {strings.deleteControl}
+        </button>
+        <label class="grid-toggle">
           <input
             type="checkbox"
             checked={showGrid}
@@ -136,7 +179,7 @@ export function App() {
           />
           {strings.grid}
         </label>
-        <label>
+        <label class="snap-toggle">
           <input
             type="checkbox"
             checked={snapping}
@@ -165,7 +208,7 @@ export function App() {
         </div>
       )}
       {!document && !error && <p>{strings.loading}</p>}
-      {document && !editable && !propertyEditable && !error && !busy && (
+      {document && !editable && !propertyEditable && !structuralEditable && !error && !busy && (
         <p class="notice">{strings.readOnly}</p>
       )}
       {document && (
@@ -179,6 +222,12 @@ export function App() {
             </p>
           ))}
           <div class="designer-workspace">
+            <Toolbox
+              selected={tool}
+              disabled={!structuralEditable || busy || !!error}
+              strings={strings}
+              onSelect={setTool}
+            />
             <DesignerCanvas
               document={document}
               approximateBounds={strings.approximateBounds}
@@ -191,6 +240,18 @@ export function App() {
               selectedId={selectedId}
               onSelectionChange={setSelectedId}
               onCommit={commit}
+              placing={!!tool && structuralEditable && !error}
+              onCancelPlacement={() => setTool(undefined)}
+              onDelete={canDelete ? remove : undefined}
+              onPlace={(left, top) => {
+                if (!tool) return;
+                const control = createControl(document, tool, left, top, snapping);
+                if (!control) {
+                  setEditError(strings.cannotInsert);
+                  return;
+                }
+                commit([{ type: "addControl", control }]);
+              }}
             />
             {propertyGrid &&
             (selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form) ? (

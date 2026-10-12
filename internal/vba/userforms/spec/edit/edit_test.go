@@ -553,3 +553,181 @@ func FuzzScalarSourceEdits(f *testing.F) {
 		}
 	})
 }
+
+func applyJSONOK(t *testing.T, source []byte, operations ...Operation) Result {
+	t.Helper()
+	input := bytes.Clone(source)
+	result, err := Apply(spec.SpecInput{Format: "json"}, source, operations)
+	if err != nil {
+		t.Fatalf("Apply JSON: %v (%#v)", err, err)
+	}
+	if !bytes.Equal(source, input) {
+		t.Fatal("JSON input mutated")
+	}
+	rebuilt := bytes.Clone(source)
+	for i := len(result.Edits) - 1; i >= 0; i-- {
+		edit := result.Edits[i]
+		if i > 0 && result.Edits[i-1].End > edit.Start {
+			t.Fatal("overlapping JSON source edits")
+		}
+		rebuilt = append(bytes.Clone(rebuilt[:edit.Start]), append([]byte(edit.Text), rebuilt[edit.End:]...)...)
+	}
+	if !bytes.Equal(rebuilt, result.Source) {
+		t.Fatalf("JSON source edits do not rebuild result:\n%s\nwant\n%s", rebuilt, result.Source)
+	}
+	parsed, err := spec.ParseFormSpec(spec.SpecInput{Format: "json"}, result.Source)
+	if err != nil || !reflect.DeepEqual(parsed, result.Document) {
+		t.Fatalf("JSON result is not canonical: %v", err)
+	}
+	return result
+}
+
+func TestJSONAddControlPreservesCompactSource(t *testing.T) {
+	source := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"日本😀"},"controls":[{"id":"first","type":"Label","name":"先頭"},{"id":"last","type":"Label","name":"末尾"}],"warnings":[]}`)
+	control := &spec.FormSpecControl{ID: "added", Type: "Label", Name: "追加😀", Caption: new("日本語")}
+	result := applyJSONOK(t, source, Operation{Type: AddControl, Control: control})
+	encoded, err := json.Marshal(control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := `{"id":"last","type":"Label","name":"末尾"}`
+	want := strings.Replace(string(source), last, last+","+string(encoded), 1)
+	if string(result.Source) != want {
+		t.Fatalf("unrelated compact JSON bytes changed:\n got: %s\nwant: %s", result.Source, want)
+	}
+	if len(result.Document.Controls) != 3 || result.Document.Controls[2].ID != "added" {
+		t.Fatalf("added control missing from canonical model: %+v", result.Document.Controls)
+	}
+}
+
+func TestJSONAddControlPreservesMultilineLFAndCRLF(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n"} {
+		source := []byte(strings.ReplaceAll("{\n  \"schemaVersion\": 1,\n  \"kind\": \"xlflow.userform\",\n  \"basis\": \"designer\",\n  \"form\": {\"name\": \"日本😀\"},\n  \"controls\": [\n    {\n      \"id\": \"first\",\n      \"type\": \"Label\",\n      \"name\": \"先頭\"\n    }\n  ],\n  \"warnings\": []\n}\n", "\n", newline))
+		control := &spec.FormSpecControl{ID: "added", Type: "Label", Name: "追加😀", Caption: new("日本語")}
+		result := applyJSONOK(t, source, Operation{Type: AddControl, Control: control})
+		if len(result.Edits) != 1 || !strings.HasPrefix(result.Edits[0].Text, ","+newline+"    {"+newline+"      \"id\": \"added\"") || !strings.HasSuffix(result.Edits[0].Text, newline+"    }") {
+			t.Fatalf("added control did not match source formatting: %+v", result.Edits)
+		}
+		if newline == "\r\n" && bytes.Contains(bytes.ReplaceAll(result.Source, []byte("\r\n"), nil), []byte("\n")) {
+			t.Fatalf("line ending changed while adding control:\n%s", result.Source)
+		}
+		if !bytes.Contains(result.Source, []byte("日本😀")) || !bytes.Contains(result.Source, []byte("先頭")) {
+			t.Fatal("unrelated Unicode source was rewritten")
+		}
+	}
+}
+
+func TestJSONAddControlToEmptyAndNullControls(t *testing.T) {
+	control := &spec.FormSpecControl{ID: "added", Type: "Label", Name: "追加"}
+	compactBase := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"}`
+	for _, suffix := range []string{`,"controls":[]}`, `,"controls":null}`} {
+		t.Run(suffix, func(t *testing.T) {
+			result := applyJSONOK(t, []byte(compactBase+suffix), Operation{Type: AddControl, Control: control})
+			if len(result.Document.Controls) != 1 || result.Document.Controls[0].ID != "added" {
+				t.Fatalf("control was not added: %+v", result.Document.Controls)
+			}
+		})
+	}
+	for _, newline := range []string{"\n", "\r\n"} {
+		source := []byte(strings.ReplaceAll("{\n  \"schemaVersion\": 1,\n  \"kind\": \"xlflow.userform\",\n  \"basis\": \"designer\",\n  \"form\": {\"name\": \"Main\"},\n  \"controls\": [\n  ]\n}\n", "\n", newline))
+		result := applyJSONOK(t, source, Operation{Type: AddControl, Control: control})
+		if !bytes.Contains(result.Source, []byte(newline+"    {")) || !bytes.Contains(result.Source, []byte(newline+"  ]")) {
+			t.Fatalf("empty multiline controls lost formatting:\n%s", result.Source)
+		}
+	}
+	missingControls := []byte(compactBase + `}`)
+	result, err := Apply(spec.SpecInput{Format: "json"}, missingControls, []Operation{{Type: AddControl, Control: control}})
+	editErr, ok := errors.AsType[*Error](err)
+	if err == nil || !ok || !reflect.DeepEqual(result, Result{}) || !slices.ContainsFunc(editErr.Diagnostics, func(d Diagnostic) bool { return d.Code == "UFV004" }) {
+		t.Fatalf("missing controls bypassed canonical validation: result=%+v error=%#v", result, err)
+	}
+}
+
+func TestJSONRemoveControlPreservesFirstMiddleLastAndOnlyItems(t *testing.T) {
+	items := []string{
+		`{"id":"first","type":"Label","name":"First"}`,
+		`{"id":"middle","type":"Label","name":"Middle"}`,
+		`{"id":"last","type":"Label","name":"Last"}`,
+	}
+	cases := []struct {
+		count int
+		index int
+		id    string
+	}{
+		{count: 1, index: 0, id: "first"},
+		{count: 3, index: 0, id: "first"},
+		{count: 3, index: 1, id: "middle"},
+		{count: 3, index: 2, id: "last"},
+	}
+	for _, newline := range []string{"", "\n", "\r\n"} {
+		for _, test := range cases {
+			active := items[:test.count]
+			arrayPrefix := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[`
+			arraySuffix := `],"warnings":[]}`
+			separator := ","
+			if newline != "" {
+				arrayPrefix = "{\n  \"schemaVersion\": 1,\n  \"kind\": \"xlflow.userform\",\n  \"basis\": \"designer\",\n  \"form\": {\"name\": \"Main\"},\n  \"controls\": [\n    "
+				arraySuffix = "\n  ],\n  \"warnings\": []\n}"
+				separator = ",\n    "
+				arrayPrefix = strings.ReplaceAll(arrayPrefix, "\n", newline)
+				arraySuffix = strings.ReplaceAll(arraySuffix, "\n", newline)
+			}
+			source := []byte(arrayPrefix + strings.Join(active, separator) + arraySuffix)
+			result := applyJSONOK(t, source, Operation{Type: RemoveControl, ControlID: test.id})
+			remaining := make([]string, 0, len(active)-1)
+			for i, item := range active {
+				if i != test.index {
+					remaining = append(remaining, item)
+				}
+			}
+			want := arrayPrefix + strings.Join(remaining, separator) + arraySuffix
+			if string(result.Source) != want {
+				t.Fatalf("newline=%q count=%d index=%d source changed outside item removal:\n got: %s\nwant: %s", newline, test.count, test.index, result.Source, want)
+			}
+		}
+	}
+}
+
+func TestJSONRemoveControlCascadeUsesCanonicalFlattenedParents(t *testing.T) {
+	source := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"frame","type":"Frame","name":"Frame","controls":[{"id":"child","type":"Frame","name":"Child","controls":[{"id":"grand","type":"Label","name":"Grand"}]}]},{"id":"sibling","type":"Label","name":"Sibling"},{"id":"flatChild","type":"Label","name":"Flat child","parentId":"frame"}]}`)
+	result, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{{Type: RemoveControl, ControlID: "frame"}})
+	if err == nil || !reflect.DeepEqual(result, Result{}) {
+		t.Fatal("remove without cascade accepted canonical descendants")
+	}
+	editErr, ok := errors.AsType[*Error](err)
+	if !ok || !slices.ContainsFunc(editErr.Diagnostics, func(d Diagnostic) bool { return d.Code == "UFE007" }) {
+		t.Fatalf("missing descendant diagnostic: %#v", err)
+	}
+	result = applyJSONOK(t, source, Operation{Type: RemoveControl, ControlID: "frame", Cascade: true})
+	if len(result.Document.Controls) != 1 || result.Document.Controls[0].ID != "sibling" {
+		t.Fatalf("cascade did not remove nested and flat descendants: %+v", result.Document.Controls)
+	}
+	if !bytes.Contains(result.Source, []byte(`{"id":"sibling","type":"Label","name":"Sibling"}`)) || bytes.Contains(result.Source, []byte(`"id":"flatChild"`)) {
+		t.Fatalf("cascade changed or retained the wrong source controls: %s", result.Source)
+	}
+}
+
+func TestJSONAddControlIDCollisionUsesCanonicalValidation(t *testing.T) {
+	source := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"existing","type":"Label","name":"Existing"}]}`)
+	result, err := Apply(spec.SpecInput{Format: "json"}, source, []Operation{{Type: AddControl, Control: &spec.FormSpecControl{ID: "existing", Type: "Label", Name: "Duplicate"}}})
+	editErr, ok := errors.AsType[*Error](err)
+	if err == nil || !ok || !reflect.DeepEqual(result, Result{}) || !slices.ContainsFunc(editErr.Diagnostics, func(d Diagnostic) bool { return d.Code == "UFV007" }) {
+		t.Fatalf("duplicate ID did not come from canonical validation: result=%+v error=%#v", result, err)
+	}
+}
+
+func TestJSONRejectsDuplicateKeysAndUnsafeNestedRemovalAtomically(t *testing.T) {
+	duplicateKey := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"one","id":"two","type":"Label","name":"One"}]}`)
+	result, err := Apply(spec.SpecInput{Format: "json"}, duplicateKey, []Operation{{Type: RemoveControl, ControlID: "one"}})
+	editErr, ok := errors.AsType[*Error](err)
+	if err == nil || !ok || !reflect.DeepEqual(result, Result{}) || !slices.ContainsFunc(editErr.Diagnostics, func(d Diagnostic) bool { return d.Code == "UFE008" }) {
+		t.Fatalf("duplicate JSON key was not rejected: result=%+v error=%#v", result, err)
+	}
+
+	unsafeNested := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"frame","type":"Frame","name":"Frame","controls":[{"id":"child","type":"Label","name":"Child","parentId":"other"}]},{"id":"other","type":"Frame","name":"Other"}]}`)
+	result, err = Apply(spec.SpecInput{Format: "json"}, unsafeNested, []Operation{{Type: RemoveControl, ControlID: "frame"}})
+	editErr, ok = errors.AsType[*Error](err)
+	if err == nil || !ok || !reflect.DeepEqual(result, Result{}) || !slices.ContainsFunc(editErr.Diagnostics, func(d Diagnostic) bool { return d.Code == "UFE006" }) {
+		t.Fatalf("removal that would discard a canonically unrelated nested control was accepted: result=%+v error=%#v", result, err)
+	}
+}

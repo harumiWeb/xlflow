@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { mkdtemp, readFile, unlink, rmdir, writeFile } from "fs/promises";
+import { mkdtemp, readFile, unlink, rm, writeFile } from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { designerHTML, designerViewType } from "../../src/userFormEditor/provider";
@@ -39,6 +39,12 @@ window.addEventListener("message", e => {
       const target = document.querySelector(action.selector);
       if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: action.selector}); return; }
       const props = { bubbles: true, cancelable: true, ...action.props };
+      if (props.formPoints) {
+        const bounds = document.querySelector(".form").getBoundingClientRect();
+        const zoom = Number(document.querySelector(".designer-toolbar select").value);
+        props.clientX = bounds.left + props.formPoints[0] * 96 * zoom / 72;
+        props.clientY = bounds.top + props.formPoints[1] * 96 * zoom / 72;
+      }
       if (action.event === "change" || action.event === "input") { if ("value" in props) target.value = props.value; if ("checked" in props) target.checked = props.checked; }
       target.dispatchEvent(["change", "input"].includes(action.event) ? new Event(action.event, props) : action.event.startsWith("key") ? new KeyboardEvent(action.event, props) : action.event === "focusout" ? new FocusEvent("blur", props) : new PointerEvent(action.event, props));
       await new Promise(resolve => setTimeout(resolve, 30));
@@ -70,6 +76,9 @@ window.addEventListener("message", e => {
       top: label && getComputedStyle(label).top,
       height: label && getComputedStyle(label).height,
       handles: document.querySelectorAll(".resize-handle").length,
+      toolboxDisabled: document.querySelector('[data-toolbox-type="Label"]')?.disabled,
+      placing: !!document.querySelector(".placing-control"),
+      selectedId: document.querySelector(".selection-outline")?.dataset.controlId,
       editMessages,
       images: document.querySelectorAll("img").length,
       propertyTitle: document.querySelector(".property-grid h2")?.textContent,
@@ -389,7 +398,7 @@ window.addEventListener("message", e => {
       version: 19,
       actions: [
         {
-          selector: ".designer-toolbar input:nth-of-type(1)",
+          selector: ".grid-toggle input",
           event: "change",
           props: { checked: true },
         },
@@ -405,7 +414,7 @@ window.addEventListener("message", e => {
       version: 20,
       actions: [
         {
-          selector: ".designer-toolbar label:nth-child(2) input",
+          selector: ".snap-toggle input",
           event: "change",
           props: { checked: true },
         },
@@ -438,7 +447,7 @@ window.addEventListener("message", e => {
       actions: [
         { selector: ".designer-toolbar select", event: "change", props: { value: "1" } },
         {
-          selector: ".designer-toolbar label:nth-child(2) input",
+          selector: ".snap-toggle input",
           event: "change",
           props: { checked: false },
         },
@@ -674,6 +683,97 @@ window.addEventListener("message", e => {
       ],
     );
     assert.deepStrictEqual(controlEdit.violations, []);
+
+    const allEdits = controlEdit.editMessages as { requestId: number; operations: unknown[] }[];
+    await panel.webview.postMessage({ type: "editResult", requestId: allEdits.at(-1)!.requestId });
+    const structuralDocument = {
+      type: "document" as const,
+      version: 50,
+      document: interactive,
+      structuralEditable: true,
+    };
+    const structuralReady = await snapshot(structuralDocument);
+    assert.strictEqual(
+      structuralReady.toolboxDisabled,
+      false,
+      "structural editing is independent of geometry and properties",
+    );
+    const added = await snapshot({
+      type: "testAction",
+      version: 51,
+      actions: [
+        { selector: '[data-toolbox-type="TextBox"]', event: "click" },
+        { selector: ".form", event: "pointerdown", props: { button: 0, formPoints: [12, 16] } },
+      ],
+    });
+    const structuralEdits = added.editMessages as {
+      requestId: number;
+      version: number;
+      operations: {
+        type: string;
+        control?: {
+          id: string;
+          name: string;
+          type: string;
+          left: number;
+          top: number;
+          width: number;
+          height: number;
+        };
+      }[];
+    }[];
+    assert.strictEqual(structuralEdits.length, allEdits.length + 1);
+    const addition = structuralEdits.at(-1)!;
+    assert.strictEqual(addition.version, 50);
+    const newControl = addition.operations[0].control!;
+    assert.match(newControl.id, /^control-[0-9a-f-]{36}$/);
+    assert.strictEqual(newControl.name, "TextBox1");
+    assert.deepStrictEqual(
+      [newControl.left, newControl.top, newControl.width, newControl.height],
+      [12, 16, 120, 18],
+    );
+    assert.strictEqual(
+      added.count,
+      4,
+      "pending creation does not replace canonical document state",
+    );
+    interactive.controls.push({ ...newControl, approximate: false });
+    const addedDocument = await snapshot({ ...structuralDocument, version: 52 });
+    await panel.webview.postMessage({ type: "editResult", requestId: addition.requestId });
+    assert.strictEqual(addedDocument.selectedId, newControl.id);
+    const deleting = await snapshot({
+      type: "testAction",
+      version: 53,
+      actions: [{ selector: ".delete-control", event: "click" }],
+    });
+    const deleteEdits = deleting.editMessages as { requestId: number; operations: unknown[] }[];
+    assert.deepStrictEqual(deleteEdits.at(-1)!.operations, [
+      { type: "removeControl", controlId: newControl.id, cascade: true },
+    ]);
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: deleteEdits.at(-1)!.requestId,
+      error: { code: "editCancelled", message: "Cancelled" },
+    });
+    const cancelledDeletion = await snapshot({ type: "testAction", version: 54, actions: [] });
+    assert.strictEqual(cancelledDeletion.count, 5);
+    assert.strictEqual(cancelledDeletion.error, undefined);
+    const deleted = await snapshot({
+      type: "testAction",
+      version: 55,
+      actions: [key("keydown", "Delete")],
+    });
+    const deletedEdits = deleted.editMessages as { requestId: number; operations: unknown[] }[];
+    assert.strictEqual(deletedEdits.length, deleteEdits.length + 1);
+    interactive.controls = interactive.controls.filter((control) => control.id !== newControl.id);
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: deletedEdits.at(-1)!.requestId,
+    });
+    const afterDeletion = await snapshot({ ...structuralDocument, version: 56 });
+    assert.strictEqual(afterDeletion.count, 4);
+    assert.strictEqual(afterDeletion.selectedId, undefined);
+    assert.deepStrictEqual(afterDeletion.violations, []);
   } finally {
     subscription.dispose();
     panel.dispose();
@@ -712,6 +812,7 @@ export async function runCustomEditorRegistrationAssertions(): Promise<void> {
       }
     }
     await unlink(file);
-    await rmdir(directory);
+    // VS Code/Windows may release its directory watcher just after tab close.
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }

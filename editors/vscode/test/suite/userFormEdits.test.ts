@@ -24,12 +24,169 @@ const formSource = [
 export async function runUserFormEditAssertions(): Promise<void> {
   await assertGeometryTransactionsUndoAndRedo();
   await assertPropertyTransactionsUndoAndRedo();
+  await assertStructuralTransactionsUndoAndRedo();
+  await assertConfirmationRejectsStaleAndCancelledEdits();
   await assertStaleResponsesAreDiscarded();
   await assertConnectionInvalidationIsDiscarded();
   await assertConcurrentPanelsAreSerialized();
   await assertUnicodeAndCRLFRanges();
   await assertInvalidRangesAreRejectedAtomically();
   await assertStructuredRejectionPreservesSource();
+}
+
+async function assertStructuralTransactionsUndoAndRedo(): Promise<void> {
+  const source = [
+    "schemaVersion: 1",
+    "kind: xlflow.userform",
+    "form: {name: Main, build: {clientWidth: 480, clientHeight: 360}}",
+    "controls:",
+    "  - {id: frame, name: Frame1, type: Frame}",
+    '  - {id: other, name: Label1, type: Label, caption: "😀 keep"}',
+    "  - {id: child, parentId: frame, name: TextBox1, type: TextBox}",
+    "",
+  ].join("\r\n");
+  await withDesignerDocument("structural-undo", source, async (document) => {
+    const queue = new DocumentEditQueue();
+    const initial = document.getText();
+    const addition =
+      "  - {id: control-new, name: Label2, type: Label, left: 10, top: 20, width: 72, height: 18}\r\n";
+    const client = fakeClient((doc, version, _text, operations) => {
+      if (operations[0].type === "addControl") {
+        const position = doc.positionAt(doc.getText().length);
+        return {
+          version,
+          edits: [{ range: { start: position, end: position }, newText: addition }],
+        };
+      }
+      const edits: SourceTextEdit[] = [];
+      for (let i = 0; i < doc.lineCount; i++) {
+        const line = doc.lineAt(i);
+        if (/id: (frame|child),/.test(line.text))
+          edits.push({ range: line.rangeIncludingLineBreak, newText: "" });
+      }
+      return { version, edits };
+    });
+    assert.strictEqual(
+      await queue.run(
+        document,
+        document.version,
+        [
+          {
+            type: "addControl",
+            control: {
+              id: "control-new",
+              name: "Label2",
+              type: "Label",
+              left: 10,
+              top: 20,
+              width: 72,
+              height: 18,
+            },
+          },
+        ],
+        client,
+        () => true,
+      ),
+      undefined,
+    );
+    const added = initial + addition;
+    assert.strictEqual(document.getText(), added);
+    assert.strictEqual(
+      await queue.run(
+        document,
+        document.version,
+        [{ type: "removeControl", controlId: "frame", cascade: true }],
+        client,
+        () => true,
+      ),
+      undefined,
+    );
+    const removed = document.getText();
+    assert.ok(!removed.includes("id: frame") && !removed.includes("id: child"));
+    assert.ok(removed.includes('caption: "😀 keep"'));
+    assertActiveDesigner(document.uri);
+    await vscode.commands.executeCommand("undo");
+    assert.strictEqual(
+      document.getText(),
+      added,
+      "one undo restores the entire noncontiguous subtree",
+    );
+    await vscode.commands.executeCommand("undo");
+    assert.strictEqual(document.getText(), initial, "the preceding add is its own transaction");
+    await vscode.commands.executeCommand("redo");
+    assert.strictEqual(document.getText(), added);
+    await vscode.commands.executeCommand("redo");
+    assert.strictEqual(document.getText(), removed);
+  });
+}
+
+async function assertConfirmationRejectsStaleAndCancelledEdits(): Promise<void> {
+  await withDesignerDocument("confirmation-stale", formSource, async (document) => {
+    const queue = new DocumentEditQueue();
+    let requests = 0;
+    const client = fakeClient((_document, version) => {
+      requests++;
+      return { version, edits: [] };
+    });
+    const operations: SemanticOperation[] = [
+      { type: "removeControl", controlId: "frame", cascade: true },
+    ];
+    const initial = document.getText();
+    const cancelled = await queue.run(
+      document,
+      document.version,
+      operations,
+      client,
+      () => true,
+      async () => ({ code: "editCancelled", message: "Cancelled" }),
+    );
+    assert.strictEqual(cancelled?.code, "editCancelled");
+    assert.strictEqual(requests, 0);
+    assert.strictEqual(document.getText(), initial);
+
+    const started = deferred<void>();
+    const confirmation = deferred<undefined>();
+    const pending = queue.run(
+      document,
+      document.version,
+      operations,
+      client,
+      () => true,
+      () => {
+        started.resolve();
+        return confirmation.promise;
+      },
+    );
+    await withTimeout(started.promise, "confirmation did not open");
+    const edit = new vscode.WorkspaceEdit();
+    edit.insert(document.uri, new vscode.Position(0, 0), "# external edit\r\n");
+    assert.ok(await vscode.workspace.applyEdit(edit));
+    const externallyEdited = document.getText();
+    confirmation.resolve(undefined);
+    assert.strictEqual((await pending)?.code, "staleDocument");
+    assert.strictEqual(requests, 0, "an accepted old confirmation cannot reach the LSP");
+    assert.strictEqual(document.getText(), externallyEdited);
+
+    const connectionStarted = deferred<void>();
+    const connectionConfirmation = deferred<undefined>();
+    let current = true;
+    const connectionPending = queue.run(
+      document,
+      document.version,
+      operations,
+      client,
+      () => current,
+      () => {
+        connectionStarted.resolve();
+        return connectionConfirmation.promise;
+      },
+    );
+    await withTimeout(connectionStarted.promise, "connection confirmation did not open");
+    current = false;
+    connectionConfirmation.resolve(undefined);
+    assert.strictEqual((await connectionPending)?.code, "staleDocument");
+    assert.strictEqual(requests, 0);
+  });
 }
 
 async function assertGeometryTransactionsUndoAndRedo(): Promise<void> {

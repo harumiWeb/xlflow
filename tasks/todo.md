@@ -1,3 +1,38 @@
+# PR #928 review follow-up
+
+- [x] Reproduce Delete bubbling from a focused Page tab and custom ProgID insertion through the Designer RPC.
+- [x] Restrict canvas Delete to the canvas target; constrain explicit ProgID to the advertised built-in contract without changing shared semantic edits.
+- [x] Verify regressions, existing UI/Undo and Go contracts; prepare the fixes for the existing PR.
+
+# Issue #919 final review follow-up
+
+- [x] Reproduce Pass 1 RPC bypass of root-only insertion and Page exclusion.
+- [x] Enforce the Designer structural scope at the LSP boundary while preserving the shared edit API.
+- [x] Verify YAML/JSON rejection, subtree deletion and existing edit contracts; prepare the verified fixes for Pass 2.
+- [x] Preserve the Pass 1 report and complete review resource cleanup.
+
+Pass 1 P2 verified and fixed at the Designer RPC boundary. Focused UserForm edit
+tests passed; full related UserForm/LSP tests passed (LSP 127.468s), along with
+vet, lint, docs and formatting. Generic parent/Page/custom edit API and allowed
+MultiPage cascade/child deletion are protected by regression tests. Report and
+cleanup evidence: `tmp_workspaces/final-review/issue919/pass-1-disposition.md`.
+
+# Issue #919 Toolbox and structural editing
+
+- [x] Add shared control metadata, click placement and stable ID/name generation.
+- [x] Expose source-preserving YAML/JSON add/delete via structural LSP capability.
+- [x] Confirm subtree deletion in the URI edit queue and retain stale/undo guarantees.
+- [x] Verify generation, UI, compiler, RPC, native undo/redo and source preservation.
+- [x] Document the contract, update changelogs and complete self-review.
+
+Validation: `rtk pnpm --dir editors/vscode test` passed, including real VS Code
+1.140.0 Webview and native Undo/Redo. Related Go checks passed with
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/vba/userforms/... ./internal/lspserver`
+(LSP: 132.554s); the corresponding `vet` also passed. Lint, docs checks,
+changed-file Oxfmt, Go formatting and `git diff --check` passed. Focused read-only
+UI and Go reviews found no confirmed defects. Excel device tests and remote CI
+were not run; this change edits source documents and does not alter COM/VBIDE.
+
 # PR #927 review follow-up
 
 - [x] Reproduce and isolate form/control draft identity when a control ID is `form`.
@@ -746,3 +781,9 @@ CI or publication is claimed.
 - [x] Refresh forms reference with canonical source authority, containers, pictures and omission semantics; add focused pack reference and architecture discovery.
 - [x] Verify installed reference links across providers and execute the documented examples through blank/template pack and file push with artifact readback. Full agentskill/CLI tests PASS (1.350s/136.836s), lint and skill validator PASS; installed-binary skill smoke PASS in tmp_workspaces/issue912-agent-skill-release/xlflow.
 - [x] Complete self-review and docs/lint checks; prepare the skill update for commit and resume the authorized PR preparation. Validation evidence: tmp_workspaces/final-review/agent-skill-validation.md.
+
+# PR #928 security CI follow-up
+
+- [x] Inspect the failed security job and confirm the fixed Go patch release against the official release and vulnerability feeds.
+- [x] Raise the Go patch baseline to 1.26.9 and verify the complete security scan and Go tests (analyze: 589.162s; LSP: 223.591s).
+- [x] Prepare the verified security fix for the existing PR.

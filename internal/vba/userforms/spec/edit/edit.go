@@ -316,11 +316,8 @@ func (e *engine) apply(op Operation) error {
 	case SetFormProperty:
 		return e.setForm(op)
 	case AddControl:
-		if op.Control == nil || op.Control.ID == "" || op.Control.Name == "" || op.Control.Type == "" || len(op.Control.Controls) > 0 {
-			return failure(-1, op, "UFE003", "AddControl requires an explicit ID, name, type and a single flat control.", "Supply control.id, control.name and control.type.")
-		}
-		if _, err := json.Marshal(op.Control); err != nil {
-			return failure(-1, op, "UFE003", "Control payload is not serializable: "+err.Error(), "Supply serializable FormSpec control fields.")
+		if err := validateAddControl(op); err != nil {
+			return err
 		}
 		var node yaml.Node
 		if err := node.Encode(*op.Control); err != nil {
@@ -376,6 +373,16 @@ func (e *engine) apply(op Operation) error {
 		}
 	}
 	return failure(-1, op, "UFE003", "Unknown semantic operation.", "Use a supported operation type.")
+}
+
+func validateAddControl(op Operation) error {
+	if op.Control == nil || op.Control.ID == "" || op.Control.Name == "" || op.Control.Type == "" || len(op.Control.Controls) > 0 {
+		return failure(-1, op, "UFE003", "AddControl requires an explicit ID, name, type and a single flat control.", "Supply control.id, control.name and control.type.")
+	}
+	if _, err := json.Marshal(op.Control); err != nil {
+		return failure(-1, op, "UFE003", "Control payload is not serializable: "+err.Error(), "Supply serializable FormSpec control fields.")
+	}
+	return nil
 }
 
 func scalarContract(c spec.PropertyContract) bool {

@@ -33,9 +33,31 @@ constraints. Form and Page bounds are not directly editable on the canvas.
 
 Visual operations produce local source edits and retain unrelated formatting.
 Invalid source retains the last valid preview and disables editing until fixed.
-An xlflow LSP advertising UserForm editing is required; older servers can
-still provide a read-only preview. Images remain placeholders, and Toolbox,
-reparenting and Page collection editing are future features.
+The Toolbox contains Pointer and Label, TextBox, ComboBox, ListBox,
+CommandButton, CheckBox, OptionButton, ToggleButton, SpinButton, ScrollBar,
+Image, Frame, MultiPage, and TabStrip. Choose a type, then click the canvas to
+insert a root control; Escape cancels placement. The Designer uses the same
+type-specific default sizes as its preview and clamps the position to fit the
+form. A form smaller than the default control size rejects insertion. New
+controls have stable `control-<UUID>` IDs and conflict-free generated VBA names.
+Insertion selects the new control and returns to Pointer. A new MultiPage has
+no Pages and `selectedIndex: -1`; a new TabStrip has `tabs: []` and
+`selectedIndex: -1`.
+
+Delete the selected control with the toolbar or Delete while the canvas has
+focus. Leaf controls are removed immediately. When a control has descendants,
+a confirmation shows its name and descendant count; confirming removes the
+subtree as one undoable edit. Designer deletion does not intercept Delete in a
+focused input, so normal character deletion continues to work. Direct deletion
+of a Page is disabled. Structural editing requires the LSP's separate
+`userFormStructuralEdit` capability. Older servers keep their advertised
+geometry/property support and do not offer structural actions. Source edits do
+not change code-behind or save automatically.
+
+Placement inside Frames, reparenting, and Page or Tab collection editing remain
+future work tracked by [Issue #920](https://github.com/harumiWeb/xlflow/issues/920) and
+[Issue #921](https://github.com/harumiWeb/xlflow/issues/921). Images remain
+placeholders.
 
 ### Edit properties
 

@@ -18,6 +18,7 @@ export class DocumentEditQueue {
     operations: SemanticOperation[],
     client: EditClient,
     current: () => boolean,
+    prepare?: () => Promise<DesignerError | undefined>,
   ): Promise<DesignerError | undefined> {
     const key = document.uri.toString();
     const previous = this.pending.get(key) ?? Promise.resolve();
@@ -38,6 +39,19 @@ export class DocumentEditQueue {
             ),
           };
         try {
+          if (prepare) {
+            const error = await prepare();
+            // Confirmation is part of the URI queue and cannot authorize an
+            // edit against a document/connection changed while it was open.
+            if (stale())
+              return {
+                code: "staleDocument",
+                message: vscode.l10n.t(
+                  "The document changed. Retry the operation on the updated form.",
+                ),
+              };
+            if (error) return error;
+          }
           const result = await client.requestUserFormEdit(document, version, text, operations);
           if (stale() || result.version !== version)
             return {
@@ -55,13 +69,18 @@ export class DocumentEditQueue {
             };
           if (!edits.length) return undefined;
           const edit = new vscode.WorkspaceEdit();
-          const label = operations.some(
-            (op) => op.type === "setFormProperty" || op.type === "setControlProperty",
-          )
-            ? vscode.l10n.t("Edit UserForm property")
-            : operations.some((op) => op.type === "resizeControl")
-              ? vscode.l10n.t("Resize control")
-              : vscode.l10n.t("Move control");
+          const label =
+            operations[0].type === "addControl"
+              ? vscode.l10n.t("Add control")
+              : operations[0].type === "removeControl"
+                ? vscode.l10n.t("Delete control")
+                : operations.some(
+                      (op) => op.type === "setFormProperty" || op.type === "setControlProperty",
+                    )
+                  ? vscode.l10n.t("Edit UserForm property")
+                  : operations.some((op) => op.type === "resizeControl")
+                    ? vscode.l10n.t("Resize control")
+                    : vscode.l10n.t("Move control");
           edit.set(
             document.uri,
             edits.map((e): [vscode.TextEdit, vscode.WorkspaceEditEntryMetadata] => [

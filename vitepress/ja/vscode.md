@@ -32,4 +32,29 @@ picture、任意 property bag は Property Grid の編集対象外です。
 ソースが曖昧な場合は有効なプレビューを保ったままプロパティ編集を無効にします。
 FormSpec のソース編集に Excel は不要で、ブックへ自動適用はしません。
 
+## UserForm Designer の Toolbox と構造編集
+
+Toolbox には Pointer と、Label、TextBox、ComboBox、ListBox、CommandButton、
+CheckBox、OptionButton、ToggleButton、SpinButton、ScrollBar、Image、Frame、
+MultiPage、TabStrip の14種類を表示します。Page は一覧に含めません。
+種類を選んでキャンバスをクリックすると、フォーム直下にコントロールを追加します。
+ドラッグ追加やFrame／Page内への配置は行いません。描画と同じ種類別の既定サイズを使い、
+フォーム内に収まるよう位置を補正します。フォームが既定サイズより小さい場合は追加を拒否します。
+
+追加したコントロールには`control-<UUID>` IDと、既存コントロール名およびフォーム名に
+大文字・小文字を区別せず重複しない最小の正整数suffixを使った名前を割り当てます。名前を変更してもIDは変わりません。
+MultiPage はPageを持たず`selectedIndex: -1`で作成し、TabStrip は`tabs: []`と
+`selectedIndex: -1`で作成します。追加に成功すると新しいコントロールを選択し、Toolboxを
+Pointerに戻します。配置中のEscapeは追加を取り消します。
+
+選択中のコントロールはツールバー、またはキャンバスにフォーカスがあるときのDeleteで削除できます。
+子孫がないコントロールはそのまま削除します。子孫がある場合だけ対象名と子孫数を表示して確認し、
+対象と子孫を一つのundo/redo可能な編集で削除します。入力欄の文字Deleteは横取りせず、Pageの直接削除は無効です。
+追加・削除には`userFormStructuralEdit` capabilityが必要です。未対応サーバーでも、既存の
+geometry／property編集は各capabilityが示す範囲で利用できます。ソース編集は自動保存せず、
+code-behindも変更しません。
+
+Frameへの配置・親変更は[Issue #920](https://github.com/harumiWeb/xlflow/issues/920)、
+PageやTabの編集は[Issue #921](https://github.com/harumiWeb/xlflow/issues/921)の範囲です。
+
 [英語の VS Code 詳細](../vscode/) には設定一覧と機能別の制約を掲載しています。

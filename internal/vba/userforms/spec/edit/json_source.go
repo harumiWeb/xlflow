@@ -70,11 +70,16 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 	}
 	updated := bytes.Clone(source)
 	pieces := pieceTable{{start: 0, end: len(source)}}
-	types := map[string]string{}
+	types := jsonControlTypes(model)
 	originalControls := map[string][]*jsonSourceNode{}
 	indexJSONControls(jsonSourceMemberValue(originalRoot, "controls"), originalControls)
-	for _, control := range model.Controls {
-		types[control.ID] = control.Type
+	newControls := map[string]bool{}
+	applyEdits := func(edits []SourceEdit) {
+		for i := len(edits) - 1; i >= 0; i-- {
+			edit := edits[i]
+			pieces = pieces.replace(edit)
+			updated = applySourceEdits(updated, []SourceEdit{edit})
+		}
 	}
 	for index, op := range operations {
 		if err := checkPayload(op); err != nil {
@@ -84,8 +89,65 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 		if err != nil {
 			return Result{}, annotate(index, op, err)
 		}
+		if op.Type == AddControl {
+			if err := validateAddControl(op); err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			encoded, err := json.Marshal(op.Control)
+			if err != nil {
+				return Result{}, annotate(index, op, failure(-1, op, "UFE003", "Control payload is not serializable: "+err.Error(), "Supply serializable FormSpec control fields."))
+			}
+			edit, err := jsonAddControlEdit(updated, root, encoded)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			applyEdits([]SourceEdit{edit})
+			newControls[op.Control.ID] = true
+			model, err = normalizedJSONModel(updated)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			types = jsonControlTypes(model)
+			continue
+		}
 		nodes := map[string][]*jsonSourceNode{}
 		indexJSONControls(jsonSourceMemberValue(root, "controls"), nodes)
+		if op.Type == RemoveControl {
+			if len(nodes[op.ControlID]) != 1 {
+				return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+			}
+			removeIDs, err := jsonControlRemovalOrder(op, model, root, nodes)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			removeSet := make(map[string]bool, len(removeIDs))
+			for _, id := range removeIDs {
+				removeSet[id] = true
+			}
+			for _, id := range removeIDs {
+				currentRoot, err := parseJSONSource(updated)
+				if err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+				currentNodes := map[string][]*jsonSourceNode{}
+				indexJSONControls(jsonSourceMemberValue(currentRoot, "controls"), currentNodes)
+				if len(currentNodes[id]) != 1 {
+					return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+				}
+				edit, err := jsonRemoveControlEdit(updated, currentRoot, currentNodes[id][0], removeSet)
+				if err != nil {
+					return Result{}, annotate(index, op, err)
+				}
+				applyEdits([]SourceEdit{edit})
+				delete(newControls, id)
+			}
+			model, err = normalizedJSONModel(updated)
+			if err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			types = jsonControlTypes(model)
+			continue
+		}
 		var target *jsonSourceNode
 		var originalTarget *jsonSourceNode
 		values := map[string]json.RawMessage{}
@@ -150,7 +212,7 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 				return Result{}, failure(index, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
 			}
 			target = nodes[op.ControlID][0]
-			if len(originalControls[op.ControlID]) == 1 {
+			if !newControls[op.ControlID] && len(originalControls[op.ControlID]) == 1 {
 				originalTarget = originalControls[op.ControlID][0]
 			}
 			switch op.Type {
@@ -198,12 +260,7 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 		if err != nil {
 			return Result{}, annotate(index, op, err)
 		}
-		// Apply backwards so all ranges remain relative to this source snapshot.
-		for i := len(edits) - 1; i >= 0; i-- {
-			edit := edits[i]
-			pieces = pieces.replace(edit)
-			updated = applySourceEdits(updated, []SourceEdit{edit})
-		}
+		applyEdits(edits)
 	}
 	after, err := spec.ParseFormSpec(input, updated)
 	if err != nil {
@@ -214,6 +271,22 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 		return Result{}, validationError(index, op, err)
 	}
 	return Result{Source: updated, Document: after, Edits: pieces.edits(source), Warnings: after.ValidationWarnings}, nil
+}
+
+func jsonControlTypes(model spec.FormSpec) map[string]string {
+	types := make(map[string]string, len(model.Controls))
+	for _, control := range model.Controls {
+		types[control.ID] = control.Type
+	}
+	return types
+}
+
+func normalizedJSONModel(source []byte) (spec.FormSpec, error) {
+	var model spec.FormSpec
+	if err := json.Unmarshal(source, &model); err != nil {
+		return spec.FormSpec{}, err
+	}
+	return spec.NormalizeFormSpec(model), nil
 }
 
 func marshalJSONScalar(value any) ([]byte, error) {
@@ -485,6 +558,276 @@ func indexJSONControls(sequence *jsonSourceNode, nodesByID map[string][]*jsonSou
 		}
 		indexJSONControls(jsonSourceMemberValue(control, "controls"), nodesByID)
 	}
+}
+
+func jsonControlRemovalOrder(op Operation, model spec.FormSpec, root *jsonSourceNode, nodes map[string][]*jsonSourceNode) ([]string, error) {
+	remove := map[string]bool{op.ControlID: true}
+	for changed := true; changed; {
+		changed = false
+		for _, control := range model.Controls {
+			if remove[control.ParentID] && !remove[control.ID] {
+				remove[control.ID] = true
+				changed = true
+			}
+		}
+	}
+	if len(remove) > 1 && !op.Cascade {
+		return nil, failure(-1, op, "UFE007", "The control has descendants.", "Use cascade=true or remove/reparent descendants first.")
+	}
+
+	depths := map[string]int{}
+	var indexDepth func(*jsonSourceNode, int)
+	indexDepth = func(sequence *jsonSourceNode, depth int) {
+		if sequence == nil || sequence.kind != jsonSourceArray {
+			return
+		}
+		for _, control := range sequence.elements {
+			if control.kind != jsonSourceObject {
+				continue
+			}
+			if id := jsonSourceMemberValue(control, "id"); id != nil && id.kind == jsonSourceString {
+				depths[id.text] = depth
+			}
+			indexDepth(jsonSourceMemberValue(control, "controls"), depth+1)
+		}
+	}
+	indexDepth(jsonSourceMemberValue(root, "controls"), 0)
+
+	order := make([]string, 0, len(remove))
+	positions := make(map[string]int, len(remove))
+	for position, control := range model.Controls {
+		if remove[control.ID] {
+			if _, exists := positions[control.ID]; !exists {
+				positions[control.ID] = position
+				order = append(order, control.ID)
+			}
+		}
+	}
+	if len(order) != len(remove) {
+		return nil, failure(-1, op, "UFE004", "A canonical control did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+	}
+	for _, id := range order {
+		if len(nodes[id]) != 1 {
+			return nil, failure(-1, op, "UFE004", "Control ID did not resolve to exactly one JSON control.", "Use a unique explicit control ID.")
+		}
+	}
+	slices.SortFunc(order, func(left, right string) int {
+		if depthOrder := cmp.Compare(depths[right], depths[left]); depthOrder != 0 {
+			return depthOrder
+		}
+		return cmp.Compare(positions[right], positions[left])
+	})
+	return order, nil
+}
+
+func jsonAddControlEdit(source []byte, root *jsonSourceNode, encoded []byte) (SourceEdit, error) {
+	controls := jsonSourceMemberValue(root, "controls")
+	if controls.kind == jsonSourceArray {
+		return jsonArrayAppendEdit(source, controls, root, encoded), nil
+	}
+	if controls.kind == jsonSourceOther && controls.text == "null" {
+		return SourceEdit{Start: controls.start, End: controls.end, Text: string(jsonArrayValueForParent(source, root, encoded))}, nil
+	}
+	return SourceEdit{}, failure(-1, Operation{}, "UFE005", "The controls field must be an array or null.", "Use a valid controls array and retry.")
+}
+
+func jsonArrayValueForParent(source []byte, parent *jsonSourceNode, encoded []byte) []byte {
+	parentStyle := jsonObjectStyle(source, parent)
+	if !parentStyle.multiline {
+		return []byte("[" + string(encoded) + "]")
+	}
+	indentUnit := jsonIndentUnit(source, parent)
+	itemIndent := parentStyle.indent + indentUnit
+	formatted := jsonIndentValue(encoded, itemIndent, indentUnit, parentStyle.newline)
+	return []byte("[" + parentStyle.newline + itemIndent + string(formatted) + parentStyle.newline + parentStyle.indent + "]")
+}
+
+func jsonArrayAppendEdit(source []byte, array, parent *jsonSourceNode, encoded []byte) SourceEdit {
+	style := jsonArrayStyle(source, array, parent)
+	if len(array.elements) == 0 {
+		var contents string
+		if style.multiline {
+			formatted := jsonIndentValue(encoded, style.itemIndent, style.indentUnit, style.newline)
+			contents = style.newline + style.itemIndent + string(formatted) + style.newline + style.closeIndent
+		} else {
+			contents = string(encoded)
+		}
+		return SourceEdit{Start: array.start + 1, End: array.end - 1, Text: contents}
+	}
+	last := array.elements[len(array.elements)-1]
+	if style.multiline {
+		formatted := jsonIndentValue(encoded, style.itemIndent, style.indentUnit, style.newline)
+		return SourceEdit{Start: last.end, End: last.end, Text: "," + style.newline + style.itemIndent + string(formatted)}
+	}
+	return SourceEdit{Start: last.end, End: last.end, Text: "," + style.afterComma + string(encoded)}
+}
+
+type jsonArrayFormatting struct {
+	afterComma  string
+	newline     string
+	itemIndent  string
+	closeIndent string
+	indentUnit  string
+	multiline   bool
+}
+
+func jsonArrayStyle(source []byte, array, parent *jsonSourceNode) jsonArrayFormatting {
+	style := jsonArrayFormatting{newline: "\n", indentUnit: jsonIndentUnit(source, parent)}
+	keyIndent := jsonArrayKeyIndent(source, parent, array)
+	parentStyle := jsonObjectStyle(source, parent)
+	if len(array.elements) == 0 {
+		body := source[array.start+1 : array.end-1]
+		if bytes.ContainsAny(body, "\r\n") || parentStyle.multiline {
+			style.multiline = true
+			style.newline = parentStyle.newline
+			if bytes.ContainsAny(body, "\r\n") {
+				style.newline = jsonNewlineIn(body)
+			}
+			style.closeIndent = keyIndent
+			style.itemIndent = keyIndent + style.indentUnit
+		}
+		return style
+	}
+
+	for i := 1; i < len(array.elements); i++ {
+		spacing := source[array.elements[i-1].end:array.elements[i].start]
+		if bytes.ContainsAny(spacing, "\r\n") {
+			style.multiline = true
+			style.newline = jsonNewlineIn(spacing)
+			style.itemIndent = jsonIndentForKey(source, array.elements[i].start)
+		} else if i == len(array.elements)-1 && len(spacing) > 1 {
+			style.afterComma = string(spacing[1:])
+		}
+	}
+	first := array.elements[0]
+	last := array.elements[len(array.elements)-1]
+	leading := source[array.start+1 : first.start]
+	trailing := source[last.end : array.end-1]
+	if bytes.ContainsAny(leading, "\r\n") || bytes.ContainsAny(trailing, "\r\n") {
+		style.multiline = true
+		if bytes.ContainsAny(leading, "\r\n") {
+			style.newline = jsonNewlineIn(leading)
+		} else {
+			style.newline = jsonNewlineIn(trailing)
+		}
+	}
+	if style.multiline {
+		if style.itemIndent == "" {
+			style.itemIndent = jsonIndentForKey(source, last.start)
+		}
+		if style.itemIndent == "" {
+			style.itemIndent = keyIndent + style.indentUnit
+		}
+		style.closeIndent = jsonIndentForKey(source, array.end-1)
+		if style.closeIndent == "" {
+			style.closeIndent = keyIndent
+		}
+		if last.kind == jsonSourceObject && len(last.members) > 0 {
+			memberIndent := jsonIndentForKey(source, last.members[0].keyStart)
+			if strings.HasPrefix(memberIndent, style.itemIndent) && len(memberIndent) > len(style.itemIndent) {
+				style.indentUnit = memberIndent[len(style.itemIndent):]
+			}
+		}
+	}
+	return style
+}
+
+func jsonArrayKeyIndent(source []byte, parent, array *jsonSourceNode) string {
+	if parent == nil {
+		return ""
+	}
+	for _, member := range parent.members {
+		if member.value == array {
+			return jsonIndentForKey(source, member.keyStart)
+		}
+	}
+	return ""
+}
+
+func jsonIndentUnit(source []byte, object *jsonSourceNode) string {
+	if object != nil {
+		for _, member := range object.members {
+			baseIndent := jsonIndentForKey(source, member.keyStart)
+			switch member.value.kind {
+			case jsonSourceObject:
+				if len(member.value.members) > 0 {
+					childIndent := jsonIndentForKey(source, member.value.members[0].keyStart)
+					if strings.HasPrefix(childIndent, baseIndent) && len(childIndent) > len(baseIndent) {
+						return childIndent[len(baseIndent):]
+					}
+				}
+			case jsonSourceArray:
+				if len(member.value.elements) > 0 {
+					childIndent := jsonIndentForKey(source, member.value.elements[0].start)
+					if strings.HasPrefix(childIndent, baseIndent) && len(childIndent) > len(baseIndent) {
+						return childIndent[len(baseIndent):]
+					}
+				}
+			}
+		}
+	}
+	return "  "
+}
+
+func jsonIndentValue(encoded []byte, prefix, indent, newline string) []byte {
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, encoded, prefix, indent); err != nil {
+		return bytes.Clone(encoded)
+	}
+	return []byte(strings.ReplaceAll(formatted.String(), "\n", newline))
+}
+
+func jsonControlArray(sequence, target *jsonSourceNode) *jsonSourceNode {
+	if sequence == nil || sequence.kind != jsonSourceArray {
+		return nil
+	}
+	for _, control := range sequence.elements {
+		if control == target {
+			return sequence
+		}
+		if nested := jsonControlArray(jsonSourceMemberValue(control, "controls"), target); nested != nil {
+			return nested
+		}
+	}
+	return nil
+}
+
+func jsonRemoveControlEdit(source []byte, root, target *jsonSourceNode, removeSet map[string]bool) (SourceEdit, error) {
+	if jsonHasUnselectedNestedControl(target, removeSet) {
+		return SourceEdit{}, failure(-1, Operation{}, "UFE006", "Removing this JSON control would also remove a nested control outside the canonical removal set.", "Resolve the nested control relationship before retrying.")
+	}
+	array := jsonControlArray(jsonSourceMemberValue(root, "controls"), target)
+	if array == nil {
+		return SourceEdit{}, fmt.Errorf("control array for JSON source node was not found")
+	}
+	index := slices.Index(array.elements, target)
+	if index < 0 {
+		return SourceEdit{}, fmt.Errorf("control item in JSON source array was not found")
+	}
+	if len(array.elements) == 1 {
+		return SourceEdit{Start: target.start, End: target.end}, nil
+	}
+	if index == 0 {
+		return SourceEdit{Start: target.start, End: array.elements[1].start}, nil
+	}
+	return SourceEdit{Start: array.elements[index-1].end, End: target.end}, nil
+}
+
+func jsonHasUnselectedNestedControl(control *jsonSourceNode, removeSet map[string]bool) bool {
+	children := jsonSourceMemberValue(control, "controls")
+	if children == nil || children.kind != jsonSourceArray {
+		return false
+	}
+	for _, child := range children.elements {
+		if child.kind != jsonSourceObject {
+			return true
+		}
+		id := jsonSourceMemberValue(child, "id")
+		if id == nil || id.kind != jsonSourceString || !removeSet[id.text] || jsonHasUnselectedNestedControl(child, removeSet) {
+			return true
+		}
+	}
+	return false
 }
 
 func jsonObjectInsertion(source []byte, object *jsonSourceNode, keys []string, values map[string]json.RawMessage) SourceEdit {

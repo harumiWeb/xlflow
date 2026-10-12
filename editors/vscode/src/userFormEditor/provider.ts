@@ -4,8 +4,56 @@ import type { XlflowLanguageClientManager } from "../client";
 import { readFormsRootFromToml } from "../sidebar";
 import { isFormSpecPath, PreviewSynchronizer } from "./document";
 import { isWebviewMessage } from "./protocol";
-import type { HostMessage } from "./protocol";
+import type { HostMessage, DesignerDocument, StructuralOperation, DesignerError } from "./protocol";
 import { DocumentEditQueue } from "./edits";
+import { subtreeIds } from "./toolbox";
+
+export type DeleteConfirmation = (name: string, descendants: number) => PromiseLike<boolean>;
+const confirmSubtreeDeletion: DeleteConfirmation = async (name, descendants) => {
+  const action = vscode.l10n.t("Delete controls");
+  return (
+    (await vscode.window.showWarningMessage(
+      vscode.l10n.t('Delete "{0}" and its {1} descendant control(s)?', name, descendants),
+      { modal: true },
+      action,
+    )) === action
+  );
+};
+
+export async function prepareStructuralEdit(
+  operation: StructuralOperation,
+  snapshot: { version: number; document: DesignerDocument } | undefined,
+  version: number,
+  confirm: DeleteConfirmation,
+): Promise<DesignerError | undefined> {
+  if (!snapshot || snapshot.version !== version)
+    return {
+      code: "staleDocument",
+      message: vscode.l10n.t("The document changed. Retry the operation on the updated form."),
+    };
+  const controls = snapshot.document.controls;
+  if (operation.type === "addControl") {
+    const name = operation.control.name.toLowerCase();
+    if (
+      controls.some((c) => c.id === operation.control.id || c.name.toLowerCase() === name) ||
+      snapshot.document.name.toLowerCase() === name
+    )
+      return {
+        code: "controlConflict",
+        message: vscode.l10n.t("The new control ID or name is already in use."),
+      };
+    return;
+  }
+  const control = controls.find((c) => c.id === operation.controlId);
+  if (!control || control.type.toLowerCase() === "page")
+    return {
+      code: "unsupportedDeletion",
+      message: vscode.l10n.t("Select a control other than Page to delete."),
+    };
+  const descendants = subtreeIds(controls, control.id).size - 1;
+  if (descendants && !(await confirm(control.name, descendants)))
+    return { code: "editCancelled", message: vscode.l10n.t("Control deletion cancelled.") };
+}
 
 export const designerViewType = "xlflow.userFormDesigner";
 
@@ -14,6 +62,7 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
   public constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly clients: XlflowLanguageClientManager,
+    private readonly confirmDeletion: DeleteConfirmation = confirmSubtreeDeletion,
   ) {}
 
   public async resolveCustomTextEditor(
@@ -30,6 +79,8 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
     let timer: NodeJS.Timeout | undefined;
     let editable = false;
     let propertyEditable = false;
+    let structuralEditable = false;
+    let latestDocument: { version: number; document: DesignerDocument } | undefined;
     let generation = 0;
     let contextGeneration = 0;
     const replies = new Map<
@@ -55,9 +106,14 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
     const send = (message: HostMessage) => {
       if (message.type === "document") editable = message.editable === true;
       if (message.type === "document") propertyEditable = message.propertyEditable === true;
+      if (message.type === "document") {
+        structuralEditable = message.structuralEditable === true;
+        latestDocument = { version: message.version, document: message.document };
+      }
       if (message.type === "invalidDocument" || message.type === "editingUnavailable") {
         editable = false;
         propertyEditable = false;
+        structuralEditable = false;
       }
       if (ready && !disposed && panel.visible) void panel.webview.postMessage(message);
     };
@@ -66,6 +122,16 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
         type: "localization",
         strings: {
           header: vscode.l10n.t("xlflow UserForm Designer"),
+          toolbox: vscode.l10n.t("Toolbox"),
+          pointer: vscode.l10n.t("Pointer"),
+          deleteControl: vscode.l10n.t("Delete control"),
+          structuralReadOnly: vscode.l10n.t(
+            "Adding and deleting controls requires an xlflow version supporting structural edits.",
+          ),
+          cannotInsert: vscode.l10n.t("This control's default size is larger than the form."),
+          placement: vscode.l10n.t(
+            "Click the form to place the control. Escape cancels. Controls are added at the form root.",
+          ),
           openText: vscode.l10n.t("Open text editor"),
           lastValid: vscode.l10n.t("Showing the last valid document."),
           loading: vscode.l10n.t("Loading FormSpec…"),
@@ -224,14 +290,25 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider {
           const property =
             message.operations[0].type === "setFormProperty" ||
             message.operations[0].type === "setControlProperty";
+          const operation = message.operations[0];
+          const structural = operation.type === "addControl" || operation.type === "removeControl";
           const permitted = () =>
             !disposed &&
             contextGeneration === editContext &&
             panel.visible &&
-            (property ? propertyEditable : editable) &&
+            (structural ? structuralEditable : property ? propertyEditable : editable) &&
             generation === editGeneration;
+          const prepare = structural
+            ? () =>
+                prepareStructuralEdit(
+                  operation,
+                  latestDocument,
+                  message.version,
+                  this.confirmDeletion,
+                )
+            : undefined;
           void this.edits
-            .run(document, message.version, message.operations, this.clients, permitted)
+            .run(document, message.version, message.operations, this.clients, permitted, prepare)
             .then(async (error) => {
               if (disposed || contextGeneration !== editContext) return;
               replies.set(message.requestId, {

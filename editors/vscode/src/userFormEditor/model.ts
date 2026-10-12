@@ -1,23 +1,5 @@
 import type { DesignerDocument, PreviewDocument } from "./protocol";
-
-// These are display-only defaults from the pure-Go generation contract.
-const sizes: Record<string, [number, number]> = {
-  label: [72, 18],
-  textbox: [120, 18],
-  commandbutton: [72, 24],
-  checkbox: [72, 18],
-  optionbutton: [72, 18],
-  togglebutton: [72, 18],
-  combobox: [120, 18],
-  listbox: [120, 72],
-  spinbutton: [18, 36],
-  scrollbar: [120, 18],
-  image: [72, 72],
-  frame: [144, 108],
-  multipage: [240, 180],
-  page: [0, 0],
-  tabstrip: [240, 48],
-};
+import { controlDefaults } from "./toolbox";
 
 export function pointsToPixels(points: number, zoom = 1): number {
   return (points * 96 * zoom) / 72;
@@ -62,7 +44,7 @@ export function designerDocument(spec: PreviewDocument, warnings: string[] = [])
     warnings,
     controls: spec.controls.map((control) => {
       const effective = { ...control.observed, ...control };
-      const defaults = sizes[control.type.toLowerCase()] ?? [72, 24];
+      const defaults = controlDefaults(control.type);
       return {
         ...effective,
         left: effective.left ?? 0,
