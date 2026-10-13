@@ -197,7 +197,7 @@ func rewriteVBFrameClientSize(raw []byte, size Size, codePage uint16) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	result := make([]byte, 0, len(raw)+64)
+	result := make([]byte, 0, len(raw))
 	for index, line := range lines {
 		switch index {
 		case layout.rootClientWidthIndex:
