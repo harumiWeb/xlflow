@@ -56,7 +56,7 @@ type InitOptions struct {
 }
 
 func Init(cwd, workbookPath string) (InitResult, error) {
-	return InitWithOptions(cwd, workbookPath, InitOptions{UserFormCodeSource: "frm"})
+	return InitWithOptions(cwd, workbookPath, InitOptions{UserFormCodeSource: "sidecar"})
 }
 
 func InitWithOptions(cwd, workbookPath string, opts InitOptions) (InitResult, error) {
@@ -66,7 +66,7 @@ func InitWithOptions(cwd, workbookPath string, opts InitOptions) (InitResult, er
 	}
 	codeSource := strings.TrimSpace(opts.UserFormCodeSource)
 	if codeSource == "" {
-		codeSource = "frm"
+		codeSource = "sidecar"
 	}
 	if codeSource != "frm" && codeSource != "sidecar" {
 		return result, fmt.Errorf("userform code source must be one of frm, sidecar")
@@ -453,6 +453,8 @@ basis: designer
 form:
   name: %s
   caption: %s
+  width: 240
+  height: 180
 controls: []
 
 # Example controls:

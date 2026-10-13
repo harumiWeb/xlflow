@@ -472,11 +472,11 @@ func TestUserFormEditStructuralYAMLAndJSON(t *testing.T) {
 	}{
 		{
 			name: "yaml", format: "yaml",
-			source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\n  build:\n    clientWidth: 320\n    clientHeight: 240\ncontrols:\n  - id: frame\n    name: Frame1\n    type: Frame\n    left: 0\n    top: 0\n    width: 160\n    height: 100\n  - id: child\n    parentId: frame\n    name: ChildLabel\n    type: Label\n    left: 4\n    top: 4\n    width: 80\n    height: 16\n",
+			source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\n  width: 320\n  height: 240\ncontrols:\n  - id: frame\n    name: Frame1\n    type: Frame\n    left: 0\n    top: 0\n    width: 160\n    height: 100\n  - id: child\n    parentId: frame\n    name: ChildLabel\n    type: Label\n    left: 4\n    top: 4\n    width: 80\n    height: 16\n",
 		},
 		{
 			name: "json", format: "json",
-			source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main","build":{"clientWidth":320,"clientHeight":240}},"controls":[{"id":"frame","name":"Frame1","type":"Frame","left":0,"top":0,"width":160,"height":100},{"id":"child","parentId":"frame","name":"ChildLabel","type":"Label","left":4,"top":4,"width":80,"height":16}]}`,
+			source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main","width":320,"height":240},"controls":[{"id":"frame","name":"Frame1","type":"Frame","left":0,"top":0,"width":160,"height":100},{"id":"child","parentId":"frame","name":"ChildLabel","type":"Label","left":4,"top":4,"width":80,"height":16}]}`,
 		},
 	}
 	for _, fixture := range fixtures {
@@ -714,11 +714,11 @@ func TestUserFormEditNewBuiltInControlsCompile(t *testing.T) {
 	}{
 		{
 			name: "yaml", input: spec.SpecInput{Format: "yaml"},
-			source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\n  build:\n    clientWidth: 320\n    clientHeight: 240\ncontrols: []\n",
+			source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\n  width: 320\n  height: 240\ncontrols: []\n",
 		},
 		{
 			name: "json", input: spec.SpecInput{Format: "json"},
-			source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main","build":{"clientWidth":320,"clientHeight":240}},"controls":[]}`,
+			source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main","width":320,"height":240},"controls":[]}`,
 		},
 	}
 	types := []struct {

@@ -190,10 +190,11 @@ function Get-FormSnapshot([string]$FormName) {
             $root[$property.Substring(0, 1).ToLowerInvariant() + $property.Substring(1)] = [double]$value.value
         }
     }
-    if ($Phase -eq 'verify') {
-        # ClientHeight in persisted VBFrame includes space excluded by the
-        # runtime MSForms InsideHeight property; compare matching representations.
-        $exportPath = Join-Path ([IO.Path]::GetDirectoryName($WorkbookPath)) ($FormName + '-' + [Guid]::NewGuid().ToString('N') + '.frm')
+    # FormSpec dimensions are the persisted VBFrame client dimensions. Read
+    # those from the exported artifact; Designer Width/Height and Inside* are
+    # observations and must not be used as substitutes.
+    $exportPath = Join-Path ([IO.Path]::GetDirectoryName([string]$script:workbook.FullName)) ($FormName + '-' + [Guid]::NewGuid().ToString('N') + '.frm')
+    try {
         $component = Get-FormComponent $FormName
         $component.Export($exportPath)
         $exported = [IO.File]::ReadAllText($exportPath)
@@ -202,6 +203,8 @@ function Get-FormSnapshot([string]$FormName) {
             if (-not $match.Success) { throw "Missing exported Client$dimension for $FormName" }
             $root['client' + $dimension] = [double]$match.Groups[1].Value / 20.0
         }
+    } finally {
+        if (Test-Path -LiteralPath $exportPath) { Remove-Item -LiteralPath $exportPath -Force }
     }
 
     $controls = Hold-Com $designer.Controls
@@ -209,8 +212,8 @@ function Get-FormSnapshot([string]$FormName) {
     for ($i = 0; $i -lt [int]$controls.Count; $i++) {
         $rows += Get-ControlSnapshot (Hold-Com ($controls.Item($i)))
     }
-    $formWidth = if ($root.Contains('clientWidth')) { $root.clientWidth } elseif ($root.Contains('width')) { $root.width } else { $null }
-    $formHeight = if ($root.Contains('clientHeight')) { $root.clientHeight } elseif ($root.Contains('height')) { $root.height } else { $null }
+    $formWidth = if ($root.Contains('clientWidth')) { $root.clientWidth } else { $null }
+    $formHeight = if ($root.Contains('clientHeight')) { $root.clientHeight } else { $null }
     return [pscustomobject]@{
         name = $FormName
         form = [pscustomobject]@{
@@ -249,19 +252,13 @@ function Assert-FormsReference {
     return $rows
 }
 
-function Set-FormClientSize([string]$FormName, [object]$Designer) {
-    $insideWidthSet = $false
-    $insideHeightSet = $false
-    try { $Designer.InsideWidth = 240; $insideWidthSet = $true } catch { $insideWidthSet = $false }
-    try { $Designer.InsideHeight = 180; $insideHeightSet = $true } catch { $insideHeightSet = $false }
-    if (-not ($insideWidthSet -and $insideHeightSet)) {
-        $component = Get-FormComponent $FormName
-        $properties = Hold-Com $component.Properties
-        $width = Hold-Com ($properties.Item('Width'))
-        $height = Hold-Com ($properties.Item('Height'))
-        $width.Value = 240
-        $height.Value = 180
-    }
+function Set-FormClientSize([string]$FormName) {
+    $component = Get-FormComponent $FormName
+    $properties = Hold-Com $component.Properties
+    $width = Hold-Com ($properties.Item('Width'))
+    $height = Hold-Com ($properties.Item('Height'))
+    $width.Value = 240
+    $height.Value = 180
 }
 
 function New-Form([string]$FormName, [string]$Caption, [bool]$Populate) {
@@ -271,7 +268,7 @@ function New-Form([string]$FormName, [string]$Caption, [bool]$Populate) {
     $designer = Hold-Com $component.Designer
     $component.Name = $FormName
     $designer.Caption = $Caption
-    Set-FormClientSize $FormName $designer
+    Set-FormClientSize $FormName
     if ($Populate) {
         $controls = Hold-Com $designer.Controls
         foreach ($spec in $script:controlSpecs) {
@@ -440,22 +437,23 @@ function Assert-ExpectedForm([object]$Snapshot, [object]$Expected) {
     if ($expectedName -and [string]$expectedName -cne [string]$Snapshot.name) {
         throw "Expected form name differs: expected=$expectedName actual=$($Snapshot.name)"
     }
+    if ($null -ne $expectedForm.PSObject.Properties['build']) {
+        throw "$($Snapshot.name): ExpectedPath must use canonical form.width/form.height; form.build is removed"
+    }
     Assert-ExpectedFields "$($Snapshot.name).form" $Snapshot.form $expectedForm @('caption')
 
     $expectedObservedForm = Get-PropertyOrNull $expectedForm 'observed'
     if ($null -ne $expectedObservedForm) {
         Assert-ExpectedFields "$($Snapshot.name).form.observed" $Snapshot.root $expectedObservedForm @('clientWidth', 'clientHeight')
     }
-    $expectedBuildForm = Get-PropertyOrNull $expectedForm 'build'
-    if ($null -eq $expectedBuildForm) { $expectedBuildForm = Get-PropertyOrNull $Expected 'build' }
-    if ($null -eq $expectedBuildForm) { throw "$($Snapshot.name): ExpectedPath must provide form.build.clientWidth/clientHeight" }
-    foreach ($dimension in @('clientWidth', 'clientHeight')) {
-        if ($null -eq $expectedBuildForm.PSObject.Properties[$dimension]) {
-            throw "$($Snapshot.name): ExpectedPath must provide form.build.$dimension"
+    foreach ($dimension in @('width', 'height')) {
+        if ($null -eq $expectedForm.PSObject.Properties[$dimension]) {
+            throw "$($Snapshot.name): ExpectedPath must provide canonical form.$dimension"
         }
     }
-    Assert-ExpectedFields "$($Snapshot.name).form.build" $Snapshot.form $expectedBuildForm @('caption')
-    Assert-ExpectedFields "$($Snapshot.name).form.build" $Snapshot.root $expectedBuildForm @('clientWidth', 'clientHeight')
+    Assert-ExpectedFields "$($Snapshot.name).form" $Snapshot.form $expectedForm @('width', 'height')
+    Assert-Value "$($Snapshot.name).persisted.clientWidth" $Snapshot.root.clientWidth $expectedForm.width
+    Assert-Value "$($Snapshot.name).persisted.clientHeight" $Snapshot.root.clientHeight $expectedForm.height
 
     $expectedControls = Get-PropertyOrNull $Expected 'controls'
     if ($null -eq $expectedControls) { $expectedControls = Get-PropertyOrNull $expectedForm 'controls' }

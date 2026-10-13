@@ -190,8 +190,8 @@ func TestPropertyGridRejectsAliasAndMergeDependentYAML(t *testing.T) {
 	fixtures := []string{
 		strings.Replace(base, "caption: 'Submit'", "caption: &caption 'Submit'", 1) + "# anchored authoring\n",
 		strings.Replace(strings.Replace(base, "caption: 'Submit'", "caption: &caption 'Submit'", 1), "text: keep", "text: *caption", 1),
-		strings.Replace(strings.Replace(base, "name: Main", "name: Main\n  build: &build {width: 100}", 1), "text: keep", "<<: *build\n    text: keep", 1),
-		strings.Replace(strings.Replace(base, "name: Main", "name: Main\n  build: &build {caption: caption}", 1), "caption: 'Submit'", "<<: *build", 1),
+		strings.Replace(base, "name: Main", "name: Main\n  width: &width 100\n  height: *width", 1),
+		strings.Replace(strings.Replace(base, "type: CommandButton", "type: CommandButton\n    properties: &custom {vendor: value}", 1), "type: TextBox", "type: TextBox\n    properties:\n      <<: *custom", 1),
 	}
 	for _, source := range fixtures {
 		input := spec.SpecInput{Format: "yaml"}
@@ -208,23 +208,23 @@ func TestPropertyGridRejectsAliasAndMergeDependentYAML(t *testing.T) {
 
 func TestNullContainersAreNotGuessedDuringInsertion(t *testing.T) {
 	for _, format := range []string{"yaml", "json"} {
-		source := strings.Replace(base, "name: Main", "name: Main\n  build: null", 1)
+		source := strings.Replace(base, "name: Main", "name: Main\n  width: null", 1)
 		if format == "json" {
-			source = strings.Replace(propertyJSON, "\"caption\":null", "\"caption\":null,\"build\":null", 1)
+			source = strings.Replace(propertyJSON, "\"caption\":null", "\"caption\":null,\"width\":null", 1)
 		}
 		input := spec.SpecInput{Format: format}
 		if _, err := spec.ParseFormSpec(input, []byte(source)); err != nil {
 			t.Fatal(err)
 		}
 		grid, err := PropertyGrid(input, []byte(source))
-		if err != nil || grid.Form.Values["build.caption"].Present {
-			t.Fatalf("null build contains authored leaf: %+v %v", grid, err)
+		if err != nil || !grid.Form.Values["width"].Present || grid.Form.Values["width"].Value != nil {
+			t.Fatalf("null canonical width was not preserved: %+v %v", grid, err)
 		}
 		body := []byte(source)
 		original := bytes.Clone(body)
-		result, err := Apply(input, body, []Operation{{Type: SetFormProperty, Field: "build.caption", Value: "new"}})
-		if err == nil || !reflect.DeepEqual(result, Result{}) || !bytes.Equal(body, original) {
-			t.Fatalf("null build overwritten unsafely: %s %v", result.Source, err)
+		result, err := Apply(input, body, []Operation{{Type: SetFormProperty, Field: "width", Value: 200}})
+		if err != nil || result.Document.Form.Width == nil || *result.Document.Form.Width != 200 || !bytes.Equal(body, original) {
+			t.Fatalf("null canonical width update failed: %s %v", result.Source, err)
 		}
 		source = strings.Replace(base, "form:\n  name: Main", "form: null", 1)
 		if format == "json" {
@@ -311,13 +311,13 @@ func TestJSONScalarPropertyPreservesTokenSpans(t *testing.T) {
 		t.Fatalf("nonlocal replacement: %s %+v", result.Source, result.Edits)
 	}
 	result = applyFormatOK(t, "json", propertyJSON,
-		Operation{Type: SetFormProperty, Field: "build.clientWidth", Value: 200.0},
-		Operation{Type: SetFormProperty, Field: "build.caption", Value: ""},
+		Operation{Type: SetFormProperty, Field: "width", Value: 200.0},
+		Operation{Type: SetFormProperty, Field: "caption", Value: ""},
 		Operation{Type: SetControlProperty, ControlID: "submit", Field: "tabIndex", Value: 0},
 		Operation{Type: SetControlProperty, ControlID: "submit", Field: "visible", Value: false},
 	)
-	if result.Document.Form.Build == nil || *result.Document.Form.Build.ClientWidth != 200 || *result.Document.Form.Build.Caption != "" {
-		t.Fatalf("missing build fields: %+v", result.Document.Form.Build)
+	if result.Document.Form.Width == nil || *result.Document.Form.Width != 200 || result.Document.Form.Caption == nil || *result.Document.Form.Caption != "" {
+		t.Fatalf("missing canonical form fields: %+v", result.Document.Form)
 	}
 	if !bytes.Contains(result.Source, []byte("\"caption\":\"\\u65e5本😀\"")) || !bytes.Contains(result.Source, []byte("\"left\":1e2")) || bytes.Count(result.Source, []byte("\r\n")) != strings.Count(propertyJSON, "\r\n") {
 		t.Fatalf("unrelated bytes changed: %s", result.Source)
@@ -356,35 +356,25 @@ func TestJSONScalarNoopAndRepeatedEdits(t *testing.T) {
 	}
 }
 
-func TestJSONExistingBuildLocalFormatting(t *testing.T) {
-	for _, build := range []string{`{}`, "{\r\n      \"width\" : 2.40e2\r\n    }"} {
-		source := strings.Replace(propertyJSON, "\"caption\":null", "\"caption\":null,\"build\":"+build, 1)
-		result := applyFormatOK(t, "json", source, Operation{Type: SetFormProperty, Field: "build.caption", Value: "caption"})
-		if *result.Document.Form.Build.Caption != "caption" || len(result.Edits) != 1 || result.Edits[0].Start != result.Edits[0].End {
-			t.Fatalf("not a local insertion: %+v", result.Edits)
-		}
-		if strings.Contains(build, "2.40e2") && !bytes.Contains(result.Source, []byte("2.40e2,\r\n      \"caption\" : \"caption\"")) {
-			t.Fatalf("build format changed: %s", result.Source)
-		}
-		result = applyFormatOK(t, "json", string(result.Source), Operation{Type: SetFormProperty, Field: "build.caption", Value: "changed"})
-		if *result.Document.Form.Build.Caption != "changed" || len(result.Edits) != 1 {
-			t.Fatal("existing build scalar replacement failed")
-		}
+func TestJSONCanonicalFormWidthInsertionPreservesLocalFormatting(t *testing.T) {
+	cases := []struct {
+		name      string
+		source    string
+		insertion bool
+	}{
+		{name: "insert", source: propertyJSON, insertion: true},
+		{name: "replace", source: strings.Replace(propertyJSON, `"caption":null`, `"caption":null,"width":2.40e2`, 1)},
 	}
-}
-
-func TestJSONEmptyBuildPreservesMultilineLayout(t *testing.T) {
-	for _, newline := range []string{"\n", "\r\n"} {
-		empty := "{" + newline + "    }"
-		source := strings.Replace(propertyJSON, `"caption":null`, `"caption":null,"build":`+empty, 1)
-		result := applyFormatOK(t, "json", source, Operation{Type: SetFormProperty, Field: "build.clientWidth", Value: 200.0})
-		want := "{" + newline + `      "clientWidth":200` + newline + "    }"
-		if string(result.Source) != strings.Replace(source, empty, want, 1) {
-			t.Fatalf("empty multiline build lost layout: %s", result.Source)
-		}
-		if len(result.Edits) != 1 || result.Edits[0].Start != result.Edits[0].End {
-			t.Fatalf("expected one localized insertion: %+v", result.Edits)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := applyFormatOK(t, "json", tc.source, Operation{Type: SetFormProperty, Field: "width", Value: 200.0})
+			if result.Document.Form.Width == nil || *result.Document.Form.Width != 200 || len(result.Edits) != 1 || (result.Edits[0].Start == result.Edits[0].End) != tc.insertion {
+				t.Fatalf("canonical form width edit = %+v, %+v", result.Document.Form, result.Edits)
+			}
+			if !bytes.Contains(result.Source, []byte(`"width":200`)) {
+				t.Fatalf("width was not authored locally: %s", result.Source)
+			}
+		})
 	}
 }
 
@@ -441,10 +431,10 @@ func TestExplicitNullPropertyAndWirePresence(t *testing.T) {
 		if state := grid.Controls["submit"].Values["caption"]; !state.Present || state.Value != nil {
 			t.Fatalf("null lost: %+v", state)
 		}
-		result = applyFormatOK(t, format, source, Operation{Type: SetFormProperty, Field: "build.caption", ValuePresent: true})
+		result = applyFormatOK(t, format, source, Operation{Type: SetFormProperty, Field: "caption", ValuePresent: true})
 		grid, err = PropertyGrid(spec.SpecInput{Format: format}, result.Source)
-		if err != nil || !grid.Form.Values["build.caption"].Present || grid.Form.Values["build.caption"].Value != nil {
-			t.Fatalf("nested null lost: %+v %v", grid, err)
+		if err != nil || !grid.Form.Values["caption"].Present || grid.Form.Values["caption"].Value != nil {
+			t.Fatalf("form null lost: %+v %v", grid, err)
 		}
 	}
 	for _, test := range []struct {
@@ -514,7 +504,7 @@ func TestPropertyFailuresAreAtomic(t *testing.T) {
 	}
 	for _, source := range []string{
 		strings.Replace(propertyJSON, "\"caption\":null", "\"caption\":null,\"caption\":\"duplicate\"", 1),
-		strings.Replace(propertyJSON, "\"name\":\"Main\"", "\"name\":\"Main\",\"build\":{\"caption\":\"x\",\"\\u0063aption\":\"y\"}", 1),
+		strings.Replace(propertyJSON, "\"name\":\"Main\"", "\"name\":\"Main\",\"width\":1,\"\\u0077idth\":2", 1),
 	} {
 		result, err := Apply(spec.SpecInput{Format: "json"}, []byte(source), []Operation{{Type: SetFormProperty, Field: "caption", Value: "x"}})
 		if err == nil || !reflect.DeepEqual(result, Result{}) {
@@ -528,12 +518,12 @@ func TestPropertyFailuresAreAtomic(t *testing.T) {
 
 func TestEditablePropertiesMatchTypedAuthoring(t *testing.T) {
 	form := EditableFormProperties()
-	for _, name := range []string{"name", "caption", "width", "height", "build.caption", "build.width", "build.height", "build.clientWidth", "build.clientHeight"} {
+	for _, name := range []string{"name", "caption", "width", "height"} {
 		if _, ok := form[name]; !ok {
 			t.Fatalf("missing form field %s", name)
 		}
 	}
-	if len(form) != 9 {
+	if len(form) != 4 {
 		t.Fatalf("unexpected form properties: %+v", form)
 	}
 	for _, name := range []string{"id", "type", "parentId", "zIndex", "picture", "pictureAlignment", "pictureSizeMode", "controls", "properties", "observed", "list", "tabs"} {
@@ -570,7 +560,7 @@ func TestPropertyGridPreservesAuthoredStates(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if grid.Form.Values["caption"] != (PropertyState{Present: true}) || grid.Form.Values["width"].Present || grid.Form.Values["build.caption"].Present {
+		if grid.Form.Values["caption"] != (PropertyState{Present: true}) || grid.Form.Values["width"].Present {
 			t.Fatalf("normalization/snapshot leaked: %+v", grid.Form.Values)
 		}
 		if grid.Controls["submit"].Values["enabled"] != (PropertyState{Present: true, Value: false}) || grid.Controls["other"].Values["text"] != (PropertyState{Present: true, Value: ""}) {

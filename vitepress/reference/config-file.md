@@ -210,7 +210,7 @@ Set `enabled = true` only when runtime diagnostics need meaningful `Erl` values.
 | ------------- | ------ | -------- | ------------- | ------------------------------------------------------------------------------------------ |
 | `code_source` | string | no       | `"sidecar"`\* | Where UserForm code-behind lives in the source tree.<br>Valid values: `"frm"`, `"sidecar"` |
 
-\* `xlflow new` defaults to `"sidecar"`. `xlflow init` defaults to `"frm"` so that existing code inside `.frm` files remains authoritative. Use `xlflow init --userform-code-source sidecar` for imported workbooks that should start with sidecar code and Designer specs.
+\* `xlflow new` and `xlflow init` default to `"sidecar"`. For artifact imports that should keep embedded `.frm` code authoritative (including custom-control workflows), pass `xlflow init --userform-code-source frm` explicitly.
 
 ### `[backup.retention]`
 
@@ -255,7 +255,9 @@ errors. See [pack](../commands/pack) for canonical inputs and supported edits.
 | `code_page` | int  | no       | `1252`  | MBCS code page authored into a fresh template-free VBA project. |
 
 This value applies only to `xlflow pack --blank`; template mode preserves the
-template's code page. Japanese projects normally use code page `932`. Both
+template's code page. Manually authored configuration defaults to `1252`.
+`new` and `init` seed the setting from the actual VBA project's `PROJECTCODEPAGE`;
+UTF-8 source files are never rewritten. Japanese projects normally use code page `932`. Both
 `PROJECTLCID` and `PROJECTLCIDINVOKE` always use the MS-OVBA-required value
 `0x00000409`; `pack.blank.lcid` is unsupported and fails configuration loading.
 Source files remain UTF-8 without BOM regardless of this setting.
@@ -473,8 +475,8 @@ ranking contract are defined in
 ## Defaults differ between `new` and `init`
 
 - **`xlflow new`** writes `[userform].code_source = "sidecar"`.
-- **`xlflow init`** writes `[userform].code_source = "frm"` by default.
-- **`xlflow init --userform-code-source sidecar`** writes `[userform].code_source = "sidecar"` and generates imported UserForm specs under `src/forms/specs`.
+- **`xlflow init`** writes `[userform].code_source = "sidecar"` by default and generates imported UserForm specs under `src/forms/specs`.
+- **`xlflow init --userform-code-source frm`** explicitly selects imported `.frm` code as the authority, including compatibility/custom-control artifact workflows.
 - **`xlflow form migrate sidecar`** converts an existing imported project from `frm` to `sidecar` after creating sidecar code and Designer specs.
 - **`xlflow new`** defaults to `build/Book.xlsm` when the workbook argument is omitted or has no extension. Use an explicit `.xlam` filename to create an Excel add-in project or `.xlsb` for an Excel Binary Workbook VBA project.
 - **`xlflow init`** preserves the copied workbook filename and extension, including `.xlam` and `.xlsb`.

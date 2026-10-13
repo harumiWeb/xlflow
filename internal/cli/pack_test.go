@@ -33,7 +33,7 @@ func TestRootCommandIncludesPackCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "pack" {
 		t.Fatalf("expected pack command, got %#v", cmd)
 	}
-	for _, name := range []string{"out", "template", "blank"} {
+	for _, name := range []string{"out", "template", "blank", "check"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected pack command to define --%s", name)
 		}
@@ -70,6 +70,38 @@ func TestPackCommandBlankCreatesWorkbookWithoutTemplate(t *testing.T) {
 	}
 	if _, err := vbaproject.Read(zipEntryBytes(t, body, "xl/vbaProject.bin")); err != nil {
 		t.Fatalf("fresh vbaProject.bin: %v", err)
+	}
+}
+
+func TestPackCommandCheckValidatesWithoutPublishing(t *testing.T) {
+	for _, mode := range []string{"template", "blank"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			writePackProject(t, dir, false)
+			writePackSourceTree(t, dir, false)
+			args := []string{"--json", "pack", "--check"}
+			if mode == "blank" {
+				args = append(args, "--blank")
+			}
+			stdout, err := runPackCommandForTest(dir, args...)
+			if err != nil {
+				t.Fatalf("pack --check: %v\n%s", err, stdout)
+			}
+			var env output.Envelope
+			if decodeErr := json.Unmarshal([]byte(stdout), &env); decodeErr != nil {
+				t.Fatalf("JSON output: %v\n%s", decodeErr, stdout)
+			}
+			if env.Status != output.StatusOK || env.Command != "pack" {
+				t.Fatalf("check envelope = %+v", env)
+			}
+			payload := cliObjectMap(env.Pack)
+			if payload["check"] != true || payload["base"] != mode {
+				t.Fatalf("pack check payload = %+v", payload)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, "dist", "Book.xlsm")); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("check mode published an artifact, stat error = %v", statErr)
+			}
+		})
 	}
 }
 
@@ -138,19 +170,27 @@ func TestPackCommandBlankRejectsUserFormArtifacts(t *testing.T) {
 	cases := []struct {
 		name string
 		path string
+		body []byte
 		code string
 	}{
 		{name: "frm", path: filepath.Join("src", "forms", "Login.frm"), code: "pack_userform_generation_unsupported"},
 		{name: "orphan frx", path: filepath.Join("src", "forms", "Login.frx"), code: "pack_ambiguous_layout"},
 		{name: "orphan sidecar code", path: filepath.Join("src", "forms", "code", "Login.bas"), code: "pack_ambiguous_layout"},
-		{name: "orphan form spec", path: filepath.Join("src", "forms", "specs", "Login.yaml"), code: "pack_ambiguous_layout"},
+		{name: "invalid form spec", path: filepath.Join("src", "forms", "specs", "Login.yaml"), body: []byte("artifact"), code: "spec_validation_failed"},
+		// The open custom-unchecked properties bag is not a raw schema error;
+		// pack rejects the unsupported alias during UserForm generation.
+		{name: "unsupported property alias", path: filepath.Join("src", "forms", "specs", "Login.yaml"), body: []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login"},"controls":[{"id":"text1","name":"TextBox1","type":"TextBox","properties":{"UnknownAlias":"x"}}]}`), code: "pack_userform_generation_unsupported"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			writePackConfig(t, dir)
 			writePackSourceTree(t, dir, false)
-			writePackSourceModule(t, dir, tc.path, []byte("artifact"))
+			body := tc.body
+			if body == nil {
+				body = []byte("artifact")
+			}
+			writePackSourceModule(t, dir, tc.path, body)
 
 			stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--blank", "--out", "dist/Fresh.xlsm")
 			if err == nil || output.ExitCode(err) != output.ExitValidation {
@@ -187,6 +227,151 @@ func TestPackCommandValidationFailures(t *testing.T) {
 	}
 }
 
+func TestPackCommandReportsSourceEncodingDiagnosticsInBuildAndCheck(t *testing.T) {
+	for _, mode := range []string{"build", "check"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			writePackProject(t, dir, false)
+			writePackSourceTree(t, dir, false)
+			writePackSourceModule(t, dir, filepath.Join("src", "modules", "Module1.bas"), []byte("Attribute VB_Name = \"Module1\"\r\nOption Explicit\r\n' \U0001F600\r\n"))
+
+			args := []string{"--json", "pack"}
+			if mode == "check" {
+				args = append(args, "--check")
+			} else {
+				args = append(args, "--out", "dist/Book.xlsm")
+			}
+			stdout, err := runPackCommandForTest(dir, args...)
+			if err == nil || output.ExitCode(err) != output.ExitValidation {
+				t.Fatalf("err=%v exit=%d, want validation failure\n%s", err, output.ExitCode(err), stdout)
+			}
+			var env struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+				Issues []struct {
+					Code     string `json:"code"`
+					Severity string `json:"severity"`
+					File     string `json:"file"`
+					Line     int    `json:"line"`
+					Column   int    `json:"column"`
+				} `json:"issues"`
+			}
+			var detailsEnv struct {
+				Error struct {
+					Details []struct {
+						RuneCode string `json:"rune_code"`
+						CodePage uint16 `json:"codepage"`
+					} `json:"details"`
+				} `json:"error"`
+			}
+			if decodeErr := json.Unmarshal([]byte(stdout), &env); decodeErr != nil {
+				t.Fatalf("JSON output: %v\n%s", decodeErr, stdout)
+			}
+			if decodeErr := json.Unmarshal([]byte(stdout), &detailsEnv); decodeErr != nil {
+				t.Fatalf("JSON details: %v\n%s", decodeErr, stdout)
+			}
+			if env.Error.Code != "pack_source_encoding_failed" || len(env.Issues) != 1 {
+				t.Fatalf("encoding response = %+v\n%s", env, stdout)
+			}
+			issue := env.Issues[0]
+			if issue.Code != "pack_source_encoding_failed" || issue.Severity != "error" || issue.File != "src/modules/Module1.bas" || issue.Line != 3 || issue.Column != 3 {
+				t.Fatalf("encoding issue = %+v, want Module1.bas:3:3", issue)
+			}
+			if len(detailsEnv.Error.Details) != 1 || detailsEnv.Error.Details[0].RuneCode != "U+1F600" || detailsEnv.Error.Details[0].CodePage == 0 {
+				t.Fatalf("encoding details = %+v, want unsupported rune and codepage", detailsEnv.Error.Details)
+			}
+			if strings.Contains(stdout, "Option Explicit") {
+				t.Fatalf("diagnostic leaked module source:\n%s", stdout)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, "dist", "Book.xlsm")); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("failed %s published an artifact, stat error = %v", mode, statErr)
+			}
+		})
+	}
+}
+
+func TestPackCommandReportsCanonicalFormSpecEncodingLocation(t *testing.T) {
+	dir := t.TempDir()
+	writePackProject(t, dir, false)
+	writePackSourceTree(t, dir, false)
+	specSource := "{\n  \"schemaVersion\": 1,\n  \"kind\": \"xlflow.userform\",\n  \"basis\": \"designer\",\n  \"form\": {\n    \"name\": \"EmojiForm\",\n    \"caption\": \"\U0001F600\"\n  },\n  \"controls\": []\n}\n"
+	writePackSourceModule(t, dir, filepath.Join("src", "forms", "specs", "EmojiForm.json"), []byte(specSource))
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--check")
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("err=%v exit=%d, want validation failure\n%s", err, output.ExitCode(err), stdout)
+	}
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+		Issues []struct {
+			Code   string `json:"code"`
+			File   string `json:"file"`
+			Line   int    `json:"line"`
+			Column int    `json:"column"`
+		} `json:"issues"`
+	}
+	if decodeErr := json.Unmarshal([]byte(stdout), &env); decodeErr != nil {
+		t.Fatalf("JSON output: %v\n%s", decodeErr, stdout)
+	}
+	if env.Error.Code != "pack_source_encoding_failed" || len(env.Issues) != 1 {
+		t.Fatalf("encoding response = %+v\n%s", env, stdout)
+	}
+	issue := env.Issues[0]
+	if issue.Code != "pack_source_encoding_failed" || issue.File != "src/forms/specs/EmojiForm.json" || issue.Line != 7 || issue.Column != 17 {
+		t.Fatalf("FormSpec issue = %+v, want exact source location 7:17", issue)
+	}
+}
+
+func TestPackCommandAggregatesIndependentCompilerErrorsInBuildAndCheck(t *testing.T) {
+	for _, mode := range []string{"build", "check"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			writePackProject(t, dir, false)
+			writePackSourceTree(t, dir, false)
+			for _, name := range []string{"FirstBad", "SecondBad"} {
+				source := fmt.Sprintf(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":%q},"controls":[{"id":"text1","name":"TextBox1","type":"TextBox","text":"first","value":"second"}]}`, name)
+				writePackSourceModule(t, dir, filepath.Join("src", "forms", "specs", name+".json"), []byte(source))
+			}
+
+			args := []string{"--json", "pack"}
+			if mode == "check" {
+				args = append(args, "--check")
+			} else {
+				args = append(args, "--out", "dist/Book.xlsm")
+			}
+			stdout, err := runPackCommandForTest(dir, args...)
+			if err == nil || output.ExitCode(err) != output.ExitValidation {
+				t.Fatalf("err=%v exit=%d, want validation failure\n%s", err, output.ExitCode(err), stdout)
+			}
+			var env struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+				Issues []struct {
+					Code string `json:"code"`
+				} `json:"issues"`
+			}
+			if decodeErr := json.Unmarshal([]byte(stdout), &env); decodeErr != nil {
+				t.Fatalf("JSON output: %v\n%s", decodeErr, stdout)
+			}
+			if env.Error.Code != "pack_validation_failed" || len(env.Issues) != 2 {
+				t.Fatalf("aggregate response = %+v\n%s", env, stdout)
+			}
+			for _, issue := range env.Issues {
+				if issue.Code != "pack_userform_generation_conflict" {
+					t.Errorf("issue code = %q, want pack_userform_generation_conflict", issue.Code)
+				}
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, "dist", "Book.xlsm")); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("%s published an artifact, stat error = %v", mode, statErr)
+			}
+		})
+	}
+}
+
 func TestPackCommandTemplateNotFound(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)
@@ -207,7 +392,6 @@ func TestPackCommandRejectsXlsbConfiguredWorkbook(t *testing.T) {
 	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
 		t.Fatal(err)
 	}
-
 	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
 	if err == nil || output.ExitCode(err) != output.ExitConfig {
 		t.Fatalf("err=%v exit=%d, want config failure", err, output.ExitCode(err))
@@ -343,6 +527,53 @@ func TestCollectPackSourceModulesIncludesForms(t *testing.T) {
 	}
 	if counts[packpkg.ModuleTypeStandard] != 1 || counts[packpkg.ModuleTypeClass] != 1 || counts[packpkg.ModuleTypeDocument] != 2 || counts[packpkg.ModuleTypeForm] != 1 {
 		t.Fatalf("source counts = %v", counts)
+	}
+}
+
+func TestCollectPackSourceModulesRetainsCanonicalFormArtifactSources(t *testing.T) {
+	root := t.TempDir()
+	writePackSourceTree(t, root, false)
+	specSource := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login"},"controls":[]}`)
+	codeSource := []byte("Option Explicit\r\nPublic Sub LoginCode()\r\nEnd Sub\r\n")
+	writePackSourceModule(t, root, filepath.Join("src", "forms", "specs", "Login.json"), specSource)
+	writePackSourceModule(t, root, filepath.Join("src", "forms", "code", "Login.bas"), codeSource)
+
+	forms := packFormSources(t, root, config.Default())
+	if len(forms) != 1 {
+		t.Fatalf("form sources = %+v, want one canonical form", forms)
+	}
+	form := forms[0]
+	if form.SourcePath != "src/forms/code/Login.bas" {
+		t.Errorf("code SourcePath = %q, want sidecar path", form.SourcePath)
+	}
+	if form.FormSpecPath != "src/forms/specs/Login.json" || !bytes.Equal(form.FormSpecSource, specSource) {
+		t.Errorf("FormSpec source metadata = path %q, source %q", form.FormSpecPath, form.FormSpecSource)
+	}
+	if form.Source != string(codeSource) {
+		t.Errorf("form code source = %q, want sidecar source", form.Source)
+	}
+}
+
+func TestCollectPackSourceModulesDoesNotSelectPictureAsFormCodePath(t *testing.T) {
+	root := t.TempDir()
+	writePackSourceTree(t, root, false)
+	specSource := []byte(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login"},"controls":[{"id":"image1","name":"Image1","type":"Image","picture":{"path":"src/forms/images/Login.bas"}}]}`)
+	codeSource := []byte("Option Explicit\r\nPublic Sub LoginCode()\r\nEnd Sub\r\n")
+	writePackSourceModule(t, root, filepath.Join("src", "forms", "specs", "Login.json"), specSource)
+	writePackSourceModule(t, root, filepath.Join("src", "forms", "code", "Login.bas"), codeSource)
+	bmp, err := os.ReadFile(filepath.Join("..", "vba", "userforms", "compiler", "testdata", "pictures-excel-authored", "logo.bmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePackSourceModule(t, root, filepath.Join("src", "forms", "images", "Login.bas"), bmp)
+
+	forms := packFormSources(t, root, config.Default())
+	if len(forms) != 1 {
+		t.Fatalf("form sources = %+v, want one canonical form", forms)
+	}
+	form := forms[0]
+	if form.SourcePath != "src/forms/code/Login.bas" || form.Source != string(codeSource) {
+		t.Fatalf("picture artifact replaced sidecar source: path=%q source=%q", form.SourcePath, form.Source)
 	}
 }
 
@@ -767,6 +998,28 @@ func TestPackCommandEndToEndUpdatesFormCodeBehind(t *testing.T) {
 		"Attribute VB_Exposed = False\r\n" +
 		"Private Sub CommandButton1_Click()\r\n    Debug.Print \"CLI_PACKED_FORM\"\r\nEnd Sub\r\n"
 	writePackSourceModule(t, dir, filepath.Join("src", "forms", "UserForm1.frm"), []byte(frm))
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.UserForm.CodeSource = "frm" // This test exercises explicit legacy FRM import.
+	if err := config.UpdateUserFormCodeSource(filepath.Join(dir, config.FileName), cfg.UserForm.CodeSource); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := collectPackSourceModules(dir, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var formSource *packpkg.SourceModule
+	for i := range sources {
+		if sources[i].Name == "UserForm1" && sources[i].Type == packpkg.ModuleTypeForm {
+			formSource = &sources[i]
+			break
+		}
+	}
+	if formSource == nil || formSource.PreserveExistingCode || !strings.Contains(formSource.Source, "CLI_PACKED_FORM") {
+		t.Fatalf("explicit FRM source was not collected: %+v", formSource)
+	}
 
 	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--experimental", "--out", "dist/Book.xlsm")
 	if err != nil {
@@ -1337,9 +1590,9 @@ func TestCollectPackSourceModulesFrmModeReadsFrmVerbatim(t *testing.T) {
 	}
 }
 
-func TestCollectPackSourceModulesSidecarFallsBackToFrmWhenNoBas(t *testing.T) {
+func TestCollectPackSourceModulesLegacySidecarPreservesExistingCodeWhenNoBas(t *testing.T) {
 	root := t.TempDir()
-	cfg := config.Default() // sidecar
+	cfg := config.Default() // Without an authoritative sidecar, preserve the template's existing code.
 	makePackSourceRoots(t, root, cfg)
 	formsDir := filepath.Join(root, filepath.FromSlash(cfg.Src.Forms))
 	frm := "Attribute VB_Name = \"UserForm1\"\r\nPrivate Sub a()\r\nEnd Sub\r\n"
@@ -1347,8 +1600,11 @@ func TestCollectPackSourceModulesSidecarFallsBackToFrmWhenNoBas(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := packFormSources(t, root, cfg)
-	if len(got) != 1 || got[0].Source != frm {
-		t.Errorf("missing sidecar should fall back to .frm, got %+v", got)
+	if len(got) != 1 {
+		t.Fatalf("forms = %+v, want one legacy form", got)
+	}
+	if got[0].FormSpec != nil || !got[0].PreserveExistingCode || got[0].Source != "" {
+		t.Fatalf("legacy .frm should remain a compatibility artifact when sidecar code is absent: %+v", got[0])
 	}
 }
 

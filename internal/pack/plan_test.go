@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/harumiWeb/xlflow/internal/pack/ovba"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/compiler"
 )
@@ -55,7 +56,6 @@ func TestPlanProjectRejectsComprehensiveSourceIdentityFailures(t *testing.T) {
 	}{
 		{"case-insensitive duplicate", []SourceModule{{Name: "Thing", Type: ModuleTypeStandard, Source: standardSource("Thing")}, {Name: "thing", Type: ModuleTypeClass, Source: classSource(t, "thing")}}},
 		{"invalid name", []SourceModule{{Name: "1Bad", Type: ModuleTypeStandard, Source: standardSource("1Bad")}}},
-		{"unrepresentable writer name", []SourceModule{{Name: "Ābc", Type: ModuleTypeStandard, Source: standardSource("Ābc")}}},
 		{"filename identity mismatch", []SourceModule{{SourcePath: "src/modules/New.bas", Name: "New", Type: ModuleTypeStandard, Source: standardSource("Old")}}},
 		{"template-owned document case mismatch", []SourceModule{{Name: "thisworkbook", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"}}},
 		{"template-owned document type mismatch", []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeForm, Source: "Attribute VB_Name = \"ThisWorkbook\"\r\n"}}},
@@ -68,6 +68,99 @@ func TestPlanProjectRejectsComprehensiveSourceIdentityFailures(t *testing.T) {
 				t.Fatalf("err = %v, want ErrAmbiguousLayout", err)
 			}
 		})
+	}
+}
+
+func TestPlanProjectReportsTypedSourceEncodingLocations(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.Props.CodePage = 1252
+	sources := []SourceModule{
+		{SourcePath: "src/modules/Emoji.bas", Name: "Emoji", Type: ModuleTypeStandard, Source: standardSource("Emoji") + "' \U0001F600\r\n"},
+		{SourcePath: "src/modules/Japanese.bas", Name: "Japanese", Type: ModuleTypeStandard, Source: standardSource("Japanese") + "' 日本語\r\n"},
+	}
+	_, err = PlanProject(project, sources)
+	if errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("source encoding was misclassified as ambiguous layout: %v", err)
+	}
+	diagnostics, ok := errors.AsType[*SourceEncodingErrors](err)
+	if !ok || len(diagnostics.Errors) != 2 {
+		t.Fatalf("encoding diagnostics = %#v, want two source errors", err)
+	}
+	want := map[string]rune{"src/modules/Emoji.bas": '\U0001F600', "src/modules/Japanese.bas": '日'}
+	for _, issue := range diagnostics.Errors {
+		if got := want[issue.Path]; got == 0 || issue.Rune != got || issue.CodePage != 1252 {
+			t.Fatalf("unexpected issue: %+v", issue)
+		}
+		if issue.Line != 3 || issue.Column != 3 {
+			t.Errorf("%s position = %d:%d, want 3:3", issue.Path, issue.Line, issue.Column)
+		}
+		delete(want, issue.Path)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing source issues: %v", want)
+	}
+}
+
+func TestPlanProjectDoesNotClassifyUnsupportedCodePageAsAmbiguousLayout(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.Props.CodePage = 37
+	_, err = PlanProject(project, []SourceModule{{Name: "Module1", Type: ModuleTypeStandard, Source: standardSource("Module1")}})
+	if errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("unsupported codepage was misclassified as ambiguous layout: %v", err)
+	}
+	codePageErr, ok := errors.AsType[*ovba.CodePageEncodingError](err)
+	if !ok || codePageErr.CodePage != 37 || !codePageErr.UnsupportedCodePage {
+		t.Fatalf("codepage error = %#v, want typed unsupported-codepage error", err)
+	}
+}
+
+func TestPlanProjectAggregatesIndependentFormCompilerErrors(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := authoredForm("FirstBad")
+	first.FormSpec.Controls[0].Type = "UnknownControl"
+	second := authoredForm("SecondBad")
+	second.FormSpec.Controls[0].Width = new(-1.0)
+	_, err = PlanProject(project, []SourceModule{first, second})
+	diagnostics, ok := errors.AsType[*DiagnosticsError](err)
+	if !ok || len(diagnostics.Errors) != 2 {
+		t.Fatalf("diagnostics = %#v, want two compiler errors", err)
+	}
+	for _, issue := range diagnostics.Errors {
+		if _, ok := errors.AsType[*compiler.Error](issue); !ok {
+			t.Errorf("diagnostic %T = %v, want compiler error", issue, issue)
+		}
+	}
+}
+
+func TestPlanProjectEncodingAndFormCompilerErrorsAreCombined(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.Props.CodePage = 1252
+	badForm := authoredForm("BadForm")
+	badForm.FormSpec.Form.Caption = new("Bad form")
+	badForm.FormSpec.Controls[0].Type = "UnknownControl"
+	sources := []SourceModule{
+		{SourcePath: "src/modules/Bad.bas", Name: "Bad", Type: ModuleTypeStandard, Source: standardSource("Bad") + "' \U0001F600\r\n"},
+		badForm,
+	}
+	_, err = PlanProject(project, sources)
+	diagnostics, ok := errors.AsType[*DiagnosticsError](err)
+	if !ok || len(diagnostics.Errors) != 2 {
+		t.Fatalf("diagnostics = %#v, want encoding and compiler issues", err)
+	}
+	if _, ok := errors.AsType[*SourceEncodingErrors](err); !ok {
+		t.Fatalf("combined error lost source encoding issues: %v", err)
 	}
 }
 

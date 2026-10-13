@@ -1601,6 +1601,19 @@ func UpdateUserFormCodeSource(path string, codeSource string) error {
 	default:
 		return fmt.Errorf("userform.code_source must be one of frm, sidecar")
 	}
+	return updateConfigScalar(path, "userform", "code_source", strconv.Quote(codeSource))
+}
+
+// UpdateBlankCodePage seeds blank generation from a scaffold's VBA project
+// without rewriting unrelated configuration or comments.
+func UpdateBlankCodePage(path string, codePage uint16) error {
+	if codePage == 0 {
+		return fmt.Errorf("pack.blank.code_page must be nonzero")
+	}
+	return updateConfigScalar(path, "pack.blank", "code_page", strconv.Itoa(int(codePage)))
+}
+
+func updateConfigScalar(path, sectionName, key, value string) error {
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -1628,15 +1641,15 @@ func UpdateUserFormCodeSource(path string, codeSource string) error {
 			userFormEnd = i
 			break
 		}
-		if section == "userform" {
+		if section == sectionName {
 			userFormStart = i
 		}
 	}
 
-	replacement := fmt.Sprintf("code_source = %q", codeSource)
+	replacement := key + " = " + value
 	if userFormStart >= 0 {
 		for i := userFormStart + 1; i < userFormEnd; i++ {
-			if tomlKeyName(lines[i]) == "code_source" {
+			if tomlKeyName(lines[i]) == key {
 				lines[i] = replacement
 				return os.WriteFile(path, []byte(joinConfigLines(lines, newline, hadTrailingNewline)), 0o644)
 			}
@@ -1651,7 +1664,7 @@ func UpdateUserFormCodeSource(path string, codeSource string) error {
 	if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
 		lines = append(lines, "")
 	}
-	lines = append(lines, "[userform]", replacement)
+	lines = append(lines, "["+sectionName+"]", replacement)
 	return os.WriteFile(path, []byte(joinConfigLines(lines, newline, true)), 0o644)
 }
 

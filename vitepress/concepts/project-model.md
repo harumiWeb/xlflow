@@ -19,4 +19,4 @@ build/*.xlsm, build/*.xlam, or build/*.xlsb
 
 For a first Git commit, include `xlflow.toml` and the relevant `src/` files. Keep the workbook according to your team's review and artifact policy; [Manage VBA source with Git](../guides/source-control) gives a practical baseline.
 
-New projects default UserForm code authority to sidecar code files. Initialized projects preserve the imported `.frm` code model until the user intentionally migrates with `xlflow form migrate sidecar`, or opts in during import with `xlflow init --userform-code-source sidecar`.
+New and initialized projects default UserForm code authority to sidecar code files; `init` imports canonical Designer specs and code sidecars. Use `xlflow init --userform-code-source frm` explicitly when imported `.frm` artifacts must remain the code authority, including custom-control artifact workflows.

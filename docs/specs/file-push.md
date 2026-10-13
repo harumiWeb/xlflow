@@ -28,7 +28,15 @@ A successful file push confirms only that the artifact was rebuilt and
 structurally validated. VBA is not compiled and no VBE/runtime validation is
 performed; output states `vbe_validation="not_performed"` and emits warning
 `vbe_validation_skipped`. Consumers needing compile evidence must use the
-Excel backend or validate the pushed workbook separately.
+Excel backend or validate the pushed workbook separately. Both push backends
+use the shared pure-Go UserForm compiler for canonical FormSpecs. For Excel
+push, the bridge saves a private baseline with `SaveCopyAs`, Go builds the
+compiled workbook with `pack.BuildWorkbook`, and a private Excel instance
+exports each compiled form to private `.frm` / companion `.frx` artifacts.
+The bridge imports those components into the target with
+`VBComponents.Import`; persisted geometry and picture state arrive in the
+compiled artifact, with no imperative Designer-property writes. See
+[ADR-0072](../adr/ADR-0072-userform-canonical-compiler-and-persisted-dimensions.md).
 
 Successful JSON includes:
 
@@ -94,7 +102,10 @@ bridge so both backends agree on what changed:
   `(kind, root-relative path, SHA-256)`.
 - In sidecar mode, canonical `forms/specs/**/*.yaml|.yml|.json` FormSpecs are
   passed to the shared pure-Go UserForm compiler. A FormSpec can add a form,
-  update a supported Designer, or replace/remove an Image picture. Referenced
+  update root MS-OFORMS `DisplayedSize` dimensions or another supported Designer property, or
+  replace/remove an Image picture. Omitted root dimensions default to 240 by
+  180 points only for newly added forms; omitted dimensions on existing forms
+  preserve the saved baseline. Referenced
   assets are resolved relative to the project root and included in the
   file-backend fingerprint. See
   [`userform-picture-assets.md`](userform-picture-assets.md) for schema,
@@ -119,8 +130,9 @@ VB_*` lines stripped; an empty body becomes `Option Explicit`), matching
   `GoTo`/`GoSub`/`Resume` targets fail with `vba_line_number_safety_failed`
   before the workbook is read.
 - Canonical FormSpec state is the Designer authority for sidecar forms. A
-  retained `.frm` / `.frx` is not imported when a canonical spec and sidecar
-  code are selected, so the file-pull
+  prebuilt `.frm` / `.frx` is not required when a canonical spec supplies the
+  Designer and sidecar mode supplies code. A retained `.frm` / `.frx` is not
+  imported when those authorities are selected, so the file-pull
   `compatibility_artifact_unsynchronized` marker does not block that path.
   The marker still fails with `FRM201` when `frm` code or compatibility
   artifacts are selected as import authority. File push never rewrites

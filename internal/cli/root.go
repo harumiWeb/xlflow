@@ -1619,6 +1619,9 @@ func (a *app) newCommand() *cobra.Command {
 				if bootstrapCode != output.ExitSuccess {
 					return a.write(bootstrapEnv, bootstrapCode)
 				}
+				if err := seedScaffoldCodePage(a.cwd); err != nil {
+					return a.writeFailure("new", output.ExitEnvironment, "scaffold_codepage_failed", err)
+				}
 				var skillResult agentskill.InstallResult
 				if withSkill {
 					skillResult, err = agentskill.Install(skillOpts)
@@ -1675,7 +1678,7 @@ func (a *app) initCommand() *cobra.Command {
 				runOpts := commandOpts
 				codeSource := strings.TrimSpace(userFormCodeSource)
 				if codeSource == "" {
-					codeSource = "frm"
+					codeSource = "sidecar"
 				}
 				result, err := project.InitWithOptions(a.cwd, args[0], project.InitOptions{UserFormCodeSource: codeSource})
 				if err != nil {
@@ -1687,6 +1690,9 @@ func (a *app) initCommand() *cobra.Command {
 				}
 				if bootstrapCode != output.ExitSuccess {
 					return a.write(bootstrapEnv, bootstrapCode)
+				}
+				if err := seedScaffoldCodePage(a.cwd); err != nil {
+					return a.writeFailure("init", output.ExitEnvironment, "scaffold_codepage_failed", err)
 				}
 				var sidecarSpecs []string
 				if codeSource == "sidecar" {
@@ -1758,7 +1764,7 @@ func (a *app) initCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&withModule, "with-module", false, "install bundled xlflow helper modules and push them to the workbook")
 	cmd.Flags().StringVar(&skillAgent, "agent", "", "skill provider target: agents, codex, claude, cursor, or gemini")
 	cmd.Flags().BoolVar(&noUpdateCheck, "no-update-check", false, "skip the interactive GitHub release update check during project scaffolding")
-	cmd.Flags().StringVar(&userFormCodeSource, "userform-code-source", "frm", "UserForm code source for imported projects: frm or sidecar")
+	cmd.Flags().StringVar(&userFormCodeSource, "userform-code-source", "sidecar", "UserForm code source for imported projects: sidecar or explicit frm import")
 	return cmd
 }
 
@@ -2575,12 +2581,13 @@ func (a *app) packCommand() *cobra.Command {
 	var outPath string
 	var templatePath string
 	var blank bool
+	var check bool
 	cmd := &cobra.Command{
 		Use:   "pack --out <path.xlsm>",
 		Short: "Build an .xlsm artifact from source",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(outPath) == "" || !strings.EqualFold(filepath.Ext(outPath), ".xlsm") {
+			if !check && (strings.TrimSpace(outPath) == "" || !strings.EqualFold(filepath.Ext(outPath), ".xlsm")) {
 				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", errors.New("--out is required and must end in .xlsm"))
 			}
 			if blank && cmd.Flags().Changed("template") {
@@ -2616,18 +2623,21 @@ func (a *app) packCommand() *cobra.Command {
 			}
 
 			resolvedOut := workbookArgPath(a.cwd, outPath)
-			aliasesWorkbook, err := packOutputAliasesWorkbook(a.cwd, resolvedOut, resolvedTemplate, configuredWorkbook)
-			if err != nil {
-				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
+			publicationOut := ""
+			if !check {
+				aliasesWorkbook, err := packOutputAliasesWorkbook(a.cwd, resolvedOut, resolvedTemplate, configuredWorkbook)
+				if err != nil {
+					return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
+				}
+				if aliasesWorkbook {
+					return a.writeFailure("pack", output.ExitConfig, "pack_in_place_overwrite", fmt.Errorf("--out must differ from template and configured workbook: %s", resolvedOut))
+				}
+				outputIdentity, err := coordination.NewWorkbookIdentity(a.cwd, resolvedOut)
+				if err != nil {
+					return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
+				}
+				publicationOut = outputIdentity.CanonicalPath
 			}
-			if aliasesWorkbook {
-				return a.writeFailure("pack", output.ExitConfig, "pack_in_place_overwrite", fmt.Errorf("--out must differ from template and configured workbook: %s", resolvedOut))
-			}
-			outputIdentity, err := coordination.NewWorkbookIdentity(a.cwd, resolvedOut)
-			if err != nil {
-				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", err)
-			}
-			publicationOut := outputIdentity.CanonicalPath
 			// Lock and session checks cover only the workbooks pack reads or
 			// replaces: the resolved template and the --out destination. The
 			// configured workbook is covered implicitly whenever it is the
@@ -2635,6 +2645,9 @@ func (a *app) packCommand() *cobra.Command {
 			// --template) does not block packing. The alias guard above still
 			// rejects writing over it.
 			candidates := packCandidatePaths(a.cwd, resolvedTemplate, resolvedOut)
+			if check {
+				candidates = packCandidatePaths(a.cwd, resolvedTemplate, "")
+			}
 			for _, candidate := range candidates {
 				if lockPath, locked := officeLockFilePresent(candidate); locked {
 					return a.writeFailure("pack", output.ExitConfig, "pack_active_session", fmt.Errorf("workbook appears to be open: %s", lockPath))
@@ -2659,20 +2672,41 @@ func (a *app) packCommand() *cobra.Command {
 			var workbookBytes []byte
 			var meta packpkg.PackMeta
 			if blank {
-				workbookBytes, meta, err = packpkg.BuildBlankWorkbook(sources, packpkg.BlankOptions{
-					CodePage: cfg.Pack.Blank.CodePage,
-				})
+				if check {
+					meta, err = packpkg.CheckBlankWorkbook(sources, packpkg.BlankOptions{CodePage: cfg.Pack.Blank.CodePage})
+				} else {
+					workbookBytes, meta, err = packpkg.BuildBlankWorkbook(sources, packpkg.BlankOptions{CodePage: cfg.Pack.Blank.CodePage})
+				}
 			} else {
 				templateBytes, readErr := os.ReadFile(resolvedTemplate)
 				if readErr != nil {
 					return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", readErr)
 				}
-				workbookBytes, meta, err = packpkg.BuildWorkbook(templateBytes, sources, packpkg.TemplateOptions{
-					UserFormTopology: cfg.Pack.UserFormTopology,
-				})
+				if check {
+					meta, err = packpkg.CheckWorkbook(templateBytes, sources, packpkg.TemplateOptions{UserFormTopology: cfg.Pack.UserFormTopology})
+				} else {
+					workbookBytes, meta, err = packpkg.BuildWorkbook(templateBytes, sources, packpkg.TemplateOptions{UserFormTopology: cfg.Pack.UserFormTopology})
+				}
 			}
 			if err != nil {
+				if handled, writeErr := a.writePackDiagnostics(err, blank, resolvedTemplate); handled {
+					return writeErr
+				}
 				return a.writePackEngineFailure(err)
+			}
+			if check {
+				env := output.New("pack")
+				base := "template"
+				if blank {
+					base = "blank"
+				}
+				payload := map[string]any{"backend": "pure-go", "base": base, "check": true, "vbe_validation": "not_performed"}
+				if !blank {
+					payload["template"] = displayPath(a.cwd, resolvedTemplate)
+				}
+				env.Pack = payload
+				env.Logs = []string{"pack validation passed; no artifact was written"}
+				return a.write(env, output.ExitSuccess)
 			}
 			createdParentDirs, publication, err := writePackOutput(publicationOut, workbookBytes)
 			if err != nil {
@@ -2741,6 +2775,7 @@ func (a *app) packCommand() *cobra.Command {
 	cmd.Flags().StringVar(&outPath, "out", "", "destination .xlsm artifact path")
 	cmd.Flags().StringVar(&templatePath, "template", "", "workbook template path")
 	cmd.Flags().BoolVar(&blank, "blank", false, "create a fresh one-sheet workbook without a template")
+	cmd.Flags().BoolVar(&check, "check", false, "validate the same pack inputs without writing an artifact")
 	cmd.Flags().Bool("experimental", false, "deprecated no-op retained for command-line compatibility")
 	if err := cmd.Flags().MarkDeprecated("experimental", "pack is stable; remove --experimental"); err != nil {
 		panic(err)
@@ -2749,6 +2784,9 @@ func (a *app) packCommand() *cobra.Command {
 }
 
 func (a *app) writePackEngineFailure(err error) error {
+	if specErr, ok := errors.AsType[*forms.SpecError](err); ok {
+		return a.writeFormSpecFailure("pack", specErr)
+	}
 	if code, ok := userFormEngineErrorCode(err); ok {
 		return a.writeFailure("pack", output.ExitValidation, "pack_"+code, err)
 	}
@@ -3048,13 +3086,12 @@ func buildPushOptions(backupMode string, fast bool, changedOnly bool, session bo
 }
 
 func (a *app) pushSource(ctx context.Context, command string, cfg config.Config, pushOpts excel.PushOptions, progressLabel string) (output.Envelope, int, error) {
-	if err := a.runSourceEncodingPreflight(ctx, command, cfg); err != nil {
+	var err error
+	cfg, err = a.runCanonicalSourceEncodingPreflight(ctx, command, cfg, false)
+	if err != nil {
 		return output.Envelope{}, 0, err
 	}
-	if err := a.runUserFormCodeSourcePreflight(command, cfg, nil); err != nil {
-		return output.Envelope{}, 0, err
-	}
-	if err := a.runUserFormArtifactPreflight(command, cfg, nil); err != nil {
+	if err := a.runUserFormCodeSourceValidation(command, cfg); err != nil {
 		return output.Envelope{}, 0, err
 	}
 	if err := a.runSourcePreflightAfterEncoding(ctx, command, cfg, "pushing to Excel", nil, nil); err != nil {
@@ -3067,7 +3104,7 @@ func (a *app) pushSource(ctx context.Context, command string, cfg config.Config,
 		env, code, runErr = a.excelRunnerForConfig(cfg).PushWithOptions(cfg, pushOpts)
 		return runErr
 	}
-	err := a.withExcelProgress(progressLabel, pushOpts.Keepalive, run)
+	err = a.withExcelProgress(progressLabel, pushOpts.Keepalive, run)
 	if err != nil {
 		return output.Envelope{}, 0, err
 	}
@@ -7083,13 +7120,15 @@ func collectPackSourceModules(root string, cfg config.Config) ([]packpkg.SourceM
 func collectPackSourceModulesForMode(root string, cfg config.Config, blank bool) ([]packpkg.SourceModule, error) {
 	components, err := sourceinventory.Discover(sourceinventory.Options{
 		Root: root, Config: cfg, ValidateFormArtifacts: true,
-		CanonicalFormSpecs:       true,
-		AllowLegacyFormArtifacts: true,
+		CanonicalFormSpecs:                    true,
+		AllowLegacyFormArtifacts:              true,
+		IgnoreCanonicalCompatibilityArtifacts: true,
+		PreserveMissingFormCode:               !blank,
 	})
 	if err != nil {
 		var layoutErr *sourceinventory.LayoutError
 		if errors.As(err, &layoutErr) {
-			return nil, fmt.Errorf("%w: %v", packpkg.ErrAmbiguousLayout, err)
+			return nil, fmt.Errorf("%w: %w", packpkg.ErrAmbiguousLayout, err)
 		}
 		// Filesystem failures are environment problems, not layout ambiguity;
 		// the caller maps them to pack_source_read_failed.
@@ -7101,20 +7140,35 @@ func collectPackSourceModulesForMode(root string, cfg config.Config, blank bool)
 		source := string(component.Source)
 		if !blank && component.FormSpec == nil && component.Type == sourceinventory.ComponentForm && strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
 			for _, artifact := range component.Related {
-				if strings.EqualFold(filepath.Ext(artifact.Path), ".bas") && strings.EqualFold(filepath.Base(artifact.Path), component.Name+".bas") {
+				if artifact.Role != sourceinventory.ArtifactRolePicture && strings.EqualFold(filepath.Ext(artifact.Path), ".bas") && strings.EqualFold(filepath.Base(artifact.Path), component.Name+".bas") {
 					source = forms.MergeUserFormCodeIntoFRM(source, string(artifact.Source))
 					break
 				}
 			}
 		}
-		sources = append(sources, packpkg.SourceModule{
-			SourcePath:   component.SourcePath,
-			RelatedPaths: component.RelatedPaths(),
-			Name:         component.Name,
-			Type:         typ,
-			Source:       source,
-			FormSpec:     component.FormSpec,
-		})
+		packedSource := packpkg.SourceModule{
+			SourcePath:           component.SourcePath,
+			RelatedPaths:         component.RelatedPaths(),
+			Name:                 component.Name,
+			Type:                 typ,
+			Source:               source,
+			FormSpec:             component.FormSpec,
+			PreserveExistingCode: component.PreserveExistingCode,
+		}
+		if component.FormSpec != nil {
+			packedSource.FormSpecPath = component.SourcePath
+			for _, artifact := range component.Related {
+				if artifact.Path == component.SourcePath {
+					packedSource.FormSpecSource = artifact.Source
+				}
+				if artifact.Role != sourceinventory.ArtifactRolePicture &&
+					((strings.EqualFold(cfg.UserForm.CodeSource, "frm") && strings.EqualFold(filepath.Ext(artifact.Path), ".frm")) ||
+						(!strings.EqualFold(cfg.UserForm.CodeSource, "frm") && strings.EqualFold(filepath.Ext(artifact.Path), ".bas") && strings.EqualFold(filepath.Base(artifact.Path), component.Name+".bas"))) {
+					packedSource.SourcePath = artifact.Path
+				}
+			}
+		}
+		sources = append(sources, packedSource)
 	}
 	return sources, nil
 }
@@ -7806,7 +7860,8 @@ func (a *app) lintCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.runSourceEncodingPreflight(cmd.Context(), "lint", cfg); err != nil {
+			cfg, err = a.runCanonicalSourceEncodingPreflight(cmd.Context(), "lint", cfg, false)
+			if err != nil {
 				return err
 			}
 			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
@@ -7968,7 +8023,8 @@ func (a *app) analyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.runSourceEncodingPreflight(cmd.Context(), "analyze", cfg); err != nil {
+			cfg, err = a.runCanonicalSourceEncodingPreflight(cmd.Context(), "analyze", cfg, false)
+			if err != nil {
 				return err
 			}
 			runCtx := cmd.Context()
@@ -8038,7 +8094,8 @@ func (a *app) checkCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.runSourceEncodingPreflight(cmd.Context(), "check", cfg); err != nil {
+			cfg, err = a.runCanonicalSourceEncodingPreflight(cmd.Context(), "check", cfg, false)
+			if err != nil {
 				return err
 			}
 			env := output.New("check")
@@ -8276,7 +8333,9 @@ func (a *app) runSourcePreflightInternal(ctx context.Context, command string, cf
 		return err
 	}
 	if validateEncoding {
-		if err := a.runSourceEncodingPreflight(ctx, command, cfg); err != nil {
+		var err error
+		cfg, err = a.runCanonicalSourceEncodingPreflight(ctx, command, cfg, false)
+		if err != nil {
 			return err
 		}
 	}
@@ -8452,32 +8511,6 @@ func (a *app) runUserFormCodeSourceCheck(command string, cfg config.Config, targ
 	return nil
 }
 
-func (a *app) runUserFormArtifactPreflight(command string, cfg config.Config, targetForms map[string]bool) error {
-	if cfg.UserForm.CodeSource != "sidecar" {
-		return nil
-	}
-	issues, err := forms.ValidateUserFormArtifactsAgainstSpecs(filepath.Join(a.cwd, cfg.Src.Forms), targetForms)
-	if err != nil {
-		return a.writeFailure(command, output.ExitEnvironment, "source_preflight_failed", err)
-	}
-	if len(issues) == 0 {
-		return nil
-	}
-	rendered := make([]lint.Issue, 0, len(issues))
-	for _, issue := range issues {
-		rendered = append(rendered, issue.LintIssue(filepath.Join(a.cwd, cfg.Src.Forms)))
-	}
-	env := output.Failure(command, output.Error{
-		Code:    "source_preflight_failed",
-		Message: fmt.Sprintf("%d UserForm spec/artifact issue(s) must be fixed before %s so push cannot import the wrong Designer-backed form", len(rendered), command),
-		Source:  "xlflow",
-		Phase:   "preflight",
-	})
-	env.Issues = rendered
-	env.Logs = []string{"blocked before push because spec-driven UserForm artifacts are missing or inconsistent with src/forms/specs"}
-	return a.write(env, output.ExitValidation)
-}
-
 func (a *app) runFormWritePreflight(ctx context.Context, command string, cfg config.Config, opts formWriteCommandOptions) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -8486,7 +8519,7 @@ func (a *app) runFormWritePreflight(ctx context.Context, command string, cfg con
 		return err
 	}
 	targetForms := map[string]bool{opts.Spec.Form.Name: true}
-	if err := a.runUserFormCodeSourcePreflight(command, cfg, targetForms); err != nil {
+	if err := a.runUserFormCodeSourceCheck(command, cfg, targetForms, false); err != nil {
 		return err
 	}
 	if cfg.UserForm.CodeSource == "sidecar" {

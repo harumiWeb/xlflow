@@ -520,74 +520,9 @@ func geometryParentBounds(model spec.FormSpec, parentID string) (float64, float6
 }
 
 func designerFormBounds(model spec.FormSpec) (float64, float64) {
-	form := model.Form
-	var observed *spec.FormSpecObservedForm
-	if form.Observed != nil {
-		observed = form.Observed
-	}
-	var build *spec.FormSpecBuildForm
-	if form.Build != nil {
-		build = form.Build
-	}
-	width := firstNumber(
-		buildFormNumber(build, "clientWidth"),
-		observedFormNumber(observed, "clientWidth"),
-		observedFormNumber(observed, "insideWidth"),
-		buildFormNumber(build, "width"),
-		form.Width,
-		observedFormNumber(observed, "width"),
-		new(240.0),
-	)
-	height := firstNumber(
-		buildFormNumber(build, "clientHeight"),
-		observedFormNumber(observed, "clientHeight"),
-		observedFormNumber(observed, "insideHeight"),
-		buildFormNumber(build, "height"),
-		form.Height,
-		observedFormNumber(observed, "height"),
-		new(180.0),
-	)
+	width := firstNumber(model.Form.Width, new(240.0))
+	height := firstNumber(model.Form.Height, new(180.0))
 	return max(0, width), max(0, height)
-}
-
-func buildFormNumber(build *spec.FormSpecBuildForm, field string) *float64 {
-	if build == nil {
-		return nil
-	}
-	switch field {
-	case "clientWidth":
-		return build.ClientWidth
-	case "clientHeight":
-		return build.ClientHeight
-	case "width":
-		return build.Width
-	case "height":
-		return build.Height
-	default:
-		return nil
-	}
-}
-
-func observedFormNumber(observed *spec.FormSpecObservedForm, field string) *float64 {
-	if observed == nil {
-		return nil
-	}
-	switch field {
-	case "clientWidth":
-		return observed.ClientWidth
-	case "clientHeight":
-		return observed.ClientHeight
-	case "insideWidth":
-		return observed.InsideWidth
-	case "insideHeight":
-		return observed.InsideHeight
-	case "width":
-		return observed.Width
-	case "height":
-		return observed.Height
-	default:
-		return nil
-	}
 }
 
 func contentBounds(parent controlGeometry) (float64, float64) {

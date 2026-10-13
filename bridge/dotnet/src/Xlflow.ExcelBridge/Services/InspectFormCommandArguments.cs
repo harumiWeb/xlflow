@@ -8,4 +8,5 @@ public sealed record InspectFormCommandArguments(
     bool StrictDesigner,
     bool Visible,
     bool UseSession,
-    string MetadataPath);
+    string MetadataPath,
+    string PrivateSnapshotWorkbookPath = "");

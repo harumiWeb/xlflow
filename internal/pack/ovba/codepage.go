@@ -13,6 +13,39 @@ import (
 	"golang.org/x/text/encoding/traditionalchinese"
 )
 
+// CodePageEncodingError identifies a source character that cannot be encoded
+// with a VBA project's PROJECTCODEPAGE, or a code page the writer does not
+// support. Offset is the UTF-8 byte offset in the input string when Rune is
+// non-zero.
+type CodePageEncodingError struct {
+	CodePage            uint16
+	Rune                rune
+	Offset              int
+	UnsupportedCodePage bool
+	InvalidUTF8         bool
+	Cause               error
+}
+
+func (e *CodePageEncodingError) Error() string {
+	if e == nil {
+		return "ovba: codepage encoding failed"
+	}
+	if e.UnsupportedCodePage {
+		return fmt.Sprintf("ovba: unsupported codepage %d", e.CodePage)
+	}
+	if e.InvalidUTF8 {
+		return fmt.Sprintf("ovba: invalid UTF-8 for codepage %d at byte offset %d", e.CodePage, e.Offset)
+	}
+	return fmt.Sprintf("ovba: rune U+%04X cannot be encoded with codepage %d", e.Rune, e.CodePage)
+}
+
+func (e *CodePageEncodingError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
 // codePageEncoding maps a VBA PROJECTCODEPAGE value to its codec. Only the
 // practically relevant Windows ANSI code pages and UTF-8 are supported; an
 // unknown code page must fail deterministically rather than guess an encoding
@@ -50,7 +83,7 @@ func codePageEncoding(codepage uint16) (encoding.Encoding, error) {
 	case 65001:
 		return nil, nil // UTF-8 is handled natively in EncodeMBCS/DecodeMBCS
 	default:
-		return nil, fmt.Errorf("ovba: unsupported codepage %d", codepage)
+		return nil, &CodePageEncodingError{CodePage: codepage, UnsupportedCodePage: true}
 	}
 }
 
@@ -88,10 +121,15 @@ func DecodeMBCS(b []byte, codepage uint16) (string, error) {
 // string containing characters the target code page cannot represent returns
 // an error instead of emitting silent replacement bytes.
 func EncodeMBCS(s string, codepage uint16) ([]byte, error) {
-	if codepage == 65001 {
-		if !utf8.ValidString(s) {
-			return nil, fmt.Errorf("ovba: invalid UTF-8 string for codepage %d", codepage)
+	if !utf8.ValidString(s) {
+		return nil, &CodePageEncodingError{
+			CodePage:    codepage,
+			Rune:        utf8.RuneError,
+			Offset:      firstInvalidUTF8Offset(s),
+			InvalidUTF8: true,
 		}
+	}
+	if codepage == 65001 {
 		return []byte(s), nil
 	}
 	enc, err := codePageEncoding(codepage)
@@ -100,7 +138,23 @@ func EncodeMBCS(s string, codepage uint16) ([]byte, error) {
 	}
 	out, err := enc.NewEncoder().Bytes([]byte(s))
 	if err != nil {
-		return nil, fmt.Errorf("ovba: cannot encode %q to codepage %d: %w", s, codepage, err)
+		for offset, r := range s {
+			if _, runeErr := enc.NewEncoder().Bytes([]byte(string(r))); runeErr != nil {
+				return nil, &CodePageEncodingError{CodePage: codepage, Rune: r, Offset: offset, Cause: runeErr}
+			}
+		}
+		return nil, &CodePageEncodingError{CodePage: codepage, Rune: utf8.RuneError, Cause: err}
 	}
 	return out, nil
+}
+
+func firstInvalidUTF8Offset(s string) int {
+	for offset := 0; offset < len(s); {
+		r, size := utf8.DecodeRuneInString(s[offset:])
+		if r == utf8.RuneError && size == 1 {
+			return offset
+		}
+		offset += size
+	}
+	return len(s)
 }

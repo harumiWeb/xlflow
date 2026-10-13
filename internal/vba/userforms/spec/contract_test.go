@@ -118,13 +118,16 @@ func TestUserFormContractDocumentAndCommonProperties(t *testing.T) {
 			assertProperty(t, property, tc.valueType, tc.required, tc.supportLevel)
 		})
 	}
-	for _, name := range []string{"clientWidth", "clientHeight"} {
-		t.Run("form_build_"+name, func(t *testing.T) {
-			property, ok := LookupFormBuildProperty(name)
+	for _, name := range []string{"width", "height"} {
+		t.Run("form_"+name, func(t *testing.T) {
+			property, ok := UserFormContract().FormProperties[name]
 			if !ok {
-				t.Fatalf("form.build property %q missing", name)
+				t.Fatalf("form property %q missing", name)
 			}
 			assertProperty(t, property, ValueTypeNumber, false, SupportLevelSupported)
+			if property.Description != "Persisted UserForm client content "+name+" in points." || !property.IncludeInAuthoring {
+				t.Fatalf("form.%s metadata = %+v", name, property)
+			}
 		})
 	}
 	for _, name := range []string{"insideWidth", "insideHeight", "clientWidth", "clientHeight"} {
@@ -257,7 +260,6 @@ func TestUserFormContractSupportLevelsAreRepresented(t *testing.T) {
 
 	for _, supportLevel := range []SupportLevel{
 		SupportLevelSupported,
-		SupportLevelBestEffort,
 		SupportLevelObservedOnly,
 		SupportLevelSnapshotOnly,
 		SupportLevelCustomUnchecked,

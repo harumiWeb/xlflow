@@ -19,7 +19,8 @@ kind: xlflow.userform
 basis: designer
 form:
   name: Main
-  build: {clientWidth: 360, clientHeight: 240}
+  width: 360
+  height: 240
 controls:
   - id: outer
     name: Outer
@@ -158,7 +159,7 @@ func TestProductivityMovePreservesObservedNullAndFractionalGeometry(t *testing.T
 	const sourceYAML = `schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Main, build: {clientWidth: 220, clientHeight: 120}}
+form: {name: Main, width: 220, height: 120}
 controls:
   - id: first
     name: First
@@ -227,7 +228,7 @@ func TestDistributeUsesSpatialOrderAndKeepsEndpoints(t *testing.T) {
 	source := `schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Main, build: {clientWidth: 200, clientHeight: 100}}
+form: {name: Main, width: 200, height: 100}
 controls:
   - {id: zFront, name: ZFront, type: Label, zIndex: 10, left: 80, top: 10, width: 10, height: 10}
   - {id: spatialFirst, name: SpatialFirst, type: Label, zIndex: 20, left: 10, top: 10, width: 10, height: 10}
@@ -274,7 +275,7 @@ func TestAlignmentPreservesUntouchedFractionalAxis(t *testing.T) {
 			source := sourceInFormat(t, format, `schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Main, build: {clientWidth: 200, clientHeight: 120}}
+form: {name: Main, width: 200, height: 120}
 controls:
   - {id: anchor, name: Anchor, type: Label, left: 1.23456789, top: 2.34567891, width: 20, height: 10}
   - {id: moving, name: Moving, type: Label, left: 10.55555, top: 3.78901234, width: 20, height: 10}
@@ -383,7 +384,7 @@ func TestAlignControlsAllDirectionsAndSameSizeDimensions(t *testing.T) {
 	const sourceYAML = `schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Main, build: {clientWidth: 240, clientHeight: 180}}
+form: {name: Main, width: 240, height: 180}
 controls:
   - {id: anchor, name: Anchor, type: Label, left: 40, top: 40, width: 50, height: 30}
   - {id: moving, name: Moving, type: Label, left: 10, top: 10, width: 20, height: 10}
@@ -519,7 +520,7 @@ func TestProductivityRejectsCustomParentsAndDirectPageOrCustomTargets(t *testing
 	source := []byte(`schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Main, build: {clientWidth: 240, clientHeight: 180}}
+form: {name: Main, width: 240, height: 180}
 controls:
   - id: customFrame
     name: CustomFrame
@@ -608,7 +609,7 @@ func TestAlignUsesDesignerDefaultsAndRequiredContainerSize(t *testing.T) {
 		source := `schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Main, build: {clientWidth: 240, clientHeight: 160}}
+form: {name: Main, width: 240, height: 160}
 controls:
   - {id: option, name: Option, type: CheckBox, left: 1, top: 4}
   - {id: anchor, name: Anchor, type: CommandButton, left: 40, top: 40}
@@ -627,7 +628,7 @@ controls:
 		source := `schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Main, build: {clientWidth: 300, clientHeight: 200}}
+form: {name: Main, width: 300, height: 200}
 controls:
   - id: anchor
     name: Anchor
@@ -653,7 +654,7 @@ controls:
 		source := `schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Main, build: {clientWidth: 320, clientHeight: 220}}
+form: {name: Main, width: 320, height: 220}
 controls:
   - id: anchor
     name: Anchor
@@ -826,14 +827,14 @@ func TestPasteBoundaryClampPreservesUnchangedNullGeometryAxes(t *testing.T) {
 	const sourceYAML = `schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Source, build: {clientWidth: 360, clientHeight: 240}}
+form: {name: Source, width: 360, height: 240}
 controls:
   - {id: frame, name: Frame, type: Frame, left: null, top: null, width: 140, height: 150, observed: {left: 220, top: 7.25}}
 `
 	const targetYAML = `schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Target, build: {clientWidth: 360, clientHeight: 240}}
+form: {name: Target, width: 360, height: 240}
 controls: []
 `
 	for _, format := range []string{"yaml", "json"} {
@@ -903,7 +904,7 @@ func TestPasteControlsRejectsUnfitDestinationParentAtomically(t *testing.T) {
 	target := []byte(`schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Main, build: {clientWidth: 240, clientHeight: 180}}
+form: {name: Main, width: 240, height: 180}
 controls:
   - {id: tiny, name: Tiny, type: Frame, left: 0, top: 0, width: 100, height: 100}
 `)
@@ -928,7 +929,7 @@ func TestCopyAndPasteRootsFollowSiblingStackingOrder(t *testing.T) {
 	source := []byte(`schemaVersion: 1
 kind: xlflow.userform
 basis: designer
-form: {name: Main, build: {clientWidth: 200, clientHeight: 120}}
+form: {name: Main, width: 200, height: 120}
 controls:
   - {id: a, name: A, type: Label, zIndex: 2, left: 10, top: 10, width: 20, height: 10}
   - {id: b, name: B, type: Label, zIndex: 8, left: 40, top: 10, width: 20, height: 10}

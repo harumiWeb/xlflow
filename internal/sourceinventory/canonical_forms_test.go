@@ -175,7 +175,7 @@ func TestCanonicalFormSpecPreservesAuthoredRootOmission(t *testing.T) {
 		t.Fatalf("items = %+v", items)
 	}
 	spec := items[0].FormSpec
-	if spec.Form.Caption != nil || spec.Form.Width != nil || spec.Form.Height != nil || spec.Form.Build != nil {
+	if spec.Form.Caption != nil || spec.Form.Width != nil || spec.Form.Height != nil {
 		t.Fatalf("inferred root fields survived: %+v", spec.Form)
 	}
 	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != 300 {

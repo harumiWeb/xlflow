@@ -861,3 +861,12 @@ CI or publication is claimed.
 - [x] Inspect the failed security job and confirm the fixed Go patch release against the official release and vulnerability feeds.
 - [x] Raise the Go patch baseline to 1.26.9 and verify the complete security scan and Go tests (analyze: 589.162s; LSP: 223.591s).
 - [x] Prepare the verified security fix for the existing PR.
+
+# Unreleased UserForm canonical authoring and UX
+
+- [x] Define one client-size authoring schema and update Designer/LSP/projection.
+- [x] Share pure-Go generation and root resizing across pack, push and Excel reflection.
+- [x] Remove mandatory prebuilt .frm artifacts for canonical specs; preserve code and opaque state.
+- [x] Persist scaffold VBA codepage and add actionable encoding diagnostics / pack --check.
+- [x] Update ADR/specs/user documentation and changelogs.
+- [x] Run focused regressions, required checks and fresh session-backed Excel / pack round-trips.

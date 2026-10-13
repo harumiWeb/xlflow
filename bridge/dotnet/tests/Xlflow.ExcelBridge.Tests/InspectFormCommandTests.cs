@@ -173,6 +173,7 @@ public sealed class InspectFormCommandTests
             Assert.False(args.Visible);
             Assert.True(args.UseSession);
             Assert.Equal(@"C:\work\.xlflow\session.json", args.MetadataPath);
+            Assert.Equal(@"C:\temp\snapshot.xlsm", args.PrivateSnapshotWorkbookPath);
 
             return BridgeResponse.Ok(request, new Dictionary<string, object?>
             {
@@ -230,7 +231,8 @@ public sealed class InspectFormCommandTests
                   "StrictDesigner": "true",
                   "Visible": "false",
                   "UseSession": "true",
-                  "MetadataPath": "C:\\work\\.xlflow\\session.json"
+                  "MetadataPath": "C:\\work\\.xlflow\\session.json",
+                  "PrivateSnapshotWorkbookPath": "C:\\temp\\snapshot.xlsm"
                 }
                 """).RootElement.Clone(),
         };
@@ -243,6 +245,30 @@ public sealed class InspectFormCommandTests
         Assert.Equal("runtime", json.RootElement.GetProperty("forms").GetProperty("runtime").GetProperty("basis").GetString());
         Assert.Equal("designer", json.RootElement.GetProperty("forms").GetProperty("designer").GetProperty("basis").GetString());
         Assert.Equal("runtime_form_temp_copy", json.RootElement.GetProperty("warnings")[0].GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public void SavePrivateSnapshotWorkbookUsesSaveCopyAsAndCreatesPrivateDirectory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-inspect-snapshot-test-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(root, "nested", "snapshot.xlsm");
+        var workbook = new FakeSnapshotWorkbook();
+        try
+        {
+            var savedPath = ExcelFormInspectionService.SavePrivateSnapshotWorkbook(workbook, path);
+
+            Assert.Equal(Path.GetFullPath(path), savedPath);
+            Assert.Equal(savedPath, workbook.SavedCopyPath);
+            Assert.True(File.Exists(path));
+            Assert.Equal("copy", File.ReadAllText(path));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -289,6 +315,17 @@ public sealed class InspectFormCommandTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             return handler(request, args);
+        }
+    }
+
+    public sealed class FakeSnapshotWorkbook
+    {
+        public string? SavedCopyPath { get; private set; }
+
+        public void SaveCopyAs(string path)
+        {
+            SavedCopyPath = path;
+            File.WriteAllText(path, "copy");
         }
     }
 

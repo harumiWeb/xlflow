@@ -4,6 +4,13 @@
 
 Accepted
 
+The final bullet in this decision that rejects picture authoring for
+Excel-backed `form build` and apply was superseded before release by
+[ADR-0072](ADR-0072-userform-canonical-compiler-and-persisted-dimensions.md).
+Picture validation and compilation now use the shared pure-Go UserForm
+compiler; the remaining asset path, omission, preservation, and file-push
+authority rules in this ADR continue to apply.
+
 ## Context
 
 ADR-0060 established canonical FormSpec output for `pull --backend file`, while

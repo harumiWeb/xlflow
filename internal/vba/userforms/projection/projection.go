@@ -281,15 +281,11 @@ func projectForm(level *oforms.Level, result *forms.FormSpec) {
 	if size, ok := record.Sizes["DisplayedSize"]; ok {
 		clientWidth := points(size.Width)
 		clientHeight := points(size.Height)
+		result.Form.Width = &clientWidth
+		result.Form.Height = &clientHeight
 		result.Form.Observed = &forms.FormSpecObservedForm{
 			ClientWidth:  &clientWidth,
 			ClientHeight: &clientHeight,
-		}
-		buildClientWidth := clientWidth
-		buildClientHeight := clientHeight
-		result.Form.Build = &forms.FormSpecBuildForm{
-			ClientWidth:  &buildClientWidth,
-			ClientHeight: &buildClientHeight,
 		}
 	}
 	unsupported := unsupportedRecordProperties(record, map[string]bool{

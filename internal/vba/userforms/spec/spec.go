@@ -47,7 +47,6 @@ type FormSpecForm struct {
 	Width    *float64              `json:"width,omitempty" yaml:"width,omitempty"`
 	Height   *float64              `json:"height,omitempty" yaml:"height,omitempty"`
 	Observed *FormSpecObservedForm `json:"observed,omitempty" yaml:"observed,omitempty"`
-	Build    *FormSpecBuildForm    `json:"build,omitempty" yaml:"build,omitempty"`
 }
 
 type FormSpecObservedForm struct {
@@ -56,14 +55,6 @@ type FormSpecObservedForm struct {
 	Height       *float64 `json:"height,omitempty" yaml:"height,omitempty"`
 	InsideWidth  *float64 `json:"insideWidth,omitempty" yaml:"insideWidth,omitempty"`
 	InsideHeight *float64 `json:"insideHeight,omitempty" yaml:"insideHeight,omitempty"`
-	ClientWidth  *float64 `json:"clientWidth,omitempty" yaml:"clientWidth,omitempty"`
-	ClientHeight *float64 `json:"clientHeight,omitempty" yaml:"clientHeight,omitempty"`
-}
-
-type FormSpecBuildForm struct {
-	Caption      *string  `json:"caption,omitempty" yaml:"caption,omitempty"`
-	Width        *float64 `json:"width,omitempty" yaml:"width,omitempty"`
-	Height       *float64 `json:"height,omitempty" yaml:"height,omitempty"`
 	ClientWidth  *float64 `json:"clientWidth,omitempty" yaml:"clientWidth,omitempty"`
 	ClientHeight *float64 `json:"clientHeight,omitempty" yaml:"clientHeight,omitempty"`
 }
@@ -218,8 +209,6 @@ const (
 	UnsupportedControlTypeProperty                 = "controlType"
 	CompatibilityArtifactUnsynchronizedWarningCode = "compatibility_artifact_unsynchronized"
 	formDimensionValidationCode                    = "UFV016"
-	formBuildDimensionConflictCode                 = "UFV017"
-	excelClientDimensionValidationCode             = "UFV018"
 	tabNameValidationCode                          = "UFV019"
 	selectedIndexValidationCode                    = "UFV020"
 )
@@ -428,8 +417,7 @@ func ValidateFormSpec(spec FormSpec) error {
 	return nil
 }
 
-// ValidateFormSpecForAuthoring rejects snapshot-only control placeholders and
-// client dimensions that cannot be authored safely by an Excel writer.
+// ValidateFormSpecForAuthoring rejects snapshot-only control placeholders.
 func ValidateFormSpecForAuthoring(input SpecInput, spec FormSpec) error {
 	issues := make([]ValidationIssue, 0)
 	for i, control := range spec.Controls {
@@ -445,27 +433,6 @@ func ValidateFormSpecForAuthoring(input SpecInput, spec FormSpec) error {
 			"Replace the placeholder with a supported built-in type or provide the control's real custom progId.",
 			"",
 		))
-	}
-	if build := spec.Form.Build; build != nil {
-		for _, field := range []struct {
-			path  string
-			value *float64
-		}{
-			{path: "form.build.clientWidth", value: build.ClientWidth},
-			{path: "form.build.clientHeight", value: build.ClientHeight},
-		} {
-			if field.value == nil {
-				continue
-			}
-			issues = append(issues, validationIssue(
-				excelClientDimensionValidationCode,
-				SeverityError,
-				fmt.Sprintf("%s is a pure-Go build client dimension and is not supported by Excel-backed form build; refusing it instead of ignoring it.", field.path),
-				field.path,
-				"Remove the client dimension before using `form build` or use the pure-Go generator.",
-				SupportLevelSupported,
-			))
-		}
 	}
 	if hasValidationErrors(issues) {
 		return newSpecValidationIssuesError(input, issues)
@@ -755,7 +722,6 @@ func validateRawFormSpec(root map[string]any) []ValidationIssue {
 	if ok {
 		if formMap, formOK := asObjectMap(form); formOK {
 			issues = append(issues, validateObjectProperties(formMap, contract.FormProperties, "form", nil)...)
-			issues = append(issues, validateRawFormSubobject(formMap, "build", formBuildProperties(), "form.build")...)
 			issues = append(issues, validateRawFormSubobject(formMap, "observed", formObservedProperties(), "form.observed")...)
 			issues = append(issues, validateRawFormDimensions(formMap)...)
 		}
@@ -1205,6 +1171,17 @@ func validateObjectProperties(root map[string]any, properties map[string]Propert
 		field := joinFieldPath(path, key)
 		property, ok := lookupProperty(properties, key)
 		if !ok {
+			if path == "form" && strings.EqualFold(key, "build") {
+				issues = append(issues, validationIssue(
+					"UFV001",
+					SeverityError,
+					"form.build was removed from the UserForm authoring schema.",
+					field,
+					"Move form.build.caption to form.caption and form.build.clientWidth/clientHeight to form.width/form.height (persisted client content size in points). Keep captured root state under form.observed.",
+					"",
+				))
+				continue
+			}
 			if allow != nil && allow[key] {
 				continue
 			}
@@ -1234,16 +1211,6 @@ func validateObjectProperties(root map[string]any, properties map[string]Propert
 	return issues
 }
 
-func formBuildProperties() map[string]PropertyContract {
-	return map[string]PropertyContract{
-		"caption":      property(ValueTypeString, false, SupportLevelSupported, "Build caption.", false),
-		"width":        property(ValueTypeNumber, false, SupportLevelBestEffort, "Build outer width.", false),
-		"height":       property(ValueTypeNumber, false, SupportLevelBestEffort, "Build outer height.", false),
-		"clientWidth":  property(ValueTypeNumber, false, SupportLevelSupported, "Build client width for pure-Go generation.", false),
-		"clientHeight": property(ValueTypeNumber, false, SupportLevelSupported, "Build client height for pure-Go generation.", false),
-	}
-}
-
 func validateFormDimensions(form FormSpecForm) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	for _, field := range []struct {
@@ -1263,37 +1230,11 @@ func validateFormDimensions(form FormSpecForm) []ValidationIssue {
 			issues = append(issues, invalidFormDimensionIssue(field.path))
 		}
 	}
-	if build := form.Build; build != nil {
-		for _, field := range []struct {
-			path  string
-			value *float64
-		}{
-			{path: "form.build.width", value: build.Width},
-			{path: "form.build.height", value: build.Height},
-			{path: "form.build.clientWidth", value: build.ClientWidth},
-			{path: "form.build.clientHeight", value: build.ClientHeight},
-		} {
-			if field.value != nil && !validFormDimension(*field.value) {
-				issues = append(issues, invalidFormDimensionIssue(field.path))
-			}
-		}
-		if hasBuildClientDimensions(build) && (hasBuildOuterDimensions(build) || form.Width != nil || form.Height != nil) {
-			issues = append(issues, validationIssue(
-				formBuildDimensionConflictCode,
-				SeverityError,
-				"legacy form.width/height or form.build.width/height and form.build.clientWidth/clientHeight cannot be specified together.",
-				"form.build",
-				"Use legacy outer dimensions without client dimensions, or use clientWidth/clientHeight for pure-Go client dimensions.",
-				SupportLevelSupported,
-			))
-		}
-	}
 	return issues
 }
 
 func validateRawFormDimensions(formMap map[string]any) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
-	legacyOuterDimensions := hasRawFormDimension(formMap, "width") || hasRawFormDimension(formMap, "height")
 	for _, field := range []struct {
 		root map[string]any
 		key  string
@@ -1304,13 +1245,11 @@ func validateRawFormDimensions(formMap map[string]any) []ValidationIssue {
 	} {
 		issues = append(issues, validateRawFormDimension(field.root, field.key, field.path)...)
 	}
-	var buildObject map[string]any
 	for _, nested := range []struct {
 		key  string
 		path string
 	}{
 		{key: "observed", path: "form.observed"},
-		{key: "build", path: "form.build"},
 	} {
 		value, ok := lookupRawField(formMap, nested.key)
 		if !ok {
@@ -1320,22 +1259,9 @@ func validateRawFormDimensions(formMap map[string]any) []ValidationIssue {
 		if !ok {
 			continue
 		}
-		if nested.key == "build" {
-			buildObject = object
-		}
 		for _, key := range []string{"width", "height", "insideWidth", "insideHeight", "clientWidth", "clientHeight"} {
 			issues = append(issues, validateRawFormDimension(object, key, nested.path+"."+key)...)
 		}
-	}
-	if buildObject != nil && (legacyOuterDimensions || hasRawFormDimension(buildObject, "width") || hasRawFormDimension(buildObject, "height")) && (hasRawFormDimension(buildObject, "clientWidth") || hasRawFormDimension(buildObject, "clientHeight")) {
-		issues = append(issues, validationIssue(
-			formBuildDimensionConflictCode,
-			SeverityError,
-			"legacy form.width/height or form.build.width/height and form.build.clientWidth/clientHeight cannot be specified together.",
-			"form.build",
-			"Use legacy outer dimensions without client dimensions, or use clientWidth/clientHeight for pure-Go client dimensions.",
-			SupportLevelSupported,
-		))
 	}
 	return issues
 }
@@ -1352,19 +1278,6 @@ func validateRawFormDimension(root map[string]any, key, path string) []Validatio
 		return []ValidationIssue{invalidFormDimensionIssue(path)}
 	}
 	return nil
-}
-
-func hasRawFormDimension(root map[string]any, key string) bool {
-	value, ok := lookupRawField(root, key)
-	return ok && value != nil
-}
-
-func hasBuildOuterDimensions(build *FormSpecBuildForm) bool {
-	return build != nil && (build.Width != nil || build.Height != nil)
-}
-
-func hasBuildClientDimensions(build *FormSpecBuildForm) bool {
-	return build != nil && (build.ClientWidth != nil || build.ClientHeight != nil)
 }
 
 func rawFloat64(value any) (float64, bool) {
@@ -1739,30 +1652,45 @@ func FormSpecFromInspectSnapshot(snapshot any) (FormSpec, error) {
 	warnings = append(warnings, generatedWarnings...)
 	form := FormSpecForm{Name: name}
 	observed := &FormSpecObservedForm{}
-	build := &FormSpecBuildForm{}
 	if caption, ok := stringField(root, "caption"); ok {
-		form.Caption = &caption
+		form.Caption = new(caption)
 		observed.Caption = &caption
-		build.Caption = &caption
 	}
 	if width, ok := optionalFloatField(root, "width"); ok {
-		form.Width = &width
 		observed.Width = &width
-		build.Width = &width
 	}
 	if height, ok := optionalFloatField(root, "height"); ok {
-		form.Height = &height
 		observed.Height = &height
-		build.Height = &height
+	}
+	missingClientDimensions := make([]string, 0, 2)
+	if width, ok := optionalFloatField(root, "client_width"); ok {
+		if !validFormDimension(width) {
+			return FormSpec{}, fmt.Errorf("snapshot client_width is outside the supported finite non-negative HIMETRIC range")
+		}
+		form.Width = new(width)
+		observed.ClientWidth = new(width)
+	} else {
+		missingClientDimensions = append(missingClientDimensions, "client_width")
+	}
+	if height, ok := optionalFloatField(root, "client_height"); ok {
+		if !validFormDimension(height) {
+			return FormSpec{}, fmt.Errorf("snapshot client_height is outside the supported finite non-negative HIMETRIC range")
+		}
+		form.Height = new(height)
+		observed.ClientHeight = new(height)
+	} else {
+		missingClientDimensions = append(missingClientDimensions, "client_height")
+	}
+	if len(missingClientDimensions) > 0 {
+		warnings = append(warnings, FormSpecWarning{
+			Code:    "snapshot_client_dimensions_missing",
+			Message: fmt.Sprintf("Inspect snapshot omitted %s; authored form.width/form.height were not seeded from legacy outer width/height.", strings.Join(missingClientDimensions, " and ")),
+		})
 	}
 	if !hasObservedFormValues(observed) {
 		observed = nil
 	}
-	if !hasBuildFormValues(build) {
-		build = nil
-	}
 	form.Observed = observed
-	form.Build = build
 	if warnings == nil {
 		warnings = []FormSpecWarning{}
 	}
@@ -1778,35 +1706,8 @@ func FormSpecFromInspectSnapshot(snapshot any) (FormSpec, error) {
 }
 
 func normalizeFormSpecForm(form FormSpecForm) FormSpecForm {
-	if form.Observed == nil {
-		form.Observed = &FormSpecObservedForm{}
-	}
-	if form.Observed.Caption == nil && form.Caption != nil {
-		form.Observed.Caption = form.Caption
-	}
-	if form.Observed.Width == nil && form.Width != nil {
-		form.Observed.Width = form.Width
-	}
-	if form.Observed.Height == nil && form.Height != nil {
-		form.Observed.Height = form.Height
-	}
-	if !hasObservedFormValues(form.Observed) {
+	if form.Observed != nil && !hasObservedFormValues(form.Observed) {
 		form.Observed = nil
-	}
-	if form.Build == nil {
-		form.Build = &FormSpecBuildForm{}
-	}
-	if form.Build.Caption == nil {
-		form.Build.Caption = firstStringPtr(form.Caption, observedFormCaption(form.Observed))
-	}
-	if !hasBuildClientDimensions(form.Build) && form.Build.Width == nil {
-		form.Build.Width = firstFloatPtr(form.Width, observedFormWidth(form.Observed))
-	}
-	if !hasBuildClientDimensions(form.Build) && form.Build.Height == nil {
-		form.Build.Height = firstFloatPtr(form.Height, observedFormHeight(form.Observed))
-	}
-	if !hasBuildFormValues(form.Build) {
-		form.Build = nil
 	}
 	return form
 }
@@ -2202,17 +2103,6 @@ func hasObservedFormValues(observed *FormSpecObservedForm) bool {
 	return observed != nil && (observed.Caption != nil || observed.Width != nil || observed.Height != nil || observed.InsideWidth != nil || observed.InsideHeight != nil || observed.ClientWidth != nil || observed.ClientHeight != nil)
 }
 
-func hasBuildFormValues(build *FormSpecBuildForm) bool {
-	return build != nil && (build.Caption != nil || build.Width != nil || build.Height != nil || build.ClientWidth != nil || build.ClientHeight != nil)
-}
-
-func observedFormCaption(observed *FormSpecObservedForm) *string {
-	if observed == nil {
-		return nil
-	}
-	return observed.Caption
-}
-
 func observedFormWidth(observed *FormSpecObservedForm) *float64 {
 	if observed == nil {
 		return nil
@@ -2275,24 +2165,6 @@ func hasObservedControlValues(observed *FormSpecObservedControl) bool {
 			len(observed.List) > 0 ||
 			len(observed.Unsupported) > 0 ||
 			len(observed.Properties) > 0)
-}
-
-func firstStringPtr(values ...*string) *string {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
-}
-
-func firstFloatPtr(values ...*float64) *float64 {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
 }
 
 func cloneMap(value map[string]any) map[string]any {

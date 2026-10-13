@@ -113,8 +113,17 @@ func TestRunnerUserFormCoordinationDoesNotConflictAcrossWorkbooks(t *testing.T) 
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 	callCount := 0
+	projectBytes, _, _ := userFormSnapshotFixture(t)
+	var snapshotErr error
 	bridgeProviderForMode = func(string, excelbridge.Mode) excelbridge.Provider {
-		return trackingBridgeProvider{name: "dotnet", supports: true, callCount: &callCount, response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"inspect-form","logs":[]}`)}}
+		return callbackBridgeProvider{
+			name: "dotnet",
+			execute: func(req excelbridge.Request) {
+				callCount++
+				snapshotErr = writeWorkbookSnapshot(req.Args["PrivateSnapshotWorkbookPath"], projectBytes)
+			},
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"inspect-form","logs":[],"forms":{"name":"UserForm1","basis":"designer"}}`)},
+		}
 	}
 	env, code, err := (Runner{RootDir: rootB, BridgeMode: "dotnet", Coordination: manager}).InspectForm(cfg, InspectFormOptions{Name: "UserForm1", Basis: "designer"})
 	if err != nil {
@@ -122,6 +131,9 @@ func TestRunnerUserFormCoordinationDoesNotConflictAcrossWorkbooks(t *testing.T) 
 	}
 	if code != output.ExitSuccess || env.Error != nil || callCount != 1 {
 		t.Fatalf("different workbook result = code %d, error %#v, bridge calls %d", code, env.Error, callCount)
+	}
+	if snapshotErr != nil {
+		t.Fatalf("write private workbook snapshot: %v", snapshotErr)
 	}
 }
 

@@ -110,13 +110,6 @@ func LookupTabProperty(propertyName string) (PropertyContract, bool) {
 	return clonePropertyContract(property), ok
 }
 
-// LookupFormBuildProperty returns metadata for the explicit form.build
-// override object. It is shared by source validation and editor intelligence.
-func LookupFormBuildProperty(propertyName string) (PropertyContract, bool) {
-	property, ok := lookupProperty(formBuildProperties(), propertyName)
-	return clonePropertyContract(property), ok
-}
-
 // LookupFormObservedProperty returns metadata for captured form.observed
 // fields. These fields are snapshots rather than normal authoring inputs.
 func LookupFormObservedProperty(propertyName string) (PropertyContract, bool) {
@@ -274,7 +267,7 @@ func newUserFormContract() Contract {
 		"tabIndex":    property(ValueTypeInteger, false, SupportLevelSupported, "Control tab order index.", true),
 		"enabled":     property(ValueTypeBoolean, false, SupportLevelSupported, "Whether the control is enabled.", true),
 		"visible":     property(ValueTypeBoolean, false, SupportLevelSupported, "Whether the control is visible.", true),
-		"observed":    property(ValueTypeObject, false, SupportLevelSnapshotOnly, "Snapshot state captured from Excel for review and fallback build intent.", false),
+		"observed":    property(ValueTypeObject, false, SupportLevelSnapshotOnly, "Snapshot state captured from Excel for review; it does not override authoring values.", false),
 		"controls":    property(ValueTypeObjectArray, false, SupportLevelSnapshotOnly, "Legacy nested input accepted and normalized to flat controls.", false),
 		"properties":  property(ValueTypeObject, false, SupportLevelCustomUnchecked, "Unchecked custom property bag for future or non-standard controls.", false),
 		"unsupported": property(ValueTypeStringArray, false, SupportLevelSnapshotOnly, "Properties observed during inspection that xlflow did not model.", false),
@@ -312,16 +305,15 @@ func newUserFormContract() Contract {
 			"kind":             propertyWithAllowed(ValueTypeString, true, SupportLevelSupported, "Document kind discriminator.", false, "xlflow.userform"),
 			"basis":            propertyWithAllowed(ValueTypeString, true, SupportLevelSupported, "Inspection/build basis for the spec.", false, "designer"),
 			"coordinateSystem": propertyWithAllowed(ValueTypeString, false, SupportLevelSupported, "Coordinate basis used by geometry fields.", false, "points", "parent-relative"),
-			"form":             property(ValueTypeObject, true, SupportLevelSupported, "Top-level UserForm metadata and build intent.", false),
+			"form":             property(ValueTypeObject, true, SupportLevelSupported, "Top-level UserForm authoring and observed metadata.", false),
 			"controls":         property(ValueTypeObjectArray, true, SupportLevelSupported, "Flat control list.", false),
 			"warnings":         property(ValueTypeObjectArray, false, SupportLevelSnapshotOnly, "Snapshot-oriented warnings persisted with the spec.", false),
 		},
 		FormProperties: map[string]PropertyContract{
 			"name":     property(ValueTypeString, true, SupportLevelSupported, "VBA UserForm component name.", true),
 			"caption":  property(ValueTypeString, false, SupportLevelSupported, "UserForm caption.", true),
-			"width":    property(ValueTypeNumber, false, SupportLevelBestEffort, "Form width; applied through VBComponent properties when available.", true),
-			"height":   property(ValueTypeNumber, false, SupportLevelBestEffort, "Form height; applied through VBComponent properties when available.", true),
-			"build":    property(ValueTypeObject, false, SupportLevelSupported, "Authoritative build intent for form-level properties.", false),
+			"width":    property(ValueTypeNumber, false, SupportLevelSupported, "Persisted UserForm client content width in points.", true),
+			"height":   property(ValueTypeNumber, false, SupportLevelSupported, "Persisted UserForm client content height in points.", true),
 			"observed": property(ValueTypeObject, false, SupportLevelSnapshotOnly, "Observed form state captured from Excel.", false),
 		},
 		CommonControlProperties: common,

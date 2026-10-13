@@ -4,9 +4,17 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Unified unreleased UserForm authoring around `form.width` / `form.height`
+  client-area dimensions in points, shared pure-Go compilation and template
+  resizing. Removed the `form.build` authoring aliases and separated observed
+  Excel dimensions from authoring intent.
+- Added `pack --check` without artifact publication and actionable VBA project
+  encoding diagnostics. New and imported projects record their workbook's VBA
+  codepage for subsequent blank packing while source files remain UTF-8.
+
 - Fixed Excel-backed FormSpec build/apply rejecting fractional control geometry
-  after MSForms twip and single-precision rounding. Geometry verification accepts
-  that bounded rounding while other modeled properties retain strict checks.
+  by reflecting the shared compiler's persisted HIMETRIC coordinates instead of
+  independently writing and comparing Designer properties.
 
 - Fixed UserForm Designer control-interior clicks and subsequent drags losing
   selection because leaf controls intercepted clicks as blank containers.

@@ -104,7 +104,6 @@ controls:
 		{"UFV010", "error", "controls[7].parentId", false},
 		{"UFV011", "error", "controls[3].parentId", false},
 		{"UFV012", "error", "controls[5].progId", false},
-		{"UFV013", "warning", "form.width", true},
 		{"UFV013", "warning", "controls[9].controls", true},
 		{"UFV013", "warning", "controls[10].list", true},
 		{"UFV014", "warning", "controls[6].progId", false},

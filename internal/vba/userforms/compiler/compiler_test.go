@@ -57,7 +57,7 @@ func TestCompileNoopAndMetadataPreserveAllBytes(t *testing.T) {
 			form, before := fixture(t, name)
 			after := snapshotCopy(t, before)
 			after.Warnings = nil
-			after.Form.Observed = &spec.FormSpecObservedForm{Caption: new("not build intent")}
+			after.Form.Observed = &spec.FormSpecObservedForm{Caption: new("not authoring intent")}
 			for i := range after.Controls {
 				after.Controls[i].Observed = nil
 				after.Controls[i].Unsupported = nil
@@ -177,7 +177,12 @@ func TestCompileRejectsEditsAtomically(t *testing.T) {
 		name, code string
 		change     func(*spec.FormSpec, *spec.FormSpec)
 	}{
-		{"root-size", Invalid, func(_, a *spec.FormSpec) { a.Form.Width = new(300.0) }},
+		{"stale-root-size", Stale, func(b, a *spec.FormSpec) {
+			b.Form.Width = new(100.0)
+			a.Form.Width = new(300.0)
+		}},
+		{"root-size-overflow", Invalid, func(_, a *spec.FormSpec) { a.Form.Width = new(1e100) }},
+		{"root-size-reset", Unsupported, func(_, a *spec.FormSpec) { a.Form.Width = nil }},
 		{"rename", Unsupported, func(_, a *spec.FormSpec) { a.Controls[0].Name = "Renamed" }},
 		{"remove", Unsupported, func(_, a *spec.FormSpec) { a.Controls = a.Controls[1:] }},
 		{"stale", Stale, func(b, a *spec.FormSpec) {
@@ -200,11 +205,6 @@ func TestCompileRejectsEditsAtomically(t *testing.T) {
 		{"after-coordinate-system", Invalid, func(_, a *spec.FormSpec) {
 			a.CoordinateSystem = "pixels"
 			a.Controls[0].Properties = map[string]any{"Left": 72.0}
-		}},
-		{"new-build-caption-stale-legacy", Stale, func(b, a *spec.FormSpec) {
-			b.Form.Build = nil
-			b.Form.Caption = new("stale legacy caption")
-			a.Form.Build = &spec.FormSpecBuildForm{Caption: new("requested")}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -238,21 +238,17 @@ func TestCompileRejectsEditsAtomically(t *testing.T) {
 	}
 }
 
-func TestCompileExplicitBuildCaptionAndBagAlias(t *testing.T) {
+func TestCompileExplicitRootCaptionAndBagAlias(t *testing.T) {
 	form, before := fixture(t, "p4_form.bin")
 	after := snapshotCopy(t, before)
-	if after.Form.Build == nil {
-		after.Form.Build = &spec.FormSpecBuildForm{}
-	}
-	after.Form.Build.Caption = new("build caption")
-	after.Form.Caption = new("legacy caption")
+	after.Form.Caption = new("requested caption")
 	after.Controls[0].Caption = new("same")
 	after.Controls[0].Properties = map[string]any{"Caption": "same", "Tag": "日本語", "ControlTipText": "tip", "BackColor": float64(0x8000000f)}
 	result, err := CompileEdits(form, before, after, 932)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := result.Levels[0].Record.Strings["Caption"].Text; got != "build caption" {
+	if got := result.Levels[0].Record.Strings["Caption"].Text; got != "requested caption" {
 		t.Fatalf("caption=%q", got)
 	}
 	if got := result.Controls[0].Site.Strings["Tag"].Text; got != "日本語" {
@@ -309,54 +305,30 @@ func TestCompileCoordinateSystems(t *testing.T) {
 	}
 }
 
-func TestCompileNewBuildCaptionChecksLegacyBaseline(t *testing.T) {
-	for _, tc := range []struct {
-		name, wantCode string
-		change         func(*spec.FormSpec, *spec.FormSpec)
-	}{
-		{"matching-legacy", "", func(_, _ *spec.FormSpec) {}},
-		{"empty-build-matching-legacy", "", func(b, _ *spec.FormSpec) { b.Form.Build = &spec.FormSpecBuildForm{} }},
-		{"stale-legacy", Stale, func(b, _ *spec.FormSpec) { b.Form.Caption = new("stale") }},
-		{"empty-build-stale-legacy", Stale, func(b, _ *spec.FormSpec) {
-			b.Form.Build = &spec.FormSpecBuildForm{}
-			b.Form.Caption = new("stale")
-		}},
-		{"stale-legacy-equal-new-build", Stale, func(b, a *spec.FormSpec) { b.Form.Caption = a.Form.Build.Caption }},
-		{"absent-legacy", "", func(b, _ *spec.FormSpec) { b.Form.Caption = nil }},
-		{"existing-build-precedence", "", func(b, _ *spec.FormSpec) {
-			b.Form.Build = &spec.FormSpecBuildForm{Caption: b.Form.Caption}
-			b.Form.Caption = new("ignored legacy baseline")
-		}},
-		{"stale-existing-build", Stale, func(b, _ *spec.FormSpec) {
-			b.Form.Build = &spec.FormSpecBuildForm{Caption: new("stale build")}
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			form, before := fixture(t, "p4_form.bin")
-			before.Form.Build = nil
-			if before.Form.Caption == nil {
-				before.Form.Caption = new("")
-			}
-			after := snapshotCopy(t, before)
-			after.Form.Build = &spec.FormSpecBuildForm{Caption: new("requested build caption")}
-			after.Form.Caption = new("ignored legacy edit")
-			tc.change(&before, &after)
-			result, err := CompileEdits(form, before, after, 932)
-			if tc.wantCode != "" {
-				detail, ok := errors.AsType[*Error](err)
-				if result != nil || !ok || detail.Code != tc.wantCode || detail.Property != "form.caption" {
-					t.Fatalf("expected stale caption: %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := result.Levels[0].Record.Strings["Caption"].Text; got != *after.Form.Build.Caption {
-				t.Fatalf("build precedence lost: %q", got)
-			}
-		})
-	}
+func TestCompileEditsUsesCanonicalRootCaptionAndRejectsStaleBefore(t *testing.T) {
+	t.Run("canonical-caption", func(t *testing.T) {
+		form, before := fixture(t, "p4_form.bin")
+		after := snapshotCopy(t, before)
+		after.Form.Caption = new("requested caption")
+		result, err := CompileEdits(form, before, after, 932)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := result.Levels[0].Record.Strings["Caption"].Text; got != *after.Form.Caption {
+			t.Fatalf("caption = %q, want %q", got, *after.Form.Caption)
+		}
+	})
+	t.Run("stale-before", func(t *testing.T) {
+		form, before := fixture(t, "p4_form.bin")
+		before.Form.Caption = new("stale caption")
+		after := snapshotCopy(t, before)
+		after.Form.Caption = new("requested caption")
+		result, err := CompileEdits(form, before, after, 932)
+		detail, ok := errors.AsType[*Error](err)
+		if result != nil || !ok || detail.Code != Stale || detail.Property != "form.caption" {
+			t.Fatalf("stale before error = %v", err)
+		}
+	})
 }
 
 func TestCompilePropertyKeyUnionIsDeterministic(t *testing.T) {

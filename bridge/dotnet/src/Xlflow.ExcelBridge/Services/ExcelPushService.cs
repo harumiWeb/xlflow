@@ -59,6 +59,19 @@ public sealed class ExcelPushService : IPushService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (args.Phase == "prepare")
+        {
+            return PrepareCanonicalWorkbookCopy(request, args);
+        }
+        if (args.Phase != "import")
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "push_args_invalid",
+                Message: "Phase must be prepare or import.",
+                Phase: "validate_args",
+                Source: "xlflow-excel-bridge"));
+        }
+
         object? excel = null;
         object? workbook = null;
         BackupRef? backupRef = null;
@@ -70,11 +83,27 @@ public sealed class ExcelPushService : IPushService
 
         try
         {
+            var canonicalFormNames = DecodeCanonicalFormNames(args.CanonicalFormNamesJson64);
+            var canonicalPicturePaths = DecodeCanonicalPicturePaths(args.CanonicalPicturePathsJson64);
             var sourceFiles = VbaSourceHelper.DiscoverSourceFiles(
-                args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource);
+                args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource, canonicalFormNames, canonicalPicturePaths);
             var workbookPath = ExcelBridgeSupport.NormalizePath(args.WorkbookPath);
+            Directory.CreateDirectory(tmpImportDir);
+            if (canonicalFormNames.Count > 0)
+            {
+                if (string.IsNullOrWhiteSpace(args.CompiledWorkbookPath))
+                {
+                    return BridgeResponse.Failed(request, new BridgeError(
+                        Code: "push_args_invalid",
+                        Message: "CompiledWorkbookPath is required when canonical UserForms are staged.",
+                        Phase: "validate_args",
+                        Source: "xlflow-excel-bridge"));
+                }
+                sourceFiles.AddRange(ExportCanonicalForms(args.CompiledWorkbookPath, canonicalFormNames, tmpImportDir));
+            }
             var fingerprint = VbaSourceHelper.ComputeFingerprint(
-                args.WorkbookPath, args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource, args.LineNumbersEnabled, args.FolderAnnotation);
+                args.WorkbookPath, args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir, args.CodeSource,
+                args.LineNumbersEnabled, args.FolderAnnotation, sourceFiles);
 
             if (args.LineNumbersEnabled && !TryValidateLineNumberSources(sourceFiles, out var lineNumberIssue))
             {
@@ -197,8 +226,6 @@ public sealed class ExcelPushService : IPushService
                     () => CreateBackup(workbook, args.BackupRoot, workbookPath));
                 backupRef = new BackupRef(backup.Id, backup.Path, backupReason, args.BackupMode);
             }
-
-            Directory.CreateDirectory(tmpImportDir);
 
             excelMutationBegan = true;
             var importResult = ReplaceNonDocumentComponents(workbook, args, sourceFiles, tmpImportDir);
@@ -439,6 +466,228 @@ public sealed class ExcelPushService : IPushService
                 catch (IOException) { /* best-effort cleanup */ }
             }
         }
+    }
+
+    private static BridgeResponse PrepareCanonicalWorkbookCopy(BridgeRequest request, PushCommandArguments args)
+    {
+        object? excel = null;
+        object? workbook = null;
+        var sessionAttached = false;
+        var sessionMode = "none";
+        try
+        {
+            var opened = AttachOrOpenWorkbook(args.WorkbookPath, args.MetadataPath, args.UseSession, args.Visible);
+            excel = opened.Attachment.Excel;
+            workbook = opened.Attachment.Workbook;
+            sessionAttached = opened.SessionAttached;
+            sessionMode = opened.Attachment.SessionMode;
+            var parent = Path.GetDirectoryName(args.PreparedWorkbookPath);
+            if (string.IsNullOrWhiteSpace(args.PreparedWorkbookPath))
+            {
+                throw new InvalidOperationException("PreparedWorkbookPath is required during prepare.");
+            }
+            if (!string.IsNullOrWhiteSpace(parent))
+            {
+                Directory.CreateDirectory(parent);
+            }
+            ExcelBridgeSupport.InvokeViaDynamic(workbook, "SaveCopyAs", args.PreparedWorkbookPath);
+            return BridgeResponse.Ok(request, new Dictionary<string, object?>
+            {
+                ["target"] = new Dictionary<string, object?>
+                {
+                    ["kind"] = sessionAttached ? "live_session" : "file",
+                    ["path"] = ExcelBridgeSupport.NormalizePath(args.WorkbookPath),
+                },
+                ["session"] = ExcelBridgeSupport.BuildSessionPayload(args.WorkbookPath, sessionAttached, sessionMode, null, false),
+                ["prepared_workbook_path"] = args.PreparedWorkbookPath,
+            }) with
+            {
+                Logs = ["saved a private workbook copy for shared compiler", "left the source workbook unsaved"],
+            };
+        }
+        catch (Exception ex)
+        {
+            return BridgeResponse.Failed(request, new BridgeError(
+                Code: "push_prepare_failed",
+                Message: ExcelBridgeSupport.FormatExceptionDetail(ex),
+                Phase: "prepare_compiler_workbook",
+                Source: "xlflow-excel-bridge"));
+        }
+        finally
+        {
+            if (sessionAttached)
+            {
+                ExcelBridgeSupport.ReleaseComObject(workbook);
+                ExcelBridgeSupport.ReleaseComObject(excel);
+            }
+            else
+            {
+                CloseComInstance(workbook, excel);
+            }
+        }
+    }
+
+    private static HashSet<string> DecodeCanonicalFormNames(string encoded)
+    {
+        if (string.IsNullOrWhiteSpace(encoded))
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(Convert.FromBase64String(encoded));
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException("canonical form name payload must be a JSON array.");
+            }
+            return document.RootElement.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString() ?? "")
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException)
+        {
+            throw new InvalidOperationException("canonical form name payload is invalid.", ex);
+        }
+    }
+
+    private static HashSet<string> DecodeCanonicalPicturePaths(string encoded)
+    {
+        if (string.IsNullOrWhiteSpace(encoded))
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(Convert.FromBase64String(encoded));
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException("canonical picture path payload must be a JSON array.");
+            }
+
+            var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in document.RootElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
+                {
+                    continue;
+                }
+
+                var path = item.GetString()!;
+                if (!Path.IsPathFullyQualified(path))
+                {
+                    throw new InvalidOperationException("canonical picture paths must be fully qualified.");
+                }
+
+                paths.Add(Path.GetFullPath(path));
+            }
+
+            return paths;
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException)
+        {
+            throw new InvalidOperationException("canonical picture path payload is invalid.", ex);
+        }
+    }
+
+    private static List<DiscoveredSourceFile> ExportCanonicalForms(string compiledWorkbookPath, IReadOnlySet<string> formNames, string tempRoot)
+    {
+        var exported = new List<DiscoveredSourceFile>();
+        var attachment = ExcelBridgeSupport.OpenWorkbookDirect(compiledWorkbookPath, visible: false);
+        object? project = null;
+        object? components = null;
+        try
+        {
+            project = ExcelBridgeSupport.Get(attachment.Workbook, "VBProject")
+                ?? throw new InvalidOperationException("VBProject access is denied for the compiled workbook.");
+            components = ExcelBridgeSupport.Get(project, "VBComponents")
+                ?? throw new InvalidOperationException("VBComponents is unavailable in the compiled workbook.");
+            var canonicalDir = Path.Combine(tempRoot, "canonical");
+            Directory.CreateDirectory(canonicalDir);
+            foreach (var formName in formNames.OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!string.Equals(Path.GetFileName(formName), formName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"invalid canonical UserForm name '{formName}'.");
+                }
+                var component = FindComponent(components, formName);
+                if (component is null)
+                {
+                    throw new InvalidOperationException($"compiled workbook does not contain UserForm '{formName}'.");
+                }
+                try
+                {
+                    var componentType = Convert.ToInt32(ExcelBridgeSupport.Get(component, "Type"), CultureInfo.InvariantCulture);
+                    if (componentType != ComponentTypeForm)
+                    {
+                        throw new InvalidOperationException($"compiled component '{formName}' is not a UserForm.");
+                    }
+                    var formPath = Path.Combine(canonicalDir, formName + ".frm");
+                    ExcelBridgeSupport.InvokeViaDynamic(component, "Export", formPath);
+                    exported.Add(new DiscoveredSourceFile
+                    {
+                        Kind = "form",
+                        RootDir = canonicalDir,
+                        FullPath = formPath,
+                        RelativePath = "canonical/" + formName + ".frm",
+                        Extension = ".frm",
+                        ModuleName = formName,
+                    });
+                    var frxPath = Path.ChangeExtension(formPath, ".frx");
+                    if (File.Exists(frxPath))
+                    {
+                        exported.Add(new DiscoveredSourceFile
+                        {
+                            Kind = "form",
+                            RootDir = canonicalDir,
+                            FullPath = frxPath,
+                            RelativePath = "canonical/" + formName + ".frx",
+                            Extension = ".frx",
+                            ModuleName = formName,
+                        });
+                    }
+                }
+                finally
+                {
+                    ExcelBridgeSupport.ReleaseComObject(component);
+                }
+            }
+            return exported;
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(components);
+            ExcelBridgeSupport.ReleaseComObject(project);
+            ExcelBridgeSupport.CloseWorkbookAndQuitApplication(attachment.Workbook, attachment.Excel);
+        }
+    }
+
+    private static object? FindComponent(object components, string name)
+    {
+        var count = Convert.ToInt32(ExcelBridgeSupport.Get(components, "Count"), CultureInfo.InvariantCulture);
+        for (var index = 1; index <= count; index++)
+        {
+            object? candidate = null;
+            try
+            {
+                candidate = ExcelBridgeSupport.Get(components, "Item", index);
+                var candidateName = candidate is null ? "" : ExcelBridgeSupport.GetString(candidate, "Name") ?? "";
+                if (string.Equals(candidateName, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+            catch
+            {
+                ExcelBridgeSupport.ReleaseComObject(candidate);
+                throw;
+            }
+            ExcelBridgeSupport.ReleaseComObject(candidate);
+        }
+        return null;
     }
 
     private static (ExcelSessionAttachment Attachment, bool SessionAttached) AttachOrOpenWorkbook(
@@ -948,18 +1197,22 @@ public sealed class ExcelPushService : IPushService
                     continue;
                 }
 
-                var rootDir = VbaSourceHelper.GetComponentRootDir(
-                    file.Kind == "module" ? 1 :
-                    file.Kind == "class" ? 2 :
-                    file.Kind == "form" ? 3 : 100,
-                    args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir);
+                var rootDir = !string.IsNullOrWhiteSpace(file.RootDir)
+                    ? file.RootDir
+                    : VbaSourceHelper.GetComponentRootDir(
+                        file.Kind == "module" ? 1 :
+                        file.Kind == "class" ? 2 :
+                        file.Kind == "form" ? 3 : 100,
+                        args.ModulesDir, args.ClassesDir, args.FormsDir, args.WorkbookDir);
 
-                var importPath = VbaSourceHelper.PrepareSourceForImport(
-                    file.FullPath,
-                    Path.Combine(tmpImportDir, Path.GetFileName(file.FullPath)),
-                    rootDir,
-                    args.FolderAnnotation,
-                    args.LineNumbersEnabled);
+                var importPath = file.RelativePath.StartsWith("canonical/", StringComparison.OrdinalIgnoreCase)
+                    ? CopyCanonicalFormForImport(file.FullPath, tmpImportDir)
+                    : VbaSourceHelper.PrepareSourceForImport(
+                        file.FullPath,
+                        Path.Combine(tmpImportDir, Path.GetFileName(file.FullPath)),
+                        rootDir,
+                        args.FolderAnnotation,
+                        args.LineNumbersEnabled);
 
                 if (string.IsNullOrWhiteSpace(importPath))
                 {
@@ -1006,6 +1259,15 @@ public sealed class ExcelPushService : IPushService
         }
 
         return imported;
+    }
+
+    private static string CopyCanonicalFormForImport(string sourcePath, string tempRoot)
+    {
+        var canonicalDir = Path.Combine(tempRoot, "canonical-import");
+        Directory.CreateDirectory(canonicalDir);
+        var destination = Path.Combine(canonicalDir, Path.GetFileName(sourcePath));
+        File.Copy(sourcePath, destination, overwrite: true);
+        return destination;
     }
 
     internal static void SyncUserFormCodeBehind(object workbook, string formName, string formsDir, bool lineNumbersEnabled)

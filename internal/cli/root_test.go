@@ -5207,8 +5207,8 @@ code_source = "sidecar"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(rewritten), `version = "sidecar"`) || strings.Contains(string(rewritten), `version = "frm"`) {
-		t.Fatalf("frm artifact was not synchronized from sidecar:\n%s", string(rewritten))
+	if !bytes.Equal(rewritten, beforeCanceled) {
+		t.Fatalf("form apply preflight rewrote a tracked compatibility artifact:\n%s", string(rewritten))
 	}
 }
 
@@ -6017,7 +6017,7 @@ End Sub
 	}
 }
 
-func TestPushRejectsSpecDrivenUserFormArtifactNameMismatchBeforeExcel(t *testing.T) {
+func TestPushCanonicalSpecIgnoresStaleCompatibilityArtifact(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "src", "forms", "specs"), 0o755); err != nil {
 		t.Fatal(err)
@@ -6065,8 +6065,8 @@ code_source = "sidecar"
 	root.SetArgs([]string{"--json", "push"})
 
 	err := root.Execute()
-	if err == nil || output.ExitCode(err) != output.ExitValidation {
-		t.Fatalf("expected validation failure, got err=%v exit=%d", err, output.ExitCode(err))
+	if err == nil || output.ExitCode(err) != output.ExitEnvironment {
+		t.Fatalf("expected the missing workbook to fail after source validation, got err=%v exit=%d", err, output.ExitCode(err))
 	}
 
 	var got struct {
@@ -6084,11 +6084,15 @@ code_source = "sidecar"
 	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &got); unmarshalErr != nil {
 		t.Fatalf("failed to parse push spec/artifact mismatch output: %v\n%s", unmarshalErr, stdout.String())
 	}
-	if got.Status != output.StatusFailed || got.Error.Code != "source_preflight_failed" || got.Error.Phase != "preflight" {
+	if got.Status != output.StatusFailed || got.Error.Code == "source_preflight_failed" || got.Error.Phase == "preflight" {
 		t.Fatalf("unexpected push spec/artifact mismatch payload: %+v", got)
 	}
-	if len(got.Issues) != 1 || got.Issues[0].Code != "FRM201" || got.Issues[0].Line != 4 {
-		t.Fatalf("unexpected push spec/artifact mismatch issues: %+v", got.Issues)
+	if len(got.Issues) != 0 {
+		t.Fatalf("canonical spec was blocked by compatibility issues: %+v", got.Issues)
+	}
+	unchanged, readErr := os.ReadFile(filepath.Join(dir, "src", "forms", "RegistrationForm.frm"))
+	if readErr != nil || string(unchanged) != frmBody {
+		t.Fatalf("canonical push rewrote tracked compatibility source: %v", readErr)
 	}
 }
 

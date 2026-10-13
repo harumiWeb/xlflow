@@ -1,6 +1,10 @@
 package ovba
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestSupportedCodePagesRoundTrip(t *testing.T) {
 	cases := []struct {
@@ -63,10 +67,21 @@ func TestEncodeMBCSRejections(t *testing.T) {
 	if _, err := EncodeMBCS("\u65e5\u672c\u8a9e", 1252); err == nil {
 		t.Error("characters not representable in CP1252 should return an error")
 	}
-	if _, err := EncodeMBCS("x \U0001F600 y", 932); err == nil {
+	input := "x \U0001F600 y"
+	if _, err := EncodeMBCS(input, 932); err == nil {
 		t.Error("emoji not representable in CP932 should return an error")
+	} else {
+		detail, ok := errors.AsType[*CodePageEncodingError](err)
+		if !ok || detail.CodePage != 932 || detail.Rune != '\U0001F600' || detail.Offset != 2 {
+			t.Fatalf("encoding error = %#v, want typed CP932 error at byte 2", detail)
+		}
+		if strings.Contains(err.Error(), input) {
+			t.Fatalf("encoding error exposed the complete source: %v", err)
+		}
 	}
 	if _, err := EncodeMBCS("x", 37); err == nil {
 		t.Error("unsupported codepage 37 should return an error")
+	} else if detail, ok := errors.AsType[*CodePageEncodingError](err); !ok || !detail.UnsupportedCodePage || detail.CodePage != 37 {
+		t.Fatalf("unsupported codepage error = %#v", detail)
 	}
 }

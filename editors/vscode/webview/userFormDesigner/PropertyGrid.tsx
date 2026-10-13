@@ -15,13 +15,7 @@ const categories = {
   layout: ["left", "top", "width", "height"],
   behavior: ["enabled", "visible"],
   navigation: ["tabIndex", "selectedIndex", "accelerator"],
-  advanced: [
-    "build.caption",
-    "build.width",
-    "build.height",
-    "build.clientWidth",
-    "build.clientHeight",
-  ],
+  advanced: [],
 } as const;
 type Category = keyof typeof categories;
 const categoryOf = (field: string): Category =>
@@ -44,11 +38,6 @@ const labels: Record<string, keyof DesignerStrings> = {
   tag: "propertyTag",
   controlTipText: "propertyControlTipText",
   accelerator: "propertyAccelerator",
-  "build.caption": "propertyBuildCaption",
-  "build.width": "propertyBuildWidth",
-  "build.height": "propertyBuildHeight",
-  "build.clientWidth": "propertyClientWidth",
-  "build.clientHeight": "propertyClientHeight",
 };
 
 export interface PropertyReply {

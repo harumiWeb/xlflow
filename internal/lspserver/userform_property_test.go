@@ -29,11 +29,21 @@ func TestUserFormPropertyEditsAndAuthoringStates(t *testing.T) {
 			if !label.Values["caption"].Present || label.Values["caption"].Value != "" || !label.Values["enabled"].Present || label.Values["enabled"].Value != false || label.Values["width"].Present {
 				t.Fatalf("source states: %+v", label.Values)
 			}
+			if preview.PropertyGrid.Form.Values["width"].Present || preview.PropertyGrid.Form.Values["height"].Present {
+				t.Fatalf("omitted form dimensions became authored: %+v", preview.PropertyGrid.Form.Values)
+			}
+			formFields := map[string]bool{}
+			for _, descriptor := range preview.PropertyGrid.Form.Descriptors {
+				formFields[descriptor.Field] = true
+			}
+			if !formFields["caption"] || !formFields["width"] || !formFields["height"] || formFields["build.clientWidth"] {
+				t.Fatalf("form property metadata = %+v", preview.PropertyGrid.Form.Descriptors)
+			}
 			if !preview.PropertyGrid.Controls["text"].Values["text"].Present || preview.PropertyGrid.Controls["text"].Values["text"].Value != nil {
 				t.Fatal("explicit null was lost")
 			}
 			for _, operation := range []map[string]any{
-				{"type": "setFormProperty", "field": "build.clientWidth", "value": 200.5},
+				{"type": "setFormProperty", "field": "width", "value": 200.5},
 				{"type": "setControlProperty", "controlId": "label", "field": "caption", "value": "日本語 😀"},
 				{"type": "setControlProperty", "controlId": "label", "field": "enabled", "value": true},
 				{"type": "setControlProperty", "controlId": "text", "field": "text", "value": nil},
@@ -188,7 +198,7 @@ func TestUserFormPropertyEditsCompileAndProject(t *testing.T) {
 			}
 			uri := pathToFileURI(filepath.Join(s.opts.RootDir, "src/forms/specs/Main."+format))
 			for index, op := range []map[string]any{
-				{"type": "setFormProperty", "field": "build.caption", "value": "タイトル"},
+				{"type": "setFormProperty", "field": "caption", "value": "タイトル"},
 				{"type": "setControlProperty", "controlId": "text", "field": "text", "value": "入力テキスト"},
 				{"type": "setControlProperty", "controlId": "text", "field": "enabled", "value": false},
 			} {
@@ -221,7 +231,7 @@ func TestUserFormPropertyEditsCompileAndProject(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if projected.Form.Build == nil || projected.Form.Build.Caption == nil || *projected.Form.Build.Caption != "タイトル" || len(projected.Controls) != 1 || projected.Controls[0].Text == nil || *projected.Controls[0].Text != "入力テキスト" || projected.Controls[0].Enabled == nil || *projected.Controls[0].Enabled {
+			if projected.Form.Caption == nil || *projected.Form.Caption != "タイトル" || len(projected.Controls) != 1 || projected.Controls[0].Text == nil || *projected.Controls[0].Text != "入力テキスト" || projected.Controls[0].Enabled == nil || *projected.Controls[0].Enabled {
 				t.Fatalf("property compiler projection: %+v", projected)
 			}
 		})

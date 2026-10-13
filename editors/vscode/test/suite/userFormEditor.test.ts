@@ -85,7 +85,7 @@ export async function runUserFormEditorAssertions(): Promise<void> {
   );
   assert.strictEqual(pointsToPixels(0.75), 1);
   const document = {
-    form: { name: "Main", build: { clientWidth: 123.5, clientHeight: 100 } },
+    form: { name: "Main", width: 123.5, height: 100 },
     controls: [
       {
         id: "label",

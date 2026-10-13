@@ -96,10 +96,10 @@ ordering and unrelated source. A root destination uses an empty `parentId`.
 Like YAML, the generic API does not compute world coordinates. JSON
 `reorderControl` updates sibling order locally and preserves `tabIndex`.
 
-Setting a supported `build.*` path may insert the missing `form.build` object;
-only the required local object/member is added. Legacy fields and build fields
-remain independent. `form.name` changes only that field, without renaming files,
-sidecars or VBA references.
+Form metadata has one direct path: `form.name`, `form.caption`, `form.width`,
+and `form.height`. The `form.build` object and its aliases are rejected by the
+canonical FormSpec validator. `form.name` changes only that field, without
+renaming files, sidecars or VBA references.
 
 The operation is a tagged value with optional payload fields. Pointer fields
 distinguish an omitted number from an explicit zero. `Value` is restricted to a
@@ -168,7 +168,7 @@ ID fails parsing with `UFV004` before any operation is applied.
 
 | Type                 | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `setFormProperty`    | Set one supported scalar field by an explicit path relative to `form`. Supported paths include `name`, `caption`, `width`, `height`, `build.caption`, `build.width`, `build.height`, `build.clientWidth`, and `build.clientHeight`. The path names the exact field: `caption` never silently redirects to `build.caption`, and build fields never redirect to legacy form fields. `observed.*` is not editable.                                                          |
+| `setFormProperty`    | Set one supported scalar field by an explicit path relative to `form`. Supported paths are `name`, `caption`, `width`, and `height`. Width and height are persisted client dimensions in points. `build.*` and `observed.*` are not editable.                                                                                                                                                                                                                            |
 | `setControlProperty` | Set one supported scalar field named relative to the selected control. Supported fields include `name`, `caption`, `tag`, `controlTipText`, `accelerator`, `text`, scalar `value`, `left`, `top`, `width`, `height`, `tabIndex`, `selectedIndex`, `enabled`, and `visible`. `progId` is not an authorable field. `id` and `type` are immutable. Geometry can be set individually with this operation; `moveControl` and `resizeControl` are the paired-field operations. |
 | `moveControl`        | Set both `left` and `top` on `controlId`; both pointers are required.                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `resizeControl`      | Set both `width` and `height`; both pointers are required.                                                                                                                                                                                                                                                                                                                                                                                                               |

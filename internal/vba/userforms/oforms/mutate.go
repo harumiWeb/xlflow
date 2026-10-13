@@ -58,6 +58,23 @@ func ApplyEdits(base *Form, edits []Edit, codePage uint16) (*Form, error) {
 	records := map[*Record]Edit{}
 	sites := map[*Site]Edit{}
 	var rootCaption *string
+	rootWidthEdited, rootHeightEdited := false, false
+	for _, edit := range edits {
+		if edit.Control != "" {
+			continue
+		}
+		rootWidthEdited = rootWidthEdited || edit.Property == "Width"
+		rootHeightEdited = rootHeightEdited || edit.Property == "Height"
+	}
+	rootSizeProperty := ""
+	switch {
+	case rootWidthEdited && rootHeightEdited:
+		rootSizeProperty = "Form"
+	case rootWidthEdited:
+		rootSizeProperty = "Width"
+	case rootHeightEdited:
+		rootSizeProperty = "Height"
+	}
 	for _, edit := range edits {
 		if edit.Control == "" && edit.Property == "Caption" {
 			caption, ok := edit.Value.(string)
@@ -129,8 +146,9 @@ func ApplyEdits(base *Form, edits []Edit, codePage uint16) (*Form, error) {
 		stored.Streams[level.Path+"/"+level.FStreamName] = level.FRaw
 		stored.Streams[level.Path+"/"+level.OStreamName] = level.ORaw
 	}
+	root := clone.Levels[0]
+	rootFrame := root.VBFrameRaw
 	if rootCaption != nil {
-		root := clone.Levels[0]
 		current, found, err := rootVBFrameCaption(root.VBFrameRaw, codePage)
 		if err != nil {
 			return nil, &EditError{Control: "", Property: "Caption", Err: err}
@@ -140,8 +158,28 @@ func ApplyEdits(base *Form, edits []Edit, codePage uint16) (*Form, error) {
 			if err != nil {
 				return nil, &EditError{Control: "", Property: "Caption", Err: err}
 			}
-			stored.Streams[root.Path+"/"+root.VBFrameName] = updated
+			rootFrame = updated
 		}
+	}
+	if rootSizeProperty != "" {
+		size, found := root.Record.Sizes["DisplayedSize"]
+		if !found {
+			return nil, &EditError{Control: "", Property: rootSizeProperty, Err: fmt.Errorf("%w: root DisplayedSize is missing", ErrUnsupportedEdit)}
+		}
+		updated, err := rewriteVBFrameClientSize(rootFrame, size, codePage)
+		if err != nil {
+			property := rootSizeProperty
+			var dimensionErr *vbFrameDimensionError
+			if errors.As(err, &dimensionErr) {
+				property = dimensionErr.Property
+				err = dimensionErr.Err
+			}
+			return nil, &EditError{Control: "", Property: property, Err: err}
+		}
+		rootFrame = updated
+	}
+	if !bytes.Equal(rootFrame, root.VBFrameRaw) {
+		stored.Streams[root.Path+"/"+root.VBFrameName] = rootFrame
 	}
 	return reparseEditedForm(stored, base.Name, codePage)
 }
@@ -183,7 +221,7 @@ func applyPersistenceEdit(form *Form, edit Edit, cp uint16, records map[*Record]
 			return fmt.Errorf("%w: control not found", ErrInvalidEdit)
 		}
 		r = control.Record
-	} else if edit.Property != "Caption" {
+	} else if edit.Property != "Caption" && edit.Property != "Width" && edit.Property != "Height" {
 		return ErrUnsupportedEdit
 	}
 	if control != nil {

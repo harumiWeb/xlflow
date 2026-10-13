@@ -88,11 +88,11 @@ func TestFormSpecFromInspectSnapshotConvertsDesignerPayload(t *testing.T) {
 	if spec.CoordinateSystem != "parent-relative" {
 		t.Fatalf("coordinate system = %q", spec.CoordinateSystem)
 	}
-	if spec.Form.Name != "UserForm1" || spec.Form.Caption == nil || *spec.Form.Caption != "Order Entry" {
+	if spec.Form.Name != "UserForm1" || spec.Form.Caption == nil || *spec.Form.Caption != "Order Entry" || spec.Form.Observed == nil || spec.Form.Observed.Caption == nil || *spec.Form.Observed.Caption != "Order Entry" {
 		t.Fatalf("form summary = %#v", spec.Form)
 	}
-	if spec.Form.Observed == nil || spec.Form.Build == nil {
-		t.Fatalf("expected observed/build form values, got %#v", spec.Form)
+	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != 308 || spec.Form.Observed.Height == nil || *spec.Form.Observed.Height != 372 || spec.Form.Width != nil || spec.Form.Height != nil {
+		t.Fatalf("snapshot root dimensions must remain observed-only, got %#v", spec.Form)
 	}
 	if len(spec.Controls) != 2 {
 		t.Fatalf("controls = %#v", spec.Controls)
@@ -120,8 +120,65 @@ func TestFormSpecFromInspectSnapshotConvertsDesignerPayload(t *testing.T) {
 	if child.Name != "lblNested" || child.ParentID != control.ID {
 		t.Fatalf("child control = %#v, parent id = %q", child, control.ID)
 	}
-	if len(spec.Warnings) != 1 || spec.Warnings[0].Code != "unsupported_property" {
+	if len(spec.Warnings) != 2 || spec.Warnings[0].Code != "unsupported_property" || spec.Warnings[1].Code != "snapshot_client_dimensions_missing" || !strings.Contains(spec.Warnings[1].Message, "client_width and client_height") || !strings.Contains(spec.Warnings[1].Message, "not seeded from legacy outer width/height") {
 		t.Fatalf("warnings = %#v", spec.Warnings)
+	}
+}
+
+func TestFormSpecFromInspectSnapshotSeedsAuthoredDimensionsFromClientFields(t *testing.T) {
+	spec, err := FormSpecFromInspectSnapshot(map[string]any{
+		"name":          "UserForm1",
+		"caption":       "Order Entry",
+		"width":         308.0,
+		"height":        372.0,
+		"client_width":  280.0,
+		"client_height": 344.0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Form.Caption == nil || *spec.Form.Caption != "Order Entry" || spec.Form.Width == nil || *spec.Form.Width != 280 || spec.Form.Height == nil || *spec.Form.Height != 344 {
+		t.Fatalf("authored form values were not seeded from the inspect snapshot: %#v", spec.Form)
+	}
+	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != 308 || spec.Form.Observed.Height == nil || *spec.Form.Observed.Height != 372 || spec.Form.Observed.ClientWidth == nil || *spec.Form.Observed.ClientWidth != 280 || spec.Form.Observed.ClientHeight == nil || *spec.Form.Observed.ClientHeight != 344 {
+		t.Fatalf("observed form values did not preserve outer and client dimensions: %#v", spec.Form.Observed)
+	}
+	if len(spec.Warnings) != 0 {
+		t.Fatalf("complete client dimensions produced warnings: %#v", spec.Warnings)
+	}
+	body, err := MarshalSnapshot("json", spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(body, &document); err != nil {
+		t.Fatal(err)
+	}
+	form := document["form"].(map[string]any)
+	observed := form["observed"].(map[string]any)
+	if form["caption"] != "Order Entry" || form["width"] != float64(280) || form["height"] != float64(344) || observed["width"] != float64(308) || observed["height"] != float64(372) {
+		t.Fatalf("snapshot did not persist authored client dimensions and observed outer size independently: %s", body)
+	}
+}
+
+func TestFormSpecFromInspectSnapshotPreservesZeroClientSizeAndDiagnosesMissingDimension(t *testing.T) {
+	spec, err := FormSpecFromInspectSnapshot(map[string]any{
+		"name":         "UserForm1",
+		"width":        308.0,
+		"height":       372.0,
+		"client_width": 0.0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Form.Width == nil || *spec.Form.Width != 0 || spec.Form.Height != nil {
+		t.Fatalf("client zero or missing height was not preserved: width=%v height=%v", spec.Form.Width, spec.Form.Height)
+	}
+	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != 308 || spec.Form.Observed.Height == nil || *spec.Form.Observed.Height != 372 || spec.Form.Observed.ClientWidth == nil || *spec.Form.Observed.ClientWidth != 0 || spec.Form.Observed.ClientHeight != nil {
+		t.Fatalf("observed dimensions = %#v", spec.Form.Observed)
+	}
+	if len(spec.Warnings) != 1 || spec.Warnings[0].Code != "snapshot_client_dimensions_missing" || !strings.Contains(spec.Warnings[0].Message, "client_height") || strings.Contains(spec.Warnings[0].Message, "client_width and") {
+		t.Fatalf("missing client dimension diagnostic = %#v", spec.Warnings)
 	}
 }
 
@@ -473,17 +530,18 @@ func TestValidateFormSpecStrictSelectedIndexUsesKnownPageTopology(t *testing.T) 
 	}
 }
 
-func TestNormalizeFormSpecPreservesObservedOuterDimensionsForClientBuild(t *testing.T) {
+func TestNormalizeFormSpecPreservesCanonicalAndObservedDimensions(t *testing.T) {
 	outerWidth, outerHeight := 308.0, 372.0
 	clientWidth, clientHeight := 280.0, 344.0
+	width, height := clientWidth, clientHeight
 	spec := NormalizeFormSpec(FormSpec{
 		Form: FormSpecForm{
-			Name: "UserForm1",
+			Name:   "UserForm1",
+			Width:  &width,
+			Height: &height,
 			Observed: &FormSpecObservedForm{
-				Width:  &outerWidth,
-				Height: &outerHeight,
-			},
-			Build: &FormSpecBuildForm{
+				Width:        &outerWidth,
+				Height:       &outerHeight,
 				ClientWidth:  &clientWidth,
 				ClientHeight: &clientHeight,
 			},
@@ -492,14 +550,8 @@ func TestNormalizeFormSpecPreservesObservedOuterDimensionsForClientBuild(t *test
 	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != outerWidth || spec.Form.Observed.Height == nil || *spec.Form.Observed.Height != outerHeight {
 		t.Fatalf("observed dimensions = %#v, want outer dimensions", spec.Form.Observed)
 	}
-	if spec.Form.Width != nil || spec.Form.Height != nil {
-		t.Fatalf("normalization synthesized legacy top-level dimensions: %#v/%#v", spec.Form.Width, spec.Form.Height)
-	}
-	if spec.Form.Build == nil || spec.Form.Build.Width != nil || spec.Form.Build.Height != nil {
-		t.Fatalf("client build inherited legacy outer dimensions: %#v", spec.Form.Build)
-	}
-	if spec.Form.Build.ClientWidth == nil || *spec.Form.Build.ClientWidth != clientWidth || spec.Form.Build.ClientHeight == nil || *spec.Form.Build.ClientHeight != clientHeight {
-		t.Fatalf("client build dimensions = %#v", spec.Form.Build)
+	if spec.Form.Width == nil || *spec.Form.Width != clientWidth || spec.Form.Height == nil || *spec.Form.Height != clientHeight {
+		t.Fatalf("canonical dimensions = %#v/%#v, want persisted client size", spec.Form.Width, spec.Form.Height)
 	}
 
 	validSpec := spec
@@ -507,40 +559,37 @@ func TestNormalizeFormSpecPreservesObservedOuterDimensionsForClientBuild(t *test
 	validSpec.Kind = "xlflow.userform"
 	validSpec.Basis = "designer"
 	if err := ValidateFormSpec(validSpec); err != nil {
-		t.Fatalf("client build with observed outer dimensions should validate: %v", err)
+		t.Fatalf("canonical client dimensions with observed outer dimensions should validate: %v", err)
 	}
 	jsonBody, err := MarshalSnapshot("json", spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"\"clientWidth\"", "\"clientHeight\""} {
+	for _, field := range []string{"\"width\": 280", "\"height\": 344", "\"clientWidth\"", "\"clientHeight\""} {
 		if !strings.Contains(string(jsonBody), field) {
 			t.Fatalf("JSON snapshot missing %s: %s", field, jsonBody)
 		}
 	}
 }
 
-func TestValidateFormSpecRejectsConflictingBuildDimensions(t *testing.T) {
+func TestValidateFormSpecAcceptsIndependentCanonicalAndObservedDimensions(t *testing.T) {
+	outerWidth, outerHeight := 308.0, 372.0
 	spec := FormSpec{
 		SchemaVersion: 1,
 		Kind:          "xlflow.userform",
 		Basis:         "designer",
 		Form: FormSpecForm{
-			Name: "UserForm1",
-			Build: &FormSpecBuildForm{
-				Width:       ptrFloat(308),
-				ClientWidth: ptrFloat(280),
+			Name:   "UserForm1",
+			Width:  ptrFloat(280),
+			Height: ptrFloat(344),
+			Observed: &FormSpecObservedForm{
+				Width:  &outerWidth,
+				Height: &outerHeight,
 			},
 		},
 	}
-	if !hasValidationIssue(ValidateFormSpecStrict(spec), "UFV017", "form.build") {
-		t.Fatalf("missing build dimension conflict: %+v", ValidateFormSpecStrict(spec))
-	}
-
-	spec.Form.Width = ptrFloat(308)
-	spec.Form.Build.Width = nil
-	if !hasValidationIssue(ValidateFormSpecStrict(spec), "UFV017", "form.build") {
-		t.Fatalf("missing top-level legacy/build client dimension conflict: %+v", ValidateFormSpecStrict(spec))
+	if issues := ValidateFormSpecStrict(spec); len(issues) != 0 {
+		t.Fatalf("canonical dimensions conflicted with snapshot-only observations: %+v", issues)
 	}
 }
 
@@ -561,8 +610,8 @@ func TestFormSpecFromInspectSnapshotOmitsUnsupportedBuiltInValue(t *testing.T) {
 	if !slices.Contains(control.Unsupported, "value") {
 		t.Fatalf("unsupported = %q, want value", control.Unsupported)
 	}
-	if len(spec.Warnings) != 1 || spec.Warnings[0].Code != "unsupported_properties" {
-		t.Fatalf("warnings = %#v, want one unsupported_properties warning", spec.Warnings)
+	if len(spec.Warnings) != 2 || spec.Warnings[0].Code != "unsupported_properties" || spec.Warnings[1].Code != "snapshot_client_dimensions_missing" {
+		t.Fatalf("warnings = %#v, want unsupported_properties and snapshot_client_dimensions_missing", spec.Warnings)
 	}
 
 	path := filepath.Join(t.TempDir(), "SnapshotForm.json")
@@ -582,12 +631,10 @@ func TestWriteSnapshotWritesJSONAndYAML(t *testing.T) {
 		Basis:            "designer",
 		CoordinateSystem: "parent-relative",
 		Form: FormSpecForm{
-			Name: "UserForm1",
+			Name:   "UserForm1",
+			Width:  ptrFloat(280),
+			Height: ptrFloat(344),
 			Observed: &FormSpecObservedForm{
-				Width:  ptrFloat(308),
-				Height: ptrFloat(372),
-			},
-			Build: &FormSpecBuildForm{
 				Width:  ptrFloat(308),
 				Height: ptrFloat(372),
 			},
@@ -623,6 +670,11 @@ func TestWriteSnapshotWritesJSONAndYAML(t *testing.T) {
 	var decoded map[string]any
 	if err := json.Unmarshal(jsonBody, &decoded); err != nil {
 		t.Fatalf("json snapshot should remain valid: %v\n%s", err, string(jsonBody))
+	}
+	form := decoded["form"].(map[string]any)
+	observed := form["observed"].(map[string]any)
+	if form["width"] != float64(280) || form["height"] != float64(344) || observed["width"] != float64(308) || observed["height"] != float64(372) {
+		t.Fatalf("canonical and observed form dimensions were conflated: %+v", form)
 	}
 	marshaledJSON, err := MarshalSnapshot("json", spec)
 	if err != nil || !bytes.Equal(marshaledJSON, jsonBody) {
@@ -679,10 +731,10 @@ func TestFormSpecFromInspectSnapshotAssignsPlaceholderToUnnamedControl(t *testin
 	if spec.Controls[1].Name != "<unnamed_2>" || spec.Controls[1].ParentID != spec.Controls[0].ID {
 		t.Fatalf("unexpected nested unnamed control placeholder: %#v", spec.Controls[1])
 	}
-	if len(spec.Warnings) != 2 {
+	if len(spec.Warnings) != 3 {
 		t.Fatalf("warnings = %#v", spec.Warnings)
 	}
-	if spec.Warnings[0].Code != "unnamed_control_placeholder" || spec.Warnings[1].Code != "unnamed_control_placeholder" {
+	if spec.Warnings[0].Code != "unnamed_control_placeholder" || spec.Warnings[1].Code != "unnamed_control_placeholder" || spec.Warnings[2].Code != "snapshot_client_dimensions_missing" {
 		t.Fatalf("unexpected warnings = %#v", spec.Warnings)
 	}
 }
@@ -801,10 +853,8 @@ kind: xlflow.userform
 basis: designer
 form:
   name: UserForm1
-  build:
-    clientWidth: .nan
-    clientHeight: .inf
-    height: -1
+  width: .nan
+  height: -1
 controls: []
 warnings: []
 `)
@@ -812,32 +862,58 @@ warnings: []
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasValidationIssue(issues, "UFV002", "form.build.clientWidth") || !hasValidationIssue(issues, "UFV002", "form.build.clientHeight") {
-		t.Fatalf("non-finite dimensions were not rejected as invalid numbers: %+v", issues)
-	}
-	if hasValidationIssue(issues, "UFV016", "form.build.clientWidth") || hasValidationIssue(issues, "UFV016", "form.build.clientHeight") || !hasValidationIssue(issues, "UFV016", "form.build.height") {
+	if !hasValidationIssue(issues, "UFV002", "form.width") || !hasValidationIssue(issues, "UFV016", "form.height") {
 		t.Fatalf("dimension range issues = %+v", issues)
 	}
 }
 
-func TestValidateFormSpecSourceRejectsOuterAndClientBuildDimensionsTogether(t *testing.T) {
-	body := []byte(`schemaVersion: 1
+func TestValidateFormSpecSourceRejectsRemovedBuildAliasWithMigrationSuggestion(t *testing.T) {
+	cases := []struct {
+		format string
+		body   string
+	}{
+		{
+			format: "yaml",
+			body: `schemaVersion: 1
 kind: xlflow.userform
 basis: designer
 form:
   name: UserForm1
-  width: 308
   build:
     clientWidth: 280
+    clientHeight: 344
 controls: []
 warnings: []
-`)
-	issues, err := ValidateFormSpecSource(SpecInput{Format: "yaml", DisplayPath: "UserForm1.yaml"}, body)
-	if err != nil {
-		t.Fatal(err)
+`,
+		},
+		{
+			format: "json",
+			body:   `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"UserForm1","build":{"clientWidth":280,"clientHeight":344}},"controls":[],"warnings":[]}`,
+		},
 	}
-	if !hasValidationIssue(issues, "UFV017", "form.build") {
-		t.Fatalf("missing top-level/build client dimension conflict: %+v", issues)
+	for _, tc := range cases {
+		t.Run(tc.format, func(t *testing.T) {
+			input := SpecInput{Format: tc.format, DisplayPath: "UserForm1." + tc.format}
+			issues, err := ValidateFormSpecSource(input, []byte(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			foundAliasIssue := false
+			for _, issue := range issues {
+				if issue.Code == "UFV001" && issue.Field == "form.build" {
+					if !strings.Contains(issue.Suggestion, "form.build.clientWidth/clientHeight") || !strings.Contains(issue.Suggestion, "form.width/form.height") || !strings.Contains(issue.Suggestion, "persisted client content size") {
+						t.Fatalf("build alias migration suggestion = %q", issue.Suggestion)
+					}
+					foundAliasIssue = true
+				}
+			}
+			if !foundAliasIssue {
+				t.Fatalf("removed build alias was not rejected: %+v", issues)
+			}
+			if _, err := ParseFormSpec(input, []byte(tc.body)); err == nil {
+				t.Fatal("ParseFormSpec silently discarded the removed build alias")
+			}
+		})
 	}
 }
 
@@ -848,8 +924,7 @@ basis: designer
 extraRoot: true
 form:
   name: UserForm1
-  build:
-    width: wide
+  width: wide
   observed:
     insideWidth: 200
     extraObserved: true
@@ -878,7 +953,7 @@ warnings: []
 	}{
 		{"UFV003", "schemaVersion"},
 		{"UFV001", "extraRoot"},
-		{"UFV002", "form.build.width"},
+		{"UFV002", "form.width"},
 		{"UFV001", "form.observed.extraObserved"},
 		{"UFV005", "controls[0].list"},
 		{"UFV001", "controls[0].observed.missing"},
@@ -1007,12 +1082,14 @@ warnings:
 		{"UFV014", "controls[0].progId", SupportLevelCustomUnchecked},
 		{"UFV013", "controls[0].caption", SupportLevelCustomUnchecked},
 		{"UFV013", "controls[0].observed.text", SupportLevelCustomUnchecked},
-		{"UFV013", "form.width", SupportLevelBestEffort},
 		{"UFV013", "warnings", SupportLevelSnapshotOnly},
 	} {
 		if !hasValidationIssueWithSupport(issues, want.code, want.field, want.support) {
 			t.Fatalf("missing warning %s at %s support %s in %+v", want.code, want.field, want.support, issues)
 		}
+	}
+	if hasValidationIssue(issues, "UFV013", "form.width") {
+		t.Fatalf("canonical form.width should remain supported: %+v", issues)
 	}
 }
 
@@ -1070,23 +1147,20 @@ func TestValidateFormSpecForAuthoringRejectsUnsupportedSnapshotPlaceholder(t *te
 	}
 }
 
-func TestValidateFormSpecForAuthoringRejectsClientDimensions(t *testing.T) {
+func TestValidateFormSpecForAuthoringAcceptsCanonicalDimensions(t *testing.T) {
 	spec := FormSpec{
 		SchemaVersion: 1,
 		Kind:          "xlflow.userform",
 		Basis:         "designer",
 		Form: FormSpecForm{
-			Name:  "UserForm1",
-			Build: &FormSpecBuildForm{ClientWidth: ptrFloat(280)},
+			Name:   "UserForm1",
+			Width:  ptrFloat(280),
+			Height: ptrFloat(344),
 		},
 	}
 	err := ValidateFormSpecForAuthoring(SpecInput{Format: "yaml", DisplayPath: "UserForm1.yaml"}, spec)
-	var specErr *SpecError
-	if !errors.As(err, &specErr) {
-		t.Fatalf("authoring error = %#v, want SpecError", err)
-	}
-	if specErr.Field != "form.build.clientWidth" || len(specErr.Issues) != 1 || specErr.Issues[0].Code != "UFV018" || !strings.Contains(specErr.Message, "refusing it instead of ignoring it") {
-		t.Fatalf("authoring client dimension error = %#v", specErr)
+	if err != nil {
+		t.Fatalf("canonical form dimensions rejected: %v", err)
 	}
 }
 

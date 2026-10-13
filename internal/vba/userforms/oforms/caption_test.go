@@ -66,6 +66,46 @@ func TestRewriteVBFrameCaptionEscapesQuotesAndPreservesOtherLines(t *testing.T) 
 	}
 }
 
+func TestRewriteVBFrameClientSizeAcceptsExcelFractionalClientWidth(t *testing.T) {
+	raw := []byte("VERSION 5.00\r\nBegin Form\r\n   ClientHeight    =   8000\r\n   ClientLeft      =   0\r\n   ClientTop       =   0\r\n   ClientWidth     =   9996.001\r\n   StartUpPosition =   1  ' Excel normalized\r\nEnd\r\n")
+	got, err := rewriteVBFrameClientSize(raw, Size{Width: 18344, Height: 14817}, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range [][]byte{
+		[]byte("   ClientWidth     =   10400\r\n"),
+		[]byte("   ClientHeight    =   8400\r\n"),
+		[]byte("   ClientLeft      =   0\r\n"),
+		[]byte("   ClientTop       =   0\r\n"),
+		[]byte("   StartUpPosition =   1  ' Excel normalized\r\n"),
+	} {
+		if !bytes.Contains(got, want) {
+			t.Fatalf("rewritten VBFrame is missing preserved or updated line %q: %q", want, got)
+		}
+	}
+}
+
+func TestRewriteVBFrameClientSizeRejectsInvalidNumericValues(t *testing.T) {
+	for _, value := range []string{"malformed", "-1", "NaN", "Inf", "0x1p2", "1217471045", "2147483648"} {
+		t.Run(value, func(t *testing.T) {
+			raw := []byte("VERSION 5.00\r\nBegin Form\r\n   ClientHeight = 8000\r\n   ClientWidth = " + value + "\r\nEnd\r\n")
+			_, err := rewriteVBFrameClientSize(raw, Size{Width: 18344, Height: 14817}, 932)
+			dimensionErr, ok := errors.AsType[*vbFrameDimensionError](err)
+			if !ok || dimensionErr.Property != "Width" || !errors.Is(err, ErrInvalidEdit) {
+				t.Fatalf("invalid ClientWidth %q error = %v, want typed invalid Width", value, err)
+			}
+		})
+	}
+}
+
+func TestRewriteVBFrameClientSizeAcceptsLargestTwipsValueWithinHimetricRange(t *testing.T) {
+	raw := []byte("VERSION 5.00\r\nBegin Form\r\n   ClientHeight = 8000\r\n   ClientWidth = 1217471044\r\nEnd\r\n")
+
+	if _, err := rewriteVBFrameClientSize(raw, Size{Width: 18344, Height: 14817}, 932); err != nil {
+		t.Fatalf("largest HIMETRIC-representable ClientWidth was rejected: %v", err)
+	}
+}
+
 func TestApplyEditsSameRootCaptionPreservesVBFrameBytes(t *testing.T) {
 	base, err := ReadForm(openFixture(t, "p4_form.bin"), "UserForm1", 932)
 	if err != nil {

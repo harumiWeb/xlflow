@@ -166,7 +166,7 @@ export function runUserFormGeometryAssertions(): void {
     "resize round trips do not accumulate coordinate drift",
   );
   const model = designerDocument({
-    form: { name: "Main", build: { clientWidth: 200, clientHeight: 100 } },
+    form: { name: "Main", width: 200, height: 100 },
     controls: [
       { id: "frame", name: "Frame", type: "Frame", width: 100, height: 80 },
       {

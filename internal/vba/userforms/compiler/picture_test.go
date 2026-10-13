@@ -276,7 +276,6 @@ func TestCompileTemplatePictureActionsAndMarkerReconciliation(t *testing.T) {
 	}
 	caption := "Issue 912 picture push verification"
 	desired.Form.Caption = &caption
-	desired.Form.Build = &spec.FormSpecBuildForm{Caption: &caption}
 	desired.Controls[index].Picture = &spec.FormSpecPicture{Path: "assets/logo.bmp", Data: bytes.Clone(bmp)}
 	beforeInput, err := cloneFormSpec(desired)
 	if err != nil {

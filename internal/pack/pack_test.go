@@ -462,6 +462,35 @@ func TestBuildWorkbookReplacesVBAProjectAndPreservesOtherEntries(t *testing.T) {
 	}
 }
 
+func TestCheckWorkbookUsesBuildPipelineWithoutReturningArtifact(t *testing.T) {
+	template := buildWorkbookFixture(t, readTestFile(t, "corpus", "p1_compiled.bin"))
+	sources := p1SourceModules(t)
+	_, want, err := BuildWorkbook(template, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := CheckWorkbook(template, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("CheckWorkbook meta = %+v, BuildWorkbook meta = %+v", got, want)
+	}
+}
+
+func TestCheckWorkbookAggregatesIndependentFormCompilerErrors(t *testing.T) {
+	template := buildWorkbookFixture(t, readTestFile(t, "corpus", "p1_compiled.bin"))
+	first := authoredForm("FirstBad")
+	first.FormSpec.Controls[0].Type = "UnknownControl"
+	second := authoredForm("SecondBad")
+	second.FormSpec.Controls[0].Width = new(-1.0)
+	_, err := CheckWorkbook(template, []SourceModule{first, second})
+	diagnostics, ok := errors.AsType[*DiagnosticsError](err)
+	if !ok || len(diagnostics.Errors) != 2 {
+		t.Fatalf("diagnostics = %#v, want two compiler errors", err)
+	}
+}
+
 func TestBuildWorkbookRejectsMissingVBAProject(t *testing.T) {
 	templateXlsm := buildWorkbookFixture(t, nil)
 	_, _, err := BuildWorkbook(templateXlsm, nil)
@@ -660,6 +689,67 @@ func TestBuildBlankWorkbookCreatesFreshProject(t *testing.T) {
 	gotReferences := []string{project.References[0].Name, project.References[1].Name}
 	if !slices.Equal(gotReferences, []string{"stdole", "Office"}) {
 		t.Fatalf("references = %v", gotReferences)
+	}
+}
+
+func TestCheckBlankWorkbookUsesBuildPipelineWithoutReturningArtifact(t *testing.T) {
+	sources := []SourceModule{
+		{Name: "Module1", Type: ModuleTypeStandard, Source: standardSource("Module1")},
+		{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"},
+		{Name: "Sheet1", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"},
+	}
+	_, want, err := BuildBlankWorkbook(sources, BlankOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := CheckBlankWorkbook(sources, BlankOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("CheckBlankWorkbook meta = %+v, BuildBlankWorkbook meta = %+v", got, want)
+	}
+}
+
+func TestCheckBlankWorkbookAggregatesEncodingAndIndependentCompilerErrors(t *testing.T) {
+	badForm := authoredForm("BadGeometry")
+	badForm.FormSpec.Form.Caption = new("ASCII")
+	badForm.FormSpec.Controls[0].Text = new("valid")
+	badForm.FormSpec.Controls[0].Width = new(-1.0)
+	encodingForm := authoredForm("BadEncoding")
+	encodingForm.FormSpec.Form.Caption = new("ASCII")
+	encodingForm.FormSpec.Controls[0].Text = new("valid")
+	encodingForm.SourcePath = "src/forms/code/BadEncoding.bas"
+	encodingForm.Source = "Option Explicit\r\n' \U0001F600\r\n"
+	sources := []SourceModule{
+		{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"},
+		{Name: "Sheet1", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"},
+		badForm,
+		{Name: "AnotherEncoding", Type: ModuleTypeStandard, Source: standardSource("AnotherEncoding") + "' 日本語\r\n"},
+		encodingForm,
+	}
+	_, err := CheckBlankWorkbook(sources, BlankOptions{CodePage: 1252})
+	diagnostics, ok := errors.AsType[*DiagnosticsError](err)
+	if !ok || len(diagnostics.Errors) != 2 {
+		t.Fatalf("diagnostics = %#v, want encoding and compiler errors", err)
+	}
+	encodingErrors, ok := errors.AsType[*SourceEncodingErrors](err)
+	if !ok || len(encodingErrors.Errors) != 2 {
+		t.Fatalf("combined error lost independent source encoding issues: %v", err)
+	}
+	if _, ok := errors.AsType[*compiler.Error](err); !ok {
+		t.Fatalf("combined error lost compiler failure: %v", err)
+	}
+}
+
+func TestBuildBlankWorkbookDoesNotClassifyUnsupportedCodePageAsAmbiguousLayout(t *testing.T) {
+	_, _, err := BuildBlankWorkbook(nil, BlankOptions{CodePage: 37})
+	if errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("unsupported codepage was misclassified as ambiguous layout: %v", err)
+	}
+	codePageErr, ok := errors.AsType[*ovba.CodePageEncodingError](err)
+	if !ok || codePageErr.CodePage != 37 || !codePageErr.UnsupportedCodePage {
+		t.Fatalf("codepage error = %#v, want typed unsupported-codepage error", err)
 	}
 }
 

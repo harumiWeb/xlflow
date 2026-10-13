@@ -61,13 +61,6 @@ func EditableFormProperties() map[string]spec.PropertyContract {
 			result[name] = contract
 		}
 	}
-	t := reflect.TypeFor[spec.FormSpecBuildForm]()
-	for i := range t.NumField() {
-		name := strings.SplitN(t.Field(i).Tag.Get("yaml"), ",", 2)[0]
-		if contract, ok := spec.LookupFormBuildProperty(name); ok && scalarContract(contract) {
-			result["build."+name] = contract
-		}
-	}
 	return result
 }
 

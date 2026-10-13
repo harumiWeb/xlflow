@@ -11,16 +11,15 @@ async function run() {
   runUserFormGeometryAssertions();
   const mixed = {
     name: "Mixed",
-    build: { width: 300, height: 240 },
     observed: { insideWidth: 280, insideHeight: 210 },
   };
-  const measured = designerDocument({ form: mixed, controls: [] });
+  const measured = designerDocument({ form: { ...mixed, width: 300, height: 240 }, controls: [] });
   assert.deepStrictEqual(
     [measured.width, measured.height, measured.approximate],
-    [280, 210, false],
+    [300, 240, false],
   );
   const explicit = designerDocument({
-    form: { ...mixed, build: { ...mixed.build, clientWidth: 260, clientHeight: 190 } },
+    form: { ...mixed, width: 260, height: 190 },
     controls: [],
   });
   assert.deepStrictEqual(
@@ -29,10 +28,50 @@ async function run() {
   );
   assert.strictEqual(
     designerDocument({
-      form: { name: "OuterHeight", build: { clientWidth: 260, height: 200 } },
+      form: { name: "ObservedOnly", observed: { clientWidth: 260, height: 200 } },
       controls: [],
     }).approximate,
     true,
+  );
+  const zeroSize = designerDocument({
+    form: { name: "ZeroSize", width: 0, height: 0, observed: { width: 240, height: 180 } },
+    controls: [],
+  });
+  assert.deepStrictEqual(
+    [zeroSize.width, zeroSize.height, zeroSize.approximate],
+    [0, 0, false],
+    "canonical zero dimensions remain authored and observed dimensions are ignored",
+  );
+  const observedControl = designerDocument({
+    form: { name: "ObservedControl" },
+    controls: [
+      {
+        id: "observed-label",
+        type: "Label",
+        name: "ObservedLabel",
+        observed: {
+          left: 90,
+          top: 70,
+          width: 190,
+          height: 80,
+          caption: "Snapshot caption",
+          enabled: false,
+        },
+      },
+    ],
+  }).controls[0];
+  assert.deepStrictEqual(
+    [
+      observedControl.left,
+      observedControl.top,
+      observedControl.width,
+      observedControl.height,
+      observedControl.approximate,
+      observedControl.caption,
+      observedControl.enabled,
+    ],
+    [0, 0, 72, 18, true, undefined, undefined],
+    "snapshot-only control values do not become preview authoring intent",
   );
   for (const [fields, expected] of [
     [{ value: "West", list: ["East", "West"] }, "West"],

@@ -128,7 +128,6 @@ function Assert-ExpectedSnapshot([object]$Snapshot, [object]$Expected) {
     if ($Expected.PSObject.Properties.Name -contains 'form') {
         if ($Expected.form.name -cne 'MutationForm') { throw 'Expected form name differs from MutationForm' }
         if ($Expected.form.PSObject.Properties.Name -contains 'caption') { Assert-Value 'form.caption' $Snapshot.caption $Expected.form.caption }
-        if ($Expected.form.build -and $Expected.form.build.PSObject.Properties.Name -contains 'caption') { Assert-Value 'form.build.caption' $Snapshot.caption $Expected.form.build.caption }
     } elseif ($Expected.PSObject.Properties.Name -contains 'caption') { Assert-Value 'form.caption' $Snapshot.caption $Expected.caption }
     $designer = Get-Designer
     foreach ($row in $Expected.controls) {

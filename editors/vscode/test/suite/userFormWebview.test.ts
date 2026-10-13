@@ -210,7 +210,8 @@ window.addEventListener("message", e => {
       form: {
         name: "Main",
         caption: "<img src=x onerror=bad()>",
-        build: { clientWidth: 240, clientHeight: 180 },
+        width: 240,
+        height: 180,
       },
       controls: [
         {
@@ -567,7 +568,7 @@ window.addEventListener("message", e => {
           { field: "caption", valueType: "string" as const, required: false, nullable: true },
           { field: "width", valueType: "number" as const, required: false, nullable: true },
           {
-            field: "build.clientWidth",
+            field: "height",
             valueType: "number" as const,
             required: false,
             nullable: true,
@@ -576,7 +577,7 @@ window.addEventListener("message", e => {
         values: {
           caption: { present: true, value: "Authored caption" },
           width: { present: true, value: 240 },
-          "build.clientWidth": { present: false, value: null },
+          height: { present: false, value: null },
         },
       },
       controls: {
@@ -827,7 +828,7 @@ window.addEventListener("message", e => {
     assert.deepStrictEqual(afterDeletion.violations, []);
 
     const parenting = designerDocument({
-      form: { name: "Main", build: { clientWidth: 600, clientHeight: 400 } },
+      form: { name: "Main", width: 600, height: 400 },
       controls: [
         { id: "label", name: "Label1", type: "Label", left: 10, top: 10, width: 20, height: 10 },
         {
@@ -1020,7 +1021,7 @@ window.addEventListener("message", e => {
       error: { code: "editCancelled", message: "Cancelled" },
     });
     const overflow = designerDocument({
-      form: { name: "Overflow", build: { clientWidth: 400, clientHeight: 300 } },
+      form: { name: "Overflow", width: 400, height: 300 },
       controls: [
         { id: "frame", name: "Frame1", type: "Frame", left: 20, top: 20, width: 100, height: 80 },
         {
@@ -1055,7 +1056,7 @@ window.addEventListener("message", e => {
     );
     assert.deepStrictEqual(adjusted.violations, []);
     const collections = designerDocument({
-      form: { name: "Collections", build: { clientWidth: 600, clientHeight: 400 } },
+      form: { name: "Collections", width: 600, height: 400 },
       controls: [
         {
           id: "multi",
@@ -1189,7 +1190,7 @@ window.addEventListener("message", e => {
     assert.deepStrictEqual(tabSelected.violations, []);
     await panel.webview.postMessage({ type: "editResult", requestId: tabRequest.requestId });
     const productivityDocument = designerDocument({
-      form: { name: "Productivity", build: { clientWidth: 400, clientHeight: 240 } },
+      form: { name: "Productivity", width: 400, height: 240 },
       controls: [
         { id: "a", name: "Label1", type: "Label", left: 20, top: 20, width: 60, height: 18 },
         { id: "b", name: "TextBox2", type: "TextBox", left: 110, top: 20, width: 60, height: 18 },

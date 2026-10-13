@@ -1,6 +1,6 @@
 # UserForm Specification
 
-`src/forms/specs/<FormName>.yaml` is the source-controlled Designer specification for a UserForm. `xlflow form build` validates this contract before opening Excel.
+`src/forms/specs/<FormName>.yaml` is the source-controlled Designer specification for a UserForm. `xlflow form build`, `push`, and `pack` use the shared pure-Go compiler for this contract. Excel-backed build imports the compiled form artifact into the target workbook and restores the previous component if import fails.
 
 ## Minimal Authoring Spec
 
@@ -13,6 +13,8 @@ basis: designer
 form:
   name: SampleForm
   caption: SampleForm
+  width: 240
+  height: 180
 controls: []
 ```
 
@@ -26,29 +28,40 @@ Do not add snapshot-oriented fields such as `warnings` to a new spec unless they
 | `kind`             | string  | Yes      | Must be `xlflow.userform`.                                     |
 | `basis`            | string  | Yes      | Must be `designer`.                                            |
 | `coordinateSystem` | string  | No       | `points` or `parent-relative`.                                 |
-| `form`             | object  | Yes      | Form metadata and build intent.                                |
+| `form`             | object  | Yes      | Form metadata and persisted root `DisplayedSize` dimensions.   |
 | `controls`         | array   | Yes      | Flat array of control mappings.                                |
 | `warnings`         | array   | No       | Snapshot-only capture metadata; omit from hand-authored specs. |
 
 ## Form Fields
 
-| Field             | Type   | Required | Support                                                                                                                   |
-| ----------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `name`            | string | Yes      | Supported. VBA UserForm component name.                                                                                   |
-| `caption`         | string | No       | Supported.                                                                                                                |
-| `width`, `height` | number | No       | Best-effort. Verify the rebuilt form in Excel.                                                                            |
-| `build`           | object | No       | Build intent: `caption`, outer `width` / `height`, or explicit client `clientWidth` / `clientHeight`.                     |
-| `observed`        | object | No       | Snapshot-only captured state: `caption`, `width`, `height`, `insideWidth`, `insideHeight`, `clientWidth`, `clientHeight`. |
+| Field             | Type   | Required | Support                                                                                                                                     |
+| ----------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`            | string | Yes      | Supported. VBA UserForm component name.                                                                                                     |
+| `caption`         | string | No       | Supported.                                                                                                                                  |
+| `width`, `height` | number | No       | Persisted MS-OFORMS `DisplayedSize` in points. New forms default to 240 × 180; omitted dimensions on existing template forms are preserved. |
+| `observed`        | object | No       | Snapshot-only captured state, including runtime and persisted dimensions.                                                                   |
 
 ## Controls
 
-`form.build.clientWidth` / `clientHeight` are client-area dimensions in points
-for the internal pure-Go new-form compiler. Do not combine them with outer
-width/height inputs. These are persisted `DisplayedSize` / VBFrame client
-dimensions; runtime MSForms `InsideWidth` / `InsideHeight` can differ.
-Excel-backed `form build` rejects client-size input
-before changing a workbook. Pure-Go UserForm generation is available through
-the `pack` generation paths; it does not open Excel.
+`form.width` and `form.height` directly author persisted MS-OFORMS
+`DisplayedSize`, in points. Snapshots and file pull seed these fields from the
+persisted `DisplayedSize`; inspection fields named `client_width` and
+`client_height` carry that value and are not read from VBFrame
+`ClientWidth` / `ClientHeight`. VBFrame client properties are compiler-
+maintained companion values and never seed root authoring dimensions. Runtime
+MSForms `InsideWidth` / `InsideHeight` are separate observations and are not
+converted to or from these values. Excel import/export may normalize
+`DisplayedSize`, so snapshots report the actual persisted size and exact
+round-trip equality with authored points is not guaranteed. The pure-Go
+nearest-integer HIMETRIC rounding contract is separate. The legacy
+`form.build` object and its
+dimension aliases are invalid. The same pure-Go compiler handles form build,
+both push backends, and pack. New-form construction defaults omitted axes to
+240 × 180; edits to existing template forms preserve omitted axes. Excel build
+compiles against a private copy of the live workbook, exports the compiled
+component from a temporary Excel instance, then imports it into the target
+through VBIDE with rollback from an exported backup. Canonical specs do not
+require prebuilt `.frm` or `.frx` files.
 
 Every authored control requires `id`, `name`, and `type`. Controls are a flat list; use `parentId` to place a child inside a container.
 
@@ -110,8 +123,9 @@ Null, empty values, `remove: false`, mixed `path` and `remove`, unknown keys,
 and `picture` on non-Image controls are rejected. Picture source bytes are
 referenced by path and are not embedded in the YAML or JSON spec.
 
-Pure-Go `pack` and `push --backend file` support this field. Excel-backed
-`form build` and apply APIs reject it until they implement picture authoring.
+The shared pure-Go compiler supports this field in `form build`, both push
+backends, and pack. Excel-backed form build applies the compiled picture
+through the bridge.
 File pull emits supported embedded pictures under `src/forms/assets/` using
 content-addressed BMP/JPEG names. Identical assets may be shared; pull does not
 automatically delete old assets. File push loads, validates, and fingerprints
@@ -212,7 +226,7 @@ publish only a fully compiled result.
 
 `form build` reports all detected contract issues before Excel opens. YAML files directly under the configured `src/forms/specs` directory receive the same live diagnostics in the xlflow LSP.
 
-The LSP also provides context-aware completion and Hover for known UserForm YAML fields, built-in control types, and built-in ProgIDs. Hover shows the expected value type, required status, applicable controls, support level, and build limitations. In particular, `width` and `height` are best-effort; `ComboBox` and `ListBox` list selection state is observed-only; and `warnings`, `observed`, `unsupported`, and `properties` are snapshot-oriented or custom/unchecked metadata rather than guaranteed normal build inputs.
+The LSP also provides context-aware completion and Hover for known UserForm YAML fields, built-in control types, and built-in ProgIDs. Hover shows the expected value type, required status, applicable controls, and support level. In particular, root `width` and `height` author persisted MS-OFORMS `DisplayedSize`; `ComboBox` and `ListBox` list selection state is observed-only; and `warnings`, `observed`, `unsupported`, and `properties` are snapshot-oriented or custom/unchecked metadata rather than normal build inputs.
 
 | Code              | Meaning                                                                                                                       |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -221,8 +235,8 @@ The LSP also provides context-aware completion and Hover for known UserForm YAML
 | `UFV006`–`UFV012` | Unsupported control type, duplicate ID, invalid parent reference, parent cycle, invalid parent type, or type/ProgID mismatch. |
 | `UFV013`–`UFV015` | Support-level, custom-control, or snapshot-only unresolved-control warning.                                                   |
 | `UFV016`          | Invalid form dimension (finite, non-negative, representable HIMETRIC required).                                               |
-| `UFV017`          | Outer and client build dimensions were specified together.                                                                    |
-| `UFV018`          | Excel-backed form build cannot apply explicit pure-Go client dimensions.                                                      |
+
+The removed `form.build` aliases are reported as unknown fields (`UFV001`).
 
 For a Designer capture, use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml`. Captured `warnings`, `observed`, and other snapshot fields are preserved for review, but new authoring should begin with the minimal form above. Keep authored specs directly in `src/forms/specs/` so the LSP recognizes them; files outside that configured location are intentionally ignored.
 

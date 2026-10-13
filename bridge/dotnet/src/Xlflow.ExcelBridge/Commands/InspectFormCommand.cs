@@ -29,7 +29,8 @@ public sealed class InspectFormCommand : ICommandHandler
             StrictDesigner: BridgePayload.GetBool(request.Payload, "StrictDesigner"),
             Visible: BridgePayload.GetBool(request.Payload, "Visible"),
             UseSession: BridgePayload.GetBool(request.Payload, "UseSession"),
-            MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "");
+            MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "",
+            PrivateSnapshotWorkbookPath: BridgePayload.GetString(request.Payload, "PrivateSnapshotWorkbookPath") ?? "");
 
         if (string.IsNullOrWhiteSpace(args.WorkbookPath))
         {

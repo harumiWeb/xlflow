@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -150,6 +151,135 @@ func TestApplyEditsFixtureRoundTrip(t *testing.T) {
 	}
 }
 
+func TestApplyEditsRootDimensionsKeepFrameAndStreamsConsistent(t *testing.T) {
+	base, err := ReadForm(openFixture(t, "p4_form.bin"), "UserForm1", 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := SerializeForm(base, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ApplyEdits(base, []Edit{{"", "Width", int32(11289)}, {"", "Height", int32(8467)}}, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size := got.Levels[0].Record.Sizes["DisplayedSize"]; size != (Size{Width: 11289, Height: 8467}) {
+		t.Fatalf("root DisplayedSize = %+v", size)
+	}
+	assertVBFrameDimension(t, got.Levels[0].VBFrameRaw, "ClientWidth", 6400)
+	assertVBFrameDimension(t, got.Levels[0].VBFrameRaw, "ClientHeight", 4800)
+	after, err := SerializeForm(got, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootF := base.Levels[0].Path + "/" + base.Levels[0].FStreamName
+	rootFrame := base.Levels[0].Path + "/" + base.Levels[0].VBFrameName
+	for path, raw := range before.Streams {
+		if path == rootF || path == rootFrame {
+			continue
+		}
+		if !bytes.Equal(after.Streams[path], raw) {
+			t.Fatalf("unrelated or opaque stream %q changed", path)
+		}
+	}
+	unchanged, err := SerializeForm(base, 932)
+	if err != nil {
+		t.Fatalf("root resize mutated base: %v", err)
+	}
+	if !reflect.DeepEqual(before, unchanged) {
+		t.Fatal("root resize mutated its input")
+	}
+}
+
+func TestApplyEditsMalformedRootClientHeightReportsHeightAtomically(t *testing.T) {
+	base, err := ReadForm(openFixture(t, "p4_form.bin"), "UserForm1", 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := SerializeForm(base, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootFramePath := base.Levels[0].Path + "/" + base.Levels[0].VBFrameName
+	stored.Streams[rootFramePath] = malformedRootVBFrameDimension(t, stored.Streams[rootFramePath], "ClientHeight")
+	base, err = reparseEditedForm(stored, base.Name, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := SerializeForm(base, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ApplyEdits(base, []Edit{{"", "Width", int32(11289)}, {"", "Height", int32(8467)}}, 932)
+	if got != nil || !errors.Is(err, ErrInvalidEdit) {
+		t.Fatalf("ApplyEdits result=%v error=%v, want atomic invalid edit", got, err)
+	}
+	editErr, ok := errors.AsType[*EditError](err)
+	if !ok || editErr.Property != "Height" {
+		t.Fatalf("edit context = %#v, want malformed ClientHeight reported as Height", editErr)
+	}
+	if !strings.Contains(editErr.Error(), "malformed root ClientHeight value") {
+		t.Fatalf("height error lost its source detail: %v", editErr)
+	}
+	after, err := SerializeForm(base, 932)
+	if err != nil {
+		t.Fatalf("serialize base after failed resize: %v", err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("failed two-axis resize mutated the source form or its streams")
+	}
+}
+
+func malformedRootVBFrameDimension(t *testing.T, raw []byte, property string) []byte {
+	t.Helper()
+	lines := bytes.SplitAfter(raw, []byte{'\n'})
+	result := make([]byte, 0, len(raw))
+	depth := 0
+	found := false
+	for _, line := range lines {
+		body, ending := vbFrameLineParts(line)
+		trimmed := strings.TrimSpace(string(body))
+		if !found && depth == 1 && isVBFrameProperty(trimmed, property) {
+			result = append(result, []byte("   "+property+" = malformed")...)
+			result = append(result, ending...)
+			found = true
+		} else {
+			result = append(result, line...)
+		}
+		if isVBFrameBegin(trimmed) {
+			depth++
+		} else if strings.EqualFold(trimmed, "End") {
+			depth--
+		}
+	}
+	if !found {
+		t.Fatalf("root VBFrame %s property not found", property)
+	}
+	return result
+}
+
+func assertVBFrameDimension(t *testing.T, raw []byte, property string, want int64) {
+	t.Helper()
+	for _, line := range strings.Split(string(raw), "\n") {
+		name, value, found := strings.Cut(strings.TrimSpace(line), "=")
+		if !found || !strings.EqualFold(strings.TrimSpace(name), property) {
+			continue
+		}
+		fields := strings.Fields(value)
+		if len(fields) == 0 {
+			t.Fatalf("VBFrame %s has no value: %q", property, line)
+		}
+		got, err := strconv.ParseInt(fields[0], 10, 32)
+		if err != nil || got != want {
+			t.Fatalf("VBFrame %s = %q, want %d", property, line, want)
+		}
+		return
+	}
+	t.Fatalf("VBFrame %s is missing", property)
+}
+
 func TestApplyEditsInvalidAtomicAndContext(t *testing.T) {
 	base, err := ReadForm(openFixture(t, "p4_form.bin"), "UserForm1", 932)
 	if err != nil {
@@ -159,7 +289,8 @@ func TestApplyEditsInvalidAtomicAndContext(t *testing.T) {
 		edit     Edit
 		sentinel error
 	}{
-		{Edit{"", "Width", int32(5)}, ErrUnsupportedEdit},
+		{Edit{"", "Width", int32(-1)}, ErrInvalidEdit},
+		{Edit{"", "Height", 5}, ErrInvalidEdit},
 		{Edit{"missing", "Caption", "x"}, ErrInvalidEdit},
 		{Edit{"CommandButton1", "Width", -1}, ErrInvalidEdit},
 		{Edit{"CommandButton1", "Width", int32(-1)}, ErrInvalidEdit},

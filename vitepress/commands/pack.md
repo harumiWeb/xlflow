@@ -5,11 +5,20 @@ Build a release `.xlsm` artifact from source, with either a workbook template or
 ```bash
 xlflow pack --out build/Release.xlsm
 
+# Validate the same pipeline without writing an artifact
+xlflow pack --check
+
 # No template: ThisWorkbook + one Sheet1
 xlflow pack --blank --out build/Release.xlsm
+xlflow pack --blank --check
 ```
 
-`--blank` is mutually exclusive with `--template`. It requires `ThisWorkbook.bas` and `Sheet1.bas`, rejects additional document modules, and uses `[pack.blank].code_page` for project text encoding (default `1252`; use `932` for Japanese). VBA project LCID records always use the MS-OVBA-required value `0x00000409`.
+`--check` runs the same source preflight, planning, UserForm and picture
+compilation, VBA-project generation, and structural readback as a normal pack.
+It does not require `--out`, create an artifact, or create the destination
+directory. Success reports `pack.check=true` and omits `output`.
+
+`--blank` is mutually exclusive with `--template`. It requires `ThisWorkbook.bas` and `Sheet1.bas`, rejects additional document modules, and uses `[pack.blank].code_page` for project text encoding (manual configuration default `1252`; use `932` for Japanese). `new` and `init` seed this setting from the actual VBA project's `PROJECTCODEPAGE`; managed source stays UTF-8. VBA project LCID records always use the MS-OVBA-required value `0x00000409`.
 
 Blank mode can create empty UserForms and common controls from canonical
 `src/forms/specs/<Name>.yaml` (or JSON/YML) specs. In the default sidecar mode,
@@ -28,8 +37,10 @@ document topology comes from the template. Template mode also adds supported
 UserForms from canonical specs and edits supported properties of existing
 Designers, including Frame/common-control additions, removals, replacements,
 parent changes, sibling ordering, and Image picture replacement/removal. The
-spec lists every control; omitted properties retain template values. Existing
-forms without a spec retain legacy code-only updates.
+spec lists every control; omitted properties retain template values. Omitted
+root dimensions default to 240 by 180 points only for newly added forms;
+existing template forms preserve omitted dimensions. Existing forms without a
+spec retain legacy code-only updates.
 `pack` does not compile or execute VBA, so successful JSON keeps
 `pack.backend = "pure-go"` and `pack.vbe_validation = "not_performed"`.
 
@@ -42,8 +53,9 @@ userform_topology = "source"
 ```
 
 This requires canonical specs for all forms remaining in source. The default
-is `"template"`; blank mode always uses the source form set. Root-dimension edits and
-unsupported property edits fail before publication with specific
+is `"template"`; blank mode always uses the source form set. Canonical
+`form.width` and `form.height` edit persisted root client dimensions in points.
+Unsupported property edits fail before publication with specific
 `pack_userform_generation_*` or `pack_userform_edit_*` errors.
 
 Use `parentId` or nested `controls` for hierarchy and `zIndex` for sibling order.
@@ -66,7 +78,7 @@ controls:
         text: Hello
 ```
 
-It validates every managed `.bas`, `.cls`, and `.frm` file as UTF-8 without BOM before source planning or binary generation. Invalid input returns `source_encoding_invalid`; run `xlflow encoding check`, then use `xlflow encoding convert --from cp932` only for eligible CP932 source. Open the resulting artifact in real Excel to compile/run a sentinel macro before publishing. See the repository's [pack specification](https://github.com/harumiWeb/xlflow/blob/main/docs/specs/pack-command.md) for release-gate details.
+It validates every managed `.bas`, `.cls`, and `.frm` file as UTF-8 without BOM before source planning or binary generation. Invalid UTF-8 returns `source_encoding_invalid`; a valid UTF-8 character that cannot be represented in the target VBA project code page returns `pack_source_encoding_failed` with its source location and rune/code-page details. Multiple validation issues use `pack_validation_failed` and retain their per-issue codes. Run `xlflow encoding check` for malformed or legacy-encoded source, then use `xlflow encoding convert --from cp932` only for eligible CP932 input. Open the resulting artifact in real Excel to compile/run a sentinel macro before publishing. See the repository's [pack specification](https://github.com/harumiWeb/xlflow/blob/main/docs/specs/pack-command.md) for release-gate details.
 
 Use `build` when Excel/VBIDE-backed reconstruction and compile validation are
 required. Use `push` to synchronize the complete source tree into the configured

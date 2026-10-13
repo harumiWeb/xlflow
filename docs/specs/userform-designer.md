@@ -116,9 +116,10 @@ different Page. Omitted visibility defaults to visible.
 
 Page collection order follows stable sibling `zIndex` order, matching the
 pure-Go generation and topology compiler. Selection is applied before hiding
-invisible Pages. Explicit build client dimensions take precedence over observed
-client/inside dimensions, which take precedence over outer dimensions. Either
-axis relying on outer dimensions remains approximate. ComboBox display prefers
+invisible Pages. The preview reads root `form.width` and `form.height` directly;
+it does not infer authoring dimensions from observed client, inside, or outer
+Excel values. An omitted axis uses the preview default and remains approximate.
+ComboBox display prefers
 explicit text, then value (including empty strings), then the first list item.
 
 The extension host supplies localized UI strings through a `localization`

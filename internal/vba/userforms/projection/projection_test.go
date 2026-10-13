@@ -28,14 +28,11 @@ func TestProjectSimpleFixture(t *testing.T) {
 	if got.CoordinateSystem != "parent-relative" || got.Form.Name != "UserForm1" {
 		t.Fatalf("form identity = %#v", got.Form)
 	}
-	if got.Form.Width != nil || got.Form.Height != nil {
-		t.Fatalf("legacy form dimensions should remain absent, got %#v/%#v", got.Form.Width, got.Form.Height)
-	}
 	if got.Form.Observed == nil || got.Form.Observed.Width != nil || got.Form.Observed.Height != nil || got.Form.Observed.InsideWidth != nil || got.Form.Observed.InsideHeight != nil || got.Form.Observed.ClientWidth == nil || got.Form.Observed.ClientHeight == nil || *got.Form.Observed.ClientWidth <= 0 || *got.Form.Observed.ClientHeight <= 0 {
 		t.Fatalf("observed form dimensions = %#v", got.Form.Observed)
 	}
-	if got.Form.Build == nil || got.Form.Build.Width != nil || got.Form.Build.Height != nil || got.Form.Build.ClientWidth == nil || got.Form.Build.ClientHeight == nil || *got.Form.Build.ClientWidth <= 0 || *got.Form.Build.ClientHeight <= 0 {
-		t.Fatalf("build form dimensions = %#v", got.Form.Build)
+	if got.Form.Width == nil || got.Form.Height == nil || *got.Form.Width != *got.Form.Observed.ClientWidth || *got.Form.Height != *got.Form.Observed.ClientHeight {
+		t.Fatalf("canonical form dimensions = %#v/%#v, want persisted client size %#v/%#v", got.Form.Width, got.Form.Height, got.Form.Observed.ClientWidth, got.Form.Observed.ClientHeight)
 	}
 	if len(got.Controls) == 0 {
 		t.Fatal("projected form has no controls")

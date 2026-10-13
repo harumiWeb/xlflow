@@ -207,7 +207,7 @@ async function assertStructuralTransactionsUndoAndRedo(): Promise<void> {
   const source = [
     "schemaVersion: 1",
     "kind: xlflow.userform",
-    "form: {name: Main, build: {clientWidth: 480, clientHeight: 360}}",
+    "form: {name: Main, width: 480, height: 360}",
     "controls:",
     "  - {id: frame, name: Frame1, type: Frame}",
     '  - {id: other, name: Label1, type: Label, caption: "😀 keep"}',
@@ -293,7 +293,7 @@ async function assertParentTransactionUndoAndRedo(): Promise<void> {
   const source = [
     "schemaVersion: 1",
     "kind: xlflow.userform",
-    "form: {name: Main, build: {clientWidth: 480, clientHeight: 360}}",
+    "form: {name: Main, width: 480, height: 360}",
     "controls:",
     "  - {id: frame, name: Frame1, type: Frame}",
     "  - {id: child, parentId: frame, name: TextBox1, type: TextBox}",

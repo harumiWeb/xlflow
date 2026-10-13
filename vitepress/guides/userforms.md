@@ -10,6 +10,14 @@ xlflow form export-image UserForm1 --json
 
 Run `lint` and `form build` preflight before opening Excel. Do not edit generated `.frm` code-behind independently when sidecar mode is authoritative; see the [UserForm specification](../reference/userform-spec).
 
+Root `form.width` and `form.height` author persisted MS-OFORMS `DisplayedSize`
+in points. Snapshots and file pull read that same persisted value; VBFrame
+`ClientWidth` / `ClientHeight` are compiler-maintained companion values and do
+not seed authoring dimensions. Excel import/export may normalize `DisplayedSize`,
+so a snapshot reports the persisted result and does not guarantee exact equality
+with the authored points. This Excel behavior is separate from pure-Go
+HIMETRIC rounding; xlflow does not compensate with a fixed offset.
+
 ## Visual layout in VS Code
 
 Open a canonical `.yaml`, `.yml`, or `.json` FormSpec directly under your
@@ -181,6 +189,8 @@ to clear an existing picture. Omitting `picture` preserves it. File pull stores
 supported embedded images in `src/forms/assets/<full-SHA-256>.bmp|jpg`; those
 files are not automatically deleted. File push loads, validates, and
 fingerprints referenced assets only; unreferenced assets are retained and
-ignored. Excel may normalize JPEG input to BMP when saving. Excel-backed `form build` and apply APIs reject `picture` until
-they implement the same contract. See the [UserForm specification](../reference/userform-spec)
-for invalid values and full field details.
+ignored. Excel may normalize JPEG input to BMP when saving. Form build, both
+push backends, and pack share the pure-Go compiler for picture validation and
+persistence; Excel-backed build reflects that compiled result through the
+bridge. See the [UserForm specification](../reference/userform-spec) for
+invalid values and full field details.

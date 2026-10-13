@@ -18,4 +18,9 @@ public sealed record PushCommandArguments(
     bool UseSession,
     bool NoSave,
     string MetadataPath,
-    bool LineNumbersEnabled = false);
+    bool LineNumbersEnabled = false,
+    string Phase = "import",
+    string PreparedWorkbookPath = "",
+    string CompiledWorkbookPath = "",
+    string CanonicalFormNamesJson64 = "",
+    string CanonicalPicturePathsJson64 = "");

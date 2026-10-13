@@ -28,7 +28,7 @@ const root = document.getElementById("app")!;
 const edits = () =>
   messages.filter((m): m is Extract<WebviewMessage, { type: "edit" }> => m.type === "edit");
 let model: DesignerDocument = designerDocument({
-  form: { name: "Main", build: { clientWidth: 480, clientHeight: 360 } },
+  form: { name: "Main", width: 480, height: 360 },
   controls: [
     { id: "label", name: "lAbEl1", type: "Label", left: 10, top: 10 },
     { id: "frame", name: "Frame1", type: "Frame", left: 200, top: 50 },

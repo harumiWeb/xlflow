@@ -72,9 +72,15 @@ export interface SpecControl {
 }
 
 export interface FormDimensions {
-  caption?: string;
-  width?: number;
-  height?: number;
+  caption?: string | null;
+  width?: number | null;
+  height?: number | null;
+}
+
+export interface ObservedFormDimensions {
+  caption?: string | null;
+  width?: number | null;
+  height?: number | null;
   clientWidth?: number;
   clientHeight?: number;
   insideWidth?: number;
@@ -82,7 +88,7 @@ export interface FormDimensions {
 }
 
 export interface PreviewDocument {
-  form: FormDimensions & { name: string; build?: FormDimensions; observed?: FormDimensions };
+  form: FormDimensions & { name: string; observed?: ObservedFormDimensions };
   controls: SpecControl[];
 }
 
@@ -155,11 +161,6 @@ export const designerStrings = {
   propertyTag: "Tag",
   propertyControlTipText: "ControlTipText",
   propertyAccelerator: "Accelerator",
-  propertyBuildCaption: "Build caption",
-  propertyBuildWidth: "Build width",
-  propertyBuildHeight: "Build height",
-  propertyClientWidth: "Client width",
-  propertyClientHeight: "Client height",
   unset: "Not set",
   nullValue: "null",
   valueType: "Value type",

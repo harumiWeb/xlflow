@@ -32,7 +32,7 @@ for (const name of [
   });
 const root = document.getElementById("app")!;
 const model = designerDocument({
-  form: { name: "Main", build: { clientWidth: 600, clientHeight: 400 } },
+  form: { name: "Main", width: 600, height: 400 },
   controls: [
     { id: "label", name: "Label1", type: "Label", left: 10, top: 10, width: 20, height: 10 },
     { id: "frame", name: "Frame1", type: "Frame", left: 200, top: 100, width: 180, height: 160 },

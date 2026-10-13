@@ -79,12 +79,15 @@ path and captured image bytes; file reads and target-directory coordination
 use the resolved physical path. Regression coverage verifies that a symlink
 target edit invalidates changed-only state.
 
-Template-based pack and file-push operations preserve a picture when the
-FormSpec omits `picture`. Explicit path or removal intent is applied to the
+Template-based pack, file push, Excel push, and Excel-backed form build/apply
+preserve a picture when the FormSpec omits `picture`. Explicit path or removal
+intent is compiled by the shared pure-Go UserForm compiler and applied to the
 Image control. Blank pack can generate a supported picture from its asset.
-Excel-backed `form build` and apply APIs reject picture authoring until they
-implement this contract. An explicit file backend reports unsupported cases
-without starting Excel.
+Excel-backed commands transfer the compiled form artifact through the bridge:
+a private Excel instance exports the compiled component to `.frm` / `.frx`, and
+VBIDE imports it into the target workbook. They do not use a separate
+picture-authoring or per-property write path. An explicit file backend reports
+unsupported cases without starting Excel.
 
 Custom ActiveX controls and arbitrary non-Image picture properties are outside
 this contract. File operations fail before publication when completing the

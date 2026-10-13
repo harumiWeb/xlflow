@@ -16,11 +16,13 @@ See `docs/adr/ADR-0012-pack-command.md` for the rationale and
 
 ```text
 xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm> | --blank]
+xlflow [--json] pack --check [--template <path.xlsm> | --blank]
 ```
 
 - `--out <path>` (required): destination artifact path. Must end in `.xlsm`. May overwrite an existing output file, but must not resolve to the template or the configured source workbook (see Template handling). A missing `--out` fails with `pack_args_invalid` (exit 2).
 - `--template <path>` (optional): the workbook template the artifact is based on. When omitted, `pack` uses the source workbook configured in `xlflow.toml` under `[excel].path`. The template provides workbook structure — sheets, document-module hosts, and any existing designer streams; `pack` replaces only `xl/vbaProject.bin`.
 - `--blank` (optional): create a fresh workbook without reading a template. It is mutually exclusive with an explicit `--template`; passing `--blank` together with `--template` — including an explicitly empty `--template ''` — fails with `pack_args_invalid` (exit 2). When neither flag is provided, template mode keeps the `[excel].path` fallback.
+- `--check` (optional): run the same preflight, planning, FormSpec and picture compilation, VBA-project generation, and structural readback without publishing an `.xlsm`. `--out` is not required. Success reports `pack.check=true` and has no `output` field; no artifact or destination directory is created.
 - `--json`: persistent global flag; emits the standard envelope (see Output / JSON contract).
 
 The first stable release accepts the former `--experimental` flag as a hidden,
@@ -97,6 +99,11 @@ The fresh project is named `VBAProject`, uses source-only module streams, and st
 
 `[pack.blank].code_page` controls `PROJECTCODEPAGE` and therefore the MBCS encoding of project text and component names. It defaults to `1252`; Japanese projects use `932`. `PROJECTLCID` and `PROJECTLCIDINVOKE` are independently fixed to the MS-OVBA-required value `0x00000409`. The removed `pack.blank.lcid` key and every other unknown `[pack]` key are configuration errors rather than ignored compatibility settings. Managed source remains UTF-8 without BOM.
 
+`new` and `init` read `PROJECTCODEPAGE` from the actual configured workbook's
+VBA project and seed `[pack.blank].code_page` with that value. This records
+the project's encoding for later blank packs; it does not convert or rewrite
+the UTF-8 source tree.
+
 Blank projects retain a deterministic Project CLSID and matching unprotected-project protection tuple. The Windows/Excel release gate opens two independently generated blank workbooks in one Excel instance, runs both projects, verifies all baseline references are unbroken, and confirms that one project can reference the other after assigning it a distinct VBA project name. Two projects named `VBAProject` cannot reference each other until one is renamed; that name-level ambiguity is independent of the shared deterministic CLSID.
 
 ### VBA container compatibility
@@ -163,16 +170,19 @@ empty source form set, and requires canonical specs for all supplied forms.
 Blank mode always uses source form authority independently of this setting.
 
 For a supplied canonical spec, template pack applies supported Designer
-properties, Frame/common-control and MultiPage/Page/TabStrip topology, Image
-picture replacement/removal, and code.
+properties including root dimensions, Frame/common-control and
+MultiPage/Page/TabStrip topology, Image picture replacement/removal, and code.
 The spec supplies the complete
 control list, including additions, deletions, replacements, parent changes and
 sibling ordering. IDs are local spec identities and are mapped
 by control names to the binary baseline. Omitted properties retain template
 values; explicit empty text, false and zero remain authoring input. Observed
-snapshot fields and warnings do not request edits. The compiler rejects
-unsupported edits (including root dimensions and specialized container changes)
-instead of discarding opaque state through regeneration.
+snapshot fields and warnings do not request edits. Root `form.width` and
+`form.height` are persisted MS-OFORMS `DisplayedSize` dimensions in points. For a newly added
+form, an omitted axis defaults to 240 by 180 points; for an existing template
+form, omitted axes preserve the baseline dimensions. The compiler rejects
+unsupported edits and legacy `form.build.*` aliases instead of discarding
+opaque state through regeneration.
 
 Retained controls are matched by case-sensitive names and case-insensitive
 type labels. A type change replaces the control; renaming is deletion plus
@@ -223,7 +233,7 @@ When regenerating `dir/PROJECTMODULES`, `pack` preserves the module-level metada
 
 ## Read-only source plan
 
-Before building the source plan, `pack` validates the complete managed VBA source scope as UTF-8 without BOM. The scan covers configured module, class, form, and workbook roots plus the legacy top-level `tests/` root. Configured roots use the same separator normalization and absolute-path resolution as the pack source inventory, including absolute roots outside the project; external diagnostic paths remain absolute. This pack-only compatibility does not relax the project-containment rules for explicit `encoding check` or `encoding convert` paths. The scan includes `.frm` designer files even in sidecar mode and includes sidecar `.bas` files; binary `.frx` files are excluded. Invalid input returns `source_encoding_invalid` (exit 1) with the same source path, byte position, status, and remediation suggestions as `encoding check`. No source planning, template payload read, `vbaProject.bin` generation, or output publication occurs after this failure. `pack` never converts source implicitly; use `encoding convert --from cp932` explicitly for eligible CP932 input.
+Before building the source plan, `pack` validates the complete managed VBA source scope as UTF-8 without BOM. The scan covers configured module, class, form, and workbook roots plus the legacy top-level `tests/` root. Configured roots use the same separator normalization and absolute-path resolution as the pack source inventory, including absolute roots outside the project; external diagnostic paths remain absolute. This pack-only compatibility does not relax the project-containment rules for explicit `encoding check` or `encoding convert` paths. The scan includes `.frm` designer files even in sidecar mode and includes sidecar `.bas` files; binary `.frx` files are excluded. Invalid UTF-8 returns `source_encoding_invalid` (exit 1) with the source path, byte offset, line, byte column, status, and remediation suggestions. A valid UTF-8 rune that cannot be represented in the target VBA project code page returns `pack_source_encoding_failed` with path, line, Unicode-character column, rune, rune code, and code page. Neither error rewrites source. No source planning, template payload read, `vbaProject.bin` generation, or output publication occurs after a preflight failure. `pack` never converts source implicitly; use `encoding convert --from cp932` explicitly for eligible CP932 input.
 
 After encoding validation, `pack` builds a deterministic, read-only plan. Source discovery is shared with `build`, but `[build].exclude` is deliberately not applied to `pack`. Every configured source root must exist and be readable. Unknown extensions, invalid component names, case-insensitive duplicate names across component types, incomplete or ambiguous UserForm artifacts, and filename/`Attribute VB_Name` identity mismatches fail before project mutation or output publication. Template mode rejects source-only document modules and form additions without canonical specs; blank mode applies its fixed document topology contract.
 
@@ -233,19 +243,20 @@ The plan records each component's primary source path, related UserForm artifact
 
 Each unsupported case is a specific, loud error. `pack` never falls back to best-effort behavior.
 
-| Case                                                      | Error code                                                                                                                         | Exit |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| active xlflow session / live workbook                     | `pack_active_session`                                                                                                              | 2    |
-| in-place overwrite of the template/source workbook        | `pack_in_place_overwrite`                                                                                                          | 2    |
-| aliased template/workbook path via symlink/junction       | `pack_in_place_overwrite`                                                                                                          | 2    |
-| output locked or open in another process                  | `pack_output_busy`                                                                                                                 | 3    |
-| atomic publication impossible (no fallback)               | `pack_output_replace_failed`                                                                                                       | 3    |
-| protected VBA project                                     | `pack_protected_project`                                                                                                           | 1    |
-| signed VBA project                                        | `pack_signed_project`                                                                                                              | 1    |
-| managed source is not UTF-8 without BOM                   | `source_encoding_invalid`                                                                                                          | 1    |
-| unsupported new Designer / missing canonical spec         | `pack_userform_generation_unsupported`                                                                                             | 1    |
-| invalid or conflicting form generation                    | `pack_userform_generation_invalid` / `pack_userform_generation_conflict`                                                           | 1    |
-| unsupported, invalid, stale or conflicting Designer edits | `pack_userform_edit_unsupported` / `pack_userform_edit_invalid` / `pack_userform_edit_stale_input` / `pack_userform_edit_conflict` | 1    |
+| Case                                                                          | Error code                                                                                                                         | Exit |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| active xlflow session / live workbook                                         | `pack_active_session`                                                                                                              | 2    |
+| in-place overwrite of the template/source workbook                            | `pack_in_place_overwrite`                                                                                                          | 2    |
+| aliased template/workbook path via symlink/junction                           | `pack_in_place_overwrite`                                                                                                          | 2    |
+| output locked or open in another process                                      | `pack_output_busy`                                                                                                                 | 3    |
+| atomic publication impossible (no fallback)                                   | `pack_output_replace_failed`                                                                                                       | 3    |
+| protected VBA project                                                         | `pack_protected_project`                                                                                                           | 1    |
+| signed VBA project                                                            | `pack_signed_project`                                                                                                              | 1    |
+| managed source is not valid UTF-8 without BOM                                 | `source_encoding_invalid`                                                                                                          | 1    |
+| valid UTF-8 source contains a rune not representable in the project code page | `pack_source_encoding_failed`                                                                                                      | 1    |
+| unsupported Designer state or control generation                              | `pack_userform_generation_unsupported`                                                                                             | 1    |
+| invalid or conflicting form generation                                        | `pack_userform_generation_invalid` / `pack_userform_generation_conflict`                                                           | 1    |
+| unsupported, invalid, stale or conflicting Designer edits                     | `pack_userform_edit_unsupported` / `pack_userform_edit_invalid` / `pack_userform_edit_stale_input` / `pack_userform_edit_conflict` | 1    |
 
 | unknown or ambiguous VBA project layout | `pack_ambiguous_layout` | 1 |
 | missing `--out`, bad extension, other arg errors | `pack_args_invalid` | 2 |
@@ -255,7 +266,12 @@ Each unsupported case is a specific, loud error. `pack` never falls back to best
 
 ## Output / JSON contract
 
-On success with `--json`, `pack` emits the standard envelope (`status`, `command = "pack"`, `error = null`, `logs`) plus two top-level fields. An encoding failure instead uses the shared source-encoding failure envelope: `command = "pack"`, `error.code = "source_encoding_invalid"`, and `source.expected`, `source.files[]`, and `source.summary` describe the complete managed-source check.
+On success with `--json`, `pack` emits the standard envelope (`status`, `command = "pack"`, `error = null`, `logs`) plus command-specific fields. Invalid UTF-8 uses `error.code = "source_encoding_invalid"` and includes the shared `source.expected`, `source.files[]`, and `source.summary`. A valid UTF-8 rune that cannot be encoded in the target code page uses `error.code = "pack_source_encoding_failed"`; it includes source path and details for line, Unicode-character column, byte column, byte offset, rune, rune code, and code page. When validation returns multiple pack issues, the top-level code is `pack_validation_failed` and each issue retains its specific compiler code and source location. Source encoding errors never rewrite managed files.
+
+With `--check`, the success envelope contains `pack.backend="pure-go"`,
+`pack.check=true`, the selected `pack.base`, and
+`pack.vbe_validation="not_performed"`. It contains no `output` field because
+the generated bytes are validated in memory and never published.
 
 - `output`: the produced artifact, mirroring the `export-image` `output` object — `path`, `format` (`"xlsm"`), optional `created_parent_dirs`, and the publication contract shared with `build`: `replaced_existing` (bool), `publication` (`"atomic_create"` or `"atomic_replace"`), and `temporary_cleanup` (`{"status": "clean"|"failed", "residual_path"?, "error"?}`).
 - `pack`: identifies the backend and the validation posture.
@@ -387,15 +403,10 @@ remains a developer release gate and is recorded with the fixture evidence in
 `compiler/testdata/frame-excel-authored` and
 `compiler/testdata/multipage-excel-authored`.
 
-## Staged UserForm plan
+## UserForm authoring and compatibility
 
-See ADR-0012 for the rationale. Summary:
+`pack` uses the shared pure-Go UserForm compiler in blank and template modes. Blank mode uses source form authority and requires a canonical spec for every generated form. Template mode preserves forms omitted from source by default; explicit source topology removes omitted forms. A supplied canonical spec provides Designer intent for a new or edited form. Existing forms without a spec retain code-only updates and their saved Designer state under template topology, while explicit source topology requires canonical specs for every supplied form.
 
-- **Stage 1 (implemented)**: carry existing template designer streams through untouched; never generate forms.
-- **Stage 2 (implemented)**: update the code-behind of a form already in the template, keeping the template's designer state. The code-behind source follows `[userform].code_source` — `frm` (code in the `.frm`) or `sidecar` (code in `src/forms/code/<FormName>.bas`, merged in memory); `pack` never writes the source tree. A new form requires a canonical spec; `.frm` alone fails with `pack_userform_generation_unsupported`. A matching `.frx` is inventoried and validated as a related source artifact but is not written into the packed project.
-- **Stage 3 (supported subset implemented)**: generate new Designers from
-  canonical specs in blank/template modes, apply supported lossless property
-  edits, and explicitly reconcile source-authoritative form topology.
-  Compatibility `.frm`/`.frx` Designer bytes are not authoring input.
+Canonical FormSpecs author supported Designer and picture state without prebuilt `.frm` / `.frx` inputs. Compatibility exports remain available, and `[userform].code_source` still selects embedded `.frm` code or a sidecar as the code-behind source. Omitted supported properties preserve template values; opaque or unsupported state is retained when untouched and causes validation failure if an edit cannot preserve it. New forms default omitted root dimensions to 240 by 180 points; omitted dimensions on existing forms preserve the template baseline.
 
-The reference implementation has demonstrated the Stage 1 / Stage 2 round-trip against real Excel, including a nested Frame/MultiPage form whose designer sub-storages round-trip byte-for-byte. That informs the staging but is not part of the MVP.
+`pack --check` runs the same preflight, source planning, FormSpec and picture compilation, VBA-project generation, and structural readback as ordinary pack, but publishes no artifact. It does not provide VBE compilation or runtime evidence. Excel-backed build, apply, and push use the same compiled workbook output and transfer form components through VBIDE export/import rather than writing Designer properties one at a time. See `ADR-0072` for the compiler and bridge decision.

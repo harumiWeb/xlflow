@@ -46,32 +46,43 @@ func CompileNew(input spec.FormSpec, codePage uint16) (*oforms.Form, error) {
 	if err := vbaproject.ValidateWritableComponentIdentity(input.Form.Name, input.Form.Name, codePage); err != nil {
 		return nil, fail(GenerationInvalid, "", "form.name", err.Error())
 	}
+	for _, dimension := range []struct {
+		name  string
+		value *float64
+	}{
+		{name: "width", value: input.Form.Width},
+		{name: "height", value: input.Form.Height},
+	} {
+		if dimension.value == nil {
+			continue
+		}
+		if _, err := dimensionHIMETRIC(*dimension.value, dimension.name); err != nil {
+			return nil, fail(GenerationInvalid, "", "form."+dimension.name, err.Error())
+		}
+	}
 	form, err := normalizedCopy(input)
 	if err != nil {
 		return nil, fail(GenerationInvalid, "", "spec", err.Error())
 	}
-	if form.Form.Width != nil || form.Form.Height != nil || (form.Form.Build != nil && (form.Form.Build.Width != nil || form.Form.Build.Height != nil)) {
-		return nil, fail(GenerationUnsupported, "", "form", "outer dimensions require conversion; use form.build.clientWidth/clientHeight")
+	rootSize, err := generationSize(240, 180)
+	if err != nil {
+		return nil, fail(GenerationInvalid, "", "form", err.Error())
 	}
-	width, height := 240.0, 180.0
+	if form.Form.Width != nil {
+		rootSize.Width, err = dimensionHIMETRIC(*form.Form.Width, "width")
+		if err != nil {
+			return nil, fail(GenerationInvalid, "", "form.width", err.Error())
+		}
+	}
+	if form.Form.Height != nil {
+		rootSize.Height, err = dimensionHIMETRIC(*form.Form.Height, "height")
+		if err != nil {
+			return nil, fail(GenerationInvalid, "", "form.height", err.Error())
+		}
+	}
 	caption := form.Form.Name
 	if form.Form.Caption != nil {
 		caption = *form.Form.Caption
-	}
-	if form.Form.Build != nil {
-		if form.Form.Build.Caption != nil {
-			caption = *form.Form.Build.Caption
-		}
-		if form.Form.Build.ClientWidth != nil {
-			width = *form.Form.Build.ClientWidth
-		}
-		if form.Form.Build.ClientHeight != nil {
-			height = *form.Form.Build.ClientHeight
-		}
-	}
-	rootSize, err := generationSize(width, height)
-	if err != nil {
-		return nil, fail(GenerationInvalid, "", "form.build", err.Error())
 	}
 	definition := oforms.Definition{Name: form.Form.Name, Caption: caption, Size: rootSize}
 	if !validGenerationName(form.Form.Name) {
@@ -159,11 +170,7 @@ func CompileNew(input spec.FormSpec, codePage uint16) (*oforms.Form, error) {
 			code = GenerationUnsupported
 		}
 		if detail, ok := errors.AsType[*oforms.EditError](err); ok && detail.Control == "" && detail.Property == "Caption" {
-			property := "form.caption"
-			if form.Form.Build != nil && form.Form.Build.Caption != nil {
-				property = "form.build.caption"
-			}
-			return nil, &Error{Code: code, Form: form.Form.Name, Property: property, Reason: detail.Error(), Cause: err}
+			return nil, &Error{Code: code, Form: form.Form.Name, Property: "form.caption", Reason: detail.Error(), Cause: err}
 		}
 		return nil, &Error{Code: code, Form: form.Form.Name, Reason: err.Error(), Cause: err}
 	}
@@ -420,15 +427,23 @@ func validGenerationName(name string) bool {
 }
 
 func generationSize(width, height float64) (oforms.Size, error) {
-	w, e := convertValue("", "width", width)
+	w, e := dimensionHIMETRIC(width, "width")
 	if e != nil {
 		return oforms.Size{}, e
 	}
-	h, e := convertValue("", "height", height)
+	h, e := dimensionHIMETRIC(height, "height")
 	if e != nil {
 		return oforms.Size{}, e
 	}
-	return oforms.Size{Width: w.(int32), Height: h.(int32)}, nil
+	return oforms.Size{Width: w, Height: h}, nil
+}
+
+func dimensionHIMETRIC(points float64, property string) (int32, error) {
+	value, err := convertValue("", property, points)
+	if err != nil {
+		return 0, err
+	}
+	return value.(int32), nil
 }
 
 func generationValue(kind, key string, value any) (any, error) {

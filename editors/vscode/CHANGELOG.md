@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Unified UserForm authoring and preview dimensions as `form.width` and
+  `form.height`, persisted client content size in points. Removed the unreleased
+  `form.build` aliases; validation recommends the canonical fields, and observed
+  snapshot dimensions no longer supply preview defaults.
+
 - Fixed control-interior clicks and subsequent drags losing selection in the
   UserForm Designer because leaf controls intercepted clicks as blank containers.
 

@@ -11,39 +11,17 @@ export function pixelsToPoints(pixels: number, zoom = 1): number {
 
 export function designerDocument(spec: PreviewDocument, warnings: string[] = []): DesignerDocument {
   const form = spec.form;
-  const build = form.build ?? {};
-  const observed = form.observed ?? {};
-  const width =
-    build.clientWidth ??
-    observed.clientWidth ??
-    observed.insideWidth ??
-    build.width ??
-    form.width ??
-    observed.width;
-  const height =
-    build.clientHeight ??
-    observed.clientHeight ??
-    observed.insideHeight ??
-    build.height ??
-    form.height ??
-    observed.height;
+  const width = form.width;
+  const height = form.height;
   return {
     name: form.name,
-    caption: build.caption ?? form.caption ?? observed.caption ?? form.name,
+    caption: form.caption ?? form.name,
     width: width ?? 240,
     height: height ?? 180,
-    approximate:
-      width === undefined ||
-      height === undefined ||
-      (build.clientWidth === undefined &&
-        observed.clientWidth === undefined &&
-        observed.insideWidth === undefined) ||
-      (build.clientHeight === undefined &&
-        observed.clientHeight === undefined &&
-        observed.insideHeight === undefined),
+    approximate: width == null || height == null,
     warnings,
     controls: spec.controls.map((control) => {
-      const effective = { ...control.observed, ...control };
+      const effective = control;
       const defaults = controlDefaults(control.type);
       return {
         ...effective,

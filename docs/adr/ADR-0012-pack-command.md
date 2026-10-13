@@ -72,6 +72,12 @@ environment and cause repeated round trips to grow forms, so this stage
 does not convert outer dimensions. Excel-backed Designer build rejects the
 new client input before mutation until it has a supported application path.
 
+This dimension and backend split was superseded before release by
+[ADR-0072](ADR-0072-userform-canonical-compiler-and-persisted-dimensions.md):
+`form.width` / `form.height` now mean persisted client dimensions, and the
+shared pure-Go compiler supplies the compiled result to both file and
+Excel-backed operations.
+
 Issue #883 owns flat common-control generation and code-behind/project
 assembly with an already-present Microsoft Forms reference. Reference
 mutation remains Issue #886; CLI source-authority planning and blank/template

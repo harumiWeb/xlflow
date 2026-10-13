@@ -31,7 +31,7 @@ function Assert-Rejected([scriptblock]$Action, [string]$MessagePattern) {
     Assert-Test ($caught.Exception.Message -match $MessagePattern) "Unexpected rejection: $($caught.Exception.Message)"
 }
 
-$completeJson = '[{"form":{"name":"GeneratedForm","build":{"clientWidth":240,"clientHeight":180}},"controls":[]},{"form":{"name":"GeneratedEmptyForm","build":{"clientWidth":240,"clientHeight":180}},"controls":[]}]'
+$completeJson = '[{"form":{"name":"GeneratedForm","width":240,"height":180},"controls":[]},{"form":{"name":"GeneratedEmptyForm","width":240,"height":180},"controls":[]}]'
 $complete = ConvertFrom-Json $completeJson
 foreach ($inputValue in @(
     ,$complete
@@ -79,14 +79,20 @@ Assert-Test ($scroll.properties.Delay -eq 50 -and $scroll.properties.Proportiona
 
 $snapshot = [pscustomobject]@{
     name = 'GeneratedForm'
-    form = [pscustomobject]@{}
+    form = [pscustomobject]@{ width = 240; height = 180 }
     root = [pscustomobject]@{ clientWidth = 240; clientHeight = 180 }
     controls = @($spin, $scroll)
 }
-$expectedJson = '{"form":{"name":"GeneratedForm","build":{"clientWidth":240,"clientHeight":180}},"controls":[{"name":"SpinButtonMain","type":"SpinButton","observed":{"properties":{"Delay":50}}},{"name":"ScrollBarMain","type":"ScrollBar","observed":{"properties":{"Delay":50,"ProportionalThumb":true}}}]}'
+$expectedJson = '{"form":{"name":"GeneratedForm","width":240,"height":180},"controls":[{"name":"SpinButtonMain","type":"SpinButton","observed":{"properties":{"Delay":50}}},{"name":"ScrollBarMain","type":"ScrollBar","observed":{"properties":{"Delay":50,"ProportionalThumb":true}}}]}'
 $expected = ConvertFrom-Json $expectedJson
 Assert-ExpectedForm $snapshot $expected
 Assert-Test $true 'Canonical properties expectations pass'
+$legacy = ConvertFrom-Json $expectedJson
+$legacy.form | Add-Member -NotePropertyName build -NotePropertyValue ([pscustomobject]@{ clientWidth = 240; clientHeight = 180 })
+Assert-Rejected { Assert-ExpectedForm $snapshot $legacy } 'form\.build is removed'
+$missingWidth = ConvertFrom-Json $expectedJson
+$missingWidth.form.PSObject.Properties.Remove('width')
+Assert-Rejected { Assert-ExpectedForm $snapshot $missingWidth } 'canonical form\.width'
 foreach ($case in @(
     [pscustomobject]@{ index = 0; key = 'Delay'; wrong = 51 }
     [pscustomobject]@{ index = 1; key = 'Delay'; wrong = 51 }
