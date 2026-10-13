@@ -6,6 +6,8 @@ import type {
 } from "./protocol";
 import {
   gridSize,
+  isDesignerFrame,
+  isDesignerPage,
   isControlVisible,
   orderedChildren,
   parentBounds,
@@ -183,7 +185,7 @@ export function defaultPasteParent(
   const uniqueIds = [...new Set(selectedIds)];
   if (uniqueIds.length === 1) {
     const selected = document.controls.find((control) => control.id === uniqueIds[0]);
-    if (selected?.type.toLowerCase() === "page" || selected?.type.toLowerCase() === "frame")
+    if (selected && (isDesignerFrame(selected) || isDesignerPage(document, selected)))
       return selected.id;
     return selected?.parentId ?? "";
   }

@@ -352,7 +352,7 @@ export function App() {
     if (!parentId) return true;
     const parent = document?.controls.find((control) => control.id === parentId);
     if (!parent) return false;
-    return parent.type.toLowerCase() === "page" ? pageEditable : parentEditable;
+    return parentEditable && (parent.type.toLowerCase() !== "page" || pageEditable);
   };
   const requestClipboard = (
     action: ProductivityClipboardAction,

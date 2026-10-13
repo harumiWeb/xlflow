@@ -816,7 +816,20 @@ export function DesignerCanvas({
   const selectedId = selected;
   const groupBounds =
     productivityEditable && selectionIds.length > 1
-      ? selectedWorldBounds(document, selectionIds)
+      ? selectedWorldBounds(
+          groupPreview
+            ? {
+                ...document,
+                controls: document.controls.map((control) => {
+                  const position = groupPreview.find((item) => item.id === control.id);
+                  return position
+                    ? { ...control, left: position.left, top: position.top }
+                    : control;
+                }),
+              }
+            : document,
+          selectionIds,
+        )
       : undefined;
   return (
     <div class="designer-canvas">

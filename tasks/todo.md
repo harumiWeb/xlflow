@@ -1,5 +1,6 @@
 # Issue #922 Designer productivity
 
+- [x] PR #932: validate and fix six review findings (paste/container capability, Page Delete, live group boundary, context-menu dismissal/focus and tab-order parent choices); focused regressions, full VS Code tests, lint and diff checks passed.
 - [x] Validate Pass 1 custom-control tab-order finding, align eligibility with Property Grid metadata and add YAML/JSON regressions.
 - [x] Preserve Pass 1 evidence and clean up its review resources; FormSpec tests, focused LSP tests and vet pass.
 - [x] Run independent Pass 2 on 568a86c: PASS; prior P2 resolved, no additional findings. Preserve report and clean up review resources.

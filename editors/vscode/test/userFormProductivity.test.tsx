@@ -147,6 +147,20 @@ async function run() {
     ),
   };
   assert.equal(defaultPasteParent(nestedCustomDocument, ["nested"]), "frame");
+  const customFrameDocument = {
+    ...model,
+    controls: model.controls.map((control) =>
+      control.id === "frame" ? { ...control, progId: "Vendor.Frame.1" } : control,
+    ),
+  };
+  assert.equal(defaultPasteParent(customFrameDocument, ["frame"]), "");
+  const customOwnerDocument = {
+    ...model,
+    controls: model.controls.map((control) =>
+      control.id === "multi" ? { ...control, progId: "Vendor.MultiPage.1" } : control,
+    ),
+  };
+  assert.equal(defaultPasteParent(customOwnerDocument, ["page"]), "multi");
 
   const fractionalDocument = {
     ...model,
@@ -375,6 +389,10 @@ async function run() {
     pointsToPixels(12),
   );
   await pointer(".designer-viewport", "pointermove", pointsToPixels(57), pointsToPixels(20));
+  const movingBoundary = root.querySelector<HTMLElement>(".group-selection-outline")!;
+  assert.equal(movingBoundary.style.left, `${pointsToPixels(25)}px`);
+  assert.equal(movingBoundary.style.top, `${pointsToPixels(18)}px`);
+  assert.equal(movingBoundary.style.width, `${pointsToPixels(50)}px`);
   await pointer(".designer-viewport", "pointerup", pointsToPixels(57), pointsToPixels(20));
   assert.deepEqual(emitted.at(-1), [
     {
@@ -440,6 +458,11 @@ async function run() {
   );
   await pointer(".designer-viewport", "pointercancel", 30, 30);
   assert.equal(emitted.length, committedCount, "pointer cancellation discards the group move");
+  assert.equal(
+    root.querySelector<HTMLElement>(".group-selection-outline")!.style.left,
+    `${pointsToPixels(10)}px`,
+    "cancel restores the source selection boundary",
+  );
 
   const beforeExternalUpdate = emitted.length;
   await pointer(
@@ -795,6 +818,119 @@ async function run() {
   assert.equal(customProperties.disabled, false, "single custom controls retain Properties access");
   await act(() => customProperties.click());
   assert.equal(propertiesOpened, true);
+
+  const toolbarProps = {
+    document: model,
+    selectionIds: ["page"],
+    strings: designerStrings,
+    enabled: true,
+    structuralEnabled: true,
+    tabEnabled: true,
+    clipboardAvailable: true,
+    canPaste: true,
+    busy: false,
+    onOperation: (operation: SemanticOperation) => operations.push(operation),
+    onClipboard: () => {},
+    onProperties: () => {},
+    onCloseMenu: () => {},
+  };
+  await act(() =>
+    render(<ProductivityToolbar {...toolbarProps} contextMenu={{ x: 2, y: 3 }} />, root),
+  );
+  const pageDeleteButtons = [...root.querySelectorAll<HTMLButtonElement>("button")].filter(
+    (button) => button.textContent === designerStrings.deleteItem,
+  );
+  assert.equal(pageDeleteButtons.length, 2);
+  assert.ok(
+    pageDeleteButtons.every((button) => button.disabled),
+    "Page Delete disabled in toolbar and menu",
+  );
+
+  const childMetadata = propertyGrid.controls.a;
+  const nestedMetadata: PropertyGridData = {
+    ...propertyGrid,
+    controls: { ...propertyGrid.controls, nested: childMetadata, "page-child": childMetadata },
+  };
+  const parentModel = {
+    ...model,
+    controls: [
+      ...model.controls,
+      { ...model.controls[0], id: "page-child", name: "PageChild", parentId: "page" },
+    ],
+  };
+  for (const invalid of [false, true]) {
+    const currentModel = invalid
+      ? {
+          ...parentModel,
+          controls: parentModel.controls.map((control) =>
+            ["frame", "multi"].includes(control.id)
+              ? { ...control, progId: `Vendor.${control.type}.1` }
+              : control,
+          ),
+        }
+      : parentModel;
+    await act(() =>
+      render(
+        <ProductivityToolbar
+          {...toolbarProps}
+          document={currentModel}
+          selectionIds={["nested"]}
+          propertyGrid={nestedMetadata}
+        />,
+        root,
+      ),
+    );
+    assert.deepEqual(
+      [...root.querySelectorAll<HTMLOptionElement>(".tab-order-editor select option")].map(
+        (option) => option.value,
+      ),
+      invalid ? [""] : ["", "frame", "page"],
+      "tab-order parents use server-compatible containers",
+    );
+    if (invalid)
+      assert.equal(root.querySelector<HTMLSelectElement>(".tab-order-editor select")!.value, "");
+  }
+
+  let menuClosures = 0;
+  const menuProps = {
+    ...toolbarProps,
+    selectionIds: ["a"],
+    structuralEnabled: false,
+    onCloseMenu: () => {
+      menuClosures++;
+    },
+    contextMenu: { x: 3, y: 4 },
+  };
+  await act(() => render(<ProductivityToolbar {...menuProps} />, root));
+  const enabledMenuItems = [
+    ...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'),
+  ];
+  assert.equal(
+    document.activeElement,
+    enabledMenuItems[0],
+    "opening menu skips disabled items and focuses first enabled action",
+  );
+  await act(() =>
+    enabledMenuItems[0].dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }),
+    ),
+  );
+  assert.equal(document.activeElement, enabledMenuItems[1]);
+  await pointer('[role="menu"]', "pointerdown", 0, 0);
+  assert.equal(menuClosures, 0, "inside pointer-down keeps menu open");
+  await act(() =>
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape" })),
+  );
+  assert.equal(menuClosures, 1);
+  await act(() =>
+    document.body.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true })),
+  );
+  assert.equal(menuClosures, 2, "outside pointer-down closes menu");
+  await act(() => render(null, root));
+  await act(() =>
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape" })),
+  );
+  assert.equal(menuClosures, 2, "unmount removes menu listeners");
 
   await act(() => render(null, root));
   process.stdout.write(

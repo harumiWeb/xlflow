@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { isDesignerFrame, isDesignerPage } from "../../src/userFormEditor/geometry";
 import type {
   DesignerDocument,
   DesignerStrings,
@@ -76,7 +77,56 @@ export function ProductivityToolbar({
   const pasteAllowed = clipboardAvailable && canPaste && !busy;
   const cutAllowed = canCopy && structuralEnabled;
   const duplicateAllowed = canCopy && structuralEnabled && duplicateEditable;
-  const canRemove = hasSelectedControl && structuralEnabled && !busy;
+  const canRemove =
+    selectionIds.some((id) =>
+      document.controls.some(
+        (control) => control.id === id && control.type.toLowerCase() !== "page",
+      ),
+    ) &&
+    structuralEnabled &&
+    !busy;
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!contextMenu) return;
+    const items = () =>
+      Array.from(
+        menuRef.current?.querySelectorAll<HTMLButtonElement>(
+          'button[role="menuitem"]:not(:disabled)',
+        ) ?? [],
+      );
+    items()[0]?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseMenu();
+        window.document.querySelector<HTMLElement>(".designer-viewport")?.focus();
+      } else if (
+        menuRef.current?.contains(event.target as Node) &&
+        ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
+      ) {
+        event.preventDefault();
+        const enabledItems = items();
+        const current = enabledItems.indexOf(window.document.activeElement as HTMLButtonElement);
+        const next =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? enabledItems.length - 1
+              : (current + (event.key === "ArrowDown" ? 1 : -1) + enabledItems.length) %
+                enabledItems.length;
+        enabledItems[next]?.focus();
+      }
+    };
+    const outside = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) onCloseMenu();
+    };
+    window.addEventListener("keydown", keydown);
+    window.addEventListener("pointerdown", outside, true);
+    return () => {
+      window.removeEventListener("keydown", keydown);
+      window.removeEventListener("pointerdown", outside, true);
+    };
+  }, [contextMenu, onCloseMenu]);
 
   const parentChoices = useMemo(() => {
     const seen = new Set<string>();
@@ -327,6 +377,7 @@ export function ProductivityToolbar({
       </section>
       {contextMenu && (
         <div
+          ref={menuRef}
           class="designer-context-menu"
           role="menu"
           style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
@@ -427,5 +478,11 @@ function eligibleParents(document: DesignerDocument, propertyGrid?: PropertyGrid
       )
       .map((control) => control.parentId ?? ""),
   );
-  return ["", ...[...eligibleIds].filter(Boolean)];
+  return [
+    "",
+    ...[...eligibleIds].filter((id) => {
+      const parent = id && document.controls.find((control) => control.id === id);
+      return !!parent && (isDesignerFrame(parent) || isDesignerPage(document, parent));
+    }),
+  ];
 }
