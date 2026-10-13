@@ -1434,7 +1434,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
         {
             ExcelBridgeSupport.Set(target, propertyName, expectedValue);
             var actualValue = ExcelBridgeSupport.Get(target, propertyName);
-            if (!RequiredValuesEqual(actualValue, expectedValue))
+            if (!RequiredValuesEqual(actualValue, expectedValue, propertyName))
             {
                 throw new InvalidOperationException($"designer_write_failed: UserForm Designer {propertyName} did not persist.");
             }
@@ -1449,7 +1449,7 @@ public sealed class ExcelFormWriteService : IFormWriteService
         }
     }
 
-    private static bool RequiredValuesEqual(object? actualValue, object expectedValue)
+    private static bool RequiredValuesEqual(object? actualValue, object expectedValue, string propertyName)
     {
         if (actualValue is null)
         {
@@ -1473,7 +1473,24 @@ public sealed class ExcelFormWriteService : IFormWriteService
         }
         if (expectedValue is double expectedDouble)
         {
-            return Math.Abs(Convert.ToDouble(actualValue, CultureInfo.InvariantCulture) - expectedDouble) <= 0.000001;
+            var actualDouble = Convert.ToDouble(actualValue, CultureInfo.InvariantCulture);
+            if (!double.IsFinite(actualDouble) || !double.IsFinite(expectedDouble))
+            {
+                return false;
+            }
+            var tolerance = 0.000001;
+            if (propertyName is "Left" or "Top" or "Width" or "Height")
+            {
+                // MSForms rounds geometry to twips (1/20 pt) and returns Single.
+                // Allow half a twip plus one Single ULP for conversion on both
+                // sides of the rounding boundary; other numeric fields stay strict.
+                var single = (float)expectedDouble;
+                var ulp = Math.Max(
+                    Math.Abs((double)MathF.BitIncrement(single) - single),
+                    Math.Abs((double)MathF.BitDecrement(single) - single));
+                tolerance = 0.025 + ulp;
+            }
+            return double.IsFinite(tolerance) && Math.Abs(actualDouble - expectedDouble) <= tolerance;
         }
         return Equals(actualValue, expectedValue);
     }

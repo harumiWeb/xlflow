@@ -135,6 +135,18 @@ Source-preserving semantic edits use the host-neutral Go API. See
 
 ## Interactive geometry
 
+Excel-backed `form build` and apply verification allow the native MSForms
+rounding of control `Left`, `Top`, `Width`, and `Height`: half a twip
+(0.025 pt) plus one single-precision ULP at the requested value. Excel 16.0
+returns these fields as `Single` after rounding to twips (0.05 pt).
+This tolerance applies only to the four geometry fields; numeric `Value`,
+`TabIndex`, Boolean and string persistence checks retain their existing
+strictness. Non-finite geometry and differences outside the bound fail with
+`designer_write_failed`. This does not round or rewrite authored FormSpec
+values and does not alter pure-Go HIMETRIC conversion. Regression coverage
+includes fractional Designer values, half-twip boundaries, larger coordinates,
+ignored writes and strict numeric-value checks.
+
 Selection is a transient control ID; clicking the background selects the form.
 Known built-in controls other than Page can move and resize with eight handles.
 Form and Page geometry is not edited on the canvas. Unknown controls remain

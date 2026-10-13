@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed Excel-backed FormSpec build/apply rejecting fractional control geometry
+  after MSForms twip and single-precision rounding. Geometry verification accepts
+  that bounded rounding while other modeled properties retain strict checks.
+
 - Fixed UserForm Designer control-interior clicks and subsequent drags losing
   selection because leaf controls intercepted clicks as blank containers.
 

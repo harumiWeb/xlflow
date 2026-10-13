@@ -368,6 +368,46 @@ public sealed class FormWriteCommandTests
         Assert.Contains("Width did not persist", inner.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("Left", 33.150021)]
+    [InlineData("Top", 34.649986999999996)]
+    [InlineData("Width", 256.95000500000003)]
+    [InlineData("Height", 95.699982)]
+    [InlineData("Left", 12.34567)]
+    [InlineData("Top", 1234.56789)]
+    [InlineData("Width", 32767.974)]
+    [InlineData("Height", 12.325)]
+    [InlineData("Left", 0.025)]
+    public void RequiredGeometryAcceptsExcelTwipAndSinglePrecisionRounding(string field, double value)
+    {
+        var method = typeof(ExcelFormWriteService).GetMethod("SetRequiredMember", BindingFlags.NonPublic | BindingFlags.Static)!;
+        method.Invoke(null, [new FakeRoundedGeometry(), field, value]);
+    }
+
+    [Theory]
+    [InlineData("Left", 12.35)]
+    [InlineData("Top", 12.35)]
+    [InlineData("Width", 12.35)]
+    [InlineData("Height", 12.35)]
+    [InlineData("Left", 0.026)]
+    [InlineData("Width", double.NaN)]
+    [InlineData("Height", double.PositiveInfinity)]
+    [InlineData("Top", double.MaxValue)]
+    public void RequiredGeometryRejectsChangeLargerThanExcelRounding(string field, double value)
+    {
+        var method = typeof(ExcelFormWriteService).GetMethod("SetRequiredMember", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var exception = Assert.Throws<TargetInvocationException>(() => method.Invoke(null, [new FakeRoundedGeometry(ignoreWrites: true), field, value]));
+        Assert.Contains($"{field} did not persist", exception.InnerException!.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RequiredNumericValueRetainsStrictPrecisionVerification()
+    {
+        var method = typeof(ExcelFormWriteService).GetMethod("SetRequiredMember", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var exception = Assert.Throws<TargetInvocationException>(() => method.Invoke(null, [new FakeRoundedGeometry(), "Value", 12.34567]));
+        Assert.Contains("Value did not persist", exception.InnerException!.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void PageObservedGeometryIsNotWrittenButChildGeometryIsApplied()
     {
@@ -834,5 +874,23 @@ public sealed class FormWriteCommandTests
             get => 0;
             set { }
         }
+    }
+
+    private sealed class FakeRoundedGeometry(bool ignoreWrites = false)
+    {
+        private float _value;
+        private object Read() => _value;
+        private void Write(object value)
+        {
+            if (!ignoreWrites)
+            {
+                _value = (float)(Math.Round((float)Convert.ToDouble(value) * 20.0, MidpointRounding.AwayFromZero) / 20.0);
+            }
+        }
+        public object Left { get => Read(); set => Write(value); }
+        public object Top { get => Read(); set => Write(value); }
+        public object Width { get => Read(); set => Write(value); }
+        public object Height { get => Read(); set => Write(value); }
+        public object Value { get => Read(); set => Write(value); }
     }
 }

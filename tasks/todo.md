@@ -1,5 +1,6 @@
 # Issue #922 Designer productivity
 
+- [x] Confirmed Excel 16.0 twip/Single geometry rounding; limited tolerance to four geometry fields and added acceptance/rejection regressions (528 .NET tests pass). Rebuilt/installed both binaries. Original fractional FormSpec succeeds through build/push/run/save/pull/lint and saved-file apply; sentinel, 12 geometry values, unchanged spec and COM cleanup verified. Lint/format checks pass. Evidence: tmp_workspaces/final-review/issue922/coordinate-precision-evidence.md.
 - [x] Reproduced interior click selection loss in native VS Code Webview before the fix. Restrict blank content to Frame; coordinate hit tests cover Label/TextBox, nested children, holding an existing selection and single/group movement. Full VS Code tests and lint passed.
 - [x] PR #932: validate and fix six review findings (paste/container capability, Page Delete, live group boundary, context-menu dismissal/focus and tab-order parent choices); focused regressions, full VS Code tests, lint and diff checks passed.
 - [x] Validate Pass 1 custom-control tab-order finding, align eligibility with Property Grid metadata and add YAML/JSON regressions.
