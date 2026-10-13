@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed UserForm Designer control-interior clicks and subsequent drags losing
+  selection because leaf controls intercepted clicks as blank containers.
+
 - Added UserForm Designer sibling multi-selection and group movement,
   alignment/distribution, anchor sizing, z-order, shared in-memory Cut/Copy/Paste
   and Duplicate, and parent-local tab-order editing. YAML/YML/JSON edits

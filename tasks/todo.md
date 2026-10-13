@@ -1,5 +1,6 @@
 # Issue #922 Designer productivity
 
+- [x] Reproduced interior click selection loss in native VS Code Webview before the fix. Restrict blank content to Frame; coordinate hit tests cover Label/TextBox, nested children, holding an existing selection and single/group movement. Full VS Code tests and lint passed.
 - [x] PR #932: validate and fix six review findings (paste/container capability, Page Delete, live group boundary, context-menu dismissal/focus and tab-order parent choices); focused regressions, full VS Code tests, lint and diff checks passed.
 - [x] Validate Pass 1 custom-control tab-order finding, align eligibility with Property Grid metadata and add YAML/JSON regressions.
 - [x] Preserve Pass 1 evidence and clean up its review resources; FormSpec tests, focused LSP tests and vet pass.

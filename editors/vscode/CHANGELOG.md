@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed control-interior clicks and subsequent drags losing selection in the
+  UserForm Designer because leaf controls intercepted clicks as blank containers.
+
 - Added sibling multi-selection, marquee selection, group movement,
   alignment/distribution, same-size and z-order commands, shared Cut/Copy/Paste
   and Duplicate, and parent-local tab-order editing. Actions negotiate

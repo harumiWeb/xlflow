@@ -153,6 +153,7 @@
 
 # UserForm preview alignment
 
+- Designer pointer regressions must dispatch to the element found at the on-screen coordinates in the native Webview, including control interiors and a second press to drag an existing selection. Dispatching directly to a control wrapper bypasses transparent overlays and cannot establish that real clicks select it.
 - Verify preview collection order against the canonical compiler before changing selectedIndex semantics; source order and zIndex order may differ. Test mixed inner/outer dimensions and explicit empty values, and route Webview UI strings through extension localization.
 - When matching control text placement, verify both axes in the actual Webview with single-line and multiline captions. CSS text-align alone does not verify vertical placement; preserve control-specific layout rather than centering every control.
 - When reproducing MSForms control chrome from a reference image, model dropdown buttons as sized elements and distinguish raised button edges from recessed input edges; a text arrow alone does not reproduce the control.

@@ -772,7 +772,7 @@ export function DesignerCanvas({
                 </div>
               )}
             </>
-          ) : (
+          ) : type === "frame" ? (
             <div
               class="container-content"
               data-container-id={control.id}
@@ -785,7 +785,7 @@ export function DesignerCanvas({
             >
               {children(control.id).map((c) => draw(c))}
             </div>
-          )}
+          ) : null}
         </div>
         {selectedControl && (
           <div

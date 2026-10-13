@@ -41,7 +41,7 @@ window.addEventListener("message", e => {
   if (!["document", "invalidDocument", "testAction"].includes(e.data.type)) return;
   setTimeout(async () => {
     for (const action of e.data.actions ?? []) {
-      const target = document.querySelector(action.selector);
+      let target = document.querySelector(action.selector);
       if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: action.selector}); return; }
       const props = { bubbles: true, cancelable: true, ...action.props };
       if (props.formPoints) {
@@ -61,6 +61,10 @@ window.addEventListener("message", e => {
         const zoom = Number(document.querySelector(".designer-toolbar select").value);
         props.clientX = bounds.left + props.formPoints[0] * 96 * zoom / 72;
         props.clientY = bounds.top + props.formPoints[1] * 96 * zoom / 72;
+      }
+      if (props.hitTest) {
+        target = document.elementFromPoint(props.clientX, props.clientY);
+        if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: "hit test " + action.selector}); return; }
       }
       if (action.event === "change" || action.event === "input") { if ("value" in props) target.value = props.value; if ("checked" in props) target.checked = props.checked; }
       target.dispatchEvent(["change", "input"].includes(action.event) ? new Event(action.event, props) : action.event.startsWith("key") ? new KeyboardEvent(action.event, props) : action.event === "focusout" ? new FocusEvent("blur", props) : new PointerEvent(action.event, props));
@@ -960,7 +964,10 @@ window.addEventListener("message", e => {
       type: "testAction",
       version: 68,
       actions: [
-        parentPointer('.control[data-control-id="child"]', "pointerdown", 228.5, 139.5),
+        {
+          ...parentPointer('.control[data-control-id="child"]', "pointerdown", 228.5, 139.5),
+          props: { pointerId: 1, button: 0, formPoints: [228.5, 139.5], hitTest: true },
+        },
         parentPointer(".designer-viewport", "pointerup", 228.5, 139.5),
         { selector: ".selection-path > span button", event: "click" },
       ],
@@ -1185,7 +1192,7 @@ window.addEventListener("message", e => {
       form: { name: "Productivity", build: { clientWidth: 400, clientHeight: 240 } },
       controls: [
         { id: "a", name: "Label1", type: "Label", left: 20, top: 20, width: 60, height: 18 },
-        { id: "b", name: "Label2", type: "Label", left: 110, top: 20, width: 60, height: 18 },
+        { id: "b", name: "TextBox2", type: "TextBox", left: 110, top: 20, width: 60, height: 18 },
       ],
     });
     const productivityMessage = (version: number): Extract<HostMessage, { type: "document" }> => ({
@@ -1214,6 +1221,74 @@ window.addEventListener("message", e => {
         },
       },
     });
+    await snapshot(productivityMessage(95));
+    const selectedInterior = await snapshot({
+      type: "testAction",
+      version: 96,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "1" } },
+        { selector: ".snap-toggle input", event: "change", props: { checked: false } },
+        {
+          selector: '.control[data-control-id="a"]',
+          event: "pointerdown",
+          props: { pointerId: 1, button: 0, formPoints: [50, 29], hitTest: true },
+        },
+        parentPointer(".designer-viewport", "pointerup", 50, 29),
+      ],
+    });
+    assert.deepStrictEqual(
+      selectedInterior.selectedIds,
+      ["a"],
+      "interior click selects the control",
+    );
+    assert.strictEqual(selectedInterior.canvasFocused, true);
+    const pressedInterior = await snapshot({
+      type: "testAction",
+      version: 97,
+      actions: [
+        {
+          selector: '.control[data-control-id="a"]',
+          event: "pointerdown",
+          props: { pointerId: 1, button: 0, formPoints: [50, 29], hitTest: true },
+        },
+      ],
+    });
+    assert.deepStrictEqual(
+      pressedInterior.selectedIds,
+      ["a"],
+      "holding the interior retains selection",
+    );
+    assert.strictEqual(pressedInterior.canvasFocused, true);
+    assert.deepStrictEqual(pressedInterior.editMessages, selectedInterior.editMessages);
+    const draggedInterior = await snapshot({
+      type: "testAction",
+      version: 98,
+      actions: [
+        parentPointer(".designer-viewport", "pointermove", 62, 35),
+        parentPointer(".designer-viewport", "pointerup", 62, 35),
+      ],
+    });
+    assert.deepStrictEqual(draggedInterior.selectedIds, ["a"]);
+    const interiorEdits = draggedInterior.editMessages as {
+      requestId: number;
+      operations: unknown[];
+    }[];
+    assert.strictEqual(
+      interiorEdits.length,
+      (selectedInterior.editMessages as unknown[]).length + 1,
+    );
+    assert.deepStrictEqual(interiorEdits.at(-1)!.operations, [
+      {
+        type: "moveControl",
+        controlId: "a",
+        left: 32,
+        top: 26,
+      },
+    ]);
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: interiorEdits.at(-1)!.requestId,
+    });
     const beforeGroup = await snapshot(productivityMessage(100));
     const selectedGroup = await snapshot({
       type: "testAction",
@@ -1221,11 +1296,14 @@ window.addEventListener("message", e => {
       actions: [
         { selector: ".designer-toolbar select", event: "change", props: { value: "1" } },
         { selector: ".snap-toggle input", event: "change", props: { checked: false } },
-        parentPointer('.control[data-control-id="a"]', "pointerdown", 25, 25),
+        {
+          ...parentPointer('.control[data-control-id="a"]', "pointerdown", 25, 25),
+          props: { pointerId: 1, button: 0, formPoints: [25, 25], hitTest: true },
+        },
         parentPointer(".designer-viewport", "pointerup", 25, 25),
         {
           ...parentPointer('.control[data-control-id="b"]', "pointerdown", 115, 25),
-          props: { pointerId: 1, button: 0, formPoints: [115, 25], ctrlKey: true },
+          props: { pointerId: 1, button: 0, formPoints: [115, 25], ctrlKey: true, hitTest: true },
         },
         parentPointer(".designer-viewport", "pointerup", 115, 25),
       ],
@@ -1237,7 +1315,10 @@ window.addEventListener("message", e => {
       type: "testAction",
       version: 102,
       actions: [
-        parentPointer('.control[data-control-id="a"]', "pointerdown", 25, 25),
+        {
+          ...parentPointer('.control[data-control-id="a"]', "pointerdown", 25, 25),
+          props: { pointerId: 1, button: 0, formPoints: [25, 25], hitTest: true },
+        },
         parentPointer(".designer-viewport", "pointermove", 37, 31),
         parentPointer(".designer-viewport", "pointerup", 37, 31),
       ],
