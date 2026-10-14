@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "fs/promises";
 import * as path from "path";
 import * as vscode from "vscode";
 import type { XlflowLanguageClientManager } from "../../src/client";
+import { DraftCheckpointStore } from "../../src/userFormEditor/checkpoint";
 import { UserFormCustomDocument } from "../../src/userFormEditor/customDocument";
 import { UserFormEditorProvider } from "../../src/userFormEditor/provider";
 import { designerResourceUri } from "../../src/userFormEditor/resource";
@@ -85,6 +86,7 @@ interface FakePanel {
 
 interface TestEnvironment {
   directory: string;
+  checkpointRoot: vscode.Uri;
   uri: vscode.Uri;
   sourceDocument: vscode.TextDocument;
   customDocument: UserFormCustomDocument;
@@ -96,6 +98,7 @@ interface TestEnvironment {
 
 interface DraftProviderTestExtension {
   register(provider: vscode.CustomEditorProvider<UserFormCustomDocument>): vscode.Disposable;
+  registerSaveCommand(provider: UserFormEditorProvider, commandId: string): vscode.Disposable;
 }
 
 export async function runUserFormDraftProviderAssertions(extensionUri: vscode.Uri): Promise<void> {
@@ -105,10 +108,13 @@ export async function runUserFormDraftProviderAssertions(extensionUri: vscode.Ur
   await assertRepeatedOpenSharesDraft(extensionUri);
   await assertExternalChangesMergeIntoDraft(extensionUri);
   await assertExternalControlReorderConflictsWithDraft(extensionUri);
-  await assertConflictingSourceChangeBlocksSave(extensionUri);
+  await assertConflictingSourceChangeBlocksPublish(extensionUri);
   await assertRevertPreservesUnsavedSourceBuffer(extensionUri);
   await assertBackupRestoreRevertAndSaveAs(extensionUri);
   await assertRegisteredProviderNativeSave(extensionUri);
+  await assertCheckpointRecovery(extensionUri, "yaml", yamlSource);
+  await assertCheckpointRecovery(extensionUri, "json", jsonControlsSource);
+  await assertMalformedCheckpointIsRetained(extensionUri);
 }
 
 async function assertDraftEditUndoRedoAndSave(
@@ -164,7 +170,7 @@ async function assertDraftEditUndoRedoAndSave(
       assert.ok(draft.includes("# keep the inline comment"));
     }
 
-    await provider.saveCustomDocument(customDocument, cancellation.token);
+    await provider.publishCustomDocument(customDocument, cancellation.token);
     assert.strictEqual(sourceDocument.getText(), draft);
     assert.strictEqual(await readFile(uri.fsPath, "utf8"), draft);
     assert.strictEqual(customDocument.state.dirty, false);
@@ -247,13 +253,13 @@ async function assertExternalChangesMergeIntoDraft(extensionUri: vscode.Uri): Pr
     assert.strictEqual(sourceDocument.getText(), externalPrefix + yamlSource);
     assert.strictEqual(await readFile(uri.fsPath, "utf8"), yamlSource);
 
-    await provider.saveCustomDocument(customDocument, environment.cancellation.token);
+    await provider.publishCustomDocument(customDocument, environment.cancellation.token);
     assert.strictEqual(sourceDocument.getText(), mergedDraft);
     assert.strictEqual(await readFile(uri.fsPath, "utf8"), mergedDraft);
   });
 }
 
-async function assertConflictingSourceChangeBlocksSave(extensionUri: vscode.Uri): Promise<void> {
+async function assertConflictingSourceChangeBlocksPublish(extensionUri: vscode.Uri): Promise<void> {
   await withTestEnvironment(extensionUri, "yaml", yamlSource, async (environment) => {
     const { customDocument, provider, sourceDocument, uri } = environment;
     const events: vscode.CustomDocumentEditEvent<UserFormCustomDocument>[] = [];
@@ -277,8 +283,15 @@ async function assertConflictingSourceChangeBlocksSave(extensionUri: vscode.Uri)
       localDraft,
       "the conflicting Designer draft is retained",
     );
+    await provider.saveCustomDocument(customDocument, environment.cancellation.token);
+    const checkpoint = await new DraftCheckpointStore(environment.checkpointRoot).read(uri);
+    assert.strictEqual(
+      checkpoint?.state.text,
+      localDraft,
+      "checkpoint save retains the conflict draft",
+    );
     await assert.rejects(
-      provider.saveCustomDocument(customDocument, environment.cancellation.token),
+      provider.publishCustomDocument(customDocument, environment.cancellation.token),
       /conflict/i,
     );
     assert.strictEqual(sourceDocument.getText(), externalSource, "the external buffer is retained");
@@ -406,10 +419,13 @@ async function assertExternalControlReorderConflictsWithDraft(
     );
     assert.strictEqual(sourceDocument.getText(), reorderedSource);
     assert.strictEqual(await readFile(uri.fsPath, "utf8"), jsonControlsSource);
+    await provider.saveCustomDocument(customDocument, environment.cancellation.token);
+    const checkpoint = await new DraftCheckpointStore(environment.checkpointRoot).read(uri);
+    assert.strictEqual(checkpoint?.state.text, localDraft);
     await assert.rejects(
-      provider.saveCustomDocument(customDocument, environment.cancellation.token),
+      provider.publishCustomDocument(customDocument, environment.cancellation.token),
       /conflict/i,
-      "a semantic identity conflict must block save",
+      "a semantic identity conflict must block publishing",
     );
     assert.strictEqual(customDocument.state.text, localDraft);
     assert.strictEqual(customDocument.document.getText(), reorderedSource);
@@ -446,7 +462,13 @@ async function assertBackupRestoreRevertAndSaveAs(extensionUri: vscode.Uri): Pro
 
     provider.dispose();
     const restoredClient = createTestClient();
-    const restoredProvider = new UserFormEditorProvider(extensionUri, restoredClient.client);
+    const restoredProvider = new UserFormEditorProvider(
+      extensionUri,
+      restoredClient.client,
+      undefined,
+      undefined,
+      environment.checkpointRoot,
+    );
     const restoredPanel = createFakePanel();
     const restoredEvents: vscode.CustomDocumentEditEvent<UserFormCustomDocument>[] = [];
     const restoredSubscription = restoredProvider.onDidChangeCustomDocument((event) =>
@@ -534,6 +556,7 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
   const viewType = "xlflow.userFormDraftProviderTest";
   const cancellation = new vscode.CancellationTokenSource();
   const client = createTestClient();
+  const checkpointRoot = vscode.Uri.file(path.join(directory, "checkpoints"));
   const confirmedResolutions: ("source" | "designer")[] = [];
   const provider = new UserFormEditorProvider(
     extensionUri,
@@ -543,6 +566,7 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
       confirmedResolutions.push(choice);
       return true;
     },
+    checkpointRoot,
   );
   const hostMessages: HostMessage[] = [];
   const events: vscode.CustomDocumentEditEvent<UserFormCustomDocument>[] = [];
@@ -550,6 +574,7 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
   let transportPanel: vscode.WebviewPanel | undefined;
   let editSubscription: vscode.Disposable | undefined;
   let registration: vscode.Disposable | undefined;
+  let saveCommandRegistration: vscode.Disposable | undefined;
   let customDocument: UserFormCustomDocument | undefined;
   let placeholderDisposed = false;
   const resolvedEditorUris: string[] = [];
@@ -576,11 +601,16 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
         await resolve(document, panel, token);
         return;
       }
-      assert.strictEqual(
-        document,
-        customDocument,
-        "the redirect must reuse the preopened virtual document",
-      );
+      assert.strictEqual(document.uri.toString(), designerUri.toString());
+      if (customDocument && !customDocument.closed)
+        assert.strictEqual(
+          document,
+          customDocument,
+          "the initial redirect reuses the preopened draft",
+        );
+      else
+        assert.notStrictEqual(document, customDocument, "reopen creates a fresh custom document");
+      customDocument = document;
       nativePanel = panel;
       transportPanel = instrumentPanel(panel, hostMessages);
       await resolve(document, transportPanel, token);
@@ -594,6 +624,8 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
     );
     const fixtureApi = await fixtureExtension.activate();
     registration = fixtureApi.register(provider);
+    const testSaveCommand = "xlflow.userFormDraftProviderTest.save";
+    saveCommandRegistration = fixtureApi.registerSaveCommand(provider, testSaveCommand);
     await vscode.commands.executeCommand("vscode.openWith", uri, viewType);
 
     try {
@@ -725,11 +757,35 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
     await vscode.commands.executeCommand("workbench.action.files.save");
     await waitForAsync(
       async () =>
+        sourceDocument.getText() === yamlSource &&
+        (await readFile(uri.fsPath, "utf8")) === yamlSource &&
+        customDocument!.state.dirty &&
+        findCustomTab(viewType, designerUri)?.isDirty === false,
+      "generic native Save to checkpoint the draft and clear only the custom-tab dirty state",
+    );
+    assert.strictEqual(
+      (await new DraftCheckpointStore(checkpointRoot).read(uri))?.state.text,
+      firstExpected,
+      "generic native Save persists the pending draft checkpoint",
+    );
+    assert.strictEqual(
+      customDocument.state.dirty,
+      true,
+      "native checkpoint acknowledgement does not clear the Designer draft badge",
+    );
+
+    await vscode.commands.executeCommand(testSaveCommand);
+    await waitForAsync(
+      async () =>
         sourceDocument.getText() === firstExpected &&
         (await readFile(uri.fsPath, "utf8")) === firstExpected &&
+        !customDocument!.state.dirty &&
         findCustomTab(viewType, designerUri)?.isDirty === false,
-      "the native Ctrl+S command to save and clear the custom-tab dirty state",
+      "the explicit Designer Save command to publish while the native tab is already clean",
     );
+    const publishedCheckpoint = await new DraftCheckpointStore(checkpointRoot).read(uri);
+    assert.strictEqual(publishedCheckpoint?.state.text, firstExpected);
+    assert.strictEqual(publishedCheckpoint?.state.baseText, firstExpected);
 
     undoCallbacks = 0;
     redoCallbacks = 0;
@@ -887,10 +943,13 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
       "the local Designer conflict draft is retained",
     );
     assert.strictEqual(sourceDocument.getText(), externalConflict);
+    await provider.saveCustomDocument(customDocument, cancellation.token);
+    const conflictedCheckpoint = await new DraftCheckpointStore(checkpointRoot).read(uri);
+    assert.strictEqual(conflictedCheckpoint?.state.text, localConflict);
     await assert.rejects(
-      provider.saveCustomDocument(customDocument, cancellation.token),
+      provider.publishCustomDocument(customDocument, cancellation.token),
       /conflict/i,
-      "the provider must block saving while the source conflict is unresolved",
+      "publishing is blocked while the source conflict is unresolved",
     );
     assert.strictEqual(
       sourceDocument.getText(),
@@ -969,6 +1028,7 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
       await sourceDocument.save(),
       "save the external buffer after assertions to clean up the fixture",
     );
+    const diskBeforeAutoSave = await readFile(uri.fsPath, "utf8");
 
     await waitFor(
       () =>
@@ -985,21 +1045,100 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
     const previousAutoSaveDelay =
       filesConfiguration.inspect<number>("autoSaveDelay")?.workspaceValue;
     const configurationTarget = vscode.ConfigurationTarget.Workspace;
+    let autoSavedExpected = "";
+    let sourceAfterAutoSave = externalConflict;
+    let diskAfterAutoSave = diskBeforeAutoSave;
     try {
       await filesConfiguration.update("autoSaveDelay", 200, configurationTarget);
       await filesConfiguration.update("autoSave", "afterDelay", configurationTarget);
-      const autoSavedExpected = replaceCaption(externalConflict, "Auto Saved");
+      autoSavedExpected = replaceCaption(externalConflict, "Auto Saved");
       await postTestEdit(transportPanel!, customDocument, 4, "Auto Saved");
       await waitFor(() => events.length === 5, "the final autosave draft edit event");
       await waitForAsync(
         async () =>
-          sourceDocument.getText() === autoSavedExpected &&
-          (await readFile(uri.fsPath, "utf8")) === autoSavedExpected &&
+          sourceDocument.getText() === externalConflict &&
+          (await readFile(uri.fsPath, "utf8")) === diskBeforeAutoSave &&
           !sourceDocument.isDirty &&
+          customDocument!.state.dirty &&
+          findCustomTab(viewType, designerUri)?.isDirty === false,
+        "AutoSave afterDelay to checkpoint without publishing or clearing the Designer draft badge",
+      );
+      assert.strictEqual(
+        (await new DraftCheckpointStore(checkpointRoot).read(uri))?.state.text,
+        autoSavedExpected,
+        "AutoSave afterDelay persists the latest draft checkpoint",
+      );
+      assert.ok(
+        hostMessages.some((message) => message.type === "draftState" && message.dirty),
+        "source-pending state remains visible after Auto Save",
+      );
+
+      await vscode.commands.executeCommand("undo");
+      await waitFor(
+        () =>
+          customDocument!.state.text === externalConflict &&
           !customDocument!.state.dirty &&
           findCustomTab(viewType, designerUri)?.isDirty === false,
-        "native CustomEditor autosave to persist the final draft without an explicit Save command",
+        "Undo followed by Auto Save to checkpoint the source baseline",
       );
+      await vscode.commands.executeCommand("redo");
+      await waitFor(
+        () =>
+          customDocument!.state.text === autoSavedExpected &&
+          customDocument!.state.dirty &&
+          findCustomTab(viewType, designerUri)?.isDirty === false,
+        "Redo followed by Auto Save to preserve the pending draft",
+      );
+      assert.strictEqual(await readFile(uri.fsPath, "utf8"), diskBeforeAutoSave);
+
+      const sourcePrefix = "# direct source Auto Save remains enabled\n";
+      const sourceEdit = new vscode.WorkspaceEdit();
+      sourceEdit.insert(uri, new vscode.Position(0, 0), sourcePrefix);
+      assert.ok(await vscode.workspace.applyEdit(sourceEdit));
+      sourceAfterAutoSave = sourcePrefix + externalConflict;
+      autoSavedExpected = sourcePrefix + autoSavedExpected;
+      await waitForAsync(
+        async () =>
+          !customDocument!.reconciling &&
+          customDocument!.state.text === autoSavedExpected &&
+          sourceDocument.getText() === sourceAfterAutoSave &&
+          (await readFile(uri.fsPath, "utf8")) === sourceAfterAutoSave &&
+          !sourceDocument.isDirty,
+        "normal source Auto Save to publish only the direct YAML edit and update the Designer",
+      );
+      assert.ok(
+        customDocument.state.dirty,
+        "direct source Auto Save does not apply the Designer caption",
+      );
+
+      await vscode.commands.executeCommand(testSaveCommand);
+      await waitForAsync(
+        async () =>
+          !customDocument!.state.dirty &&
+          sourceDocument.getText() === autoSavedExpected &&
+          (await readFile(uri.fsPath, "utf8")) === autoSavedExpected,
+        "explicit Designer save while Auto Save is enabled and the native tab is clean",
+      );
+      sourceAfterAutoSave = autoSavedExpected;
+      diskAfterAutoSave = autoSavedExpected;
+      await waitFor(
+        () =>
+          hostMessages.some(
+            (message) =>
+              message.type === "document" && message.version === customDocument!.document.version,
+          ),
+        "the published baseline to reach the Webview",
+      );
+      autoSavedExpected = replaceCaption(autoSavedExpected, "Pending after Auto Save");
+      await postTestEdit(transportPanel!, customDocument, 5, "Pending after Auto Save");
+      await waitFor(
+        () =>
+          events.length === 6 &&
+          customDocument!.state.dirty &&
+          findCustomTab(viewType, designerUri)?.isDirty === false,
+        "a fresh pending draft to be internally checkpointed before close",
+      );
+      assert.strictEqual(await readFile(uri.fsPath, "utf8"), diskAfterAutoSave);
     } finally {
       try {
         await filesConfiguration.update("autoSave", previousAutoSave, configurationTarget);
@@ -1011,6 +1150,33 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
         );
       }
     }
+
+    const closedDraft = customDocument!;
+    const closedTab = findCustomTab(viewType, designerUri);
+    assert.ok(closedTab, "the Designer tab should be open before close/reopen recovery");
+    await vscode.window.tabGroups.close(closedTab, true);
+    await waitFor(() => closedDraft.closed, "the native Designer tab to close its custom document");
+    hostMessages.length = 0;
+    await vscode.commands.executeCommand("vscode.openWith", uri, viewType);
+    await waitFor(
+      () =>
+        customDocument !== closedDraft &&
+        findCustomTab(viewType, designerUri) !== undefined &&
+        hostMessages.some((message) => message.type === "document"),
+      "reopening the Designer tab to restore its pending draft checkpoint",
+    );
+    assert.strictEqual(customDocument!.state.text, autoSavedExpected);
+    assert.strictEqual(customDocument!.state.dirty, true);
+    assert.strictEqual(customDocument!.state.conflicted, false);
+    assert.strictEqual(sourceDocument.getText(), sourceAfterAutoSave);
+    assert.strictEqual(await readFile(uri.fsPath, "utf8"), diskAfterAutoSave);
+    nativePanel!.reveal(nativePanel!.viewColumn);
+    await vscode.commands.executeCommand("workbench.action.files.save");
+    await waitFor(
+      () => findCustomTab(viewType, designerUri)?.isDirty === false,
+      "checkpointing the recovered draft before closing the test tab",
+    );
+    assert.ok(customDocument!.state.dirty, "checkpointing recovery does not apply the source");
   } finally {
     editSubscription?.dispose();
     placeholderSubscriptions.forEach((subscription) => subscription.dispose());
@@ -1022,12 +1188,202 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
             input instanceof vscode.TabInputCustom &&
             input.uri.toString() === designerUri.toString() &&
             input.viewType === viewType
-          )
+          ) {
+            nativePanel!.reveal(nativePanel!.viewColumn);
+            await vscode.commands.executeCommand("workbench.action.files.save");
             await vscode.window.tabGroups.close(tab, true);
+          }
         }
       }
     }
     registration?.dispose();
+    saveCommandRegistration?.dispose();
+    provider.dispose();
+    client.dispose();
+    cancellation.dispose();
+    await rm(uri.fsPath, { force: true, maxRetries: 5, retryDelay: 100 });
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
+
+async function assertCheckpointRecovery(
+  extensionUri: vscode.Uri,
+  format: "yaml" | "json",
+  initial: string,
+): Promise<void> {
+  const { directory, uri } = await createWorkspaceFixture(format);
+  const checkpointRoot = vscode.Uri.file(path.join(directory, "checkpoints"));
+  const store = new DraftCheckpointStore(checkpointRoot);
+  const cancellation = new vscode.CancellationTokenSource();
+  const clients: TestClient[] = [];
+  const providers: UserFormEditorProvider[] = [];
+  const disposedProviders = new Set<UserFormEditorProvider>();
+  let document: UserFormCustomDocument | undefined;
+
+  const createProvider = () => {
+    const client = createTestClient();
+    clients.push(client);
+    const provider = new UserFormEditorProvider(
+      extensionUri,
+      client.client,
+      undefined,
+      undefined,
+      checkpointRoot,
+    );
+    providers.push(provider);
+    return provider;
+  };
+  const disposeProvider = (provider: UserFormEditorProvider) => {
+    if (disposedProviders.has(provider)) return;
+    disposedProviders.add(provider);
+    provider.dispose();
+  };
+  const open = (provider: UserFormEditorProvider) =>
+    provider.openCustomDocument(
+      designerResourceUri(uri),
+      { backupId: undefined, untitledDocumentData: undefined },
+      cancellation.token,
+    );
+
+  try {
+    await writeFile(uri.fsPath, initial, "utf8");
+    const sourceDocument = await vscode.workspace.openTextDocument(uri);
+    let provider = createProvider();
+    document = await open(provider);
+    const recoveredText = replaceCaption(initial, "Checkpointed draft");
+    document.apply(
+      [
+        {
+          range: captionRange(document.document, "Original"),
+          newText: JSON.stringify("Checkpointed draft"),
+        },
+      ],
+      "Checkpoint recovery fixture",
+    );
+
+    // No explicit checkpoint wait: open must read behind the queued write
+    // emitted by the last edit, even when the panel closes immediately.
+    document.dispose();
+    document = await open(provider);
+    assert.strictEqual(
+      document.state.text,
+      recoveredText,
+      "immediate reopen waits for draft persistence",
+    );
+    assert.ok(document.state.dirty);
+
+    let conflictSource: string | undefined;
+    if (format === "json") {
+      const parsed = JSON.parse(initial) as { controls: SpecControl[] };
+      conflictSource =
+        JSON.stringify({ ...parsed, controls: [...parsed.controls].reverse() }, null, 2) + "\n";
+      assert.ok(
+        await vscode.workspace.applyEdit(replaceWholeDocument(sourceDocument, conflictSource)),
+        "the external canonical reorder should apply",
+      );
+      await waitFor(
+        () => document!.state.conflicted && !document!.reconciling,
+        "the canonical source identity conflict before checkpointing",
+      );
+      assert.strictEqual(document.state.text, recoveredText);
+    }
+
+    await provider.saveCustomDocument(document, cancellation.token);
+    assert.strictEqual(document.state.dirty, true, "a checkpoint keeps the draft badge dirty");
+    assert.strictEqual(sourceDocument.getText(), conflictSource ?? initial);
+    assert.strictEqual(
+      await readFile(uri.fsPath, "utf8"),
+      initial,
+      "checkpointing does not publish the source buffer",
+    );
+    const firstCheckpoint = await store.read(uri);
+    assert.strictEqual(firstCheckpoint?.state.text, recoveredText);
+    if (format === "json") {
+      assert.strictEqual(firstCheckpoint?.state.conflicted, true);
+      assert.strictEqual(firstCheckpoint?.state.pendingSourceText, conflictSource);
+    }
+
+    document.dispose();
+    document = await open(provider);
+    assert.strictEqual(document.state.text, recoveredText, "normal reopen recovers the draft");
+    assert.strictEqual(document.state.dirty, true);
+    assert.strictEqual(document.state.conflicted, format === "json");
+
+    document.dispose();
+    document = undefined;
+    disposeProvider(provider);
+    provider = createProvider();
+    document = await open(provider);
+    assert.strictEqual(document.state.text, recoveredText, "provider restart recovers the draft");
+    assert.strictEqual(document.state.dirty, true);
+    assert.strictEqual(
+      document.state.conflicted,
+      format === "json",
+      "provider restart retains the canonical conflict",
+    );
+    if (format === "json") {
+      assert.strictEqual(document.document.getText(), conflictSource);
+      assert.strictEqual(document.state.serialize().pendingSourceText, conflictSource);
+    }
+
+    await provider.revertCustomDocument(document, cancellation.token);
+    const revertedText = conflictSource ?? initial;
+    assert.strictEqual(document.state.text, revertedText);
+    assert.strictEqual(document.state.dirty, false);
+    assert.strictEqual(document.state.conflicted, false);
+    document.dispose();
+    document = undefined;
+    disposeProvider(provider);
+
+    const afterRevertProvider = createProvider();
+    document = await open(afterRevertProvider);
+    assert.strictEqual(document.state.text, revertedText);
+    assert.strictEqual(document.state.dirty, false, "revert clears pending draft recovery");
+    assert.strictEqual(document.state.conflicted, false);
+  } finally {
+    document?.dispose();
+    providers.forEach(disposeProvider);
+    clients.forEach((client) => client.dispose());
+    cancellation.dispose();
+    await rm(uri.fsPath, { force: true, maxRetries: 5, retryDelay: 100 });
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
+
+async function assertMalformedCheckpointIsRetained(extensionUri: vscode.Uri): Promise<void> {
+  const { directory, uri } = await createWorkspaceFixture("yaml");
+  const checkpointRoot = vscode.Uri.file(path.join(directory, "checkpoints"));
+  const store = new DraftCheckpointStore(checkpointRoot);
+  const cancellation = new vscode.CancellationTokenSource();
+  const client = createTestClient();
+  const provider = new UserFormEditorProvider(
+    extensionUri,
+    client.client,
+    undefined,
+    undefined,
+    checkpointRoot,
+  );
+  const malformed = "{ malformed checkpoint";
+  try {
+    await writeFile(uri.fsPath, yamlSource, "utf8");
+    const location = store.location(uri);
+    await mkdir(path.dirname(location.fsPath), { recursive: true });
+    await writeFile(location.fsPath, malformed, "utf8");
+    await assert.rejects(
+      provider.openCustomDocument(
+        designerResourceUri(uri),
+        { backupId: undefined, untitledDocumentData: undefined },
+        cancellation.token,
+      ),
+      (error: unknown) => error instanceof Error,
+      "opening a malformed checkpoint must surface the recovery error",
+    );
+    assert.strictEqual(
+      await readFile(location.fsPath, "utf8"),
+      malformed,
+      "a malformed recovery record is retained for diagnosis",
+    );
+  } finally {
     provider.dispose();
     client.dispose();
     cancellation.dispose();
@@ -1045,7 +1401,14 @@ async function withTestEnvironment(
   const { directory, uri } = await createWorkspaceFixture(format);
   const cancellation = new vscode.CancellationTokenSource();
   const client = createTestClient();
-  const provider = new UserFormEditorProvider(extensionUri, client.client);
+  const checkpointRoot = vscode.Uri.file(path.join(directory, "checkpoints"));
+  const provider = new UserFormEditorProvider(
+    extensionUri,
+    client.client,
+    undefined,
+    undefined,
+    checkpointRoot,
+  );
   const panel = createFakePanel();
   try {
     await writeFile(uri.fsPath, initial, "utf8");
@@ -1060,6 +1423,7 @@ async function withTestEnvironment(
     assert.strictEqual(customDocument.document.uri.toString(), uri.toString());
     const environment: TestEnvironment = {
       directory,
+      checkpointRoot,
       uri,
       sourceDocument,
       customDocument,

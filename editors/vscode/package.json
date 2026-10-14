@@ -59,6 +59,14 @@
   },
   "l10n": "./l10n",
   "contributes": {
+    "keybindings": [
+      {
+        "command": "xlflow.userFormDesigner.save",
+        "key": "ctrl+s",
+        "mac": "cmd+s",
+        "when": "activeCustomEditorId == xlflow.userFormDesigner"
+      }
+    ],
     "customEditors": [
       {
         "viewType": "xlflow.userFormDesigner",
@@ -208,6 +216,12 @@
         "command": "xlflow.restartLanguageServer",
         "title": "%command.restartLanguageServer.title%",
         "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.userFormDesigner.save",
+        "title": "%command.userFormDesigner.save.title%",
+        "category": "%command.category%",
+        "enablement": "activeCustomEditorId == xlflow.userFormDesigner"
       },
       {
         "command": "xlflow.checkEnvironment",

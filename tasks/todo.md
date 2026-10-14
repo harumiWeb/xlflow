@@ -879,6 +879,12 @@ CI or publication is claimed.
 
 # Deferred-save UserForm Designer
 
+## Explicit source save with Auto Save enabled
+
+- [x] Separate internal draft checkpoints from explicit YAML/JSON publication; add Designer-scoped Ctrl+S/Cmd+S and keep global Auto Save settings untouched.
+- [x] Preserve URI-shared native Undo/Redo, pending-source badge and durable draft recovery on close/reopen/restart; retain corrupt recovery data and failed saves. Read recovery records behind pending source-queue writes so immediate reopen cannot miss the final edit.
+- [x] Full VS Code 1.141.1 tests PASS, including actual Auto Save, explicit command/button, direct source Auto Save, native history, normal reopen/provider restart, JSON structural conflicts, Revert, Save As and malformed-record retention. Lint/docs checks PASS; root pnpm version switching required a command-scoped environment override for the existing local package-manager change. ADR/specs/guides/changelogs updated; VSIX packaged. Bounded read-only review reported no confirmed findings; no Excel E2E is needed for this editor-only change.
+
 - [x] Record the URI-shared draft, native custom-document history, conflict, save, and VS Code lifecycle decisions in ADR-0073; supersede the relevant ADR-0064/0066 decisions.
 - [x] Update the Designer specification, user guide, and unreleased changelogs for deferred save and explicit conflict resolution.
 - [x] Implement `CustomEditorProvider` and URI-shared draft state, including draft history rebasing, `CustomDocumentEditEvent` Undo/Redo, and Save/Save As/Revert/backup/restore through the latest `TextDocument`. Isolate native Designer history with a dedicated editor resource URI while retaining the real source URI for LSP and persistence.

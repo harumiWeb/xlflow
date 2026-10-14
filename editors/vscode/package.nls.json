@@ -24,6 +24,7 @@
   "view.tests.name": "Tests",
   "view.formulas.name": "Formulas",
   "command.category": "xlflow",
+  "command.userFormDesigner.save.title": "Save UserForm Designer Changes to Source",
   "command.restartLanguageServer.title": "Restart Language Server",
   "command.checkEnvironment.title": "Check Environment",
   "command.openInstallGuide.title": "Open Install Guide",

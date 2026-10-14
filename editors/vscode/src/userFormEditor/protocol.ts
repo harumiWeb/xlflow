@@ -130,7 +130,7 @@ export const designerStrings = {
   header: "xlflow UserForm Designer",
   openText: "Open text editor",
   save: "Save",
-  unsaved: "Unsaved Designer changes",
+  unsaved: "Designer changes not applied to YAML/JSON",
   sourceConflict: "YAML/JSON and Designer changes conflict. Resolve the conflict before saving.",
   useSource: "Use YAML/JSON changes",
   useDesigner: "Use Designer draft",

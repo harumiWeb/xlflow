@@ -4,10 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added deferred-save editing to the UserForm Designer with one shared draft
-  per FormSpec, LSP validation, native Undo/Redo, and explicit handling for
-  conflicts with text-editor changes. Designer edits leave YAML/YML/JSON
-  source unchanged until Save; AutoSave follows the VS Code setting.
+- Added deferred-save editing to the UserForm Designer with URI-keyed drafts,
+  LSP validation, native Undo/Redo, and explicit handling for text-editor
+  conflicts. VS Code Save, Save All, menu Save, and AutoSave checkpoint drafts
+  in extension storage without writing YAML/YML/JSON. The Designer Save button
+  and scoped Ctrl+S/Cmd+S command explicitly publish the validated draft;
+  the source-not-applied badge is independent from the native tab dirty dot.
 
 - Added UserForm Designer form-edge and corner resizing with client-size
   source updates, zoom/grid snapping, child bounds and one-step Undo/Redo.

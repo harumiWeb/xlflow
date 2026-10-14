@@ -27,15 +27,30 @@ eight handles. Arrow keys move 1 point; Shift+Arrow moves 10 points. Holding
 an arrow key creates one edit when the keys are released. Escape cancels an
 unfinished interaction. Use VS Code Undo/Redo to restore completed edits.
 
-Designer actions are kept in a shared draft for the FormSpec. The Save and
-Unsaved indicators reflect that draft; source files remain unchanged until you
-save. VS Code AutoSave follows your existing Auto Save setting.
+Designer actions are kept in a shared draft for the FormSpec. The Designer's
+**YAML/JSON not applied** badge shows whether that draft has been published to
+the source. The VS Code tab's dirty dot tracks its internal checkpoint, so the
+dot can clear while the not-applied badge remains.
+
+VS Code Save, Save All, menu Save, and AutoSave durably checkpoint the draft in
+xlflow's extension storage; they do not write YAML, YML, or JSON. To publish,
+use the Designer Save button or the Designer-scoped Ctrl+S/Cmd+S command. This
+validates the current draft and saves it through the latest source document.
+Your global AutoSave setting is unchanged, and AutoSave for regular source-text
+editing continues normally. Pending drafts survive closing and reopening the
+Designer and restarting VS Code. Backup and hot-exit recovery remain supported.
+
+Use Revert to discard the pending Designer draft and adopt the latest YAML/JSON
+source buffer. Save As explicitly publishes to the destination you choose. A
+corrupt saved draft displays a recovery error and remains available until an
+explicit Save or Revert resolves it.
 
 Changes you make in the regular text editor appear in the Designer immediately.
 Non-overlapping changes merge with a dirty Designer draft. If the changes
-conflict, the Designer retains both versions and disables saving until you
-choose **Use YAML/JSON changes** or **Use Designer draft**. A whole-document
-choice is confirmed explicitly when the changes cannot be merged safely.
+conflict, the Designer retains both versions and disables source publication
+until you choose **Use YAML/JSON changes** or **Use Designer draft**. Native
+checkpoint saves remain available. A whole-document choice is confirmed
+explicitly when the changes cannot be merged safely.
 
 Select the form by clicking its background or its name in the selection path.
 Drag the right edge, bottom edge or bottom-right corner to resize it. This
@@ -76,8 +91,8 @@ focused input, so normal character deletion continues to work. Direct deletion
 of a Page is disabled. Structural editing requires the LSP's separate
 `userFormStructuralEdit` capability. Older servers keep their advertised
 geometry/property support and do not offer structural actions. Source edits do
-not change code-behind. Save explicitly or let VS Code AutoSave save according
-to its standard configuration.
+not change code-behind. Publish source with the Designer Save button or its
+scoped Ctrl+S/Cmd+S command; AutoSave checkpoints the draft only.
 
 Drag an existing control into a Frame or onto the form background to change
 its parent. The highlighted destination and drag preview show the final

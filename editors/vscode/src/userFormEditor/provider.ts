@@ -31,7 +31,9 @@ import {
 } from "./clipboard";
 import type { ClipboardContent } from "./clipboard";
 import { designerDocument } from "./model";
+import { tmpdir } from "node:os";
 import { UserFormCustomDocument, virtualTextDocument } from "./customDocument";
+import { DraftCheckpointStore, decodeDraftCheckpoint } from "./checkpoint";
 import { DraftState, computeSourceChanges } from "./draft";
 import type { DraftFrame } from "./draft";
 import { designerResourceUri, designerSourceUri } from "./resource";
@@ -208,6 +210,7 @@ export async function prepareCollectionEdit(
 }
 
 export const designerViewType = "xlflow.userFormDesigner";
+export const designerSaveCommand = "xlflow.userFormDesigner.save";
 
 export class UserFormEditorProvider
   implements vscode.CustomEditorProvider<UserFormCustomDocument>, vscode.Disposable
@@ -221,6 +224,9 @@ export class UserFormEditorProvider
   public readonly onDidChangeCustomDocument = this.customEdits.event;
   private readonly restored = new Set<UserFormCustomDocument>();
   private readonly redirectDrafts = new Map<string, DraftState>();
+  private readonly checkpoints: DraftCheckpointStore;
+  private readonly panels = new Map<vscode.WebviewPanel, UserFormCustomDocument>();
+  private readonly checkpointCancellation = new vscode.CancellationTokenSource();
   public constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly clients: XlflowLanguageClientManager,
@@ -228,12 +234,20 @@ export class UserFormEditorProvider
     private readonly confirmResolution: (
       choice: "source" | "designer",
     ) => PromiseLike<boolean> = confirmConflictResolution,
-  ) {}
+    checkpointStorageRoot = vscode.Uri.joinPath(
+      vscode.Uri.file(tmpdir()),
+      "xlflow-userform-designer-drafts",
+    ),
+  ) {
+    this.checkpoints = new DraftCheckpointStore(checkpointStorageRoot);
+  }
 
   dispose(): void {
     this.documents.forEach((document) => document.dispose());
     this.documents.clear();
     this.redirectDrafts.clear();
+    this.panels.clear();
+    this.checkpointCancellation.dispose();
     this.customEdits.dispose();
     this.clipboard.dispose();
   }
@@ -247,13 +261,23 @@ export class UserFormEditorProvider
     if (existing && !existing.closed) return existing;
     const source = await vscode.workspace.openTextDocument(designerSourceUri(uri));
     let state: DraftState | undefined = this.redirectDrafts.get(uri.toString());
+    // A freshly closed panel can still have a queued checkpoint write. Read
+    // behind that same source queue so reopening cannot miss its latest draft.
+    let recovery = await this.edits.exclusive(source.uri, () => this.checkpoints.read(source.uri));
     if (context.backupId) {
-      const backup = JSON.parse(
-        Buffer.from(
-          await vscode.workspace.fs.readFile(vscode.Uri.parse(context.backupId)),
-        ).toString("utf8"),
+      const backup = decodeDraftCheckpoint(
+        JSON.parse(
+          Buffer.from(
+            await vscode.workspace.fs.readFile(vscode.Uri.parse(context.backupId)),
+          ).toString("utf8"),
+        ),
+        source.uri,
       );
-      const restored = DraftState.restore(backup);
+      this.checkpoints.observe(backup);
+      if (!recovery || backup.updatedAt > recovery.updatedAt) recovery = backup;
+    }
+    if (!state && recovery) {
+      const restored = DraftState.restore(recovery.state);
       // VS Code does not persist custom undo callbacks across extension reloads.
       // Recover the pending draft as one native edit against its source baseline.
       state = new DraftState(restored.baseText);
@@ -277,7 +301,24 @@ export class UserFormEditorProvider
     if (state) this.restored.add(document);
     this.documents.set(uri.toString(), document);
     this.redirectDrafts.delete(uri.toString());
+    let checkpointRevision = document.state.revision;
+    const checkpointChanges = document.onDidChange(() => {
+      if (document.uri.scheme === "file") return; // Temporary Open With redirect, not the draft owner.
+      if (checkpointRevision === document.state.revision) return;
+      checkpointRevision = document.state.revision;
+      // Persist source synchronization and Undo/Redo as well as native saves:
+      // a clean native tab can still contain changes not yet applied to YAML.
+      void this.edits
+        .exclusive(document.sourceUri, () =>
+          this.checkpointDocument(document, this.checkpointCancellation.token),
+        )
+        .catch((error) => {
+          document.saveError = String(error);
+          if (!document.closed) document.notify();
+        });
+    });
     document.onDidDispose(() => {
+      checkpointChanges.dispose();
       this.restored.delete(document);
       if (this.documents.get(uri.toString()) === document) this.documents.delete(uri.toString());
     });
@@ -336,13 +377,69 @@ export class UserFormEditorProvider
     document: UserFormCustomDocument,
     token: vscode.CancellationToken,
   ): Promise<void> {
+    try {
+      await this.edits.exclusive(document.sourceUri, () =>
+        this.checkpointDocument(document, token),
+      );
+    } catch (error) {
+      if (!(error instanceof vscode.CancellationError)) {
+        document.saveError = String(error);
+        document.notify();
+      }
+      throw error;
+    }
+  }
+
+  private async checkpointDocument(
+    document: UserFormCustomDocument,
+    token: vscode.CancellationToken,
+  ): Promise<void> {
+    await this.checkpoints.write(document.sourceUri, document.state.serialize(), token);
+  }
+
+  /** Publish only through an explicit Designer action, never native Auto Save. */
+  public async publishCustomDocument(
+    document: UserFormCustomDocument,
+    token: vscode.CancellationToken,
+  ): Promise<void> {
     await this.edits.exclusive(document.sourceUri, () =>
-      document.save(async () => {
-        const result = await this.clients.requestUserFormPreview(document.document);
-        if (result.error || !result.document)
-          throw new Error(result.error?.message ?? "The UserForm draft is invalid.");
-      }, token),
+      (async () => {
+        await document.save(async () => {
+          const result = await this.clients.requestUserFormPreview(document.document);
+          if (result.error || !result.document)
+            throw new Error(result.error?.message ?? "The UserForm draft is invalid.");
+        }, token);
+        await this.checkpointDocument(document, token);
+      })(),
     );
+  }
+
+  public registerSaveCommand(command = designerSaveCommand): vscode.Disposable {
+    return vscode.commands.registerCommand(command, () => this.publishActiveDocument());
+  }
+
+  public async publishActiveDocument(): Promise<void> {
+    const active = [...this.panels.entries()].find(([panel]) => panel.active);
+    if (!active) return;
+    await this.publishPanel(active[0], active[1]);
+  }
+
+  private async publishPanel(
+    panel: vscode.WebviewPanel,
+    document: UserFormCustomDocument,
+  ): Promise<void> {
+    const cancellation = new vscode.CancellationTokenSource();
+    try {
+      await this.publishCustomDocument(document, cancellation.token);
+      // Refresh the native draft checkpoint even when Auto Save already made
+      // the tab clean. This command never publishes source by itself.
+      if (!document.closed && panel.visible) {
+        panel.reveal(panel.viewColumn);
+        await vscode.commands.executeCommand("workbench.action.files.save");
+      }
+    } finally {
+      cancellation.dispose();
+    }
   }
 
   public async saveCustomDocumentAs(
@@ -354,7 +451,7 @@ export class UserFormEditorProvider
       destination.toString() === document.uri.toString() ||
       destination.toString() === document.sourceUri.toString()
     )
-      return this.saveCustomDocument(document, token);
+      return this.publishCustomDocument(document, token);
     await this.edits.exclusive(document.sourceUri, async () => {
       document.saving = true;
       document.saveError = undefined;
@@ -420,6 +517,11 @@ export class UserFormEditorProvider
           throw new Error(
             "The document changed during Save As. The Designer draft has been retained.",
           );
+        // Save As replaces the editor with the destination. Retain the latest
+        // source for the original URI so reopening it does not resurrect the
+        // draft that was explicitly published to a different file.
+        document.state.revert(document.sourceDocument.getText());
+        await this.checkpointDocument(document, token);
       } catch (error) {
         document.saveError = String(error);
         throw error;
@@ -439,6 +541,7 @@ export class UserFormEditorProvider
       const text = document.sourceDocument.getText();
       if (token.isCancellationRequested) throw new vscode.CancellationError();
       document.state.revert(text);
+      await this.checkpointDocument(document, token);
       document.notify();
     });
   }
@@ -450,9 +553,14 @@ export class UserFormEditorProvider
   ): Promise<vscode.CustomDocumentBackup> {
     return this.edits.exclusive(document.sourceUri, async () => {
       if (token.isCancellationRequested) throw new vscode.CancellationError();
+      const checkpoint = await this.checkpoints.write(
+        document.sourceUri,
+        document.state.serialize(),
+        token,
+      );
       await vscode.workspace.fs.writeFile(
         context.destination,
-        Buffer.from(JSON.stringify(document.state.serialize()), "utf8"),
+        Buffer.from(JSON.stringify(checkpoint), "utf8"),
       );
       if (token.isCancellationRequested) throw new vscode.CancellationError();
       return {
@@ -492,6 +600,8 @@ export class UserFormEditorProvider
       panel.dispose();
       return;
     }
+    this.panels.set(panel, customDocument);
+    panel.onDidDispose(() => this.panels.delete(panel));
     const document = customDocument.document;
     const resources = vscode.Uri.joinPath(this.extensionUri, "dist", "userFormDesigner");
     panel.webview.options = { enableScripts: true, localResourceRoots: [resources] };
@@ -857,10 +967,9 @@ export class UserFormEditorProvider
             viewColumn: vscode.ViewColumn.Beside,
           });
         } else if (message.type === "save") {
-          panel.reveal(panel.viewColumn);
-          void vscode.commands
-            .executeCommand("workbench.action.files.save")
-            .then(undefined, (error) => vscode.window.showErrorMessage(String(error)));
+          void this.publishPanel(panel, customDocument).then(undefined, (error) =>
+            vscode.window.showErrorMessage(String(error)),
+          );
         } else if (message.type === "resolveConflict") {
           void this.edits
             .exclusive(document.uri, async () => {

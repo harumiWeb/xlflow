@@ -2,11 +2,14 @@
 
 ## Unreleased
 
-- Added deferred-save UserForm Designer drafts shared across panels for one
-  FormSpec. Designer edits use native Undo/Redo and preserve YAML/YML/JSON
-  until Save. Non-overlapping text-editor changes merge, while conflicts retain both
-  versions and require an explicit resolution. AutoSave follows VS Code
-  settings.
+- Added URI-keyed deferred-save UserForm Designer drafts shared across panels.
+  Native Save, Save All, menu Save, and AutoSave checkpoint drafts in extension
+  storage without writing YAML/YML/JSON; the Designer Save button and scoped
+  Ctrl+S/Cmd+S command explicitly publish the validated draft. The native tab
+  dirty dot tracks its checkpoint independently from the source-not-applied
+  badge. Non-overlapping text-editor changes merge, while conflicts retain both
+  versions and require explicit resolution. Global AutoSave settings remain
+  unchanged.
 
 - Added selected-form right/bottom edge and corner dragging to resize
   `form.width` / `form.height` in client points, with snapping, child bounds,

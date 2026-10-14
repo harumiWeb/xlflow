@@ -9,6 +9,9 @@ function activate() {
         supportsMultipleEditorsPerDocument: true,
       });
     },
+    registerSaveCommand(provider, commandId) {
+      return provider.registerSaveCommand(commandId);
+    },
   };
 }
 

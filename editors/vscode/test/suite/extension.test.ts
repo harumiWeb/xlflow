@@ -1263,6 +1263,17 @@ function assertLocalizationResources(extensionPath: string): void {
     readPath(manifest, ["contributes", "commands", 0, "title"]),
     "%command.restartLanguageServer.title%",
   );
+  assert.deepStrictEqual(readPath(manifest, ["contributes", "keybindings", 0]), {
+    command: "xlflow.userFormDesigner.save",
+    key: "ctrl+s",
+    mac: "cmd+s",
+    when: "activeCustomEditorId == xlflow.userFormDesigner",
+  });
+  assert.strictEqual(
+    packageNls["command.userFormDesigner.save.title"],
+    "Save UserForm Designer Changes to Source",
+  );
+  assert.ok(packageNlsJa["command.userFormDesigner.save.title"]);
   assert.strictEqual(
     readPath(manifest, ["contributes", "views", "xlflow", 0, "name"]),
     "%view.setup.name%",

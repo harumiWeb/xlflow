@@ -32,10 +32,27 @@ project, or without a compatible LSP connection, produces an editor error.
 The provider owns one custom document and source-text draft per eligible
 FormSpec URI. Every Designer panel for that URI reads and edits the same draft
 and native history. The draft starts from the latest open `TextDocument` text
-and preserves comments, formatting, and other untouched source. Designer
-actions do not change the open source document until Save or configured
-AutoSave.
-The Designer shows Save/Unsaved state for this shared draft.
+and preserves comments, formatting, and other untouched source. Persist pending
+drafts in extension internal storage keyed by the original FormSpec URI so they
+survive normal close, reopen, and extension restart.
+
+The native `CustomEditorProvider` save callback durably checkpoints the draft
+to extension internal storage only. AutoSave, File Save All, and menu Save use
+this callback and never write YAML, YML, or JSON. The native tab dirty marker
+therefore tracks the internal checkpoint, while a separate **YAML/JSON not
+applied** badge indicates that the draft has not been published to source.
+Neither the extension nor the Designer changes the user's global
+`files.autoSave` setting. Regular source-text editing and its configured
+AutoSave behavior continue normally; edits in that document appear in the
+Designer immediately.
+
+Only the Designer Save button and its Designer-scoped Ctrl+S/Cmd+S command
+publish the current validated draft. Reconcile against the newest open
+`TextDocument`, apply source-preserving edits through VS Code document APIs,
+and call `TextDocument.save()`; never write the workspace file directly. On
+successful publication, refresh the internal checkpoint and clear pending
+recovery state. A failed validation, conflict, edit, or source save retains the
+pending draft for retry.
 
 The host sends the exact current draft text and its revision to the LSP for
 preview, canonical validation, and semantic edits. It applies the localized
@@ -48,7 +65,8 @@ in the Designer. If the Designer draft has no pending edits, it adopts the
 current text. If it is dirty, the draft engine merges non-overlapping changes
 against the last synchronized source and rebases draft history. An overlapping
 change retains both the current text-editor source and the Designer draft,
-shows a source conflict, and disables saving until explicitly resolved. The
+shows a source conflict, and disables explicit source publication until
+resolved. Native checkpoint saves remain available. The
 user can choose **Use YAML/JSON changes** or **Use Designer draft**. When a
 safe granular merge is unavailable, choosing a whole-document version
 requires explicit confirmation. Neither version is silently discarded.
@@ -66,26 +84,32 @@ Designer action returns to that latest source baseline. History entries
 superseded by later direct source edits are neutral native callbacks; advancing
 past them never restores discarded source or throws a stale-frame error.
 
-Save first reconciles against the latest open `TextDocument`, applies the
-resolved source edits through VS Code document APIs, and then calls
+Explicit Designer Save first validates and reconciles against the latest open
+`TextDocument`, applies source edits through VS Code document APIs, then calls
 `TextDocument.save()`. A stale draft never overwrites a newer dirty text-editor
 buffer, and the provider does not overwrite workspace source through filesystem
-writes. Save As creates a missing destination and then uses the VS Code
-document-save path; an existing dirty destination must be saved or reverted
-first. Backup, restore,
-and Revert use the custom-document lifecycle; Revert discards unsaved Designer
-edits and adopts the latest text-editor buffer, preserving its unsaved edits.
-Advancing past superseded neutral Undo entries can conservatively mark the
-native tab dirty even when no Designer text delta remains; Redo to the saved
-checkpoint or Save clears that marker without reverting external source.
-AutoSave follows the standard VS Code configuration and uses the same
-save path.
+writes. Save As is an explicit publish to the chosen destination; it creates a
+missing destination through VS Code, and an existing dirty destination must be
+saved or reverted first. Backup, restore, hot-exit, and Revert use the
+custom-document lifecycle. Revert discards the pending Designer draft and
+adopts the latest source `TextDocument` buffer, including unsaved text-editor
+changes; clear recovery state only after that succeeds. Advancing past
+superseded neutral Undo entries can conservatively dirty the custom document
+and trigger another internal checkpoint. The native tab dot tracks that
+checkpoint, while the source-not-applied badge remains until publication.
+AutoSave follows the standard VS Code configuration and checkpoints internal
+storage only.
+
+A corrupt checkpoint displays a recovery error and remains stored; it is never
+silently discarded or overwritten. Clear recovery state only after explicit
+source publication or Revert completes successfully.
 
 Each completed Designer action raises one `CustomDocumentEditEvent`.
 VS Code Undo/Redo updates the shared draft, and the draft engine rebases its
 history when external text changes are merged.
-After extension reload, pending backup contents are recovered as one native
-Undo step because VS Code does not persist the provider's callback objects.
+VS Code backup and hot-exit recovery remain supported in addition to the
+URI-keyed internal checkpoint. Restoring a checkpoint recovers the pending
+source draft; source publication remains an explicit Designer action.
 
 ## Source and preview protocol
 
@@ -395,7 +419,8 @@ confirmed action removes that Page and its descendants with `cascade: true` in
 one semantic edit and one native history step.
 
 Structural edits apply only to the shared FormSpec draft. They do not edit
-code-behind or save the open source document until a VS Code save action. The
+code-behind or publish the source document until explicit Designer Save or its
+scoped keyboard command. The
 host captures the draft source and revision associated with an add request or
 pending delete confirmation. If that draft revision, project, or LSP
 connection changes before the action is submitted or applied, discard the
@@ -785,8 +810,12 @@ These are required implementation checks; they do not claim that the current
 implementation or test run has passed.
 
 Verify that multiple Designer panels for one URI share draft text and native
-Undo/Redo. A completed LSP edit must change only the draft until Save or
-configured AutoSave, and Undo/Redo must not write to the open `TextDocument`.
+Undo/Redo. A completed LSP edit must change only the draft until explicit
+Designer Save or its scoped keyboard command. Native Save, Save All, and
+configured AutoSave must checkpoint internally without writing the open
+`TextDocument`; Undo/Redo must not publish it. Verify that the tab dirty marker
+tracks the internal checkpoint independently from the YAML/JSON-not-applied
+badge.
 Preview and edit requests must carry the exact draft text, preserve source
 formatting, and retain canonical LSP validation behavior without frontend
 semantic rules.
@@ -795,14 +824,20 @@ Verify that external unsaved text-editor changes appear immediately. A clean
 draft adopts them; non-overlapping changes merge into a dirty draft and the
 EngineWorker rebases history so subsequent Undo/Redo remains correct. An
 overlapping edit must retain both versions, show the Source Conflict state, and
-block Save/AutoSave until an explicit resolution. Cover **Use YAML/JSON
+block explicit Designer Save until an explicit resolution. Native checkpoint
+save and AutoSave remain available without publishing source. Cover **Use YAML/JSON
 changes**, **Use Designer draft**, and an explicitly confirmed whole-document
 choice when a granular merge is unavailable.
 
-Verify Save and AutoSave apply edits to the latest open `TextDocument` and call
-its save API without writing the workspace file directly or replacing newer
-dirty text. Cover failed apply/save retry, Save As, Revert, backup and restore,
-and the standard VS Code AutoSave enabled/disabled settings.
+Verify explicit Designer Save validates and applies edits to the latest open
+`TextDocument`, then calls its save API without writing the workspace file
+directly or replacing newer dirty text. Verify the native save callback
+checkpoints only internal storage for menu Save, Save All, and AutoSave, and
+that pending drafts survive close/reopen/restart by URI. Cover failed
+apply/save retry, Save As as an explicit publish, Revert, backup, restore,
+hot-exit, and standard AutoSave enabled/disabled settings. A corrupt checkpoint
+must show an error and remain stored until successful explicit Save or Revert
+resolves the pending recovery state.
 
 ## Structural edit verification requirements
 

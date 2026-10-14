@@ -24,6 +24,7 @@
   "view.tests.name": "テスト",
   "view.formulas.name": "数式",
   "command.category": "xlflow",
+  "command.userFormDesigner.save.title": "UserForm Designer の変更をソースに保存",
   "command.openInstallGuide.title": "インストールガイドを開く",
   "command.configurePath.title": "xlflowパスを設定",
   "command.retryCliDetection.title": "CLI検出を再試行",
