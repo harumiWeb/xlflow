@@ -54,6 +54,16 @@ successful publication, refresh the internal checkpoint and clear pending
 recovery state. A failed validation, conflict, edit, or source save retains the
 pending draft for retry.
 
+Normalize multiline LSP edit text to the source `TextDocument.eol` before
+creating draft history, matching native VS Code TextEdit application. Verify
+the source still matches the validated draft after applying the publication
+edit. After `TextDocument.save()` succeeds, accept the actual saved buffer,
+including formatter/save-participant changes, and rebase history from the
+published draft. The old source baseline must not make our own saved edit a
+conflict. A still-dirty source or changed draft revision remains a failed save.
+Native regressions cover CRLF multiline edits and save-participant final
+newlines, repeated publication, and Undo/Redo with the saved newline retained.
+
 The host sends the exact current draft text and its revision to the LSP for
 preview, canonical validation, and semantic edits. It applies the localized
 text edits returned by the LSP to the draft. The LSP and canonical FormSpec

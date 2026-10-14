@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed false source conflicts during Designer Save by matching native source
+  line endings and adopting successfully saved formatter output.
+
 - Added URI-keyed deferred-save UserForm Designer drafts shared across panels.
   Native Save, Save All, menu Save, and AutoSave checkpoint drafts in extension
   storage without writing YAML/YML/JSON; the Designer Save button and scoped

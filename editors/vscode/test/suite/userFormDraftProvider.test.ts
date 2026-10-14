@@ -105,6 +105,8 @@ export async function runUserFormDraftProviderAssertions(extensionUri: vscode.Ur
   await assertDraftEditUndoRedoAndSave(extensionUri, "yaml", yamlSource);
   await assertDraftEditUndoRedoAndSave(extensionUri, "yaml", crlfYamlSource);
   await assertDraftEditUndoRedoAndSave(extensionUri, "json", jsonSource);
+  await assertMultilineCRLFPublication(extensionUri);
+  await assertSaveParticipantPublication(extensionUri);
   await assertRepeatedOpenSharesDraft(extensionUri);
   await assertExternalChangesMergeIntoDraft(extensionUri);
   await assertExternalControlReorderConflictsWithDraft(extensionUri);
@@ -115,6 +117,78 @@ export async function runUserFormDraftProviderAssertions(extensionUri: vscode.Ur
   await assertCheckpointRecovery(extensionUri, "yaml", yamlSource);
   await assertCheckpointRecovery(extensionUri, "json", jsonControlsSource);
   await assertMalformedCheckpointIsRetained(extensionUri);
+}
+
+async function assertMultilineCRLFPublication(extensionUri: vscode.Uri): Promise<void> {
+  await withTestEnvironment(extensionUri, "yaml", crlfYamlSource, async (environment) => {
+    const { customDocument, provider, cancellation, sourceDocument, uri } = environment;
+    // Exercise LF edit text against a native CRLF document.
+    const frame = customDocument.apply(
+      [
+        {
+          range: { start: { line: 6, character: 0 }, end: { line: 6, character: 0 } },
+          newText: "  width: 500\n  height: 450\n",
+        },
+      ],
+      "Resize form",
+    );
+    assert.ok(frame);
+    const expected = crlfYamlSource.replace(
+      "controls: []",
+      "  width: 500\r\n  height: 450\r\ncontrols: []",
+    );
+    await provider.publishCustomDocument(customDocument, cancellation.token);
+    assert.strictEqual(customDocument.state.conflicted, false);
+    assert.strictEqual(customDocument.state.dirty, false);
+    assert.strictEqual(customDocument.state.text, expected);
+    assert.strictEqual(sourceDocument.getText(), expected);
+    assert.strictEqual(await readFile(uri.fsPath, "utf8"), expected);
+    customDocument.undo(frame);
+    assert.strictEqual(customDocument.state.text, crlfYamlSource);
+    customDocument.redo(frame);
+    assert.strictEqual(customDocument.state.text, expected);
+    await provider.publishCustomDocument(customDocument, cancellation.token);
+  });
+}
+
+async function assertSaveParticipantPublication(extensionUri: vscode.Uri): Promise<void> {
+  await withTestEnvironment(extensionUri, "yaml", yamlSource, async (environment) => {
+    const { customDocument, provider, cancellation, sourceDocument, uri } = environment;
+    const subscription = vscode.workspace.onWillSaveTextDocument((event) => {
+      if (event.document.uri.toString() !== uri.toString()) return;
+      // A real VS Code save participant, like insertFinalNewline or a formatter.
+      if (!event.document.getText().endsWith("\n\n"))
+        event.waitUntil(
+          Promise.resolve([
+            vscode.TextEdit.insert(
+              event.document.positionAt(event.document.getText().length),
+              "\n",
+            ),
+          ]),
+        );
+    });
+    try {
+      await sendCaptionEdit(environment, 1, "Saved with formatter");
+      await provider.publishCustomDocument(customDocument, cancellation.token);
+      const expected = replaceCaption(yamlSource, "Saved with formatter") + "\n";
+      await waitFor(() => !customDocument.reconciling, "save participant reconciliation");
+      assert.strictEqual(sourceDocument.getText(), expected);
+      assert.strictEqual(await readFile(uri.fsPath, "utf8"), expected);
+      assert.strictEqual(customDocument.state.text, expected);
+      assert.strictEqual(customDocument.state.dirty, false);
+      assert.strictEqual(customDocument.state.conflicted, false);
+      const frame = customDocument.state.appliedFrames.at(-1)!;
+      customDocument.undo(frame);
+      assert.strictEqual(customDocument.state.text, yamlSource + "\n");
+      customDocument.redo(frame);
+      assert.strictEqual(customDocument.state.text, expected);
+      await sendCaptionEdit(environment, 2, "Second save");
+      await provider.publishCustomDocument(customDocument, cancellation.token);
+      assert.strictEqual(customDocument.state.conflicted, false);
+    } finally {
+      subscription.dispose();
+    }
+  });
 }
 
 async function assertDraftEditUndoRedoAndSave(

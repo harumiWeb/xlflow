@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed UserForm Designer explicit Save incorrectly reporting source conflicts
+  after multiline CRLF edits or VS Code save-time formatting.
+
 - Added deferred-save editing to the UserForm Designer with URI-keyed drafts,
   LSP validation, native Undo/Redo, and explicit handling for text-editor
   conflicts. VS Code Save, Save All, menu Save, and AutoSave checkpoint drafts

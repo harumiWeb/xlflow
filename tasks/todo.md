@@ -879,6 +879,12 @@ CI or publication is claimed.
 
 # Deferred-save UserForm Designer
 
+## Explicit save false conflict
+
+- [x] Reproduce false conflicts with multiline LF edits in a native CRLF source and a real VS Code save participant before each fix.
+- [x] Match native TextDocument edit normalization and reconcile successfully saved output from the published baseline while retaining pre-save external-change protection and safe draft history.
+- [x] Full VS Code 1.141.1 tests PASS, including both regressions, repeated Save and Undo/Redo. Lint/docs/format and diff checks PASS; one-pass read-only review found no confirmed issues. Save-contract specification and both changelogs updated; VSIX rebuilt. No Excel E2E is needed for this editor-only fix.
+
 ## Explicit source save with Auto Save enabled
 
 - [x] Separate internal draft checkpoints from explicit YAML/JSON publication; add Designer-scoped Ctrl+S/Cmd+S and keep global Auto Save settings untouched.

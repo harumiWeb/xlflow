@@ -141,7 +141,15 @@ export class UserFormCustomDocument implements vscode.CustomDocument {
   apply(edits: SourceTextEdit[], label?: string): DraftFrame | undefined {
     if (this.closed || this.saving || this.reconciling || this.state.conflicted)
       throw new Error("The Designer draft is unavailable for editing.");
-    const frame = this.state.commit(applySourceTextEdits(this.state.text, edits), label);
+    // TextDocument applies multiline TextEdits using the source document's EOL.
+    // Apply the same rule in the draft, before creating its Undo/Redo frame.
+    // Otherwise our own publish is mistaken for an external source change.
+    const eol = this.sourceDocument.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+    const normalizedEdits = edits.map((edit) => ({
+      ...edit,
+      newText: edit.newText.replace(/\r\n|\r|\n/g, eol),
+    }));
+    const frame = this.state.commit(applySourceTextEdits(this.state.text, normalizedEdits), label);
     if (frame) this.changed.fire();
     return frame;
   }
@@ -223,11 +231,16 @@ export class UserFormCustomDocument implements vscode.CustomDocument {
             "Could not save the UserForm source. The Designer draft has been retained.",
           ),
         );
-      if (this.sourceDocument.getText() !== text || this.state.revision !== revision)
+      if (this.sourceDocument.isDirty || this.state.revision !== revision)
         throw new Error(
           vscode.l10n.t("The document changed. Retry the operation on the updated form."),
         );
+      // Publication was verified before invoking save. Save participants may
+      // then format the source; the successfully saved buffer is authoritative.
+      // Rebase from the published draft, rather than its pre-publication base,
+      // so our own edit cannot conflict with its formatted counterpart.
       this.state.markSaved();
+      this.state.synchronize(this.sourceDocument.getText());
     } catch (error) {
       this.saveError = String(error);
       throw error;
