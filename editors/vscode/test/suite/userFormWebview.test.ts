@@ -34,6 +34,7 @@ window.acquireVsCodeApi = () => ({
 const violations = [];
 const runtimeErrors = [];
 let pointerFormOrigin;
+let pointerHandleOrigin;
 window.addEventListener("error", e => runtimeErrors.push(e.message));
 window.addEventListener("unhandledrejection", e => runtimeErrors.push(String(e.reason)));
 window.addEventListener("securitypolicyviolation", e => violations.push(e.violatedDirective));
@@ -59,8 +60,17 @@ window.addEventListener("message", e => {
         // breadcrumbs or notices change the form's position during the drag.
         const bounds = pointerFormOrigin ?? currentBounds;
         const zoom = Number(document.querySelector(".designer-toolbar select").value);
+        if (props.handleCenter) {
+          const handle = target.getBoundingClientRect();
+          props.formPoints = [(handle.left + handle.right - 2 * bounds.left) * 72 / (2 * 96 * zoom), (handle.top + handle.bottom - 2 * bounds.top) * 72 / (2 * 96 * zoom)];
+        }
         props.clientX = bounds.left + props.formPoints[0] * 96 * zoom / 72;
         props.clientY = bounds.top + props.formPoints[1] * 96 * zoom / 72;
+        if (props.handleCenter) pointerHandleOrigin = { x: props.clientX, y: props.clientY };
+        if (props.handleDelta && pointerHandleOrigin) {
+          props.clientX = pointerHandleOrigin.x + props.handleDelta[0] * 96 * zoom / 72;
+          props.clientY = pointerHandleOrigin.y + props.handleDelta[1] * 96 * zoom / 72;
+        }
       }
       if (props.hitTest) {
         target = document.elementFromPoint(props.clientX, props.clientY);
@@ -97,6 +107,9 @@ window.addEventListener("message", e => {
       width: label && getComputedStyle(label).width,
       top: label && getComputedStyle(label).top,
       height: label && getComputedStyle(label).height,
+      formWidth: document.querySelector(".form") && getComputedStyle(document.querySelector(".form")).width,
+      formHeight: document.querySelector(".form") && getComputedStyle(document.querySelector(".form")).height,
+      formHandles: document.querySelectorAll("[data-form-handle]").length,
       handles: document.querySelectorAll(".resize-handle").length,
       toolboxDisabled: document.querySelector('[data-toolbox-type="Label"]')?.disabled,
       placing: !!document.querySelector(".placing-control"),
@@ -1396,6 +1409,67 @@ window.addEventListener("message", e => {
     ]);
     assert.deepStrictEqual(assignedTabs.violations, []);
     assert.deepStrictEqual(assignedTabs.runtimeErrors, []);
+    await panel.webview.postMessage({ type: "editResult", requestId: tabOrderRequest.requestId });
+    const root = await snapshot({
+      type: "document",
+      version: 110,
+      document: interactive,
+      editable: true,
+      propertyEditable: true,
+      propertyGrid,
+    });
+    const priorRootEdits = (root.editMessages as unknown[]).length;
+    const rootPreview = await snapshot({
+      type: "testAction",
+      version: 111,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "1.5" } },
+        { selector: ".selection-path button", event: "click" },
+        {
+          selector: '[data-form-handle="se"]',
+          event: "pointerdown",
+          props: { pointerId: 1, button: 0, formPoints: [0, 0], handleCenter: true, hitTest: true },
+        },
+        {
+          selector: ".designer-viewport",
+          event: "pointermove",
+          props: { pointerId: 1, formPoints: [0, 0], handleDelta: [20, 15] },
+        },
+      ],
+    });
+    assert.strictEqual(rootPreview.formHandles, 3);
+    assert.strictEqual(
+      (rootPreview.editMessages as unknown[]).length,
+      priorRootEdits,
+      "form preview does not edit source",
+    );
+    assert.ok(
+      Math.abs(parseFloat(String(rootPreview.formWidth)) - ((interactive.width + 20) * 96) / 72) <
+        0.05,
+    );
+    assert.ok(
+      Math.abs(parseFloat(String(rootPreview.formHeight)) - ((interactive.height + 15) * 96) / 72) <
+        0.05,
+    );
+    const rootResized = await snapshot({
+      type: "testAction",
+      version: 112,
+      actions: [
+        {
+          selector: ".designer-viewport",
+          event: "pointerup",
+          props: { pointerId: 1, formPoints: [0, 0], handleDelta: [20, 15] },
+        },
+      ],
+    });
+    const rootRequests = rootResized.editMessages as { operations: unknown[] }[];
+    assert.strictEqual(rootRequests.length, priorRootEdits + 1);
+    assert.deepStrictEqual(rootRequests.at(-1)!.operations, [
+      { type: "setFormProperty", field: "width", value: interactive.width + 20 },
+      { type: "setFormProperty", field: "height", value: interactive.height + 15 },
+    ]);
+    assert.deepStrictEqual(rootResized.violations, []);
+    assert.deepStrictEqual(rootResized.runtimeErrors, []);
   } finally {
     subscription.dispose();
     panel.dispose();

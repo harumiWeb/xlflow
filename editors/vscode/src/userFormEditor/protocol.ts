@@ -185,6 +185,9 @@ export const designerStrings = {
   hierarchy: "Selection path",
   invalidDrop: "This control cannot be placed in this container.",
   dropTarget: "Drop target",
+  resizeWidth: "Resize form width",
+  resizeHeight: "Resize form height",
+  resizeBoth: "Resize form width and height",
   parentReadOnly: "Changing parents requires an xlflow version supporting parent edits.",
   parentPlacement: "Click the form or a Frame to place the control. Escape cancels.",
   cannotInsertContainer: "This control's default size is larger than the container.",
@@ -698,6 +701,15 @@ export function isWebviewMessage(value: unknown): value is WebviewMessage {
         isPageOperation(operations[0]) ||
         isTabOperation(operations[0]) ||
         (isProductivityOperation(operations[0]) && operations[0].type !== "pasteControls"))) ||
+      (operations.length === 2 &&
+        operations.every(
+          (op) =>
+            isPropertyOperation(op) &&
+            op.type === "setFormProperty" &&
+            ["width", "height"].includes(op.field) &&
+            typeof op.value === "number",
+        ) &&
+        new Set(operations.map((op) => op.field)).size === 2) ||
       (operations.every(isGeometryOperation) &&
         operations.every((op) => op.controlId === operations[0].controlId) &&
         new Set(operations.map((op) => op.type)).size === operations.length))

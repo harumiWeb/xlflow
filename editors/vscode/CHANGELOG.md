@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added selected-form right/bottom edge and corner dragging to resize
+  `form.width` / `form.height` in client points, with snapping, child bounds,
+  cancellation and atomic Undo/Redo.
+
 - Unified UserForm authoring and preview dimensions as `form.width` and
   `form.height`, persisted client content size in points. Removed the unreleased
   `form.build` aliases; validation recommends the canonical fields, and observed

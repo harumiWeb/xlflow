@@ -27,6 +27,12 @@ eight handles. Arrow keys move 1 point; Shift+Arrow moves 10 points. Holding
 an arrow key creates one edit when the keys are released. Escape cancels an
 unfinished interaction. Use VS Code Undo/Redo to restore completed edits.
 
+Select the form by clicking its background or its name in the selection path.
+Drag the right edge, bottom edge or bottom-right corner to resize it. This
+updates `form.width` and `form.height` in client-area points; the title bar and
+window border are not included. A corner drag updates both dimensions in one
+Undo step. Shrinking stops at the extents of existing root controls.
+
 The grid displays 8-point spacing and has a separate snapping toggle. Snapping
 applies to mouse movement and resize; keyboard movement retains its 1/10-point
 steps. Zoom ranges from 50% to 200% and does not change source coordinates.
@@ -37,7 +43,7 @@ a Frame or MultiPage stops before its children would overflow, including
 children on other Pages. Existing out-of-bounds controls are not automatically
 corrected; controls larger than their parent must be resized to fit before
 moving. Direct source edits remain available for layouts outside these UI
-constraints. Form and Page bounds are not directly editable on the canvas.
+constraints. Page bounds are not directly editable on the canvas.
 
 Visual operations produce local source edits and retain unrelated formatting.
 Invalid source retains the last valid preview and disables editing until fixed.

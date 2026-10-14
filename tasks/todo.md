@@ -1,3 +1,9 @@
+# Designer form resize
+
+- [x] Add selected form edge/corner drag handles and client-size preview with zoom, snapping and child bounds.
+- [x] Support atomic width/height transactions through the Webview and LSP boundaries, preserving YAML/JSON source and Undo/Redo.
+- [x] Verify cancellation, capability gates, native Webview hit testing and full extension checks; update specifications and changelogs. VS Code 1.141.1 full tests, LSP full tests (157.730s), vet, lint/docs and formatting pass. No Excel workbook E2E is needed for this source-only gesture change.
+
 # Issue #922 Designer productivity
 
 - [x] Confirmed Excel 16.0 twip/Single geometry rounding; limited tolerance to four geometry fields and added acceptance/rejection regressions (528 .NET tests pass). Rebuilt/installed both binaries. Original fractional FormSpec succeeds through build/push/run/save/pull/lint and saved-file apply; sentinel, 12 geometry values, unchanged spec and COM cleanup verified. Lint/format checks pass. Evidence: tmp_workspaces/final-review/issue922/coordinate-precision-evidence.md.

@@ -249,6 +249,22 @@ export function runUserFormGeometryAssertions(): void {
     operations: [{ type: "moveControl", controlId: "child", left: 0, top: 0 }],
   };
   assert.ok(isWebviewMessage(message));
+  const formResize = [
+    { type: "setFormProperty", field: "width", value: 500 },
+    { type: "setFormProperty", field: "height", value: 450 },
+  ];
+  assert.ok(isWebviewMessage({ ...message, operations: formResize }));
+  assert.ok(isWebviewMessage({ ...message, operations: [...formResize].reverse() }));
+  for (const second of [
+    { ...formResize[1], field: "width" },
+    { ...formResize[1], field: "caption" },
+    { ...formResize[1], value: null },
+    { ...formResize[1], value: "450" },
+    { ...formResize[1], value: Infinity },
+    { ...formResize[1], type: "setControlProperty", controlId: "child" },
+    message.operations[0],
+  ])
+    assert.ok(!isWebviewMessage({ ...message, operations: [formResize[0], second] }));
   assert.ok(
     !isWebviewMessage({ ...message, operations: [{ ...message.operations[0], left: NaN }] }),
   );

@@ -42,6 +42,12 @@ button {
     11px Tahoma,
     sans-serif;
 }
+.form-client-area {
+  position: relative;
+  display: inline-block;
+  overflow: visible;
+  vertical-align: top;
+}
 .control {
   position: absolute;
   box-sizing: border-box;
@@ -235,6 +241,31 @@ button {
   box-sizing: border-box;
   pointer-events: auto;
   z-index: 1;
+}
+.form-resize-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border: 1px solid #0078d4;
+  box-sizing: border-box;
+  pointer-events: auto;
+  z-index: 100001;
+}
+.form-resize-e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.form-resize-s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.form-resize-se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
 }
 .handle-nw {
   left: 0;

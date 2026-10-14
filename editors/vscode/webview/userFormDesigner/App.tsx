@@ -524,6 +524,19 @@ export function App() {
               document={document}
               approximateBounds={strings.approximateBounds}
               editable={editable}
+              formResizable={
+                propertyEditable &&
+                !error &&
+                ["width", "height"].every((field) =>
+                  propertyGrid?.form.descriptors.some(
+                    (descriptor) => descriptor.field === field && descriptor.valueType === "number",
+                  ),
+                )
+              }
+              onFormResize={commit}
+              resizeWidthLabel={strings.resizeWidth}
+              resizeHeightLabel={strings.resizeHeight}
+              resizeBothLabel={strings.resizeBoth}
               parentEditable={parentEditable && !error}
               pageEditable={pageEditable && !error}
               productivityEditable={productivityEditable && !error}

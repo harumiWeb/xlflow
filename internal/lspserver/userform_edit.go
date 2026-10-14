@@ -235,17 +235,56 @@ func validateUserFormEditTransaction(operations []formsedit.Operation) *userForm
 		}
 	}
 	if len(operations) < 1 || len(operations) > 2 {
-		return invalidUserFormEditParams(fmt.Errorf("a transaction requires one property, geometry or structural operation, or one move/resize pair"))
+		return invalidUserFormEditParams(fmt.Errorf("a transaction requires one property, geometry or structural operation, one move/resize pair, or one root width/height resize pair"))
 	}
 	if len(operations) == 2 {
+		if isUserFormResizePropertyPair(operations) {
+			return nil
+		}
 		first, second := operations[0], operations[1]
 		moveResize := first.Type == formsedit.MoveControl && second.Type == formsedit.ResizeControl
 		resizeMove := first.Type == formsedit.ResizeControl && second.Type == formsedit.MoveControl
 		if first.ControlID != second.ControlID || (!moveResize && !resizeMove) {
-			return invalidUserFormEditParams(fmt.Errorf("a move/resize pair must target one control with distinct operation types"))
+			return invalidUserFormEditParams(fmt.Errorf("a two-operation transaction must be a same-control move/resize pair or a root width/height property pair"))
 		}
 	}
 	return nil
+}
+
+func isUserFormResizePropertyPair(operations []formsedit.Operation) bool {
+	if len(operations) != 2 {
+		return false
+	}
+	fields := map[string]bool{}
+	for _, operation := range operations {
+		if operation.Type != formsedit.SetFormProperty ||
+			(operation.Field != "width" && operation.Field != "height") ||
+			!operation.ValuePresent || !isFiniteUserFormEditNumber(operation.Value) || fields[operation.Field] {
+			return false
+		}
+		fields[operation.Field] = true
+	}
+	return fields["width"] && fields["height"]
+}
+
+func isFiniteUserFormEditNumber(value any) bool {
+	if number, ok := value.(json.Number); ok {
+		_, err := decodeFiniteJSONNumber(json.RawMessage(number))
+		return err == nil
+	}
+	number := reflect.ValueOf(value)
+	if !number.IsValid() {
+		return false
+	}
+	switch number.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return true
+	case reflect.Float32, reflect.Float64:
+		return !math.IsNaN(number.Float()) && !math.IsInf(number.Float(), 0)
+	default:
+		return false
+	}
 }
 
 func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditError) {

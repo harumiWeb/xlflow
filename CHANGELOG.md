@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added UserForm Designer form-edge and corner resizing with client-size
+  source updates, zoom/grid snapping, child bounds and one-step Undo/Redo.
+
 - Unified unreleased UserForm authoring around `form.width` / `form.height`
   client-area dimensions in points, shared pure-Go compilation and template
   resizing. Removed the `form.build` authoring aliases and separated observed

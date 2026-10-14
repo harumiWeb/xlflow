@@ -1,11 +1,301 @@
 import * as assert from "assert";
+import { render } from "preact";
+import { act } from "preact/test-utils";
 import { renderToString } from "preact-render-to-string";
 import { DesignerCanvas, ControlGlyph } from "../webview/userFormDesigner/DesignerCanvas";
-import { designerDocument } from "../src/userFormEditor/model";
-import type { SpecControl } from "../src/userFormEditor/protocol";
+import { designerDocument, pointsToPixels } from "../src/userFormEditor/model";
+import type { PropertyOperation, SpecControl } from "../src/userFormEditor/protocol";
 import { runUserFormEditorAssertions } from "./suite/userFormEditor.test";
 import { runUserFormGeometryAssertions } from "./suite/userFormGeometry.test";
 
+const { JSDOM } = require("jsdom");
+const dom = new JSDOM('<!doctype html><html><body><div id="app"></div></body></html>', {
+  url: "https://designer.test/",
+});
+Object.assign(globalThis, { window: dom.window, document: dom.window.document });
+for (const name of [
+  "onpointerdown",
+  "onpointermove",
+  "onpointerup",
+  "onpointercancel",
+  "onlostpointercapture",
+])
+  Object.defineProperty(dom.window.HTMLElement.prototype, name, {
+    configurable: true,
+    value: null,
+  });
+const root = document.getElementById("app")!;
+
+async function pointer(
+  selector: string,
+  type: string,
+  left: number,
+  top: number,
+  zoom = 1,
+  pointerId = 1,
+) {
+  const element = root.querySelector(selector)!;
+  assert.ok(element, selector);
+  const event = new dom.window.MouseEvent(type, {
+    bubbles: true,
+    button: 0,
+    clientX: pointsToPixels(left, zoom),
+    clientY: pointsToPixels(top, zoom),
+  });
+  Object.defineProperty(event, "pointerId", { value: pointerId });
+  await act(() => {
+    element.dispatchEvent(event);
+  });
+}
+
+async function rootResizeAssertions() {
+  const model = designerDocument({
+    form: { name: "Resize", width: 600, height: 400 },
+    controls: [
+      { id: "child", name: "Child", type: "Label", left: 50, top: 40, width: 30, height: 20 },
+    ],
+  });
+  const operations: PropertyOperation[][] = [];
+  const mount = async (
+    options: {
+      zoom?: number;
+      snapping?: boolean;
+      busy?: boolean;
+      editable?: boolean;
+      formResizable?: boolean;
+      placing?: boolean;
+      selectedId?: string;
+      document?: typeof model;
+    } = {},
+  ) => {
+    await act(() => {
+      render(null, root);
+      render(
+        <DesignerCanvas
+          document={options.document ?? model}
+          editable={options.editable ?? true}
+          formResizable={options.formResizable ?? true}
+          busy={options.busy}
+          placing={options.placing}
+          selectedId={options.selectedId}
+          onSelectionChange={() => {}}
+          zoom={options.zoom}
+          snapping={options.snapping}
+          onFormResize={(ops) => operations.push(ops)}
+        />,
+        root,
+      );
+    });
+  };
+  const width = () => root.querySelector<HTMLElement>(".form")!.style.width;
+  const height = () => root.querySelector<HTMLElement>(".form")!.style.height;
+
+  await mount({ formResizable: false });
+  assert.equal(
+    root.querySelectorAll("[data-form-handle]").length,
+    0,
+    "read-only metadata hides root handles",
+  );
+  await mount({ editable: false });
+  assert.equal(
+    root.querySelectorAll("[data-form-handle]").length,
+    3,
+    "form property capability is independent of control geometry",
+  );
+  await pointer('[data-form-handle="e"]', "pointerdown", 600, 200);
+  await pointer(".designer-viewport", "pointerup", 608, 200);
+  assert.deepEqual(
+    operations.at(-1),
+    [{ type: "setFormProperty", field: "width", value: 608 }],
+    "property-only editors can resize the root",
+  );
+  await mount({ placing: true });
+  assert.equal(
+    root.querySelectorAll("[data-form-handle]").length,
+    0,
+    "placement hides root handles",
+  );
+  await mount({ busy: true });
+  assert.equal(
+    root.querySelectorAll("[data-form-handle]").length,
+    0,
+    "busy mode hides root handles",
+  );
+  await mount({ selectedId: "child" });
+  assert.equal(
+    root.querySelectorAll("[data-form-handle]").length,
+    0,
+    "root handles require root selection",
+  );
+
+  for (const zoom of [0.5, 1, 1.5, 2]) {
+    await mount({ zoom });
+    const handles = Array.from(root.querySelectorAll<HTMLElement>(".form-resize-handle"));
+    assert.deepEqual(
+      handles.map((handle) => handle.dataset.formHandle).sort(),
+      ["e", "s", "se"],
+      "root uses distinct east/south/corner handles",
+    );
+    assert.equal(
+      root.querySelectorAll(".resize-handle").length,
+      0,
+      "root handles do not change control handle selectors",
+    );
+    assert.ok(handles.every((handle) => handle.closest(".form-client-area")));
+    assert.equal(
+      root.querySelector(".form-title [data-form-handle]"),
+      null,
+      "title bar has no resize hit area",
+    );
+
+    const previous = operations.length;
+    await pointer('[data-form-handle="e"]', "pointerdown", 600, 200, zoom);
+    await pointer(".designer-viewport", "pointerup", 632, 200, zoom);
+    assert.deepEqual(
+      operations.at(-1),
+      [{ type: "setFormProperty", field: "width", value: 632 }],
+      `east resize uses client points at ${zoom}x zoom`,
+    );
+    assert.equal(operations.length, previous + 1, "pointerup commits exactly once");
+    assert.equal(
+      width(),
+      `${pointsToPixels(632)}px`,
+      "preview uses client width without shell borders",
+    );
+    assert.equal(height(), `${pointsToPixels(400)}px`, "east handle preserves client height");
+    await pointer(".designer-viewport", "pointerup", 632, 200, zoom);
+    assert.equal(operations.length, previous + 1, "duplicate pointerup cannot repeat the edit");
+  }
+
+  await mount({ snapping: true });
+  await pointer('[data-form-handle="e"]', "pointerdown", 600, 200);
+  await pointer(".designer-viewport", "pointerup", 629, 200);
+  assert.deepEqual(
+    operations.at(-1),
+    [{ type: "setFormProperty", field: "width", value: 632 }],
+    "root size snaps to the 8pt grid",
+  );
+
+  let before = operations.length;
+  await mount();
+  await pointer('[data-form-handle="e"]', "pointerdown", 600, 200);
+  await pointer(".designer-viewport", "pointerup", 600, 200);
+  assert.equal(operations.length, before, "no-op resize creates no operation");
+
+  await mount();
+  await pointer('[data-form-handle="se"]', "pointerdown", 600, 400);
+  await pointer(".designer-viewport", "pointerup", 0, 0);
+  assert.deepEqual(
+    operations.at(-1),
+    [
+      { type: "setFormProperty", field: "width", value: 80 },
+      { type: "setFormProperty", field: "height", value: 60 },
+    ],
+    "root cannot shrink below immediate child extents",
+  );
+  assert.deepEqual(
+    [
+      model.controls[0].left,
+      model.controls[0].top,
+      model.controls[0].width,
+      model.controls[0].height,
+    ],
+    [50, 40, 30, 20],
+    "root resize preserves child geometry",
+  );
+
+  const cancelGesture = async (cancel: "escape" | "pointercancel" | "lostcapture" | "blur") => {
+    before = operations.length;
+    await mount();
+    await pointer('[data-form-handle="se"]', "pointerdown", 600, 400);
+    await pointer(".designer-viewport", "pointermove", 632, 424);
+    if (cancel === "escape") {
+      await act(() => {
+        root
+          .querySelector(".designer-viewport")!
+          .dispatchEvent(new dom.window.KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+      });
+    } else if (cancel === "blur") {
+      await act(() => {
+        dom.window.dispatchEvent(new dom.window.Event("blur"));
+      });
+    } else {
+      await pointer(
+        ".designer-viewport",
+        cancel === "pointercancel" ? "pointercancel" : "lostpointercapture",
+        632,
+        424,
+      );
+    }
+    await pointer(".designer-viewport", "pointerup", 632, 424);
+    assert.equal(operations.length, before, `${cancel} cancels without committing`);
+    assert.equal(width(), `${pointsToPixels(600)}px`, `${cancel} restores the client width`);
+    assert.equal(height(), `${pointsToPixels(400)}px`, `${cancel} restores the client height`);
+  };
+  await cancelGesture("escape");
+  await cancelGesture("pointercancel");
+  await cancelGesture("lostcapture");
+  await cancelGesture("blur");
+
+  for (const gate of ["busy", "formResizable"] as const) {
+    before = operations.length;
+    await mount();
+    await pointer('[data-form-handle="e"]', "pointerdown", 600, 200);
+    await pointer(".designer-viewport", "pointermove", 632, 200);
+    await act(() =>
+      render(
+        <DesignerCanvas
+          document={model}
+          editable
+          formResizable={gate === "busy"}
+          busy={gate === "busy"}
+          onFormResize={(ops) => operations.push(ops)}
+        />,
+        root,
+      ),
+    );
+    await pointer(".designer-viewport", "pointerup", 632, 200);
+    assert.equal(operations.length, before, `${gate} becoming unavailable cancels active resize`);
+    assert.equal(width(), `${pointsToPixels(600)}px`, `${gate} cancellation clears preview`);
+  }
+
+  before = operations.length;
+  await mount();
+  await pointer('[data-form-handle="e"]', "pointerdown", 600, 200);
+  await pointer(".designer-viewport", "pointerup", 632, 200);
+  assert.equal(operations.length, before + 1, "pointerup submits a changed client size");
+  assert.equal(width(), `${pointsToPixels(632)}px`, "preview remains until the edit reply");
+  await act(() => {
+    render(
+      <DesignerCanvas document={model} editable formResizable busy onFormResize={() => {}} />,
+      root,
+    );
+  });
+  assert.equal(width(), `${pointsToPixels(632)}px`, "busy reply keeps the pending preview");
+  await act(() => {
+    render(
+      <DesignerCanvas document={model} editable formResizable onFormResize={() => {}} />,
+      root,
+    );
+  });
+  assert.equal(width(), `${pointsToPixels(600)}px`, "failed reply clears preview when busy ends");
+
+  await mount();
+  await pointer('[data-form-handle="e"]', "pointerdown", 600, 200);
+  await pointer(".designer-viewport", "pointermove", 632, 200);
+  const updated = designerDocument({
+    form: { name: "Resize", width: 620, height: 410 },
+    controls: model.controls,
+  });
+  await act(() => {
+    render(
+      <DesignerCanvas document={updated} editable formResizable onFormResize={() => {}} />,
+      root,
+    );
+  });
+  assert.equal(width(), `${pointsToPixels(620)}px`, "document updates replace pending preview");
+  await act(() => render(null, root));
+}
 async function run() {
   await runUserFormEditorAssertions();
   runUserFormGeometryAssertions();
@@ -228,6 +518,7 @@ async function run() {
     "selection matches compiler zIndex-ordered Page collection",
   );
   assert.ok(!reordered.includes("Hidden page child"));
+  await rootResizeAssertions();
   console.log("UserForm synchronization and rendering assertions passed.");
 }
 void run().catch((error) => {

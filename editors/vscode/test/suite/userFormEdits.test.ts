@@ -26,6 +26,7 @@ export async function runUserFormEditAssertions(): Promise<void> {
   await assertProductivityTransactionsUndoAndRedo();
   await assertCopyReadSharesEditQueue();
   await assertPropertyTransactionsUndoAndRedo();
+  await assertFormResizeTransactionsUndoAndRedo();
   await assertStructuralTransactionsUndoAndRedo();
   await assertPageCollectionUndoAndRedo();
   await assertParentTransactionUndoAndRedo();
@@ -36,6 +37,60 @@ export async function runUserFormEditAssertions(): Promise<void> {
   await assertUnicodeAndCRLFRanges();
   await assertInvalidRangesAreRejectedAtomically();
   await assertStructuredRejectionPreservesSource();
+}
+
+async function assertFormResizeTransactionsUndoAndRedo(): Promise<void> {
+  for (const extension of ["yaml", "json"]) {
+    const source =
+      extension === "yaml"
+        ? "schemaVersion: 1\r\nkind: xlflow.userform\r\nform: {name: Main, width: 500, height: 450}\r\ncontrols: []\r\n"
+        : '{"schemaVersion":1,"kind":"xlflow.userform","form":{"name":"Main","width":500,"height":450},"controls":[]}\r\n';
+    await withDesignerDocument(
+      `form-resize-${extension}`,
+      source,
+      async (document) => {
+        const operations: SemanticOperation[] = [
+          { type: "setFormProperty", field: "width", value: 520 },
+          { type: "setFormProperty", field: "height", value: 470 },
+        ];
+        const queue = new DocumentEditQueue();
+        const client = fakeClient((doc, version, text, requested) => {
+          assert.deepStrictEqual(requested, operations);
+          return {
+            version,
+            edits: [
+              {
+                range: {
+                  start: doc.positionAt(text.indexOf("500")),
+                  end: doc.positionAt(text.indexOf("500") + 3),
+                },
+                newText: "520",
+              },
+              {
+                range: {
+                  start: doc.positionAt(text.indexOf("450")),
+                  end: doc.positionAt(text.indexOf("450") + 3),
+                },
+                newText: "470",
+              },
+            ],
+          };
+        });
+        assert.strictEqual(
+          await queue.run(document, document.version, operations, client, () => true),
+          undefined,
+        );
+        const resized = source.replace("500", "520").replace("450", "470");
+        assert.strictEqual(document.getText(), resized);
+        assertActiveDesigner(document.uri);
+        await vscode.commands.executeCommand("undo");
+        assert.strictEqual(document.getText(), source, "one Undo restores both form dimensions");
+        await vscode.commands.executeCommand("redo");
+        assert.strictEqual(document.getText(), resized);
+      },
+      extension,
+    );
+  }
 }
 
 async function assertProductivityTransactionsUndoAndRedo(): Promise<void> {
@@ -748,9 +803,10 @@ async function withDesignerDocument(
   name: string,
   source: string,
   assertions: (document: vscode.TextDocument) => Promise<void>,
+  extension = "yaml",
 ): Promise<void> {
   const directory = await mkdtemp(path.join(os.tmpdir(), `xlflow-userform-edits-${name}-`));
-  const file = path.join(directory, "Main.yaml");
+  const file = path.join(directory, `Main.${extension}`);
   const uri = vscode.Uri.file(file);
   try {
     await writeFile(file, source, "utf8");

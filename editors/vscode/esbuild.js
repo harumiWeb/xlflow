@@ -51,6 +51,7 @@ Promise.all([
     jsxImportSource: "preact",
     entryPoints: ["test/userFormRendering.test.tsx"],
     outfile: "dist/test/userFormRendering.test.js",
+    external: [...common.external, "jsdom"],
   }),
   esbuild.build({
     ...common,

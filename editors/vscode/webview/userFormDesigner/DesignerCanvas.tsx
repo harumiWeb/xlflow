@@ -8,6 +8,7 @@ import type { JSX } from "preact";
 import type {
   GeometryOperation,
   ParentOperation,
+  PropertyOperation,
   ProductivityOperation,
 } from "../../src/userFormEditor/protocol";
 import {
@@ -38,6 +39,7 @@ import {
   worldGeometry,
   orderedChildren,
   selectionPath,
+  stableDelta,
 } from "../../src/userFormEditor/geometry";
 import type { Geometry, ResizeHandle, DropTarget } from "../../src/userFormEditor/geometry";
 const px = (points: number) => `${pointsToPixels(points)}px`;
@@ -119,6 +121,7 @@ export function DesignerCanvas({
   editable = false,
   parentEditable = false,
   pageEditable = false,
+  formResizable = false,
   activePages,
   onActivePageChange,
   busy = false,
@@ -132,6 +135,7 @@ export function DesignerCanvas({
   onSelectionChange,
   onSelectionChangeMany,
   onCommit = () => {},
+  onFormResize,
   onContextMenu,
   onShortcut,
   placing = false,
@@ -142,12 +146,16 @@ export function DesignerCanvas({
   invalidDrop = "This control cannot be placed in this container.",
   dropTargetLabel = "Drop target",
   placementSize,
+  resizeWidthLabel = "Resize form width",
+  resizeHeightLabel = "Resize form height",
+  resizeBothLabel = "Resize form width and height",
 }: {
   document: DesignerDocument;
   approximateBounds?: string;
   editable?: boolean;
   parentEditable?: boolean;
   pageEditable?: boolean;
+  formResizable?: boolean;
   activePages?: ActivePages;
   onActivePageChange?: (ownerId: string, pageId: string) => void;
   busy?: boolean;
@@ -161,6 +169,7 @@ export function DesignerCanvas({
   onSelectionChange?: (id: string | undefined) => void;
   onSelectionChangeMany?: (ids: string[]) => void;
   onCommit?: (operations: (GeometryOperation | ParentOperation | ProductivityOperation)[]) => void;
+  onFormResize?: (operations: PropertyOperation[]) => void;
   onContextMenu?: (controlId: string, x: number, y: number) => void;
   onShortcut?: (action: "copy" | "cut" | "paste" | "duplicate" | "delete") => boolean;
   placing?: boolean;
@@ -171,6 +180,9 @@ export function DesignerCanvas({
   invalidDrop?: string;
   dropTargetLabel?: string;
   placementSize?: { width: number; height: number };
+  resizeWidthLabel?: string;
+  resizeHeightLabel?: string;
+  resizeBothLabel?: string;
 }) {
   const [localActivePages, setLocalActivePages] = useState<ActivePages>({});
   const document = useMemo(
@@ -189,6 +201,7 @@ export function DesignerCanvas({
     else setLocalSelection(ids);
   };
   const [preview, setPreview] = useState<{ id: string; geometry: Geometry; floating?: boolean }>();
+  const [formResizePreview, setFormResizePreview] = useState<{ width: number; height: number }>();
   const [groupPreview, setGroupPreview] = useState<{ id: string; left: number; top: number }[]>();
   const [marqueeBox, setMarqueeBox] = useState<SelectionRect>();
   const [destination, setDestination] = useState<{ target?: DropTarget; valid: boolean }>();
@@ -210,6 +223,14 @@ export function DesignerCanvas({
     group?: DesignerControl[];
     groupMoves?: Extract<ProductivityOperation, { type: "moveControls" }>;
   }>();
+  const formResizeGesture = useRef<{
+    handle: "e" | "s" | "se";
+    pointerId: number;
+    x: number;
+    y: number;
+    start: { width: number; height: number };
+    end: { width: number; height: number };
+  }>();
   const marquee = useRef<{
     pointerId: number;
     parentId: string;
@@ -221,8 +242,10 @@ export function DesignerCanvas({
   const canvas = useRef<HTMLDivElement>(null);
   const cancel = () => {
     gesture.current = undefined;
+    formResizeGesture.current = undefined;
     marquee.current = undefined;
     setPreview(undefined);
+    setFormResizePreview(undefined);
     setGroupPreview(undefined);
     setMarqueeBox(undefined);
     setDestination(undefined);
@@ -230,6 +253,7 @@ export function DesignerCanvas({
   const cancelPointer = (event: JSX.TargetedPointerEvent<HTMLDivElement>) => {
     if (
       gesture.current?.pointerId === event.pointerId ||
+      formResizeGesture.current?.pointerId === event.pointerId ||
       marquee.current?.pointerId === event.pointerId
     )
       cancel();
@@ -292,6 +316,17 @@ export function DesignerCanvas({
       setSelection([]);
   }, [document]);
   useEffect(() => {
+    if (!formResizable) {
+      formResizeGesture.current = undefined;
+      setFormResizePreview(undefined);
+    } else if (busy || placing) {
+      if (formResizeGesture.current) {
+        formResizeGesture.current = undefined;
+        setFormResizePreview(undefined);
+      }
+    }
+  }, [formResizable, busy, placing]);
+  useEffect(() => {
     if (!editable) {
       gesture.current = undefined;
       if (!busy) setPreview(undefined);
@@ -333,6 +368,59 @@ export function DesignerCanvas({
     gesture.current = { control, start, end: start, x, y, handle, pointerId, dx: 0, dy: 0 };
     setNotice(undefined);
     return gesture.current;
+  };
+  const startFormResize = (handle: "e" | "s" | "se", x: number, y: number, pointerId: number) => {
+    if (!formResizable || busy || placing || selectionIds.length !== 0) return;
+    const start = { width: document.width, height: document.height };
+    formResizeGesture.current = { handle, x, y, pointerId, start, end: start };
+    setFormResizePreview(start);
+  };
+  const updateFormResize = (dx: number, dy: number) => {
+    const current = formResizeGesture.current;
+    if (!current) return;
+    const rootChildren = document.controls.filter((control) => !control.parentId);
+    const minimumWidth = Math.max(
+      1,
+      ...rootChildren.map((control) => control.left + control.width),
+    );
+    const minimumHeight = Math.max(
+      1,
+      ...rootChildren.map((control) => control.top + control.height),
+    );
+    const resizeAxis = (start: number, delta: number, minimum: number) => {
+      if (stableDelta(delta) === 0) return start;
+      const target = start + stableDelta(delta);
+      return stableDelta(
+        Math.max(minimum, snapping ? Math.round(target / gridSize) * gridSize : target),
+      );
+    };
+    const end = {
+      width:
+        current.handle === "e" || current.handle === "se"
+          ? resizeAxis(current.start.width, dx, minimumWidth)
+          : current.start.width,
+      height:
+        current.handle === "s" || current.handle === "se"
+          ? resizeAxis(current.start.height, dy, minimumHeight)
+          : current.start.height,
+    };
+    current.end = end;
+    setFormResizePreview(end);
+  };
+  const finishFormResize = () => {
+    const current = formResizeGesture.current;
+    formResizeGesture.current = undefined;
+    if (!current) return;
+    const operations: PropertyOperation[] = [];
+    if (current.end.width !== current.start.width)
+      operations.push({ type: "setFormProperty", field: "width", value: current.end.width });
+    if (current.end.height !== current.start.height)
+      operations.push({ type: "setFormProperty", field: "height", value: current.end.height });
+    if (!operations.length || !onFormResize || !formResizable || busy || placing) {
+      setFormResizePreview(undefined);
+      return;
+    }
+    onFormResize?.(operations);
   };
   const startGroupGesture = (
     controls: DesignerControl[],
@@ -487,6 +575,7 @@ export function DesignerCanvas({
     if (
       event.button !== 0 ||
       gesture.current?.pointerId !== undefined ||
+      formResizeGesture.current?.pointerId !== undefined ||
       marquee.current?.pointerId !== undefined
     )
       return;
@@ -515,6 +604,24 @@ export function DesignerCanvas({
           point.top - target.origin.top,
           target.parentId || undefined,
         );
+      }
+      return;
+    }
+    const formHandle = target.closest<HTMLElement>("[data-form-handle]")?.dataset.formHandle as
+      | "e"
+      | "s"
+      | "se"
+      | undefined;
+    if (formHandle) {
+      event.preventDefault();
+      canvas.current?.focus();
+      startFormResize(formHandle, event.clientX, event.clientY, event.pointerId);
+      if (formResizeGesture.current) {
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          /* no active pointer */
+        }
       }
       return;
     }
@@ -878,6 +985,7 @@ export function DesignerCanvas({
         onContextMenu={contextMenu}
         onPointerMove={(event) => {
           const current = gesture.current;
+          const formResize = formResizeGesture.current;
           if (placing && parentEditable && !busy) {
             const form = canvas.current?.querySelector<HTMLElement>(".form");
             if (form) {
@@ -916,8 +1024,24 @@ export function DesignerCanvas({
               pixelsToPoints(event.clientX - current.x, zoom),
               pixelsToPoints(event.clientY - current.y, zoom),
             );
+          if (formResize?.pointerId === event.pointerId)
+            updateFormResize(
+              pixelsToPoints(event.clientX - formResize.x, zoom),
+              pixelsToPoints(event.clientY - formResize.y, zoom),
+            );
         }}
         onPointerUp={(event) => {
+          const formResize = formResizeGesture.current;
+          if (formResize?.pointerId === event.pointerId) {
+            updateFormResize(
+              pixelsToPoints(event.clientX - formResize.x, zoom),
+              pixelsToPoints(event.clientY - formResize.y, zoom),
+            );
+            finishFormResize();
+            if (event.currentTarget.hasPointerCapture?.(event.pointerId))
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            return;
+          }
           const current = gesture.current;
           if (current?.pointerId === event.pointerId) {
             updateGesture(
@@ -970,72 +1094,96 @@ export function DesignerCanvas({
           else cancel();
         }}
         style={{
-          width: `${pointsToPixels(document.width + 2, zoom)}px`,
-          height: `${pointsToPixels(document.height + 24, zoom)}px`,
+          width: `${pointsToPixels((formResizePreview ?? document).width + 2, zoom)}px`,
+          height: `${pointsToPixels((formResizePreview ?? document).height + 24, zoom)}px`,
         }}
       >
         <div class="form-shell" style={{ transform: `scale(${zoom})` }}>
           <div class="form-title">{document.caption}</div>
-          <div
-            class={`form ${showGrid ? "show-grid" : ""} ${selectedId === undefined ? "form-selected" : ""}`}
-            data-container-id=""
-            style={{
-              width: px(document.width),
-              height: px(document.height),
-              backgroundSize: `${px(gridSize)} ${px(gridSize)}`,
-            }}
-          >
-            {children().map((c) => draw(c))}
-            {groupBounds && (
-              <div
-                class="group-selection-outline"
-                aria-hidden="true"
-                style={{
-                  left: px(groupBounds.left),
-                  top: px(groupBounds.top),
-                  width: px(groupBounds.right - groupBounds.left),
-                  height: px(groupBounds.bottom - groupBounds.top),
-                }}
-              />
-            )}
-            {marqueeBox &&
-              (() => {
-                const form = canvas.current?.querySelector<HTMLElement>(".form");
-                const rect = form?.getBoundingClientRect();
-                if (!rect) return null;
-                return (
-                  <div
-                    class="marquee-selection"
-                    aria-hidden="true"
-                    style={{
-                      left: px(pixelsToPoints(marqueeBox.left - rect.left, zoom)),
-                      top: px(pixelsToPoints(marqueeBox.top - rect.top, zoom)),
-                      width: px(pixelsToPoints(marqueeBox.right - marqueeBox.left, zoom)),
-                      height: px(pixelsToPoints(marqueeBox.bottom - marqueeBox.top, zoom)),
-                    }}
+          <div class="form-client-area">
+            <div
+              class={`form ${showGrid ? "show-grid" : ""} ${selectedId === undefined ? "form-selected" : ""}`}
+              data-container-id=""
+              style={{
+                width: px((formResizePreview ?? document).width),
+                height: px((formResizePreview ?? document).height),
+                backgroundSize: `${px(gridSize)} ${px(gridSize)}`,
+              }}
+            >
+              {children().map((c) => draw(c))}
+              {groupBounds && (
+                <div
+                  class="group-selection-outline"
+                  aria-hidden="true"
+                  style={{
+                    left: px(groupBounds.left),
+                    top: px(groupBounds.top),
+                    width: px(groupBounds.right - groupBounds.left),
+                    height: px(groupBounds.bottom - groupBounds.top),
+                  }}
+                />
+              )}
+              {marqueeBox &&
+                (() => {
+                  const form = canvas.current?.querySelector<HTMLElement>(".form");
+                  const rect = form?.getBoundingClientRect();
+                  if (!rect) return null;
+                  return (
+                    <div
+                      class="marquee-selection"
+                      aria-hidden="true"
+                      style={{
+                        left: px(pixelsToPoints(marqueeBox.left - rect.left, zoom)),
+                        top: px(pixelsToPoints(marqueeBox.top - rect.top, zoom)),
+                        width: px(pixelsToPoints(marqueeBox.right - marqueeBox.left, zoom)),
+                        height: px(pixelsToPoints(marqueeBox.bottom - marqueeBox.top, zoom)),
+                      }}
+                    />
+                  );
+                })()}
+              {destination?.target && (
+                <div
+                  class={`drop-target ${destination.valid ? "valid" : "invalid"}`}
+                  data-drop-parent-id={destination.target.parentId}
+                  aria-label={dropTargetLabel}
+                  style={{
+                    left: px(destination.target.origin.left),
+                    top: px(destination.target.origin.top),
+                    width: px(destination.target.bounds.width),
+                    height: px(destination.target.bounds.height),
+                  }}
+                />
+              )}
+              {preview?.floating && (
+                <div class="drag-preview" aria-hidden="true">
+                  {draw(
+                    document.controls.find((c) => c.id === preview.id),
+                    true,
+                  )}
+                </div>
+              )}
+            </div>
+            {formResizable && !busy && !placing && selectionIds.length === 0 && (
+              <>
+                {(
+                  [
+                    ["e", resizeWidthLabel],
+                    ["s", resizeHeightLabel],
+                    ["se", resizeBothLabel],
+                  ] as const
+                ).map(([handle, label]) => (
+                  <span
+                    key={handle}
+                    class={`form-resize-handle form-resize-${handle}`}
+                    data-form-handle={handle}
+                    role="button"
+                    tabIndex={-1}
+                    aria-label={label}
+                    title={label}
+                    style={{ transform: `translate(-50%, -50%) scale(${1 / zoom})` }}
                   />
-                );
-              })()}
-            {destination?.target && (
-              <div
-                class={`drop-target ${destination.valid ? "valid" : "invalid"}`}
-                data-drop-parent-id={destination.target.parentId}
-                aria-label={dropTargetLabel}
-                style={{
-                  left: px(destination.target.origin.left),
-                  top: px(destination.target.origin.top),
-                  width: px(destination.target.bounds.width),
-                  height: px(destination.target.bounds.height),
-                }}
-              />
-            )}
-            {preview?.floating && (
-              <div class="drag-preview" aria-hidden="true">
-                {draw(
-                  document.controls.find((c) => c.id === preview.id),
-                  true,
-                )}
-              </div>
+                ))}
+              </>
             )}
           </div>
         </div>

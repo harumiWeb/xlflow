@@ -150,7 +150,12 @@ ignored writes and strict numeric-value checks.
 
 Selection is a transient control ID; clicking the background selects the form.
 Known built-in controls other than Page can move and resize with eight handles.
-Form and Page geometry is not edited on the canvas. Unknown controls remain
+When the form is selected, its right edge, bottom edge and bottom-right corner
+resize the persisted client width/height. Window decorations are preview-only
+and are never added to authored dimensions. Form resizing requires property
+editing capability and numeric width/height descriptors from LSP metadata.
+It preserves child coordinates and protects all immediate root child extents,
+including hidden controls. Page geometry is not edited on the canvas. Unknown controls remain
 selectable placeholders. Only a completed parent-changing pointer drag can
 commit a new relationship; overlap alone never changes source.
 
@@ -565,7 +570,9 @@ using control IDs and finite point values, or one `setFormProperty` /
 `capabilities.experimental.userFormPropertyEdit: true`; older geometry-capable
 servers retain geometry editing with the grid disabled. Preview-only servers
 retain read-only rendering. The extension and RPC both accept
-one operation or a move/resize pair for the same control per interaction.
+one operation, a move/resize pair for the same control, or a distinct numeric
+`setFormProperty` width/height pair per interaction. A completed form corner
+resize updates both dimensions in one source transaction and one Undo step.
 Adding and removing ordinary controls additionally require the separate
 `capabilities.experimental.userFormStructuralEdit: true` capability. This
 capability gates `addControl` and `removeControl` without changing the
@@ -593,8 +600,10 @@ operations; the Designer adapter enforces its capability and interaction
 scope.
 For existing operation families, empty batches, more than two operations,
 repeated operation types, and pairs targeting different controls are rejected
-before source edits are generated. A property operation cannot be batched with
-another property or geometry edit. These legacy restrictions are unchanged.
+before source edits are generated, except for the dedicated width/height form
+property pair. Other property pairs and mixed property/geometry edits remain
+rejected; duplicate dimensions, nulls and nonnumeric values in a form resize
+pair are invalid.
 Its payload supplies `field` and an explicit scalar `value`, plus `controlId`
 for `setControlProperty`. Missing `value` is invalid; explicit null must survive
 transport as a present value. Both Webview boundary and RPC validate payload
