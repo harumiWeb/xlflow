@@ -74,7 +74,9 @@ The main features include:
 - Opens canonical YAML, YML, and JSON UserForm FormSpecs in an optional
   visual editor with selection, move, resize, keyboard movement, grid snapping,
   zoom, an LSP metadata-driven Property Grid, and a Toolbox for click-to-place
-  root controls. Leaf controls delete immediately; controls with descendants
+  controls. New MultiPages start with two Pages, and new TabStrips with two
+  tabs; each selects its first item. Creating a MultiPage and its Pages is one
+  undoable action. Leaf controls delete immediately; controls with descendants
   require confirmation and are removed as one undoable subtree edit. The preview
   follows the current document and keeps its last valid rendering while the
   source has errors.
@@ -308,8 +310,11 @@ Additionally, ensure that both Windows and WSL instances can execute xlflow succ
   remain read-only. The grid distinguishes unset/null/empty/false/zero and
   supports explicit optional null, not key deletion. Form name edits do not
   rename files or code sidecars. Source editing requires no Excel.
-  Toolbox insertion and deletion need `userFormStructuralEdit`; Frame placement
-  and reparenting need `userFormParentEdit`. Page and TabStrip collection
+  Toolbox insertion and deletion need `userFormStructuralEdit`; MultiPage
+  insertion also needs `userFormPageEdit`, and TabStrip insertion also needs
+  `userFormTabEdit`. Other Toolbox controls retain their existing capability
+  requirements. Frame placement and reparenting need `userFormParentEdit`.
+  Page and TabStrip collection
   actions are exposed only when the extension implements the editor and the
   selected LSP advertises the matching capability (`userFormPageEdit` or
   `userFormTabEdit`). Page navigation uses

@@ -598,8 +598,52 @@ export function isStructuralOperation(value: unknown): value is StructuralOperat
     Number(control.width) > 0 &&
     Number(control.height) > 0 &&
     (!Object.hasOwn(control, "caption") || typeof control.caption === "string") &&
-    (!Object.hasOwn(control, "selectedIndex") || control.selectedIndex === -1) &&
-    (!Object.hasOwn(control, "tabs") || (Array.isArray(control.tabs) && control.tabs.length === 0))
+    (((!Object.hasOwn(control, "selectedIndex") || control.selectedIndex === -1) &&
+      (!Object.hasOwn(control, "tabs") ||
+        (Array.isArray(control.tabs) && control.tabs.length === 0))) ||
+      (control.type === "TabStrip" &&
+        control.selectedIndex === 0 &&
+        Array.isArray(control.tabs) &&
+        control.tabs.length === 2 &&
+        control.tabs.every(
+          (tab) =>
+            typeof tab === "object" &&
+            tab !== null &&
+            Object.keys(tab).every((key) => ["name", "caption"].includes(key)) &&
+            typeof tab.name === "string" &&
+            /^[A-Za-z][A-Za-z0-9_]*$/.test(tab.name) &&
+            typeof tab.caption === "string",
+        ) &&
+        new Set(control.tabs.map((tab) => tab.name.toLowerCase())).size === 2))
+  );
+}
+
+export function isInitialMultiPageOperations(operations: unknown[]): boolean {
+  if (operations.length !== 3) return false;
+  const [owner, ...pages] = operations;
+  if (
+    !isStructuralOperation(owner) ||
+    owner.type !== "addControl" ||
+    owner.control.type !== "MultiPage" ||
+    owner.control.selectedIndex !== -1
+  )
+    return false;
+  if (
+    !pages.every(
+      (page) =>
+        isPageOperation(page) &&
+        page.type === "addPage" &&
+        page.control.parentId === owner.control.id,
+    )
+  )
+    return false;
+  const controls = [
+    owner.control,
+    ...pages.map((page) => (page as Extract<PageOperation, { type: "addPage" }>).control),
+  ];
+  return (
+    new Set(controls.map((control) => control.id)).size === 3 &&
+    new Set(controls.map((control) => control.name.toLowerCase())).size === 3
   );
 }
 
@@ -705,14 +749,20 @@ export function isWebviewMessage(value: unknown): value is WebviewMessage {
     Number(message.version) >= 0 &&
     Array.isArray(operations) &&
     operations.length >= 1 &&
-    operations.length <= 2 &&
-    ((operations.length === 1 &&
-      (isPropertyOperation(operations[0]) ||
-        isStructuralOperation(operations[0]) ||
-        isParentOperation(operations[0]) ||
-        isPageOperation(operations[0]) ||
-        isTabOperation(operations[0]) ||
-        (isProductivityOperation(operations[0]) && operations[0].type !== "pasteControls"))) ||
+    operations.length <= 3 &&
+    (isInitialMultiPageOperations(operations) ||
+      (operations.length === 1 &&
+        (isPropertyOperation(operations[0]) ||
+          (isStructuralOperation(operations[0]) &&
+            (operations[0].type !== "addControl" ||
+              (operations[0].control.type !== "MultiPage" &&
+                (operations[0].control.type !== "TabStrip" ||
+                  (operations[0].control.selectedIndex === 0 &&
+                    operations[0].control.tabs?.length === 2))))) ||
+          isParentOperation(operations[0]) ||
+          isPageOperation(operations[0]) ||
+          isTabOperation(operations[0]) ||
+          (isProductivityOperation(operations[0]) && operations[0].type !== "pasteControls"))) ||
       (operations.length === 2 &&
         operations.every(
           (op) =>

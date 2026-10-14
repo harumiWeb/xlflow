@@ -7,6 +7,9 @@ import { DraftCheckpointStore } from "../../src/userFormEditor/checkpoint";
 import { UserFormCustomDocument } from "../../src/userFormEditor/customDocument";
 import { UserFormEditorProvider } from "../../src/userFormEditor/provider";
 import { designerResourceUri } from "../../src/userFormEditor/resource";
+import { createControl } from "../../src/userFormEditor/toolbox";
+import { initialControlOperations } from "../../src/userFormEditor/collections";
+import { designerDocument } from "../../src/userFormEditor/model";
 import type {
   HostMessage,
   SemanticOperation,
@@ -107,6 +110,7 @@ export async function runUserFormDraftProviderAssertions(extensionUri: vscode.Ur
   await assertDraftEditUndoRedoAndSave(extensionUri, "json", jsonSource);
   await assertMultilineCRLFPublication(extensionUri);
   await assertSaveParticipantPublication(extensionUri);
+  await assertInitialCollectionUndoRedo(extensionUri);
   await assertRepeatedOpenSharesDraft(extensionUri);
   await assertExternalChangesMergeIntoDraft(extensionUri);
   await assertExternalControlReorderConflictsWithDraft(extensionUri);
@@ -117,6 +121,60 @@ export async function runUserFormDraftProviderAssertions(extensionUri: vscode.Ur
   await assertCheckpointRecovery(extensionUri, "yaml", yamlSource);
   await assertCheckpointRecovery(extensionUri, "json", jsonControlsSource);
   await assertMalformedCheckpointIsRetained(extensionUri);
+}
+
+async function assertInitialCollectionUndoRedo(extensionUri: vscode.Uri): Promise<void> {
+  for (const type of ["MultiPage", "TabStrip"] as const) {
+    await withTestEnvironment(extensionUri, "json", jsonSource, async (environment) => {
+      const { customDocument, provider, cancellation, sourceDocument, uri, panel } = environment;
+      const model = designerDocument(JSON.parse(jsonSource));
+      const control = createControl(model, type, 0, 0, false)!;
+      const operations = initialControlOperations(model, control)!;
+      const events: vscode.CustomDocumentEditEvent<UserFormCustomDocument>[] = [];
+      const subscription = provider.onDidChangeCustomDocument((event) => events.push(event));
+      try {
+        panel.receive({
+          type: "edit",
+          requestId: 1,
+          version: customDocument.document.version,
+          operations,
+        });
+        await waitFor(
+          () =>
+            panel.messages.some(
+              (message) => message.type === "editResult" && message.requestId === 1,
+            ),
+          "initial collection creation",
+        );
+        const reply = panel.messages.find(
+          (message) => message.type === "editResult" && message.requestId === 1,
+        );
+        assert.ok(reply?.type === "editResult" && !reply.error);
+        assert.strictEqual(
+          events.length,
+          1,
+          "owner and initial members share one native Undo event",
+        );
+        const draft = customDocument.state.text;
+        const controls = (JSON.parse(draft) as { controls: SpecControl[] }).controls;
+        assert.strictEqual(controls[0].selectedIndex, 0);
+        assert.strictEqual(
+          type === "MultiPage" ? controls.length - 1 : controls[0].tabs?.length,
+          2,
+        );
+        assert.strictEqual(sourceDocument.getText(), jsonSource);
+        assert.strictEqual(await readFile(uri.fsPath, "utf8"), jsonSource);
+        await events[0].undo();
+        assert.strictEqual(customDocument.state.text, jsonSource);
+        await events[0].redo();
+        assert.strictEqual(customDocument.state.text, draft);
+        await provider.publishCustomDocument(customDocument, cancellation.token);
+        assert.strictEqual(await readFile(uri.fsPath, "utf8"), draft);
+      } finally {
+        subscription.dispose();
+      }
+    });
+  }
 }
 
 async function assertMultilineCRLFPublication(extensionUri: vscode.Uri): Promise<void> {
@@ -1598,6 +1656,23 @@ function createTestClient(): TestClient {
       operations: SemanticOperation[],
     ) => {
       const operation = operations[0];
+      if (document.languageId === "json" && operation?.type === "addControl") {
+        const source = JSON.parse(text) as { controls: SpecControl[] };
+        const additions: SpecControl[] = operations.flatMap((op) =>
+          op.type === "addControl" || op.type === "addPage" ? [{ ...op.control }] : [],
+        );
+        if (operation.control.type === "MultiPage") additions[0].selectedIndex = 0;
+        source.controls.push(...additions);
+        return {
+          version,
+          edits: [
+            {
+              range: new vscode.Range(document.positionAt(0), document.positionAt(text.length)),
+              newText: JSON.stringify(source, null, 2) + "\n",
+            },
+          ],
+        };
+      }
       if (operation?.type !== "setFormProperty" || operation.field !== "caption")
         return {
           version,

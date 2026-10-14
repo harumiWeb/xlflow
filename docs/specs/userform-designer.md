@@ -407,9 +407,25 @@ Toolbox allocation and host-add checks are the Designer's name-conflict guards;
 Go `Apply` and canonical FormSpec validation do not add global control-name
 uniqueness validation.
 
-A new MultiPage has no Page child controls and `selectedIndex: -1`. A new
-TabStrip has `tabs: []` and `selectedIndex: -1`. Inserting either control does
-not create or edit Pages or tabs. On successful insertion, select the new
+A Toolbox-created MultiPage has exactly two Page child controls and
+`selectedIndex: 0`. Build it with one exact three-operation transaction:
+`addControl` for the MultiPage with initial `selectedIndex: -1`, followed by
+exactly two `addPage` operations owned by that MultiPage. Allocate Page names
+with the global case-insensitive Toolbox name allocator against the form,
+existing controls, and Pages already allocated in this transaction; retry
+generated Page control IDs on collisions across the existing and newly created
+controls, including the MultiPage. The first Page
+changes `selectedIndex` from `-1` to `0`, which remains the final canonical
+selection after the second Page is added. Apply and validate the complete
+transaction atomically so one Toolbox action creates one source edit and one
+native Undo step. This is the only three-operation exception; arbitrary mixed
+batches remain invalid.
+
+A Toolbox-created TabStrip has `tabs` containing `Tab1` and `Tab2`, with
+`selectedIndex: 0`. Those names are unique within that TabStrip. Create it in
+one `addControl` operation and one native Undo step. Existing authored empty
+MultiPages and TabStrips remain empty; these defaults apply only when the
+Toolbox creates a new control. On successful insertion, select the new
 control and return the Toolbox to Pointer. Escape cancels pending placement
 without a source edit.
 
@@ -678,18 +694,26 @@ retain read-only rendering. The extension and RPC both accept
 one operation, a move/resize pair for the same control, or a distinct numeric
 `setFormProperty` width/height pair per interaction. A completed form corner
 resize updates both dimensions in one source transaction and one Undo step.
-Adding and removing ordinary controls additionally require the separate
-`capabilities.experimental.userFormStructuralEdit: true` capability. This
-capability gates `addControl` and `removeControl` without changing the
-independent geometry and property capability checks. Page collection operations
-require `capabilities.experimental.userFormPageEdit: true`; TabStrip collection
-and tab-property operations require
-`capabilities.experimental.userFormTabEdit: true`. These capabilities are
-independent of one another and of `userFormPropertyEdit` and
-`userFormParentEdit`. An older server that omits a capability keeps its other
-advertised edit families and does not expose the unsupported actions.
-Each Toolbox insertion or deletion sends one structural operation; it is not
-combined with geometry or property operations in the same transaction.
+Adding and removing controls require the separate
+`capabilities.experimental.userFormStructuralEdit: true` capability. Ordinary
+Toolbox control insertion uses that capability with any existing destination
+requirements. MultiPage insertion additionally requires
+`capabilities.experimental.userFormPageEdit: true`; TabStrip insertion
+additionally requires `capabilities.experimental.userFormTabEdit: true`.
+Page collection operations require the Page capability, and TabStrip
+collection and tab-property operations require the Tab capability. These
+capabilities remain independent of one another and of
+`userFormPropertyEdit`, `userFormParentEdit`, and geometry support. An older
+server that omits a capability keeps its other advertised edit families and
+does not expose the unsupported actions.
+
+Each ordinary Toolbox insertion or deletion sends one structural operation;
+it is not combined with geometry or property operations in the same
+transaction. The sole exception is creating a MultiPage with its two initial
+Pages: accept exactly `addControl(MultiPage, selectedIndex: -1)` followed by
+two `addPage` operations for that new MultiPage. Reject every other batch of
+three operations and arbitrary mixed batches. TabStrip creation remains one
+`addControl` operation containing its two initial tabs and `selectedIndex: 0`.
 The RPC also enforces structural scope: `addControl` accepts a root, Frame, or
 eligible Page destination, but not a Page control. A Page destination requires
 structural, parent, and Page capabilities. An omitted or empty ProgID uses the
@@ -706,9 +730,10 @@ scope.
 For existing operation families, empty batches, more than two operations,
 repeated operation types, and pairs targeting different controls are rejected
 before source edits are generated, except for the dedicated width/height form
-property pair. Other property pairs and mixed property/geometry edits remain
-rejected; duplicate dimensions, nulls and nonnumeric values in a form resize
-pair are invalid.
+property pair and the exact three-operation MultiPage creation sequence above.
+Other property pairs and mixed property/geometry edits remain rejected;
+duplicate dimensions, nulls and nonnumeric values in a form resize pair are
+invalid. A failed MultiPage sequence returns no partial edit.
 Its payload supplies `field` and an explicit scalar `value`, plus `controlId`
 for `setControlProperty`. Missing `value` is invalid; explicit null must survive
 transport as a present value. Both Webview boundary and RPC validate payload
@@ -855,13 +880,16 @@ Implementation checks should cover the 14 Toolbox types and Pointer, click-to-
 place and Escape cancellation, centralized default dimensions, stableDelta
 precision and grid snapping, position clamping and undersized-form rejection,
 UUID/name collision handling at Toolbox allocation and host add preflight,
-stable ID after rename, and the empty MultiPage/TabStrip states. Designer checks
-should cover root, Frame, and active-Page insertion, selection followed by
-return to Pointer, canvas Delete handling that leaves Pages intact, Page-list
+stable ID after rename, the exact atomic MultiPage-plus-two-Pages transaction,
+the two-tab TabStrip default, and preservation of authored empty collections.
+Batch validation should accept only the exact three-operation MultiPage
+sequence and reject other three-operation or arbitrary mixed batches. Designer
+checks should cover root, Frame, and active-Page insertion, selection followed
+by return to Pointer, canvas Delete handling that leaves Pages intact, Page-list
 deletion confirmation and cascade, immediate leaf-control deletion,
 confirmation content and cancellation for controls with descendants, descendant
-cascade, a single native Undo/Redo step, and pending-confirmation/version
-invalidation.
+cascade, a single native Undo/Redo step for each initial-control creation, and
+pending-confirmation/version invalidation.
 
 Keep coverage in `editors/vscode/test/userFormStructure.test.tsx`, the actual
 Webview interaction suite `editors/vscode/test/suite/userFormWebview.test.ts`,

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- New Toolbox MultiPages start with two Pages and `selectedIndex: 0`; their
+  control and Pages are created atomically as one native Undo step. New
+  TabStrips start with `Tab1`, `Tab2`, and `selectedIndex: 0`. MultiPage and
+  TabStrip insertion also require their respective Page or Tab capability;
+  existing authored empty collections remain unchanged.
+
 - Fixed false source conflicts during Designer Save by matching native source
   line endings and adopting successfully saved formatter output.
 

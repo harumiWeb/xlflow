@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- New Toolbox MultiPages start with two Pages and select the first; new
+  TabStrips start with two tabs and select the first. MultiPage and both Pages
+  are created as one undoable edit, while existing authored empty collections
+  remain unchanged.
+
 - Fixed UserForm Designer explicit Save incorrectly reporting source conflicts
   after multiline CRLF edits or VS Code save-time formatting.
 

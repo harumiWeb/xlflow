@@ -879,6 +879,13 @@ CI or publication is claimed.
 
 # Deferred-save UserForm Designer
 
+## Initial MultiPage and TabStrip members
+
+- [x] Create two initial Pages or tabs on Toolbox placement, selecting the first member and allocating collision-free names and IDs.
+- [x] Admit the narrow atomic creation transaction through Webview, host and LSP capability/validation boundaries; preserve one-step Undo/Redo and deferred source saving.
+- [x] Resolve the review finding: reject standalone empty collection insertion messages and gate MultiPage/TabStrip insertion by owner type on every extension layer. Read-only second pass confirms the finding is resolved.
+- [x] Full VS Code 1.141.1 tests PASS, including visible headers, collection capability matrix, native history and explicit-only source publication. Full LSP tests PASS (131.894s), covering YAML/JSON source preservation, nested Frame/Page placement and atomic rejection. Lint/docs/format and diff checks PASS. ADR/spec/guides and both changelogs updated, latest VSIX rebuilt and `rtk task install` succeeded. No Excel E2E is needed for the Toolbox/LSP-only change.
+
 ## Explicit save false conflict
 
 - [x] Reproduce false conflicts with multiline LF edits in a native CRLF source and a real VS Code save participant before each fix.

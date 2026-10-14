@@ -75,13 +75,16 @@ Invalid source retains the last valid preview and disables editing until fixed.
 The Toolbox contains Pointer and Label, TextBox, ComboBox, ListBox,
 CommandButton, CheckBox, OptionButton, ToggleButton, SpinButton, ScrollBar,
 Image, Frame, MultiPage, and TabStrip. Choose a type, then click the canvas to
-insert a root control or target a Frame; Escape cancels placement. The Designer uses the same
-type-specific default sizes as its preview and clamps the position to fit the
-destination. A destination smaller than the default control size rejects insertion. New
-controls have stable `control-<UUID>` IDs and conflict-free generated VBA names.
-Insertion selects the new control and returns to Pointer. A new MultiPage has
-no Pages and `selectedIndex: -1`; a new TabStrip has `tabs: []` and
-`selectedIndex: -1`.
+insert a control or target a Frame or active Page when its capabilities are
+available; Escape cancels placement. The Designer uses the same type-specific
+default sizes as its preview and clamps the position to fit the destination. A
+destination smaller than the default control size rejects insertion. New
+controls have stable `control-<UUID>` IDs and conflict-free generated VBA
+names. Insertion selects the new control and returns to Pointer. A new
+MultiPage starts with two Pages and `selectedIndex: 0`; its control and both
+Pages are one atomic, undoable edit. A new TabStrip starts with `Tab1` and
+`Tab2` and `selectedIndex: 0`. Existing authored empty MultiPages and
+TabStrips remain unchanged.
 
 Delete the selected control with the toolbar or Delete while the canvas has
 focus. Leaf controls are removed immediately. When a control has descendants,
@@ -89,10 +92,13 @@ a confirmation shows its name and descendant count; confirming removes the
 subtree as one undoable edit. Designer deletion does not intercept Delete in a
 focused input, so normal character deletion continues to work. Direct deletion
 of a Page is disabled. Structural editing requires the LSP's separate
-`userFormStructuralEdit` capability. Older servers keep their advertised
-geometry/property support and do not offer structural actions. Source edits do
-not change code-behind. Publish source with the Designer Save button or its
-scoped Ctrl+S/Cmd+S command; AutoSave checkpoints the draft only.
+`userFormStructuralEdit` capability. Adding a MultiPage also requires
+`userFormPageEdit`; adding a TabStrip also requires `userFormTabEdit`. Other
+Toolbox controls retain their existing capability requirements. Older servers
+keep their advertised geometry/property support and do not offer unsupported
+structural actions. Source edits do not change code-behind. Publish source with
+the Designer Save button or its scoped Ctrl+S/Cmd+S command; AutoSave
+checkpoints the draft only.
 
 Drag an existing control into a Frame or onto the form background to change
 its parent. The highlighted destination and drag preview show the final

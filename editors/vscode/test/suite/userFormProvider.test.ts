@@ -9,6 +9,7 @@ import {
 } from "../../src/userFormEditor/provider";
 import { designerDocument } from "../../src/userFormEditor/model";
 import { createControl } from "../../src/userFormEditor/toolbox";
+import { initialControlOperations } from "../../src/userFormEditor/collections";
 import type { DocumentEditQueue } from "../../src/userFormEditor/edits";
 import type { DesignerError, HostMessage, WebviewMessage } from "../../src/userFormEditor/protocol";
 import {
@@ -22,6 +23,7 @@ import type { ClipboardContent } from "../../src/userFormEditor/clipboard";
 // and deferred queue result, so visibility cannot race the test driver.
 export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): Promise<void> {
   await runClientCapabilityAssertions();
+  await runInitialCollectionCapabilityAssertions();
   await runClipboardAssertions();
   await runProductivityCapabilityAssertions();
   await runStructuralPreparationAssertions();
@@ -589,6 +591,78 @@ async function runClientCapabilityAssertions(): Promise<void> {
       }
     }
   }
+}
+
+async function runInitialCollectionCapabilityAssertions(): Promise<void> {
+  const document = await vscode.workspace.openTextDocument({
+    language: "json",
+    content: '{"form":{"name":"Main"},"controls":[]}',
+  });
+  const model = designerDocument({ form: { name: "Main" }, controls: [] });
+  for (const structural of [false, true])
+    for (const pages of [false, true])
+      for (const tabs of [false, true]) {
+        let requests = 0;
+        const manager = Object.assign(Object.create(XlflowLanguageClientManager.prototype), {
+          previewGeneration: 0,
+          workspaceFolderKey: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString(),
+          client: {
+            isRunning: () => true,
+            initializeResult: {
+              capabilities: {
+                experimental: {
+                  userFormStructuralEdit: structural,
+                  userFormPageEdit: pages,
+                  userFormTabEdit: tabs,
+                },
+              },
+            },
+            sendRequest: async () => {
+              requests++;
+              return { version: document.version, edits: [] };
+            },
+          },
+        }) as XlflowLanguageClientManager;
+        for (const type of ["MultiPage", "TabStrip"] as const) {
+          const control = createControl(model, type, 0, 0, false)!;
+          const operations = initialControlOperations(model, control)!;
+          const before = requests;
+          const allowed = structural && (type === "MultiPage" ? pages : tabs);
+          const request = manager.requestUserFormEdit(
+            document,
+            document.version,
+            document.getText(),
+            operations,
+          );
+          if (allowed) await request;
+          else await assert.rejects(request);
+          assert.strictEqual(
+            requests,
+            before + Number(allowed),
+            "initial members require only structural and the matching collection capability",
+          );
+          if (!(type === "MultiPage" ? pages : tabs)) {
+            const beforeEmpty = requests;
+            await assert.rejects(
+              manager.requestUserFormEdit(document, document.version, document.getText(), [
+                {
+                  type: "addControl",
+                  control: {
+                    ...control,
+                    selectedIndex: -1,
+                    ...(type === "TabStrip" ? { tabs: [] } : {}),
+                  },
+                },
+              ]),
+            );
+            assert.strictEqual(
+              requests,
+              beforeEmpty,
+              "empty collection payloads cannot bypass the owner capability gate",
+            );
+          }
+        }
+      }
 }
 
 async function runStructuralPreparationAssertions(): Promise<void> {

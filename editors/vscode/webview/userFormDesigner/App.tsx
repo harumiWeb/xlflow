@@ -12,6 +12,7 @@ import { PropertyGrid } from "./PropertyGrid";
 import { Toolbox } from "./Toolbox";
 import { CollectionEditor } from "./CollectionEditor";
 import type { ActivePages } from "../../src/userFormEditor/collections";
+import { initialControlOperations } from "../../src/userFormEditor/collections";
 import { createControl, controlMetadata } from "../../src/userFormEditor/toolbox";
 import type { ToolboxType } from "../../src/userFormEditor/toolbox";
 import type { PropertyDraftStore, PropertyReply } from "./PropertyGrid";
@@ -238,6 +239,13 @@ export function App() {
   const commit = (operations: SemanticOperation[]) => {
     if (pending.current || busy || error || draftState.saving || draftState.conflicted) return;
     const operation = operations[0];
+    if (operations.some((op) => op.type === "addPage") && !pageEditable) return;
+    if (
+      operation.type === "addControl" &&
+      ((operation.control.type === "MultiPage" && !pageEditable) ||
+        (operation.control.type === "TabStrip" && !tabEditable))
+    )
+      return;
     const property =
       operation.type === "setFormProperty" ||
       operation.type === "setControlProperty" ||
@@ -561,6 +569,7 @@ export function App() {
             <Toolbox
               parentEditable={parentEditable}
               pageEditable={pageEditable}
+              tabEditable={tabEditable}
               selected={tool}
               disabled={!structuralEditable || busy || !!error}
               strings={strings}
@@ -627,7 +636,12 @@ export function App() {
                   setEditError(parentId ? strings.cannotInsertContainer : strings.cannotInsert);
                   return;
                 }
-                commit([{ type: "addControl", control }]);
+                const operations = initialControlOperations(document, control);
+                if (!operations) {
+                  setEditError(strings.cannotInsert);
+                  return;
+                }
+                commit(operations);
               }}
             />
             <div class="properties-pane" ref={propertiesPane}>

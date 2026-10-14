@@ -16,6 +16,7 @@ import type {
   ProductivityOperation,
   SemanticOperation,
   WebviewMessage,
+  SpecControl,
 } from "./protocol";
 import { DocumentEditQueue } from "./edits";
 import { controlMetadata, subtreeIds } from "./toolbox";
@@ -70,6 +71,7 @@ export async function prepareStructuralEdit(
   version: number,
   confirm: DeleteConfirmation,
   pageEditable = false,
+  initialPages: SpecControl[] = [],
 ): Promise<DesignerError | undefined> {
   if (!snapshot || snapshot.version !== version)
     return {
@@ -81,7 +83,13 @@ export async function prepareStructuralEdit(
     const name = operation.control.name.toLowerCase();
     if (
       controls.some((c) => c.id === operation.control.id || c.name.toLowerCase() === name) ||
-      snapshot.document.name.toLowerCase() === name
+      snapshot.document.name.toLowerCase() === name ||
+      initialPages.some(
+        (page) =>
+          controls.some(
+            (c) => c.id === page.id || c.name.toLowerCase() === page.name.toLowerCase(),
+          ) || snapshot.document.name.toLowerCase() === page.name.toLowerCase(),
+      )
     )
       return {
         code: "controlConflict",
@@ -1004,6 +1012,13 @@ export class UserFormEditorProvider
             message.operations[0].type === "setFormProperty" ||
             message.operations[0].type === "setControlProperty";
           const operation = message.operations[0];
+          const initialPages = message.operations.flatMap((op) =>
+            op.type === "addPage" && operation.type === "addControl" ? [op.control] : [],
+          );
+          const initialTabs =
+            operation.type === "addControl" && operation.control.type === "TabStrip";
+          const initialMultiPage =
+            operation.type === "addControl" && operation.control.type === "MultiPage";
           const structural = operation.type === "addControl" || operation.type === "removeControl";
           const parentOperation = operation.type === "setParent";
           const parentedAdd =
@@ -1043,6 +1058,9 @@ export class UserFormEditorProvider
             contextGeneration === editContext &&
             panel.visible &&
             (!pageParent || pageEditable) &&
+            (!initialPages.length || pageEditable) &&
+            (!initialMultiPage || pageEditable) &&
+            (!initialTabs || tabEditable) &&
             (productivity
               ? productivityAllowed()
               : page
@@ -1084,6 +1102,7 @@ export class UserFormEditorProvider
                     message.version,
                     this.confirmDeletion,
                     pageEditable,
+                    initialPages,
                   )
               : parentOperation
                 ? async () =>

@@ -462,6 +462,313 @@ func TestUserFormEditStructuralPayloadValidation(t *testing.T) {
 	}
 }
 
+func TestUserFormEditInitialMultiPageAndTabStrip(t *testing.T) {
+	root := t.TempDir()
+	server := &Server{opts: Options{RootDir: root, Config: config.Default()}}
+	fixtures := []struct {
+		name   string
+		format string
+		source string
+	}{
+		{
+			name: "yaml", format: "yaml",
+			source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\ncontrols: []\n",
+		},
+		{
+			name: "json", format: "json",
+			source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[]}`,
+		},
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.name+"/MultiPage", func(t *testing.T) {
+			uri := pathToFileURI(filepath.Join(root, "src/forms/specs/Main."+fixture.format))
+			operations := []any{
+				map[string]any{"type": "addControl", "control": map[string]any{
+					"id": "multi", "name": "MultiPage1", "type": "MultiPage", "selectedIndex": -1,
+				}},
+				map[string]any{"type": "addPage", "control": map[string]any{
+					"id": "page-one", "name": "PageOne", "type": "Page", "parentId": "multi",
+				}},
+				map[string]any{"type": "addPage", "control": map[string]any{
+					"id": "page-two", "name": "PageTwo", "type": "Page", "parentId": "multi",
+				}},
+			}
+			params := parseUserFormEditTestParams(t, uri, fixture.source, operations)
+			result := server.userFormEdit(params)
+			if result.Error != nil || result.Version != params.Version || len(result.Edits) == 0 {
+				t.Fatalf("initial MultiPage transaction failed: %+v", result)
+			}
+			updated, err := applyLSPTextEdits(fixture.source, result.Edits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, err := spec.ParseFormSpec(spec.SpecInput{Format: fixture.format}, []byte(updated))
+			if err != nil {
+				t.Fatalf("initial MultiPage transaction produced invalid %s: %v\n%s", fixture.format, err, updated)
+			}
+			if len(document.Controls) != 3 {
+				t.Fatalf("MultiPage controls = %+v, want owner and two Pages", document.Controls)
+			}
+			owner := document.Controls[0]
+			if owner.ID != "multi" || owner.ParentID != "" || !strings.EqualFold(owner.Type, "MultiPage") ||
+				owner.SelectedIndex == nil || *owner.SelectedIndex != 0 || len(owner.Tabs) != 0 {
+				t.Fatalf("canonical MultiPage owner = %+v", owner)
+			}
+			for index, want := range []struct {
+				id, name string
+			}{{"page-one", "PageOne"}, {"page-two", "PageTwo"}} {
+				page := document.Controls[index+1]
+				if page.ID != want.id || page.Name != want.name || !strings.EqualFold(page.Type, "Page") || page.ParentID != owner.ID ||
+					page.Left != nil || page.Top != nil || page.Width != nil || page.Height != nil {
+					t.Errorf("canonical Page %d = %+v, want parent %q and no geometry", index, page, owner.ID)
+				}
+			}
+		})
+
+		t.Run(fixture.name+"/TabStrip", func(t *testing.T) {
+			uri := pathToFileURI(filepath.Join(root, "src/forms/specs/Main."+fixture.format))
+			operations := []any{map[string]any{"type": "addControl", "control": map[string]any{
+				"id": "tabs", "name": "TabStrip1", "type": "TabStrip", "selectedIndex": 0,
+				"tabs": []any{
+					map[string]any{"name": "Tab1", "caption": "Tab1"},
+					map[string]any{"name": "Tab2", "caption": "Tab2"},
+				},
+			}}}
+			params := parseUserFormEditTestParams(t, uri, fixture.source, operations)
+			result := server.userFormEdit(params)
+			if result.Error != nil || len(result.Edits) == 0 {
+				t.Fatalf("initial TabStrip insertion failed: %+v", result)
+			}
+			updated, err := applyLSPTextEdits(fixture.source, result.Edits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, err := spec.ParseFormSpec(spec.SpecInput{Format: fixture.format}, []byte(updated))
+			if err != nil || len(document.Controls) != 1 {
+				t.Fatalf("initial TabStrip result = %+v, %v\n%s", document.Controls, err, updated)
+			}
+			control := document.Controls[0]
+			if control.ID != "tabs" || !strings.EqualFold(control.Type, "TabStrip") || control.SelectedIndex == nil || *control.SelectedIndex != 0 || len(control.Tabs) != 2 {
+				t.Fatalf("canonical TabStrip = %+v", control)
+			}
+			for index, want := range []string{"Tab1", "Tab2"} {
+				tab := control.Tabs[index]
+				if tab.Name != want || tab.Caption == nil || *tab.Caption != want || tab.ControlTipText != nil || tab.Tag != nil ||
+					tab.Accelerator != nil || tab.Enabled != nil || tab.Visible != nil {
+					t.Errorf("canonical TabStrip tab %d = %+v", index, tab)
+				}
+			}
+		})
+
+		for _, test := range []struct {
+			name    string
+			control map[string]any
+		}{
+			{name: "empty-MultiPage-selected-minus-one", control: map[string]any{"id": "empty-multi", "name": "EmptyMulti", "type": "MultiPage", "selectedIndex": -1}},
+			{name: "empty-MultiPage-omitted-selection", control: map[string]any{"id": "empty-multi-omitted", "name": "EmptyMultiOmitted", "type": "MultiPage"}},
+			{name: "empty-TabStrip-selected-minus-one", control: map[string]any{"id": "empty-tabs", "name": "EmptyTabs", "type": "TabStrip", "selectedIndex": -1, "tabs": []any{}}},
+			{name: "empty-TabStrip-omitted-selection-and-tabs", control: map[string]any{"id": "empty-tabs-omitted", "name": "EmptyTabsOmitted", "type": "TabStrip"}},
+		} {
+			t.Run(fixture.name+"/legacy-"+test.name, func(t *testing.T) {
+				uri := pathToFileURI(filepath.Join(root, "src/forms/specs/Main."+fixture.format))
+				params := parseUserFormEditTestParams(t, uri, fixture.source, []any{
+					map[string]any{"type": "addControl", "control": test.control},
+				})
+				result := server.userFormEdit(params)
+				if result.Error != nil || len(result.Edits) == 0 {
+					t.Fatalf("legacy %s insertion failed: %+v", test.name, result)
+				}
+				updated, err := applyLSPTextEdits(fixture.source, result.Edits)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := spec.ParseFormSpec(spec.SpecInput{Format: fixture.format}, []byte(updated)); err != nil {
+					t.Fatalf("legacy %s result is invalid: %v\n%s", test.name, err, updated)
+				}
+			})
+		}
+	}
+}
+
+func TestUserFormEditInitialMultiPageSupportsExistingContainers(t *testing.T) {
+	root := t.TempDir()
+	server := &Server{opts: Options{RootDir: root, Config: config.Default()}}
+	fixtures := []struct {
+		name   string
+		format string
+		source string
+	}{
+		{
+			name: "yaml", format: "yaml",
+			source: "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: Main\ncontrols:\n  - id: existing-multi\n    name: ExistingMulti\n    type: MultiPage\n    selectedIndex: 0\n  - id: existing-page\n    name: ExistingPage\n    type: Page\n    parentId: existing-multi\n  - id: existing-frame\n    name: ExistingFrame\n    type: Frame\n    parentId: existing-page\n",
+		},
+		{
+			name: "json", format: "json",
+			source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"existing-multi","name":"ExistingMulti","type":"MultiPage","selectedIndex":0},{"id":"existing-page","name":"ExistingPage","type":"Page","parentId":"existing-multi"},{"id":"existing-frame","name":"ExistingFrame","type":"Frame","parentId":"existing-page"}]}`,
+		},
+	}
+	for _, fixture := range fixtures {
+		for _, parent := range []struct {
+			name string
+			id   string
+		}{{name: "Frame", id: "existing-frame"}, {name: "Page", id: "existing-page"}} {
+			t.Run(fixture.name+"/inside-"+parent.name, func(t *testing.T) {
+				uri := pathToFileURI(filepath.Join(root, "src/forms/specs/Main."+fixture.format))
+				operations := []any{
+					map[string]any{"type": "addControl", "control": map[string]any{
+						"id": "multi", "name": "MultiPage1", "type": "MultiPage", "selectedIndex": -1, "parentId": parent.id,
+					}},
+					map[string]any{"type": "addPage", "control": map[string]any{
+						"id": "page-one", "name": "PageOne", "type": "Page", "parentId": "multi",
+					}},
+					map[string]any{"type": "addPage", "control": map[string]any{
+						"id": "page-two", "name": "PageTwo", "type": "Page", "parentId": "multi",
+					}},
+				}
+				params := parseUserFormEditTestParams(t, uri, fixture.source, operations)
+				result := server.userFormEdit(params)
+				if result.Error != nil || len(result.Edits) == 0 {
+					t.Fatalf("MultiPage insertion inside %s failed: %+v", parent.name, result)
+				}
+				updated, err := applyLSPTextEdits(fixture.source, result.Edits)
+				if err != nil {
+					t.Fatal(err)
+				}
+				document, err := spec.ParseFormSpec(spec.SpecInput{Format: fixture.format}, []byte(updated))
+				if err != nil {
+					t.Fatalf("nested MultiPage transaction produced invalid %s: %v\n%s", fixture.format, err, updated)
+				}
+				controls := make(map[string]spec.FormSpecControl, len(document.Controls))
+				for _, control := range document.Controls {
+					controls[control.ID] = control
+				}
+				owner := controls["multi"]
+				if owner.ID != "multi" || owner.ParentID != parent.id || owner.SelectedIndex == nil || *owner.SelectedIndex != 0 {
+					t.Fatalf("canonical nested MultiPage = %+v, want parent %q and selectedIndex 0", owner, parent.id)
+				}
+				for _, pageID := range []string{"page-one", "page-two"} {
+					page := controls[pageID]
+					if page.ID != pageID || !strings.EqualFold(page.Type, "Page") || page.ParentID != owner.ID {
+						t.Errorf("canonical Page %q = %+v, want parent %q", pageID, page, owner.ID)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestUserFormEditInitialMultiPageRejectsMalformedTransactions(t *testing.T) {
+	root := t.TempDir()
+	server := &Server{opts: Options{RootDir: root, Config: config.Default()}}
+	source := `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[]}`
+	uri := pathToFileURI(filepath.Join(root, "src/forms/specs/Main.json"))
+	baseOperations := func() []any {
+		return []any{
+			map[string]any{"type": "addControl", "control": map[string]any{
+				"id": "multi", "name": "MultiPage1", "type": "MultiPage", "selectedIndex": -1,
+			}},
+			map[string]any{"type": "addPage", "control": map[string]any{
+				"id": "page-one", "name": "PageOne", "type": "Page", "parentId": "multi",
+			}},
+			map[string]any{"type": "addPage", "control": map[string]any{
+				"id": "page-two", "name": "PageTwo", "type": "Page", "parentId": "multi",
+			}},
+		}
+	}
+	tests := []struct {
+		name     string
+		mutate   func([]any)
+		source   string
+		wantCode string
+	}{
+		{name: "wrong parent", mutate: func(operations []any) {
+			operations[2].(map[string]any)["control"].(map[string]any)["parentId"] = "other"
+		}, wantCode: compiler.Invalid},
+		{name: "invalid child", mutate: func(operations []any) { operations[1].(map[string]any)["control"].(map[string]any)["type"] = "Label" }, wantCode: compiler.Invalid},
+		{name: "duplicate IDs", mutate: func(operations []any) { operations[2].(map[string]any)["control"].(map[string]any)["id"] = "page-one" }, wantCode: compiler.Invalid},
+		{name: "duplicate names ignoring case", mutate: func(operations []any) { operations[2].(map[string]any)["control"].(map[string]any)["name"] = "pageone" }, wantCode: compiler.Invalid},
+		{name: "unsupported owner ProgID", mutate: func(operations []any) {
+			operations[0].(map[string]any)["control"].(map[string]any)["progId"] = "Vendor.MultiPage"
+		}, wantCode: compiler.Unsupported},
+		{name: "mixed arbitrary batch", mutate: func(operations []any) {
+			operations[0] = map[string]any{"type": "setFormProperty", "field": "caption", "value": "Changed"}
+		}, wantCode: compiler.Invalid},
+		{name: "existing ID collision", mutate: func([]any) {}, source: `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main"},"controls":[{"id":"multi","name":"Existing","type":"Label"}]}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			operations := baseOperations()
+			test.mutate(operations)
+			requestSource := source
+			if test.source != "" {
+				requestSource = test.source
+			}
+			payload := marshalUserFormEditTestRequest(t, uri, requestSource, operations)
+			params, requestError := parseUserFormEditParams(payload)
+			if requestError != nil {
+				if requestError.Code != test.wantCode {
+					t.Fatalf("request error = %+v, want %s", requestError, test.wantCode)
+				}
+				return
+			}
+			result := server.userFormEdit(params)
+			if result.Error == nil || (test.wantCode != "" && result.Error.Code != test.wantCode) || len(result.Edits) != 0 {
+				t.Fatalf("malformed transaction result = %+v, want %s and no edits", result, test.wantCode)
+			}
+			if params.Text != requestSource {
+				t.Fatalf("failed transaction changed source: %q", params.Text)
+			}
+		})
+	}
+}
+
+func TestUserFormEditInitialTabStripPayloadIsNarrow(t *testing.T) {
+	valid := `{"type":"addControl","control":{"id":"tabs","name":"Tabs","type":"TabStrip","selectedIndex":0,"tabs":[{"name":"Tab1","caption":"Tab1"},{"name":"Tab2","caption":"Tab2"}]}}`
+	emptyCaption := strings.Replace(valid, `"caption":"Tab1"`, `"caption":""`, 1)
+	if _, requestError := parseUserFormEditOperation([]byte(emptyCaption)); requestError != nil {
+		t.Fatalf("valid empty TabStrip caption was rejected: %+v", requestError)
+	}
+	for _, test := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "extra tab field", raw: strings.Replace(valid, `"caption":"Tab1"`, `"caption":"Tab1","enabled":false`, 1)},
+		{name: "duplicate tab names ignoring case", raw: strings.Replace(valid, `"name":"Tab2"`, `"name":"tab1"`, 1)},
+		{name: "invalid selected index", raw: strings.Replace(valid, `"selectedIndex":0`, `"selectedIndex":1`, 1)},
+		{name: "missing selected index", raw: strings.Replace(valid, `,"selectedIndex":0`, ``, 1)},
+		{name: "non-string caption", raw: strings.Replace(valid, `"caption":"Tab1"`, `"caption":1`, 1)},
+		{name: "only one initial tab", raw: strings.Replace(valid, `,{"name":"Tab2","caption":"Tab2"}`, ``, 1)},
+		{name: "missing caption", raw: strings.Replace(valid, `,"caption":"Tab1"`, ``, 1)},
+		{name: "custom ProgID", raw: strings.Replace(valid, `"type":"TabStrip"`, `"type":"TabStrip","progId":"Vendor.Tabs"`, 1)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, requestError := parseUserFormEditOperation([]byte(test.raw)); requestError == nil {
+				t.Fatalf("malformed initial TabStrip payload was accepted: %s", test.raw)
+			}
+		})
+	}
+}
+
+func parseUserFormEditTestParams(t *testing.T, uri, source string, operations []any) userFormEditParams {
+	t.Helper()
+	params, requestError := parseUserFormEditParams(marshalUserFormEditTestRequest(t, uri, source, operations))
+	if requestError != nil {
+		t.Fatalf("parse test request: %+v", requestError)
+	}
+	return params
+}
+
+func marshalUserFormEditTestRequest(t *testing.T, uri, source string, operations []any) []byte {
+	t.Helper()
+	request, err := json.Marshal(map[string]any{
+		"uri": uri, "version": 23, "text": source, "operations": operations,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
+}
+
 func TestUserFormEditStructuralYAMLAndJSON(t *testing.T) {
 	root := t.TempDir()
 	server := &Server{opts: Options{RootDir: root, Config: config.Default()}}

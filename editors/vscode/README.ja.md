@@ -9,8 +9,10 @@
   UserForm FormSpecを、任意のデザイナーでプレビューし、対応するプロパティを編集できます。
   開いているドキュメントに追従し、ソースにエラーがある間も最後に正常表示
   できた状態を保持します。
-  Toolboxから14種類の組み込みコントロールをフォーム直下に追加できます。子孫がある
-  コントロールだけ削除前に子孫数を確認し、一つのundo/redo可能な編集として削除します。
+  Toolboxから14種類の組み込みコントロールを追加できます。新しいMultiPageにはPageが2つ、
+  TabStripにはタブが2つ作成され、どちらも先頭が選択されます。子孫があるコントロールは
+  削除前に子孫数を確認し、一つのundo/redo可能な編集として削除します。MultiPageと
+  2つのPageの追加は、undo/redoでまとめて戻せる一つの操作です。
 - VBAモジュールのインポートとエクスポート機能を実装
 - 高速に各種操作を行うセッション管理機能を搭載
 - LSP機能により、VSCode上でVBA向けの補完、診断、シンボル解析などを利用できます。
@@ -324,7 +326,9 @@ WSL連携を利用する場合は、プロジェクトがWindows側からもWSL�
   移動・リサイズを維持し、previewのみのサーバーは読み取り専用です。
   未設定・null・空文字・false・0を区別し、optionalフィールドの明示的nullに対応しますが、
   キーの削除は行いません。フォーム名の変更はファイルやsidecarを改名しません。
-  Toolboxの追加・削除には`userFormStructuralEdit`、Frame内への配置・親変更には
+  Toolboxの追加・削除には`userFormStructuralEdit`が必要です。MultiPageの追加には
+  `userFormPageEdit`、TabStripの追加には`userFormTabEdit`も必要で、他のToolbox
+  コントロールのcapability要件は変わりません。Frame内への配置・親変更には
   `userFormParentEdit`が必要です。PageとTabStripのコレクション操作は、
   拡張機能がエディタ機能を実装し、選択中LSPが対応するcapability
   (`userFormPageEdit`または`userFormTabEdit`)を通知した場合に利用できます。

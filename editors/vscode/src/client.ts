@@ -193,7 +193,11 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
         vscode.l10n.t("Update xlflow to a version supporting UserForm property edits."),
       );
     if (
-      operations.some((op) => ["addPage", "removePage", "reorderPage"].includes(op.type)) &&
+      operations.some(
+        (op) =>
+          ["addPage", "removePage", "reorderPage"].includes(op.type) ||
+          (op.type === "addControl" && op.control.type === "MultiPage"),
+      ) &&
       experimental?.userFormPageEdit !== true
     )
       throw new Error(
@@ -202,8 +206,10 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
         ),
       );
     if (
-      operations.some((op) =>
-        ["addTab", "removeTab", "reorderTab", "setTabProperty"].includes(op.type),
+      operations.some(
+        (op) =>
+          ["addTab", "removeTab", "reorderTab", "setTabProperty"].includes(op.type) ||
+          (op.type === "addControl" && op.control.type === "TabStrip"),
       ) &&
       experimental?.userFormTabEdit !== true
     )
