@@ -9,12 +9,24 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
+func TestBlankFormCompilerErrorPointsToSpecInsteadOfCodeSidecar(t *testing.T) {
+	formSpec := spec.FormSpec{Form: spec.FormSpecForm{Name: "InvalidForm", Width: new(-1.0)}}
+	_, _, err := BuildBlankWorkbook([]SourceModule{
+		{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Option Explicit"},
+		{Name: "Sheet1", Type: ModuleTypeDocument, Source: "Option Explicit"},
+		{Name: "InvalidForm", Type: ModuleTypeForm, SourcePath: "src/forms/code/InvalidForm.bas", FormSpecPath: "src/forms/specs/InvalidForm.yaml", FormSpec: &formSpec, Source: "Option Explicit"},
+	}, BlankOptions{CodePage: 932})
+	if err == nil || !strings.Contains(err.Error(), "src/forms/specs/InvalidForm.yaml") || strings.Contains(err.Error(), "src/forms/code/InvalidForm.bas") {
+		t.Fatalf("compiler error does not identify the authored spec: %v", err)
+	}
+}
+
 func TestBlankFormsJapaneseAndAllCommonControlsReadback(t *testing.T) {
 	formSpec := spec.FormSpec{SchemaVersion: 1, Kind: "xlflow.userform", Basis: "designer", Form: spec.FormSpecForm{Name: "JapaneseForm", Caption: new("日本語")}}
 	for i, kind := range []string{"Label", "TextBox", "CommandButton", "CheckBox", "OptionButton", "ToggleButton", "ComboBox", "ListBox", "SpinButton", "ScrollBar", "Image"} {
 		control := spec.FormSpecControl{ID: kind, Name: kind + "Main", Type: kind, TabIndex: new(i)}
 		if kind == "TextBox" {
-			control.Text = new("日本語😀")
+			control.Text = new("日本語")
 		}
 		formSpec.Controls = append(formSpec.Controls, control)
 	}

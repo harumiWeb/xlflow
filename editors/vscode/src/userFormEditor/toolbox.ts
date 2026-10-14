@@ -95,7 +95,13 @@ export function createControl(
     if (parentId) control.parentId = parentId;
     if ("caption" in metadata && metadata.caption) control.caption = control.name;
     if (type === "MultiPage" || type === "TabStrip") control.selectedIndex = -1;
-    if (type === "TabStrip") control.tabs = [];
+    if (type === "TabStrip") {
+      control.tabs = [
+        { name: "Tab1", caption: "Tab1" },
+        { name: "Tab2", caption: "Tab2" },
+      ];
+      control.selectedIndex = 0;
+    }
     return control;
   }
 }

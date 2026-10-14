@@ -51,8 +51,8 @@ func TestInitScaffold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.UserForm.CodeSource != "frm" {
-		t.Fatalf("init userform code source = %q, want frm", cfg.UserForm.CodeSource)
+	if cfg.UserForm.CodeSource != "sidecar" {
+		t.Fatalf("init userform code source = %q, want sidecar", cfg.UserForm.CodeSource)
 	}
 	assertScaffoldBuildExcludes(t, cfg)
 }

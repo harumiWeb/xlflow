@@ -35,7 +35,10 @@ public sealed class FormWriteCommand : ICommandHandler
             NoSave: BridgePayload.GetBool(request.Payload, "NoSave"),
             Visible: BridgePayload.GetBool(request.Payload, "Visible"),
             UseSession: BridgePayload.GetBool(request.Payload, "UseSession"),
-            MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "");
+            MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "",
+            Phase: BridgePayload.GetString(request.Payload, "Phase") ?? "import",
+            PreparedWorkbookPath: BridgePayload.GetString(request.Payload, "PreparedWorkbookPath") ?? "",
+            CompiledWorkbookPath: BridgePayload.GetString(request.Payload, "CompiledWorkbookPath") ?? "");
 
         var action = args.Action.Trim().ToLowerInvariant();
         var validationCode = action == "apply" ? "form_apply_args_invalid" : "form_build_args_invalid";
@@ -52,17 +55,21 @@ public sealed class FormWriteCommand : ICommandHandler
         {
             return Failed(request, validationCode, "SpecJson64 is required.");
         }
-        if (string.IsNullOrWhiteSpace(args.FormsDir))
+        if (args.Phase is not ("prepare" or "import"))
         {
-            return Failed(request, validationCode, "FormsDir is required.");
+            return Failed(request, validationCode, "Phase must be prepare or import.");
         }
         if (args.NoSave && !args.UseSession)
         {
             return Failed(request, validationCode, "--NoSave requires --UseSession.");
         }
-        if (action == "build" && args.Overwrite && args.NoSave)
+        if (args.Phase == "prepare" && string.IsNullOrWhiteSpace(args.PreparedWorkbookPath))
         {
-            return Failed(request, validationCode, "--overwrite cannot be combined with --NoSave because Excel requires an intermediate save before recreating the UserForm.");
+            return Failed(request, validationCode, "PreparedWorkbookPath is required during prepare.");
+        }
+        if (args.Phase == "import" && string.IsNullOrWhiteSpace(args.CompiledWorkbookPath))
+        {
+            return Failed(request, validationCode, "CompiledWorkbookPath is required during import.");
         }
 
         return _service.Execute(request, args with { Action = action }, cancellationToken);

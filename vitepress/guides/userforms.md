@@ -10,6 +10,14 @@ xlflow form export-image UserForm1 --json
 
 Run `lint` and `form build` preflight before opening Excel. Do not edit generated `.frm` code-behind independently when sidecar mode is authoritative; see the [UserForm specification](../reference/userform-spec).
 
+Root `form.width` and `form.height` author persisted MS-OFORMS `DisplayedSize`
+in points. Snapshots and file pull read that same persisted value; VBFrame
+`ClientWidth` / `ClientHeight` are compiler-maintained companion values and do
+not seed authoring dimensions. Excel import/export may normalize `DisplayedSize`,
+so a snapshot reports the persisted result and does not guarantee exact equality
+with the authored points. This Excel behavior is separate from pure-Go
+HIMETRIC rounding; xlflow does not compensate with a fixed offset.
+
 ## Visual layout in VS Code
 
 Open a canonical `.yaml`, `.yml`, or `.json` FormSpec directly under your
@@ -18,6 +26,37 @@ xlflow UserForm Designer**. Select a control to drag it or resize with one of
 eight handles. Arrow keys move 1 point; Shift+Arrow moves 10 points. Holding
 an arrow key creates one edit when the keys are released. Escape cancels an
 unfinished interaction. Use VS Code Undo/Redo to restore completed edits.
+
+Designer actions are kept in a shared draft for the FormSpec. The Designer's
+**YAML/JSON not applied** badge shows whether that draft has been published to
+the source. The VS Code tab's dirty dot tracks its internal checkpoint, so the
+dot can clear while the not-applied badge remains.
+
+VS Code Save, Save All, menu Save, and AutoSave durably checkpoint the draft in
+xlflow's extension storage; they do not write YAML, YML, or JSON. To publish,
+use the Designer Save button or the Designer-scoped Ctrl+S/Cmd+S command. This
+validates the current draft and saves it through the latest source document.
+Your global AutoSave setting is unchanged, and AutoSave for regular source-text
+editing continues normally. Pending drafts survive closing and reopening the
+Designer and restarting VS Code. Backup and hot-exit recovery remain supported.
+
+Use Revert to discard the pending Designer draft and adopt the latest YAML/JSON
+source buffer. Save As explicitly publishes to the destination you choose. A
+corrupt saved draft displays a recovery error and remains available until an
+explicit Save or Revert resolves it.
+
+Changes you make in the regular text editor appear in the Designer immediately.
+Non-overlapping changes merge with a dirty Designer draft. If the changes
+conflict, the Designer retains both versions and disables source publication
+until you choose **Use YAML/JSON changes** or **Use Designer draft**. Native
+checkpoint saves remain available. A whole-document choice is confirmed
+explicitly when the changes cannot be merged safely.
+
+Select the form by clicking its background or its name in the selection path.
+Drag the right edge, bottom edge or bottom-right corner to resize it. This
+updates `form.width` and `form.height` in client-area points; the title bar and
+window border are not included. A corner drag updates both dimensions in one
+Undo step. Shrinking stops at the extents of existing root controls.
 
 The grid displays 8-point spacing and has a separate snapping toggle. Snapping
 applies to mouse movement and resize; keyboard movement retains its 1/10-point
@@ -29,20 +68,23 @@ a Frame or MultiPage stops before its children would overflow, including
 children on other Pages. Existing out-of-bounds controls are not automatically
 corrected; controls larger than their parent must be resized to fit before
 moving. Direct source edits remain available for layouts outside these UI
-constraints. Form and Page bounds are not directly editable on the canvas.
+constraints. Page bounds are not directly editable on the canvas.
 
 Visual operations produce local source edits and retain unrelated formatting.
 Invalid source retains the last valid preview and disables editing until fixed.
 The Toolbox contains Pointer and Label, TextBox, ComboBox, ListBox,
 CommandButton, CheckBox, OptionButton, ToggleButton, SpinButton, ScrollBar,
 Image, Frame, MultiPage, and TabStrip. Choose a type, then click the canvas to
-insert a root control or target a Frame; Escape cancels placement. The Designer uses the same
-type-specific default sizes as its preview and clamps the position to fit the
-destination. A destination smaller than the default control size rejects insertion. New
-controls have stable `control-<UUID>` IDs and conflict-free generated VBA names.
-Insertion selects the new control and returns to Pointer. A new MultiPage has
-no Pages and `selectedIndex: -1`; a new TabStrip has `tabs: []` and
-`selectedIndex: -1`.
+insert a control or target a Frame or active Page when its capabilities are
+available; Escape cancels placement. The Designer uses the same type-specific
+default sizes as its preview and clamps the position to fit the destination. A
+destination smaller than the default control size rejects insertion. New
+controls have stable `control-<UUID>` IDs and conflict-free generated VBA
+names. Insertion selects the new control and returns to Pointer. A new
+MultiPage starts with two Pages and `selectedIndex: 0`; its control and both
+Pages are one atomic, undoable edit. A new TabStrip starts with `Tab1` and
+`Tab2` and `selectedIndex: 0`. Existing authored empty MultiPages and
+TabStrips remain unchanged.
 
 Delete the selected control with the toolbar or Delete while the canvas has
 focus. Leaf controls are removed immediately. When a control has descendants,
@@ -50,9 +92,13 @@ a confirmation shows its name and descendant count; confirming removes the
 subtree as one undoable edit. Designer deletion does not intercept Delete in a
 focused input, so normal character deletion continues to work. Direct deletion
 of a Page is disabled. Structural editing requires the LSP's separate
-`userFormStructuralEdit` capability. Older servers keep their advertised
-geometry/property support and do not offer structural actions. Source edits do
-not change code-behind or save automatically.
+`userFormStructuralEdit` capability. Adding a MultiPage also requires
+`userFormPageEdit`; adding a TabStrip also requires `userFormTabEdit`. Other
+Toolbox controls retain their existing capability requirements. Older servers
+keep their advertised geometry/property support and do not offer unsupported
+structural actions. Source edits do not change code-behind. Publish source with
+the Designer Save button or its scoped Ctrl+S/Cmd+S command; AutoSave
+checkpoints the draft only.
 
 Drag an existing control into a Frame or onto the form background to change
 its parent. The highlighted destination and drag preview show the final
@@ -64,9 +110,53 @@ clickable selection path above the canvas to select ancestor Frames.
 
 Frame placement additionally requires `userFormParentEdit`; reparenting
 requires both that capability and geometry support. Older servers retain
-root placement and same-parent movement. Page/Tab collection editing and
-direct Page-parent changes remain future work tracked by
-[Issue #921](https://github.com/harumiWeb/xlflow/issues/921). Images remain placeholders.
+root placement and same-parent movement. Page and TabStrip collection editing
+is available when the LSP advertises `userFormPageEdit` and
+`userFormTabEdit`, respectively. See the sections below for Page placement,
+tab editing, and tab order.
+
+### Selection and layout productivity
+
+Ctrl/Cmd-click or Shift-click toggles ordinary built-in sibling controls in a
+group selection under the form, one Frame, or one Page. Custom controls remain
+selectable alone but cannot join a group. Marquee selection includes only
+visible, ordinary built-in immediate children whose complete displayed bounds
+are inside the marquee. Dragging a group preserves its parent and relative
+geometry; group dragging does not resize controls.
+
+Use Align Left/Center/Right or Top/Middle/Bottom to align to the last selected
+control. Make Same Width, Same Height, or Same Size also uses that anchor.
+Distribute Horizontally or Vertically requires at least three controls and
+keeps the first and last positions fixed while making the edge gaps equal. The
+Designer sorts by left/top position and uses z-order to break ties.
+Bring to Front, Bring Forward, Send Backward, and Send to Back preserve the
+selected controls' relative order and leave `tabIndex` unchanged.
+
+The selection context menu offers Cut, Copy, Paste, Delete, Duplicate, z-order
+commands, and Properties. Copy publishes its successful snapshot to an
+in-memory clipboard shared by Designer panels. Copying a Frame includes its
+children; copying a MultiPage includes its Pages and their descendants. A Page
+cannot be copied directly, and unsupported custom-control subtrees are
+rejected. Paste uses a selected Frame or Page as its destination only when it
+is the sole selected control; otherwise, including a multi-selection, it uses
+the selection's owning parent. Duplicate always uses the original selection's
+owning parent, so a Frame is not duplicated inside itself. Each repeated paste
+starts 8 points down and right; a new clipboard snapshot restarts this offset
+for each destination form and parent. The Designer shifts the entire pasted
+group to fit its destination or rejects it if it cannot fit without resizing.
+Same-project picture paths stay unchanged; a cross-project paste containing
+one is rejected. Image files, events, and code-behind are not copied.
+
+Cut first captures a valid source snapshot, then asks one confirmation for the
+aggregate descendant count across selected controls; leaf-only Cut needs no
+descendant confirmation. After confirmation, it removes the selection as one
+undoable edit and publishes the captured snapshot to the shared clipboard only
+if deletion succeeds. Cancellation or failure leaves the source and previous
+clipboard unchanged. Each completed
+layout, z-order, paste/duplicate, delete/cut, or tab-order Apply action is one
+VS Code Undo step. Copy alone does not edit the document. Productivity actions
+require the LSP's `userFormProductivityEdit` plus the applicable existing
+geometry, property, structural, parent, or Page capability.
 
 ### Edit properties
 
@@ -80,8 +170,8 @@ edited in this grid.
 Confirm text/number input with Enter or by leaving the field; Escape cancels
 the draft. Boolean/enum choices confirm immediately. Each confirmation creates
 one native undoable source edit in YAML, YML or JSON. Invalid input keeps its
-field error without changing source. A source update invalidates an older
-draft; re-enter it against the refreshed document.
+field error without changing source. A source update invalidates an unconfirmed
+Property Grid field entry; re-enter it against the refreshed document.
 
 Unset, explicit null, empty string, false and zero are distinct. The grid does
 not fill authored fields from measured or preview defaults. Explicit null is
@@ -110,6 +200,14 @@ Page geometry comes from its owning MultiPage, so do not author Page
 `left`/`top`/`width`/`height`. See the [UserForm specification](../reference/userform-spec)
 for the complete schema, snapshot shape, and generation details.
 
+The Designer's tab-order editor lists direct controls for one form, Frame, or
+Page parent when the LSP metadata exposes `tabIndex`. Hidden and disabled
+controls remain in the list; Page controls and TabStrip tab records do not.
+Initial order uses authored numeric `tabIndex`, ascending, then z-order for
+ties; absent or null indexes follow in z-order. Apply assigns contiguous
+zero-based indexes in one edit. If the source changes before Apply, the pending
+order is discarded and rebuilt from the document.
+
 ## Image pictures
 
 An Image control can load a project-root-relative BMP or JPEG asset in pure-Go
@@ -129,6 +227,8 @@ to clear an existing picture. Omitting `picture` preserves it. File pull stores
 supported embedded images in `src/forms/assets/<full-SHA-256>.bmp|jpg`; those
 files are not automatically deleted. File push loads, validates, and
 fingerprints referenced assets only; unreferenced assets are retained and
-ignored. Excel may normalize JPEG input to BMP when saving. Excel-backed `form build` and apply APIs reject `picture` until
-they implement the same contract. See the [UserForm specification](../reference/userform-spec)
-for invalid values and full field details.
+ignored. Excel may normalize JPEG input to BMP when saving. Form build, both
+push backends, and pack share the pure-Go compiler for picture validation and
+persistence; Excel-backed build reflects that compiled result through the
+bridge. See the [UserForm specification](../reference/userform-spec) for
+invalid values and full field details.

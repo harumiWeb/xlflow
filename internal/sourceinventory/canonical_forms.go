@@ -505,7 +505,11 @@ func loadAuthoredFormSpec(input forms.SpecInput, body []byte) (forms.FormSpec, e
 	}
 	for _, issue := range sourceIssues {
 		if issue.Severity == forms.SeverityError {
-			return forms.FormSpec{}, fmt.Errorf("%s: %s", issue.Code, issue.Message)
+			return forms.FormSpec{}, &forms.SpecError{
+				Code: "spec_validation_failed", Path: input.DisplayPath, Format: input.Format,
+				Message: fmt.Sprintf("%s: %s: %s", input.DisplayPath, issue.Code, issue.Message),
+				Field:   issue.Field, Suggestion: issue.Suggestion, Issues: sourceIssues,
+			}
 		}
 	}
 	var raw forms.FormSpec
@@ -528,7 +532,6 @@ func loadAuthoredFormSpec(input forms.SpecInput, body []byte) (forms.FormSpec, e
 	normalized.Form.Width = raw.Form.Width
 	normalized.Form.Height = raw.Form.Height
 	normalized.Form.Observed = raw.Form.Observed
-	normalized.Form.Build = raw.Form.Build
 	for i := range normalized.Controls {
 		// Control fields authored at the top level are retained by normalization;
 		// only its synthesized observed compatibility view is discarded.

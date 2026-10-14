@@ -101,11 +101,17 @@ End Sub
 
 Use file push to apply it to a configured, closed `.xlsm`, or pack to create a
 separate workbook. No `.frx` is required for supported canonical generation.
-For a new form that needs an explicit client size, use
-`form.build.clientWidth` / `clientHeight` in points. Do not combine client and
-outer dimensions. Pure-Go template edits reject root-size changes; Excel-backed
-`form build` rejects client-size authoring. Root captions must fit the workbook
-project code page; see [pack.md](pack.md) for Japanese blank projects.
+`form.width` and `form.height` directly author the persisted MS-OFORMS
+`DisplayedSize` / VBFrame `ClientWidth` and `ClientHeight`, in points. Omitted
+axes default to 240 × 180 only for new forms; omitted dimensions on existing
+template forms are preserved. Runtime `InsideWidth` / `InsideHeight` are
+separate observations and are never converted with a fixed offset. The removed
+`form.build` aliases are invalid. Form build, both push backends, and pack share
+the pure-Go compiler; Excel-backed build compiles against a private live
+workbook copy and imports the compiled form through VBIDE with rollback from a
+backup. Canonical specs need no prebuilt `.frm` or `.frx`. Root captions
+must fit the workbook project code page; see [pack.md](pack.md) for Japanese
+blank projects.
 
 ## Editing Existing Forms
 
@@ -182,9 +188,10 @@ authoring are rejected. Assets must resolve inside the project, including
 symlink targets; limits are 16 MiB and 16 million pixels. Asset bytes are embedded
 in the workbook, so runtime does not require the original image file.
 
-Picture authoring is supported by pure-Go pack and file push. Excel-backed
-`form build` rejects it before mutation. Keep conventional image suffixes for
-clarity, even though explicit references classify assets independently of suffix.
+Picture authoring uses the shared pure-Go compiler for form build, both push
+backends, and pack. Excel-backed build applies the compiled result through the
+bridge. Keep conventional image suffixes for clarity, even though explicit
+references classify assets independently of suffix.
 An image-only edit invalidates file-push changed-only state. Unreferenced files
 under reserved `assets/` are ignored and never automatically garbage-collected.
 

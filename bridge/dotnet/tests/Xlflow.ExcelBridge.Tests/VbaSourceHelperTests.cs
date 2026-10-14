@@ -7,6 +7,50 @@ namespace Xlflow.ExcelBridge.Tests;
 public sealed class VbaSourceHelperTests
 {
     [Fact]
+    public void CanonicalFormsIgnoreTrackedCompatibilityArtifactsButKeepLegacyFormsAndSidecars()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-push-inventory-" + Guid.NewGuid().ToString("N"));
+        var modules = Path.Combine(root, "modules");
+        var classes = Path.Combine(root, "classes");
+        var forms = Path.Combine(root, "forms");
+        var code = Path.Combine(forms, "code");
+        var workbook = Path.Combine(root, "workbook");
+        Directory.CreateDirectory(modules);
+        Directory.CreateDirectory(classes);
+        Directory.CreateDirectory(code);
+        Directory.CreateDirectory(workbook);
+        try
+        {
+            File.WriteAllText(Path.Combine(forms, "Canonical.frm"), "canonical compatibility artifact");
+            File.WriteAllBytes(Path.Combine(forms, "Canonical.frx"), [1, 2, 3]);
+            File.WriteAllText(Path.Combine(forms, "Legacy.frm"), "legacy form");
+            File.WriteAllText(Path.Combine(code, "Canonical.bas"), "canonical sidecar");
+            var assets = Path.Combine(forms, "assets");
+            Directory.CreateDirectory(assets);
+            var picturePath = Path.Combine(assets, "Canonical.bas");
+            File.WriteAllBytes(picturePath, [0, 255, 1, 2]);
+            var retainedPath = Path.Combine(assets, "Retained.bas");
+            File.WriteAllBytes(retainedPath, [0, 255, 1, 2]);
+
+            var files = VbaSourceHelper.DiscoverSourceFiles(
+                modules, classes, forms, workbook, "sidecar",
+                new HashSet<string>(["Canonical"], StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>([picturePath], StringComparer.OrdinalIgnoreCase));
+
+            Assert.DoesNotContain(files, file => file.Kind == "form" && file.ModuleName == "Canonical" && (file.Extension is ".frm" or ".frx"));
+            Assert.Contains(files, file => file.Kind == "form" && file.ModuleName == "Legacy" && file.Extension == ".frm");
+            Assert.Contains(files, file => file.Kind == "form_code" && file.ModuleName == "Canonical");
+            Assert.DoesNotContain(files, file => file.FullPath == picturePath);
+            Assert.DoesNotContain(files, file => file.FullPath == retainedPath);
+            Assert.Empty(VbaSourceHelper.FindDuplicateModuleNames(files));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void PullParityFixturesMatchTrackedSourceContract()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "pull-parity.json")));

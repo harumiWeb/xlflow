@@ -78,18 +78,12 @@ func CompileTemplate(base *oforms.Form, desired spec.FormSpec, codePage uint16) 
 	result, err = oforms.ApplyEdits(result, []oforms.Edit{{Control: "", Property: "Caption", Value: *caption}}, codePage)
 	if err != nil {
 		property := "form.caption"
-		if desired.Form.Build != nil && desired.Form.Build.Caption != nil {
-			property = "form.build.caption"
-		}
 		return nil, templateError(base, Invalid, "", property, err.Error())
 	}
 	return result, nil
 }
 
 func templateExplicitRootCaption(form spec.FormSpecForm) (*string, bool) {
-	if form.Build != nil && form.Build.Caption != nil {
-		return form.Build.Caption, true
-	}
 	if form.Caption != nil {
 		return form.Caption, true
 	}
@@ -111,46 +105,14 @@ func validateTemplateCoordinateSystem(form, coordinateSystem string) error {
 }
 
 func overlayTemplateForm(base *oforms.Form, target *spec.FormSpecForm, desired spec.FormSpecForm) error {
-	if desired.Caption != nil && desired.Build != nil && desired.Build.Caption != nil && *desired.Caption != *desired.Build.Caption {
-		return templateError(base, Conflict, "", "form.caption", "aliases request different values for the same persisted property")
+	if desired.Caption != nil {
+		target.Caption = new(*desired.Caption)
 	}
-
-	caption := desired.Caption
-	if desired.Build != nil && desired.Build.Caption != nil {
-		caption = desired.Build.Caption
-	}
-	if caption != nil {
-		target.Caption = new(*caption)
-		if target.Build == nil {
-			target.Build = &spec.FormSpecBuildForm{}
-		}
-		target.Build.Caption = new(*caption)
-	}
-
 	if desired.Width != nil {
 		target.Width = new(*desired.Width)
 	}
 	if desired.Height != nil {
 		target.Height = new(*desired.Height)
-	}
-	if desired.Build == nil {
-		return nil
-	}
-	if target.Build == nil {
-		target.Build = &spec.FormSpecBuildForm{}
-	}
-	for _, field := range []struct {
-		target **float64
-		source *float64
-	}{
-		{&target.Build.Width, desired.Build.Width},
-		{&target.Build.Height, desired.Build.Height},
-		{&target.Build.ClientWidth, desired.Build.ClientWidth},
-		{&target.Build.ClientHeight, desired.Build.ClientHeight},
-	} {
-		if field.source != nil {
-			*field.target = new(*field.source)
-		}
 	}
 	return nil
 }

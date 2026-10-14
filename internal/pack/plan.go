@@ -75,6 +75,23 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 			return PackPlan{}, fmt.Errorf("%w: invalid UserForm topology %q", ErrAmbiguousLayout, options[0].UserFormTopology)
 		}
 	}
+	encodingIssues, err := collectSourceEncodingErrors(sources, project.Props.CodePage)
+	if err != nil {
+		return PackPlan{}, ambiguousLayoutUnlessEncoding(err)
+	}
+	if encodingIssues != nil {
+		diagnostics := []error{encodingIssues}
+		validSources := make([]SourceModule, 0, len(sources))
+		for _, source := range sources {
+			if source.Type == ModuleTypeForm && sourceHasEncodingIssue(source, encodingIssues) {
+				continue
+			}
+			validSources = append(validSources, source)
+		}
+		_, formDiagnostics := compileSourceForms(project, validSources)
+		diagnostics = append(diagnostics, formDiagnostics...)
+		return PackPlan{}, combinePackDiagnostics(diagnostics)
+	}
 	// Mutations below operate on an independent project, and the caller never
 	// sees a partially reconciled Designer/reference/component state.
 	working, err := vbaproject.Clone(project)
@@ -84,7 +101,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 	templateByName := make(map[string]vbaproject.Module, len(project.Modules))
 	for _, module := range project.Modules {
 		if err := vbaproject.ValidateWritableComponentIdentity(module.Name, module.StreamName, project.Props.CodePage); err != nil {
-			return PackPlan{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+			return PackPlan{}, ambiguousLayoutUnlessEncoding(err)
 		}
 		key := strings.ToLower(module.Name)
 		if prior, exists := templateByName[key]; exists {
@@ -109,7 +126,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 			return PackPlan{}, fmt.Errorf("%w: invalid VBA component name %q", ErrAmbiguousLayout, source.Name)
 		}
 		if err := vbaproject.ValidateWritableComponentIdentity(source.Name, source.Name, project.Props.CodePage); err != nil {
-			return PackPlan{}, fmt.Errorf("%w: %v", ErrAmbiguousLayout, err)
+			return PackPlan{}, ambiguousLayoutUnlessEncoding(err)
 		}
 		if _, err := toProjectModuleType(source.Type); err != nil {
 			return PackPlan{}, err
@@ -136,6 +153,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 			}
 		}
 	}
+	compiledForms, diagnostics := compileSourceForms(project, sources)
 
 	plan := PackPlan{
 		Components: make([]PlannedComponent, 0, len(project.Modules)+len(sources)),
@@ -173,11 +191,9 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 			if index < 0 {
 				return PackPlan{}, fmt.Errorf("%w: form %q has no Designer", ErrAmbiguousLayout, module.Name)
 			}
-			updated, err := compiler.CompileTemplate(working.Forms[index], *source.FormSpec, project.Props.CodePage)
-			if err != nil {
-				return PackPlan{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
+			if updated := compiledForms[moduleKey(source.Name, source.Type)]; updated != nil {
+				working.Forms[index] = updated
 			}
-			working.Forms[index] = updated
 		}
 
 		if source.PreserveExistingCode {
@@ -227,17 +243,23 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 	})
 	for _, source := range additions {
 		if source.Type == ModuleTypeForm {
-			form, err := compiler.CompileNew(*source.FormSpec, project.Props.CodePage)
-			if err != nil {
-				return PackPlan{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
+			form := compiledForms[moduleKey(source.Name, source.Type)]
+			if form == nil {
+				continue
 			}
 			module, err := vbaproject.NewUserFormModule(form, source.Source, project.Props.CodePage)
 			if err != nil {
-				return PackPlan{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
+				if issue := sourceEncodingErrorFromError(source, err); issue != nil {
+					diagnostics = appendSourceEncodingDiagnostic(diagnostics, issue)
+				} else {
+					diagnostics = append(diagnostics, fmt.Errorf("%s: %w", sourceLabel(source), err))
+				}
+				continue
 			}
 			working, err = vbaproject.WithNewUserForm(working, form, module)
 			if err != nil {
-				return PackPlan{}, fmt.Errorf("%s: %w", sourceLabel(source), err)
+				diagnostics = append(diagnostics, fmt.Errorf("%s: %w", sourceLabel(source), err))
+				continue
 			}
 			plan.modules = append(plan.modules, module)
 			plan.Components = append(plan.Components, PlannedComponent{SourcePath: source.SourcePath, RelatedPaths: slices.Clone(source.RelatedPaths), Name: source.Name, Type: source.Type, Action: PlanAdd, TopologyAuthority: formAuthority, CodeAuthority: AuthoritySource})
@@ -247,6 +269,10 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 		targetType, _ := toProjectModuleType(source.Type)
 		normalized, err := normalizePlannedSource(vbaproject.Module{Name: source.Name, StreamName: source.Name, Type: targetType}, source)
 		if err != nil {
+			if issue := sourceEncodingErrorFromError(source, err); issue != nil {
+				diagnostics = appendSourceEncodingDiagnostic(diagnostics, issue)
+				continue
+			}
 			return PackPlan{}, err
 		}
 		plan.modules = append(plan.modules, vbaproject.Module{Name: source.Name, StreamName: source.Name, Type: targetType, Source: normalized})
@@ -270,9 +296,45 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 		}
 		streams[key] = module.StreamName
 	}
+	if err := combinePackDiagnostics(diagnostics); err != nil {
+		return PackPlan{}, err
+	}
 	working.Modules = slices.Clone(plan.modules)
 	plan.project = working
 	return plan, nil
+}
+
+func compileSourceForms(project *vbaproject.Project, sources []SourceModule) (map[string]*oforms.Form, []error) {
+	templateForms := make(map[string]*oforms.Form, len(project.Forms))
+	for _, form := range project.Forms {
+		if form != nil {
+			templateForms[strings.ToLower(form.Name)] = form
+		}
+	}
+	compiled := make(map[string]*oforms.Form)
+	var diagnostics []error
+	for _, source := range sources {
+		if source.Type != ModuleTypeForm || source.FormSpec == nil {
+			continue
+		}
+		var form *oforms.Form
+		var err error
+		if base := templateForms[strings.ToLower(source.Name)]; base != nil {
+			form, err = compiler.CompileTemplate(base, *source.FormSpec, project.Props.CodePage)
+		} else {
+			form, err = compiler.CompileNew(*source.FormSpec, project.Props.CodePage)
+		}
+		if err == nil {
+			compiled[moduleKey(source.Name, source.Type)] = form
+			continue
+		}
+		if issue := sourceEncodingErrorFromError(source, err); issue != nil {
+			diagnostics = appendSourceEncodingDiagnostic(diagnostics, issue)
+		} else {
+			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", formSpecSourceLabel(source), err))
+		}
+	}
+	return compiled, diagnostics
 }
 
 func moduleKey(name string, typ ModuleType) string {
@@ -331,6 +393,13 @@ func sourceLabel(source SourceModule) string {
 		return source.SourcePath
 	}
 	return source.Name
+}
+
+func formSpecSourceLabel(source SourceModule) string {
+	if source.FormSpecPath != "" {
+		return source.FormSpecPath
+	}
+	return sourceLabel(source)
 }
 
 func setAuthorities(component *PlannedComponent) {

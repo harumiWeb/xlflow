@@ -9,13 +9,23 @@ import {
 } from "../../src/userFormEditor/provider";
 import { designerDocument } from "../../src/userFormEditor/model";
 import { createControl } from "../../src/userFormEditor/toolbox";
+import { initialControlOperations } from "../../src/userFormEditor/collections";
 import type { DocumentEditQueue } from "../../src/userFormEditor/edits";
 import type { DesignerError, HostMessage, WebviewMessage } from "../../src/userFormEditor/protocol";
+import {
+  DesignerClipboard,
+  pasteOperation,
+  prepareProductivityDeletion,
+} from "../../src/userFormEditor/clipboard";
+import type { ClipboardContent } from "../../src/userFormEditor/clipboard";
 
 // Use the real provider and VS Code events with a controllable panel transport
 // and deferred queue result, so visibility cannot race the test driver.
 export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): Promise<void> {
   await runClientCapabilityAssertions();
+  await runInitialCollectionCapabilityAssertions();
+  await runClipboardAssertions();
+  await runProductivityCapabilityAssertions();
   await runStructuralPreparationAssertions();
   await runCollectionPreparationAssertions();
   const incoming = new vscode.EventEmitter<WebviewMessage>();
@@ -48,6 +58,15 @@ export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): P
     onDidChangePreviewConnection: connection.event,
   } as unknown as XlflowLanguageClientManager;
   const provider = new UserFormEditorProvider(extensionUri, client);
+  const document = await vscode.workspace.openTextDocument({
+    language: "yaml",
+    content: "form: {name: Main, caption: Original}\ncontrols: []\n",
+  });
+  const customDocument = await provider.openCustomDocument(
+    document.uri,
+    { backupId: undefined, untitledDocumentData: undefined },
+    cancel.token,
+  );
   let finish!: (error: DesignerError | undefined) => void;
   let current!: () => boolean;
   (provider as unknown as { edits: Pick<DocumentEditQueue, "run"> }).edits = {
@@ -58,10 +77,6 @@ export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): P
       });
     },
   };
-  const document = await vscode.workspace.openTextDocument({
-    language: "yaml",
-    content: "form: {name: Main, caption: Original}\ncontrols: []\n",
-  });
   const source = document.getText();
   const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
   const show = async () => {
@@ -73,12 +88,12 @@ export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): P
     incoming.fire({
       type: "edit",
       requestId,
-      version: document.version,
+      version: customDocument.document.version,
       operations: [{ type: "setFormProperty", field: "caption", value: "Draft" }],
     });
   const replies = () => messages.filter((m) => m.type === "editResult");
   try {
-    await provider.resolveCustomTextEditor(document, panel, cancel.token);
+    await provider.resolveCustomEditor(customDocument, panel, cancel.token);
     incoming.fire({ type: "ready" });
     await tick();
     const errors: (DesignerError | undefined)[] = [
@@ -153,6 +168,180 @@ export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): P
     disposed.dispose();
     connection.dispose();
     cancel.dispose();
+  }
+}
+
+async function runClipboardAssertions(): Promise<void> {
+  const clipboard = new DesignerClipboard();
+  const content: ClipboardContent = {
+    projectKey: "project-a",
+    hasPicturePaths: true,
+    snapshot: { format: "yaml", text: "opaque source with explicit null", controlIds: ["frame"] },
+    document: designerDocument({
+      form: { name: "Source" },
+      controls: [
+        { id: "frame", name: "Frame1", type: "Frame" },
+        { id: "child", name: "Label1", type: "Label", parentId: "frame" },
+      ],
+    }),
+  };
+  try {
+    clipboard.write(content);
+    const earlierCopy = clipboard.beginCopy();
+    const laterCopy = clipboard.beginCopy();
+    assert.strictEqual(clipboard.finishCopy(laterCopy, content), true);
+    assert.strictEqual(
+      clipboard.finishCopy(earlierCopy, { ...content, projectKey: "obsolete" }),
+      false,
+    );
+    assert.strictEqual(
+      clipboard.read()!.projectKey,
+      "project-a",
+      "late old copies cannot overwrite a newer selection",
+    );
+    content.snapshot.text = "mutated outside clipboard";
+    assert.strictEqual(clipboard.read()!.snapshot.text, "opaque source with explicit null");
+    const read = clipboard.read()!;
+    read.document.controls.length = 0;
+    assert.strictEqual(clipboard.read()!.document.controls.length, 2);
+    assert.strictEqual(clipboard.nextOffset("form-b", ""), 8);
+    const generation = clipboard.generation;
+    clipboard.pasted("form-b", "", generation);
+    assert.strictEqual(clipboard.nextOffset("form-b", ""), 16);
+    assert.strictEqual(clipboard.nextOffset("form-c", ""), 8);
+    clipboard.write(clipboard.read()!);
+    clipboard.pasted("form-b", "", generation);
+    assert.strictEqual(
+      clipboard.nextOffset("form-b", ""),
+      8,
+      "an older paste cannot advance a new clipboard",
+    );
+    const target = designerDocument({
+      form: { name: "LABEL1" },
+      controls: [
+        { id: "keep", name: "FRAME1", type: "Frame" },
+        { id: "label", name: "Label2", type: "Label" },
+      ],
+    });
+    let sequence = 0;
+    const operation = pasteOperation(clipboard.read()!, target, "project-a", "", 8, false, () =>
+      String(++sequence),
+    );
+    assert.ok("type" in operation);
+    if ("type" in operation) {
+      assert.deepStrictEqual(
+        operation.allocations.map((a) => a.name),
+        ["Frame2", "Label3"],
+      );
+      assert.deepStrictEqual(
+        operation.allocations.map((a) => a.id),
+        ["control-1", "control-2"],
+      );
+      assert.strictEqual(operation.snapshot.text, "opaque source with explicit null");
+    }
+    const crossProject = pasteOperation(clipboard.read()!, target, "project-b", "", 8, false);
+    assert.ok("code" in crossProject);
+    if ("code" in crossProject) assert.strictEqual(crossProject.code, "crossProjectPicture");
+    const noPicture = { ...clipboard.read()!, hasPicturePaths: false };
+    assert.ok("type" in pasteOperation(noPicture, target, "project-b", "", 8, false));
+    assert.ok("code" in pasteOperation(noPicture, target, "project-a", "label", 8, false));
+    let confirmations = 0;
+    const selection = designerDocument({
+      form: { name: "Main" },
+      controls: [
+        { id: "a", name: "Frame1", type: "Frame" },
+        { id: "b", name: "Frame2", type: "Frame" },
+        { id: "c", name: "Label1", type: "Label", parentId: "a" },
+        { id: "d", name: "Label2", type: "Label", parentId: "b" },
+      ],
+    });
+    assert.strictEqual(
+      await prepareProductivityDeletion(
+        {
+          type: "removeControls",
+          controlIds: ["a", "b"],
+          cascade: true,
+        },
+        selection,
+        async (names, descendants) => {
+          confirmations++;
+          assert.strictEqual(names, "Frame1, Frame2");
+          assert.strictEqual(descendants, 2);
+          return true;
+        },
+      ),
+      undefined,
+    );
+    assert.strictEqual(confirmations, 1, "one confirmation covers all selected subtrees");
+    assert.strictEqual(
+      (
+        await prepareProductivityDeletion(
+          {
+            type: "removeControls",
+            controlIds: ["a", "c"],
+            cascade: true,
+          },
+          selection,
+          async () => true,
+        )
+      )?.code,
+      "invalidSelection",
+    );
+  } finally {
+    clipboard.dispose();
+  }
+}
+
+async function runProductivityCapabilityAssertions(): Promise<void> {
+  const document = await vscode.workspace.openTextDocument({ content: "form: {name: Main}" });
+  for (const enabled of [undefined, false, true]) {
+    let requests = 0;
+    const manager = Object.assign(Object.create(XlflowLanguageClientManager.prototype), {
+      previewGeneration: 0,
+      workspaceFolderKey: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString(),
+      client: {
+        isRunning: () => true,
+        initializeResult: {
+          capabilities: {
+            experimental: {
+              userFormPreview: true,
+              userFormEdit: true,
+              userFormStructuralEdit: true,
+              userFormPropertyEdit: true,
+              userFormProductivityEdit: enabled,
+            },
+          },
+        },
+        sendRequest: async () => {
+          requests++;
+          return {
+            version: document.version,
+            edits: [],
+            document: { form: { name: "Main" }, controls: [] },
+          };
+        },
+      },
+    }) as XlflowLanguageClientManager;
+    assert.strictEqual(
+      (await manager.requestUserFormPreview(document)).productivityEditable,
+      enabled === true,
+    );
+    const before = requests;
+    const request = manager.requestUserFormEdit(document, document.version, document.getText(), [
+      {
+        type: "moveControls",
+        moves: [
+          { controlId: "a", left: 1, top: 2 },
+          { controlId: "b", left: 3, top: 4 },
+        ],
+      },
+    ]);
+    if (enabled === true) await request;
+    else await assert.rejects(request);
+    const copy = manager.requestUserFormCopy(document, document.version, document.getText(), ["a"]);
+    if (enabled === true) await copy;
+    else await assert.rejects(copy);
+    assert.strictEqual(requests - before, enabled === true ? 2 : 0);
   }
 }
 
@@ -402,6 +591,78 @@ async function runClientCapabilityAssertions(): Promise<void> {
       }
     }
   }
+}
+
+async function runInitialCollectionCapabilityAssertions(): Promise<void> {
+  const document = await vscode.workspace.openTextDocument({
+    language: "json",
+    content: '{"form":{"name":"Main"},"controls":[]}',
+  });
+  const model = designerDocument({ form: { name: "Main" }, controls: [] });
+  for (const structural of [false, true])
+    for (const pages of [false, true])
+      for (const tabs of [false, true]) {
+        let requests = 0;
+        const manager = Object.assign(Object.create(XlflowLanguageClientManager.prototype), {
+          previewGeneration: 0,
+          workspaceFolderKey: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString(),
+          client: {
+            isRunning: () => true,
+            initializeResult: {
+              capabilities: {
+                experimental: {
+                  userFormStructuralEdit: structural,
+                  userFormPageEdit: pages,
+                  userFormTabEdit: tabs,
+                },
+              },
+            },
+            sendRequest: async () => {
+              requests++;
+              return { version: document.version, edits: [] };
+            },
+          },
+        }) as XlflowLanguageClientManager;
+        for (const type of ["MultiPage", "TabStrip"] as const) {
+          const control = createControl(model, type, 0, 0, false)!;
+          const operations = initialControlOperations(model, control)!;
+          const before = requests;
+          const allowed = structural && (type === "MultiPage" ? pages : tabs);
+          const request = manager.requestUserFormEdit(
+            document,
+            document.version,
+            document.getText(),
+            operations,
+          );
+          if (allowed) await request;
+          else await assert.rejects(request);
+          assert.strictEqual(
+            requests,
+            before + Number(allowed),
+            "initial members require only structural and the matching collection capability",
+          );
+          if (!(type === "MultiPage" ? pages : tabs)) {
+            const beforeEmpty = requests;
+            await assert.rejects(
+              manager.requestUserFormEdit(document, document.version, document.getText(), [
+                {
+                  type: "addControl",
+                  control: {
+                    ...control,
+                    selectedIndex: -1,
+                    ...(type === "TabStrip" ? { tabs: [] } : {}),
+                  },
+                },
+              ]),
+            );
+            assert.strictEqual(
+              requests,
+              beforeEmpty,
+              "empty collection payloads cannot bypass the owner capability gate",
+            );
+          }
+        }
+      }
 }
 
 async function runStructuralPreparationAssertions(): Promise<void> {

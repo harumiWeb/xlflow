@@ -19,6 +19,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/coordination"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/harumiWeb/xlflow/internal/sourceinventory"
 	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
@@ -561,6 +562,19 @@ func (r Runner) Push(cfg config.Config, opts ...CommandOptions) (output.Envelope
 }
 
 func (r Runner) PushWithOptions(cfg config.Config, opts PushOptions) (output.Envelope, int, error) {
+	if opts.SourceRoot == "" {
+		components, canonicalNames, err := discoverPushCompilerInputs(r.RootDir, cfg)
+		if err != nil {
+			return output.Failure("push", output.Error{Code: "push_source_inventory_failed", Message: err.Error(), Source: "xlflow", Phase: "prepare_sources"}), output.ExitValidation, nil
+		}
+		if len(canonicalNames) > 0 {
+			return r.pushCanonicalForms(cfg, opts, components, canonicalNames)
+		}
+	}
+	return r.run("push", buildPushScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+}
+
+func buildPushScriptArgs(root string, cfg config.Config, opts PushOptions) map[string]string {
 	backupMode := opts.BackupMode
 	if backupMode == "" {
 		backupMode = "always"
@@ -570,36 +584,103 @@ func (r Runner) PushWithOptions(cfg config.Config, opts PushOptions) (output.Env
 		backupMode = "never"
 		changedOnly = true
 	}
-	modulesDir := filepath.Join(r.RootDir, cfg.Src.Modules)
-	classesDir := filepath.Join(r.RootDir, cfg.Src.Classes)
-	formsDir := filepath.Join(r.RootDir, cfg.Src.Forms)
-	workbookDir := filepath.Join(r.RootDir, cfg.Src.Workbook)
+	modulesDir := filepath.Join(root, cfg.Src.Modules)
+	classesDir := filepath.Join(root, cfg.Src.Classes)
+	formsDir := filepath.Join(root, cfg.Src.Forms)
+	workbookDir := filepath.Join(root, cfg.Src.Workbook)
 	if opts.SourceRoot != "" {
 		modulesDir = opts.SourceRoot
 		classesDir = ""
 		formsDir = ""
 		workbookDir = ""
 	}
-	return r.run("push", map[string]string{
-		"WorkbookPath":            workbookPath(r.RootDir, cfg.Excel.Path),
+	return map[string]string{
+		"WorkbookPath":            workbookPath(root, cfg.Excel.Path),
 		"ModulesDir":              modulesDir,
 		"ClassesDir":              classesDir,
 		"FormsDir":                formsDir,
 		"WorkbookDir":             workbookDir,
 		"CodeSource":              cfg.UserForm.CodeSource,
-		"BackupRoot":              filepath.Join(r.RootDir, ".xlflow", "backups"),
+		"BackupRoot":              filepath.Join(root, ".xlflow", "backups"),
 		"Folders":                 strconv.FormatBool(cfg.VBA.Folders),
 		"FolderAnnotation":        cfg.VBA.FolderAnnotation,
 		"DefaultComponentFolders": strconv.FormatBool(cfg.VBA.DefaultComponentFolders),
 		"LineNumbersEnabled":      strconv.FormatBool(cfg.VBA.LineNumbers.Enabled),
-		"StatePath":               filepath.Join(r.RootDir, ".xlflow", "state", "push.json"),
+		"StatePath":               filepath.Join(root, ".xlflow", "state", "push.json"),
 		"Visible":                 strconv.FormatBool(cfg.Excel.Visible),
 		"BackupMode":              backupMode,
 		"ChangedOnly":             strconv.FormatBool(changedOnly),
 		"UseSession":              strconv.FormatBool(opts.Session),
 		"NoSave":                  strconv.FormatBool(opts.NoSave),
-		"MetadataPath":            filepath.Join(r.RootDir, ".xlflow", "session.json"),
-	}, opts.Keepalive)
+		"MetadataPath":            filepath.Join(root, ".xlflow", "session.json"),
+	}
+}
+
+func (r Runner) pushCanonicalForms(cfg config.Config, opts PushOptions, components []sourceinventory.Component, canonicalNames []string) (output.Envelope, int, error) {
+	tempDir, err := os.MkdirTemp("", "xlflow-push-compiler-")
+	if err != nil {
+		return output.Failure("push", output.Error{Code: "push_stage_failed", Message: err.Error(), Source: "xlflow", Phase: "prepare_compiler"}), output.ExitEnvironment, nil
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+	preparedPath := filepath.Join(tempDir, "baseline.xlsm")
+	compiledPath := filepath.Join(tempDir, "compiled.xlsm")
+	namesJSON, err := json.Marshal(canonicalNames)
+	if err != nil {
+		return output.Failure("push", output.Error{Code: "push_stage_failed", Message: err.Error(), Source: "xlflow", Phase: "prepare_compiler"}), output.ExitEnvironment, nil
+	}
+	namesJSON64 := base64.StdEncoding.EncodeToString(namesJSON)
+	picturePaths := make([]string, 0)
+	for _, component := range components {
+		for _, artifact := range component.Related {
+			if artifact.Role == sourceinventory.ArtifactRolePicture {
+				path := artifact.AbsolutePath
+				if path == "" {
+					path = filepath.Join(r.RootDir, filepath.FromSlash(artifact.Path))
+				}
+				picturePaths = append(picturePaths, path)
+			}
+		}
+	}
+	picturesJSON, err := json.Marshal(picturePaths)
+	if err != nil {
+		return output.Failure("push", output.Error{Code: "push_stage_failed", Message: err.Error(), Source: "xlflow", Phase: "prepare_compiler"}), output.ExitEnvironment, nil
+	}
+	picturesJSON64 := base64.StdEncoding.EncodeToString(picturesJSON)
+	prepareArgs := buildPushScriptArgs(r.RootDir, cfg, opts)
+	prepareArgs["Phase"] = "prepare"
+	prepareArgs["PreparedWorkbookPath"] = preparedPath
+	prepareArgs["CanonicalFormNamesJson64"] = namesJSON64
+	prepareArgs["CanonicalPicturePathsJson64"] = picturesJSON64
+	lease, ownsLease, failure := r.beginBridgeTransaction("push", prepareArgs)
+	if failure != nil {
+		return failure.env, failure.exitCode, nil
+	}
+	if ownsLease && lease != nil {
+		defer func() { _ = lease.Release() }()
+	}
+	prepared, code, runErr := r.runCoordinatedBridge("push", prepareArgs, opts.Keepalive, lease)
+	if runErr != nil || code != output.ExitSuccess || prepared.Status != output.StatusOK {
+		return prepared, code, runErr
+	}
+	baseline, err := os.ReadFile(preparedPath)
+	if err != nil {
+		return output.Failure("push", output.Error{Code: "push_stage_failed", Message: fmt.Sprintf("read prepared workbook copy: %v", err), Source: "xlflow", Phase: "compile_canonical_forms"}), output.ExitEnvironment, nil
+	}
+	compiled, err := compileTemplateWorkbook(baseline, pushPackSources(components, cfg.UserForm.CodeSource))
+	if err != nil {
+		return output.Failure("push", output.Error{Code: "push_canonical_compile_failed", Message: err.Error(), Source: "xlflow", Phase: "compile_canonical_forms"}), output.ExitValidation, nil
+	}
+	if err := os.WriteFile(compiledPath, compiled, 0o600); err != nil {
+		return output.Failure("push", output.Error{Code: "push_stage_failed", Message: fmt.Sprintf("write compiled workbook copy: %v", err), Source: "xlflow", Phase: "compile_canonical_forms"}), output.ExitEnvironment, nil
+	}
+	importArgs := buildPushScriptArgs(r.RootDir, cfg, opts)
+	importArgs["Phase"] = "import"
+	importArgs["CompiledWorkbookPath"] = compiledPath
+	importArgs["CanonicalFormNamesJson64"] = namesJSON64
+	importArgs["CanonicalPicturePathsJson64"] = picturesJSON64
+	env, code, runErr := r.runCoordinatedBridge("push", importArgs, opts.Keepalive, lease)
+	env.Command = "push"
+	return env, code, runErr
 }
 
 // Build delegates a previously resolved source plan to the Excel bridge.
@@ -899,8 +980,45 @@ func (r Runner) ListForms(cfg config.Config, opts SessionCommandOptions) (output
 }
 
 func (r Runner) InspectForm(cfg config.Config, opts InspectFormOptions) (output.Envelope, int, error) {
-	env, code, err := r.run("inspect-form", buildInspectFormScriptArgs(r.RootDir, cfg, opts), opts.Keepalive)
+	args := buildInspectFormScriptArgs(r.RootDir, cfg, opts)
+	basis := strings.ToLower(strings.TrimSpace(opts.Basis))
+	var snapshotDir string
+	if basis == "designer" || basis == "both" {
+		var err error
+		snapshotDir, err = os.MkdirTemp("", "xlflow-inspect-form-snapshot-")
+		if err != nil {
+			return output.Failure("inspect", output.Error{
+				Code:    "inspect_form_snapshot_failed",
+				Message: fmt.Sprintf("create private workbook snapshot directory: %v", err),
+				Source:  "xlflow",
+				Phase:   "prepare_snapshot",
+			}), output.ExitEnvironment, nil
+		}
+		defer func() { _ = os.RemoveAll(snapshotDir) }()
+		args["PrivateSnapshotWorkbookPath"] = filepath.Join(snapshotDir, "snapshot.xlsm")
+	}
+
+	lease, ownsLease, failure := r.beginBridgeTransaction("inspect-form", args)
+	if failure != nil {
+		failure.env.Command = "inspect"
+		return failure.env, failure.exitCode, nil
+	}
+	if ownsLease && lease != nil {
+		defer func() { _ = lease.Release() }()
+	}
+	env, code, err := r.runCoordinatedBridge("inspect-form", args, opts.Keepalive, lease)
 	env.Command = "inspect"
+	if err != nil || code != output.ExitSuccess || env.Status != output.StatusOK || snapshotDir == "" {
+		return env, code, err
+	}
+	if err := projectPersistedFormDimensions(filepath.Join(snapshotDir, "snapshot.xlsm"), opts.Name, basis, &env.Forms); err != nil {
+		return output.Failure("inspect", output.Error{
+			Code:    "inspect_form_snapshot_failed",
+			Message: err.Error(),
+			Source:  "xlflow",
+			Phase:   "read_persisted_form_dimensions",
+		}), output.ExitValidation, nil
+	}
 	return env, code, err
 }
 
@@ -922,12 +1040,56 @@ func (r Runner) FormExportImage(cfg config.Config, opts FormExportImageOptions) 
 }
 
 func (r Runner) FormWrite(cfg config.Config, opts FormWriteOptions) (output.Envelope, int, error) {
+	return r.formWriteWithCompiler(cfg, opts, compileFormWriteWorkbook)
+}
+
+func (r Runner) formWriteWithCompiler(
+	cfg config.Config,
+	opts FormWriteOptions,
+	compile func(string, config.Config, []byte, FormWriteOptions) ([]byte, error),
+) (output.Envelope, int, error) {
+	opts.Action = strings.ToLower(strings.TrimSpace(opts.Action))
 	scriptArgs, err := buildFormWriteScriptArgs(r.RootDir, cfg, opts)
 	if err != nil {
 		code, exitCode := formWriteArgFailure(err, opts.Action)
 		return output.Failure("form "+opts.Action, output.Error{Code: code, Message: err.Error(), Source: "xlflow"}), exitCode, nil
 	}
-	env, code, runErr := r.run("form-write", scriptArgs, opts.Keepalive)
+	tempDir, err := os.MkdirTemp("", "xlflow-form-write-")
+	if err != nil {
+		return output.Failure("form "+opts.Action, output.Error{Code: "form_write_stage_failed", Message: err.Error(), Source: "xlflow", Phase: "prepare_compiler"}), output.ExitEnvironment, nil
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+	preparedPath := filepath.Join(tempDir, "baseline.xlsm")
+	compiledPath := filepath.Join(tempDir, "compiled.xlsm")
+	scriptArgs["Phase"] = "prepare"
+	scriptArgs["PreparedWorkbookPath"] = preparedPath
+	lease, ownsLease, failure := r.beginBridgeTransaction("form-write", scriptArgs)
+	if failure != nil {
+		return failure.env, failure.exitCode, nil
+	}
+	if ownsLease && lease != nil {
+		defer func() { _ = lease.Release() }()
+	}
+	prepared, code, runErr := r.runCoordinatedBridge("form-write", scriptArgs, opts.Keepalive, lease)
+	if runErr != nil || code != output.ExitSuccess || prepared.Status != output.StatusOK {
+		prepared.Command = "form " + opts.Action
+		return prepared, code, runErr
+	}
+	baseline, err := os.ReadFile(preparedPath)
+	if err != nil {
+		return output.Failure("form "+opts.Action, output.Error{Code: "form_write_stage_failed", Message: fmt.Sprintf("read prepared workbook copy: %v", err), Source: "xlflow", Phase: "compile_form"}), output.ExitEnvironment, nil
+	}
+	compiled, err := compile(r.RootDir, cfg, baseline, opts)
+	if err != nil {
+		return output.Failure("form "+opts.Action, output.Error{Code: "form_write_compile_failed", Message: err.Error(), Source: "xlflow", Phase: "compile_form"}), output.ExitValidation, nil
+	}
+	if err := os.WriteFile(compiledPath, compiled, 0o600); err != nil {
+		return output.Failure("form "+opts.Action, output.Error{Code: "form_write_stage_failed", Message: fmt.Sprintf("write compiled workbook copy: %v", err), Source: "xlflow", Phase: "compile_form"}), output.ExitEnvironment, nil
+	}
+	scriptArgs["Phase"] = "import"
+	scriptArgs["CompiledWorkbookPath"] = compiledPath
+	delete(scriptArgs, "PreparedWorkbookPath")
+	env, code, runErr := r.runCoordinatedBridge("form-write", scriptArgs, opts.Keepalive, lease)
 	env.Command = "form " + opts.Action
 	return env, code, runErr
 }
@@ -1067,6 +1229,7 @@ func buildFormWriteScriptArgs(root string, cfg config.Config, opts FormWriteOpti
 	}
 	return map[string]string{
 		"Action":                  action,
+		"Phase":                   "import",
 		"WorkbookPath":            workbookPath(root, cfg.Excel.Path),
 		"FormsDir":                filepath.Join(root, cfg.Src.Forms),
 		"CodeSource":              cfg.UserForm.CodeSource,
@@ -1599,8 +1762,37 @@ func (r Runner) run(commandName string, args map[string]string, opts ...CommandO
 }
 
 type commandRunOptions struct {
-	Timeout   time.Duration
-	Keepalive CommandOptions
+	Timeout     time.Duration
+	Keepalive   CommandOptions
+	Coordinated bool
+	Lease       *coordination.Lease
+}
+
+func (r Runner) beginBridgeTransaction(commandName string, args map[string]string) (*coordination.Lease, bool, *coordinationFailure) {
+	descriptor, err := coordination.LookupBridge(commandName, args)
+	if err != nil {
+		return nil, false, &coordinationFailure{
+			env: output.Failure(commandName, output.Error{
+				Code:    coordination.MissingPolicyCode,
+				Message: err.Error(),
+				Source:  "xlflow",
+				Phase:   "coordination.policy",
+			}),
+			exitCode: output.ExitEnvironment,
+		}
+	}
+	if observed, ok := r.observeRecoveryBeforeBridge(commandName, args, descriptor); ok {
+		return nil, false, observed
+	}
+	return r.acquireBridgeCoordination(commandName, args, descriptor)
+}
+
+func (r Runner) runCoordinatedBridge(commandName string, args map[string]string, keepalive CommandOptions, lease *coordination.Lease) (output.Envelope, int, error) {
+	return r.runWithOptions(commandName, args, commandRunOptions{
+		Keepalive:   keepalive,
+		Coordinated: true,
+		Lease:       lease,
+	})
 }
 
 func (r Runner) runWithOptions(commandName string, args map[string]string, opts commandRunOptions) (output.Envelope, int, error) {
@@ -1616,12 +1808,17 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 		})
 		return env, output.ExitEnvironment, nil
 	}
-	if observed, ok := r.observeRecoveryBeforeBridge(commandName, args, descriptor); ok {
-		return observed.env, observed.exitCode, nil
-	}
-	lease, ownsLease, coordinationFailure := r.acquireBridgeCoordination(commandName, args, descriptor)
-	if coordinationFailure != nil {
-		return coordinationFailure.env, coordinationFailure.exitCode, nil
+	lease := opts.Lease
+	ownsLease := false
+	if !opts.Coordinated {
+		if observed, ok := r.observeRecoveryBeforeBridge(commandName, args, descriptor); ok {
+			return observed.env, observed.exitCode, nil
+		}
+		var coordinationFailure *coordinationFailure
+		lease, ownsLease, coordinationFailure = r.acquireBridgeCoordination(commandName, args, descriptor)
+		if coordinationFailure != nil {
+			return coordinationFailure.env, coordinationFailure.exitCode, nil
+		}
 	}
 	if lease != nil && ownsLease {
 		defer func() { _ = lease.Release() }()

@@ -81,7 +81,7 @@ End Sub
 	inputSpec.Form.Caption = new("issue883-日本語")
 	// Use a whole export-grid size so VBIDE's twip/grid quantization does not
 	// obscure the independently verified binary client-size contract.
-	inputSpec.Form.Build = &spec.FormSpecBuildForm{ClientWidth: new(324.0), ClientHeight: new(282.0)}
+	inputSpec.Form.Width, inputSpec.Form.Height = new(324.0), new(282.0)
 	for i, kind := range []string{"Label", "TextBox", "CommandButton", "CheckBox", "OptionButton", "ToggleButton", "ComboBox", "ListBox", "SpinButton", "ScrollBar", "Image"} {
 		control := spec.FormSpecControl{Name: kind + "Main", Type: kind, Left: new(float64(12 + (i%2)*160)), Top: new(float64(12 + (i/2)*44)), Enabled: new(false), Visible: new(true)}
 		if _, ok := spec.LookupControlProperty(kind, "caption"); ok {
@@ -129,7 +129,7 @@ End Function
 			t.Fatal(err)
 		}
 		// These runtime defaults were observed in the saved/reopened Excel
-		// baseline. Keep them in the generic observation bag, not build intent:
+		// baseline. Keep them in the generic observation bag, not authoring intent:
 		// neither property is part of the supported generation input surface.
 		for i := range result.Controls {
 			control := &result.Controls[i]
@@ -229,8 +229,8 @@ func TestReadExcelNormalizedNewForms(t *testing.T) {
 		if got.Form.Caption == nil || *got.Form.Caption != *want.Form.Caption || len(got.Controls) != len(want.Controls) {
 			t.Fatalf("normalized form differs: %s", want.Form.Name)
 		}
-		if !reflect.DeepEqual(got.Form.Build, want.Form.Build) {
-			t.Fatalf("persisted client dimensions differ: %s got=%+v want=%+v", want.Form.Name, got.Form.Build, want.Form.Build)
+		if !reflect.DeepEqual(got.Form.Width, want.Form.Width) || !reflect.DeepEqual(got.Form.Height, want.Form.Height) {
+			t.Fatalf("persisted client dimensions differ: %s got=(%v,%v) want=(%v,%v)", want.Form.Name, got.Form.Width, got.Form.Height, want.Form.Width, want.Form.Height)
 		}
 		for i, control := range want.Controls {
 			actual := got.Controls[i]

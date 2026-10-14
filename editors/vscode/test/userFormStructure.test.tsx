@@ -3,6 +3,7 @@ import { render } from "preact";
 import { act } from "preact/test-utils";
 import { designerDocument, pointsToPixels } from "../src/userFormEditor/model";
 import { controlMetadata, createControl, subtreeIds } from "../src/userFormEditor/toolbox";
+import { initialControlOperations } from "../src/userFormEditor/collections";
 import { designerStrings, isWebviewMessage } from "../src/userFormEditor/protocol";
 import type { DesignerDocument, HostMessage, WebviewMessage } from "../src/userFormEditor/protocol";
 
@@ -28,7 +29,7 @@ const root = document.getElementById("app")!;
 const edits = () =>
   messages.filter((m): m is Extract<WebviewMessage, { type: "edit" }> => m.type === "edit");
 let model: DesignerDocument = designerDocument({
-  form: { name: "Main", build: { clientWidth: 480, clientHeight: 360 } },
+  form: { name: "Main", width: 480, height: 360 },
   controls: [
     { id: "label", name: "lAbEl1", type: "Label", left: 10, top: 10 },
     { id: "frame", name: "Frame1", type: "Frame", left: 200, top: 50 },
@@ -78,16 +79,71 @@ function testGeneration() {
         version: 1,
         operations: [{ type: "addControl", control: created }],
       }),
-      true,
+      metadata.type !== "MultiPage",
     );
-    if (metadata.type === "MultiPage" || metadata.type === "TabStrip")
-      assert.equal(created.selectedIndex, -1);
-    if (metadata.type === "TabStrip") assert.deepEqual(created.tabs, []);
+    if (metadata.type === "MultiPage") assert.equal(created.selectedIndex, -1);
+    if (metadata.type === "TabStrip") {
+      assert.equal(created.selectedIndex, 0);
+      assert.deepEqual(created.tabs, [
+        { name: "Tab1", caption: "Tab1" },
+        { name: "Tab2", caption: "Tab2" },
+      ]);
+    }
     const renamed = { ...created, name: "Renamed" };
     assert.equal(renamed.id, created.id);
   }
   assert.equal(createControl({ ...model, width: 1 }, "Label", 0, 0, false), undefined);
   assert.equal(createControl(model, "Label", Infinity, 0, false), undefined);
+  const multi = createControl(model, "MultiPage", 0, 0, false, () => "owner")!;
+  const pageIds = ["owner", "first", "first", "second"];
+  const creation = initialControlOperations(model, multi, () => pageIds.shift()!)!;
+  assert.equal(creation.length, 3);
+  assert.ok(isWebviewMessage({ type: "edit", requestId: 1, version: 1, operations: creation }));
+  const pages = creation.slice(1).map((op) => {
+    assert.equal(op.type, "addPage");
+    if (op.type !== "addPage") throw new Error("expected Page addition");
+    assert.equal(op.control.parentId, multi.id);
+    return op.control;
+  });
+  assert.deepEqual(
+    pages.map((page) => page.name),
+    ["Page2", "Page3"],
+  );
+  assert.deepEqual(
+    pages.map((page) => page.id),
+    ["control-first", "control-second"],
+  );
+  assert.equal(
+    initialControlOperations(model, multi, () => "owner"),
+    undefined,
+  );
+  const initialMessage = (operations: unknown[]) => ({
+    type: "edit",
+    requestId: 1,
+    version: 1,
+    operations,
+  });
+  const tabStrip = createControl(model, "TabStrip", 0, 0, false)!;
+  assert.equal(
+    isWebviewMessage(
+      initialMessage([
+        { type: "addControl", control: { ...tabStrip, tabs: [], selectedIndex: -1 } },
+      ]),
+    ),
+    false,
+  );
+  for (const operations of [
+    creation.slice(0, 2),
+    [...creation, creation[1]],
+    [creation[0], creation[1], { type: "addPage", control: { ...pages[1], parentId: "other" } }],
+    [creation[0], creation[1], { type: "addPage", control: { ...pages[1], id: pages[0].id } }],
+    [
+      creation[0],
+      creation[1],
+      { type: "addPage", control: { ...pages[1], name: pages[0].name.toLowerCase() } },
+    ],
+  ])
+    assert.equal(isWebviewMessage(initialMessage(operations)), false);
   assert.deepEqual(
     [...subtreeIds([...model.controls, { id: "grandchild", parentId: "child" }], "frame")],
     ["frame", "child", "grandchild"],
@@ -126,8 +182,16 @@ function testGeneration() {
 async function host(message: HostMessage) {
   await act(() => window.dispatchEvent(new dom.window.MessageEvent("message", { data: message })));
 }
-async function refresh(version: number, structuralEditable = true) {
-  await host({ type: "document", version, document: model, editable: false, structuralEditable });
+async function refresh(version: number, structuralEditable = true, collectionEditable = true) {
+  await host({
+    type: "document",
+    version,
+    document: model,
+    editable: false,
+    structuralEditable,
+    pageEditable: collectionEditable,
+    tabEditable: collectionEditable,
+  });
 }
 async function click(element: Element) {
   await act(() =>
@@ -175,6 +239,17 @@ async function run() {
   );
   // The structural capability does not require geometry/property editing.
   let version = 1;
+  await refresh(version, true, false);
+  for (const type of ["MultiPage", "TabStrip"])
+    assert.equal(
+      (root.querySelector(`[data-toolbox-type="${type}"]`) as HTMLButtonElement).disabled,
+      true,
+    );
+  assert.equal(
+    (root.querySelector('[data-toolbox-type="Label"]') as HTMLButtonElement).disabled,
+    false,
+  );
+  await refresh(version);
   for (const metadata of controlMetadata) {
     await click(root.querySelector(`[data-toolbox-type="${metadata.type}"]`)!);
     assert.ok(root.querySelector(".placing-control"));
@@ -207,7 +282,22 @@ async function run() {
     assert.equal(edits().length, before + 1);
     model = {
       ...model,
-      controls: [...model.controls, { ...operation.control, approximate: false }],
+      controls: [
+        ...model.controls,
+        {
+          ...operation.control,
+          selectedIndex: metadata.type === "MultiPage" ? 0 : operation.control.selectedIndex,
+          approximate: false,
+        },
+        ...edits()
+          .at(-1)!
+          .operations.slice(1)
+          .flatMap((op) =>
+            op.type === "addPage"
+              ? [{ ...op.control, left: 0, top: 0, width: 0, height: 0, approximate: true }]
+              : [],
+          ),
+      ],
     };
     version++;
     if (metadata.type === "Label") {
@@ -219,6 +309,20 @@ async function run() {
     }
     assert.ok(root.querySelector(`.selection-outline[data-control-id="${operation.control.id}"]`));
     assert.equal(root.querySelector(".placing-control"), null);
+    if (metadata.type === "MultiPage") {
+      assert.equal(edits().at(-1)!.operations.length, 3);
+      assert.equal(
+        root.querySelectorAll(`[data-control-id="${operation.control.id}"] .tabs button`).length,
+        2,
+      );
+    }
+    if (metadata.type === "TabStrip")
+      assert.deepEqual(
+        Array.from(
+          root.querySelectorAll(`[data-control-id="${operation.control.id}"] .tabs span`),
+        ).map((element) => element.textContent),
+        ["Tab1", "Tab2"],
+      );
   }
   const beforeCancel = edits().length;
   await click(root.querySelector('[data-toolbox-type="Label"]')!);

@@ -54,6 +54,42 @@ remaining useful before container and Page-specific editing arrive in Issues
   document version, project and LSP context. Native VS Code history owns
   Undo/Redo; structural edits do not change code-behind or save automatically.
 
+## Amendment — 2026-10-14: initial MultiPage and TabStrip contents
+
+The accepted decision above gave newly inserted MultiPages and TabStrips empty
+collections. The user found the empty default confusing and requested
+alignment with familiar VBE defaults: two Pages or tabs, with the first item
+selected. This records the requested authoring behavior and makes no claim of a
+new VBE runtime observation. The user-approved amendment supersedes only the
+initial contents of Toolbox-created controls. It does not normalize, populate,
+or rewrite collections already authored in a FormSpec.
+
+- A Toolbox-created MultiPage has two Page controls and `selectedIndex: 0`.
+  Create it as one exact atomic sequence: `addControl` for the MultiPage with
+  its initial `selectedIndex: -1`, followed by exactly two `addPage` operations
+  owned by that MultiPage. Allocate Page names with the existing global,
+  case-insensitive name allocator against the form, existing controls, and
+  Pages already allocated in this transaction;
+  generate Page control IDs uniquely against all existing and newly created
+  controls, including the MultiPage, and retry an ID collision. The first Page
+  changes the initial `selectedIndex: -1` to `0`; the second leaves the final
+  canonical selection at `0`. Apply and validate the sequence as one source
+  transaction and one native Undo step. No other three-operation or arbitrary
+  mixed batch is admitted.
+- A Toolbox-created TabStrip is added with `Tab1` and `Tab2` in its `tabs`
+  collection and `selectedIndex: 0`. Tab names are unique within that
+  TabStrip. This is one `addControl` operation and one native Undo step.
+- MultiPage placement requires both `userFormStructuralEdit` and
+  `userFormPageEdit`; TabStrip placement requires both
+  `userFormStructuralEdit` and `userFormTabEdit`. These type-specific gates do
+  not change the capability requirements for other control types or the
+  independent geometry, property, and parent edit capabilities.
+- Existing authored empty MultiPages and TabStrips remain empty. The defaults
+  apply only when the Toolbox creates a new control; opening, previewing, or
+  editing an existing form does not add collection entries.
+- This remains a draft source edit. The existing deferred-save contract still
+  requires explicit Designer Save to publish it.
+
 ## Consequences
 
 - Users can create a flat, root-level form layout and remove a confirmed

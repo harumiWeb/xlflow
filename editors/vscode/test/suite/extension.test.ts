@@ -2,6 +2,8 @@ import * as assert from "assert";
 import { runUserFormEditorAssertions } from "./userFormEditor.test";
 import { runUserFormEditAssertions } from "./userFormEdits.test";
 import { runUserFormProviderAssertions } from "./userFormProvider.test";
+import { runUserFormClipboardAssertions } from "./userFormClipboard.test";
+import { runUserFormDraftProviderAssertions } from "./userFormDraftProvider.test";
 import {
   runUserFormWebviewAssertions,
   runCustomEditorRegistrationAssertions,
@@ -126,6 +128,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   await runCustomEditorRegistrationAssertions();
   await runUserFormEditAssertions();
   await runUserFormProviderAssertions(extension.extensionUri);
+  await runUserFormDraftProviderAssertions(extension.extensionUri);
   assert.deepStrictEqual([...initWorkbookExtensions], ["xlsm", "xlam", "xlsb"]);
   assert.ok(newProjectWorkbookPlaceholder.includes(".xlsb"));
   assert.ok(newProjectWorkbookPlaceholder.includes(".xlam"));
@@ -1096,6 +1099,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     ),
     ["formulaEmpty"],
   );
+  await runUserFormClipboardAssertions(extension.extensionUri);
 }
 
 async function assertRulesRegistryBehavior(): Promise<void> {
@@ -1259,6 +1263,17 @@ function assertLocalizationResources(extensionPath: string): void {
     readPath(manifest, ["contributes", "commands", 0, "title"]),
     "%command.restartLanguageServer.title%",
   );
+  assert.deepStrictEqual(readPath(manifest, ["contributes", "keybindings", 0]), {
+    command: "xlflow.userFormDesigner.save",
+    key: "ctrl+s",
+    mac: "cmd+s",
+    when: "activeCustomEditorId == xlflow.userFormDesigner",
+  });
+  assert.strictEqual(
+    packageNls["command.userFormDesigner.save.title"],
+    "Save UserForm Designer Changes to Source",
+  );
+  assert.ok(packageNlsJa["command.userFormDesigner.save.title"]);
   assert.strictEqual(
     readPath(manifest, ["contributes", "views", "xlflow", 0, "name"]),
     "%view.setup.name%",

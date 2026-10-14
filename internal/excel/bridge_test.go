@@ -55,10 +55,11 @@ type trackingBridgeProvider struct {
 }
 
 type callbackBridgeProvider struct {
-	name     string
-	response excelbridge.Response
-	err      error
-	execute  func(excelbridge.Request)
+	name         string
+	response     excelbridge.Response
+	responseFunc func(excelbridge.Request) excelbridge.Response
+	err          error
+	execute      func(excelbridge.Request)
 }
 
 func (p callbackBridgeProvider) Name() string { return p.name }
@@ -71,6 +72,9 @@ func (p callbackBridgeProvider) Info(context.Context) (excelbridge.Info, error) 
 func (p callbackBridgeProvider) Execute(_ context.Context, req excelbridge.Request) (excelbridge.Response, error) {
 	if p.execute != nil {
 		p.execute(req)
+	}
+	if p.responseFunc != nil {
+		return p.responseFunc(req), p.err
 	}
 	return p.response, p.err
 }
@@ -507,12 +511,16 @@ func TestRunnerDotNetInspectResponsePreservesEnvelopeFields(t *testing.T) {
 }
 
 func TestRunnerDotNetInspectFormResponsePreservesEnvelopeFields(t *testing.T) {
+	projectBytes, _, _ := userFormSnapshotFixture(t)
+	var snapshotErr error
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
 	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
-		return trackingBridgeProvider{
-			name:     string(mode),
-			supports: true,
+		return callbackBridgeProvider{
+			name: string(mode),
+			execute: func(req excelbridge.Request) {
+				snapshotErr = writeWorkbookSnapshot(req.Args["PrivateSnapshotWorkbookPath"], projectBytes)
+			},
 			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"inspect-form","logs":["inspected both UserForm UserForm1"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm","note":"Runtime inspection used a temporary workbook copy."},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":false,"dirty":false,"needs_save":false},"forms":{"runtime":{"name":"UserForm1","basis":"runtime","controls":[]},"designer":{"name":"UserForm1","basis":"designer","controls":[]}},"warnings":[{"code":"runtime_form_temp_copy","message":"Runtime inspection executed against a temporary workbook copy so the source workbook and live session are not mutated."}]}`)},
 		}
 	}
@@ -529,6 +537,9 @@ func TestRunnerDotNetInspectFormResponsePreservesEnvelopeFields(t *testing.T) {
 	}
 	if code != output.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+	}
+	if snapshotErr != nil {
+		t.Fatalf("write private workbook snapshot: %v", snapshotErr)
 	}
 	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Forms == nil || env.Warnings == nil {
 		t.Fatalf("expected inspect-form envelope fields to be populated: %+v", env)
@@ -547,17 +558,36 @@ func TestRunnerDotNetInspectFormResponsePreservesEnvelopeFields(t *testing.T) {
 	}
 }
 
-func TestRunnerDotNetFormWriteResponsePreservesEnvelopeFields(t *testing.T) {
+func TestRunnerDotNetFormWriteCompilesBetweenPrepareAndImport(t *testing.T) {
+	root := t.TempDir()
 	original := bridgeProviderForMode
 	t.Cleanup(func() { bridgeProviderForMode = original })
-	bridgeProviderForMode = func(root string, mode excelbridge.Mode) excelbridge.Provider {
-		return trackingBridgeProvider{
-			name:     string(mode),
-			supports: true,
-			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"form-write","logs":["build form UserForm1 from src/forms/specs/UserForm1.yaml"],"target":{"kind":"live_session","path":"C:\\temp\\Book.xlsm"},"session":{"active":true,"workbook_path":"C:\\temp\\Book.xlsm","dirty":false,"save_required":false,"live_newer_than_disk":false,"mode":"explicit","source_of_truth":"saved_workbook"},"workbook":{"path":"C:\\temp\\Book.xlsm","session":true,"session_mode":"explicit","session_requested":true,"auto_session":false,"saved":true,"dirty":false,"needs_save":false},"forms":{"name":"UserForm1","basis":"designer","action":"build","coordinate_system":"parent-relative","control_count":2,"spec_path":"src/forms/specs/UserForm1.yaml","overwrite":true,"source_synced":true,"source_artifacts":{"form_path":"C:\\temp\\src\\forms\\UserForm1.frm","frx_path":"C:\\temp\\src\\forms\\UserForm1.frx","code_path":"C:\\temp\\src\\forms\\code\\UserForm1.bas"}},"warnings":[],"hints":[{"code":"userform_review_commands","message":"review"}]}`)},
+	var phases []string
+	bridgeProviderForMode = func(_ string, mode excelbridge.Mode) excelbridge.Provider {
+		return callbackBridgeProvider{
+			name: string(mode),
+			responseFunc: func(req excelbridge.Request) excelbridge.Response {
+				phase := req.Args["Phase"]
+				phases = append(phases, phase)
+				switch phase {
+				case "prepare":
+					if err := os.WriteFile(req.Args["PreparedWorkbookPath"], []byte("baseline workbook"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					return excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"form-write","logs":[]}`)}
+				case "import":
+					compiled, err := os.ReadFile(req.Args["CompiledWorkbookPath"])
+					if err != nil || string(compiled) != "compiled workbook" {
+						t.Fatalf("compiled workbook = %q, error = %v", compiled, err)
+					}
+					return excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"form-write","logs":[],"forms":{"name":"UserForm1","action":"build"}}`)}
+				default:
+					t.Fatalf("unexpected form-write phase %q", phase)
+					return excelbridge.Response{}
+				}
+			},
 		}
 	}
-
 	spec := forms.FormSpec{
 		SchemaVersion: 1,
 		Kind:          "xlflow.userform",
@@ -565,32 +595,26 @@ func TestRunnerDotNetFormWriteResponsePreservesEnvelopeFields(t *testing.T) {
 		Form:          forms.FormSpecForm{Name: "UserForm1"},
 		Controls:      []forms.FormSpecControl{{ID: "label1", Name: "Label1", Type: "label"}},
 	}
-	env, code, err := Runner{RootDir: t.TempDir(), BridgeMode: "dotnet"}.FormWrite(config.Default(), FormWriteOptions{
-		Action:    "build",
-		SpecPath:  "src/forms/specs/UserForm1.yaml",
-		Spec:      spec,
-		Overwrite: true,
-		Session:   true,
-		Keepalive: CommandOptions{},
+	env, code, err := (Runner{RootDir: root, BridgeMode: "dotnet"}).formWriteWithCompiler(config.Default(), FormWriteOptions{
+		Action: "build", SpecPath: "src/forms/specs/UserForm1.yaml", Spec: spec, Overwrite: true, Session: true,
+	}, func(_ string, _ config.Config, baseline []byte, _ FormWriteOptions) ([]byte, error) {
+		if string(baseline) != "baseline workbook" {
+			t.Fatalf("compiler baseline = %q", baseline)
+		}
+		return []byte("compiled workbook"), nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if code != output.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, output.ExitSuccess)
+		t.Fatalf("exit code = %d, want %d: %+v", code, output.ExitSuccess, env.Error)
 	}
-	if env.Command != "form build" {
-		t.Fatalf("Command = %q, want form build", env.Command)
-	}
-	if env.Target == nil || env.Session == nil || env.Workbook == nil || env.Forms == nil {
-		t.Fatalf("expected form-write envelope fields to be populated: %+v", env)
+	if strings.Join(phases, ",") != "prepare,import" {
+		t.Fatalf("bridge phases = %v", phases)
 	}
 	formsPayload, ok := env.Forms.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected forms payload map, got %#v", env.Forms)
-	}
-	if formsPayload["action"] != "build" || formsPayload["name"] != "UserForm1" {
-		t.Fatalf("unexpected forms payload: %+v", formsPayload)
+	if !ok || formsPayload["action"] != "build" || formsPayload["name"] != "UserForm1" {
+		t.Fatalf("unexpected forms payload: %#v", env.Forms)
 	}
 }
 
@@ -2553,7 +2577,7 @@ func TestFormWriteScriptArgsIncludeSpecPayloadAndSessionFlags(t *testing.T) {
 	}
 }
 
-func TestFormWriteScriptArgsRejectClientDimensionsBeforeBridge(t *testing.T) {
+func TestFormWriteScriptArgsAcceptCanonicalClientDimensions(t *testing.T) {
 	_, err := buildFormWriteScriptArgs(t.TempDir(), config.Default(), FormWriteOptions{
 		Action:   "build",
 		SpecPath: "src/forms/UserForm1.form.yaml",
@@ -2563,16 +2587,12 @@ func TestFormWriteScriptArgsRejectClientDimensionsBeforeBridge(t *testing.T) {
 			Basis:         "designer",
 			Form: forms.FormSpecForm{
 				Name:  "UserForm1",
-				Build: &forms.FormSpecBuildForm{ClientWidth: new(280.0)},
+				Width: new(280.0),
 			},
 		},
 	})
-	var argErr formWriteArgError
-	if !errors.As(err, &argErr) {
-		t.Fatalf("error = %v, want formWriteArgError", err)
-	}
-	if argErr.code != "form_build_args_invalid" || argErr.exitCode != output.ExitValidation || !strings.Contains(argErr.message, "refusing it instead of ignoring it") {
-		t.Fatalf("client dimension guard error = %#v", argErr)
+	if err != nil {
+		t.Fatalf("canonical client dimensions should be accepted: %v", err)
 	}
 }
 

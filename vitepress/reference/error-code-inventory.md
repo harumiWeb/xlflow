@@ -132,6 +132,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `byref_parameters`
 - `byref_symbols`
 - `byte_column`
+- `byte_offset`
 - `byval_modifier`
 - `cached_excel_reference`
 - `call_expression`
@@ -189,6 +190,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `clean_up`
 - `cleanup_confirmed`
 - `cli_paths`
+- `client_height`
+- `client_width`
 - `clipboard_retry_succeeded`
 - `close_statement`
 - `closes_workbook`
@@ -198,6 +201,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `code_source`
 - `code_source_after`
 - `code_source_before`
+- `codepage_source`
 - `collection_or_dictionary`
 - `column_count`
 - `column_range`
@@ -212,8 +216,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `commit_error`
 - `comparison_expression`
 - `compatibility_artifact_unsynchronized`
+- `compile_canonical_forms`
 - `compile_equivalent`
 - `compile_equivalent_diagnostics`
+- `compile_form`
 - `compile_invoked`
 - `compile_vba`
 - `complexity_max`
@@ -621,6 +627,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `form_snapshot_args_invalid`
 - `form_snapshot_write_failed`
 - `form_spec`
+- `form_write_compile_failed`
+- `form_write_stage_failed`
 - `forms_dir`
 - `forms_reference_required`
 - `formula_cell_count`
@@ -697,6 +705,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `inspect_args_invalid`
 - `inspect_failed`
 - `inspect_form_args_invalid`
+- `inspect_form_snapshot_failed`
 - `inspect_gui_failed`
 - `inspect_live_session`
 - `interactive_exact_queries`
@@ -859,6 +868,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `module_install_failed`
 - `module_kind`
 - `module_mutation_failed`
+- `module_name`
 - `module_name_invalid`
 - `module_new_args_invalid`
 - `module_new_failed`
@@ -909,6 +919,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `object_entry_states`
 - `object_procedure_summaries`
 - `object_summary_evaluations`
+- `observed_client_height`
+- `observed_client_width`
 - `obsolete_tls_protocol`
 - `old_name`
 - `older_than`
@@ -959,10 +971,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `pack_output_replace_failed`
 - `pack_protected_project`
 - `pack_signed_project`
+- `pack_source_encoding_failed`
 - `pack_source_read_failed`
 - `pack_template_not_found`
 - `pack_temporary_cleanup_failed`
+- `pack_userform_generation_conflict`
 - `pack_userform_generation_unsupported`
+- `pack_validation_failed`
 - `pack_write_failed`
 - `parallel_safe`
 - `param_array`
@@ -1008,6 +1023,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `pre_until`
 - `pre_while`
 - `preflight_diagnostic_allowed`
+- `prepare_compiler`
+- `prepare_snapshot`
+- `prepare_sources`
 - `preprocessor_block`
 - `preprocessor_else`
 - `preprocessor_elseif`
@@ -1097,6 +1115,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `push_ambiguous_layout`
 - `push_args_invalid`
 - `push_backup_failed`
+- `push_canonical_compile_failed`
 - `push_diagnostic`
 - `push_failed`
 - `push_forms_reference_required`
@@ -1105,7 +1124,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `push_protected_project`
 - `push_signed_project`
 - `push_source`
+- `push_source_inventory_failed`
 - `push_source_read_failed`
+- `push_stage_failed`
 - `push_state_last_modified_at`
 - `push_state_persist_failed`
 - `push_temporary_cleanup_failed`
@@ -1121,6 +1142,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `raw_signals`
 - `read_only`
 - `read_only_configuration`
+- `read_persisted_form_dimensions`
 - `read_write`
 - `reader_count`
 - `reason_not_runnable`
@@ -1187,6 +1209,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `run_args_invalid`
 - `run_command`
 - `run_diagnostic`
+- `rune_code`
 - `runner_args_invalid`
 - `runtime_candidate_procedures`
 - `runtime_cfg_walks`
@@ -1205,6 +1228,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `save_session_before_file_inspect`
 - `saved_file`
 - `saved_workbook`
+- `scaffold_codepage_failed`
 - `schema_version`
 - `schema_version_changed`
 - `score_model`
@@ -1274,9 +1298,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `skipped_reasons`
 - `skipped_resource_runs`
 - `skipped_runtime_runs`
+- `snapshot_client_dimensions_missing`
 - `sockaddr_in`
 - `source_applied`
-- `source_artifacts`
 - `source_bytes`
 - `source_counts`
 - `source_discovery`
@@ -1292,7 +1316,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `source_path`
 - `source_preflight_failed`
 - `source_state`
-- `source_synced`
 - `source_tree`
 - `source_tree_busy`
 - `source_tree_busy_cancelled`
@@ -1453,7 +1476,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `userform_image_export_experimental`
 - `userform_inspect_saved_file`
 - `userform_planned_commands`
-- `userform_review_commands`
 - `userform_state_partial`
 - `userform_unsaved_session_state`
 - `userforms_known`

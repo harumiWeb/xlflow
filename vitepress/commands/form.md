@@ -31,7 +31,7 @@ xlflow [--wait] form export-image <name> --out <png>
 
 `form snapshot` reads the design-time Designer state without loading the form at runtime or running workbook VBA. Controls created only by runtime code are visible through runtime inspection or image export, not through snapshot.
 
-`form new` is source-only and requires `[userform].code_source = "sidecar"`. It creates `[src].forms/code/<Name>.bas` and an authoring-focused `[src].forms/specs/<Name>.yaml` (defaulting to `src/forms/...`); blank specs omit snapshot-only fields such as `warnings`. It does not create `.frm` or `.frx` artifacts.
+`form new` is source-only and requires `[userform].code_source = "sidecar"`. It creates `[src].forms/code/<Name>.bas` and an authoring-focused `[src].forms/specs/<Name>.yaml` (defaulting to `src/forms/...`) with canonical `form.width: 240` and `form.height: 180`; blank specs omit snapshot-only fields such as `warnings`. It does not create `.frm` or `.frx` artifacts, which are not required to build a canonical spec.
 
 Workbook-writing sidecar form flows use the shared source-preflight policy.
 Registry blockers listed in `[preflight].allowed_diagnostics` can proceed with
@@ -42,10 +42,11 @@ blocking.
 
 Edit Designer specifications directly under `src/forms/specs/` to receive real-time UserForm YAML diagnostics, context-aware completion, and Hover documentation from `xlflow lsp`. Hover distinguishes supported fields from best-effort geometry, observed-only list state, snapshot metadata, and custom/unchecked fields before `form build` opens Excel.
 
-The `picture` field for an Image control is currently supported by pure-Go
-`pack` and `push --backend file`. Excel-backed `form build` and apply APIs
-reject picture authoring until they implement the same asset validation and
-Designer encoding contract. See the [Image picture guidance](../guides/userforms#image-pictures).
+`form build`, both push backends, and `pack` share the pure-Go UserForm
+compiler, including Image picture validation and persistence. Excel-backed
+build compiles against a private workbook copy, then imports the compiled form
+into the target through VBIDE with a rollback backup. See the [Image picture
+guidance](../guides/userforms#image-pictures).
 
 All other workbook-backed form commands share the configured workbook lock with
 `run`, `test`, `push`, `pull`, and Designer inspection. Contention returns

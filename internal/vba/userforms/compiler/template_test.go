@@ -171,25 +171,42 @@ func TestCompileTemplateOverlaysOmittedFieldsAndRemapsParents(t *testing.T) {
 	if !reflect.DeepEqual(projected.Controls[1].Caption, snapshot.Controls[1].Caption) {
 		t.Fatalf("omitted caption changed: got %#v want %#v", projected.Controls[1].Caption, snapshot.Controls[1].Caption)
 	}
+	if !reflect.DeepEqual(projected.Form.Width, snapshot.Form.Width) || !reflect.DeepEqual(projected.Form.Height, snapshot.Form.Height) {
+		t.Fatalf("omitted root dimensions changed: got width/height=%#v/%#v want %#v/%#v", projected.Form.Width, projected.Form.Height, snapshot.Form.Width, snapshot.Form.Height)
+	}
 }
 
-func TestCompileTemplateAcceptsEqualDimensionsAndRejectsChanges(t *testing.T) {
+func TestCompileTemplateOverlaysCanonicalRootDimensions(t *testing.T) {
 	base, snapshot := fixture(t, "p4_form.bin")
 	desired := templateInput(t, base, snapshot)
-	desired.Form.Build = &spec.FormSpecBuildForm{}
-	if snapshot.Form.Build != nil {
-		desired.Form.Build.ClientWidth = new(*snapshot.Form.Build.ClientWidth)
-		desired.Form.Build.ClientHeight = new(*snapshot.Form.Build.ClientHeight)
+	if snapshot.Form.Width != nil {
+		desired.Form.Width = new(*snapshot.Form.Width)
+	}
+	if snapshot.Form.Height != nil {
+		desired.Form.Height = new(*snapshot.Form.Height)
 	}
 	if _, err := CompileTemplate(base, desired, 932); err != nil {
 		t.Fatalf("equal dimensions rejected: %v", err)
 	}
-	desired.Form.Build.ClientWidth = new(1.0)
-	_, err := CompileTemplate(base, desired, 932)
-	detail, ok := errors.AsType[*Error](err)
-	if !ok || detail.Code != Unsupported {
-		t.Fatalf("changed dimensions error = %v, want %s", err, Unsupported)
+	desired.Form.Width, desired.Form.Height = new(320.0), new(240.0)
+	result, err := CompileTemplate(base, desired, 932)
+	if err != nil {
+		t.Fatalf("changed dimensions rejected: %v", err)
 	}
+	if got := result.Levels[0].Record.Sizes["DisplayedSize"]; got != (oforms.Size{Width: 11289, Height: 8467}) {
+		t.Fatalf("root DisplayedSize = %+v", got)
+	}
+
+	desired.Form.Width, desired.Form.Height = new(0.0), new(0.0)
+	result, err = CompileTemplate(base, desired, 932)
+	if err != nil {
+		t.Fatalf("explicit zero root dimensions rejected: %v", err)
+	}
+	if got := result.Levels[0].Record.Sizes["DisplayedSize"]; got != (oforms.Size{}) {
+		t.Fatalf("explicit zero root dimensions defaulted: %+v", got)
+	}
+	assertVBFrameDimension(t, result.Levels[0].VBFrameRaw, "ClientWidth", 0)
+	assertVBFrameDimension(t, result.Levels[0].VBFrameRaw, "ClientHeight", 0)
 }
 
 func TestCompileTemplateRejectsUnsupportedEditsAndAllowsOpaqueNoOp(t *testing.T) {

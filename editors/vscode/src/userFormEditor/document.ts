@@ -60,6 +60,7 @@ export class PreviewSynchronizer {
         parentEditable: result.parentEditable ?? false,
         pageEditable: result.pageEditable ?? false,
         tabEditable: result.tabEditable ?? false,
+        productivityEditable: result.productivityEditable ?? false,
         propertyGrid: result.propertyGrid,
         propertyError: result.propertyError,
         document: designerDocument(

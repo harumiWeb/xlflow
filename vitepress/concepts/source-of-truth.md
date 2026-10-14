@@ -17,6 +17,6 @@ UserForms have two tracked concerns:
 - Designer structure: `src/forms/specs/*.yaml`
 - Code-behind: `src/forms/code/*.bas` in sidecar mode, or embedded `.frm` code in compatibility mode
 
-Imported projects default to compatibility `frm` mode. Run `xlflow form migrate sidecar` when you want `src/forms/specs/*.yaml` and `src/forms/code/*.bas` to become the primary editing surface for existing UserForms.
+Imported projects default to `sidecar`, with canonical specs under `src/forms/specs/*.yaml` and code under `src/forms/code/*.bas`. Choose `xlflow init --userform-code-source frm` explicitly when importing `.frm` artifacts as the code authority; `xlflow form migrate sidecar` remains available for projects already using `frm` mode.
 
 Do not treat `.frm` / `.frx` files as the primary Designer source in sidecar mode. `.frx` files are binary companion artifacts, and `.frm` files remain generated artifacts used by xlflow workflows.

@@ -8,12 +8,9 @@
       "form": {
         "name": "GeneratedForm",
         "caption": "issue883-日本語😀",
+        "width": 324,
+        "height": 281.9905511811024,
         "observed": {
-          "caption": "issue883-日本語😀",
-          "clientWidth": 324,
-          "clientHeight": 281.9905511811024
-        },
-        "build": {
           "caption": "issue883-日本語😀",
           "clientWidth": 324,
           "clientHeight": 281.9905511811024
@@ -329,12 +326,9 @@
       "form": {
         "name": "GeneratedEmptyForm",
         "caption": "GeneratedEmptyForm",
+        "width": 240.00944881889762,
+        "height": 180,
         "observed": {
-          "caption": "GeneratedEmptyForm",
-          "clientWidth": 240.00944881889762,
-          "clientHeight": 180
-        },
-        "build": {
           "caption": "GeneratedEmptyForm",
           "clientWidth": 240.00944881889762,
           "clientHeight": 180

@@ -1,17 +1,23 @@
 # VS Code UserForm Designer
 
 This specification defines the interactive UserForm Designer in the
-xlflow Visual Studio Code extension. The VS Code `TextDocument` remains the
-canonical source. The Designer renders the current document through the xlflow
-Language Server Protocol (LSP); it does not create or persist another source
-representation.
+xlflow Visual Studio Code extension. The open VS Code `TextDocument` remains
+the project source. The Designer keeps pending source edits in one
+URI-shared `CustomDocument` draft and previews that draft through the xlflow
+Language Server Protocol (LSP). The draft preserves the source text and is
+saved through the VS Code document lifecycle.
 
 ## Editor selection and document eligibility
 
-The extension registers `xlflow.userFormDesigner` as an optional custom text
-editor for `.yaml`, `.yml`, and `.json` files. Its `option` priority keeps the
-normal text editor available. Users can choose the visual editor with **Reopen
-Editor With...**.
+The extension registers `xlflow.userFormDesigner` through
+`CustomEditorProvider` as an optional custom editor for `.yaml`, `.yml`, and
+`.json` files. Its `option` priority keeps the normal text editor available.
+Users can choose the visual editor with **Reopen Editor With...**.
+Opening the file with the Designer redirects to its dedicated
+`xlflow-userform-designer` editor resource. The resource maps back to the
+original file URI, which remains the LSP and source-edit target. Separate
+resource URIs isolate Designer native Undo from the regular text editor's
+history and save-time source edits.
 
 The preview is available only for a FormSpec directly inside the `specs`
 directory under the configured forms root (`[src].forms` in `xlflow.toml`,
@@ -21,12 +27,106 @@ xlflow project with `xlflow.toml` and be handled by the currently selected
 project's single xlflow LSP client. Opening a document associated with another
 project, or without a compatible LSP connection, produces an editor error.
 
+## Deferred-save draft and document lifecycle
+
+The provider owns one custom document and source-text draft per eligible
+FormSpec URI. Every Designer panel for that URI reads and edits the same draft
+and native history. The draft starts from the latest open `TextDocument` text
+and preserves comments, formatting, and other untouched source. Persist pending
+drafts in extension internal storage keyed by the original FormSpec URI so they
+survive normal close, reopen, and extension restart.
+
+The native `CustomEditorProvider` save callback durably checkpoints the draft
+to extension internal storage only. AutoSave, File Save All, and menu Save use
+this callback and never write YAML, YML, or JSON. The native tab dirty marker
+therefore tracks the internal checkpoint, while a separate **YAML/JSON not
+applied** badge indicates that the draft has not been published to source.
+Neither the extension nor the Designer changes the user's global
+`files.autoSave` setting. Regular source-text editing and its configured
+AutoSave behavior continue normally; edits in that document appear in the
+Designer immediately.
+
+Only the Designer Save button and its Designer-scoped Ctrl+S/Cmd+S command
+publish the current validated draft. Reconcile against the newest open
+`TextDocument`, apply source-preserving edits through VS Code document APIs,
+and call `TextDocument.save()`; never write the workspace file directly. On
+successful publication, refresh the internal checkpoint and clear pending
+recovery state. A failed validation, conflict, edit, or source save retains the
+pending draft for retry.
+
+Normalize multiline LSP edit text to the source `TextDocument.eol` before
+creating draft history, matching native VS Code TextEdit application. Verify
+the source still matches the validated draft after applying the publication
+edit. After `TextDocument.save()` succeeds, accept the actual saved buffer,
+including formatter/save-participant changes, and rebase history from the
+published draft. The old source baseline must not make our own saved edit a
+conflict. A still-dirty source or changed draft revision remains a failed save.
+Native regressions cover CRLF multiline edits and save-participant final
+newlines, repeated publication, and Undo/Redo with the saved newline retained.
+
+The host sends the exact current draft text and its revision to the LSP for
+preview, canonical validation, and semantic edits. It applies the localized
+text edits returned by the LSP to the draft. The LSP and canonical FormSpec
+parser remain the only authority for FormSpec meaning and validation; neither
+the host nor Webview adds independent property or schema rules.
+
+Changes made in the regular text editor are observed immediately and reflected
+in the Designer. If the Designer draft has no pending edits, it adopts the
+current text. If it is dirty, the draft engine merges non-overlapping changes
+against the last synchronized source and rebases draft history. An overlapping
+change retains both the current text-editor source and the Designer draft,
+shows a source conflict, and disables explicit source publication until
+resolved. Native checkpoint saves remain available. The
+user can choose **Use YAML/JSON changes** or **Use Designer draft**. When a
+safe granular merge is unavailable, choosing a whole-document version
+requires explicit confirmation. Neither version is silently discarded.
+Conflict detection conservatively treats different edits on the same physical
+source line as overlapping, including compact JSON and YAML flow mappings.
+Changes on different lines are merged when their source ranges do not overlap.
+Before merging a dirty draft, the host compares canonical LSP projections of
+the baseline and latest source. Changes to control order, ID, type, ProgID or
+parent require explicit conflict resolution so geometry cannot move to another
+control after a source reorder. Invalid source or an unavailable canonical
+projection also retains both versions rather than assuming a merge is safe.
+Conflict resolution rebases the existing draft history onto the latest source
+and adds one native Undo step. Undoing both the resolution and the earlier
+Designer action returns to that latest source baseline. History entries
+superseded by later direct source edits are neutral native callbacks; advancing
+past them never restores discarded source or throws a stale-frame error.
+
+Explicit Designer Save first validates and reconciles against the latest open
+`TextDocument`, applies source edits through VS Code document APIs, then calls
+`TextDocument.save()`. A stale draft never overwrites a newer dirty text-editor
+buffer, and the provider does not overwrite workspace source through filesystem
+writes. Save As is an explicit publish to the chosen destination; it creates a
+missing destination through VS Code, and an existing dirty destination must be
+saved or reverted first. Backup, restore, hot-exit, and Revert use the
+custom-document lifecycle. Revert discards the pending Designer draft and
+adopts the latest source `TextDocument` buffer, including unsaved text-editor
+changes; clear recovery state only after that succeeds. Advancing past
+superseded neutral Undo entries can conservatively dirty the custom document
+and trigger another internal checkpoint. The native tab dot tracks that
+checkpoint, while the source-not-applied badge remains until publication.
+AutoSave follows the standard VS Code configuration and checkpoints internal
+storage only.
+
+A corrupt checkpoint displays a recovery error and remains stored; it is never
+silently discarded or overwritten. Clear recovery state only after explicit
+source publication or Revert completes successfully.
+
+Each completed Designer action raises one `CustomDocumentEditEvent`.
+VS Code Undo/Redo updates the shared draft, and the draft engine rebases its
+history when external text changes are merged.
+VS Code backup and hot-exit recovery remain supported in addition to the
+URI-keyed internal checkpoint. Restoring a checkpoint recovers the pending
+source draft; source publication remains an explicit Designer action.
+
 ## Source and preview protocol
 
-The extension host reads source from the open VS Code `TextDocument`, including
-unsaved changes. It sends the document URI, its current version, and the full
-text to the LSP. The Webview never reads the document or workspace files
-directly.
+The extension host reads the URI-shared custom-document draft, including
+merged unsaved text-editor changes. It sends the document URI, current draft
+revision, and full text to the LSP. The Webview never reads the document or
+workspace files directly.
 
 The server advertises preview support through
 `capabilities.experimental.userFormPreview: true`. The request is:
@@ -116,9 +216,10 @@ different Page. Omitted visibility defaults to visible.
 
 Page collection order follows stable sibling `zIndex` order, matching the
 pure-Go generation and topology compiler. Selection is applied before hiding
-invisible Pages. Explicit build client dimensions take precedence over observed
-client/inside dimensions, which take precedence over outer dimensions. Either
-axis relying on outer dimensions remains approximate. ComboBox display prefers
+invisible Pages. The preview reads root `form.width` and `form.height` directly;
+it does not infer authoring dimensions from observed client, inside, or outer
+Excel values. An omitted axis uses the preview default and remains approximate.
+ComboBox display prefers
 explicit text, then value (including empty strings), then the first list item.
 
 The extension host supplies localized UI strings through a `localization`
@@ -135,9 +236,26 @@ Source-preserving semantic edits use the host-neutral Go API. See
 
 ## Interactive geometry
 
+Excel-backed `form build` and apply verification allow the native MSForms
+rounding of control `Left`, `Top`, `Width`, and `Height`: half a twip
+(0.025 pt) plus one single-precision ULP at the requested value. Excel 16.0
+returns these fields as `Single` after rounding to twips (0.05 pt).
+This tolerance applies only to the four geometry fields; numeric `Value`,
+`TabIndex`, Boolean and string persistence checks retain their existing
+strictness. Non-finite geometry and differences outside the bound fail with
+`designer_write_failed`. This does not round or rewrite authored FormSpec
+values and does not alter pure-Go HIMETRIC conversion. Regression coverage
+includes fractional Designer values, half-twip boundaries, larger coordinates,
+ignored writes and strict numeric-value checks.
+
 Selection is a transient control ID; clicking the background selects the form.
 Known built-in controls other than Page can move and resize with eight handles.
-Form and Page geometry is not edited on the canvas. Unknown controls remain
+When the form is selected, its right edge, bottom edge and bottom-right corner
+resize the persisted client width/height. Window decorations are preview-only
+and are never added to authored dimensions. Form resizing requires property
+editing capability and numeric width/height descriptors from LSP metadata.
+It preserves child coordinates and protects all immediate root child extents,
+including hidden controls. Page geometry is not edited on the canvas. Unknown controls remain
 selectable placeholders. Only a completed parent-changing pointer drag can
 commit a new relationship; overlap alone never changes source.
 
@@ -187,6 +305,74 @@ Resize also preserves the opposite edge. If that unchanged
 axis or opposite edge already prevents a fitting result, reject the interaction
 rather than silently correcting it; source editing remains available.
 
+## Multi-selection and productivity commands
+
+Group selection is limited to ordinary built-in controls that are immediate
+siblings under one parent: the form root, one Frame, or one Page. Ctrl/Cmd-click
+and Shift-click toggle eligible siblings in or out of the group. Custom
+controls remain selectable alone but cannot join a group. A marquee selects
+only visible, ordinary built-in immediate children whose entire displayed
+bounds are inside the marquee. A group cannot span parents. Show a group
+boundary for multi-selection; keep the last selected control as the explicit
+anchor. Changing to a different parent starts a new selection.
+
+Dragging a multi-selection applies the same parent-relative translation to
+every member, preserving the parent and all relative geometry. Multi-selection
+drag has no resize handles and never resizes its members. The move stays within
+the current parent's content bounds; apply any boundary correction to the
+whole group so relative geometry remains fixed. Reject a group that cannot fit.
+
+Provide Align Left, Center, Right, Top, Middle, and Bottom. Each aligns selected
+siblings to the corresponding edge or center of the last selected anchor.
+Provide Make Same Width, Make Same Height, and Make Same Size using the anchor's
+current dimensions. Provide Distribute Horizontally and Distribute Vertically
+for at least three siblings: order by left or top coordinate, using stable
+z-order to break ties; retain the first and last controls' positions on the
+chosen axis and divide the intervening edge-to-edge gaps equally. Provide
+Bring to Front, Bring Forward, Send Backward, and Send to Back. These z-order
+commands preserve the selected controls' relative order and do not alter
+`tabIndex`. Layout operations are atomic and must reject a result that cannot
+meet the existing parent-bound constraints without changing its requested
+alignment, size, or distribution.
+
+Expose Cut, Copy, Paste, Delete, Duplicate, z-order commands, and Properties in
+the selection context menu. Copy and Cut request source records through the
+LSP. A successful Copy replaces the shared in-memory `ClipboardSnapshot`; Cut
+keeps its captured snapshot provisional until deletion succeeds. Paste and
+Duplicate allocate new IDs and names and create one source edit. A copied Frame
+includes descendants. A copied MultiPage includes its
+Page controls and their descendants; a Page cannot be copied directly. Reject
+an unsupported custom-control subtree as a whole. Preserve source-present
+fields and observations exactly, distinguishing absent, null, empty string,
+false, and zero; do not manufacture preview or normalization defaults. TabStrip
+`tabs` stay attached to their TabStrip control. Image bytes, event handlers,
+and code-behind are never copied. Same-project authored picture paths remain
+unchanged; reject a cross-project paste when the copied subtree contains one.
+
+Offset each repeated paste by 8 pt on both axes. Translate the complete copied
+group uniformly to fit the destination's content bounds; reject it if the full
+group cannot fit. Do not resize pasted controls. Paste uses a selected Frame or
+Page as its destination only when exactly one control is selected; otherwise it
+uses the selection's owning parent. Duplicate always uses the original
+selection's owning parent, so a Frame is not duplicated inside itself.
+
+Cut captures a valid source snapshot first, then asks one confirmation with the
+aggregate descendant count for all selected roots in the same per-URI edit
+queue. Leaf-only Cut needs no descendant confirmation. If confirmed and still
+current, Cut submits one atomic `removeControls` cascade edit. Only after that
+edit succeeds does the host publish the captured snapshot to the shared
+clipboard.
+Cancellation, stale source, failed capture, or failed deletion leaves both the
+source and previous clipboard unchanged. A request superseded before deletion
+is rejected without deleting its source.
+
+Each command is one productivity semantic operation and one native VS Code
+`CustomDocumentEditEvent`/Undo step. Copy extraction is read-only. Cut captures
+its snapshot before confirmation, keeps that snapshot private during confirmation,
+and publishes it only after the single cascade edit succeeds. Productivity
+operations are not combined with each other or legacy operations in one
+`userFormEdit` transaction.
+
 ## Toolbox and structural control edits
 
 The Toolbox contains Pointer and these 14 built-in control types: Label,
@@ -221,9 +407,25 @@ Toolbox allocation and host-add checks are the Designer's name-conflict guards;
 Go `Apply` and canonical FormSpec validation do not add global control-name
 uniqueness validation.
 
-A new MultiPage has no Page child controls and `selectedIndex: -1`. A new
-TabStrip has `tabs: []` and `selectedIndex: -1`. Inserting either control does
-not create or edit Pages or tabs. On successful insertion, select the new
+A Toolbox-created MultiPage has exactly two Page child controls and
+`selectedIndex: 0`. Build it with one exact three-operation transaction:
+`addControl` for the MultiPage with initial `selectedIndex: -1`, followed by
+exactly two `addPage` operations owned by that MultiPage. Allocate Page names
+with the global case-insensitive Toolbox name allocator against the form,
+existing controls, and Pages already allocated in this transaction; retry
+generated Page control IDs on collisions across the existing and newly created
+controls, including the MultiPage. The first Page
+changes `selectedIndex` from `-1` to `0`, which remains the final canonical
+selection after the second Page is added. Apply and validate the complete
+transaction atomically so one Toolbox action creates one source edit and one
+native Undo step. This is the only three-operation exception; arbitrary mixed
+batches remain invalid.
+
+A Toolbox-created TabStrip has `tabs` containing `Tab1` and `Tab2`, with
+`selectedIndex: 0`. Those names are unique within that TabStrip. Create it in
+one `addControl` operation and one native Undo step. Existing authored empty
+MultiPages and TabStrips remain empty; these defaults apply only when the
+Toolbox creates a new control. On successful insertion, select the new
 control and return the Toolbox to Pointer. Escape cancels pending placement
 without a source edit.
 
@@ -235,19 +437,22 @@ A control with no descendants is removed immediately. If descendants exist,
 the host first shows a modal confirmation containing the selected control's
 name and descendant count. Confirmed removal deletes the selected control and
 all descendants with `cascade: true` in one semantic edit and one VS Code
-`WorkspaceEdit`; Undo/Redo therefore restores or removes the whole subtree as
-one native history step. The canvas Delete action does not delete a Page.
+`CustomDocumentEditEvent`; Undo/Redo therefore restores or removes the whole
+subtree as one native history step. The canvas Delete action does not delete a Page.
 Page deletion is available from the Page list and always requires explicit
 confirmation identifying the Page and the number of descendant controls; the
 confirmed action removes that Page and its descendants with `cascade: true` in
 one semantic edit and one native history step.
 
-Structural edits apply only to the open FormSpec `TextDocument`. They do not
-edit code-behind or save the document automatically. The host captures the
-source and version associated with an add request or pending delete
-confirmation. If the document text/version, project, or LSP connection changes
-before the edit is submitted or applied, discard the stale action and refresh
-from the current document; do not replay it against newer text.
+Structural edits apply only to the shared FormSpec draft. They do not edit
+code-behind or publish the source document until explicit Designer Save or its
+scoped keyboard command. The
+host captures the draft source and revision associated with an add request or
+pending delete confirmation. If that draft revision, project, or LSP
+connection changes before the action is submitted or applied, discard the
+stale action and refresh from the current merged draft; do not replay the
+request against newer text. Already committed draft history follows the
+external-change rebase policy above.
 
 ## Frame parenting and hierarchy
 
@@ -380,10 +585,12 @@ Keep invalid input with a field-level error without changing source; preserve
 structured field/code/message diagnostics from the server. Drafts belong to
 target kind, target ID, field and document version. Form identity is distinct
 from every control ID, including a control literally named `form`, in both
-component keys and draft/reply storage. External source edits invalidate old
-drafts rather than applying or rebasing them automatically. Switching selection
-preserves dirty drafts and their matching edit replies, including field-level
-rejection diagnostics, until corrected or canceled. Source edits and
+component keys and draft/reply storage. External source edits invalidate
+unsubmitted Property Grid field drafts rather than rebasing those field values.
+The URI-shared source draft follows the deferred-save merge and conflict policy
+above. Switching selection preserves dirty Property Grid field drafts and
+their matching edit replies, including field-level rejection diagnostics,
+until corrected or canceled. Source edits and
 undo/redo refresh values from source. Selection and rendering alone never
 produce source edits. Explicit null is allowed only for nullable fields
 accepted by canonical validation; there is no property removal action.
@@ -455,6 +662,24 @@ server validates the final FormSpec after applying the transaction; a failure
 returns no partial edit. These operations do not change Excel, COM, VBIDE, or
 runtime semantics.
 
+## Parent-local tab order
+
+Provide an editor for each parent whose direct controls expose editable
+`tabIndex` metadata from the LSP. Include hidden and disabled controls. Exclude
+Page controls and TabStrip tab records. The root form uses `parentId: ""`;
+Frame and Page lists use their stable control IDs. Up/down changes are local
+draft state; Apply sends the complete ordered list of eligible sibling IDs and
+assigns contiguous zero-based `tabIndex` values in one source edit.
+When LSP metadata yields no eligible controls for the selected parent, show the
+localized `noEditableTabOrder` empty-state string.
+
+Initialize the list from explicitly authored numeric `tabIndex` values in
+ascending order. Ties follow stable z-order, preserving source order for
+z-order ties. Missing and explicit-null indexes follow numeric entries in
+z-order. Observed or normalized indexes do not become authored values. If the
+source document changes before Apply, discard the local order and rebuild it
+from the current document; do not merge or rebase it.
+
 ## Semantic edit protocol and native history
 
 The LSP advertises `capabilities.experimental.userFormEdit: true`. Preview-only
@@ -466,19 +691,29 @@ using control IDs and finite point values, or one `setFormProperty` /
 `capabilities.experimental.userFormPropertyEdit: true`; older geometry-capable
 servers retain geometry editing with the grid disabled. Preview-only servers
 retain read-only rendering. The extension and RPC both accept
-one operation or a move/resize pair for the same control per interaction.
-Adding and removing ordinary controls additionally require the separate
-`capabilities.experimental.userFormStructuralEdit: true` capability. This
-capability gates `addControl` and `removeControl` without changing the
-independent geometry and property capability checks. Page collection operations
-require `capabilities.experimental.userFormPageEdit: true`; TabStrip collection
-and tab-property operations require
-`capabilities.experimental.userFormTabEdit: true`. These capabilities are
-independent of one another and of `userFormPropertyEdit` and
-`userFormParentEdit`. An older server that omits a capability keeps its other
-advertised edit families and does not expose the unsupported actions.
-Each Toolbox insertion or deletion sends one structural operation; it is not
-combined with geometry or property operations in the same transaction.
+one operation, a move/resize pair for the same control, or a distinct numeric
+`setFormProperty` width/height pair per interaction. A completed form corner
+resize updates both dimensions in one source transaction and one Undo step.
+Adding and removing controls require the separate
+`capabilities.experimental.userFormStructuralEdit: true` capability. Ordinary
+Toolbox control insertion uses that capability with any existing destination
+requirements. MultiPage insertion additionally requires
+`capabilities.experimental.userFormPageEdit: true`; TabStrip insertion
+additionally requires `capabilities.experimental.userFormTabEdit: true`.
+Page collection operations require the Page capability, and TabStrip
+collection and tab-property operations require the Tab capability. These
+capabilities remain independent of one another and of
+`userFormPropertyEdit`, `userFormParentEdit`, and geometry support. An older
+server that omits a capability keeps its other advertised edit families and
+does not expose the unsupported actions.
+
+Each ordinary Toolbox insertion or deletion sends one structural operation;
+it is not combined with geometry or property operations in the same
+transaction. The sole exception is creating a MultiPage with its two initial
+Pages: accept exactly `addControl(MultiPage, selectedIndex: -1)` followed by
+two `addPage` operations for that new MultiPage. Reject every other batch of
+three operations and arbitrary mixed batches. TabStrip creation remains one
+`addControl` operation containing its two initial tabs and `selectedIndex: 0`.
 The RPC also enforces structural scope: `addControl` accepts a root, Frame, or
 eligible Page destination, but not a Page control. A Page destination requires
 structural, parent, and Page capabilities. An omitted or empty ProgID uses the
@@ -492,9 +727,13 @@ source model, including legacy nested input. Deleting a MultiPage with
 semantic edit API retains generic valid Page relationships and collection
 operations; the Designer adapter enforces its capability and interaction
 scope.
-Empty batches, more than two operations, repeated operation types, and pairs
-targeting different controls are rejected before source edits are generated.
-A property operation cannot be batched with another property or geometry edit.
+For existing operation families, empty batches, more than two operations,
+repeated operation types, and pairs targeting different controls are rejected
+before source edits are generated, except for the dedicated width/height form
+property pair and the exact three-operation MultiPage creation sequence above.
+Other property pairs and mixed property/geometry edits remain rejected;
+duplicate dimensions, nulls and nonnumeric values in a form resize pair are
+invalid. A failed MultiPage sequence returns no partial edit.
 Its payload supplies `field` and an explicit scalar `value`, plus `controlId`
 for `setControlProperty`. Missing `value` is invalid; explicit null must survive
 transport as a present value. Both Webview boundary and RPC validate payload
@@ -506,20 +745,22 @@ with standard LSP TextEdit ranges converted from UTF-8 offsets to UTF-16
 positions. Errors retain structured operation diagnostics and canonical codes.
 The server does not apply edits, write files or replace input with saved source.
 
-The host serializes edits per document URI, captures source/version, validates
-returned ranges and applies all edits in one WorkspaceEdit. Reject requests and
-responses obsolete after text, project, configuration, connection, visibility
-or disposal changes. Native custom text editor history owns undo/redo; there
-is no Webview history or automatic save. Text edits, undo/redo and other panels
-refresh through the preview synchronizer. Invalid source or unavailable
+The host serializes edits per document URI, captures draft source/revision,
+validates returned ranges, and applies each completed action to the shared
+draft as one `CustomDocumentEditEvent`. Reject requests and responses obsolete
+after draft, project, configuration, connection, visibility, or disposal
+changes. Native custom-document history owns undo/redo; there is no Webview
+history. External text-editor changes refresh the draft or enter the explicit
+conflict state described above. Invalid source or unavailable
 connections disable editing while retaining the last valid rendering. Rejected
 operations revert preview and display an error without automatic retry/rebase.
 
 Webview messages add `edit` with request ID/version/operations. Host messages
 add edit results and availability; document messages carry editable capability.
-YAML/YML and JSON share geometry, scalar properties, Page collection edits,
-and TabStrip collection edits, preserving unrelated source formatting.
-Multiple selection and canvas form resizing remain outside this contract.
+YAML, YML, and JSON support the semantic operations in
+[`userform-semantic-edit.md`](userform-semantic-edit.md), including JSON
+`reorderControl`, while preserving unrelated source formatting. Canvas form
+resizing remains outside this contract.
 Frame and Page placement/reparenting use the separate parent and Page
 capabilities described above. Page and TabStrip operation details and
 `selectedIndex` identity rules are specified in
@@ -527,19 +768,128 @@ capabilities described above. Page and TabStrip operation details and
 [`userform-multipage-tabstrip.md`](userform-multipage-tabstrip.md).
 Structural control add/remove continues to use the separate capability above.
 
+The LSP advertises `capabilities.experimental.userFormProductivityEdit: true`
+independently of existing capabilities. Each `userFormEdit` request containing
+`moveControls`, `alignControls`, `distributeControls`, `sameSizeControls`,
+`reorderControls`, `removeControls`, `setTabOrder`, or `pasteControls` contains
+exactly that one operation. Do not combine a productivity operation with a
+legacy operation or another productivity operation. Each successful
+productivity action is applied by the extension host as one
+`CustomDocumentEditEvent`.
+The new capability does not imply another edit family: movement, layout, and
+z-order also require `userFormEdit`; `setTabOrder` also requires
+`userFormPropertyEdit`; `removeControls` and `pasteControls` also require
+`userFormStructuralEdit`. A paste that sets parent relationships additionally
+requires `userFormParentEdit`; creating or placing Page controls requires
+`userFormPageEdit`. The host and LSP enforce all applicable gates separately.
+Older servers keep only the other edit families they already advertise.
+
+The extension host sends `xlflow/userFormCopy` with
+`{uri, version, text, controlIds}` using the current unsaved custom-document draft. The
+request requires `userFormProductivityEdit`. A successful response is
+`{version, snapshot, document, hasPicturePaths:boolean}`. An error response
+contains `{version, error}` and may also contain `hasPicturePaths:boolean`; that
+field has no meaning without a successful snapshot. `hasPicturePaths` is
+required on success, including when false. `ClipboardSnapshot` is
+`{format: 'yaml'|'json', text, controlIds}`. The `controlIds` and copied root
+records follow stable sibling stacking order regardless of selection order; authored
+`zIndex` fields remain source data. The backend determines the exact
+same-source records in `text`, preserving source presence and observations and distinguishing
+absent, null, empty, false, and zero without synthesizing normalized defaults.
+Stale source/version results are discarded.
+
+A successful Copy publishes its snapshot to the shared clipboard. Cut keeps
+its captured snapshot provisional through confirmation and deletion, and
+publishes it only after the atomic removal succeeds.
+
+Each Copy or Cut selection request receives a global monotonically increasing
+ticket. Only the latest valid requested selection may publish its snapshot;
+discard an older response that arrives late. A Cut must still hold the current
+ticket before cascade deletion; if a newer request supersedes it first, reject
+the Cut and leave its source unchanged. Replacing the clipboard snapshot resets
+paste repetition offsets for every destination URI/parent pair. A paste may
+finish with the snapshot it captured before a replacement, but it must not
+advance the replacement snapshot's offsets.
+
+The host proposes one new stable ID and case-insensitively unique name for every
+copied control record, including descendants, and sends
+`pasteControls{snapshot,allocations:[{sourceId,id,name}],parentId,offset:{left,top}}`.
+The LSP rewrites internal IDs and parent references, assigns copied roots to
+the requested parent, and validates the final FormSpec atomically. The host
+adds an 8 pt offset on both axes for each repeat and applies only a uniform
+translation to fit the complete group; it rejects a group that cannot fit.
+Page is excluded as a direct copy root, while a copied MultiPage includes its
+Page subtree. Unsupported custom subtrees fail as a whole. Same-project
+project-root-relative picture paths remain unchanged; cross-project paste
+rejects a subtree containing one. Image files, event handlers, and code-behind
+are not copied. Cut captures a valid snapshot, confirms the aggregate
+descendant count in the same URI queue, then submits one atomic `removeControls`
+edit with cascade enabled. Only successful deletion publishes the captured
+snapshot; cancellation or failure preserves the source and previous clipboard.
+Duplicate uses the same snapshot path and one paste operation in the original
+selection's owning parent. Paste uses a selected Frame or Page as destination
+only for a single selected control; otherwise it uses the selection's owning
+parent.
+
+The tab-order editor is parent-local and lists only controls whose LSP metadata
+exposes editable `tabIndex`. Hidden and disabled controls remain listed; Page
+controls and TabStrip tab records are excluded. It initializes explicit
+numeric indexes ascending, ties by z-order, and absent/null indexes last by
+z-order. Apply sends `setTabOrder{parentId,controlIds}` with the complete
+ordered list; the LSP assigns zero-based indexes in one edit. A source change
+discards a pending local order instead of rebasing it.
+
+## Deferred-save verification requirements
+
+These are required implementation checks; they do not claim that the current
+implementation or test run has passed.
+
+Verify that multiple Designer panels for one URI share draft text and native
+Undo/Redo. A completed LSP edit must change only the draft until explicit
+Designer Save or its scoped keyboard command. Native Save, Save All, and
+configured AutoSave must checkpoint internally without writing the open
+`TextDocument`; Undo/Redo must not publish it. Verify that the tab dirty marker
+tracks the internal checkpoint independently from the YAML/JSON-not-applied
+badge.
+Preview and edit requests must carry the exact draft text, preserve source
+formatting, and retain canonical LSP validation behavior without frontend
+semantic rules.
+
+Verify that external unsaved text-editor changes appear immediately. A clean
+draft adopts them; non-overlapping changes merge into a dirty draft and the
+EngineWorker rebases history so subsequent Undo/Redo remains correct. An
+overlapping edit must retain both versions, show the Source Conflict state, and
+block explicit Designer Save until an explicit resolution. Native checkpoint
+save and AutoSave remain available without publishing source. Cover **Use YAML/JSON
+changes**, **Use Designer draft**, and an explicitly confirmed whole-document
+choice when a granular merge is unavailable.
+
+Verify explicit Designer Save validates and applies edits to the latest open
+`TextDocument`, then calls its save API without writing the workspace file
+directly or replacing newer dirty text. Verify the native save callback
+checkpoints only internal storage for menu Save, Save All, and AutoSave, and
+that pending drafts survive close/reopen/restart by URI. Cover failed
+apply/save retry, Save As as an explicit publish, Revert, backup, restore,
+hot-exit, and standard AutoSave enabled/disabled settings. A corrupt checkpoint
+must show an error and remain stored until successful explicit Save or Revert
+resolves the pending recovery state.
+
 ## Structural edit verification requirements
 
 Implementation checks should cover the 14 Toolbox types and Pointer, click-to-
 place and Escape cancellation, centralized default dimensions, stableDelta
 precision and grid snapping, position clamping and undersized-form rejection,
 UUID/name collision handling at Toolbox allocation and host add preflight,
-stable ID after rename, and the empty MultiPage/TabStrip states. Designer checks
-should cover root, Frame, and active-Page insertion, selection followed by
-return to Pointer, canvas Delete handling that leaves Pages intact, Page-list
+stable ID after rename, the exact atomic MultiPage-plus-two-Pages transaction,
+the two-tab TabStrip default, and preservation of authored empty collections.
+Batch validation should accept only the exact three-operation MultiPage
+sequence and reject other three-operation or arbitrary mixed batches. Designer
+checks should cover root, Frame, and active-Page insertion, selection followed
+by return to Pointer, canvas Delete handling that leaves Pages intact, Page-list
 deletion confirmation and cascade, immediate leaf-control deletion,
 confirmation content and cancellation for controls with descendants, descendant
-cascade, a single native Undo/Redo step, and pending-confirmation/version
-invalidation.
+cascade, a single native Undo/Redo step for each initial-control creation, and
+pending-confirmation/version invalidation.
 
 Keep coverage in `editors/vscode/test/userFormStructure.test.tsx`, the actual
 Webview interaction suite `editors/vscode/test/suite/userFormWebview.test.ts`,
@@ -582,6 +932,31 @@ capability gates, localized YAML/YML/JSON edits, observed-data preservation,
 and atomic final-validation failure. These checks do not establish runtime,
 Excel, COM, or VBE behavior.
 
+## Productivity verification requirements
+
+Plan implementation coverage in three layers. First, run the focused Go
+semantic-edit and LSP checks through `scripts/dev/go.ps1` for YAML, YML, and
+JSON, including JSON `reorderControl`, one-operation transaction enforcement,
+source preservation, stale copy versions, and atomic rejection. Cover
+selection scoping, movement, six alignments, fixed-endpoint distribution,
+anchor sizing, all four z-order commands, complete tab-order lists, and
+recursive copy/paste rewriting and allocation.
+
+Second, run the VS Code Designer tests for built-in-only group selection,
+standalone custom-control selection, marquee inclusion of fully contained
+visible built-in siblings, group movement without resizing, context actions,
+Cut snapshot-confirm-delete ordering and cancellation preservation,
+single-container Paste and owning-parent Duplicate destinations, cross-panel
+clipboard use, same-project and cross-project picture paths, and tab-order
+initialization, Apply, and discard after source changes. Include malformed,
+unsupported custom, direct-Page, and out-of-bounds copy/paste cases.
+
+Third, verify in the VS Code host that each successful productivity action is
+one native Undo step and Redo restores the complete action. Exercise cut,
+paste, alignment, distribution, z-order, and tab-order separately. These are
+source/editor checks; do not report them as Excel, COM, VBIDE, VBE, compiler,
+or runtime validation.
+
 ## Webview security
 
 Each Webview document uses a fresh random nonce for its bundled script. Its
@@ -597,9 +972,15 @@ interpolated into the HTML document.
 - Issue #917
 - Issue #918
 - Issue #919
+- Issue #920
+- Issue #921
+- Issue #922
 - `docs/adr/ADR-0068-userform-designer-structural-control-edits.md`
 - `docs/adr/ADR-0067-userform-designer-property-metadata.md`
 - `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`
+- `docs/adr/ADR-0073-userform-designer-deferred-save-document-lifecycle.md`
+- `docs/adr/ADR-0070-userform-designer-page-tab-collection-editing.md`
+- `docs/adr/ADR-0071-userform-designer-productivity-edits.md`
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`
 - `docs/specs/ms-oforms.md`
 - `docs/specs/userform-picture-assets.md`

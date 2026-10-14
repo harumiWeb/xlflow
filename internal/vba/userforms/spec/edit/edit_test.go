@@ -171,13 +171,12 @@ func TestQuotesUnicodeAndMultiline(t *testing.T) {
 
 func TestFormExplicitPaths(t *testing.T) {
 	result := applyOK(t, base,
-		Operation{Type: SetFormProperty, Field: "caption", Value: "legacy"},
-		Operation{Type: SetFormProperty, Field: "build.caption", Value: "authoritative"},
-		Operation{Type: SetFormProperty, Field: "build.clientWidth", Value: 320},
-		Operation{Type: SetFormProperty, Field: "build.clientHeight", Value: 240},
+		Operation{Type: SetFormProperty, Field: "caption", Value: "authoritative"},
+		Operation{Type: SetFormProperty, Field: "width", Value: 0},
+		Operation{Type: SetFormProperty, Field: "height", Value: 240},
 	)
-	if *result.Document.Form.Caption != "legacy" || *result.Document.Form.Build.Caption != "authoritative" || *result.Document.Form.Build.ClientWidth != 320 {
-		t.Fatal("explicit paths remapped")
+	if *result.Document.Form.Caption != "authoritative" || result.Document.Form.Width == nil || *result.Document.Form.Width != 0 || *result.Document.Form.Height != 240 {
+		t.Fatalf("canonical form paths did not update: %+v", result.Document.Form)
 	}
 	if !strings.Contains(string(result.Source), "controls:\n  # button") {
 		t.Fatal("controls changed")
@@ -549,7 +548,7 @@ func TestValidationAndAtomicity(t *testing.T) {
 		{Operation{Type: ReorderControl, ControlID: "submit", Index: new(9)}, "UFE003"},
 		{Operation{Type: "unknown"}, "UFE003"},
 		{Operation{Type: SetControlProperty, ControlID: "submit", Field: "Caption", Value: "wrong-key"}, "UFE005"},
-		{Operation{Type: SetFormProperty, Field: "build.ClientWidth", Value: 200}, "UFE005"},
+		{Operation{Type: SetFormProperty, Field: "build.clientWidth", Value: 200}, "UFE005"},
 		{Operation{Type: MoveControl, ControlID: "submit", Left: new(1.0)}, "UFE003"},
 		{Operation{Type: SetControlProperty, ControlID: "submit", Field: "caption", Value: "new", Left: new(1.0)}, "UFE003"},
 	}
@@ -561,7 +560,7 @@ func TestValidationAndAtomicity(t *testing.T) {
 			}
 		})
 	}
-	assertFailure(t, base, []Operation{{Type: SetFormProperty, Field: "build.clientWidth", Value: 200}, {Type: SetFormProperty, Field: "width", Value: 300}}, "UFV017")
+	assertFailure(t, base, []Operation{{Type: SetFormProperty, Field: "build.clientWidth", Value: 200}}, "UFE005")
 	// A temporary missing parent is allowed when the same transaction creates it.
 	result := applyOK(t, base, Operation{Type: SetParent, ControlID: "submit", ParentID: "new"}, Operation{Type: AddControl, Control: &spec.FormSpecControl{ID: "new", Name: "New", Type: "Frame"}})
 	if result.Document.Controls[0].ParentID != "new" {
@@ -628,7 +627,7 @@ func TestFormattingBoundaries(t *testing.T) {
 
 func TestEditedFormSpecCompilesAndProjects(t *testing.T) {
 	result := applyOK(t, hierarchy,
-		Operation{Type: SetFormProperty, Field: "build.caption", Value: "Edited"},
+		Operation{Type: SetFormProperty, Field: "caption", Value: "Edited"},
 		Operation{Type: MoveControl, ControlID: "child", Left: new(24.0), Top: new(12.0)},
 		Operation{Type: SetControlProperty, ControlID: "child", Field: "text", Value: "Sentinel"},
 		Operation{Type: AddControl, Control: &spec.FormSpecControl{ID: "label", Name: "Label1", Type: "Label", ParentID: "frame", Caption: new("Label")}},
@@ -645,7 +644,7 @@ func TestEditedFormSpecCompilesAndProjects(t *testing.T) {
 	if index < 0 || projected.Controls[index].Text == nil || *projected.Controls[index].Text != "Sentinel" {
 		t.Fatalf("generation lost edited value: %+v", projected.Controls)
 	}
-	if projected.Form.Build == nil || *projected.Form.Build.Caption != "Edited" {
+	if projected.Form.Caption == nil || *projected.Form.Caption != "Edited" {
 		t.Fatal("generation lost caption")
 	}
 }

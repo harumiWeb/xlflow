@@ -7,6 +7,7 @@ export function Toolbox({
   disabled,
   parentEditable = false,
   pageEditable = false,
+  tabEditable = false,
   strings,
   onSelect,
 }: {
@@ -14,6 +15,7 @@ export function Toolbox({
   disabled: boolean;
   parentEditable?: boolean;
   pageEditable?: boolean;
+  tabEditable?: boolean;
   strings: DesignerStrings;
   onSelect: (type?: ToolboxType) => void;
 }) {
@@ -38,7 +40,11 @@ export function Toolbox({
           key={control.type}
           data-toolbox-type={control.type}
           aria-pressed={selected === control.type}
-          disabled={disabled}
+          disabled={
+            disabled ||
+            (control.type === "MultiPage" && !pageEditable) ||
+            (control.type === "TabStrip" && !tabEditable)
+          }
           onClick={() => onSelect(control.type)}
         >
           {control.type}

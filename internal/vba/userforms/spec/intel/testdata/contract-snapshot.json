@@ -17,8 +17,7 @@
     { "type": "TabStrip", "progId": "Forms.TabStrip.1" }
   ],
   "bridge": {
-    "formFields": ["name", "caption", "width", "height", "observed", "build"],
-    "formBuildFields": ["caption", "width", "height", "clientWidth", "clientHeight"],
+    "formFields": ["name", "caption", "width", "height", "observed"],
     "observedFormFields": [
       "caption",
       "width",

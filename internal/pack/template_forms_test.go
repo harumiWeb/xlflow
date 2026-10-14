@@ -116,6 +116,53 @@ func TestTemplatePlanFormsIsAtomicAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestPlanProjectReportsFormSpecEncodingLocation(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.Props.CodePage = 1252
+	source := authoredForm("BadCaption")
+	source.FormSpec.Form.Caption = new("\U0001F600")
+	source.SourcePath = "src/forms/code/BadCaption.bas"
+	source.FormSpecPath = "src/forms/BadCaption.json"
+	source.FormSpecSource = []byte("{\n  \"form\": {\n    \"name\": \"BadCaption\", \"caption\": \"\U0001F600\"\n  }\n}\n")
+	_, err = PlanProject(project, []SourceModule{source})
+	if errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("FormSpec encoding was misclassified as ambiguous layout: %v", err)
+	}
+	diagnostics, ok := errors.AsType[*SourceEncodingErrors](err)
+	if !ok || len(diagnostics.Errors) != 1 {
+		t.Fatalf("encoding diagnostics = %#v, want one FormSpec source error", err)
+	}
+	issue := diagnostics.Errors[0]
+	if issue.Path != source.FormSpecPath || issue.Line != 3 || issue.Column != 39 || issue.Rune != '\U0001F600' || issue.CodePage != 1252 {
+		t.Fatalf("FormSpec issue = %+v", issue)
+	}
+}
+
+func TestPlanProjectReportsEscapedYAMLFormSpecEncodingLocation(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.Props.CodePage = 1252
+	source := authoredForm("BadCaption")
+	source.FormSpec.Form.Caption = new("\U0001F600")
+	source.SourcePath = "src/forms/code/BadCaption.bas"
+	source.FormSpecPath = "src/forms/specs/BadCaption.yaml"
+	source.FormSpecSource = []byte("form:\n  name: BadCaption\n  caption: \"\\U0001F600\"\n")
+	_, err = PlanProject(project, []SourceModule{source})
+	diagnostics, ok := errors.AsType[*SourceEncodingErrors](err)
+	if !ok || len(diagnostics.Errors) != 1 {
+		t.Fatalf("encoding diagnostics = %#v, want one FormSpec source error", err)
+	}
+	issue := diagnostics.Errors[0]
+	if issue.Path != source.FormSpecPath || issue.Line != 3 || issue.Column != 13 || issue.Rune != '\U0001F600' {
+		t.Fatalf("escaped YAML issue = %+v, want %s:3:13", issue, source.FormSpecPath)
+	}
+}
+
 func TestPlanProjectPreservesExistingFormCodeAuthority(t *testing.T) {
 	base := readTestFile(t, "corpus", "p1_compiled.bin")
 	created, err := GenerateVBAProject(base, []SourceModule{authoredForm("Login")})

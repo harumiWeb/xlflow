@@ -1,4 +1,10 @@
-import type { DesignerDocument, PageOperation, ParentOperation } from "./protocol";
+import type {
+  DesignerDocument,
+  PageOperation,
+  ParentOperation,
+  SemanticOperation,
+} from "./protocol";
+import type { NewControl } from "./toolbox";
 import {
   isDesignerPage,
   orderedChildren,
@@ -10,6 +16,27 @@ import {
 import { subtreeIds } from "./toolbox";
 
 export type ActivePages = Record<string, string>;
+
+/** Place the owner and its initial collection as one draft/history action. */
+export function initialControlOperations(
+  document: DesignerDocument,
+  control: NewControl,
+  uuid: () => string = () => crypto.randomUUID(),
+): SemanticOperation[] | undefined {
+  const operations: SemanticOperation[] = [{ type: "addControl", control }];
+  if (control.type !== "MultiPage") return operations;
+  const allocation = {
+    ...document,
+    controls: [...document.controls, { ...control, approximate: false }],
+  };
+  for (let index = 0; index < 2; index++) {
+    const page = createPage(allocation, control.id, uuid);
+    if (!page) return;
+    operations.push({ type: "addPage", control: page });
+    allocation.controls.push({ ...page, left: 0, top: 0, width: 0, height: 0, approximate: true });
+  }
+  return operations;
+}
 
 // This projection is used only for rendering and hit testing, never source edits.
 export function displayPages(document: DesignerDocument, active: ActivePages): DesignerDocument {

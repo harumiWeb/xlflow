@@ -58,8 +58,10 @@ code_source = "sidecar"
 code_page = 932
 ```
 
-Blank code page defaults to 1252; template mode uses the template project's code
-page. Managed VBA source is still UTF-8 without BOM. Root form captions and
+Manually authored blank code page defaults to 1252; template mode uses the
+template project's code page. `new` and `init` seed `[pack.blank].code_page`
+from the actual VBA project's `PROJECTCODEPAGE`. Managed VBA source stays UTF-8
+without BOM. Root form captions and
 component names must be representable in the project code page; control text
 has its own Unicode persistence. Do not invent a `pack.blank.lcid` setting or
 put unsupported configuration keys under `[pack]`.

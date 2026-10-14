@@ -50,9 +50,6 @@ func propertyAtPath(doc *Document, path string) (forms.PropertyContract, string,
 	case parent == "form":
 		property, ok := lookupProperty(contract.FormProperties, name)
 		return property, "form", ok
-	case parent == "form.build":
-		property, ok := forms.LookupFormBuildProperty(name)
-		return property, "form build override", ok
 	case parent == "form.observed":
 		property, ok := forms.LookupFormObservedProperty(name)
 		return property, "captured form state", ok

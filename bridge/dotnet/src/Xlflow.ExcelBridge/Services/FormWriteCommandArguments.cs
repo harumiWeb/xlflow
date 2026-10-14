@@ -14,4 +14,7 @@ public sealed record FormWriteCommandArguments(
     bool NoSave,
     bool Visible,
     bool UseSession,
-    string MetadataPath);
+    string MetadataPath,
+    string Phase = "import",
+    string PreparedWorkbookPath = "",
+    string CompiledWorkbookPath = "");

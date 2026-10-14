@@ -26,12 +26,15 @@ export async function runUserFormWebviewAssertions(extensionUri: vscode.Uri): Pr
   const harness = `<script nonce="${nonce}">
 const testApi = acquireVsCodeApi();
 const editMessages = [];
+const clipboardMessages = [];
 window.acquireVsCodeApi = () => ({
-  postMessage(message) { if (message.type === "edit") editMessages.push(message); testApi.postMessage(message); },
+  postMessage(message) { if (message.type === "edit") editMessages.push(message); if (message.type === "clipboard") clipboardMessages.push(message); testApi.postMessage(message); },
   getState: () => testApi.getState(), setState: (state) => testApi.setState(state)
 });
 const violations = [];
 const runtimeErrors = [];
+let pointerFormOrigin;
+let pointerHandleOrigin;
 window.addEventListener("error", e => runtimeErrors.push(e.message));
 window.addEventListener("unhandledrejection", e => runtimeErrors.push(String(e.reason)));
 window.addEventListener("securitypolicyviolation", e => violations.push(e.violatedDirective));
@@ -39,17 +42,43 @@ window.addEventListener("message", e => {
   if (!["document", "invalidDocument", "testAction"].includes(e.data.type)) return;
   setTimeout(async () => {
     for (const action of e.data.actions ?? []) {
-      const target = document.querySelector(action.selector);
+      let target = document.querySelector(action.selector);
       if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: action.selector}); return; }
       const props = { bubbles: true, cancelable: true, ...action.props };
       if (props.formPoints) {
-        const bounds = document.querySelector(".form").getBoundingClientRect();
+        // Establish focus/scroll before computing synthetic pointer coordinates;
+        // the real pointer-down handler focuses the canvas and may scroll it.
+        if (action.event === 'pointerdown') {
+          const canvas = document.querySelector('.designer-viewport');
+          canvas.focus({ preventScroll: true });
+          canvas.scrollIntoView({ block: 'start', inline: 'start', behavior: 'instant' });
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
+        const currentBounds = document.querySelector(".form").getBoundingClientRect();
+        if (action.event === 'pointerdown') pointerFormOrigin = currentBounds;
+        // Keep a gesture in one screen coordinate system even when selection
+        // breadcrumbs or notices change the form's position during the drag.
+        const bounds = pointerFormOrigin ?? currentBounds;
         const zoom = Number(document.querySelector(".designer-toolbar select").value);
+        if (props.handleCenter) {
+          const handle = target.getBoundingClientRect();
+          props.formPoints = [(handle.left + handle.right - 2 * bounds.left) * 72 / (2 * 96 * zoom), (handle.top + handle.bottom - 2 * bounds.top) * 72 / (2 * 96 * zoom)];
+        }
         props.clientX = bounds.left + props.formPoints[0] * 96 * zoom / 72;
         props.clientY = bounds.top + props.formPoints[1] * 96 * zoom / 72;
+        if (props.handleCenter) pointerHandleOrigin = { x: props.clientX, y: props.clientY };
+        if (props.handleDelta && pointerHandleOrigin) {
+          props.clientX = pointerHandleOrigin.x + props.handleDelta[0] * 96 * zoom / 72;
+          props.clientY = pointerHandleOrigin.y + props.handleDelta[1] * 96 * zoom / 72;
+        }
+      }
+      if (props.hitTest) {
+        target = document.elementFromPoint(props.clientX, props.clientY);
+        if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: "hit test " + action.selector}); return; }
       }
       if (action.event === "change" || action.event === "input") { if ("value" in props) target.value = props.value; if ("checked" in props) target.checked = props.checked; }
       target.dispatchEvent(["change", "input"].includes(action.event) ? new Event(action.event, props) : action.event.startsWith("key") ? new KeyboardEvent(action.event, props) : action.event === "focusout" ? new FocusEvent("blur", props) : new PointerEvent(action.event, props));
+      if (action.event === 'pointerup' || action.event === 'pointercancel') pointerFormOrigin = undefined;
       await new Promise(resolve => setTimeout(resolve, 30));
     }
     const label = document.querySelector(".control.label");
@@ -78,10 +107,15 @@ window.addEventListener("message", e => {
       width: label && getComputedStyle(label).width,
       top: label && getComputedStyle(label).top,
       height: label && getComputedStyle(label).height,
+      formWidth: document.querySelector(".form") && getComputedStyle(document.querySelector(".form")).width,
+      formHeight: document.querySelector(".form") && getComputedStyle(document.querySelector(".form")).height,
+      formHandles: document.querySelectorAll("[data-form-handle]").length,
       handles: document.querySelectorAll(".resize-handle").length,
       toolboxDisabled: document.querySelector('[data-toolbox-type="Label"]')?.disabled,
       placing: !!document.querySelector(".placing-control"),
       selectedId: document.querySelector(".selection-outline")?.dataset.controlId,
+      selectedIds: [...document.querySelectorAll(".selection-outline")].map(c => c.dataset.controlId),
+      groupSelection: !!document.querySelector(".group-selection-outline"),
       canvasFocused: document.activeElement === document.querySelector(".designer-viewport"),
       dropParentId: document.querySelector("[data-drop-parent-id]")?.dataset.dropParentId,
       floating: !!document.querySelector(".drag-preview"),
@@ -95,6 +129,10 @@ window.addEventListener("message", e => {
       overflowHits: (() => {
         const child = document.querySelector('[data-control-id="overflow-child"]');
         if (!child) return undefined;
+        // Hit testing uses viewport coordinates. Wrapped productivity controls
+        // can push the canvas below the smaller Linux CI Webview viewport.
+        // Scroll the canvas, not the clipped child or its Frame content.
+        document.querySelector('.designer-viewport').scrollIntoView({ block: 'start', inline: 'start', behavior: 'instant' });
         const bounds = child.getBoundingClientRect();
         const content = child.parentElement.getBoundingClientRect();
         const y = (bounds.top + bounds.bottom) / 2;
@@ -104,6 +142,7 @@ window.addEventListener("message", e => {
         };
       })(),
       editMessages,
+      clipboardMessages,
       images: document.querySelectorAll("img").length,
       propertyTitle: document.querySelector(".property-grid h2")?.textContent,
       propertyRows: [...document.querySelectorAll("[data-property-field]")].map(row => ({
@@ -184,7 +223,8 @@ window.addEventListener("message", e => {
       form: {
         name: "Main",
         caption: "<img src=x onerror=bad()>",
-        build: { clientWidth: 240, clientHeight: 180 },
+        width: 240,
+        height: 180,
       },
       controls: [
         {
@@ -541,7 +581,7 @@ window.addEventListener("message", e => {
           { field: "caption", valueType: "string" as const, required: false, nullable: true },
           { field: "width", valueType: "number" as const, required: false, nullable: true },
           {
-            field: "build.clientWidth",
+            field: "height",
             valueType: "number" as const,
             required: false,
             nullable: true,
@@ -550,7 +590,7 @@ window.addEventListener("message", e => {
         values: {
           caption: { present: true, value: "Authored caption" },
           width: { present: true, value: 240 },
-          "build.clientWidth": { present: false, value: null },
+          height: { present: false, value: null },
         },
       },
       controls: {
@@ -801,7 +841,7 @@ window.addEventListener("message", e => {
     assert.deepStrictEqual(afterDeletion.violations, []);
 
     const parenting = designerDocument({
-      form: { name: "Main", build: { clientWidth: 600, clientHeight: 400 } },
+      form: { name: "Main", width: 600, height: 400 },
       controls: [
         { id: "label", name: "Label1", type: "Label", left: 10, top: 10, width: 20, height: 10 },
         {
@@ -938,7 +978,10 @@ window.addEventListener("message", e => {
       type: "testAction",
       version: 68,
       actions: [
-        parentPointer('.control[data-control-id="child"]', "pointerdown", 228.5, 139.5),
+        {
+          ...parentPointer('.control[data-control-id="child"]', "pointerdown", 228.5, 139.5),
+          props: { pointerId: 1, button: 0, formPoints: [228.5, 139.5], hitTest: true },
+        },
         parentPointer(".designer-viewport", "pointerup", 228.5, 139.5),
         { selector: ".selection-path > span button", event: "click" },
       ],
@@ -991,7 +1034,7 @@ window.addEventListener("message", e => {
       error: { code: "editCancelled", message: "Cancelled" },
     });
     const overflow = designerDocument({
-      form: { name: "Overflow", build: { clientWidth: 400, clientHeight: 300 } },
+      form: { name: "Overflow", width: 400, height: 300 },
       controls: [
         { id: "frame", name: "Frame1", type: "Frame", left: 20, top: 20, width: 100, height: 80 },
         {
@@ -1026,7 +1069,7 @@ window.addEventListener("message", e => {
     );
     assert.deepStrictEqual(adjusted.violations, []);
     const collections = designerDocument({
-      form: { name: "Collections", build: { clientWidth: 600, clientHeight: 400 } },
+      form: { name: "Collections", width: 600, height: 400 },
       controls: [
         {
           id: "multi",
@@ -1158,6 +1201,275 @@ window.addEventListener("message", e => {
       },
     ]);
     assert.deepStrictEqual(tabSelected.violations, []);
+    await panel.webview.postMessage({ type: "editResult", requestId: tabRequest.requestId });
+    const productivityDocument = designerDocument({
+      form: { name: "Productivity", width: 400, height: 240 },
+      controls: [
+        { id: "a", name: "Label1", type: "Label", left: 20, top: 20, width: 60, height: 18 },
+        { id: "b", name: "TextBox2", type: "TextBox", left: 110, top: 20, width: 60, height: 18 },
+      ],
+    });
+    const productivityMessage = (version: number): Extract<HostMessage, { type: "document" }> => ({
+      type: "document",
+      version,
+      document: productivityDocument,
+      editable: true,
+      productivityEditable: true,
+      structuralEditable: true,
+      propertyEditable: true,
+      propertyGrid: {
+        form: { descriptors: [], values: {} },
+        controls: {
+          a: {
+            descriptors: [
+              { field: "tabIndex", valueType: "integer", nullable: true, required: false },
+            ],
+            values: { tabIndex: { present: false, value: null } },
+          },
+          b: {
+            descriptors: [
+              { field: "tabIndex", valueType: "integer", nullable: true, required: false },
+            ],
+            values: { tabIndex: { present: true, value: 8 } },
+          },
+        },
+      },
+    });
+    await snapshot(productivityMessage(95));
+    const selectedInterior = await snapshot({
+      type: "testAction",
+      version: 96,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "1" } },
+        { selector: ".snap-toggle input", event: "change", props: { checked: false } },
+        {
+          selector: '.control[data-control-id="a"]',
+          event: "pointerdown",
+          props: { pointerId: 1, button: 0, formPoints: [50, 29], hitTest: true },
+        },
+        parentPointer(".designer-viewport", "pointerup", 50, 29),
+      ],
+    });
+    assert.deepStrictEqual(
+      selectedInterior.selectedIds,
+      ["a"],
+      "interior click selects the control",
+    );
+    assert.strictEqual(selectedInterior.canvasFocused, true);
+    const pressedInterior = await snapshot({
+      type: "testAction",
+      version: 97,
+      actions: [
+        {
+          selector: '.control[data-control-id="a"]',
+          event: "pointerdown",
+          props: { pointerId: 1, button: 0, formPoints: [50, 29], hitTest: true },
+        },
+      ],
+    });
+    assert.deepStrictEqual(
+      pressedInterior.selectedIds,
+      ["a"],
+      "holding the interior retains selection",
+    );
+    assert.strictEqual(pressedInterior.canvasFocused, true);
+    assert.deepStrictEqual(pressedInterior.editMessages, selectedInterior.editMessages);
+    const draggedInterior = await snapshot({
+      type: "testAction",
+      version: 98,
+      actions: [
+        parentPointer(".designer-viewport", "pointermove", 62, 35),
+        parentPointer(".designer-viewport", "pointerup", 62, 35),
+      ],
+    });
+    assert.deepStrictEqual(draggedInterior.selectedIds, ["a"]);
+    const interiorEdits = draggedInterior.editMessages as {
+      requestId: number;
+      operations: unknown[];
+    }[];
+    assert.strictEqual(
+      interiorEdits.length,
+      (selectedInterior.editMessages as unknown[]).length + 1,
+    );
+    assert.deepStrictEqual(interiorEdits.at(-1)!.operations, [
+      {
+        type: "moveControl",
+        controlId: "a",
+        left: 32,
+        top: 26,
+      },
+    ]);
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: interiorEdits.at(-1)!.requestId,
+    });
+    const beforeGroup = await snapshot(productivityMessage(100));
+    const selectedGroup = await snapshot({
+      type: "testAction",
+      version: 101,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "1" } },
+        { selector: ".snap-toggle input", event: "change", props: { checked: false } },
+        {
+          ...parentPointer('.control[data-control-id="a"]', "pointerdown", 25, 25),
+          props: { pointerId: 1, button: 0, formPoints: [25, 25], hitTest: true },
+        },
+        parentPointer(".designer-viewport", "pointerup", 25, 25),
+        {
+          ...parentPointer('.control[data-control-id="b"]', "pointerdown", 115, 25),
+          props: { pointerId: 1, button: 0, formPoints: [115, 25], ctrlKey: true, hitTest: true },
+        },
+        parentPointer(".designer-viewport", "pointerup", 115, 25),
+      ],
+    });
+    assert.deepStrictEqual((selectedGroup.selectedIds as string[]).sort(), ["a", "b"]);
+    assert.strictEqual(selectedGroup.groupSelection, true);
+    assert.strictEqual(selectedGroup.handles, 0, "group selection has no group resize handles");
+    const groupDragged = await snapshot({
+      type: "testAction",
+      version: 102,
+      actions: [
+        {
+          ...parentPointer('.control[data-control-id="a"]', "pointerdown", 25, 25),
+          props: { pointerId: 1, button: 0, formPoints: [25, 25], hitTest: true },
+        },
+        parentPointer(".designer-viewport", "pointermove", 37, 31),
+        parentPointer(".designer-viewport", "pointerup", 37, 31),
+      ],
+    });
+    const groupRequests = groupDragged.editMessages as {
+      requestId: number;
+      operations: unknown[];
+    }[];
+    assert.strictEqual(groupRequests.length, (beforeGroup.editMessages as unknown[]).length + 1);
+    const groupOperation = groupRequests.at(-1)!.operations[0] as {
+      type: string;
+      moves: { controlId: string; left: number; top: number }[];
+    };
+    assert.strictEqual(groupRequests.at(-1)!.operations.length, 1);
+    assert.strictEqual(groupOperation.type, "moveControls", JSON.stringify(groupRequests.at(-1)));
+    assert.deepStrictEqual(
+      [
+        {
+          ...groupOperation,
+          moves: [...groupOperation.moves].sort((a, b) => a.controlId.localeCompare(b.controlId)),
+        },
+      ],
+      [
+        {
+          type: "moveControls",
+          moves: [
+            { controlId: "a", left: 32, top: 26 },
+            { controlId: "b", left: 122, top: 26 },
+          ],
+        },
+      ],
+    );
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: groupRequests.at(-1)!.requestId,
+    });
+    await snapshot(productivityMessage(103));
+    const copiedGroup = await snapshot({
+      type: "testAction",
+      version: 104,
+      actions: [
+        { selector: ".designer-viewport", event: "keydown", props: { key: "c", ctrlKey: true } },
+      ],
+    });
+    const copyRequests = copiedGroup.clipboardMessages as {
+      requestId: number;
+      action: string;
+      controlIds: string[];
+    }[];
+    assert.strictEqual(copyRequests.at(-1)!.action, "copy");
+    assert.deepStrictEqual([...copyRequests.at(-1)!.controlIds].sort(), ["a", "b"]);
+    assert.strictEqual(
+      (copiedGroup.editMessages as unknown[]).length,
+      groupRequests.length,
+      "copy emits no source edit",
+    );
+    await panel.webview.postMessage({
+      type: "editResult",
+      requestId: copyRequests.at(-1)!.requestId,
+    });
+    const assignedTabs = await snapshot({
+      type: "testAction",
+      version: 105,
+      actions: [
+        { selector: ".productivity-toolbar details:last-of-type summary", event: "click" },
+        { selector: ".tab-order-editor > button", event: "click" },
+      ],
+    });
+    const tabOrderRequest = (
+      assignedTabs.editMessages as { requestId: number; operations: unknown[] }[]
+    ).at(-1)!;
+    assert.deepStrictEqual(tabOrderRequest.operations, [
+      { type: "setTabOrder", parentId: "", controlIds: ["b", "a"] },
+    ]);
+    assert.deepStrictEqual(assignedTabs.violations, []);
+    assert.deepStrictEqual(assignedTabs.runtimeErrors, []);
+    await panel.webview.postMessage({ type: "editResult", requestId: tabOrderRequest.requestId });
+    const root = await snapshot({
+      type: "document",
+      version: 110,
+      document: interactive,
+      editable: true,
+      propertyEditable: true,
+      propertyGrid,
+    });
+    const priorRootEdits = (root.editMessages as unknown[]).length;
+    const rootPreview = await snapshot({
+      type: "testAction",
+      version: 111,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "1.5" } },
+        { selector: ".selection-path button", event: "click" },
+        {
+          selector: '[data-form-handle="se"]',
+          event: "pointerdown",
+          props: { pointerId: 1, button: 0, formPoints: [0, 0], handleCenter: true, hitTest: true },
+        },
+        {
+          selector: ".designer-viewport",
+          event: "pointermove",
+          props: { pointerId: 1, formPoints: [0, 0], handleDelta: [20, 15] },
+        },
+      ],
+    });
+    assert.strictEqual(rootPreview.formHandles, 3);
+    assert.strictEqual(
+      (rootPreview.editMessages as unknown[]).length,
+      priorRootEdits,
+      "form preview does not edit source",
+    );
+    assert.ok(
+      Math.abs(parseFloat(String(rootPreview.formWidth)) - ((interactive.width + 20) * 96) / 72) <
+        0.05,
+    );
+    assert.ok(
+      Math.abs(parseFloat(String(rootPreview.formHeight)) - ((interactive.height + 15) * 96) / 72) <
+        0.05,
+    );
+    const rootResized = await snapshot({
+      type: "testAction",
+      version: 112,
+      actions: [
+        {
+          selector: ".designer-viewport",
+          event: "pointerup",
+          props: { pointerId: 1, formPoints: [0, 0], handleDelta: [20, 15] },
+        },
+      ],
+    });
+    const rootRequests = rootResized.editMessages as { operations: unknown[] }[];
+    assert.strictEqual(rootRequests.length, priorRootEdits + 1);
+    assert.deepStrictEqual(rootRequests.at(-1)!.operations, [
+      { type: "setFormProperty", field: "width", value: interactive.width + 20 },
+      { type: "setFormProperty", field: "height", value: interactive.height + 15 },
+    ]);
+    assert.deepStrictEqual(rootResized.violations, []);
+    assert.deepStrictEqual(rootResized.runtimeErrors, []);
   } finally {
     subscription.dispose();
     panel.dispose();

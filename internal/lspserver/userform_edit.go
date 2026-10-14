@@ -68,11 +68,20 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 		result.Error = requestError
 		return result
 	}
+	newMultiPageInsertion := isDesignerMultiPageInitialInsertionCandidate(params.Operations)
 	for _, operation := range params.Operations {
-		if operation.Type == formsedit.AddControl {
-			if requestError := validateDesignerControlAddition(operation.Control); requestError != nil {
+		if isUserFormProductivityOperation(operation.Type) {
+			if requestError := validateDesignerProductivity(input, []byte(params.Text), operation); requestError != nil {
 				result.Error = requestError
 				return result
+			}
+		}
+		if operation.Type == formsedit.AddControl {
+			if !newMultiPageInsertion {
+				if requestError := validateDesignerControlAddition(operation.Control); requestError != nil {
+					result.Error = requestError
+					return result
+				}
 			}
 			if requestError := validateDesignerContainerParent(input, []byte(params.Text), operation.Control.ParentID, operation.Control.ID); requestError != nil {
 				result.Error = requestError
@@ -86,9 +95,11 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 			}
 		}
 		if operation.Type == formsedit.AddPage {
-			if requestError := validateDesignerPageAddition(input, []byte(params.Text), operation.Control); requestError != nil {
-				result.Error = requestError
-				return result
+			if !newMultiPageInsertion {
+				if requestError := validateDesignerPageAddition(input, []byte(params.Text), operation.Control); requestError != nil {
+					result.Error = requestError
+					return result
+				}
 			}
 		}
 		if operation.Type == formsedit.RemovePage || operation.Type == formsedit.ReorderPage {
@@ -137,6 +148,9 @@ func (s *Server) userFormEdit(params userFormEditParams) userFormEditResult {
 }
 
 func isUserFormEditOperation(operationType formsedit.OperationType) bool {
+	if isUserFormProductivityOperation(operationType) {
+		return true
+	}
 	switch operationType {
 	case formsedit.MoveControl, formsedit.ResizeControl,
 		formsedit.SetFormProperty, formsedit.SetControlProperty,
@@ -212,6 +226,12 @@ func parseUserFormEditParams(raw []byte) (userFormEditParams, *userFormEditError
 }
 
 func validateUserFormEditTransaction(operations []formsedit.Operation) *userFormEditError {
+	if len(operations) == 1 && isUserFormProductivityOperation(operations[0].Type) {
+		return nil
+	}
+	if isDesignerMultiPageInitialInsertionCandidate(operations) {
+		return validateDesignerMultiPageInitialInsertion(operations)
+	}
 	if len(operations) == 1 {
 		switch operations[0].Type {
 		case formsedit.SetFormProperty, formsedit.SetControlProperty,
@@ -223,17 +243,99 @@ func validateUserFormEditTransaction(operations []formsedit.Operation) *userForm
 		}
 	}
 	if len(operations) < 1 || len(operations) > 2 {
-		return invalidUserFormEditParams(fmt.Errorf("a transaction requires one property, geometry or structural operation, or one move/resize pair"))
+		return invalidUserFormEditParams(fmt.Errorf("a transaction requires one property, geometry or structural operation, one move/resize pair, or one root width/height resize pair"))
 	}
 	if len(operations) == 2 {
+		if isUserFormResizePropertyPair(operations) {
+			return nil
+		}
 		first, second := operations[0], operations[1]
 		moveResize := first.Type == formsedit.MoveControl && second.Type == formsedit.ResizeControl
 		resizeMove := first.Type == formsedit.ResizeControl && second.Type == formsedit.MoveControl
 		if first.ControlID != second.ControlID || (!moveResize && !resizeMove) {
-			return invalidUserFormEditParams(fmt.Errorf("a move/resize pair must target one control with distinct operation types"))
+			return invalidUserFormEditParams(fmt.Errorf("a two-operation transaction must be a same-control move/resize pair or a root width/height property pair"))
 		}
 	}
 	return nil
+}
+
+func isDesignerMultiPageInitialInsertionCandidate(operations []formsedit.Operation) bool {
+	return len(operations) == 3 && operations[0].Type == formsedit.AddControl &&
+		operations[1].Type == formsedit.AddPage && operations[2].Type == formsedit.AddPage
+}
+
+func validateDesignerMultiPageInitialInsertion(operations []formsedit.Operation) *userFormEditError {
+	owner := operations[0].Control
+	if owner == nil {
+		return invalidUserFormEditParams(fmt.Errorf("initial MultiPage insertion requires an owner control"))
+	}
+	if requestError := validateDesignerControlAddition(owner); requestError != nil {
+		return requestError
+	}
+	if !isDesignerMultiPage(*owner) {
+		return &userFormEditError{Code: compiler.Unsupported, Message: "initial Page insertion requires a built-in MultiPage owner"}
+	}
+	if owner.ID == "" || strings.TrimSpace(owner.Name) == "" || owner.Tabs != nil ||
+		owner.SelectedIndex == nil || *owner.SelectedIndex != -1 {
+		return invalidUserFormEditParams(fmt.Errorf("initial MultiPage requires an id, name, selectedIndex -1 and no tabs"))
+	}
+
+	ids := map[string]struct{}{owner.ID: {}}
+	names := []string{strings.TrimSpace(owner.Name)}
+	for _, operation := range operations[1:] {
+		page := operation.Control
+		if requestError := validateDesignerPageAdditionToNewMultiPage(page, owner.ID); requestError != nil {
+			return requestError
+		}
+		if _, exists := ids[page.ID]; exists {
+			return invalidUserFormEditParams(fmt.Errorf("initial MultiPage controls must have distinct IDs"))
+		}
+		ids[page.ID] = struct{}{}
+		name := strings.TrimSpace(page.Name)
+		for _, existing := range names {
+			if strings.EqualFold(existing, name) {
+				return invalidUserFormEditParams(fmt.Errorf("initial MultiPage control names must be unique ignoring case"))
+			}
+		}
+		names = append(names, name)
+	}
+	return nil
+}
+
+func isUserFormResizePropertyPair(operations []formsedit.Operation) bool {
+	if len(operations) != 2 {
+		return false
+	}
+	fields := map[string]bool{}
+	for _, operation := range operations {
+		if operation.Type != formsedit.SetFormProperty ||
+			(operation.Field != "width" && operation.Field != "height") ||
+			!operation.ValuePresent || !isFiniteUserFormEditNumber(operation.Value) || fields[operation.Field] {
+			return false
+		}
+		fields[operation.Field] = true
+	}
+	return fields["width"] && fields["height"]
+}
+
+func isFiniteUserFormEditNumber(value any) bool {
+	if number, ok := value.(json.Number); ok {
+		_, err := decodeFiniteJSONNumber(json.RawMessage(number))
+		return err == nil
+	}
+	number := reflect.ValueOf(value)
+	if !number.IsValid() {
+		return false
+	}
+	switch number.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return true
+	case reflect.Float32, reflect.Float64:
+		return !math.IsNaN(number.Float()) && !math.IsInf(number.Float(), 0)
+	default:
+		return false
+	}
 }
 
 func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditError) {
@@ -247,6 +349,9 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		return formsedit.Operation{}, invalidUserFormEditParams(fmt.Errorf("type must be a non-empty string"))
 	}
 	var allowed []string
+	if isUserFormProductivityOperation(operationType) {
+		return parseUserFormProductivityOperation(raw, fields, operationType)
+	}
 	switch operationType {
 	case formsedit.MoveControl:
 		allowed = []string{"type", "controlId", "left", "top"}
@@ -293,6 +398,11 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		}
 		if requestError := validateDesignerControlAddition(control); requestError != nil {
 			return formsedit.Operation{}, requestError
+		}
+		if isDesignerTabStrip(*control) && len(control.Tabs) != 0 {
+			if requestError := validateDesignerInitialTabStripPayload(fields["control"]); requestError != nil {
+				return formsedit.Operation{}, requestError
+			}
 		}
 		return formsedit.Operation{Type: operationType, Control: control}, nil
 	}
@@ -435,6 +545,63 @@ func validateDesignerControlAddition(control *spec.FormSpecControl) *userFormEdi
 	if control.ProgID != "" && !strings.EqualFold(control.ProgID, contract.ProgID) {
 		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer insertion does not support custom ProgIDs"}
 	}
+	if strings.EqualFold(contract.Type, "TabStrip") && len(control.Tabs) != 0 {
+		if requestError := validateDesignerInitialTabStripAddition(control); requestError != nil {
+			return requestError
+		}
+	}
+	return nil
+}
+
+func validateDesignerInitialTabStripAddition(control *spec.FormSpecControl) *userFormEditError {
+	if control == nil || !isDesignerTabStrip(*control) || len(control.Tabs) != 2 ||
+		control.SelectedIndex == nil || *control.SelectedIndex != 0 {
+		return &userFormEditError{Code: compiler.Unsupported, Message: "Designer TabStrip insertion supports only two initial tabs with selectedIndex 0"}
+	}
+	seenNames := make([]string, 0, len(control.Tabs))
+	for _, tab := range control.Tabs {
+		name := strings.TrimSpace(tab.Name)
+		if name == "" || tab.Caption == nil || tab.ControlTipText != nil || tab.Tag != nil ||
+			tab.Accelerator != nil || tab.Enabled != nil || tab.Visible != nil {
+			return invalidUserFormEditParams(fmt.Errorf("initial TabStrip tabs require only non-empty name and caption fields"))
+		}
+		for _, seen := range seenNames {
+			if strings.EqualFold(seen, name) {
+				return invalidUserFormEditParams(fmt.Errorf("initial TabStrip tab names must be unique ignoring case"))
+			}
+		}
+		seenNames = append(seenNames, name)
+	}
+	return nil
+}
+
+func validateDesignerInitialTabStripPayload(raw json.RawMessage) *userFormEditError {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return invalidUserFormEditParams(err)
+	}
+	tabsJSON, ok := fields["tabs"]
+	if !ok {
+		return invalidUserFormEditParams(fmt.Errorf("initial TabStrip tabs must be explicitly provided"))
+	}
+	var tabs []json.RawMessage
+	if err := json.Unmarshal(tabsJSON, &tabs); err != nil {
+		return invalidUserFormEditParams(fmt.Errorf("tabs: %w", err))
+	}
+	for _, rawTab := range tabs {
+		tabFields, err := decodeJSONObject(rawTab)
+		if err != nil {
+			return invalidUserFormEditParams(fmt.Errorf("tab: %w", err))
+		}
+		if err := validateJSONFieldSet(tabFields, []string{"name", "caption"}, nil); err != nil {
+			return invalidUserFormEditParams(fmt.Errorf("tab: %w", err))
+		}
+		captionJSON, ok := tabFields["caption"]
+		var caption string
+		if !ok || bytes.Equal(bytes.TrimSpace(captionJSON), []byte("null")) || json.Unmarshal(captionJSON, &caption) != nil {
+			return invalidUserFormEditParams(fmt.Errorf("tab.caption must be a string"))
+		}
+	}
 	return nil
 }
 
@@ -487,6 +654,23 @@ func validateDesignerContainerParent(input spec.SpecInput, source []byte, parent
 }
 
 func validateDesignerPageAddition(input spec.SpecInput, source []byte, control *spec.FormSpecControl) *userFormEditError {
+	if requestError := validateDesignerPageAdditionShape(control); requestError != nil {
+		return requestError
+	}
+	return validateDesignerMultiPageParent(input, source, control.ParentID)
+}
+
+func validateDesignerPageAdditionToNewMultiPage(control *spec.FormSpecControl, parentID string) *userFormEditError {
+	if requestError := validateDesignerPageAdditionShape(control); requestError != nil {
+		return requestError
+	}
+	if control.ParentID != parentID {
+		return invalidUserFormEditParams(fmt.Errorf("addPage parentId must reference the MultiPage created in this transaction"))
+	}
+	return nil
+}
+
+func validateDesignerPageAdditionShape(control *spec.FormSpecControl) *userFormEditError {
 	if control == nil {
 		return invalidUserFormEditParams(fmt.Errorf("control must be an object"))
 	}
@@ -496,7 +680,7 @@ func validateDesignerPageAddition(input spec.SpecInput, source []byte, control *
 	if control.ID == "" || control.Name == "" || control.ParentID == "" || len(control.Controls) != 0 || len(control.Tabs) != 0 || control.Left != nil || control.Top != nil || control.Width != nil || control.Height != nil {
 		return invalidUserFormEditParams(fmt.Errorf("addPage requires a flat Page with id, name and parentId and no geometry"))
 	}
-	return validateDesignerMultiPageParent(input, source, control.ParentID)
+	return nil
 }
 
 func validateDesignerPageTarget(input spec.SpecInput, source []byte, pageID string) *userFormEditError {

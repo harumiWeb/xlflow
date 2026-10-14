@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using System.Text;
 using System.Text.Json;
 using Xlflow.ExcelBridge.Contract;
 
@@ -54,6 +55,11 @@ public sealed class ExcelFormInspectionService : IInspectFormService
             if (!HasUserForm(vbProject, args.FormName))
             {
                 return Failure(request, "form_not_found", $"UserForm '{args.FormName}' was not found in the workbook.", "xlflow");
+            }
+
+            if (!string.IsNullOrWhiteSpace(args.PrivateSnapshotWorkbookPath))
+            {
+                SavePrivateSnapshotWorkbook(workbook, args.PrivateSnapshotWorkbookPath);
             }
 
             var targetKind = sessionAttached ? "live_session" : "file";
@@ -377,22 +383,180 @@ public sealed class ExcelFormInspectionService : IInspectFormService
                 ?? throw new InvalidOperationException($"XlflowInspectFormJson.designer: failed to access Designer for '{formName}'.");
 
             var rootControls = GetChildControls(designer, formName);
-            return new Dictionary<string, object?>
-            {
-                ["name"] = formName,
-                ["basis"] = "designer",
-                ["caption"] = ExcelBridgeSupport.GetString(designer, "Caption") ?? "",
-                ["width"] = TryGetDesignerFormDimension(component, designer, "Width"),
-                ["height"] = TryGetDesignerFormDimension(component, designer, "Height"),
-                ["coordinate_system"] = "parent-relative",
-                ["controls"] = rootControls,
-            };
+            var clientSize = ReadPersistedClientDimensions(component!, formName);
+            return BuildDesignerFormRootSnapshot(
+                formName,
+                ExcelBridgeSupport.GetString(designer, "Caption") ?? "",
+                TryGetDesignerFormDimension(component!, designer, "Width"),
+                TryGetDesignerFormDimension(component!, designer, "Height"),
+                clientSize.Width,
+                clientSize.Height,
+                rootControls);
         }
         finally
         {
             ExcelBridgeSupport.ReleaseComObject(designer);
             ExcelBridgeSupport.ReleaseComObject(component);
             ExcelBridgeSupport.ReleaseComObject(components);
+        }
+    }
+
+    internal static string SavePrivateSnapshotWorkbook(object workbook, string snapshotPath)
+    {
+        var fullPath = Path.GetFullPath(snapshotPath);
+        var parent = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(parent))
+        {
+            throw new InvalidOperationException("private snapshot workbook path has no parent directory.");
+        }
+
+        Directory.CreateDirectory(parent);
+        dynamic liveWorkbook = workbook;
+        liveWorkbook.SaveCopyAs(fullPath);
+        return fullPath;
+    }
+
+    internal static Dictionary<string, object?> BuildDesignerFormRootSnapshot(
+        string formName,
+        string caption,
+        double? width,
+        double? height,
+        double clientWidth,
+        double clientHeight,
+        List<Dictionary<string, object?>> controls)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["name"] = formName,
+            ["basis"] = "designer",
+            ["caption"] = caption,
+            ["width"] = width,
+            ["height"] = height,
+            ["client_width"] = clientWidth,
+            ["client_height"] = clientHeight,
+            ["coordinate_system"] = "parent-relative",
+            ["controls"] = controls,
+        };
+    }
+
+    internal static (double Width, double Height) ParsePersistedClientDimensions(string exportedFormText)
+    {
+        double? clientWidthTwips = null;
+        double? clientHeightTwips = null;
+        var blockDepth = 0;
+        var rootBlockEnded = false;
+        foreach (var rawLine in exportedFormText.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (blockDepth == 0)
+            {
+                if (line.StartsWith("Begin ", StringComparison.OrdinalIgnoreCase))
+                {
+                    blockDepth = 1;
+                }
+
+                continue;
+            }
+
+            if (line.StartsWith("Begin ", StringComparison.OrdinalIgnoreCase))
+            {
+                blockDepth++;
+                continue;
+            }
+
+            if (string.Equals(line, "End", StringComparison.OrdinalIgnoreCase))
+            {
+                blockDepth--;
+                if (blockDepth == 0)
+                {
+                    rootBlockEnded = true;
+                    break;
+                }
+
+                continue;
+            }
+
+            if (blockDepth != 1)
+            {
+                continue;
+            }
+
+            var separator = line.IndexOf('=');
+            if (separator < 0)
+            {
+                continue;
+            }
+
+            var propertyName = line[..separator].Trim();
+            if (string.Equals(propertyName, "ClientWidth", StringComparison.OrdinalIgnoreCase))
+            {
+                if (clientWidthTwips is not null)
+                {
+                    throw new InvalidOperationException("duplicate persisted VBFrame ClientWidth attribute in the exported UserForm.");
+                }
+
+                if (!double.TryParse(line[(separator + 1)..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var twips)
+                    || !double.IsFinite(twips)
+                    || twips < 0)
+                {
+                    throw new InvalidOperationException("persisted VBFrame ClientWidth must be a finite, non-negative invariant number in the exported UserForm.");
+                }
+
+                clientWidthTwips = twips;
+            }
+            else if (string.Equals(propertyName, "ClientHeight", StringComparison.OrdinalIgnoreCase))
+            {
+                if (clientHeightTwips is not null)
+                {
+                    throw new InvalidOperationException("duplicate persisted VBFrame ClientHeight attribute in the exported UserForm.");
+                }
+
+                if (!double.TryParse(line[(separator + 1)..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var twips)
+                    || !double.IsFinite(twips)
+                    || twips < 0)
+                {
+                    throw new InvalidOperationException("persisted VBFrame ClientHeight must be a finite, non-negative invariant number in the exported UserForm.");
+                }
+
+                clientHeightTwips = twips;
+            }
+        }
+
+        if (!rootBlockEnded || clientWidthTwips is null || clientHeightTwips is null)
+        {
+            throw new InvalidOperationException("could not read persisted VBFrame ClientWidth/ClientHeight from the exported UserForm.");
+        }
+
+        var maximumTwips = int.MaxValue * 1440.0 / 2540.0;
+        if (clientWidthTwips.Value > maximumTwips || clientHeightTwips.Value > maximumTwips)
+        {
+            throw new InvalidOperationException("persisted VBFrame client dimensions exceed the signed HIMETRIC range.");
+        }
+
+        return (clientWidthTwips.Value / 20.0, clientHeightTwips.Value / 20.0);
+    }
+
+    private static (double Width, double Height) ReadPersistedClientDimensions(object component, string formName)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "xlflow-form-inspect-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(tempDir);
+        var formPath = Path.Combine(tempDir, "snapshot.frm");
+        try
+        {
+            ExcelBridgeSupport.InvokeViaDynamic(component, "Export", formPath);
+            var exportedFormText = Encoding.Latin1.GetString(File.ReadAllBytes(formPath));
+            return ParsePersistedClientDimensions(exportedFormText);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup of the temporary VBIDE export.
+            }
         }
     }
 

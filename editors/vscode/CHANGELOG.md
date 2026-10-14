@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- New Toolbox MultiPages start with two Pages and `selectedIndex: 0`; their
+  control and Pages are created atomically as one native Undo step. New
+  TabStrips start with `Tab1`, `Tab2`, and `selectedIndex: 0`. MultiPage and
+  TabStrip insertion also require their respective Page or Tab capability;
+  existing authored empty collections remain unchanged.
+
+- Fixed false source conflicts during Designer Save by matching native source
+  line endings and adopting successfully saved formatter output.
+
+- Added URI-keyed deferred-save UserForm Designer drafts shared across panels.
+  Native Save, Save All, menu Save, and AutoSave checkpoint drafts in extension
+  storage without writing YAML/YML/JSON; the Designer Save button and scoped
+  Ctrl+S/Cmd+S command explicitly publish the validated draft. The native tab
+  dirty dot tracks its checkpoint independently from the source-not-applied
+  badge. Non-overlapping text-editor changes merge, while conflicts retain both
+  versions and require explicit resolution. Global AutoSave settings remain
+  unchanged.
+
+- Added selected-form right/bottom edge and corner dragging to resize
+  `form.width` / `form.height` in client points, with snapping, child bounds,
+  cancellation and atomic Undo/Redo.
+
+- Unified UserForm authoring and preview dimensions as `form.width` and
+  `form.height`, persisted client content size in points. Removed the unreleased
+  `form.build` aliases; validation recommends the canonical fields, and observed
+  snapshot dimensions no longer supply preview defaults.
+
+- Fixed control-interior clicks and subsequent drags losing selection in the
+  UserForm Designer because leaf controls intercepted clicks as blank containers.
+
+- Added sibling multi-selection, marquee selection, group movement,
+  alignment/distribution, same-size and z-order commands, shared Cut/Copy/Paste
+  and Duplicate, and parent-local tab-order editing. Actions negotiate
+  `userFormProductivityEdit` and preserve native Undo/Redo transactions.
+
 - Added Page-list add/delete/rename/caption/reorder actions, transient active
   Page navigation, control placement and movement between Pages, and TabStrip
   tab collection/property editing. YAML/JSON edits preserve source, explicit

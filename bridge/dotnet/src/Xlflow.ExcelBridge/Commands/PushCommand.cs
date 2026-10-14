@@ -50,7 +50,12 @@ public sealed class PushCommand : ICommandHandler
             UseSession: BridgePayload.GetBool(request.Payload, "UseSession"),
             NoSave: BridgePayload.GetBool(request.Payload, "NoSave"),
             MetadataPath: BridgePayload.GetString(request.Payload, "MetadataPath") ?? "",
-            LineNumbersEnabled: BridgePayload.GetBool(request.Payload, "LineNumbersEnabled"));
+            LineNumbersEnabled: BridgePayload.GetBool(request.Payload, "LineNumbersEnabled"),
+            Phase: BridgePayload.GetString(request.Payload, "Phase") ?? "import",
+            PreparedWorkbookPath: BridgePayload.GetString(request.Payload, "PreparedWorkbookPath") ?? "",
+            CompiledWorkbookPath: BridgePayload.GetString(request.Payload, "CompiledWorkbookPath") ?? "",
+            CanonicalFormNamesJson64: BridgePayload.GetString(request.Payload, "CanonicalFormNamesJson64") ?? "",
+            CanonicalPicturePathsJson64: BridgePayload.GetString(request.Payload, "CanonicalPicturePathsJson64") ?? "");
 
         return _service.Execute(request, args, cancellationToken);
     }

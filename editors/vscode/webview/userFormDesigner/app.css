@@ -42,6 +42,12 @@ button {
     11px Tahoma,
     sans-serif;
 }
+.form-client-area {
+  position: relative;
+  display: inline-block;
+  overflow: visible;
+  vertical-align: top;
+}
 .control {
   position: absolute;
   box-sizing: border-box;
@@ -210,6 +216,22 @@ button {
   z-index: 100000;
   pointer-events: none;
 }
+.group-selection-outline {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed var(--vscode-focusBorder, #0078d4);
+  background: color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 8%, transparent);
+  z-index: 99999;
+  pointer-events: none;
+}
+.marquee-selection {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-focusBorder, #0078d4);
+  background: color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 12%, transparent);
+  z-index: 100003;
+  pointer-events: none;
+}
 .resize-handle {
   position: absolute;
   width: 8px;
@@ -219,6 +241,31 @@ button {
   box-sizing: border-box;
   pointer-events: auto;
   z-index: 1;
+}
+.form-resize-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border: 1px solid #0078d4;
+  box-sizing: border-box;
+  pointer-events: auto;
+  z-index: 100001;
+}
+.form-resize-e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.form-resize-s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.form-resize-se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
 }
 .handle-nw {
   left: 0;
@@ -267,6 +314,75 @@ button {
 }
 .designer-canvas {
   flex-shrink: 0;
+}
+.productivity-toolbar {
+  margin: 8px 0 12px;
+  border: 1px solid var(--vscode-panel-border);
+  padding: 6px;
+}
+.productivity-toolbar details {
+  margin-top: 4px;
+}
+.productivity-toolbar summary {
+  cursor: pointer;
+  color: var(--vscode-descriptionForeground);
+}
+.productivity-command-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+.productivity-toolbar .productivity-command-row button {
+  margin: 0;
+}
+.productivity-selection-count {
+  color: var(--vscode-descriptionForeground);
+  margin-left: 8px;
+}
+.tab-order-editor label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tab-order-editor ol {
+  padding-left: 28px;
+}
+.tab-order-editor li {
+  padding: 2px 0;
+}
+.tab-order-editor li button,
+.tab-order-editor > button {
+  margin: 2px;
+}
+.designer-context-menu {
+  position: fixed;
+  z-index: 100100;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  max-height: 80vh;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+  background: var(--vscode-menu-background, var(--vscode-editor-background));
+  box-shadow: 0 3px 10px #0006;
+}
+.designer-context-menu button {
+  margin: 0;
+  text-align: left;
+  color: var(--vscode-menu-foreground, var(--vscode-editor-foreground));
+  background: transparent;
+}
+.designer-context-menu button:hover:not(:disabled) {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-editor-foreground));
+}
+.designer-context-menu hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
 }
 .selection-path {
   margin: 0 8px;

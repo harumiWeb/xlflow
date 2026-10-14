@@ -1,142 +1,187 @@
-using System.Reflection;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using Xlflow.ExcelBridge.Contract;
 using Xlflow.ExcelBridge.Services;
 
 namespace Xlflow.ExcelBridge.Tests;
 
 public sealed class FormWriteContractTests
 {
-    [Theory]
-    [InlineData("true", true)]
-    [InlineData("false", false)]
-    [InlineData("42", 42L)]
-    [InlineData("\"Alice\"", "Alice")]
-    public void FormValuesAreConvertedToComScalars(string json, object expected)
-    {
-        using var document = JsonDocument.Parse(json);
-        var method = typeof(ExcelFormWriteService).GetMethod("ConvertFormValue", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
-        Assert.Equal(expected, method!.Invoke(null, [document.RootElement]));
-    }
-
     [Fact]
-    public void SharedContractSnapshotMatchesBridgeProgIdsAndDtos()
+    public void RollbackFailurePoisonsLiveSessionAndRequiresDiscard()
     {
-        var snapshotPath = Path.Combine(AppContext.BaseDirectory, "contract-snapshot.json");
-        var snapshot = JsonSerializer.Deserialize<ContractSnapshot>(File.ReadAllText(snapshotPath), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-            ?? throw new InvalidOperationException("contract snapshot was empty");
-
-        var mapField = typeof(ExcelFormWriteService).GetField("TypeProgIdMap", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(mapField);
-        var map = Assert.IsType<Dictionary<string, string>>(mapField!.GetValue(null));
-        Assert.Equal(snapshot.BuiltInControls.Count, map.Count);
-        foreach (var control in snapshot.BuiltInControls)
+        var directory = Path.Combine(Path.GetTempPath(), "xlflow-form-rollback-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
         {
-            Assert.True(map.TryGetValue(control.Type, out var progId), $"bridge is missing {control.Type}");
-            Assert.Equal(control.ProgId, progId);
+            var metadataPath = Path.Combine(directory, "session.json");
+            var workbookPath = Path.Combine(directory, "Book.xlsm");
+            File.WriteAllText(metadataPath, JsonSerializer.Serialize(new { hwnd = 123, pid = 456, workbook_path = workbookPath }));
+            var args = new FormWriteCommandArguments("apply", workbookPath, "", "", "sidecar", false, "", false, "", true, true, false, true, metadataPath);
+            var response = ExcelFormWriteService.FormImportRollbackFailure(BridgeRequest.Unknown, args, true, "owned", "form import failed and rollback failed");
+            Assert.Equal("form_import_rollback_failed", response.Error!.Code);
+            var metadata = ExcelBridgeSupport.ReadSessionMetadata(metadataPath);
+            Assert.NotNull(metadata);
+            Assert.True(metadata!.Poisoned);
+            Assert.True(metadata.DiscardUnsavedChanges);
+            Assert.Throws<SessionPoisonedException>(() => ExcelBridgeSupport.ThrowIfSessionPoisoned(metadataPath, workbookPath));
         }
-        Assert.Equal("Forms.MultiPage.1", map["multipage"]);
-        Assert.Equal("Forms.Page.1", map["page"]);
-        Assert.Equal("Forms.TabStrip.1", map["tabstrip"]);
-
-        AssertJsonProperties("FormWriteFormSpec", snapshot.Bridge.FormFields);
-        AssertJsonProperties("FormWriteBuildFormSpec", snapshot.Bridge.FormBuildFields);
-        AssertJsonProperties("FormWriteObservedFormSpec", snapshot.Bridge.ObservedFormFields);
-        AssertJsonProperties("FormWriteControlSpec", snapshot.Bridge.ControlFields);
-        AssertJsonProperties("FormWriteObservedControlSpec", snapshot.Bridge.ObservedControlFields);
-        AssertJsonProperties("FormWriteTabSpec", snapshot.Bridge.TabFields);
-    }
-
-    [Theory]
-    [InlineData("clientWidth")]
-    [InlineData("clientHeight")]
-    public void CompilerClientDimensionsAreRejectedBeforeDesignerAuthoring(string field)
-    {
-        var method = typeof(ExcelFormWriteService).GetMethod("DecodeSpec", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
-        var json = JsonSerializer.Serialize(new
+        finally
         {
-            form = new { name = "Sample", build = new Dictionary<string, double> { [field] = 240 } },
-        });
-        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
-
-        var invocation = Assert.Throws<TargetInvocationException>(() => method!.Invoke(null, [encoded]));
-
-        var error = Assert.IsType<InvalidOperationException>(invocation.InnerException);
-        Assert.Contains("supported only by pure-Go generation", error.Message);
-    }
-
-    [Fact]
-    public void ObservedClientDimensionsArePreservedWithoutBecomingBuildIntent()
-    {
-        var method = typeof(ExcelFormWriteService).GetMethod("DecodeSpec", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
-        const string json = """{"form":{"name":"Sample","observed":{"insideWidth":238,"insideHeight":175,"clientWidth":240,"clientHeight":180}}}""";
-        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
-
-        var spec = method!.Invoke(null, [encoded]);
-
-        Assert.NotNull(spec);
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(spec, spec!.GetType()));
-        var form = document.RootElement.GetProperty("form");
-        Assert.Equal(JsonValueKind.Null, form.GetProperty("build").ValueKind);
-        var observed = form.GetProperty("observed");
-        Assert.Equal(238, observed.GetProperty("insideWidth").GetDouble());
-        Assert.Equal(175, observed.GetProperty("insideHeight").GetDouble());
-        Assert.Equal(240, observed.GetProperty("clientWidth").GetDouble());
-        Assert.Equal(180, observed.GetProperty("clientHeight").GetDouble());
-    }
-
-    [Fact]
-    public void TabStripTabDtoUsesThePublicMetadataFieldNames()
-    {
-        var type = typeof(ExcelFormWriteService).GetNestedType("FormWriteTabSpec", BindingFlags.NonPublic);
-        Assert.NotNull(type);
-        var actual = type!.GetProperties(BindingFlags.Instance | BindingFlags.Public)
-            .Select(property => property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name)
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Cast<string>()
-            .ToHashSet(StringComparer.Ordinal);
-
-        Assert.Equal(new[] { "name", "caption", "controlTipText", "tag", "accelerator", "enabled", "visible" }.ToHashSet(StringComparer.Ordinal), actual);
-    }
-
-    private static void AssertJsonProperties(string nestedTypeName, IReadOnlyCollection<string> expected)
-    {
-        var type = typeof(ExcelFormWriteService).GetNestedType(nestedTypeName, BindingFlags.NonPublic);
-        Assert.NotNull(type);
-        var actual = type!.GetProperties(BindingFlags.Instance | BindingFlags.Public)
-            .Select(property => property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name)
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Cast<string>()
-            .ToHashSet(StringComparer.Ordinal);
-        foreach (var name in expected)
-        {
-            Assert.Contains(name, actual);
+            Directory.Delete(directory, recursive: true);
         }
     }
 
-    private sealed class ContractSnapshot
+    [Fact]
+    public void PersistedClientDimensionsAcceptSignedHimetricBoundary()
     {
-        public List<BuiltInControl> BuiltInControls { get; init; } = [];
-        public BridgeContract Bridge { get; init; } = new();
+        var twips = int.MaxValue * 1440.0 / 2540.0;
+        var text = twips.ToString("R", CultureInfo.InvariantCulture);
+        var dimensions = ExcelFormInspectionService.ParsePersistedClientDimensions($"Begin VB.UserForm Sample\n ClientWidth = {text}\n ClientHeight = {text}\nEnd\n");
+        Assert.Equal(twips / 20.0, dimensions.Width);
     }
 
-    private sealed class BuiltInControl
+    [Fact]
+    public void BridgeReadsOnlyTheCanonicalSpecNameAndAcceptsCompilerOwnedFields()
     {
-        public string Type { get; init; } = "";
-        public string ProgId { get; init; } = "";
+        const string json = """
+            {
+              "form": {
+                "name": "Sample",
+                "caption": "Canonical caption",
+                "width": 280,
+                "height": 180,
+                "client_width": 500,
+                "client_height": 400,
+                "build": { "clientWidth": 500, "clientHeight": 400 }
+              },
+              "controls": [{ "type": "Image", "picture": { "path": "assets/logo.png" } }]
+            }
+            """;
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+
+        Assert.Equal("Sample", ExcelFormWriteService.ReadFormName(encoded));
     }
 
-    private sealed class BridgeContract
+    [Fact]
+    public void BridgeHasNoImperativeDesignerAuthoringFallback()
     {
-        public List<string> FormFields { get; init; } = [];
-        public List<string> FormBuildFields { get; init; } = [];
-        public List<string> ObservedFormFields { get; init; } = [];
-        public List<string> ControlFields { get; init; } = [];
-        public List<string> ObservedControlFields { get; init; } = [];
-        public List<string> TabFields { get; init; } = [];
+        var methods = typeof(ExcelFormWriteService).GetMethods(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Instance);
+
+        Assert.DoesNotContain(methods, method => method.Name is "BuildForm" or "ApplyForm" or "AddDesignerControl");
+    }
+
+    [Theory]
+    [InlineData(10000, 8000, 500, 400)]
+    [InlineData(0, 0, 0, 0)]
+    public void PersistedClientDimensionsConvertTwipsToPoints(int clientWidthTwips, int clientHeightTwips, double width, double height)
+    {
+        var dimensions = ExcelFormInspectionService.ParsePersistedClientDimensions(
+            $"VERSION 5.00\r\nBegin VB.UserForm Sample\r\n   ClientHeight = {clientHeightTwips}\r\n   ClientWidth = {clientWidthTwips}\r\nEnd\r\n");
+
+        Assert.Equal(width, dimensions.Width);
+        Assert.Equal(height, dimensions.Height);
+    }
+
+    [Fact]
+    public void PersistedClientDimensionsParseInvariantDecimalTwipsRegardlessOfCurrentCulture()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            var dimensions = ExcelFormInspectionService.ParsePersistedClientDimensions(
+                "Begin VB.UserForm Sample\n ClientWidth = 10000.5\n ClientHeight = 8000.25\nEnd\n");
+
+            Assert.Equal(500.025, dimensions.Width);
+            Assert.Equal(400.0125, dimensions.Height);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
+    }
+
+    [Theory]
+    [InlineData("-0.5", "8000")]
+    [InlineData("10000", "-0.5")]
+    [InlineData("NaN", "8000")]
+    [InlineData("10000", "Infinity")]
+    [InlineData("-Infinity", "8000")]
+    [InlineData("1e999", "8000")]
+    [InlineData("10000,5", "8000")]
+    [InlineData("2147483648", "8000")]
+    [InlineData("10000", "2147483648")]
+    public void PersistedClientDimensionsRejectNegativeNonFiniteOrNonInvariantValues(string clientWidthTwips, string clientHeightTwips)
+    {
+        var formText = $"Begin VB.UserForm Sample\n ClientWidth = {clientWidthTwips}\n ClientHeight = {clientHeightTwips}\nEnd\n";
+
+        Assert.Throws<InvalidOperationException>(
+            () => ExcelFormInspectionService.ParsePersistedClientDimensions(formText));
+    }
+
+    [Fact]
+    public void PersistedClientDimensionsIgnoreNestedAttributesAndVbaCodeAfterRootBlock()
+    {
+        const string formText = """
+            VERSION 5.00
+            Begin VB.UserForm Sample
+               ClientWidth = 10000
+               ClientHeight = 8000
+               Begin VB.Frame Nested
+                  ClientWidth = 5
+                  ClientHeight = 6
+               End
+            End
+            Attribute VB_Name = "Sample"
+            Private Sub Example()
+              ClientWidth = 5
+              ClientHeight = 6
+            End Sub
+            """;
+
+        var dimensions = ExcelFormInspectionService.ParsePersistedClientDimensions(formText);
+
+        Assert.Equal(500.0, dimensions.Width);
+        Assert.Equal(400.0, dimensions.Height);
+    }
+
+    [Theory]
+    [InlineData("ClientWidth = 10000", "ClientWidth")]
+    [InlineData("ClientHeight = 8000", "ClientHeight")]
+    public void PersistedClientDimensionsRejectDuplicateRootAttributes(string duplicateAttribute, string propertyName)
+    {
+        var formText = $"Begin VB.UserForm Sample\n ClientWidth = 10000\n ClientHeight = 8000\n {duplicateAttribute}\nEnd\n";
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ExcelFormInspectionService.ParsePersistedClientDimensions(formText));
+
+        Assert.Contains(propertyName, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("duplicate", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(-1, 8000)]
+    [InlineData(10000, -1)]
+    public void PersistedClientDimensionsRejectNegativeRootAttributes(int clientWidthTwips, int clientHeightTwips)
+    {
+        var formText = $"Begin VB.UserForm Sample\n ClientWidth = {clientWidthTwips}\n ClientHeight = {clientHeightTwips}\nEnd\n";
+
+        Assert.Throws<InvalidOperationException>(
+            () => ExcelFormInspectionService.ParsePersistedClientDimensions(formText));
+    }
+
+    [Fact]
+    public void DesignerSnapshotKeepsOuterAndPersistedClientDimensionsSeparate()
+    {
+        var snapshot = ExcelFormInspectionService.BuildDesignerFormRootSnapshot(
+            "Sample", "Caption", width: 540, height: 440, clientWidth: 500, clientHeight: 400, []);
+
+        Assert.Equal(540.0, snapshot["width"]);
+        Assert.Equal(440.0, snapshot["height"]);
+        Assert.Equal(500.0, snapshot["client_width"]);
+        Assert.Equal(400.0, snapshot["client_height"]);
+        Assert.Equal("Caption", snapshot["caption"]);
     }
 }

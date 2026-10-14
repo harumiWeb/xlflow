@@ -12,17 +12,23 @@ func TestCompleteYAMLRootFormAndControlProperties(t *testing.T) {
 			t.Fatalf("root items = %#v", labels(items))
 		}
 	})
-	t.Run("form includes build but hides observed by default", func(t *testing.T) {
+	t.Run("form exposes canonical authoring fields and hides observed by default", func(t *testing.T) {
 		items := CompleteYAML("form:\n  \n", Position{Line: 1, Character: 2})
-		if !hasLabel(items, "name") || !hasLabel(items, "build") || hasLabel(items, "observed") {
+		for _, label := range []string{"name", "caption", "width", "height"} {
+			if !hasLabel(items, label) {
+				t.Fatalf("form items = %#v, missing %s", labels(items), label)
+			}
+		}
+		if hasLabel(items, "build") || hasLabel(items, "observed") {
 			t.Fatalf("form items = %#v", labels(items))
 		}
 	})
-	t.Run("form build exposes client dimensions", func(t *testing.T) {
-		items := CompleteYAML("form:\n  build:\n    \n", Position{Line: 2, Character: 4})
-		for _, label := range []string{"caption", "width", "height", "clientWidth", "clientHeight"} {
-			if !hasLabel(items, label) {
-				t.Fatalf("form.build items = %#v, missing %s", labels(items), label)
+	t.Run("canonical form dimensions have supported metadata", func(t *testing.T) {
+		items := CompleteYAML("form:\n  \n", Position{Line: 1, Character: 2})
+		for _, label := range []string{"width", "height"} {
+			item, ok := completionByLabel(items, label)
+			if !ok || !strings.Contains(item.Documentation, "Support: **supported**") || !strings.Contains(item.Documentation, "points") {
+				t.Fatalf("form.%s metadata = %#v", label, item)
 			}
 		}
 	})

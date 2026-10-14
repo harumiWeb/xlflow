@@ -19,10 +19,10 @@ dispatch. Image does not expose a public TabIndex; normalized binary readback
 checks its site TabIndex instead.
 
 The persisted `DisplayedSize` height and exported VBFrame `ClientHeight`
-match each other, while runtime `InsideHeight` is about 4.55 points smaller
-in this environment. The generation contract therefore uses explicit
-`form.build.clientWidth/clientHeight`. It does not infer outer dimensions or
-apply a fixed offset.
+match each other. Runtime `InsideHeight` is a separate observation and is not
+converted or used to derive persisted dimensions. Canonical `form.width` and
+`form.height` authoring values are points written to `DisplayedSize` and the
+VBFrame client dimensions; the compiler applies no outer-size offset.
 
 Capture command (must use a fresh workspace and fixture directory):
 

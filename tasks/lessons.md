@@ -1,3 +1,5 @@
+- Match native TextDocument EOL normalization before recording draft edits. Verify publication before source save, then reconcile successfully saved formatter output from the published draft rather than the old baseline; test with a real VS Code save participant so self-save changes cannot become false conflicts.
+- When a Designer operation requires explicit source publication, do not treat `saveCustomDocument` as proof of user intent: VS Code also invokes it for Auto Save. Separate durable draft checkpoints from source publication and keep the source-pending indicator independent of the native dirty checkpoint.
 - For Excel UserForm fixture authoring, set root dimensions through `VBComponent.Properties`; do not assume Designer dispatch exposes the same writable root properties as a runtime UserForm.
 - Keep Excel COM references alive through each save/inspection slice; do not final-release an alias used by another live wrapper. Publish confirmed fixtures only after workbook closure, Excel Quit and owned-process exit verification succeed.
 - Validate LSP performance with the actual extension and executable revisions and the editor's automatic request mix. Parser-stub scheduling ratios and handler-only timings do not establish end-to-end speedups; include queued code actions and measure request-to-useful-response latency separately from diagnostics completion.
@@ -153,6 +155,9 @@
 
 # UserForm preview alignment
 
+- When the user confirms a feature has never been released, evaluate a single clear schema and execution contract without preserving speculative compatibility aliases or divergent authoring paths.
+
+- Designer pointer regressions must dispatch to the element found at the on-screen coordinates in the native Webview, including control interiors and a second press to drag an existing selection. Dispatching directly to a control wrapper bypasses transparent overlays and cannot establish that real clicks select it.
 - Verify preview collection order against the canonical compiler before changing selectedIndex semantics; source order and zIndex order may differ. Test mixed inner/outer dimensions and explicit empty values, and route Webview UI strings through extension localization.
 - When matching control text placement, verify both axes in the actual Webview with single-line and multiline captions. CSS text-align alone does not verify vertical placement; preserve control-specific layout rather than centering every control.
 - When reproducing MSForms control chrome from a reference image, model dropdown buttons as sized elements and distinguish raised button edges from recessed input edges; a text arrow alone does not reproduce the control.

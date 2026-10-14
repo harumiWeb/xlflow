@@ -56,6 +56,13 @@ and stale interactions must not overwrite concurrent source edits.
 5. **Automatically reparent or clamp existing source on load.** Rejected because
    opening a Designer must not mutate hierarchy or geometry without an edit.
 
+## Superseded by
+
+- [ADR-0073](ADR-0073-userform-designer-deferred-save-document-lifecycle.md)
+  replaces the `WorkspaceEdit`-backed TextDocument history and no-automatic-
+  save assumptions. Source-preserving LSP edits, transaction batching,
+  geometry behavior, and stale-action guards remain in force.
+
 ## Related
 
 - Property transactions and their separate capability are supplemented by `docs/adr/ADR-0067-userform-designer-property-metadata.md`.

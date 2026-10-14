@@ -18,7 +18,6 @@ type contractSnapshot struct {
 	} `json:"builtInControls"`
 	Bridge struct {
 		FormFields            []string `json:"formFields"`
-		FormBuildFields       []string `json:"formBuildFields"`
 		ObservedFormFields    []string `json:"observedFormFields"`
 		ControlFields         []string `json:"controlFields"`
 		ObservedControlFields []string `json:"observedControlFields"`
@@ -76,7 +75,6 @@ func TestContractSnapshotMatchesGoContractAndSpecTags(t *testing.T) {
 		}
 	}
 	assertJSONFields(t, reflect.TypeOf(FormSpecForm{}), snapshot.Bridge.FormFields)
-	assertJSONFields(t, reflect.TypeOf(FormSpecBuildForm{}), snapshot.Bridge.FormBuildFields)
 	assertJSONFields(t, reflect.TypeOf(FormSpecObservedForm{}), snapshot.Bridge.ObservedFormFields)
 	assertJSONFields(t, reflect.TypeOf(FormSpecControl{}), snapshot.Bridge.ControlFields)
 	assertJSONFields(t, reflect.TypeOf(FormSpecObservedControl{}), snapshot.Bridge.ObservedControlFields)

@@ -4,6 +4,44 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- New Toolbox MultiPages start with two Pages and select the first; new
+  TabStrips start with two tabs and select the first. MultiPage and both Pages
+  are created as one undoable edit, while existing authored empty collections
+  remain unchanged.
+
+- Fixed UserForm Designer explicit Save incorrectly reporting source conflicts
+  after multiline CRLF edits or VS Code save-time formatting.
+
+- Added deferred-save editing to the UserForm Designer with URI-keyed drafts,
+  LSP validation, native Undo/Redo, and explicit handling for text-editor
+  conflicts. VS Code Save, Save All, menu Save, and AutoSave checkpoint drafts
+  in extension storage without writing YAML/YML/JSON. The Designer Save button
+  and scoped Ctrl+S/Cmd+S command explicitly publish the validated draft;
+  the source-not-applied badge is independent from the native tab dirty dot.
+
+- Added UserForm Designer form-edge and corner resizing with client-size
+  source updates, zoom/grid snapping, child bounds and one-step Undo/Redo.
+
+- Unified unreleased UserForm authoring around `form.width` / `form.height`
+  client-area dimensions in points, shared pure-Go compilation and template
+  resizing. Removed the `form.build` authoring aliases and separated observed
+  Excel dimensions from authoring intent.
+- Added `pack --check` without artifact publication and actionable VBA project
+  encoding diagnostics. New and imported projects record their workbook's VBA
+  codepage for subsequent blank packing while source files remain UTF-8.
+
+- Fixed Excel-backed FormSpec build/apply rejecting fractional control geometry
+  by reflecting the shared compiler's persisted HIMETRIC coordinates instead of
+  independently writing and comparing Designer properties.
+
+- Fixed UserForm Designer control-interior clicks and subsequent drags losing
+  selection because leaf controls intercepted clicks as blank containers.
+
+- Added UserForm Designer sibling multi-selection and group movement,
+  alignment/distribution, anchor sizing, z-order, shared in-memory Cut/Copy/Paste
+  and Duplicate, and parent-local tab-order editing. YAML/YML/JSON edits
+  preserve authored source values and use one native Undo step per action.
+
 - Added visual MultiPage/Page and TabStrip editing to the UserForm Designer,
   including Page/tab collection operations, metadata-driven properties, active
   Page navigation and control placement/reparenting. Source-preserving YAML/JSON

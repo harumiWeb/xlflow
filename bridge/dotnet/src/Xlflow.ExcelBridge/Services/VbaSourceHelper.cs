@@ -292,10 +292,11 @@ internal static partial class VbaSourceHelper
         string workbookDir,
         string? codeSource,
         bool lineNumbersEnabled = false,
-        string? folderAnnotation = null)
+        string? folderAnnotation = null,
+        IReadOnlyList<DiscoveredSourceFile>? sourceFiles = null)
     {
         var files = new List<SourceFileEntry>();
-        foreach (var file in DiscoverSourceFiles(modulesDir, classesDir, formsDir, workbookDir, codeSource))
+        foreach (var file in sourceFiles ?? DiscoverSourceFiles(modulesDir, classesDir, formsDir, workbookDir, codeSource))
         {
             files.Add(new SourceFileEntry
             {
@@ -438,7 +439,9 @@ internal static partial class VbaSourceHelper
         string classesDir,
         string formsDir,
         string workbookDir,
-        string? codeSource)
+        string? codeSource,
+        IReadOnlySet<string>? ignoredCanonicalFormNames = null,
+        IReadOnlySet<string>? ignoredCanonicalPicturePaths = null)
     {
         var files = new List<DiscoveredSourceFile>();
 
@@ -471,6 +474,25 @@ internal static partial class VbaSourceHelper
                     });
                 }
             }
+        }
+
+        if (ignoredCanonicalFormNames is { Count: > 0 })
+        {
+            files.RemoveAll(file =>
+                file.Kind == "form"
+                && (file.Extension is ".frm" or ".frx")
+                && ignoredCanonicalFormNames.Contains(file.ModuleName));
+        }
+
+        if (ignoredCanonicalPicturePaths is { Count: > 0 })
+        {
+            files.RemoveAll(file => ignoredCanonicalPicturePaths.Contains(Path.GetFullPath(file.FullPath)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(formsDir))
+        {
+            var assetsRoot = Path.GetFullPath(Path.Combine(formsDir, "assets")) + Path.DirectorySeparatorChar;
+            files.RemoveAll(file => Path.GetFullPath(file.FullPath).StartsWith(assetsRoot, StringComparison.OrdinalIgnoreCase));
         }
 
         return files;

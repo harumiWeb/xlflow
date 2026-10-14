@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/sourceinventory"
 	"github.com/harumiWeb/xlflow/internal/sourcepath"
 	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
+	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 )
 
 func (a *app) encodingCommand() *cobra.Command {
@@ -70,6 +72,9 @@ func (a *app) runCanonicalSourceEncodingPreflight(ctx context.Context, command s
 	}
 	artifacts, err := sourceinventory.DiscoverPictureArtifacts(root, cfg)
 	if err != nil {
+		if specErr, ok := errors.AsType[*forms.SpecError](err); ok {
+			return cfg, a.writeFormSpecFailure(command, specErr)
+		}
 		code := output.ExitEnvironment
 		if _, ok := errors.AsType[*sourceinventory.LayoutError](err); ok {
 			code = output.ExitValidation
@@ -83,20 +88,38 @@ func (a *app) runCanonicalSourceEncodingPreflight(ctx context.Context, command s
 		}
 		return cfg, a.writeFailure(command, code, errorCode, err)
 	}
-	var filter func(string) bool
-	if len(artifacts) > 0 {
-		pictures := make(map[string]bool, len(artifacts))
-		for _, artifact := range artifacts {
-			pictures[sourcepath.Key(filepath.Join(root, filepath.FromSlash(artifact.Path)))] = true
-		}
-		filter = func(path string) bool {
-			return !pictures[sourcepath.Key(path)]
-		}
-		cfg.PicturePaths = pictures
+	pictures := make(map[string]bool, len(artifacts))
+	for _, artifact := range artifacts {
+		pictures[sourcepath.Key(filepath.Join(root, filepath.FromSlash(artifact.Path)))] = true
 	}
+	formsRoot := cfg.Src.Forms
+	if !filepath.IsAbs(formsRoot) {
+		formsRoot = filepath.Join(root, formsRoot)
+	}
+	// The reserved assets directory retains unreferenced resources after pull.
+	// Their filenames must never turn them into VBA source files.
+	err = filepath.WalkDir(filepath.Join(formsRoot, "assets"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			pictures[sourcepath.Key(path)] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return cfg, a.writeFailure(command, output.ExitEnvironment, "source_preflight_failed", err)
+	}
+	cfg.PicturePaths = pictures
 	opts := sourceEncodingOptions(a.cwd, cfg, nil)
 	opts.AllowExternalRoots = allowExternalRoots
-	opts.PathFilter = filter
+	opts.PathFilter = func(path string) bool { return !pictures[sourcepath.Key(path)] }
 	return cfg, a.runSourceEncodingPreflightWithOptions(ctx, command, opts)
 }
 

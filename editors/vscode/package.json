@@ -38,8 +38,8 @@
     "bundle": "node esbuild.js",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
-    "test": "pnpm run compile && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormCollections.test.js && node ./dist/test/runTest.js",
-    "test:designer": "pnpm run compile && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormCollections.test.js",
+    "test": "pnpm run compile && node ./dist/test/userFormDraft.test.js && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormProductivity.test.js && node ./dist/test/userFormCollections.test.js && node ./dist/test/runTest.js",
+    "test:designer": "pnpm run compile && node ./dist/test/userFormDraft.test.js && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormProductivity.test.js && node ./dist/test/userFormCollections.test.js",
     "lint": "oxlint ."
   },
   "dependencies": {
@@ -59,6 +59,14 @@
   },
   "l10n": "./l10n",
   "contributes": {
+    "keybindings": [
+      {
+        "command": "xlflow.userFormDesigner.save",
+        "key": "ctrl+s",
+        "mac": "cmd+s",
+        "when": "activeCustomEditorId == xlflow.userFormDesigner"
+      }
+    ],
     "customEditors": [
       {
         "viewType": "xlflow.userFormDesigner",
@@ -208,6 +216,12 @@
         "command": "xlflow.restartLanguageServer",
         "title": "%command.restartLanguageServer.title%",
         "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.userFormDesigner.save",
+        "title": "%command.userFormDesigner.save.title%",
+        "category": "%command.category%",
+        "enablement": "activeCustomEditorId == xlflow.userFormDesigner"
       },
       {
         "command": "xlflow.checkEnvironment",

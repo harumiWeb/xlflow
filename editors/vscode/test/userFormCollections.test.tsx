@@ -340,6 +340,49 @@ async function run() {
       isWebviewMessage({ type: "edit", requestId: 1, version: 1, operations: [operation] }),
       false,
     );
+  await send({ type: "clipboardState", available: true });
+  for (const parentEditable of [false, true]) {
+    for (const pageEditable of [false, true]) {
+      await send({
+        type: "document",
+        version: version++,
+        document: model,
+        editable: true,
+        structuralEditable: true,
+        productivityEditable: true,
+        parentEditable,
+        pageEditable,
+      });
+      await click('[data-page-tab="first"]');
+      const paste = Array.from(
+        root.querySelectorAll<HTMLButtonElement>(".productivity-toolbar button"),
+      ).find((button) => button.textContent === "Paste")!;
+      assert.ok(paste);
+      assert.equal(paste.disabled, !(parentEditable && pageEditable));
+      const before = messages.filter((message) => message.type === "clipboard").length;
+      await act(() => paste.click());
+      const requests = messages.filter((message) => message.type === "clipboard");
+      assert.equal(requests.length, before + (parentEditable && pageEditable ? 1 : 0));
+      if (parentEditable && pageEditable) {
+        const request = requests.at(-1)!;
+        assert.equal(request.parentId, "first");
+        await send({ type: "editResult", requestId: request.requestId });
+      } else {
+        await act(() => {
+          const canvas = root.querySelector<HTMLElement>(".designer-viewport")!;
+          canvas.focus();
+          canvas.dispatchEvent(
+            new dom.window.KeyboardEvent("keydown", {
+              bubbles: true,
+              key: "v",
+              ctrlKey: true,
+            }),
+          );
+        });
+        assert.equal(messages.filter((message) => message.type === "clipboard").length, before);
+      }
+    }
+  }
   await act(() => render(null, root));
   process.stdout.write("UserForm Page and TabStrip collection assertions passed\n");
 }

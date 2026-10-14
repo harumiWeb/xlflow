@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/pack/ovba"
 )
+
+var vbFrameDecimalValue = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[Ee][+-]?[0-9]+)?$`)
 
 func generatedVBFrame(name, caption string, size Size, codePage uint16) ([]byte, error) {
 	if err := validateVBFrameCaption(caption, codePage); err != nil {
@@ -63,13 +66,29 @@ func rewriteVBFrameCaption(raw []byte, caption string, codePage uint16) ([]byte,
 }
 
 type vbFrameLayout struct {
-	rootBeginIndex    int
-	rootCaptionIndex  int
-	rootTypeInfoIndex int
+	rootBeginIndex        int
+	rootCaptionIndex      int
+	rootClientWidthIndex  int
+	rootClientHeightIndex int
+	rootTypeInfoIndex     int
 }
 
+type vbFrameDimensionError struct {
+	Property string
+	Err      error
+}
+
+func (e *vbFrameDimensionError) Error() string { return e.Err.Error() }
+func (e *vbFrameDimensionError) Unwrap() error { return e.Err }
+
 func inspectVBFrameLayout(lines [][]byte, codePage uint16) (vbFrameLayout, error) {
-	layout := vbFrameLayout{rootBeginIndex: -1, rootCaptionIndex: -1, rootTypeInfoIndex: -1}
+	layout := vbFrameLayout{
+		rootBeginIndex:        -1,
+		rootCaptionIndex:      -1,
+		rootClientWidthIndex:  -1,
+		rootClientHeightIndex: -1,
+		rootTypeInfoIndex:     -1,
+	}
 	depth, propertyDepth := 0, 0
 	for index, line := range lines {
 		body, ending := vbFrameLineParts(line)
@@ -117,6 +136,29 @@ func inspectVBFrameLayout(lines [][]byte, codePage uint16) (vbFrameLayout, error
 			}
 			layout.rootTypeInfoIndex = index
 		}
+		if depth == 1 {
+			for _, property := range []struct {
+				name  string
+				index *int
+			}{{"ClientWidth", &layout.rootClientWidthIndex}, {"ClientHeight", &layout.rootClientHeightIndex}} {
+				if !isVBFrameProperty(trimmed, property.name) {
+					continue
+				}
+				if *property.index >= 0 {
+					return vbFrameLayout{}, &vbFrameDimensionError{
+						Property: strings.TrimPrefix(property.name, "Client"),
+						Err:      fmt.Errorf("%w: duplicate root %s properties in VBFrame", ErrInvalidEdit, property.name),
+					}
+				}
+				if len(ending) == 0 {
+					return vbFrameLayout{}, &vbFrameDimensionError{
+						Property: strings.TrimPrefix(property.name, "Client"),
+						Err:      fmt.Errorf("%w: root %s line has no line ending", ErrInvalidEdit, property.name),
+					}
+				}
+				*property.index = index
+			}
+		}
 		if depth == 0 && isVBFrameBegin(trimmed) {
 			if layout.rootBeginIndex >= 0 {
 				return vbFrameLayout{}, fmt.Errorf("%w: multiple root Begin blocks in VBFrame", ErrInvalidEdit)
@@ -139,6 +181,112 @@ func inspectVBFrameLayout(lines [][]byte, codePage uint16) (vbFrameLayout, error
 		return vbFrameLayout{}, fmt.Errorf("%w: unknown VBFrame layout", ErrInvalidEdit)
 	}
 	return layout, nil
+}
+
+func rewriteVBFrameClientSize(raw []byte, size Size, codePage uint16) ([]byte, error) {
+	if size.Width < 0 || size.Height < 0 {
+		return nil, fmt.Errorf("%w: negative root DisplayedSize", ErrInvalidEdit)
+	}
+	width := int64(math.Round(float64(size.Width) * 1440 / 2540))
+	height := int64(math.Round(float64(size.Height) * 1440 / 2540))
+	if width > math.MaxInt32 || height > math.MaxInt32 {
+		return nil, fmt.Errorf("%w: root client size exceeds VBFrame range", ErrInvalidEdit)
+	}
+	lines := bytes.SplitAfter(raw, []byte{'\n'})
+	layout, err := inspectVBFrameLayout(lines, codePage)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]byte, 0, len(raw))
+	for index, line := range lines {
+		switch index {
+		case layout.rootClientWidthIndex:
+			line, err = rewriteVBFrameNumericProperty(line, "ClientWidth", width, codePage)
+			if err != nil {
+				return nil, &vbFrameDimensionError{Property: "Width", Err: err}
+			}
+		case layout.rootClientHeightIndex:
+			line, err = rewriteVBFrameNumericProperty(line, "ClientHeight", height, codePage)
+			if err != nil {
+				return nil, &vbFrameDimensionError{Property: "Height", Err: err}
+			}
+		}
+		result = append(result, line...)
+		if index != layout.rootBeginIndex {
+			continue
+		}
+		_, ending := vbFrameLineParts(line)
+		for _, property := range []struct {
+			name  string
+			value int64
+			index int
+		}{{"ClientHeight", height, layout.rootClientHeightIndex}, {"ClientWidth", width, layout.rootClientWidthIndex}} {
+			if property.index >= 0 {
+				continue
+			}
+			inserted, err := encodeVBFrameIntegerProperty(property.name, property.value, ending, codePage)
+			if err != nil {
+				return nil, &vbFrameDimensionError{Property: strings.TrimPrefix(property.name, "Client"), Err: err}
+			}
+			result = append(result, inserted...)
+		}
+	}
+	return result, nil
+}
+
+func rewriteVBFrameNumericProperty(line []byte, property string, value int64, codePage uint16) ([]byte, error) {
+	body, ending := vbFrameLineParts(line)
+	text, err := ovba.DecodeMBCS(body, codePage)
+	if err != nil {
+		return nil, fmt.Errorf("%w: decode root %s: %v", ErrInvalidEdit, property, err)
+	}
+	left, right, found := strings.Cut(text, "=")
+	if !found || !strings.EqualFold(strings.TrimSpace(left), property) || len(ending) == 0 {
+		return nil, fmt.Errorf("%w: malformed root %s property", ErrInvalidEdit, property)
+	}
+	valueText, comment, hasComment := strings.Cut(right, "'")
+	numericText := strings.TrimSpace(valueText)
+	if !vbFrameDecimalValue.MatchString(numericText) {
+		return nil, fmt.Errorf("%w: malformed root %s value", ErrInvalidEdit, property)
+	}
+	parsed, err := strconv.ParseFloat(numericText, 64)
+	if err != nil || !validVBFrameClientDimensionTwips(parsed) {
+		return nil, fmt.Errorf("%w: malformed root %s value", ErrInvalidEdit, property)
+	}
+	if parsed == float64(value) {
+		return line, nil
+	}
+	leading := valueText[:len(valueText)-len(strings.TrimLeft(valueText, " \t"))]
+	trailing := valueText[len(strings.TrimRight(valueText, " \t")):]
+	updated := left + "=" + leading + strconv.FormatInt(value, 10) + trailing
+	if hasComment {
+		updated += "'" + comment
+	}
+	encoded, err := ovba.EncodeMBCS(updated+string(ending), codePage)
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode root %s: %v", ErrInvalidEdit, property, err)
+	}
+	return encoded, nil
+}
+
+func validVBFrameClientDimensionTwips(twips float64) bool {
+	if math.IsNaN(twips) || math.IsInf(twips, 0) || twips < 0 {
+		return false
+	}
+	points := twips / 20
+	himetric := math.Round(points * 2540 / 72)
+	return !math.IsInf(himetric, 0) && himetric <= math.MaxInt32
+}
+
+func encodeVBFrameIntegerProperty(property string, value int64, ending []byte, codePage uint16) ([]byte, error) {
+	if len(ending) == 0 || value < 0 || value > math.MaxInt32 {
+		return nil, fmt.Errorf("%w: invalid root %s line", ErrInvalidEdit, property)
+	}
+	encoded, err := ovba.EncodeMBCS(fmt.Sprintf("   %s = %d%s", property, value, ending), codePage)
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode root %s: %v", ErrInvalidEdit, property, err)
+	}
+	return encoded, nil
 }
 
 // Excel binds a stored TypeInfoVer to the root ShapeCookie. Keep that binding

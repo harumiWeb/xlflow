@@ -75,6 +75,10 @@ func (s *Server) userFormSpecInput(uri string) (forms.SpecInput, *userFormPrevie
 }
 
 func (s *Server) dispatchRequest(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) bool {
+	if req.Method == userFormCopyMethod {
+		s.dispatchUserFormCopy(ctx, conn, req)
+		return true
+	}
 	if req.Method == userFormEditMethod {
 		s.dispatchUserFormEdit(ctx, conn, req)
 		return true

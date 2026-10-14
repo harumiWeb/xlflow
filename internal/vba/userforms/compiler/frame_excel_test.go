@@ -117,7 +117,7 @@ func TestGenerateExcelFrameArtifact(t *testing.T) {
 			generated, err = CompileTemplate(base, desired, project.Props.CodePage)
 		}
 	} else {
-		desired.Form.Build = &spec.FormSpecBuildForm{ClientWidth: new(324.0), ClientHeight: new(240.0)}
+		desired.Form.Width, desired.Form.Height = new(324.0), new(240.0)
 		generated, err = CompileNew(desired, project.Props.CodePage)
 	}
 	if err != nil {

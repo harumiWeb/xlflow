@@ -4,7 +4,6 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import { DocumentEditQueue, type EditClient } from "../../src/userFormEditor/edits";
-import { designerViewType } from "../../src/userFormEditor/provider";
 import type {
   EditResult,
   GeometryOperation,
@@ -23,7 +22,10 @@ const formSource = [
 
 export async function runUserFormEditAssertions(): Promise<void> {
   await assertGeometryTransactionsUndoAndRedo();
+  await assertProductivityTransactionsUndoAndRedo();
+  await assertCopyReadSharesEditQueue();
   await assertPropertyTransactionsUndoAndRedo();
+  await assertFormResizeTransactionsUndoAndRedo();
   await assertStructuralTransactionsUndoAndRedo();
   await assertPageCollectionUndoAndRedo();
   await assertParentTransactionUndoAndRedo();
@@ -34,6 +36,176 @@ export async function runUserFormEditAssertions(): Promise<void> {
   await assertUnicodeAndCRLFRanges();
   await assertInvalidRangesAreRejectedAtomically();
   await assertStructuredRejectionPreservesSource();
+}
+
+async function assertFormResizeTransactionsUndoAndRedo(): Promise<void> {
+  for (const extension of ["yaml", "json"]) {
+    const source =
+      extension === "yaml"
+        ? "schemaVersion: 1\r\nkind: xlflow.userform\r\nform: {name: Main, width: 500, height: 450}\r\ncontrols: []\r\n"
+        : '{"schemaVersion":1,"kind":"xlflow.userform","form":{"name":"Main","width":500,"height":450},"controls":[]}\r\n';
+    await withDesignerDocument(
+      `form-resize-${extension}`,
+      source,
+      async (document) => {
+        const operations: SemanticOperation[] = [
+          { type: "setFormProperty", field: "width", value: 520 },
+          { type: "setFormProperty", field: "height", value: 470 },
+        ];
+        const queue = new DocumentEditQueue();
+        const client = fakeClient((doc, version, text, requested) => {
+          assert.deepStrictEqual(requested, operations);
+          return {
+            version,
+            edits: [
+              {
+                range: {
+                  start: doc.positionAt(text.indexOf("500")),
+                  end: doc.positionAt(text.indexOf("500") + 3),
+                },
+                newText: "520",
+              },
+              {
+                range: {
+                  start: doc.positionAt(text.indexOf("450")),
+                  end: doc.positionAt(text.indexOf("450") + 3),
+                },
+                newText: "470",
+              },
+            ],
+          };
+        });
+        assert.strictEqual(
+          await queue.run(document, document.version, operations, client, () => true),
+          undefined,
+        );
+        const resized = source.replace("500", "520").replace("450", "470");
+        assert.strictEqual(document.getText(), resized);
+        assertActiveTextEditor(document.uri);
+        await vscode.commands.executeCommand("undo");
+        assert.strictEqual(document.getText(), source, "one Undo restores both form dimensions");
+        await vscode.commands.executeCommand("redo");
+        assert.strictEqual(document.getText(), resized);
+      },
+      extension,
+    );
+  }
+}
+
+async function assertProductivityTransactionsUndoAndRedo(): Promise<void> {
+  const source = [
+    "schemaVersion: 1",
+    "kind: xlflow.userform",
+    "form: {name: Main}",
+    "controls:",
+    "  - {id: a, name: Label1, type: Label, left: 10, top: 20}",
+    "  - {id: b, name: Label2, type: Label, left: 100, top: 40}",
+    "",
+  ].join("\r\n");
+  await withDesignerDocument("productivity-undo", source, async (document) => {
+    const queue = new DocumentEditQueue();
+    const client = fakeClient((doc, version, _text, operations) => {
+      assert.strictEqual(operations.length, 1);
+      const operation = operations[0];
+      assert.strictEqual(operation.type, "moveControls");
+      const edits = (operation as Extract<SemanticOperation, { type: "moveControls" }>).moves.map(
+        (move) => {
+          const line = Array.from({ length: doc.lineCount }, (_, index) => doc.lineAt(index)).find(
+            (candidate) => candidate.text.includes(`id: ${move.controlId},`),
+          )!;
+          return {
+            range: line.range,
+            newText: line.text
+              .replace(/left: \d+/, `left: ${move.left}`)
+              .replace(/top: \d+/, `top: ${move.top}`),
+          };
+        },
+      );
+      return { version, edits };
+    });
+    const operation: SemanticOperation = {
+      type: "moveControls",
+      moves: [
+        { controlId: "a", left: 18, top: 28 },
+        { controlId: "b", left: 108, top: 48 },
+      ],
+    };
+    assert.strictEqual(
+      await queue.run(document, document.version, [operation], client, () => true),
+      undefined,
+    );
+    const moved = document.getText();
+    assert.ok(moved.includes("left: 18") && moved.includes("left: 108"));
+    assertActiveTextEditor(document.uri);
+    await vscode.commands.executeCommand("undo");
+    assert.strictEqual(document.getText(), source, "one Undo restores every selected control");
+    await vscode.commands.executeCommand("redo");
+    assert.strictEqual(document.getText(), moved);
+  });
+}
+
+async function assertCopyReadSharesEditQueue(): Promise<void> {
+  await withDesignerDocument("clipboard-queue", formSource, async (document) => {
+    const queue = new DocumentEditQueue();
+    const version = document.version;
+    const started = deferred<void>();
+    const reply = deferred<EditResult>();
+    const operation: GeometryOperation = {
+      type: "moveControl",
+      controlId: "😀Box",
+      left: 18,
+      top: 28,
+    };
+    const moving = queue.run(
+      document,
+      version,
+      [operation],
+      fakeClient(() => {
+        started.resolve();
+        return reply.promise;
+      }),
+      () => true,
+    );
+    await withTimeout(started.promise, "edit did not reach the client");
+    let reads = 0;
+    const copying = queue.capture(
+      document,
+      version,
+      () => true,
+      async (text) => {
+        reads++;
+        return text;
+      },
+    );
+    assert.strictEqual(reads, 0, "copy must wait for same-URI edits");
+    reply.resolve({ version, edits: geometryEdits(document.getText(), [operation]) });
+    assert.strictEqual(await moving, undefined);
+    assert.strictEqual((await copying).error?.code, "staleDocument");
+    assert.strictEqual(reads, 0, "a copy based on the old version never reads source");
+
+    const copyStarted = deferred<void>();
+    const copyReply = deferred<string>();
+    let current = true;
+    const pending = queue.capture(
+      document,
+      document.version,
+      () => current,
+      async () => {
+        copyStarted.resolve();
+        return copyReply.promise;
+      },
+    );
+    await withTimeout(copyStarted.promise, "copy did not reach the client");
+    current = false;
+    copyReply.resolve("stale snapshot");
+    const result = await pending;
+    assert.strictEqual(result.error?.code, "staleDocument");
+    assert.strictEqual(
+      result.value,
+      undefined,
+      "a retired Webview cannot publish a clipboard snapshot",
+    );
+  });
 }
 
 async function assertPageCollectionUndoAndRedo(): Promise<void> {
@@ -73,7 +245,7 @@ async function assertPageCollectionUndoAndRedo(): Promise<void> {
     );
     const removed = document.getText();
     assert.ok(removed.includes("selectedIndex: 0") && !removed.includes("id: child"));
-    assertActiveDesigner(document.uri);
+    assertActiveTextEditor(document.uri);
     await vscode.commands.executeCommand("undo");
     assert.strictEqual(
       document.getText(),
@@ -89,7 +261,7 @@ async function assertStructuralTransactionsUndoAndRedo(): Promise<void> {
   const source = [
     "schemaVersion: 1",
     "kind: xlflow.userform",
-    "form: {name: Main, build: {clientWidth: 480, clientHeight: 360}}",
+    "form: {name: Main, width: 480, height: 360}",
     "controls:",
     "  - {id: frame, name: Frame1, type: Frame}",
     '  - {id: other, name: Label1, type: Label, caption: "😀 keep"}',
@@ -155,7 +327,7 @@ async function assertStructuralTransactionsUndoAndRedo(): Promise<void> {
     const removed = document.getText();
     assert.ok(!removed.includes("id: frame") && !removed.includes("id: child"));
     assert.ok(removed.includes('caption: "😀 keep"'));
-    assertActiveDesigner(document.uri);
+    assertActiveTextEditor(document.uri);
     await vscode.commands.executeCommand("undo");
     assert.strictEqual(
       document.getText(),
@@ -175,7 +347,7 @@ async function assertParentTransactionUndoAndRedo(): Promise<void> {
   const source = [
     "schemaVersion: 1",
     "kind: xlflow.userform",
-    "form: {name: Main, build: {clientWidth: 480, clientHeight: 360}}",
+    "form: {name: Main, width: 480, height: 360}",
     "controls:",
     "  - {id: frame, name: Frame1, type: Frame}",
     "  - {id: child, parentId: frame, name: TextBox1, type: TextBox}",
@@ -332,7 +504,7 @@ async function assertGeometryTransactionsUndoAndRedo(): Promise<void> {
       "an empty edit response is a successful no-op",
     );
     assert.strictEqual(document.getText(), afterSecondTransaction);
-    assertActiveDesigner(document.uri);
+    assertActiveTextEditor(document.uri);
 
     await vscode.commands.executeCommand("undo");
     assert.strictEqual(
@@ -630,20 +802,18 @@ async function withDesignerDocument(
   name: string,
   source: string,
   assertions: (document: vscode.TextDocument) => Promise<void>,
+  extension = "yaml",
 ): Promise<void> {
   const directory = await mkdtemp(path.join(os.tmpdir(), `xlflow-userform-edits-${name}-`));
-  const file = path.join(directory, "Main.yaml");
+  const file = path.join(directory, `Main.${extension}`);
   const uri = vscode.Uri.file(file);
   try {
     await writeFile(file, source, "utf8");
     const document = await vscode.workspace.openTextDocument(uri);
-    await vscode.commands.executeCommand("vscode.openWith", uri, designerViewType);
-    const activeInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    await vscode.commands.executeCommand("vscode.openWith", uri, "default");
     assert.ok(
-      activeInput instanceof vscode.TabInputCustom &&
-        activeInput.viewType === designerViewType &&
-        activeInput.uri.toString() === uri.toString(),
-      "the test document must be open in the registered UserForm custom editor",
+      vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
+      "the isolated edit queue must use a regular text editor",
     );
     await assertions(document);
   } finally {
@@ -660,7 +830,7 @@ async function withDesignerDocument(
         }
       }
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }
 }
@@ -677,13 +847,10 @@ function geometryClient(): EditClient {
   }));
 }
 
-function assertActiveDesigner(uri: vscode.Uri): void {
-  const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+function assertActiveTextEditor(uri: vscode.Uri): void {
   assert.ok(
-    input instanceof vscode.TabInputCustom &&
-      input.viewType === designerViewType &&
-      input.uri.toString() === uri.toString(),
-    "undo and redo must run with the source's registered custom editor active",
+    vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
+    "undo and redo must run with the source text editor active",
   );
 }
 

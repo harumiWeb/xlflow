@@ -15,10 +15,23 @@ const common = {
 Promise.all([
   esbuild.build({
     ...common,
+    entryPoints: ["test/userFormDraft.test.ts"],
+    outfile: "dist/test/userFormDraft.test.js",
+  }),
+  esbuild.build({
+    ...common,
     jsx: "automatic",
     jsxImportSource: "preact",
     entryPoints: ["test/userFormCollections.test.tsx"],
     outfile: "dist/test/userFormCollections.test.js",
+    external: [...common.external, "jsdom"],
+  }),
+  esbuild.build({
+    ...common,
+    jsx: "automatic",
+    jsxImportSource: "preact",
+    entryPoints: ["test/userFormProductivity.test.tsx"],
+    outfile: "dist/test/userFormProductivity.test.js",
     external: [...common.external, "jsdom"],
   }),
   esbuild.build({
@@ -43,6 +56,7 @@ Promise.all([
     jsxImportSource: "preact",
     entryPoints: ["test/userFormRendering.test.tsx"],
     outfile: "dist/test/userFormRendering.test.js",
+    external: [...common.external, "jsdom"],
   }),
   esbuild.build({
     ...common,

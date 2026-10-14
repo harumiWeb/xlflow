@@ -43,12 +43,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   cliAvailability = new XlflowCliAvailabilityService();
   setXlflowCliAvailabilityService(cliAvailability);
   clientManager = new XlflowLanguageClientManager(channels, startup);
+  const formEditor = new UserFormEditorProvider(
+    context.extensionUri,
+    clientManager,
+    undefined,
+    undefined,
+    vscode.Uri.joinPath(context.storageUri ?? context.globalStorageUri, "userform-drafts"),
+  );
   context.subscriptions.push(
-    vscode.window.registerCustomEditorProvider(
-      designerViewType,
-      new UserFormEditorProvider(context.extensionUri, clientManager),
-      { supportsMultipleEditorsPerDocument: true },
-    ),
+    formEditor,
+    formEditor.registerSaveCommand(),
+    vscode.window.registerCustomEditorProvider(designerViewType, formEditor, {
+      supportsMultipleEditorsPerDocument: true,
+    }),
   );
   testController = new XlflowTestController(channels);
   sessionManager = new SessionManager(channels);

@@ -1,0 +1,24 @@
+{
+  "name": "userform-draft-fixture",
+  "displayName": "UserForm Draft Provider Test Fixture",
+  "version": "0.0.1",
+  "publisher": "xlflowtest",
+  "main": "./extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "xlflow.userFormDraftProviderTest",
+        "displayName": "UserForm Draft Provider Test",
+        "selector": [
+          {
+            "filenamePattern": "*.{yaml,yml,json}"
+          }
+        ],
+        "priority": "option"
+      }
+    ]
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  }
+}

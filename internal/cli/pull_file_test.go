@@ -294,7 +294,7 @@ func TestPullFileBackendPublishesUserFormSidecars(t *testing.T) {
 	}
 }
 
-func TestFilePulledUserFormSpecsAllowFilePushAndBlockExcelPush(t *testing.T) {
+func TestFilePulledUserFormSpecsIgnoreStaleCompatibilityArtifacts(t *testing.T) {
 	for _, backend := range []string{"file", "excel"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
@@ -308,6 +308,15 @@ func TestFilePulledUserFormSpecsAllowFilePushAndBlockExcelPush(t *testing.T) {
 			staleFRMPath := filepath.Join(dir, "src", "forms", "UserForm1.frm")
 			if err := os.WriteFile(staleFRMPath, staleFRM, 0o644); err != nil {
 				t.Fatal(err)
+			}
+			if backend == "excel" {
+				cfg, loadErr := config.Load(dir)
+				if loadErr != nil {
+					t.Fatal(loadErr)
+				}
+				if removeErr := os.Remove(filepath.Join(dir, cfg.Excel.Path)); removeErr != nil {
+					t.Fatal(removeErr)
+				}
 			}
 
 			stdout, err := runBuildCommandForTest(dir, "--json", "push", "--backend", backend)
@@ -328,11 +337,11 @@ func TestFilePulledUserFormSpecsAllowFilePushAndBlockExcelPush(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || output.ExitCode(err) != output.ExitValidation || jsonErrorCode(t, stdout) != "source_preflight_failed" {
+			if err == nil || output.ExitCode(err) != output.ExitEnvironment {
 				t.Fatalf("push --backend excel stdout=%s err=%v", stdout, err)
 			}
-			if !strings.Contains(stdout, "not synchronized") || !strings.Contains(stdout, "FRM201") {
-				t.Fatalf("Excel push did not report unsynchronized compatibility artifact: %s", stdout)
+			if strings.Contains(stdout, "FRM201") || strings.Contains(stdout, "source_preflight_failed") {
+				t.Fatalf("Excel push rejected stale compatibility artifact: %s", stdout)
 			}
 		})
 	}

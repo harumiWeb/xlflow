@@ -187,6 +187,20 @@ func (a *app) coordinationTargets(cmd *cobra.Command, args []string, commandID c
 		}
 		return nil, false
 	case "pack":
+		if check, err := cmd.Flags().GetBool("check"); err == nil && check {
+			if blank, err := cmd.Flags().GetBool("blank"); err == nil && blank {
+				return nil, false
+			}
+			cfg, ok := a.coordinationConfig()
+			if !ok {
+				return nil, false
+			}
+			template, _ := commandFlagString(cmd, "template")
+			if template == "" {
+				template = cfg.Excel.Path
+			}
+			return []string{workbookArgPath(a.cwd, template)}, true
+		}
 		out, outOK := commandFlagString(cmd, "out")
 		if !outOK || out == "" {
 			return nil, false

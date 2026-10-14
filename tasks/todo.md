@@ -1,3 +1,38 @@
+# Designer form resize
+
+- [x] Add selected form edge/corner drag handles and client-size preview with zoom, snapping and child bounds.
+- [x] Support atomic width/height transactions through the Webview and LSP boundaries, preserving YAML/JSON source and Undo/Redo.
+- [x] Verify cancellation, capability gates, native Webview hit testing and full extension checks; update specifications and changelogs. VS Code 1.141.1 full tests, LSP full tests (157.730s), vet, lint/docs and formatting pass. No Excel workbook E2E is needed for this source-only gesture change.
+
+# Issue #922 Designer productivity
+
+- [x] Confirmed Excel 16.0 twip/Single geometry rounding; limited tolerance to four geometry fields and added acceptance/rejection regressions (528 .NET tests pass). Rebuilt/installed both binaries. Original fractional FormSpec succeeds through build/push/run/save/pull/lint and saved-file apply; sentinel, 12 geometry values, unchanged spec and COM cleanup verified. Lint/format checks pass. Evidence: tmp_workspaces/final-review/issue922/coordinate-precision-evidence.md.
+- [x] Reproduced interior click selection loss in native VS Code Webview before the fix. Restrict blank content to Frame; coordinate hit tests cover Label/TextBox, nested children, holding an existing selection and single/group movement. Full VS Code tests and lint passed.
+- [x] PR #932: validate and fix six review findings (paste/container capability, Page Delete, live group boundary, context-menu dismissal/focus and tab-order parent choices); focused regressions, full VS Code tests, lint and diff checks passed.
+- [x] Validate Pass 1 custom-control tab-order finding, align eligibility with Property Grid metadata and add YAML/JSON regressions.
+- [x] Preserve Pass 1 evidence and clean up its review resources; FormSpec tests, focused LSP tests and vet pass.
+- [x] Run independent Pass 2 on 568a86c: PASS; prior P2 resolved, no additional findings. Preserve report and clean up review resources.
+- [x] Correct native Webview clipping-test viewport preparation after Linux CI failure; full VS Code tests, oxlint, formatting and diff check pass locally. Push correction to PR #932; remote confirmation remains pending.
+
+- [x] Extend atomic source-preserving semantic operations and copy RPC for YAML/YML/JSON.
+- [x] Add sibling selection, group layout, clipboard, z-order and Tab order UI.
+- [x] Integrate capability negotiation, shared host clipboard and stale-safe edit queue.
+- [x] Verify Go/RPC, Webview and native VS Code Undo/Redo regressions; review complete diff.
+- [x] Record ADR/spec/user documentation and changelog updates.
+
+Validation: `rtk pnpm --dir editors/vscode test` passed with VS Code 1.141.0,
+including group gestures, shared clipboard, custom-editor Undo/Redo, reversed
+Copy completions, stale source, capability gates, failed/cancelled Cut clipboard
+retention and successful Cut publication. The full
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/vba/userforms/spec/... ./internal/lspserver -count=1`
+passed (LSP: 186.776s); final focused UserForm/productivity tests and matching
+`vet` passed after backend refinements. `rtk task lint`, documentation checks,
+docs build, changed-file formatting and `rtk git diff --check` passed.
+Read-only host/UI reviews were completed; the confirmed custom-ProgID marquee
+inconsistency was fixed and covered, and fractional group translation preserves
+source precision. Excel/COM/VBE and remote CI were not run. No Excel
+`tmp_workspaces` were used; this change edits FormSpec source only.
+
 # Issue #921 final review follow-up
 
 ## PR #931 review comments
@@ -832,3 +867,38 @@ CI or publication is claimed.
 - [x] Inspect the failed security job and confirm the fixed Go patch release against the official release and vulnerability feeds.
 - [x] Raise the Go patch baseline to 1.26.9 and verify the complete security scan and Go tests (analyze: 589.162s; LSP: 223.591s).
 - [x] Prepare the verified security fix for the existing PR.
+
+# Unreleased UserForm canonical authoring and UX
+
+- [x] Define one client-size authoring schema and update Designer/LSP/projection.
+- [x] Share pure-Go generation and root resizing across pack, push and Excel reflection.
+- [x] Remove mandatory prebuilt .frm artifacts for canonical specs; preserve code and opaque state.
+- [x] Persist scaffold VBA codepage and add actionable encoding diagnostics / pack --check.
+- [x] Update ADR/specs/user documentation and changelogs.
+- [x] Run focused regressions, required checks and fresh session-backed Excel / pack round-trips.
+
+# Deferred-save UserForm Designer
+
+## Initial MultiPage and TabStrip members
+
+- [x] Create two initial Pages or tabs on Toolbox placement, selecting the first member and allocating collision-free names and IDs.
+- [x] Admit the narrow atomic creation transaction through Webview, host and LSP capability/validation boundaries; preserve one-step Undo/Redo and deferred source saving.
+- [x] Resolve the review finding: reject standalone empty collection insertion messages and gate MultiPage/TabStrip insertion by owner type on every extension layer. Read-only second pass confirms the finding is resolved.
+- [x] Full VS Code 1.141.1 tests PASS, including visible headers, collection capability matrix, native history and explicit-only source publication. Full LSP tests PASS (131.894s), covering YAML/JSON source preservation, nested Frame/Page placement and atomic rejection. Lint/docs/format and diff checks PASS. ADR/spec/guides and both changelogs updated, latest VSIX rebuilt and `rtk task install` succeeded. No Excel E2E is needed for the Toolbox/LSP-only change.
+
+## Explicit save false conflict
+
+- [x] Reproduce false conflicts with multiline LF edits in a native CRLF source and a real VS Code save participant before each fix.
+- [x] Match native TextDocument edit normalization and reconcile successfully saved output from the published baseline while retaining pre-save external-change protection and safe draft history.
+- [x] Full VS Code 1.141.1 tests PASS, including both regressions, repeated Save and Undo/Redo. Lint/docs/format and diff checks PASS; one-pass read-only review found no confirmed issues. Save-contract specification and both changelogs updated; VSIX rebuilt. No Excel E2E is needed for this editor-only fix.
+
+## Explicit source save with Auto Save enabled
+
+- [x] Separate internal draft checkpoints from explicit YAML/JSON publication; add Designer-scoped Ctrl+S/Cmd+S and keep global Auto Save settings untouched.
+- [x] Preserve URI-shared native Undo/Redo, pending-source badge and durable draft recovery on close/reopen/restart; retain corrupt recovery data and failed saves. Read recovery records behind pending source-queue writes so immediate reopen cannot miss the final edit.
+- [x] Full VS Code 1.141.1 tests PASS, including actual Auto Save, explicit command/button, direct source Auto Save, native history, normal reopen/provider restart, JSON structural conflicts, Revert, Save As and malformed-record retention. Lint/docs checks PASS; root pnpm version switching required a command-scoped environment override for the existing local package-manager change. ADR/specs/guides/changelogs updated; VSIX packaged. Bounded read-only review reported no confirmed findings; no Excel E2E is needed for this editor-only change.
+
+- [x] Record the URI-shared draft, native custom-document history, conflict, save, and VS Code lifecycle decisions in ADR-0073; supersede the relevant ADR-0064/0066 decisions.
+- [x] Update the Designer specification, user guide, and unreleased changelogs for deferred save and explicit conflict resolution.
+- [x] Implement `CustomEditorProvider` and URI-shared draft state, including draft history rebasing, `CustomDocumentEditEvent` Undo/Redo, and Save/Save As/Revert/backup/restore through the latest `TextDocument`. Isolate native Designer history with a dedicated editor resource URI while retaining the real source URI for LSP and persistence.
+- [x] Verify shared drafts across panels; unchanged source before Save; external-edit merge and history rebasing; structural and same-line conflict retention; explicit conflict resolution; Save As, source-preserving Revert, backup/recovery, and configured AutoSave. Full VS Code 1.141.1 tests, type checks, lint/docs checks and diff checks pass. Bounded read-only review completed; source-only change requires no Excel workbook E2E.

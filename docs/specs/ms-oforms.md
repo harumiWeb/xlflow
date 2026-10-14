@@ -102,12 +102,25 @@ selected index, enabled state, and visible state are projected when their binary
 meaning is known. File-format defaults are applied when the relevant MS-OFORMS property
 record is omitted.
 
-The root `DisplayedSize` is exposed through `form.build.clientWidth` /
-`clientHeight` and the matching observed client fields. It is the persisted
-client/display area and can differ from Excel VBIDE's outer Designer width/height
-because of window chrome. Projection does not label it as outer dimensions.
-Control geometry is compared directly. Boolean control values are normalized from persisted
+The root `DisplayedSize` is exposed as canonical `form.width` and
+`form.height`, in points. It is the source of truth for snapshots, file pull,
+and preview authoring. These fields represent the persisted display area and
+can differ from Excel VBIDE's outer Designer width/height. Captured values
+under `form.observed` remain snapshot-only and never override these authoring
+fields. Control geometry is compared directly. Boolean control values are normalized from persisted
 `1`/`0` spellings to Excel snapshot `True`/`False` spellings.
+
+The Excel inspection path saves a private workbook copy with `SaveCopyAs`, then
+reads MS-OFORMS `DisplayedSize` from the persisted UserForm and places it in the
+inspection `client_width` / `client_height` fields. Those names are transport
+fields; they are not sourced from VBFrame
+`ClientWidth` / `ClientHeight`. Snapshot projection copies persisted
+`DisplayedSize` into canonical `form.width` / `form.height`; observed fields
+are not a compiler fallback. VBFrame client properties are compiler-maintained
+companion values and do not seed root dimensions. Excel import/export can
+normalize `DisplayedSize`, so snapshots record the actual persisted size and
+do not guarantee exact equality with authored points. This behavior is
+separate from pure-Go nearest-integer HIMETRIC conversion and rounding.
 
 TabStrip is structurally recognized by the binary reader, but its persisted
 `ListIndex` is not part of the current FormSpec control contract. Projection
@@ -188,9 +201,9 @@ The initial editable classes are Label, TextBox, ComboBox, ListBox,
 CommandButton, CheckBox, OptionButton, and existing Frame containers. Their
 applicable caption, text/value, parent-relative position, size, tab order,
 enabled, and visible fields use explicit persistence mappings. Existing nested
-control geometry remains parent-relative. Form caption is supported; root
-width/height edits are rejected because persisted client dimensions and Excel
-outer Designer dimensions are different. MultiPage/Page/TabStrip editing is
+control geometry remains parent-relative. Form caption and persisted root
+client dimensions are supported through the same compiler mappings.
+MultiPage/Page/TabStrip editing is
 described in the Issue #885 contract below; Frame/common-control topology is
 described separately.
 
@@ -204,12 +217,9 @@ The observation is retained under the compiler's Excel-authored testdata.
 TextBox text and value address the same persisted Value string. A change to
 one alias is sufficient; conflicting changes to both aliases fail. The same
 rule applies to top-level control fields and their property-bag aliases.
-An explicitly changed `form.build.caption` takes precedence over the legacy
-form caption. Unchanged build/observed fields do not override a changed field.
-When build.caption first appears, the supplied legacy before caption remains
-the stale-input baseline; an existing explicit before build.caption takes
-precedence over the legacy baseline. Observed metadata is never synthesized
-into authoring intent or a supplied baseline.
+Form metadata has one direct authoring path: `form.caption`, `form.width`, and
+`form.height`. The `form.build` object and its aliases are invalid; observed
+metadata is never synthesized into authoring intent or a supplied baseline.
 Empty strings, zero, and false are explicit values. Removing a property to
 request a default reset is unsupported.
 
@@ -271,17 +281,22 @@ MorphData Value string. Boolean controls include ToggleButton and accept the
 same two-state spellings as the existing compiler.
 
 Geometry uses points converted to the nearest signed-int32 HIMETRIC value.
-Root `form.build.clientWidth` / `clientHeight` address client dimensions,
-with defaults of 240 by 180 points. Outer width/height input is unsupported,
-and supplying both dimension families is invalid. Snapshot observations
-alone are not root authoring intent.
+Root `form.width` / `form.height` address persisted client dimensions. A newly
+generated form defaults omitted axes to 240 by 180 points. When editing an
+existing template form, omitted axes preserve the baseline dimensions. Legacy
+`form.build.*` aliases are rejected by canonical validation. Snapshot
+observations alone are not root authoring intent; captured persisted client
+dimensions are explicit canonical root fields in the projected FormSpec.
 
-These fields mean the persisted MS-OFORMS `DisplayedSize` / VBFrame
-`ClientWidth` and `ClientHeight`, not the runtime MSForms `InsideWidth` and
-`InsideHeight` properties. The focused Excel gate observed a 4.55-point
-height difference on both Excel-authored and generated forms. No constant
-offset or outer-to-client estimate is applied. The gate compares exported
-VBFrame client dimensions and reads the normalized binary after saving.
+These fields mean persisted MS-OFORMS `DisplayedSize`, not VBFrame
+`ClientWidth` / `ClientHeight` or runtime MSForms `InsideWidth` and
+`InsideHeight`. No constant offset or outer-to-client estimate is applied.
+The pure-Go compiler converts authored points to HIMETRIC using nearest-
+integer rounding and verifies the resulting binary `DisplayedSize`. Excel
+import/export may normalize that persisted value; snapshots report the
+resulting `DisplayedSize`, while VBFrame client values remain companion state
+and are not used as authoring seeds. This Excel normalization does not change
+the pure-Go rounding contract.
 
 The default control sizes are:
 
@@ -313,9 +328,10 @@ Image picture payloads are added, replaced, or cleared only through the
 explicit `picture.path` and `picture.remove: true` forms. Omission preserves a
 retained payload. The compiler unwraps and validates the persisted StdPicture
 resource before Designer publication; source bytes remain in the in-memory
-`FormSpecPicture.Data` field and are excluded from YAML/JSON. Excel-backed
-`form build` and apply surfaces reject picture input until they implement the
-same contract. No file backend invokes Excel as a fallback.
+`FormSpecPicture.Data` field and are excluded from YAML/JSON. The shared
+compiler handles picture input for `form build` / apply, both push backends,
+and pack; the Excel bridge reflects its compiled result into the Designer. No
+file backend invokes Excel as a fallback.
 
 Errors retain form/control/property context and use
 `userform_generation_invalid`, `userform_generation_unsupported`, or
@@ -477,8 +493,10 @@ the canonical supported control state from an Excel-authored snapshot with the
 pure-Go projection of the same workbook. Set
 `XLFLOW_PROJECTION_PARITY_WORKBOOK` and
 `XLFLOW_PROJECTION_PARITY_SNAPSHOT` to run this Windows/Excel integration test.
-Root form dimensions are excluded because the binary stores client dimensions
-while Excel reports outer Designer dimensions.
+Direct COM root-size observations are excluded from this parity comparison
+because Excel reports outer Designer dimensions. The generated-form gate
+checks canonical dimensions against MS-OFORMS `DisplayedSize` and binary
+readback. VBFrame client values are not the snapshot or authoring oracle.
 
 Compiler tests cover edits, string growth/shrink, untouched controls and
 subtrees, stale input, alias conflicts, range errors, and atomic failure.

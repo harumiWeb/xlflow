@@ -1,12 +1,14 @@
 package compiler
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"maps"
 	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,11 +22,64 @@ func newSpec() spec.FormSpec {
 	return spec.FormSpec{SchemaVersion: 1, Kind: "xlflow.userform", Basis: "designer", Form: spec.FormSpecForm{Name: "GeneratedForm"}, Controls: []spec.FormSpecControl{}}
 }
 
+func TestCompileNewDefaultsCanonicalDimensionsWithoutObservedFallback(t *testing.T) {
+	input := newSpec()
+	input.Form.Observed = &spec.FormSpecObservedForm{
+		Width: new(999.0), Height: new(888.0), ClientWidth: new(777.0), ClientHeight: new(666.0),
+	}
+	form, err := CompileNew(input, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := form.Levels[0].Record.Sizes["DisplayedSize"]; got != (oforms.Size{Width: 8467, Height: 6350}) {
+		t.Fatalf("default DisplayedSize = %+v", got)
+	}
+	assertVBFrameDimension(t, form.Levels[0].VBFrameRaw, "ClientWidth", 4800)
+	assertVBFrameDimension(t, form.Levels[0].VBFrameRaw, "ClientHeight", 3600)
+}
+
+func TestCompileNewPreservesZeroAndMaximumHIMETRICDimensions(t *testing.T) {
+	maximumPoints := float64(math.MaxInt32) * 72 / 2540
+	input := newSpec()
+	input.Form.Width = new(0.0)
+	input.Form.Height = new(maximumPoints)
+	form, err := CompileNew(input, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := form.Levels[0].Record.Sizes["DisplayedSize"]; got != (oforms.Size{Width: 0, Height: math.MaxInt32}) {
+		t.Fatalf("root DisplayedSize = %+v, want explicit zero and maximum HIMETRIC", got)
+	}
+	assertVBFrameDimension(t, form.Levels[0].VBFrameRaw, "ClientWidth", 0)
+	assertVBFrameDimension(t, form.Levels[0].VBFrameRaw, "ClientHeight", int64(math.Round(float64(math.MaxInt32)*1440/2540)))
+}
+
+func TestCompileNewReportsRootDimensionOutsideHIMETRICRange(t *testing.T) {
+	tooLarge := float64(math.MaxInt32+1) * 72 / 2540
+	for _, field := range []struct {
+		name  string
+		value func(*spec.FormSpec)
+	}{
+		{name: "width", value: func(form *spec.FormSpec) { form.Form.Width = new(tooLarge) }},
+		{name: "height", value: func(form *spec.FormSpec) { form.Form.Height = new(tooLarge) }},
+	} {
+		t.Run(field.name, func(t *testing.T) {
+			input := newSpec()
+			field.value(&input)
+			_, err := CompileNew(input, 932)
+			detail, ok := errors.AsType[*Error](err)
+			if !ok || detail.Code != GenerationInvalid || detail.Property != "form."+field.name {
+				t.Fatalf("CompileNew error = %#v, want a root %s HIMETRIC range diagnostic", err, field.name)
+			}
+		})
+	}
+}
+
 func TestCompileNewEmptyAndCommonControls(t *testing.T) {
 	for _, codePage := range []uint16{1252, 932} {
 		input := newSpec()
 		input.Form.Caption = new("Generated Caption")
-		input.Form.Build = &spec.FormSpecBuildForm{ClientWidth: new(320.0), ClientHeight: new(240.0)}
+		input.Form.Width, input.Form.Height = new(320.0), new(240.0)
 		empty, err := CompileNew(input, codePage)
 		if err != nil {
 			t.Fatal(err)
@@ -71,6 +126,9 @@ func TestCompileNewEmptyAndCommonControls(t *testing.T) {
 		if projected.Form.Caption == nil || *projected.Form.Caption != *input.Form.Caption || len(projected.Controls) != 11 {
 			t.Fatal("form read-back differs")
 		}
+		if got := empty.Levels[0].Record.Sizes["DisplayedSize"]; got != (oforms.Size{Width: 11289, Height: 8467}) {
+			t.Fatalf("root client size = %+v", got)
+		}
 		if first.Levels[0].Record.Values["NextAvailableID"] != 12 {
 			t.Fatal("invalid next site ID")
 		}
@@ -105,7 +163,7 @@ func TestCompileNewEmptyAndCommonControls(t *testing.T) {
 
 func TestCompileNewLargeFormRoundTrips512Controls(t *testing.T) {
 	input := newSpec()
-	input.Form.Build = &spec.FormSpecBuildForm{ClientWidth: new(640.0), ClientHeight: new(480.0)}
+	input.Form.Width, input.Form.Height = new(640.0), new(480.0)
 	for i := range 512 {
 		input.Controls = append(input.Controls, spec.FormSpecControl{
 			Name: fmt.Sprintf("Label%03d", i), Type: "Label", Caption: new(fmt.Sprintf("Control %03d 日本語", i)),
@@ -142,8 +200,8 @@ func TestCompileNewRejectsUnsupportedAndInvalidInput(t *testing.T) {
 		code   string
 		change func(*spec.FormSpec)
 	}{
-		{"outer-size", GenerationUnsupported, func(s *spec.FormSpec) { s.Form.Width = new(300.0) }},
-		{"size-overflow", GenerationInvalid, func(s *spec.FormSpec) { s.Form.Build = &spec.FormSpecBuildForm{ClientWidth: new(1e100)} }},
+		{"negative-width", GenerationInvalid, func(s *spec.FormSpec) { s.Form.Width = new(-1.0) }},
+		{"size-overflow", GenerationInvalid, func(s *spec.FormSpec) { s.Form.Height = new(1e100) }},
 		{"nan", GenerationInvalid, func(s *spec.FormSpec) { s.Controls[0].Left = new(math.NaN()) }},
 		{"frame-picture", GenerationUnsupported, func(s *spec.FormSpec) {
 			s.Controls[0].Type = "Frame"
@@ -186,8 +244,7 @@ func TestCompileNewReportsRootCaptionCodePageContext(t *testing.T) {
 		form     spec.FormSpecForm
 		property string
 	}{
-		{name: "legacy", form: spec.FormSpecForm{Name: "GeneratedForm", Caption: new("😀")}, property: "form.caption"},
-		{name: "build", form: spec.FormSpecForm{Name: "GeneratedForm", Build: &spec.FormSpecBuildForm{Caption: new("😀")}}, property: "form.build.caption"},
+		{name: "canonical", form: spec.FormSpecForm{Name: "GeneratedForm", Caption: new("😀")}, property: "form.caption"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			input := newSpec()
@@ -221,15 +278,63 @@ func readSerializedForm(t *testing.T, serialized *oforms.SerializedForm, name st
 	return oforms.ReadForm(container, name, codePage)
 }
 
-func TestCompileEditsRejectsClientSizeChanges(t *testing.T) {
+func TestCompileEditsResizesRootAndPreservesOtherStreams(t *testing.T) {
 	base, before := fixture(t, "p4_form.bin")
 	after := snapshotCopy(t, before)
-	if after.Form.Build == nil {
-		after.Form.Build = &spec.FormSpecBuildForm{}
+	after.Form.Width, after.Form.Height = new(320.0), new(240.0)
+	original, err := oforms.SerializeForm(base, 932)
+	if err != nil {
+		t.Fatal(err)
 	}
-	after.Form.Build.ClientWidth = new(200.0)
-	_, err := CompileEdits(base, before, after, 932)
-	if detail, ok := errors.AsType[*Error](err); !ok || detail.Code != Unsupported {
-		t.Fatalf("client size edit was discarded: %v", err)
+	result, err := CompileEdits(base, before, after, 932)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if got := result.Levels[0].Record.Sizes["DisplayedSize"]; got != (oforms.Size{Width: 11289, Height: 8467}) {
+		t.Fatalf("root DisplayedSize = %+v", got)
+	}
+	assertVBFrameDimension(t, result.Levels[0].VBFrameRaw, "ClientWidth", 6400)
+	assertVBFrameDimension(t, result.Levels[0].VBFrameRaw, "ClientHeight", 4800)
+	if !reflect.DeepEqual(flattenControls(base.Controls), flattenControls(result.Controls)) {
+		t.Fatal("root resize changed controls")
+	}
+	updated, err := oforms.SerializeForm(result, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootF := base.Levels[0].Path + "/" + base.Levels[0].FStreamName
+	rootFrame := base.Levels[0].Path + "/" + base.Levels[0].VBFrameName
+	for path, raw := range original.Streams {
+		if path == rootF || path == rootFrame {
+			continue
+		}
+		if !bytes.Equal(updated.Streams[path], raw) {
+			t.Fatalf("unrelated stream %q changed", path)
+		}
+	}
+	unchanged, err := oforms.SerializeForm(base, 932)
+	if err != nil {
+		t.Fatalf("CompileEdits mutated base: %v", err)
+	}
+	assertDesignerBytes(t, original, unchanged)
+}
+
+func assertVBFrameDimension(t *testing.T, raw []byte, property string, want int64) {
+	t.Helper()
+	for _, line := range strings.Split(string(raw), "\n") {
+		name, value, found := strings.Cut(strings.TrimSpace(line), "=")
+		if !found || !strings.EqualFold(strings.TrimSpace(name), property) {
+			continue
+		}
+		fields := strings.Fields(value)
+		if len(fields) == 0 {
+			t.Fatalf("VBFrame %s has no value: %q", property, line)
+		}
+		got, err := strconv.ParseInt(fields[0], 10, 32)
+		if err != nil || got != want {
+			t.Fatalf("VBFrame %s = %q, want %d", property, line, want)
+		}
+		return
+	}
+	t.Fatalf("VBFrame %s is missing", property)
 }

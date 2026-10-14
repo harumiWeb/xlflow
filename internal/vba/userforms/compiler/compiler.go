@@ -132,7 +132,11 @@ func compilePropertyEdits(base *oforms.Form, before, after spec.FormSpec, codePa
 	for _, edit := range c.edits {
 		var got any
 		if edit.Control == "" {
-			got = result.Levels[0].Record.Strings[edit.Property].Text
+			var found bool
+			got, found = editedRootProperty(result, edit.Property)
+			if !found {
+				return nil, c.fail(Invalid, "", edit.path, "edited property is missing after read-back")
+			}
 		} else {
 			control := findModelControl(result.Controls, edit.Control)
 			var found bool
@@ -158,6 +162,29 @@ func findModelControl(controls []*oforms.Control, name string) *oforms.Control {
 		}
 	}
 	return nil
+}
+
+func editedRootProperty(form *oforms.Form, name string) (any, bool) {
+	if form == nil || len(form.Levels) == 0 || form.Levels[0].Record == nil {
+		return nil, false
+	}
+	root := form.Levels[0].Record
+	switch name {
+	case "Caption":
+		value, found := root.Strings["Caption"]
+		return value.Text, found
+	case "Width", "Height":
+		size, found := root.Sizes["DisplayedSize"]
+		if !found {
+			return nil, false
+		}
+		if name == "Width" {
+			return size.Width, true
+		}
+		return size.Height, true
+	default:
+		return nil, false
+	}
 }
 
 func editedProperty(control *oforms.Control, name string) (any, bool) {
@@ -222,12 +249,9 @@ func normalizedCopy(input spec.FormSpec) (spec.FormSpec, error) {
 	if err != nil {
 		return spec.FormSpec{}, err
 	}
-	// Normalize topology on the owned copy, but do not synthesize form build
-	// intent from observed values before detecting differences.
+	// Normalize topology on the owned copy without turning observed values into
+	// authoring intent.
 	rawForm := copied.Form
-	if copied.Form.Build != nil {
-		copied.Form.Build = new(*copied.Form.Build)
-	}
 	if copied.Form.Observed != nil {
 		copied.Form.Observed = new(*copied.Form.Observed)
 	}
@@ -289,25 +313,44 @@ func (c *compilation) topology() error {
 
 func (c *compilation) formEdits() error {
 	old, next := c.before.Form, c.after.Form
-	oldBuild, nextBuild := spec.FormSpecBuildForm{}, spec.FormSpecBuildForm{}
-	if old.Build != nil {
-		oldBuild = *old.Build
-	}
-	if next.Build != nil {
-		nextBuild = *next.Build
-	}
-	if !reflect.DeepEqual(old.Width, next.Width) || !reflect.DeepEqual(old.Height, next.Height) || !reflect.DeepEqual(oldBuild.Width, nextBuild.Width) || !reflect.DeepEqual(oldBuild.Height, nextBuild.Height) || !reflect.DeepEqual(oldBuild.ClientWidth, nextBuild.ClientWidth) || !reflect.DeepEqual(oldBuild.ClientHeight, nextBuild.ClientHeight) {
-		return c.fail(Unsupported, "", "form", "root dimensions are client dimensions, not Excel outer dimensions")
+	for _, field := range []struct {
+		name   string
+		before *float64
+		after  *float64
+		actual *float64
+	}{
+		{name: "width", before: old.Width, after: next.Width, actual: c.actual.Form.Width},
+		{name: "height", before: old.Height, after: next.Height, actual: c.actual.Form.Height},
+	} {
+		if reflect.DeepEqual(field.before, field.after) {
+			continue
+		}
+		path := "form." + field.name
+		if field.after == nil {
+			return c.fail(Unsupported, "", path, "property reset is not supported")
+		}
+		if field.before == nil || field.actual == nil {
+			return c.fail(Stale, "", path, "before dimension does not match the binary model")
+		}
+		before, err := dimensionHIMETRIC(*field.before, field.name)
+		if err != nil {
+			return c.fail(Invalid, "", path, err.Error())
+		}
+		actual, err := dimensionHIMETRIC(*field.actual, field.name)
+		if err != nil || before != actual {
+			return c.fail(Stale, "", path, "before dimension does not match the binary model")
+		}
+		value, err := dimensionHIMETRIC(*field.after, field.name)
+		if err != nil {
+			return c.fail(Invalid, "", path, err.Error())
+		}
+		property := strings.ToUpper(field.name[:1]) + field.name[1:]
+		if err := c.add("", property, value, path); err != nil {
+			return err
+		}
 	}
 	oldCaption, nextCaption := old.Caption, next.Caption
 	captionChanged := !reflect.DeepEqual(oldCaption, nextCaption)
-	if !reflect.DeepEqual(oldBuild.Caption, nextBuild.Caption) {
-		captionChanged = true
-		nextCaption = nextBuild.Caption
-		if oldBuild.Caption != nil {
-			oldCaption = oldBuild.Caption
-		}
-	}
 	if !captionChanged {
 		return nil
 	}
