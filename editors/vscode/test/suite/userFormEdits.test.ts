@@ -4,7 +4,6 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import { DocumentEditQueue, type EditClient } from "../../src/userFormEditor/edits";
-import { designerViewType } from "../../src/userFormEditor/provider";
 import type {
   EditResult,
   GeometryOperation,
@@ -82,7 +81,7 @@ async function assertFormResizeTransactionsUndoAndRedo(): Promise<void> {
         );
         const resized = source.replace("500", "520").replace("450", "470");
         assert.strictEqual(document.getText(), resized);
-        assertActiveDesigner(document.uri);
+        assertActiveTextEditor(document.uri);
         await vscode.commands.executeCommand("undo");
         assert.strictEqual(document.getText(), source, "one Undo restores both form dimensions");
         await vscode.commands.executeCommand("redo");
@@ -137,7 +136,7 @@ async function assertProductivityTransactionsUndoAndRedo(): Promise<void> {
     );
     const moved = document.getText();
     assert.ok(moved.includes("left: 18") && moved.includes("left: 108"));
-    assertActiveDesigner(document.uri);
+    assertActiveTextEditor(document.uri);
     await vscode.commands.executeCommand("undo");
     assert.strictEqual(document.getText(), source, "one Undo restores every selected control");
     await vscode.commands.executeCommand("redo");
@@ -246,7 +245,7 @@ async function assertPageCollectionUndoAndRedo(): Promise<void> {
     );
     const removed = document.getText();
     assert.ok(removed.includes("selectedIndex: 0") && !removed.includes("id: child"));
-    assertActiveDesigner(document.uri);
+    assertActiveTextEditor(document.uri);
     await vscode.commands.executeCommand("undo");
     assert.strictEqual(
       document.getText(),
@@ -328,7 +327,7 @@ async function assertStructuralTransactionsUndoAndRedo(): Promise<void> {
     const removed = document.getText();
     assert.ok(!removed.includes("id: frame") && !removed.includes("id: child"));
     assert.ok(removed.includes('caption: "😀 keep"'));
-    assertActiveDesigner(document.uri);
+    assertActiveTextEditor(document.uri);
     await vscode.commands.executeCommand("undo");
     assert.strictEqual(
       document.getText(),
@@ -505,7 +504,7 @@ async function assertGeometryTransactionsUndoAndRedo(): Promise<void> {
       "an empty edit response is a successful no-op",
     );
     assert.strictEqual(document.getText(), afterSecondTransaction);
-    assertActiveDesigner(document.uri);
+    assertActiveTextEditor(document.uri);
 
     await vscode.commands.executeCommand("undo");
     assert.strictEqual(
@@ -811,13 +810,10 @@ async function withDesignerDocument(
   try {
     await writeFile(file, source, "utf8");
     const document = await vscode.workspace.openTextDocument(uri);
-    await vscode.commands.executeCommand("vscode.openWith", uri, designerViewType);
-    const activeInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    await vscode.commands.executeCommand("vscode.openWith", uri, "default");
     assert.ok(
-      activeInput instanceof vscode.TabInputCustom &&
-        activeInput.viewType === designerViewType &&
-        activeInput.uri.toString() === uri.toString(),
-      "the test document must be open in the registered UserForm custom editor",
+      vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
+      "the isolated edit queue must use a regular text editor",
     );
     await assertions(document);
   } finally {
@@ -834,7 +830,7 @@ async function withDesignerDocument(
         }
       }
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }
 }
@@ -851,13 +847,10 @@ function geometryClient(): EditClient {
   }));
 }
 
-function assertActiveDesigner(uri: vscode.Uri): void {
-  const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+function assertActiveTextEditor(uri: vscode.Uri): void {
   assert.ok(
-    input instanceof vscode.TabInputCustom &&
-      input.viewType === designerViewType &&
-      input.uri.toString() === uri.toString(),
-    "undo and redo must run with the source's registered custom editor active",
+    vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
+    "undo and redo must run with the source text editor active",
   );
 }
 

@@ -80,6 +80,13 @@ capability boundary while the visual editor remains read-only.
    because normal text editing must remain directly available and this stage
    establishes only a read-only preview boundary.
 
+## Superseded by
+
+- [ADR-0073](ADR-0073-userform-designer-deferred-save-document-lifecycle.md)
+  replaces the direct live-`TextDocument` edit target and
+  `CustomTextEditor` lifecycle. The LSP preview, canonical validation,
+  rendering, and Webview security contracts remain in force.
+
 ## Related
 
 - Property metadata and authored states are supplemented by `docs/adr/ADR-0067-userform-designer-property-metadata.md`.

@@ -54,6 +54,12 @@ export function App() {
   const [documentVersion, setDocumentVersion] = useState(0);
   const [reply, setReply] = useState<PropertyReply>();
   const [busy, setBusy] = useState(false);
+  const [draftState, setDraftState] = useState({
+    dirty: false,
+    conflicted: false,
+    saving: false,
+    error: undefined as string | undefined,
+  });
   const [zoom, setZoom] = useState(1);
   const [showGrid, setShowGrid] = useState(true);
   const [snapping, setSnapping] = useState(false);
@@ -82,6 +88,13 @@ export function App() {
   useEffect(() => {
     const listener = (event: MessageEvent<HostMessage>) => {
       const message = event.data;
+      if (message.type === "draftState")
+        setDraftState({
+          dirty: message.dirty,
+          conflicted: message.conflicted,
+          saving: message.saving,
+          error: message.error,
+        });
       if (message.type === "localization") setStrings(message.strings);
       if (message.type === "document") {
         if (
@@ -223,7 +236,7 @@ export function App() {
     };
   }, []);
   const commit = (operations: SemanticOperation[]) => {
-    if (pending.current || busy || error) return;
+    if (pending.current || busy || error || draftState.saving || draftState.conflicted) return;
     const operation = operations[0];
     const property =
       operation.type === "setFormProperty" ||
@@ -359,7 +372,15 @@ export function App() {
     controlIds: string[],
     parentId: string,
   ) => {
-    if (!document || !productivityEditable || busy || error) return;
+    if (
+      !document ||
+      !productivityEditable ||
+      busy ||
+      error ||
+      draftState.saving ||
+      draftState.conflicted
+    )
+      return;
     if (action === "paste") {
       if (!clipboardAvailable || !structuralEditable || !canPasteInto(parentId)) return;
     } else {
@@ -422,8 +443,33 @@ export function App() {
     <>
       <header>
         {strings.header}
+        <button
+          disabled={busy || draftState.saving || draftState.conflicted}
+          onClick={() => bridge.postMessage({ type: "save" })}
+        >
+          {strings.save}
+        </button>
         <button onClick={() => bridge.postMessage({ type: "openText" })}>{strings.openText}</button>
+        {draftState.dirty && <span class="notice">{strings.unsaved}</span>}
       </header>
+      {draftState.conflicted && (
+        <div role="alert" class="error">
+          <p>{strings.sourceConflict}</p>
+          <button onClick={() => bridge.postMessage({ type: "resolveConflict", choice: "source" })}>
+            {strings.useSource}
+          </button>
+          <button
+            onClick={() => bridge.postMessage({ type: "resolveConflict", choice: "designer" })}
+          >
+            {strings.useDesigner}
+          </button>
+        </div>
+      )}
+      {draftState.error && (
+        <div role="alert" class="error">
+          {draftState.error}
+        </div>
+      )}
       {document && productivityEditable && (
         <ProductivityToolbar
           document={document}
@@ -438,7 +484,7 @@ export function App() {
           canPaste={
             structuralEditable && !error && canPasteInto(defaultPasteParent(document, selectedIds))
           }
-          busy={busy}
+          busy={busy || draftState.saving}
           contextMenu={contextMenu}
           onOperation={(operation) => commit([operation])}
           onClipboard={requestClipboard}
@@ -544,7 +590,7 @@ export function App() {
               onActivePageChange={(owner, page) =>
                 setActivePages((current) => ({ ...current, [owner]: page }))
               }
-              busy={busy}
+              busy={busy || draftState.saving}
               zoom={zoom}
               showGrid={showGrid}
               snapping={snapping}
@@ -592,7 +638,7 @@ export function App() {
                 tabEditable={tabEditable && !error}
                 parentEditable={parentEditable && !error}
                 editable={editable && !error}
-                busy={busy}
+                busy={busy || draftState.saving}
                 strings={strings}
                 onSelect={setSelectedId}
                 onActivePage={(owner, page) =>
@@ -616,7 +662,7 @@ export function App() {
                   title={document.controls.find((c) => c.id === selectedId)?.name ?? document.name}
                   version={documentVersion}
                   editable={propertyEditable && !error}
-                  busy={busy}
+                  busy={busy || draftState.saving}
                   strings={strings}
                   reply={reply}
                   onCommit={(field, value) =>

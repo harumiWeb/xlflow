@@ -27,6 +27,16 @@ eight handles. Arrow keys move 1 point; Shift+Arrow moves 10 points. Holding
 an arrow key creates one edit when the keys are released. Escape cancels an
 unfinished interaction. Use VS Code Undo/Redo to restore completed edits.
 
+Designer actions are kept in a shared draft for the FormSpec. The Save and
+Unsaved indicators reflect that draft; source files remain unchanged until you
+save. VS Code AutoSave follows your existing Auto Save setting.
+
+Changes you make in the regular text editor appear in the Designer immediately.
+Non-overlapping changes merge with a dirty Designer draft. If the changes
+conflict, the Designer retains both versions and disables saving until you
+choose **Use YAML/JSON changes** or **Use Designer draft**. A whole-document
+choice is confirmed explicitly when the changes cannot be merged safely.
+
 Select the form by clicking its background or its name in the selection path.
 Drag the right edge, bottom edge or bottom-right corner to resize it. This
 updates `form.width` and `form.height` in client-area points; the title bar and
@@ -66,7 +76,8 @@ focused input, so normal character deletion continues to work. Direct deletion
 of a Page is disabled. Structural editing requires the LSP's separate
 `userFormStructuralEdit` capability. Older servers keep their advertised
 geometry/property support and do not offer structural actions. Source edits do
-not change code-behind or save automatically.
+not change code-behind. Save explicitly or let VS Code AutoSave save according
+to its standard configuration.
 
 Drag an existing control into a Frame or onto the form background to change
 its parent. The highlighted destination and drag preview show the final
@@ -138,8 +149,8 @@ edited in this grid.
 Confirm text/number input with Enter or by leaving the field; Escape cancels
 the draft. Boolean/enum choices confirm immediately. Each confirmation creates
 one native undoable source edit in YAML, YML or JSON. Invalid input keeps its
-field error without changing source. A source update invalidates an older
-draft; re-enter it against the refreshed document.
+field error without changing source. A source update invalidates an unconfirmed
+Property Grid field entry; re-enter it against the refreshed document.
 
 Unset, explicit null, empty string, false and zero are distinct. The grid does
 not fill authored fields from measured or preview defaults. Explicit null is

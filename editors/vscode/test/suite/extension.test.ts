@@ -3,6 +3,7 @@ import { runUserFormEditorAssertions } from "./userFormEditor.test";
 import { runUserFormEditAssertions } from "./userFormEdits.test";
 import { runUserFormProviderAssertions } from "./userFormProvider.test";
 import { runUserFormClipboardAssertions } from "./userFormClipboard.test";
+import { runUserFormDraftProviderAssertions } from "./userFormDraftProvider.test";
 import {
   runUserFormWebviewAssertions,
   runCustomEditorRegistrationAssertions,
@@ -127,6 +128,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   await runCustomEditorRegistrationAssertions();
   await runUserFormEditAssertions();
   await runUserFormProviderAssertions(extension.extensionUri);
+  await runUserFormDraftProviderAssertions(extension.extensionUri);
   assert.deepStrictEqual([...initWorkbookExtensions], ["xlsm", "xlam", "xlsb"]);
   assert.ok(newProjectWorkbookPlaceholder.includes(".xlsb"));
   assert.ok(newProjectWorkbookPlaceholder.includes(".xlam"));

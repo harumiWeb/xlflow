@@ -5,6 +5,12 @@ import { runTests } from "@vscode/test-electron";
 
 async function main(): Promise<void> {
   const extensionDevelopmentPath = path.resolve(__dirname, "..", "..");
+  const fixtureExtensionPath = path.resolve(
+    extensionDevelopmentPath,
+    "test",
+    "fixtures",
+    "userFormDraftExtension",
+  );
   const extensionTestsPath = path.resolve(__dirname, "suite", "extension.test.js");
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "xlflow-vscode-922-"));
   const workspaceRoot = path.join(temporaryRoot, "workspace");
@@ -17,7 +23,7 @@ async function main(): Promise<void> {
       "utf8",
     );
     await runTests({
-      extensionDevelopmentPath,
+      extensionDevelopmentPath: [extensionDevelopmentPath, fixtureExtensionPath],
       extensionTestsPath,
       launchArgs: [workspaceRoot, "--disable-workspace-trust", "--disable-extensions"],
     });

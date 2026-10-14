@@ -12,6 +12,17 @@ export interface EditClient {
 // Shared across panels: no concurrent edit generation/application for one URI.
 export class DocumentEditQueue {
   private pending = new Map<string, Promise<unknown>>();
+  async exclusive<T>(uri: vscode.Uri, action: () => Promise<T>): Promise<T> {
+    const key = uri.toString();
+    const previous = this.pending.get(key) ?? Promise.resolve();
+    const job = previous.catch(() => {}).then(action);
+    this.pending.set(key, job);
+    try {
+      return await job;
+    } finally {
+      if (this.pending.get(key) === job) this.pending.delete(key);
+    }
+  }
   async capture<T>(
     document: vscode.TextDocument,
     version: number,
@@ -55,6 +66,7 @@ export class DocumentEditQueue {
     client: EditClient,
     current: () => boolean,
     prepare?: () => Promise<DesignerError | undefined>,
+    apply?: (edits: SourceTextEdit[], label: string) => Promise<void>,
   ): Promise<DesignerError | undefined> {
     const key = document.uri.toString();
     const previous = this.pending.get(key) ?? Promise.resolve();
@@ -141,6 +153,10 @@ export class DocumentEditQueue {
                             : operations.some((op) => op.type === "resizeControl")
                               ? vscode.l10n.t("Resize control")
                               : vscode.l10n.t("Move control"));
+          if (apply) {
+            await apply(edits, label);
+            return undefined;
+          }
           edit.set(
             document.uri,
             edits.map((e): [vscode.TextEdit, vscode.WorkspaceEditEntryMetadata] => [

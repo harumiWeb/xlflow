@@ -1,17 +1,23 @@
 # VS Code UserForm Designer
 
 This specification defines the interactive UserForm Designer in the
-xlflow Visual Studio Code extension. The VS Code `TextDocument` remains the
-canonical source. The Designer renders the current document through the xlflow
-Language Server Protocol (LSP); it does not create or persist another source
-representation.
+xlflow Visual Studio Code extension. The open VS Code `TextDocument` remains
+the project source. The Designer keeps pending source edits in one
+URI-shared `CustomDocument` draft and previews that draft through the xlflow
+Language Server Protocol (LSP). The draft preserves the source text and is
+saved through the VS Code document lifecycle.
 
 ## Editor selection and document eligibility
 
-The extension registers `xlflow.userFormDesigner` as an optional custom text
-editor for `.yaml`, `.yml`, and `.json` files. Its `option` priority keeps the
-normal text editor available. Users can choose the visual editor with **Reopen
-Editor With...**.
+The extension registers `xlflow.userFormDesigner` through
+`CustomEditorProvider` as an optional custom editor for `.yaml`, `.yml`, and
+`.json` files. Its `option` priority keeps the normal text editor available.
+Users can choose the visual editor with **Reopen Editor With...**.
+Opening the file with the Designer redirects to its dedicated
+`xlflow-userform-designer` editor resource. The resource maps back to the
+original file URI, which remains the LSP and source-edit target. Separate
+resource URIs isolate Designer native Undo from the regular text editor's
+history and save-time source edits.
 
 The preview is available only for a FormSpec directly inside the `specs`
 directory under the configured forms root (`[src].forms` in `xlflow.toml`,
@@ -21,12 +27,72 @@ xlflow project with `xlflow.toml` and be handled by the currently selected
 project's single xlflow LSP client. Opening a document associated with another
 project, or without a compatible LSP connection, produces an editor error.
 
+## Deferred-save draft and document lifecycle
+
+The provider owns one custom document and source-text draft per eligible
+FormSpec URI. Every Designer panel for that URI reads and edits the same draft
+and native history. The draft starts from the latest open `TextDocument` text
+and preserves comments, formatting, and other untouched source. Designer
+actions do not change the open source document until Save or configured
+AutoSave.
+The Designer shows Save/Unsaved state for this shared draft.
+
+The host sends the exact current draft text and its revision to the LSP for
+preview, canonical validation, and semantic edits. It applies the localized
+text edits returned by the LSP to the draft. The LSP and canonical FormSpec
+parser remain the only authority for FormSpec meaning and validation; neither
+the host nor Webview adds independent property or schema rules.
+
+Changes made in the regular text editor are observed immediately and reflected
+in the Designer. If the Designer draft has no pending edits, it adopts the
+current text. If it is dirty, the draft engine merges non-overlapping changes
+against the last synchronized source and rebases draft history. An overlapping
+change retains both the current text-editor source and the Designer draft,
+shows a source conflict, and disables saving until explicitly resolved. The
+user can choose **Use YAML/JSON changes** or **Use Designer draft**. When a
+safe granular merge is unavailable, choosing a whole-document version
+requires explicit confirmation. Neither version is silently discarded.
+Conflict detection conservatively treats different edits on the same physical
+source line as overlapping, including compact JSON and YAML flow mappings.
+Changes on different lines are merged when their source ranges do not overlap.
+Before merging a dirty draft, the host compares canonical LSP projections of
+the baseline and latest source. Changes to control order, ID, type, ProgID or
+parent require explicit conflict resolution so geometry cannot move to another
+control after a source reorder. Invalid source or an unavailable canonical
+projection also retains both versions rather than assuming a merge is safe.
+Conflict resolution rebases the existing draft history onto the latest source
+and adds one native Undo step. Undoing both the resolution and the earlier
+Designer action returns to that latest source baseline. History entries
+superseded by later direct source edits are neutral native callbacks; advancing
+past them never restores discarded source or throws a stale-frame error.
+
+Save first reconciles against the latest open `TextDocument`, applies the
+resolved source edits through VS Code document APIs, and then calls
+`TextDocument.save()`. A stale draft never overwrites a newer dirty text-editor
+buffer, and the provider does not overwrite workspace source through filesystem
+writes. Save As creates a missing destination and then uses the VS Code
+document-save path; an existing dirty destination must be saved or reverted
+first. Backup, restore,
+and Revert use the custom-document lifecycle; Revert discards unsaved Designer
+edits and adopts the latest text-editor buffer, preserving its unsaved edits.
+Advancing past superseded neutral Undo entries can conservatively mark the
+native tab dirty even when no Designer text delta remains; Redo to the saved
+checkpoint or Save clears that marker without reverting external source.
+AutoSave follows the standard VS Code configuration and uses the same
+save path.
+
+Each completed Designer action raises one `CustomDocumentEditEvent`.
+VS Code Undo/Redo updates the shared draft, and the draft engine rebases its
+history when external text changes are merged.
+After extension reload, pending backup contents are recovered as one native
+Undo step because VS Code does not persist the provider's callback objects.
+
 ## Source and preview protocol
 
-The extension host reads source from the open VS Code `TextDocument`, including
-unsaved changes. It sends the document URI, its current version, and the full
-text to the LSP. The Webview never reads the document or workspace files
-directly.
+The extension host reads the URI-shared custom-document draft, including
+merged unsaved text-editor changes. It sends the document URI, current draft
+revision, and full text to the LSP. The Webview never reads the document or
+workspace files directly.
 
 The server advertises preview support through
 `capabilities.experimental.userFormPreview: true`. The request is:
@@ -267,8 +333,8 @@ source and previous clipboard unchanged. A request superseded before deletion
 is rejected without deleting its source.
 
 Each command is one productivity semantic operation and one native VS Code
-`WorkspaceEdit`/Undo step. Copy extraction is read-only. Cut captures its
-snapshot before confirmation, keeps that snapshot private during confirmation,
+`CustomDocumentEditEvent`/Undo step. Copy extraction is read-only. Cut captures
+its snapshot before confirmation, keeps that snapshot private during confirmation,
 and publishes it only after the single cascade edit succeeds. Productivity
 operations are not combined with each other or legacy operations in one
 `userFormEdit` transaction.
@@ -321,19 +387,21 @@ A control with no descendants is removed immediately. If descendants exist,
 the host first shows a modal confirmation containing the selected control's
 name and descendant count. Confirmed removal deletes the selected control and
 all descendants with `cascade: true` in one semantic edit and one VS Code
-`WorkspaceEdit`; Undo/Redo therefore restores or removes the whole subtree as
-one native history step. The canvas Delete action does not delete a Page.
+`CustomDocumentEditEvent`; Undo/Redo therefore restores or removes the whole
+subtree as one native history step. The canvas Delete action does not delete a Page.
 Page deletion is available from the Page list and always requires explicit
 confirmation identifying the Page and the number of descendant controls; the
 confirmed action removes that Page and its descendants with `cascade: true` in
 one semantic edit and one native history step.
 
-Structural edits apply only to the open FormSpec `TextDocument`. They do not
-edit code-behind or save the document automatically. The host captures the
-source and version associated with an add request or pending delete
-confirmation. If the document text/version, project, or LSP connection changes
-before the edit is submitted or applied, discard the stale action and refresh
-from the current document; do not replay it against newer text.
+Structural edits apply only to the shared FormSpec draft. They do not edit
+code-behind or save the open source document until a VS Code save action. The
+host captures the draft source and revision associated with an add request or
+pending delete confirmation. If that draft revision, project, or LSP
+connection changes before the action is submitted or applied, discard the
+stale action and refresh from the current merged draft; do not replay the
+request against newer text. Already committed draft history follows the
+external-change rebase policy above.
 
 ## Frame parenting and hierarchy
 
@@ -466,10 +534,12 @@ Keep invalid input with a field-level error without changing source; preserve
 structured field/code/message diagnostics from the server. Drafts belong to
 target kind, target ID, field and document version. Form identity is distinct
 from every control ID, including a control literally named `form`, in both
-component keys and draft/reply storage. External source edits invalidate old
-drafts rather than applying or rebasing them automatically. Switching selection
-preserves dirty drafts and their matching edit replies, including field-level
-rejection diagnostics, until corrected or canceled. Source edits and
+component keys and draft/reply storage. External source edits invalidate
+unsubmitted Property Grid field drafts rather than rebasing those field values.
+The URI-shared source draft follows the deferred-save merge and conflict policy
+above. Switching selection preserves dirty Property Grid field drafts and
+their matching edit replies, including field-level rejection diagnostics,
+until corrected or canceled. Source edits and
 undo/redo refresh values from source. Selection and rendering alone never
 produce source edits. Explicit null is allowed only for nullable fields
 accepted by canonical validation; there is no property removal action.
@@ -615,12 +685,13 @@ with standard LSP TextEdit ranges converted from UTF-8 offsets to UTF-16
 positions. Errors retain structured operation diagnostics and canonical codes.
 The server does not apply edits, write files or replace input with saved source.
 
-The host serializes edits per document URI, captures source/version, validates
-returned ranges and applies all edits in one WorkspaceEdit. Reject requests and
-responses obsolete after text, project, configuration, connection, visibility
-or disposal changes. Native custom text editor history owns undo/redo; there
-is no Webview history or automatic save. Text edits, undo/redo and other panels
-refresh through the preview synchronizer. Invalid source or unavailable
+The host serializes edits per document URI, captures draft source/revision,
+validates returned ranges, and applies each completed action to the shared
+draft as one `CustomDocumentEditEvent`. Reject requests and responses obsolete
+after draft, project, configuration, connection, visibility, or disposal
+changes. Native custom-document history owns undo/redo; there is no Webview
+history. External text-editor changes refresh the draft or enter the explicit
+conflict state described above. Invalid source or unavailable
 connections disable editing while retaining the last valid rendering. Rejected
 operations revert preview and display an error without automatic retry/rebase.
 
@@ -643,7 +714,8 @@ independently of existing capabilities. Each `userFormEdit` request containing
 `reorderControls`, `removeControls`, `setTabOrder`, or `pasteControls` contains
 exactly that one operation. Do not combine a productivity operation with a
 legacy operation or another productivity operation. Each successful
-productivity action is applied by the extension host as one `WorkspaceEdit`.
+productivity action is applied by the extension host as one
+`CustomDocumentEditEvent`.
 The new capability does not imply another edit family: movement, layout, and
 z-order also require `userFormEdit`; `setTabOrder` also requires
 `userFormPropertyEdit`; `removeControls` and `pasteControls` also require
@@ -653,7 +725,7 @@ requires `userFormParentEdit`; creating or placing Page controls requires
 Older servers keep only the other edit families they already advertise.
 
 The extension host sends `xlflow/userFormCopy` with
-`{uri, version, text, controlIds}` using the current unsaved TextDocument. The
+`{uri, version, text, controlIds}` using the current unsaved custom-document draft. The
 request requires `userFormProductivityEdit`. A successful response is
 `{version, snapshot, document, hasPicturePaths:boolean}`. An error response
 contains `{version, error}` and may also contain `hasPicturePaths:boolean`; that
@@ -706,6 +778,31 @@ numeric indexes ascending, ties by z-order, and absent/null indexes last by
 z-order. Apply sends `setTabOrder{parentId,controlIds}` with the complete
 ordered list; the LSP assigns zero-based indexes in one edit. A source change
 discards a pending local order instead of rebasing it.
+
+## Deferred-save verification requirements
+
+These are required implementation checks; they do not claim that the current
+implementation or test run has passed.
+
+Verify that multiple Designer panels for one URI share draft text and native
+Undo/Redo. A completed LSP edit must change only the draft until Save or
+configured AutoSave, and Undo/Redo must not write to the open `TextDocument`.
+Preview and edit requests must carry the exact draft text, preserve source
+formatting, and retain canonical LSP validation behavior without frontend
+semantic rules.
+
+Verify that external unsaved text-editor changes appear immediately. A clean
+draft adopts them; non-overlapping changes merge into a dirty draft and the
+EngineWorker rebases history so subsequent Undo/Redo remains correct. An
+overlapping edit must retain both versions, show the Source Conflict state, and
+block Save/AutoSave until an explicit resolution. Cover **Use YAML/JSON
+changes**, **Use Designer draft**, and an explicitly confirmed whole-document
+choice when a granular merge is unavailable.
+
+Verify Save and AutoSave apply edits to the latest open `TextDocument` and call
+its save API without writing the workspace file directly or replacing newer
+dirty text. Cover failed apply/save retry, Save As, Revert, backup and restore,
+and the standard VS Code AutoSave enabled/disabled settings.
 
 ## Structural edit verification requirements
 
@@ -808,6 +905,7 @@ interpolated into the HTML document.
 - `docs/adr/ADR-0068-userform-designer-structural-control-edits.md`
 - `docs/adr/ADR-0067-userform-designer-property-metadata.md`
 - `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`
+- `docs/adr/ADR-0073-userform-designer-deferred-save-document-lifecycle.md`
 - `docs/adr/ADR-0070-userform-designer-page-tab-collection-editing.md`
 - `docs/adr/ADR-0071-userform-designer-productivity-edits.md`
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`

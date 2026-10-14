@@ -3,7 +3,9 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { XlflowLanguageClientManager } from "../../src/client";
-import { designerViewType, UserFormEditorProvider } from "../../src/userFormEditor/provider";
+import { UserFormEditorProvider } from "../../src/userFormEditor/provider";
+import { designerResourceUri } from "../../src/userFormEditor/resource";
+import type { UserFormCustomDocument } from "../../src/userFormEditor/customDocument";
 import type {
   ClipboardSnapshot,
   CopyResult,
@@ -214,44 +216,64 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
   const targetPanel = createFakePanel(true);
   const sourceCancellation = new vscode.CancellationTokenSource();
   const targetCancellation = new vscode.CancellationTokenSource();
-  const targetChanges: vscode.TextDocumentChangeEvent[] = [];
-  const targetChangeSubscription = vscode.workspace.onDidChangeTextDocument((event) => {
-    if (
-      event.document.uri.toString() === targetDocument.uri.toString() &&
-      event.contentChanges.length > 0
-    )
-      targetChanges.push(event);
+  const sourceCustomDocument = await provider.openCustomDocument(
+    designerResourceUri(sourceDocument.uri),
+    { backupId: undefined, untitledDocumentData: undefined },
+    sourceCancellation.token,
+  );
+  const targetCustomDocument = await provider.openCustomDocument(
+    designerResourceUri(targetDocument.uri),
+    { backupId: undefined, untitledDocumentData: undefined },
+    targetCancellation.token,
+  );
+  assert.strictEqual(
+    sourceCustomDocument.uri.toString(),
+    designerResourceUri(sourceDocument.uri).toString(),
+  );
+  assert.strictEqual(sourceCustomDocument.sourceUri.toString(), sourceDocument.uri.toString());
+  assert.strictEqual(sourceCustomDocument.document.uri.toString(), sourceDocument.uri.toString());
+  assert.strictEqual(
+    targetCustomDocument.uri.toString(),
+    designerResourceUri(targetDocument.uri).toString(),
+  );
+  assert.strictEqual(targetCustomDocument.sourceUri.toString(), targetDocument.uri.toString());
+  assert.strictEqual(targetCustomDocument.document.uri.toString(), targetDocument.uri.toString());
+  const sourceDraftDocument = sourceCustomDocument.document;
+  const targetDraftDocument = targetCustomDocument.document;
+  const targetChanges: vscode.CustomDocumentEditEvent<UserFormCustomDocument>[] = [];
+  const targetChangeSubscription = provider.onDidChangeCustomDocument((event) => {
+    if (event.document === targetCustomDocument) targetChanges.push(event);
   });
 
   try {
     console.log("[userFormClipboard] opening source and target preview panels");
-    await provider.resolveCustomTextEditor(
-      sourceDocument,
+    await provider.resolveCustomEditor(
+      sourceCustomDocument,
       sourcePanel.panel,
       sourceCancellation.token,
     );
-    await provider.resolveCustomTextEditor(
-      targetDocument,
+    await provider.resolveCustomEditor(
+      targetCustomDocument,
       targetPanel.panel,
       targetCancellation.token,
     );
     sourcePanel.receive({ type: "ready" });
     targetPanel.receive({ type: "ready" });
     await Promise.all([
-      waitForDocument(sourcePanel, sourceDocument, "the source workspace FormSpec preview"),
-      waitForDocument(targetPanel, targetDocument, "the target workspace FormSpec preview"),
+      waitForDocument(sourcePanel, sourceDraftDocument, "the source workspace FormSpec preview"),
+      waitForDocument(targetPanel, targetDraftDocument, "the target workspace FormSpec preview"),
     ]);
     console.log("[userFormClipboard] both workspace previews are ready");
     targetPanel.setVisible(false);
 
     const initialCopyIndex = pendingCopies.length;
-    startClipboardAction(sourcePanel, sourceDocument, 1, "copy", ["source-root"]);
+    startClipboardAction(sourcePanel, sourceDraftDocument, 1, "copy", ["source-root"]);
     await waitFor(() => pendingCopies.length > initialCopyIndex, "the source copy request");
     assert.strictEqual(
       pendingCopies[initialCopyIndex].document.uri.toString(),
       sourceDocument.uri.toString(),
     );
-    assert.strictEqual(pendingCopies[initialCopyIndex].text, sourceDocument.getText());
+    assert.strictEqual(pendingCopies[initialCopyIndex].text, sourceDraftDocument.getText());
     assert.deepStrictEqual(pendingCopies[initialCopyIndex].controlIds, ["source-root"]);
     resolveCopy(pendingCopies[initialCopyIndex], sourceFixture);
     const initialCopyReply = await waitForReply(sourcePanel, 1);
@@ -271,11 +293,11 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
         ),
       "the hidden target panel to replay shared clipboard availability when shown",
     );
-    await waitForDocument(targetPanel, targetDocument, "the visible target panel preview");
+    await waitForDocument(targetPanel, targetDraftDocument, "the visible target panel preview");
 
-    const originalTarget = targetDocument.getText();
+    const originalTarget = targetDraftDocument.getText();
     const targetChangeBaseline = targetChanges.length;
-    startClipboardAction(targetPanel, targetDocument, 2, "paste", ["target-root"]);
+    startClipboardAction(targetPanel, targetDraftDocument, 2, "paste", ["target-root"]);
     const pasteReply = await waitForReply(targetPanel, 2);
     assert.strictEqual(pasteReply.error, undefined, "Paste B should apply successfully");
     const firstPasteEdit = recordedEdits.at(-1);
@@ -304,9 +326,9 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
     assert.deepStrictEqual(pasteReply.selectionIds, [firstPaste.allocations[0].id]);
     await waitFor(
       () => targetChanges.length === targetChangeBaseline + 1,
-      "one real WorkspaceEdit change for the pasted subtree",
+      "one native CustomDocument edit event for the pasted subtree",
     );
-    const afterFirstPaste = targetDocument.getText();
+    const afterFirstPaste = targetDraftDocument.getText();
     assert.ok(
       afterFirstPaste.startsWith(originalTarget),
       "the WorkspaceEdit should preserve the original source bytes",
@@ -318,29 +340,30 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
       "the copied child should reference its newly allocated root ID",
     );
 
-    await vscode.commands.executeCommand("vscode.openWith", targetDocument.uri, designerViewType);
+    const pasteEvent = targetChanges.at(-1)!;
+    assert.strictEqual(pasteEvent.document, targetCustomDocument);
+    await pasteEvent.undo();
     await waitFor(
-      () => activeCustomEditorIs(designerViewType, targetDocument.uri),
-      "the real custom editor for target FormSpec B to become active",
+      () => targetDraftDocument.getText() === originalTarget,
+      "the native edit callback to undo the pasted subtree",
     );
-    await vscode.commands.executeCommand("undo");
+    await pasteEvent.redo();
     await waitFor(
-      () => targetDocument.getText() === originalTarget,
-      "Undo in custom editor B to remove the pasted subtree",
+      () => targetDraftDocument.getText() === afterFirstPaste,
+      "the native edit callback to redo the pasted subtree",
     );
-    await vscode.commands.executeCommand("redo");
-    await waitFor(
-      () => targetDocument.getText() === afterFirstPaste,
-      "Redo in custom editor B to restore the pasted subtree",
+    await waitForDocument(
+      targetPanel,
+      targetDraftDocument,
+      "the target preview after Undo and Redo",
     );
-    await waitForDocument(targetPanel, targetDocument, "the target preview after Undo and Redo");
-    console.log("[userFormClipboard] Paste, custom-editor Undo, and Redo completed");
+    console.log("[userFormClipboard] Paste, native CustomDocument Undo, and Redo completed");
 
     const olderCopyIndex = pendingCopies.length;
-    startClipboardAction(sourcePanel, sourceDocument, 3, "copy", ["source-root"]);
+    startClipboardAction(sourcePanel, sourceDraftDocument, 3, "copy", ["source-root"]);
     await waitFor(() => pendingCopies.length > olderCopyIndex, "the earlier panel copy request");
     const newerCopyIndex = pendingCopies.length;
-    startClipboardAction(targetPanel, targetDocument, 4, "copy", ["target-root"]);
+    startClipboardAction(targetPanel, targetDraftDocument, 4, "copy", ["target-root"]);
     await waitFor(
       () => pendingCopies.length > newerCopyIndex,
       "two overlapping copy requests from different panels",
@@ -358,12 +381,12 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
     console.log("[userFormClipboard] overlapping Copy requests kept the newest clipboard snapshot");
 
     const editsBeforeSupersededCut = recordedEdits.length;
-    const sourceBeforeSupersededCut = sourceDocument.getText();
+    const sourceBeforeSupersededCut = sourceDraftDocument.getText();
     const supersededCutIndex = pendingCopies.length;
-    startClipboardAction(sourcePanel, sourceDocument, 5, "cut", ["source-root"]);
+    startClipboardAction(sourcePanel, sourceDraftDocument, 5, "cut", ["source-root"]);
     await waitFor(() => pendingCopies.length > supersededCutIndex, "the source Cut copy request");
     const supersedingCopyIndex = pendingCopies.length;
-    startClipboardAction(targetPanel, targetDocument, 6, "copy", ["target-root"]);
+    startClipboardAction(targetPanel, targetDraftDocument, 6, "copy", ["target-root"]);
     await waitFor(
       () => pendingCopies.length > supersedingCopyIndex,
       "the newer target Copy request",
@@ -374,7 +397,7 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
     resolveCopy(pendingCopies[supersededCutIndex], sourceFixture);
     const supersededCutReply = await waitForReply(sourcePanel, 5);
     assert.strictEqual(supersededCutReply.error?.code, "staleDocument");
-    assert.strictEqual(sourceDocument.getText(), sourceBeforeSupersededCut);
+    assert.strictEqual(sourceDraftDocument.getText(), sourceBeforeSupersededCut);
     assert.strictEqual(
       recordedEdits.length,
       editsBeforeSupersededCut,
@@ -382,7 +405,7 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
     );
 
     const changedCopyIndex = pendingCopies.length;
-    startClipboardAction(sourcePanel, sourceDocument, 7, "copy", ["source-root"]);
+    startClipboardAction(sourcePanel, sourceDraftDocument, 7, "copy", ["source-root"]);
     await waitFor(
       () => pendingCopies.length > changedCopyIndex,
       "a delayed copy before source mutation",
@@ -405,7 +428,7 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
     );
     await waitForDocument(
       sourcePanel,
-      sourceDocument,
+      sourceDraftDocument,
       "the source panel to refresh after the delayed copy becomes stale",
       (message) => message.productivityEditable === true,
     );
@@ -414,13 +437,13 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
     previewChanged.fire();
     await waitForDocument(
       targetPanel,
-      targetDocument,
+      targetDraftDocument,
       "the target panel preview with structural editing disabled",
       (message) => message.structuralEditable === false && message.productivityEditable === true,
     );
     const editCountBeforeDeniedPaste = recordedEdits.length;
     const copyCountBeforeDeniedPaste = pendingCopies.length;
-    startClipboardAction(targetPanel, targetDocument, 8, "paste", ["target-root"]);
+    startClipboardAction(targetPanel, targetDraftDocument, 8, "paste", ["target-root"]);
     const deniedPasteReply = await waitForReply(targetPanel, 8);
     assert.ok(
       deniedPasteReply.error,
@@ -432,7 +455,7 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
     previewChanged.fire();
     await waitForDocument(
       targetPanel,
-      targetDocument,
+      targetDraftDocument,
       "the target panel to restore its structural-edit capability",
       (message) => message.structuralEditable === true,
     );
@@ -440,7 +463,7 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
       "[userFormClipboard] capability denial produced no edit; capability recovery succeeded",
     );
 
-    startClipboardAction(targetPanel, targetDocument, 9, "paste", ["target-root"]);
+    startClipboardAction(targetPanel, targetDraftDocument, 9, "paste", ["target-root"]);
     const newerClipboardPasteReply = await waitForReply(targetPanel, 9);
     assert.strictEqual(newerClipboardPasteReply.error, undefined);
     const newerClipboardPaste = recordedEdits.at(-1)?.operations[0];
@@ -455,13 +478,13 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
 
     await waitForDocument(
       sourcePanel,
-      sourceDocument,
+      sourceDraftDocument,
       "the source panel before the cut checks",
       (message) => message.productivityEditable === true,
     );
-    const sourceBeforeFailedCut = sourceDocument.getText();
+    const sourceBeforeFailedCut = sourceDraftDocument.getText();
     const failedCutIndex = pendingCopies.length;
-    startClipboardAction(sourcePanel, sourceDocument, 10, "cut", ["source-root"]);
+    startClipboardAction(sourcePanel, sourceDraftDocument, 10, "cut", ["source-root"]);
     await waitFor(
       () => pendingCopies.length > failedCutIndex,
       "the cut copy snapshot before a failed edit",
@@ -471,16 +494,16 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
     const failedCutReply = await waitForReply(sourcePanel, 10);
     assert.strictEqual(failedCutReply.error?.code, "testBackendFailure");
     assert.strictEqual(
-      sourceDocument.getText(),
+      sourceDraftDocument.getText(),
       sourceBeforeFailedCut,
       "a failed Cut must leave its source intact",
     );
 
     confirmCut = false;
     const editCountBeforeCancelledCut = recordedEdits.length;
-    const sourceBeforeCancelledCut = sourceDocument.getText();
+    const sourceBeforeCancelledCut = sourceDraftDocument.getText();
     const cancelledCutIndex = pendingCopies.length;
-    startClipboardAction(sourcePanel, sourceDocument, 11, "cut", ["source-root"]);
+    startClipboardAction(sourcePanel, sourceDraftDocument, 11, "cut", ["source-root"]);
     await waitFor(
       () => pendingCopies.length > cancelledCutIndex,
       "the cut copy snapshot before confirmation cancellation",
@@ -489,7 +512,7 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
     const cancelledCutReply = await waitForReply(sourcePanel, 11);
     assert.strictEqual(cancelledCutReply.error?.code, "editCancelled");
     assert.strictEqual(
-      sourceDocument.getText(),
+      sourceDraftDocument.getText(),
       sourceBeforeCancelledCut,
       "a cancelled Cut must leave its source intact",
     );
@@ -505,10 +528,10 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
     );
     await waitForDocument(
       targetPanel,
-      targetDocument,
+      targetDraftDocument,
       "the target before checking retained clipboard",
     );
-    startClipboardAction(targetPanel, targetDocument, 12, "paste", ["target-root"]);
+    startClipboardAction(targetPanel, targetDraftDocument, 12, "paste", ["target-root"]);
     assert.strictEqual((await waitForReply(targetPanel, 12)).error, undefined);
     const retainedPaste = recordedEdits.at(-1)!.operations[0];
     assert.ok(retainedPaste.type === "pasteControls");
@@ -525,19 +548,19 @@ export async function runUserFormClipboardAssertions(extensionUri: vscode.Uri): 
       "failed and cancelled Cut retain the paste repetition counter",
     );
     confirmCut = true;
-    await waitForDocument(sourcePanel, sourceDocument, "the source before successful Cut");
+    await waitForDocument(sourcePanel, sourceDraftDocument, "the source before successful Cut");
     const successfulCutIndex = pendingCopies.length;
-    startClipboardAction(sourcePanel, sourceDocument, 13, "cut", ["source-root"]);
+    startClipboardAction(sourcePanel, sourceDraftDocument, 13, "cut", ["source-root"]);
     await waitFor(() => pendingCopies.length > successfulCutIndex, "the successful Cut snapshot");
     resolveCopy(pendingCopies[successfulCutIndex], sourceFixture);
     assert.strictEqual((await waitForReply(sourcePanel, 13)).error, undefined);
     assert.ok(
-      !sourceDocument.getText().includes("source-root") &&
-        !sourceDocument.getText().includes("source-child"),
+      !sourceDraftDocument.getText().includes("source-root") &&
+        !sourceDraftDocument.getText().includes("source-child"),
       "successful Cut removes the complete subtree",
     );
-    await waitForDocument(targetPanel, targetDocument, "the target after successful Cut");
-    startClipboardAction(targetPanel, targetDocument, 14, "paste", ["target-root"]);
+    await waitForDocument(targetPanel, targetDraftDocument, "the target after successful Cut");
+    startClipboardAction(targetPanel, targetDraftDocument, 14, "paste", ["target-root"]);
     assert.strictEqual((await waitForReply(targetPanel, 14)).error, undefined);
     const cutPaste = recordedEdits.at(-1)!.operations[0];
     assert.ok(cutPaste.type === "pasteControls");
@@ -805,17 +828,6 @@ async function waitForReply(panel: FakePanel, requestId: number) {
           message.type === "editResult" && message.requestId === requestId,
       ),
     `clipboard reply ${requestId}`,
-  );
-}
-
-function activeCustomEditorIs(viewType: string, uri: vscode.Uri): boolean {
-  return vscode.window.tabGroups.all.some((group) =>
-    group.tabs.some((tab) => {
-      const input = tab.input as unknown as { viewType?: string; uri?: vscode.Uri };
-      return (
-        tab.isActive && input.viewType === viewType && input.uri?.toString() === uri.toString()
-      );
-    }),
   );
 }
 

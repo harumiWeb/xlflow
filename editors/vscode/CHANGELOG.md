@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added deferred-save UserForm Designer drafts shared across panels for one
+  FormSpec. Designer edits use native Undo/Redo and preserve YAML/YML/JSON
+  until Save. Non-overlapping text-editor changes merge, while conflicts retain both
+  versions and require an explicit resolution. AutoSave follows VS Code
+  settings.
+
 - Added selected-form right/bottom edge and corner dragging to resize
   `form.width` / `form.height` in client points, with snapping, child bounds,
   cancellation and atomic Undo/Redo.

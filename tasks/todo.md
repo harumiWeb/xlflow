@@ -876,3 +876,10 @@ CI or publication is claimed.
 - [x] Persist scaffold VBA codepage and add actionable encoding diagnostics / pack --check.
 - [x] Update ADR/specs/user documentation and changelogs.
 - [x] Run focused regressions, required checks and fresh session-backed Excel / pack round-trips.
+
+# Deferred-save UserForm Designer
+
+- [x] Record the URI-shared draft, native custom-document history, conflict, save, and VS Code lifecycle decisions in ADR-0073; supersede the relevant ADR-0064/0066 decisions.
+- [x] Update the Designer specification, user guide, and unreleased changelogs for deferred save and explicit conflict resolution.
+- [x] Implement `CustomEditorProvider` and URI-shared draft state, including draft history rebasing, `CustomDocumentEditEvent` Undo/Redo, and Save/Save As/Revert/backup/restore through the latest `TextDocument`. Isolate native Designer history with a dedicated editor resource URI while retaining the real source URI for LSP and persistence.
+- [x] Verify shared drafts across panels; unchanged source before Save; external-edit merge and history rebasing; structural and same-line conflict retention; explicit conflict resolution; Save As, source-preserving Revert, backup/recovery, and configured AutoSave. Full VS Code 1.141.1 tests, type checks, lint/docs checks and diff checks pass. Bounded read-only review completed; source-only change requires no Excel workbook E2E.

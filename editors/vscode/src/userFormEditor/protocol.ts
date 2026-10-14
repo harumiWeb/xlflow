@@ -129,6 +129,11 @@ export interface DesignerDocument {
 export const designerStrings = {
   header: "xlflow UserForm Designer",
   openText: "Open text editor",
+  save: "Save",
+  unsaved: "Unsaved Designer changes",
+  sourceConflict: "YAML/JSON and Designer changes conflict. Resolve the conflict before saving.",
+  useSource: "Use YAML/JSON changes",
+  useDesigner: "Use Designer draft",
   lastValid: "Showing the last valid document.",
   loading: "Loading FormSpec…",
   approximate:
@@ -254,6 +259,7 @@ export type HostMessage =
   | { type: "invalidDocument"; version: number; error: DesignerError }
   | { type: "editResult"; requestId: number; error?: DesignerError; selectionIds?: string[] }
   | { type: "clipboardState"; available: boolean }
+  | { type: "draftState"; dirty: boolean; conflicted: boolean; saving: boolean; error?: string }
   | { type: "editingUnavailable" }
   | { type: "themeChanged" };
 
@@ -629,6 +635,8 @@ export interface EditResult {
 export type WebviewMessage =
   | { type: "ready" }
   | { type: "openText" }
+  | { type: "save" }
+  | { type: "resolveConflict"; choice: "source" | "designer" }
   | {
       type: "clipboard";
       requestId: number;
@@ -678,8 +686,12 @@ export function isParentOperation(value: unknown): value is ParentOperation {
 export function isWebviewMessage(value: unknown): value is WebviewMessage {
   if (typeof value !== "object" || value === null) return false;
   const message = value as Record<string, unknown>;
-  if (message.type === "ready" || message.type === "openText")
+  if (message.type === "ready" || message.type === "openText" || message.type === "save")
     return Object.keys(message).length === 1;
+  if (message.type === "resolveConflict")
+    return (
+      Object.keys(message).length === 2 && ["source", "designer"].includes(String(message.choice))
+    );
   if (message.type === "clipboard") return isClipboardMessage(message);
   const operations = message.operations;
   return (

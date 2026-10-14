@@ -56,6 +56,15 @@ export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): P
     onDidChangePreviewConnection: connection.event,
   } as unknown as XlflowLanguageClientManager;
   const provider = new UserFormEditorProvider(extensionUri, client);
+  const document = await vscode.workspace.openTextDocument({
+    language: "yaml",
+    content: "form: {name: Main, caption: Original}\ncontrols: []\n",
+  });
+  const customDocument = await provider.openCustomDocument(
+    document.uri,
+    { backupId: undefined, untitledDocumentData: undefined },
+    cancel.token,
+  );
   let finish!: (error: DesignerError | undefined) => void;
   let current!: () => boolean;
   (provider as unknown as { edits: Pick<DocumentEditQueue, "run"> }).edits = {
@@ -66,10 +75,6 @@ export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): P
       });
     },
   };
-  const document = await vscode.workspace.openTextDocument({
-    language: "yaml",
-    content: "form: {name: Main, caption: Original}\ncontrols: []\n",
-  });
   const source = document.getText();
   const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
   const show = async () => {
@@ -81,12 +86,12 @@ export async function runUserFormProviderAssertions(extensionUri: vscode.Uri): P
     incoming.fire({
       type: "edit",
       requestId,
-      version: document.version,
+      version: customDocument.document.version,
       operations: [{ type: "setFormProperty", field: "caption", value: "Draft" }],
     });
   const replies = () => messages.filter((m) => m.type === "editResult");
   try {
-    await provider.resolveCustomTextEditor(document, panel, cancel.token);
+    await provider.resolveCustomEditor(customDocument, panel, cancel.token);
     incoming.fire({ type: "ready" });
     await tick();
     const errors: (DesignerError | undefined)[] = [

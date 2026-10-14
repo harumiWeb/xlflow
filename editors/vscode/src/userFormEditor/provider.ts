@@ -31,6 +31,10 @@ import {
 } from "./clipboard";
 import type { ClipboardContent } from "./clipboard";
 import { designerDocument } from "./model";
+import { UserFormCustomDocument, virtualTextDocument } from "./customDocument";
+import { DraftState, computeSourceChanges } from "./draft";
+import type { DraftFrame } from "./draft";
+import { designerResourceUri, designerSourceUri } from "./resource";
 
 export type DeleteConfirmation = (name: string, descendants: number) => PromiseLike<boolean>;
 const confirmSubtreeDeletion: DeleteConfirmation = async (name, descendants) => {
@@ -42,6 +46,20 @@ const confirmSubtreeDeletion: DeleteConfirmation = async (name, descendants) => 
       action,
     )) === action
   );
+};
+
+const confirmConflictResolution = async (choice: "source" | "designer"): Promise<boolean> => {
+  const action =
+    choice === "source"
+      ? vscode.l10n.t("Use YAML/JSON changes")
+      : vscode.l10n.t("Use Designer draft");
+  const warning =
+    choice === "source"
+      ? vscode.l10n.t("Discard the conflicting Designer draft and use the current YAML/JSON text?")
+      : vscode.l10n.t(
+          "Use the Designer draft instead of the current YAML/JSON text? The source will change only when you save.",
+        );
+  return (await vscode.window.showWarningMessage(warning, { modal: true }, action)) === action;
 };
 
 export async function prepareStructuralEdit(
@@ -191,24 +209,290 @@ export async function prepareCollectionEdit(
 
 export const designerViewType = "xlflow.userFormDesigner";
 
-export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
+export class UserFormEditorProvider
+  implements vscode.CustomEditorProvider<UserFormCustomDocument>, vscode.Disposable
+{
   private readonly edits = new DocumentEditQueue();
   private readonly clipboard = new DesignerClipboard();
+  private readonly documents = new Map<string, UserFormCustomDocument>();
+  private readonly customEdits = new vscode.EventEmitter<
+    vscode.CustomDocumentEditEvent<UserFormCustomDocument>
+  >();
+  public readonly onDidChangeCustomDocument = this.customEdits.event;
+  private readonly restored = new Set<UserFormCustomDocument>();
+  private readonly redirectDrafts = new Map<string, DraftState>();
   public constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly clients: XlflowLanguageClientManager,
     private readonly confirmDeletion: DeleteConfirmation = confirmSubtreeDeletion,
+    private readonly confirmResolution: (
+      choice: "source" | "designer",
+    ) => PromiseLike<boolean> = confirmConflictResolution,
   ) {}
 
   dispose(): void {
+    this.documents.forEach((document) => document.dispose());
+    this.documents.clear();
+    this.redirectDrafts.clear();
+    this.customEdits.dispose();
     this.clipboard.dispose();
   }
 
-  public async resolveCustomTextEditor(
-    document: vscode.TextDocument,
+  public async openCustomDocument(
+    uri: vscode.Uri,
+    context: vscode.CustomDocumentOpenContext,
+    token: vscode.CancellationToken,
+  ): Promise<UserFormCustomDocument> {
+    const existing = this.documents.get(uri.toString());
+    if (existing && !existing.closed) return existing;
+    const source = await vscode.workspace.openTextDocument(designerSourceUri(uri));
+    let state: DraftState | undefined = this.redirectDrafts.get(uri.toString());
+    if (context.backupId) {
+      const backup = JSON.parse(
+        Buffer.from(
+          await vscode.workspace.fs.readFile(vscode.Uri.parse(context.backupId)),
+        ).toString("utf8"),
+      );
+      const restored = DraftState.restore(backup);
+      // VS Code does not persist custom undo callbacks across extension reloads.
+      // Recover the pending draft as one native edit against its source baseline.
+      state = new DraftState(restored.baseText);
+      state.commit(restored.text, vscode.l10n.t("Restore Designer draft"));
+      try {
+        if (state.dirty && !(await this.sourceMergeSafe(source, state.baseText, source.getText())))
+          state.retainConflict(source.getText());
+        else state.synchronize(source.getText());
+      } catch {
+        state.retainConflict(source.getText());
+      }
+    }
+    if (token.isCancellationRequested) throw new vscode.CancellationError();
+    const document: UserFormCustomDocument = new UserFormCustomDocument(
+      source,
+      state,
+      uri,
+      (base, external) => this.sourceMergeSafe(document.sourceDocument, base, external),
+      (action) => this.edits.exclusive(source.uri, action),
+    );
+    if (state) this.restored.add(document);
+    this.documents.set(uri.toString(), document);
+    this.redirectDrafts.delete(uri.toString());
+    document.onDidDispose(() => {
+      this.restored.delete(document);
+      if (this.documents.get(uri.toString()) === document) this.documents.delete(uri.toString());
+    });
+    return document;
+  }
+
+  private async sourceMergeSafe(
+    source: vscode.TextDocument,
+    baseText: string,
+    externalText: string,
+  ): Promise<boolean> {
+    if (baseText === externalText) return true;
+    const snapshot = (text: string) =>
+      virtualTextDocument(
+        () => source,
+        () => text,
+        () => source.version,
+        () => source.isClosed,
+      );
+    const [base, external] = await Promise.all([
+      this.clients.requestUserFormPreview(snapshot(baseText)),
+      this.clients.requestUserFormPreview(snapshot(externalText)),
+    ]);
+    if (!base.document || !external.document || base.error || external.error) return false;
+    // A textual merge must not bind a pending edit to a different control after
+    // a source reorder, deletion, reparenting or type change. Canonical LSP
+    // projections identify these boundaries; the host does not parse FormSpec.
+    const identity = (document: import("./protocol").PreviewDocument) =>
+      JSON.stringify(
+        document.controls.map((control) => [
+          control.id,
+          control.type.toLowerCase(),
+          control.progId?.toLowerCase() ?? "",
+          control.parentId ?? "",
+        ]),
+      );
+    return identity(base.document) === identity(external.document);
+  }
+
+  private recordEdit(document: UserFormCustomDocument, frame: DraftFrame, label: string): void {
+    this.customEdits.fire({
+      document,
+      label,
+      undo: () =>
+        this.edits.exclusive(document.sourceUri, async () => {
+          document.undo(frame);
+        }),
+      redo: () =>
+        this.edits.exclusive(document.sourceUri, async () => {
+          document.redo(frame);
+        }),
+    });
+  }
+
+  public async saveCustomDocument(
+    document: UserFormCustomDocument,
+    token: vscode.CancellationToken,
+  ): Promise<void> {
+    await this.edits.exclusive(document.sourceUri, () =>
+      document.save(async () => {
+        const result = await this.clients.requestUserFormPreview(document.document);
+        if (result.error || !result.document)
+          throw new Error(result.error?.message ?? "The UserForm draft is invalid.");
+      }, token),
+    );
+  }
+
+  public async saveCustomDocumentAs(
+    document: UserFormCustomDocument,
+    destination: vscode.Uri,
+    token: vscode.CancellationToken,
+  ): Promise<void> {
+    if (
+      destination.toString() === document.uri.toString() ||
+      destination.toString() === document.sourceUri.toString()
+    )
+      return this.saveCustomDocument(document, token);
+    await this.edits.exclusive(document.sourceUri, async () => {
+      document.saving = true;
+      document.saveError = undefined;
+      document.notify();
+      try {
+        if (!(await document.reconcileSource(document.sourceDocument.getText())))
+          throw new Error("The source changed during Save As.");
+        if (document.state.conflicted)
+          throw new Error(
+            vscode.l10n.t("Resolve the YAML/JSON and Designer conflict before saving."),
+          );
+        const format = (uri: vscode.Uri) =>
+          /\.json$/i.test(uri.path) ? "json" : /\.ya?ml$/i.test(uri.path) ? "yaml" : undefined;
+        if (
+          destination.scheme !== "file" ||
+          !format(destination) ||
+          format(destination) !== format(document.sourceUri)
+        )
+          throw new Error(
+            vscode.l10n.t("Save the Designer draft using the same YAML/JSON format."),
+          );
+        const revision = document.state.revision;
+        const text = document.state.text;
+        const result = await this.clients.requestUserFormPreview(document.document);
+        if (result.error || !result.document)
+          throw new Error(result.error?.message ?? "The UserForm draft is invalid.");
+        if (token.isCancellationRequested) throw new vscode.CancellationError();
+        if (document.state.revision !== revision)
+          throw new Error("The Designer draft changed during Save As.");
+        let target: vscode.TextDocument;
+        try {
+          await vscode.workspace.fs.stat(destination);
+        } catch (error) {
+          if (!(error instanceof vscode.FileSystemError) || error.code !== "FileNotFound")
+            throw error;
+          const create = new vscode.WorkspaceEdit();
+          create.createFile(destination, { overwrite: false, ignoreIfExists: false });
+          if (!(await vscode.workspace.applyEdit(create)))
+            throw new Error("Could not create the Save As destination.");
+        }
+        target = await vscode.workspace.openTextDocument(destination);
+        if (target.isDirty)
+          throw new Error(
+            vscode.l10n.t("Save or revert the destination's unsaved text changes before Save As."),
+          );
+        if (token.isCancellationRequested) throw new vscode.CancellationError();
+        if (document.closed || document.state.revision !== revision)
+          throw new Error("The Designer draft changed during Save As.");
+        const edit = new vscode.WorkspaceEdit();
+        edit.set(destination, [
+          vscode.TextEdit.setEndOfLine(document.sourceDocument.eol),
+          ...computeSourceChanges(target.getText(), text).map(
+            (change) =>
+              new vscode.TextEdit(
+                new vscode.Range(target.positionAt(change.start), target.positionAt(change.end)),
+                change.newText,
+              ),
+          ),
+        ]);
+        if (!(await vscode.workspace.applyEdit(edit)) || !(await target.save()))
+          throw new Error("Could not save the Designer draft.");
+        if (target.getText() !== text || document.state.revision !== revision)
+          throw new Error(
+            "The document changed during Save As. The Designer draft has been retained.",
+          );
+      } catch (error) {
+        document.saveError = String(error);
+        throw error;
+      } finally {
+        document.saving = false;
+        document.notify();
+      }
+    });
+  }
+
+  public async revertCustomDocument(
+    document: UserFormCustomDocument,
+    token: vscode.CancellationToken,
+  ): Promise<void> {
+    await this.edits.exclusive(document.sourceUri, async () => {
+      document.sourceDocument = await vscode.workspace.openTextDocument(document.sourceUri);
+      const text = document.sourceDocument.getText();
+      if (token.isCancellationRequested) throw new vscode.CancellationError();
+      document.state.revert(text);
+      document.notify();
+    });
+  }
+
+  public async backupCustomDocument(
+    document: UserFormCustomDocument,
+    context: vscode.CustomDocumentBackupContext,
+    token: vscode.CancellationToken,
+  ): Promise<vscode.CustomDocumentBackup> {
+    return this.edits.exclusive(document.sourceUri, async () => {
+      if (token.isCancellationRequested) throw new vscode.CancellationError();
+      await vscode.workspace.fs.writeFile(
+        context.destination,
+        Buffer.from(JSON.stringify(document.state.serialize()), "utf8"),
+      );
+      if (token.isCancellationRequested) throw new vscode.CancellationError();
+      return {
+        id: context.destination.toString(),
+        delete: () => {
+          void vscode.workspace.fs.delete(context.destination).then(undefined, () => {});
+        },
+      };
+    });
+  }
+
+  public async resolveCustomEditor(
+    customDocument: UserFormCustomDocument,
     panel: vscode.WebviewPanel,
     token: vscode.CancellationToken,
   ): Promise<void> {
+    if (customDocument.uri.scheme === "file") {
+      const resource = designerResourceUri(customDocument.sourceUri);
+      if (customDocument.state.dirty || customDocument.state.conflicted) {
+        const existing = this.documents.get(resource.toString());
+        if (existing && existing.state.text !== customDocument.state.text)
+          throw new Error(
+            "Another Designer draft is already open for this form. Close it before restoring this backup.",
+          );
+        if (!existing)
+          this.redirectDrafts.set(
+            resource.toString(),
+            DraftState.restore(customDocument.state.serialize()),
+          );
+      }
+      await vscode.commands.executeCommand(
+        "vscode.openWith",
+        resource,
+        panel.viewType || designerViewType,
+        { viewColumn: panel.viewColumn },
+      );
+      panel.dispose();
+      return;
+    }
+    const document = customDocument.document;
     const resources = vscode.Uri.joinPath(this.extensionUri, "dist", "userFormDesigner");
     panel.webview.options = { enableScripts: true, localResourceRoots: [resources] };
     panel.webview.html = designerHTML(panel.webview, resources);
@@ -247,6 +531,21 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, 
       }
     };
     const send = (message: HostMessage) => {
+      if (
+        message.type === "document" &&
+        (customDocument.state.conflicted || customDocument.saving || customDocument.reconciling)
+      ) {
+        message = {
+          ...message,
+          editable: false,
+          propertyEditable: false,
+          structuralEditable: false,
+          parentEditable: false,
+          pageEditable: false,
+          tabEditable: false,
+          productivityEditable: false,
+        };
+      }
       if (message.type === "document") editable = message.editable === true;
       if (message.type === "document") propertyEditable = message.propertyEditable === true;
       if (message.type === "document") {
@@ -268,6 +567,19 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, 
       }
       if (ready && !disposed && panel.visible) void panel.webview.postMessage(message);
     };
+    const sendDraftState = () =>
+      send({
+        type: "draftState",
+        dirty: customDocument.state.dirty,
+        conflicted: customDocument.state.conflicted,
+        saving: customDocument.saving || customDocument.reconciling,
+        error: customDocument.saveError,
+      });
+    const applyDraft = async (edits: import("./protocol").SourceTextEdit[], label: string) => {
+      const frame = customDocument.apply(edits, label);
+      if (!frame) return;
+      this.recordEdit(customDocument, frame, label);
+    };
     const sendLocalization = () =>
       send({
         type: "localization",
@@ -277,6 +589,10 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, 
       });
     const update = async () => {
       if (disposed || token.isCancellationRequested) return;
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
       const version = document.version;
       await sync.update(
         version,
@@ -326,7 +642,6 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, 
     };
     const schedule = () => {
       generation++;
-      send({ type: "editingUnavailable" });
       sync.invalidate();
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
@@ -344,6 +659,9 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, 
       const key = projectKey(document);
       let copyRequest: number | undefined;
       const current = () =>
+        !customDocument.state.conflicted &&
+        !customDocument.reconciling &&
+        !customDocument.saving &&
         !disposed &&
         panel.visible &&
         contextGeneration === editContext &&
@@ -479,6 +797,7 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, 
         this.clients,
         current,
         prepare,
+        applyDraft,
       );
       if (error) return { error };
       if (message.action === "cut" && copied) this.clipboard.finishCopy(copyRequest!, copied);
@@ -492,15 +811,20 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, 
       watcher.onDidChange(schedule),
       watcher.onDidCreate(schedule),
       watcher.onDidDelete(schedule),
-      vscode.workspace.onDidChangeTextDocument((event) => {
-        if (event.document.uri.toString() === document.uri.toString()) schedule();
+      customDocument.onDidChange(() => {
+        sendDraftState();
+        schedule();
       }),
-      this.clients.onDidChangePreviewConnection(schedule),
+      this.clients.onDidChangePreviewConnection(() => {
+        send({ type: "editingUnavailable" });
+        schedule();
+      }),
       this.clipboard.onDidChange(sendClipboardState),
       vscode.window.onDidChangeActiveColorTheme(() => send({ type: "themeChanged" })),
       panel.onDidChangeViewState(() => {
         if (panel.visible && ready) {
           sendLocalization();
+          sendDraftState();
           sendClipboardState();
           sync.replay(send);
           flushReplies();
@@ -510,17 +834,45 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, 
       panel.webview.onDidReceiveMessage((message: unknown) => {
         if (!isWebviewMessage(message)) return;
         if (message.type === "ready") {
+          if (this.restored.delete(customDocument)) {
+            for (const frame of customDocument.state.appliedFrames)
+              this.recordEdit(
+                customDocument,
+                frame,
+                frame.label ?? vscode.l10n.t("Restore Designer draft"),
+              );
+          }
           // A new App has no pending requests and starts request IDs over.
           // Never deliver an old context's reply to its replacement.
           contextGeneration++;
           replies.clear();
           ready = true;
           sendLocalization();
+          sendDraftState();
           sendClipboardState();
           sync.replay(send);
           void update();
         } else if (message.type === "openText") {
-          void vscode.commands.executeCommand("vscode.openWith", document.uri, "default");
+          void vscode.window.showTextDocument(customDocument.sourceDocument, {
+            viewColumn: vscode.ViewColumn.Beside,
+          });
+        } else if (message.type === "save") {
+          panel.reveal(panel.viewColumn);
+          void vscode.commands
+            .executeCommand("workbench.action.files.save")
+            .then(undefined, (error) => vscode.window.showErrorMessage(String(error)));
+        } else if (message.type === "resolveConflict") {
+          void this.edits
+            .exclusive(document.uri, async () => {
+              if (!customDocument.state.conflicted) return;
+              const choice = message.choice;
+              const revision = document.version;
+              if (!(await this.confirmResolution(choice)) || document.version !== revision) return;
+              const frame = customDocument.state.resolveConflict(choice);
+              this.recordEdit(customDocument, frame, vscode.l10n.t("Resolve Designer conflict"));
+              customDocument.notify();
+            })
+            .catch((error) => vscode.window.showErrorMessage(String(error)));
         } else if (message.type === "clipboard") {
           const editContext = contextGeneration;
           void handleClipboard(message)
@@ -575,6 +927,9 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, 
                 )
               : false;
           const permitted = () =>
+            !customDocument.state.conflicted &&
+            !customDocument.reconciling &&
+            !customDocument.saving &&
             !disposed &&
             contextGeneration === editContext &&
             panel.visible &&
@@ -634,7 +989,15 @@ export class UserFormEditorProvider implements vscode.CustomTextEditorProvider, 
                       )
                   : undefined;
           void this.edits
-            .run(document, message.version, message.operations, this.clients, permitted, prepare)
+            .run(
+              document,
+              message.version,
+              message.operations,
+              this.clients,
+              permitted,
+              prepare,
+              applyDraft,
+            )
             .then(async (error) => {
               if (disposed || contextGeneration !== editContext) return;
               replies.set(message.requestId, {
