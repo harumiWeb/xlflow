@@ -586,7 +586,7 @@ export function DesignerCanvas({
       if (form && form.contains(target) && !busy) {
         event.preventDefault();
         cancel();
-        canvas.current?.focus();
+        canvas.current?.focus({ preventScroll: true });
         const bounds = form.getBoundingClientRect();
         const point = {
           left: pixelsToPoints(event.clientX - bounds.left, zoom),
@@ -614,7 +614,7 @@ export function DesignerCanvas({
       | undefined;
     if (formHandle) {
       event.preventDefault();
-      canvas.current?.focus();
+      canvas.current?.focus({ preventScroll: true });
       startFormResize(formHandle, event.clientX, event.clientY, event.pointerId);
       if (formResizeGesture.current) {
         try {
@@ -636,7 +636,7 @@ export function DesignerCanvas({
         : undefined;
     const control = document.controls.find((c) => c.id === id);
     setNotice(undefined);
-    canvas.current?.focus();
+    canvas.current?.focus({ preventScroll: true });
     if (!control) {
       setSelection([]);
       const form = canvas.current?.querySelector<HTMLElement>(".form");
@@ -715,7 +715,7 @@ export function DesignerCanvas({
       setSelection([id]);
     else if (!selectionIds.includes(id)) setSelection([id]);
     else setSelection(promoteSelection(document, selectionIds, id));
-    canvas.current?.focus();
+    canvas.current?.focus({ preventScroll: true });
     onContextMenu?.(id, event.clientX, event.clientY);
   };
   const keyDown = (event: JSX.TargetedKeyboardEvent<HTMLDivElement>) => {
@@ -947,7 +947,7 @@ export function DesignerCanvas({
           onClick={() => {
             cancel();
             setSelection([]);
-            canvas.current?.focus();
+            canvas.current?.focus({ preventScroll: true });
           }}
         >
           {document.name}
@@ -963,7 +963,7 @@ export function DesignerCanvas({
               onClick={() => {
                 cancel();
                 setSelection([control.id]);
-                canvas.current?.focus();
+                canvas.current?.focus({ preventScroll: true });
               }}
             >
               {control.name}

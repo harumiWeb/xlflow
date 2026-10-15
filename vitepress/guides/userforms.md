@@ -158,11 +158,32 @@ VS Code Undo step. Copy alone does not edit the document. Productivity actions
 require the LSP's `userFormProductivityEdit` plus the applicable existing
 geometry, property, structural, parent, or Page capability.
 
+### Workspace and navigation
+
+The compact toolbar above the canvas groups alignment, distribution, size, and
+z-order commands in menus. Alignment and size appear for at least two sibling
+controls; distribution needs three. **More actions** contains Duplicate and
+Properties. Grid, Snap, and Zoom are in the footer.
+
+The right pane has **Properties**, **Structure**, and **Tab order** tabs.
+Structure lets you select overlapping or invisible controls by name. Selecting
+a control on an inactive Page reveals that Page without editing its source
+selectedIndex. Expand containers with the disclosure arrows; use arrow keys
+for navigation and Enter/Space to select. Structure does not drag controls into
+a different parent. Below 900 px, toolbar buttons open Toolbox or the right
+pane over the canvas.
+
+**Open source beside Designer** opens the YAML/YML/JSON editor alongside the
+Designer. Use the header Save action to publish Designer changes as described
+above; opening source or changing a pane does not publish them.
+
 ### Edit properties
 
 Select the background for form properties, a control for its properties, or a
 Page tab for Page properties. The Property Grid shows supported scalar fields
-from the running LSP. Form legacy fields and `build.*` fields are separate;
+from the running LSP in name/value columns. Categories can be collapsed. Use
+the row's ellipsis menu for permitted type changes or explicit null; simply
+opening the menu does not edit a value. Form legacy fields and `build.*` fields are separate;
 changing `form.name` does not rename the file, code sidecar or VBA references.
 Page geometry, observed fields, lists/tabs, pictures and property bags are not
 edited in this grid.
@@ -200,7 +221,7 @@ Page geometry comes from its owning MultiPage, so do not author Page
 `left`/`top`/`width`/`height`. See the [UserForm specification](../reference/userform-spec)
 for the complete schema, snapshot shape, and generation details.
 
-The Designer's tab-order editor lists direct controls for one form, Frame, or
+The right pane's **Tab order** editor lists direct controls for one form, Frame, or
 Page parent when the LSP metadata exposes `tabIndex`. Hidden and disabled
 controls remain in the list; Page controls and TabStrip tab records do not.
 Initial order uses authored numeric `tabIndex`, ascending, then z-order for

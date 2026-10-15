@@ -1,5 +1,7 @@
 import * as assert from "node:assert/strict";
 import { render } from "preact";
+import type { ComponentProps } from "preact";
+import { TabOrderEditor } from "../webview/userFormDesigner/TabOrderEditor";
 import { act } from "preact/test-utils";
 import { designerDocument, pointsToPixels } from "../src/userFormEditor/model";
 import {
@@ -20,8 +22,39 @@ import type {
   SemanticOperation,
 } from "../src/userFormEditor/protocol";
 import { DesignerCanvas } from "../webview/userFormDesigner/DesignerCanvas";
-import { ProductivityToolbar } from "../webview/userFormDesigner/ProductivityToolbar";
+import { ProductivityToolbar as CommandToolbar } from "../webview/userFormDesigner/ProductivityToolbar";
 
+// Keep the established operation regressions exercising both extracted UI
+// components, without coupling tab-order authoring to toolbar placement.
+function ProductivityToolbar({
+  propertyGrid,
+  tabEnabled,
+  ...props
+}: ComponentProps<typeof CommandToolbar> & {
+  propertyGrid?: PropertyGridData;
+  tabEnabled: boolean;
+}) {
+  return (
+    <>
+      <CommandToolbar {...props} />
+      <TabOrderEditor
+        document={props.document}
+        selectionIds={props.selectionIds}
+        propertyGrid={propertyGrid}
+        strings={props.strings}
+        tabEnabled={tabEnabled}
+        busy={props.busy}
+        onOperation={props.onOperation}
+      />
+    </>
+  );
+}
+async function openCommands(label: string) {
+  const matches = [...root.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')];
+  const button = matches.find((button) => button.textContent === label);
+  assert.ok(button, `missing menu ${label}`);
+  await act(() => button.click());
+}
 const { JSDOM } = require("jsdom");
 const dom = new JSDOM('<!doctype html><html><body><div id="app"></div></body></html>', {
   url: "https://designer.test/",
@@ -595,6 +628,7 @@ async function run() {
       root,
     ),
   );
+  await openCommands(designerStrings.align);
   const alignLeft = root.querySelectorAll<HTMLButtonElement>("button");
   const alignButton = [...alignLeft].find(
     (button) => button.textContent === designerStrings.alignLeft,
@@ -606,6 +640,7 @@ async function run() {
     anchorId: "c",
     alignment: "left",
   });
+  await openCommands(designerStrings.distribute);
   const distribute = [...root.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === designerStrings.distributeHorizontal,
   )!;
@@ -663,6 +698,7 @@ async function run() {
       root,
     ),
   );
+  await openCommands(designerStrings.moreActions);
   const duplicateFrame = [...root.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === designerStrings.duplicate,
   )!;
@@ -812,6 +848,7 @@ async function run() {
     controlId: "b",
     cascade: true,
   });
+  await openCommands(designerStrings.moreActions);
   const customProperties = [...root.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === designerStrings.propertiesAction,
   )!;
@@ -901,7 +938,18 @@ async function run() {
     },
     contextMenu: { x: 3, y: 4 },
   };
-  await act(() => render(<ProductivityToolbar {...menuProps} />, root));
+  let paneClosures = 0;
+  const paneKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape" && !event.defaultPrevented) paneClosures++;
+  };
+  await act(() =>
+    render(
+      <div onKeyDown={paneKeyDown}>
+        <ProductivityToolbar {...menuProps} />
+      </div>,
+      root,
+    ),
+  );
   const enabledMenuItems = [
     ...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'),
   ];
@@ -919,9 +967,12 @@ async function run() {
   await pointer('[role="menu"]', "pointerdown", 0, 0);
   assert.equal(menuClosures, 0, "inside pointer-down keeps menu open");
   await act(() =>
-    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape" })),
+    enabledMenuItems[0].dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    ),
   );
   assert.equal(menuClosures, 1);
+  assert.equal(paneClosures, 0, "Escape closes the context menu before the enclosing pane");
   await act(() =>
     document.body.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true })),
   );
@@ -932,6 +983,64 @@ async function run() {
   );
   assert.equal(menuClosures, 2, "unmount removes menu listeners");
 
+  for (const [selection, groups] of [
+    [[], [designerStrings.moreActions]],
+    [["a"], [designerStrings.order, designerStrings.moreActions]],
+    [
+      ["a", "b"],
+      [
+        designerStrings.align,
+        designerStrings.sameSize,
+        designerStrings.order,
+        designerStrings.moreActions,
+      ],
+    ],
+    [
+      ["a", "b", "c"],
+      [
+        designerStrings.align,
+        designerStrings.distribute,
+        designerStrings.sameSize,
+        designerStrings.order,
+        designerStrings.moreActions,
+      ],
+    ],
+    [["a", "nested"], [designerStrings.moreActions]],
+  ] as [string[], string[]][]) {
+    await act(() => render(<CommandToolbar {...toolbarProps} selectionIds={selection} />, root));
+    assert.deepEqual(
+      [...root.querySelectorAll('[aria-haspopup="menu"]')].map((button) => button.textContent),
+      groups,
+      "command groups reflect eligible sibling selection count",
+    );
+  }
+  await act(() =>
+    render(
+      <div onKeyDown={paneKeyDown}>
+        <CommandToolbar {...toolbarProps} selectionIds={["a", "b", "c"]} busy />
+      </div>,
+      root,
+    ),
+  );
+  await openCommands(designerStrings.align);
+  assert.equal(
+    root.querySelectorAll('[role="menuitem"]:not(:disabled)').length,
+    0,
+    "busy layout commands stay disabled",
+  );
+  const alignTrigger = [...root.querySelectorAll<HTMLButtonElement>('[aria-haspopup="menu"]')].find(
+    (button) => button.textContent === designerStrings.align,
+  )!;
+  await act(() =>
+    root
+      .querySelector('[role="menu"]')!
+      .dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+      ),
+  );
+  assert.equal(root.querySelector('[role="menu"]'), null);
+  assert.equal(document.activeElement, alignTrigger, "Escape returns focus to the group trigger");
+  assert.equal(paneClosures, 0, "Escape closes the command menu before the enclosing pane");
   await act(() => render(null, root));
   process.stdout.write(
     "UserForm productivity selection, transaction, and toolbar assertions passed\n",

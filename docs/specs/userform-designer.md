@@ -27,6 +27,55 @@ xlflow project with `xlflow.toml` and be handled by the currently selected
 project's single xlflow LSP client. Opening a document associated with another
 project, or without a compatible LSP connection, produces an editor error.
 
+## Workspace UI
+
+The Webview fills its editor area. A compact header shows the form name,
+Designer view, **Open source beside Designer**, explicit Save, and pending-source
+state. Source opening retains the existing side-by-side text-editor behavior;
+it does not publish the draft. Conflict and error messages stay available above
+the workspace.
+
+The workspace has a 160 px Toolbox, a flexible canvas, and a 300 px right pane.
+Each pane scrolls independently. Below 900 px, Toolbox and the right pane open
+from toolbar buttons as overlays, with only one overlay open at a time.
+Canvas scroll position is retained in Webview state. Grid, Snap, Zoom, selection
+count, and single-control bounds appear in the footer. These display settings
+are never FormSpec edits.
+
+Toolbox groups ordinary controls under Common and Frame/MultiPage/TabStrip under
+Containers. Neutral controls use VS Code hover, selection, focus, and contrast
+tokens. The canvas artboard retains MSForms preview colors; editor themes style
+the surrounding workspace, not authored control appearance. Codicon CSS/font
+assets and their licence are bundled locally under the Webview resource root.
+
+The single-row command toolbar exposes Cut/Copy/Paste/Delete as labelled icon
+buttons, with Duplicate and Properties in More actions. Align and Size appear
+for two or more eligible siblings; Distribute appears for three or more; Order
+appears for at least one. Existing capability and busy guards still determine
+whether commands can execute. Menus support arrow/Home/End navigation, Escape,
+outside dismissal, and viewport-bound placement.
+
+The right pane has Properties, Structure, and Tab order tabs. Inactive panels
+remain mounted, preserving field drafts, replies, collection state, and pending
+local tab order. Tabs support arrow/Home/End navigation. Tab-order document and
+parent changes reset the local order; changing right-pane tabs does not.
+
+Properties use two columns (name/value), initially expanded category sections,
+and a target name/type header. A row's value-type details menu exposes only
+metadata-authorized scalar type choices and explicit null. Opening details
+alone is not an edit. Presence, null, scalar values, numeric precision, and edit
+confirmation retain the contracts below. Existing Page/TabStrip editors and
+Page destinations remain in collapsible sections within Properties.
+
+Structure displays the form and canonical parent hierarchy in stable sibling
+z-order, including invisible and custom controls. TabStrip tab records are not
+controls and do not appear as children. Selection mirrors canvas selection;
+tree activation selects one target. Selecting a descendant on an inactive Page
+reveals its ancestor Pages and scrolls the rendered target into view without
+editing selectedIndex or any source field. Form activation selects form
+properties. Arrow keys navigate/expand/collapse, Home/End move focus, and
+Enter/Space activate selection. Structure does not author parent changes.
+
 ## Deferred-save draft and document lifecycle
 
 The provider owns one custom document and source-text draft per eligible

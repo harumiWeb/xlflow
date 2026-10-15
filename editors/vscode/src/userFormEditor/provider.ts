@@ -1155,7 +1155,7 @@ export function designerHTML(webview: vscode.Webview, resources: vscode.Uri): st
   const style = webview.asWebviewUri(vscode.Uri.joinPath(resources, "app.css"));
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource};">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource}; font-src ${webview.cspSource};">
 <link rel="stylesheet" href="${style}"><title>xlflow UserForm Designer</title></head>
 <body><div id="app"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
 }

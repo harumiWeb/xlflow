@@ -95,6 +95,16 @@ and any normalization or file removal performed during import. Refreshes must
 preserve these attribution files and are governed by
 `docs/specs/static-analysis-corpus.md`.
 
+## VS Code Designer icon assets
+
+The extension bundles Microsoft's Codicons from `@vscode/codicons`
+`0.0.46-24` under the Creative Commons Attribution 4.0 International licence.
+Source: [microsoft/vscode-codicons](https://github.com/microsoft/vscode-codicons).
+The distributed Webview includes the upstream licence as
+`dist/userFormDesigner/CODICONS-LICENSE.txt`. Icons are used without changes;
+the glyph collection includes a Git logo credited upstream to Jason Long under
+CC BY 3.0. Preserve the upstream attribution when packaging the extension.
+
 ## Licence notes
 
 ### MIT

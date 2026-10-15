@@ -7,13 +7,32 @@
 3. `xlflow: Check Environment` を実行する。
 4. 補完や診断が表示されない場合は Language Server を再起動し、`xlflow.path` と `xlflow.lsp.logFile` を確認する。
 
+## UserForm Designer のワークスペース
+
+Canvas 上部のコンパクトな操作バーで、切取・コピー・貼付・削除を操作できます。
+整列・サイズは同じ親の2個以上、均等配置は3個以上の選択で表示します。
+重なり順はメニューにまとめ、複製とプロパティへの移動は「その他の操作」から使えます。
+Grid／Snap／Zoom は画面下部にあります。
+
+右ペインは「プロパティ」「構造」「Tab順」の3タブです。「構造」では重なった、
+不可視のコントロールも名前で選択できます。非アクティブPage配下の選択では、
+ソースの selectedIndex を変更せず該当Pageを表示します。矢印キーで移動・展開し、
+Enter／Spaceで選択します。ツリーのドラッグによる親変更は行いません。
+幅900px未満では操作バーのボタンからToolboxまたは右ペインを開きます。
+
+「ソースを隣に開く」はDesignerとテキストエディターを並べて表示します。
+Designerの変更は下書きとして保持し、ヘッダーの保存ボタンまたはDesigner上の
+Ctrl+S／Cmd+Sでソースへ反映します。ビューやタブの操作だけでは反映しません。
+
 ## UserForm Designer のプロパティ編集
 
 設定した forms root（標準は `src/forms`）直下の `specs` にある `.yaml`、
 `.yml`、`.json` の FormSpec を開き、**Reopen Editor With... → xlflow
 UserForm Designer** を選びます。背景はフォーム、コントロールはその対象、
 Page タブは Page のプロパティを選択します。Property Grid は接続中 LSP の
-メタデータから、対応する scalar フィールドを表示します。
+メタデータから、対応する scalar フィールドを名前／値の2列で表示します。
+カテゴリは折りたためます。型変更や明示的nullは各行の「…」メニューから操作し、
+メニューを開くだけでは値を変更しません。
 
 文字列・数値は Enter またはフォーカスを外して確定し、Escape で取り消します。
 boolean／enum は選択時に確定します。一確定は一つのソース編集となり、VS Code の
@@ -43,8 +62,8 @@ MultiPage、TabStrip の14種類を表示します。Page は一覧に含めま�
 
 追加したコントロールには`control-<UUID>` IDと、既存コントロール名およびフォーム名に
 大文字・小文字を区別せず重複しない最小の正整数suffixを使った名前を割り当てます。名前を変更してもIDは変わりません。
-MultiPage はPageを持たず`selectedIndex: -1`で作成し、TabStrip は`tabs: []`と
-`selectedIndex: -1`で作成します。追加に成功すると新しいコントロールを選択し、Toolboxを
+MultiPage はPage1／Page2と`selectedIndex: 0`、TabStrip はTab1／Tab2と
+`selectedIndex: 0`で作成します。既存の明示的な空コレクションは保持します。追加に成功すると新しいコントロールを選択し、Toolboxを
 Pointerに戻します。配置中のEscapeは追加を取り消します。
 
 選択中のコントロールはツールバー、またはキャンバスにフォーカスがあるときのDeleteで削除できます。

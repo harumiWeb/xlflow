@@ -128,7 +128,15 @@ export interface DesignerDocument {
 
 export const designerStrings = {
   header: "xlflow UserForm Designer",
-  openText: "Open text editor",
+  designerView: "Designer",
+  structure: "Structure",
+  commonControls: "Common",
+  containers: "Containers",
+  order: "Order",
+  moreActions: "More actions",
+  selectionBounds: "Position and size",
+  closePane: "Close pane",
+  openText: "Open source beside Designer",
   save: "Save",
   unsaved: "Designer changes not applied to YAML/JSON",
   sourceConflict: "YAML/JSON and Designer changes conflict. Resolve the conflict before saving.",

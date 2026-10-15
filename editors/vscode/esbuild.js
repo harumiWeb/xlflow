@@ -1,3 +1,5 @@
+const { copyFileSync } = require("node:fs");
+const path = require("node:path");
 const esbuild = require("esbuild");
 
 const production = process.argv.includes("--production");
@@ -10,9 +12,18 @@ const common = {
   external: ["vscode"],
   sourcemap: !production,
   minify: production,
+  loader: { ".css": "empty" },
 };
 
 Promise.all([
+  esbuild.build({
+    ...common,
+    jsx: "automatic",
+    jsxImportSource: "preact",
+    entryPoints: ["test/userFormDesignerUX.test.tsx"],
+    outfile: "dist/test/userFormDesignerUX.test.js",
+    external: [...common.external, "jsdom"],
+  }),
   esbuild.build({
     ...common,
     entryPoints: ["test/userFormDraft.test.ts"],
@@ -77,6 +88,8 @@ Promise.all([
     outfile: "dist/userFormDesigner/app.js",
     sourcemap: !production,
     minify: production,
+    loader: { ".ttf": "file" },
+    assetNames: "[name]",
   }),
   esbuild.build({
     ...common,
@@ -93,4 +106,14 @@ Promise.all([
     entryPoints: ["test/suite/extension.test.ts"],
     outfile: "dist/test/suite/extension.test.js",
   }),
-]).catch(() => process.exit(1));
+])
+  .then(() => {
+    copyFileSync(
+      require.resolve("@vscode/codicons/LICENSE"),
+      path.join(__dirname, "dist", "userFormDesigner", "CODICONS-LICENSE.txt"),
+    );
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

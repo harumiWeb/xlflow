@@ -452,5 +452,14 @@
   "Update xlflow to a version supporting UserForm previews.": "Update xlflow to a version supporting UserForm previews.",
   "Open a FormSpec in an xlflow project.": "Open a FormSpec in an xlflow project.",
   "This workspace has no xlflow.toml.": "This workspace has no xlflow.toml.",
-  "Open a FormSpec directly under the configured forms root's specs directory.": "Open a FormSpec directly under the configured forms root's specs directory."
+  "Open a FormSpec directly under the configured forms root's specs directory.": "Open a FormSpec directly under the configured forms root's specs directory.",
+  "Open source beside Designer": "Open source beside Designer",
+  "Designer": "Designer",
+  "Structure": "Structure",
+  "Common": "Common",
+  "Containers": "Containers",
+  "Order": "Order",
+  "More actions": "More actions",
+  "Position and size": "Position and size",
+  "Close pane": "Close pane"
 }

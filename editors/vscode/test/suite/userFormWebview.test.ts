@@ -45,10 +45,11 @@ window.addEventListener("message", e => {
       let target = document.querySelector(action.selector);
       if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: action.selector}); return; }
       const props = { bubbles: true, cancelable: true, ...action.props };
+      if (props.expandIfCollapsed && target.closest('[role="treeitem"]')?.getAttribute('aria-expanded') === 'true') continue;
       if (props.formPoints) {
         // Establish focus/scroll before computing synthetic pointer coordinates;
         // the real pointer-down handler focuses the canvas and may scroll it.
-        if (action.event === 'pointerdown') {
+        if (action.event === 'pointerdown' && !props.preserveScroll) {
           const canvas = document.querySelector('.designer-viewport');
           canvas.focus({ preventScroll: true });
           canvas.scrollIntoView({ block: 'start', inline: 'start', behavior: 'instant' });
@@ -76,6 +77,7 @@ window.addEventListener("message", e => {
         target = document.elementFromPoint(props.clientX, props.clientY);
         if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: "hit test " + action.selector}); return; }
       }
+      if (action.event === "scroll") { if ("scrollTop" in props) target.scrollTop = props.scrollTop; if ("scrollLeft" in props) target.scrollLeft = props.scrollLeft; }
       if (action.event === "change" || action.event === "input") { if ("value" in props) target.value = props.value; if ("checked" in props) target.checked = props.checked; }
       target.dispatchEvent(["change", "input"].includes(action.event) ? new Event(action.event, props) : action.event.startsWith("key") ? new KeyboardEvent(action.event, props) : action.event === "focusout" ? new FocusEvent("blur", props) : new PointerEvent(action.event, props));
       if (action.event === 'pointerup' || action.event === 'pointercancel') pointerFormOrigin = undefined;
@@ -143,6 +145,10 @@ window.addEventListener("message", e => {
       })(),
       editMessages,
       clipboardMessages,
+      tabOrderItems: [...document.querySelectorAll(".tab-order-editor li > span")].map(item => item.textContent),
+      activeRightTab: document.querySelector('[role="tab"][aria-selected="true"]')?.id,
+      canvasScroll: (() => { const c = document.querySelector(".canvas-scroll"); return c && {left:c.scrollLeft, top:c.scrollTop, width:c.clientWidth, height:c.clientHeight}; })(),
+      codiconLoaded: document.fonts.check('16px codicon'),
       images: document.querySelectorAll("img").length,
       propertyTitle: document.querySelector(".property-grid h2")?.textContent,
       propertyRows: [...document.querySelectorAll("[data-property-field]")].map(row => ({
@@ -1202,6 +1208,37 @@ window.addEventListener("message", e => {
     ]);
     assert.deepStrictEqual(tabSelected.violations, []);
     await panel.webview.postMessage({ type: "editResult", requestId: tabRequest.requestId });
+    const treeSelected = await snapshot({
+      type: "testAction",
+      version: 90,
+      actions: [
+        { selector: "#designer-tab-structure", event: "click" },
+        {
+          selector:
+            '[data-structure-id="multi"] > .structure-tree-row > .structure-tree-disclosure',
+          event: "click",
+          props: { expandIfCollapsed: true },
+        },
+        {
+          selector:
+            '[data-structure-id="page-b"] > .structure-tree-row > .structure-tree-disclosure',
+          event: "click",
+          props: { expandIfCollapsed: true },
+        },
+        { selector: '[data-structure-id="child-b"] > .structure-tree-row', event: "click" },
+      ],
+    });
+    assert.strictEqual(treeSelected.missingTarget, undefined);
+    assert.strictEqual(treeSelected.activeRightTab, "designer-tab-structure");
+    assert.deepStrictEqual(treeSelected.selectedIds, ["child-b"]);
+    assert.ok((treeSelected.worldPositions as { id: string }[]).some((c) => c.id === "child-b"));
+    assert.ok(!(treeSelected.worldPositions as { id: string }[]).some((c) => c.id === "child-a"));
+    assert.strictEqual(
+      (treeSelected.editMessages as unknown[]).length,
+      (tabSelected.editMessages as unknown[]).length,
+      "Structure selection changes no source",
+    );
+    assert.strictEqual(treeSelected.codiconLoaded, true);
     const productivityDocument = designerDocument({
       form: { name: "Productivity", width: 400, height: 240 },
       controls: [
@@ -1393,11 +1430,35 @@ window.addEventListener("message", e => {
       type: "editResult",
       requestId: copyRequests.at(-1)!.requestId,
     });
+    const reorderedLocalTabs = await snapshot({
+      type: "testAction",
+      version: 104,
+      actions: [
+        { selector: "#designer-tab-tabOrder", event: "click" },
+        { selector: '.tab-order-editor button[aria-label="Move down: TextBox2"]', event: "click" },
+        { selector: "#designer-tab-structure", event: "click" },
+        { selector: "#designer-tab-tabOrder", event: "click" },
+      ],
+    });
+    assert.deepStrictEqual(reorderedLocalTabs.tabOrderItems, ["0. Label1", "1. TextBox2"]);
+    assert.strictEqual(
+      (reorderedLocalTabs.editMessages as unknown[]).length,
+      groupRequests.length,
+      "right tabs retain local order without applying",
+    );
+    // Restore the original order before testing the established normalization.
+    await snapshot({
+      type: "testAction",
+      version: 104,
+      actions: [
+        { selector: '.tab-order-editor button[aria-label="Move down: Label1"]', event: "click" },
+      ],
+    });
     const assignedTabs = await snapshot({
       type: "testAction",
       version: 105,
       actions: [
-        { selector: ".productivity-toolbar details:last-of-type summary", event: "click" },
+        { selector: "#designer-tab-tabOrder", event: "click" },
         { selector: ".tab-order-editor > button", event: "click" },
       ],
     });
@@ -1470,6 +1531,72 @@ window.addEventListener("message", e => {
     ]);
     assert.deepStrictEqual(rootResized.violations, []);
     assert.deepStrictEqual(rootResized.runtimeErrors, []);
+    const resizeRequest = (rootResized.editMessages as { requestId: number }[]).at(-1)!;
+    await panel.webview.postMessage({ type: "editResult", requestId: resizeRequest.requestId });
+    const scrolledDocument = designerDocument({
+      form: { name: "ScrollCheck", width: 1600, height: 1000 },
+      controls: [
+        {
+          id: "scrolled",
+          name: "ScrolledLabel",
+          type: "Label",
+          left: 180,
+          top: 180,
+          width: 72,
+          height: 24,
+        },
+      ],
+    });
+    const beforeScroll = await snapshot({
+      type: "document",
+      version: 120,
+      document: scrolledDocument,
+      editable: true,
+    });
+    const scrolled = await snapshot({
+      type: "testAction",
+      version: 121,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "1.5" } },
+        { selector: ".snap-toggle input", event: "change", props: { checked: false } },
+        { selector: ".canvas-scroll", event: "scroll", props: { scrollLeft: 160, scrollTop: 180 } },
+        {
+          selector: '.control[data-control-id="scrolled"]',
+          event: "pointerdown",
+          props: {
+            pointerId: 1,
+            button: 0,
+            formPoints: [190, 190],
+            hitTest: true,
+            preserveScroll: true,
+          },
+        },
+        {
+          selector: ".designer-viewport",
+          event: "pointermove",
+          props: { pointerId: 1, formPoints: [198, 196] },
+        },
+        {
+          selector: ".designer-viewport",
+          event: "pointerup",
+          props: { pointerId: 1, formPoints: [198, 196] },
+        },
+      ],
+    });
+    assert.strictEqual(scrolled.missingTarget, undefined);
+    const scrollState = scrolled.canvasScroll as { left: number; top: number };
+    assert.strictEqual(scrollState.left, 160, "canvas focus preserves horizontal scroll");
+    assert.strictEqual(scrollState.top, 180, "canvas focus preserves vertical scroll");
+    assert.strictEqual(
+      (scrolled.editMessages as unknown[]).length,
+      (beforeScroll.editMessages as unknown[]).length + 1,
+    );
+    assert.deepStrictEqual(
+      (scrolled.editMessages as { operations: unknown[] }[]).at(-1)!.operations,
+      [{ type: "moveControl", controlId: "scrolled", left: 188, top: 186 }],
+    );
+    assert.deepStrictEqual(scrolled.violations, []);
+    assert.deepStrictEqual(scrolled.runtimeErrors, []);
   } finally {
     subscription.dispose();
     panel.dispose();

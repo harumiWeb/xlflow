@@ -452,5 +452,14 @@
   "Open a FormSpec in an xlflow project.": "xlflowプロジェクト内のFormSpecを開いてください。",
   "This workspace has no xlflow.toml.": "このワークスペースにxlflow.tomlがありません。",
   "Open a FormSpec directly under the configured forms root's specs directory.": "設定されたフォームルートのspecsディレクトリ直下にあるFormSpecを開いてください。",
-  "xlflow session attach": "開いているワークブックに接続"
+  "xlflow session attach": "開いているワークブックに接続",
+  "Open source beside Designer": "ソースを隣に開く",
+  "Designer": "Designer",
+  "Structure": "構造",
+  "Common": "一般",
+  "Containers": "コンテナー",
+  "Order": "重なり順",
+  "More actions": "その他の操作",
+  "Position and size": "位置とサイズ",
+  "Close pane": "ペインを閉じる"
 }

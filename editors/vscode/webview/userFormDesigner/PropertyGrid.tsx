@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { numberRoundTrips } from "./numbers";
+import { Icon } from "./Icon";
 import type {
   DesignerError,
   DesignerStrings,
@@ -53,6 +54,7 @@ interface Props {
   // A collection entry keeps its draft identity when its wire index changes.
   draftId?: string;
   title: string;
+  targetType?: string;
   version: number;
   editable: boolean;
   busy: boolean;
@@ -195,6 +197,7 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
     ? [strings.staleProperty, draft.error].filter(Boolean).join("\n")
     : draft.error;
   const disabled = !editable || busy;
+  const fieldLabel = strings[labels[descriptor.field]] ?? descriptor.field;
   const kinds: ValueKind[] =
     descriptor.valueType === "any"
       ? ["string", "number", "boolean"]
@@ -202,101 +205,108 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
   if (descriptor.nullable && !descriptor.required) kinds.push("null");
   return (
     <div class="property-row" data-property-field={descriptor.field}>
-      <label for={id}>{strings[labels[descriptor.field]] ?? descriptor.field}</label>
-      {!source?.present && !draft.dirty && <span class="property-state">{strings.unset}</span>}
-      {(descriptor.valueType === "any" || kinds.includes("null")) && (
-        <select
-          aria-label={`${strings[labels[descriptor.field]] ?? descriptor.field}: ${strings.valueType}`}
-          value={draft.kind}
-          disabled={disabled}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              update(fromSource());
-            }
-          }}
-          onChange={(event) => {
-            const kind = event.currentTarget.value as ValueKind;
-            change(
-              kind === "boolean" ? "false" : kind === "null" ? "" : current.current.text,
-              kind,
-            );
-            if (kind === "boolean" || kind === "null") commit();
-          }}
-        >
-          {kinds.map((kind) => (
-            <option value={kind}>
-              {kind === "string"
-                ? strings.typeString
-                : kind === "number"
-                  ? strings.typeNumber
-                  : kind === "boolean"
-                    ? strings.typeBoolean
-                    : strings.nullValue}
-            </option>
-          ))}
-        </select>
-      )}
-      {draft.kind === "null" ? (
-        <span id={id} class="property-state">
-          {strings.nullValue}
-        </span>
-      ) : descriptor.allowedValues || draft.kind === "boolean" ? (
-        <select
-          id={id}
-          value={!source?.present && !draft.dirty ? "__unset__" : draft.text}
-          disabled={disabled}
-          aria-invalid={!!error}
-          aria-describedby={error ? `${id}-error` : undefined}
-          onChange={(event) => {
-            change(event.currentTarget.value);
-            commit();
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              update(fromSource());
-            }
-          }}
-        >
-          {!source?.present && !draft.dirty && (
-            <option value="__unset__" disabled>
-              {strings.unset}
-            </option>
-          )}
-          {(descriptor.allowedValues ?? ["true", "false"]).map((value) => (
-            <option value={value}>{value}</option>
-          ))}
-        </select>
-      ) : (
-        <input
-          id={id}
-          type="text"
-          inputMode={draft.kind === "number" ? "decimal" : undefined}
-          value={draft.text}
-          disabled={disabled}
-          aria-invalid={!!error}
-          aria-describedby={error ? `${id}-error` : undefined}
-          onInput={(event) => change(event.currentTarget.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.isComposing) return;
-            if (event.key === "Enter") {
-              event.preventDefault();
+      <label for={id}>{fieldLabel}</label>
+      <div class="property-value">
+        {!source?.present && !draft.dirty && <span class="property-state">{strings.unset}</span>}
+        {(descriptor.valueType === "any" || kinds.includes("null")) && (
+          <details class="property-value-menu">
+            <summary aria-label={`${fieldLabel}: ${strings.valueType}`}>
+              <Icon name="ellipsis" />
+            </summary>
+            <select
+              aria-label={`${fieldLabel}: ${strings.valueType}`}
+              value={draft.kind}
+              disabled={disabled}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  update(fromSource());
+                }
+              }}
+              onChange={(event) => {
+                const kind = event.currentTarget.value as ValueKind;
+                change(
+                  kind === "boolean" ? "false" : kind === "null" ? "" : current.current.text,
+                  kind,
+                );
+                if (kind === "boolean" || kind === "null") commit();
+              }}
+            >
+              {kinds.map((kind) => (
+                <option value={kind}>
+                  {kind === "string"
+                    ? strings.typeString
+                    : kind === "number"
+                      ? strings.typeNumber
+                      : kind === "boolean"
+                        ? strings.typeBoolean
+                        : strings.nullValue}
+                </option>
+              ))}
+            </select>
+          </details>
+        )}
+        {draft.kind === "null" ? (
+          <span id={id} class="property-state">
+            {strings.nullValue}
+          </span>
+        ) : descriptor.allowedValues || draft.kind === "boolean" ? (
+          <select
+            id={id}
+            value={!source?.present && !draft.dirty ? "__unset__" : draft.text}
+            disabled={disabled}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${id}-error` : undefined}
+            onChange={(event) => {
+              change(event.currentTarget.value);
               commit();
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              update(fromSource());
-            }
-          }}
-        />
-      )}
-      {error && (
-        <p id={`${id}-error`} role="alert" class="property-error">
-          {error}
-        </p>
-      )}
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                update(fromSource());
+              }
+            }}
+          >
+            {!source?.present && !draft.dirty && (
+              <option value="__unset__" disabled>
+                {strings.unset}
+              </option>
+            )}
+            {(descriptor.allowedValues ?? ["true", "false"]).map((value) => (
+              <option value={value}>{value}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={id}
+            type="text"
+            inputMode={draft.kind === "number" ? "decimal" : undefined}
+            value={draft.text}
+            disabled={disabled}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${id}-error` : undefined}
+            onInput={(event) => change(event.currentTarget.value)}
+            onBlur={commit}
+            onKeyDown={(event) => {
+              if (event.isComposing) return;
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commit();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                update(fromSource());
+              }
+            }}
+          />
+        )}
+        {error && (
+          <p id={`${id}-error`} role="alert" class="property-error">
+            {error}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -308,6 +318,7 @@ export function PropertyGrid(props: Props) {
       <h2>
         {props.strings.properties}: {props.title}
       </h2>
+      {props.targetType && <p class="property-grid-target-type">{props.targetType}</p>}
       {!props.editable && <p class="notice">{props.strings.propertyReadOnly}</p>}
       {groups.map((category) => {
         const order: readonly string[] = categories[category];
@@ -320,8 +331,8 @@ export function PropertyGrid(props: Props) {
           });
         return (
           descriptors.length > 0 && (
-            <fieldset>
-              <legend>{props.strings[category]}</legend>
+            <details class="property-category" open>
+              <summary>{props.strings[category]}</summary>
               {descriptors.map((descriptor) => (
                 <PropertyRow
                   key={JSON.stringify([props.draftId ?? props.controlId ?? null, descriptor.field])}
@@ -329,7 +340,7 @@ export function PropertyGrid(props: Props) {
                   descriptor={descriptor}
                 />
               ))}
-            </fieldset>
+            </details>
           )
         );
       })}

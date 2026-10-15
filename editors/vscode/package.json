@@ -38,11 +38,12 @@
     "bundle": "node esbuild.js",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
-    "test": "pnpm run compile && node ./dist/test/userFormDraft.test.js && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormProductivity.test.js && node ./dist/test/userFormCollections.test.js && node ./dist/test/runTest.js",
-    "test:designer": "pnpm run compile && node ./dist/test/userFormDraft.test.js && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormProductivity.test.js && node ./dist/test/userFormCollections.test.js",
+    "test": "pnpm run compile && node ./dist/test/userFormDesignerUX.test.js && node ./dist/test/userFormDraft.test.js && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormProductivity.test.js && node ./dist/test/userFormCollections.test.js && node ./dist/test/runTest.js",
+    "test:designer": "pnpm run compile && node ./dist/test/userFormDesignerUX.test.js && node ./dist/test/userFormDraft.test.js && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormProductivity.test.js && node ./dist/test/userFormCollections.test.js",
     "lint": "oxlint ."
   },
   "dependencies": {
+    "@vscode/codicons": "0.0.46-24",
     "preact": "^10.29.1",
     "vscode-languageclient": "^10.0.0"
   },

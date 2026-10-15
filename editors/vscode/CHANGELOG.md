@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Refined the VS Code UserForm Designer with a compact contextual toolbar,
+  grouped Toolbox, two-column Property Grid, Properties/Structure/Tab order
+  tabs, independently scrolling panes, and compact layouts below 900 px.
+  Type/null controls move into row details; Structure selects nested and
+  overlapping controls without changing source hierarchy.
+
 - New Toolbox MultiPages start with two Pages and `selectedIndex: 0`; their
   control and Pages are created atomically as one native Undo step. New
   TabStrips start with `Tab1`, `Tab2`, and `selectedIndex: 0`. MultiPage and

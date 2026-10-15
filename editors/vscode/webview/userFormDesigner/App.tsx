@@ -17,8 +17,17 @@ import { createControl, controlMetadata } from "../../src/userFormEditor/toolbox
 import type { ToolboxType } from "../../src/userFormEditor/toolbox";
 import type { PropertyDraftStore, PropertyReply } from "./PropertyGrid";
 import { designerStrings } from "../../src/userFormEditor/protocol";
+import "@vscode/codicons/dist/codicon.css";
 import "./app.css";
-import { orderedChildren, zoomLevels } from "../../src/userFormEditor/geometry";
+import { Icon } from "./Icon";
+import { TabOrderEditor } from "./TabOrderEditor";
+import { StructureTree } from "./StructureTree";
+import {
+  orderedChildren,
+  zoomLevels,
+  selectionPath,
+  isDesignerPage,
+} from "../../src/userFormEditor/geometry";
 import {
   defaultDuplicateParent,
   defaultPasteParent,
@@ -65,6 +74,10 @@ export function App() {
   const [showGrid, setShowGrid] = useState(true);
   const [snapping, setSnapping] = useState(false);
   const [clipboardAvailable, setClipboardAvailable] = useState(false);
+  const [rightTab, setRightTab] = useState<"properties" | "structure" | "tabOrder">("properties");
+  const [mobilePane, setMobilePane] = useState<"toolbox" | "properties">();
+  const [revealId, setRevealId] = useState<string>();
+  const canvasScroll = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number }>();
   const version = useRef(0);
   const nextRequest = useRef(0);
@@ -84,7 +97,10 @@ export function App() {
     if (!document || restored.current) return;
     restored.current = true;
     const saved = bridge.getState();
-    if (saved) window.scrollTo(saved.scrollX ?? 0, saved.scrollY ?? 0);
+    if (saved && canvasScroll.current) {
+      canvasScroll.current.scrollLeft = saved.scrollX ?? 0;
+      canvasScroll.current.scrollTop = saved.scrollY ?? 0;
+    }
   }, [document]);
   useEffect(() => {
     const listener = (event: MessageEvent<HostMessage>) => {
@@ -228,12 +244,9 @@ export function App() {
       if (message.type === "clipboardState") setClipboardAvailable(message.available);
     };
     window.addEventListener("message", listener);
-    const save = () => bridge.setState({ scrollX: window.scrollX, scrollY: window.scrollY });
-    window.addEventListener("scroll", save);
     bridge.postMessage({ type: "ready" });
     return () => {
       window.removeEventListener("message", listener);
-      window.removeEventListener("scroll", save);
     };
   }, []);
   const commit = (operations: SemanticOperation[]) => {
@@ -439,265 +452,482 @@ export function App() {
   };
   const openProperties = () => {
     setContextMenu(undefined);
+    setRightTab("properties");
+    setMobilePane("properties");
     window.requestAnimationFrame(() =>
       propertiesPane.current
         ?.querySelector<HTMLElement>(
-          ".property-grid input, .property-grid select, .property-grid textarea, .property-grid button",
+          ".property-value > input, .property-value > select, .property-value-menu summary",
         )
         ?.focus(),
     );
   };
+  const selectStructure = (id?: string) => {
+    if (busy || draftState.saving || !document) return;
+    setTool(undefined);
+    setSelectedId(id);
+    const ancestors = selectionPath(document, id);
+    setActivePages((current) => {
+      const next = { ...current };
+      for (const control of ancestors)
+        if (isDesignerPage(document, control) && control.parentId)
+          next[control.parentId] = control.id;
+      return next;
+    });
+    setRevealId(id);
+  };
+  useEffect(() => {
+    if (!revealId || !canvasScroll.current) return;
+    const target = Array.from(
+      canvasScroll.current.querySelectorAll<HTMLElement>(".control[data-control-id]"),
+    ).find((element) => element.dataset.controlId === revealId);
+    target?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    setRevealId(undefined);
+  }, [revealId, activePages]);
+  const selectedControl = document?.controls.find((control) => control.id === selectedId);
+  const closePane = () => {
+    const pane = mobilePane;
+    setMobilePane(undefined);
+    if (pane)
+      window.document
+        .querySelector<HTMLElement>(`.pane-toggle[data-pane="${pane}"]`)
+        ?.focus({ preventScroll: true });
+  };
   return (
-    <>
+    <main class="designer-app">
       <header>
-        {strings.header}
+        <span class="sr-only">{strings.header}</span>
+        <strong class="designer-document-name">{document?.name ?? strings.header}</strong>
+        <div class="view-switcher">
+          <span class="active-view">{strings.designerView}</span>
+          <button
+            type="button"
+            title={strings.openText}
+            onClick={() => bridge.postMessage({ type: "openText" })}
+          >
+            <Icon name="go-to-file" />
+            {strings.openText}
+          </button>
+        </div>
         <button
+          class="primary-action"
           disabled={busy || draftState.saving || draftState.conflicted}
           onClick={() => bridge.postMessage({ type: "save" })}
         >
           {strings.save}
         </button>
-        <button onClick={() => bridge.postMessage({ type: "openText" })}>{strings.openText}</button>
         {draftState.dirty && <span class="notice">{strings.unsaved}</span>}
       </header>
-      {draftState.conflicted && (
-        <div role="alert" class="error">
-          <p>{strings.sourceConflict}</p>
-          <button onClick={() => bridge.postMessage({ type: "resolveConflict", choice: "source" })}>
-            {strings.useSource}
-          </button>
-          <button
-            onClick={() => bridge.postMessage({ type: "resolveConflict", choice: "designer" })}
-          >
-            {strings.useDesigner}
-          </button>
-        </div>
-      )}
-      {draftState.error && (
-        <div role="alert" class="error">
-          {draftState.error}
-        </div>
-      )}
-      {document && productivityEditable && (
-        <ProductivityToolbar
-          document={document}
-          selectionIds={selectedIds}
-          propertyGrid={propertyGrid}
-          strings={strings}
-          enabled={editable && !error}
-          structuralEnabled={structuralEditable && !error}
-          duplicateEditable={!error && canPasteInto(defaultDuplicateParent(document, selectedIds))}
-          tabEnabled={propertyEditable && !error}
-          clipboardAvailable={clipboardAvailable}
-          canPaste={
-            structuralEditable && !error && canPasteInto(defaultPasteParent(document, selectedIds))
-          }
-          busy={busy || draftState.saving}
-          contextMenu={contextMenu}
-          onOperation={(operation) => commit([operation])}
-          onClipboard={requestClipboard}
-          onProperties={openProperties}
-          onCloseMenu={() => setContextMenu(undefined)}
-        />
-      )}
-      <div class="designer-toolbar">
-        <button
-          type="button"
-          class="delete-control"
-          hidden={productivityEditable}
-          disabled={!canDelete || !!tool}
-          onClick={remove}
-        >
-          {strings.deleteControl}
-        </button>
-        <label class="grid-toggle">
-          <input
-            type="checkbox"
-            checked={showGrid}
-            onChange={(event) => setShowGrid(event.currentTarget.checked)}
-          />
-          {strings.grid}
-        </label>
-        <label class="snap-toggle">
-          <input
-            type="checkbox"
-            checked={snapping}
-            disabled={busy}
-            onChange={(event) => setSnapping(event.currentTarget.checked)}
-          />
-          {strings.snap}
-        </label>
-        <label>
-          {strings.zoom}
-          <select
-            value={zoom}
-            disabled={busy}
-            onChange={(event) => setZoom(Number(event.currentTarget.value))}
-          >
-            {zoomLevels.map((level) => (
-              <option value={level}>{Math.round(level * 100)}%</option>
+      <div class="designer-notices">
+        {draftState.conflicted && (
+          <div role="alert" class="error">
+            <p>{strings.sourceConflict}</p>
+            <button
+              onClick={() => bridge.postMessage({ type: "resolveConflict", choice: "source" })}
+            >
+              {strings.useSource}
+            </button>
+            <button
+              onClick={() => bridge.postMessage({ type: "resolveConflict", choice: "designer" })}
+            >
+              {strings.useDesigner}
+            </button>
+          </div>
+        )}
+        {draftState.error && (
+          <div role="alert" class="error">
+            {draftState.error}
+          </div>
+        )}
+        {(error || editError || propertyError) && (
+          <div role="alert" class="error">
+            {error || editError || propertyError}
+            {document && error && <p>{strings.lastValid}</p>}
+          </div>
+        )}
+        {!document && !error && <p>{strings.loading}</p>}
+        {document &&
+          !editable &&
+          !propertyEditable &&
+          !structuralEditable &&
+          !pageEditable &&
+          !tabEditable &&
+          !error &&
+          !busy && <p class="notice">{strings.readOnly}</p>}
+        {document && (
+          <>
+            {(document.approximate || document.controls.some((c) => c.approximate)) && (
+              <p class="notice">{strings.approximate}</p>
+            )}
+            {document.warnings.map((warning, index) => (
+              <p class="notice" key={index}>
+                {warning}
+              </p>
             ))}
-          </select>
-        </label>
+          </>
+        )}
       </div>
-      {(error || editError || propertyError) && (
-        <div role="alert" class="error">
-          {error || editError || propertyError}
-          {document && error && <p>{strings.lastValid}</p>}
-        </div>
-      )}
-      {!document && !error && <p>{strings.loading}</p>}
-      {document &&
-        !editable &&
-        !propertyEditable &&
-        !structuralEditable &&
-        !pageEditable &&
-        !tabEditable &&
-        !error &&
-        !busy && <p class="notice">{strings.readOnly}</p>}
       {document && (
         <>
-          {(document.approximate || document.controls.some((c) => c.approximate)) && (
-            <p class="notice">{strings.approximate}</p>
-          )}
-          {document.warnings.map((warning, index) => (
-            <p class="notice" key={index}>
-              {warning}
-            </p>
-          ))}
-          <div class="designer-workspace">
-            <Toolbox
-              parentEditable={parentEditable}
-              pageEditable={pageEditable}
-              tabEditable={tabEditable}
-              selected={tool}
-              disabled={!structuralEditable || busy || !!error}
-              strings={strings}
-              onSelect={setTool}
-            />
-            <DesignerCanvas
-              document={document}
-              approximateBounds={strings.approximateBounds}
-              editable={editable}
-              formResizable={
-                propertyEditable &&
-                !error &&
-                ["width", "height"].every((field) =>
-                  propertyGrid?.form.descriptors.some(
-                    (descriptor) => descriptor.field === field && descriptor.valueType === "number",
-                  ),
-                )
+          <div
+            class={`designer-workspace ${mobilePane ? `show-${mobilePane}` : ""}`}
+            onKeyDown={(event) => {
+              if (
+                mobilePane &&
+                window.innerWidth < 900 &&
+                event.key === "Escape" &&
+                !event.defaultPrevented
+              ) {
+                event.preventDefault();
+                closePane();
               }
-              onFormResize={commit}
-              resizeWidthLabel={strings.resizeWidth}
-              resizeHeightLabel={strings.resizeHeight}
-              resizeBothLabel={strings.resizeBoth}
-              parentEditable={parentEditable && !error}
-              pageEditable={pageEditable && !error}
-              productivityEditable={productivityEditable && !error}
-              activePages={activePages}
-              onActivePageChange={(owner, page) =>
-                setActivePages((current) => ({ ...current, [owner]: page }))
-              }
-              busy={busy || draftState.saving}
-              zoom={zoom}
-              showGrid={showGrid}
-              snapping={snapping}
-              cannotMove={strings.cannotMove}
-              hierarchy={strings.hierarchy}
-              invalidDrop={strings.invalidDrop}
-              dropTargetLabel={strings.dropTarget}
-              placementSize={controlMetadata.find((m) => m.type === tool)}
-              selectedId={selectedId}
-              selectedIds={selectedIds}
-              onSelectionChangeMany={setSelectedIds}
-              onCommit={commit}
-              onContextMenu={(id, x, y) => {
-                if (productivityEditable) setContextMenu({ x, y });
-                else setSelectedId(id);
-              }}
-              onShortcut={handleShortcut}
-              placing={!!tool && structuralEditable && !error}
-              onCancelPlacement={() => setTool(undefined)}
-              onDelete={canDelete ? remove : undefined}
-              onPlace={(left, top, parentId) => {
-                if (!tool) return;
-                const control = createControl(
-                  document,
-                  tool,
-                  left,
-                  top,
-                  snapping,
-                  undefined,
-                  parentId,
-                  pageEditable,
-                );
-                if (!control) {
-                  setEditError(parentId ? strings.cannotInsertContainer : strings.cannotInsert);
-                  return;
-                }
-                const operations = initialControlOperations(document, control);
-                if (!operations) {
-                  setEditError(strings.cannotInsert);
-                  return;
-                }
-                commit(operations);
-              }}
-            />
-            <div class="properties-pane" ref={propertiesPane}>
-              <CollectionEditor
-                document={document}
-                selectedId={selectedId}
-                pageEditable={pageEditable && !error}
-                tabEditable={tabEditable && !error}
-                parentEditable={parentEditable && !error}
-                editable={editable && !error}
-                busy={busy || draftState.saving}
+            }}
+          >
+            <div class="toolbox-pane" id="designer-toolbox">
+              <button
+                class="pane-close"
+                type="button"
+                aria-label={strings.closePane}
+                onClick={closePane}
+              >
+                <Icon name="close" />
+              </button>
+              <Toolbox
+                parentEditable={parentEditable}
+                pageEditable={pageEditable}
+                tabEditable={tabEditable}
+                selected={tool}
+                disabled={!structuralEditable || busy || !!error}
                 strings={strings}
-                onSelect={setSelectedId}
-                onActivePage={(owner, page) =>
-                  setActivePages((current) => ({ ...current, [owner]: page }))
-                }
-                onCommit={commit}
-                propertyGrid={propertyGrid}
-                drafts={drafts.current}
-                reply={reply}
-                version={documentVersion}
-                snapping={snapping}
-                onInvalidMove={() => setEditError(strings.invalidDrop)}
+                onSelect={(next) => {
+                  setTool(next);
+                  setMobilePane(undefined);
+                  window.document
+                    .querySelector<HTMLElement>(".designer-viewport")
+                    ?.focus({ preventScroll: true });
+                }}
               />
-              {propertyGrid &&
-              (selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form) ? (
-                <PropertyGrid
-                  drafts={drafts.current}
-                  key={selectedId === undefined ? "form" : `control:${selectedId}`}
-                  target={selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form}
-                  controlId={selectedId}
-                  title={document.controls.find((c) => c.id === selectedId)?.name ?? document.name}
-                  version={documentVersion}
-                  editable={propertyEditable && !error}
+            </div>
+            <section class="canvas-pane">
+              <div class="canvas-command-bar">
+                <button
+                  class="pane-toggle"
+                  data-pane="toolbox"
+                  type="button"
+                  aria-expanded={mobilePane === "toolbox"}
+                  aria-controls="designer-toolbox"
+                  onClick={() => setMobilePane(mobilePane === "toolbox" ? undefined : "toolbox")}
+                >
+                  <Icon name="tools" />
+                  {strings.toolbox}
+                </button>
+                {document && productivityEditable && (
+                  <ProductivityToolbar
+                    document={document}
+                    selectionIds={selectedIds}
+                    strings={strings}
+                    enabled={editable && !error}
+                    structuralEnabled={structuralEditable && !error}
+                    duplicateEditable={
+                      !error && canPasteInto(defaultDuplicateParent(document, selectedIds))
+                    }
+                    clipboardAvailable={clipboardAvailable}
+                    canPaste={
+                      structuralEditable &&
+                      !error &&
+                      canPasteInto(defaultPasteParent(document, selectedIds))
+                    }
+                    busy={busy || draftState.saving}
+                    contextMenu={contextMenu}
+                    onOperation={(operation) => commit([operation])}
+                    onClipboard={requestClipboard}
+                    onProperties={openProperties}
+                    onCloseMenu={() => setContextMenu(undefined)}
+                  />
+                )}
+                {!productivityEditable && (
+                  <button
+                    type="button"
+                    class="delete-control icon-button"
+                    title={strings.deleteControl}
+                    aria-label={strings.deleteControl}
+                    disabled={!canDelete || !!tool}
+                    onClick={remove}
+                  >
+                    <Icon name="trash" />
+                  </button>
+                )}
+                <button
+                  class="pane-toggle"
+                  data-pane="properties"
+                  type="button"
+                  aria-expanded={mobilePane === "properties"}
+                  aria-controls="designer-properties"
+                  onClick={() =>
+                    setMobilePane(mobilePane === "properties" ? undefined : "properties")
+                  }
+                >
+                  <Icon name="settings-gear" />
+                  {strings.properties}
+                </button>
+              </div>
+              <div
+                class="canvas-scroll"
+                ref={canvasScroll}
+                onScroll={(event) =>
+                  bridge.setState({
+                    scrollX: event.currentTarget.scrollLeft,
+                    scrollY: event.currentTarget.scrollTop,
+                  })
+                }
+              >
+                <DesignerCanvas
+                  document={document}
+                  approximateBounds={strings.approximateBounds}
+                  editable={editable}
+                  formResizable={
+                    propertyEditable &&
+                    !error &&
+                    ["width", "height"].every((field) =>
+                      propertyGrid?.form.descriptors.some(
+                        (descriptor) =>
+                          descriptor.field === field && descriptor.valueType === "number",
+                      ),
+                    )
+                  }
+                  onFormResize={commit}
+                  resizeWidthLabel={strings.resizeWidth}
+                  resizeHeightLabel={strings.resizeHeight}
+                  resizeBothLabel={strings.resizeBoth}
+                  parentEditable={parentEditable && !error}
+                  pageEditable={pageEditable && !error}
+                  productivityEditable={productivityEditable && !error}
+                  activePages={activePages}
+                  onActivePageChange={(owner, page) =>
+                    setActivePages((current) => ({ ...current, [owner]: page }))
+                  }
+                  busy={busy || draftState.saving}
+                  zoom={zoom}
+                  showGrid={showGrid}
+                  snapping={snapping}
+                  cannotMove={strings.cannotMove}
+                  hierarchy={strings.hierarchy}
+                  invalidDrop={strings.invalidDrop}
+                  dropTargetLabel={strings.dropTarget}
+                  placementSize={controlMetadata.find((m) => m.type === tool)}
+                  selectedId={selectedId}
+                  selectedIds={selectedIds}
+                  onSelectionChangeMany={setSelectedIds}
+                  onCommit={commit}
+                  onContextMenu={(id, x, y) => {
+                    if (productivityEditable) setContextMenu({ x, y });
+                    else setSelectedId(id);
+                  }}
+                  onShortcut={handleShortcut}
+                  placing={!!tool && structuralEditable && !error}
+                  onCancelPlacement={() => setTool(undefined)}
+                  onDelete={canDelete ? remove : undefined}
+                  onPlace={(left, top, parentId) => {
+                    if (!tool) return;
+                    const control = createControl(
+                      document,
+                      tool,
+                      left,
+                      top,
+                      snapping,
+                      undefined,
+                      parentId,
+                      pageEditable,
+                    );
+                    if (!control) {
+                      setEditError(parentId ? strings.cannotInsertContainer : strings.cannotInsert);
+                      return;
+                    }
+                    const operations = initialControlOperations(document, control);
+                    if (!operations) {
+                      setEditError(strings.cannotInsert);
+                      return;
+                    }
+                    commit(operations);
+                  }}
+                />
+              </div>
+            </section>
+            <aside class="properties-pane" id="designer-properties" ref={propertiesPane}>
+              <button
+                class="pane-close"
+                type="button"
+                aria-label={strings.closePane}
+                onClick={closePane}
+              >
+                <Icon name="close" />
+              </button>
+              <div class="right-pane-tabs" role="tablist" aria-label={strings.properties}>
+                {(["properties", "structure", "tabOrder"] as const).map((tab, index, tabs) => (
+                  <button
+                    id={`designer-tab-${tab}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={rightTab === tab}
+                    aria-controls={`designer-panel-${tab}`}
+                    tabIndex={rightTab === tab ? 0 : -1}
+                    onClick={() => setRightTab(tab)}
+                    onKeyDown={(event) => {
+                      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                      event.preventDefault();
+                      const next =
+                        event.key === "Home"
+                          ? 0
+                          : event.key === "End"
+                            ? tabs.length - 1
+                            : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+                              tabs.length;
+                      setRightTab(tabs[next]);
+                      propertiesPane.current
+                        ?.querySelector<HTMLElement>(`#designer-tab-${tabs[next]}`)
+                        ?.focus();
+                    }}
+                  >
+                    {strings[tab]}
+                  </button>
+                ))}
+              </div>
+              <div
+                class="right-pane-content"
+                id="designer-panel-properties"
+                role="tabpanel"
+                aria-labelledby="designer-tab-properties"
+                hidden={rightTab !== "properties"}
+              >
+                {propertyGrid &&
+                (selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form) ? (
+                  <PropertyGrid
+                    drafts={drafts.current}
+                    key={selectedId === undefined ? "form" : `control:${selectedId}`}
+                    target={selectedId ? propertyGrid.controls[selectedId] : propertyGrid.form}
+                    controlId={selectedId}
+                    title={selectedControl?.name ?? document.name}
+                    targetType={selectedControl?.type ?? "UserForm"}
+                    version={documentVersion}
+                    editable={propertyEditable && !error}
+                    busy={busy || draftState.saving}
+                    strings={strings}
+                    reply={reply}
+                    onCommit={(field, value) =>
+                      commit([
+                        selectedId
+                          ? { type: "setControlProperty", controlId: selectedId, field, value }
+                          : { type: "setFormProperty", field, value },
+                      ])
+                    }
+                  />
+                ) : (
+                  <aside class="property-grid">
+                    <h2>{strings.properties}</h2>
+                    <p class="notice">{strings.propertyReadOnly}</p>
+                  </aside>
+                )}
+                <CollectionEditor
+                  document={document}
+                  selectedId={selectedId}
+                  pageEditable={pageEditable && !error}
+                  tabEditable={tabEditable && !error}
+                  parentEditable={parentEditable && !error}
+                  editable={editable && !error}
                   busy={busy || draftState.saving}
                   strings={strings}
-                  reply={reply}
-                  onCommit={(field, value) =>
-                    commit([
-                      selectedId
-                        ? { type: "setControlProperty", controlId: selectedId, field, value }
-                        : { type: "setFormProperty", field, value },
-                    ])
+                  onSelect={setSelectedId}
+                  onActivePage={(owner, page) =>
+                    setActivePages((current) => ({ ...current, [owner]: page }))
                   }
+                  onCommit={commit}
+                  propertyGrid={propertyGrid}
+                  drafts={drafts.current}
+                  reply={reply}
+                  version={documentVersion}
+                  snapping={snapping}
+                  onInvalidMove={() => setEditError(strings.invalidDrop)}
                 />
-              ) : (
-                <aside class="property-grid">
-                  <h2>{strings.properties}</h2>
-                  <p class="notice">{strings.propertyReadOnly}</p>
-                </aside>
-              )}
-            </div>
+              </div>
+              <div
+                class="right-pane-content"
+                id="designer-panel-structure"
+                role="tabpanel"
+                aria-labelledby="designer-tab-structure"
+                hidden={rightTab !== "structure"}
+              >
+                <StructureTree
+                  document={document}
+                  selectionIds={selectedIds}
+                  strings={strings}
+                  busy={busy || draftState.saving}
+                  onSelect={selectStructure}
+                />
+              </div>
+              <div
+                class="right-pane-content"
+                id="designer-panel-tabOrder"
+                role="tabpanel"
+                aria-labelledby="designer-tab-tabOrder"
+                hidden={rightTab !== "tabOrder"}
+              >
+                <TabOrderEditor
+                  document={document}
+                  selectionIds={selectedIds}
+                  propertyGrid={propertyGrid}
+                  strings={strings}
+                  tabEnabled={productivityEditable && propertyEditable && !error}
+                  busy={busy || draftState.saving}
+                  onOperation={(operation) => commit([operation])}
+                />
+              </div>
+            </aside>
           </div>
+          <footer class="designer-statusbar">
+            <span aria-live="polite">
+              {strings.selectionCount}: {selectedIds.length}
+            </span>
+            {selectedIds.length === 1 && selectedControl && (
+              <span class="selection-bounds" aria-label={strings.selectionBounds}>
+                x:{selectedControl.left} y:{selectedControl.top} w:{selectedControl.width} h:
+                {selectedControl.height}
+              </span>
+            )}
+            <div class="designer-toolbar">
+              <label class="grid-toggle">
+                <input
+                  type="checkbox"
+                  checked={showGrid}
+                  onChange={(event) => setShowGrid(event.currentTarget.checked)}
+                />
+                {strings.grid}
+              </label>
+              <label class="snap-toggle">
+                <input
+                  type="checkbox"
+                  checked={snapping}
+                  disabled={busy}
+                  onChange={(event) => setSnapping(event.currentTarget.checked)}
+                />
+                {strings.snap}
+              </label>
+              <label>
+                {strings.zoom}
+                <select
+                  value={zoom}
+                  disabled={busy}
+                  onChange={(event) => setZoom(Number(event.currentTarget.value))}
+                >
+                  {zoomLevels.map((level) => (
+                    <option value={level}>{Math.round(level * 100)}%</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </footer>
         </>
       )}
-    </>
+    </main>
   );
 }
 

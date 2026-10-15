@@ -1192,7 +1192,11 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
           (await readFile(uri.fsPath, "utf8")) === diskBeforeAutoSave &&
           !sourceDocument.isDirty &&
           customDocument!.state.dirty &&
-          findCustomTab(viewType, designerUri)?.isDirty === false,
+          findCustomTab(viewType, designerUri)?.isDirty === false &&
+          // The native dirty event can lag the draft edit. A clean tab alone
+          // does not establish that Auto Save durably wrote this checkpoint.
+          (await new DraftCheckpointStore(checkpointRoot).read(uri))?.state.text ===
+            autoSavedExpected,
         "AutoSave afterDelay to checkpoint without publishing or clearing the Designer draft badge",
       );
       assert.strictEqual(

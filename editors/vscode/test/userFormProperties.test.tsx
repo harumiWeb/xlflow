@@ -154,6 +154,16 @@ function input(field: string): HTMLInputElement {
   assert.ok(result);
   return result;
 }
+function valueSelect(field: string): HTMLSelectElement {
+  const result = row(field).querySelector<HTMLSelectElement>(".property-value > select");
+  assert.ok(result, `property value select ${field}`);
+  return result;
+}
+function typeSelect(field: string): HTMLSelectElement {
+  const result = row(field).querySelector<HTMLSelectElement>(".property-value-menu select");
+  assert.ok(result, `property type select ${field}`);
+  return result;
+}
 async function type(field: string, value: string) {
   await act(() => {
     const element = input(field);
@@ -173,10 +183,19 @@ async function blur(field: string) {
     input(field).dispatchEvent(new dom.window.FocusEvent("blur", { bubbles: true }));
   });
 }
-async function choose(field: string, value: string, index = 0) {
+async function chooseValue(field: string, value: string) {
   await act(() => {
-    const select = row(field).querySelectorAll("select")[index];
-    assert.ok(select);
+    const select = valueSelect(field);
+    select.value = value;
+    select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  });
+}
+async function chooseType(field: string, value: string) {
+  await act(() => {
+    const menu = row(field).querySelector<HTMLDetailsElement>("details.property-value-menu");
+    assert.ok(menu, `property type menu ${field}`);
+    if (!menu.open) menu.querySelector("summary")!.click();
+    const select = typeSelect(field);
     select.value = value;
     select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   });
@@ -186,6 +205,30 @@ async function acknowledge(error?: Extract<HostMessage, { type: "editResult" }>[
 }
 
 async function run() {
+  const { PropertyGrid } = require("../webview/userFormDesigner/PropertyGrid");
+  const targetTypeRoot = document.createElement("div");
+  await act(() =>
+    render(
+      <PropertyGrid
+        drafts={{ values: new Map(), replies: new Map() }}
+        target={target()}
+        title="Label1"
+        targetType="MSForms.TextBox"
+        version={1}
+        editable={true}
+        busy={false}
+        strings={designerStrings}
+        onCommit={() => undefined}
+      />,
+      targetTypeRoot,
+    ),
+  );
+  assert.equal(
+    targetTypeRoot.querySelector(".property-grid-target-type")?.textContent,
+    "MSForms.TextBox",
+  );
+  await act(() => render(null, targetTypeRoot));
+
   const { App } = require("../webview/userFormDesigner/App");
   await act(() => {
     render(null, root);
@@ -201,11 +244,27 @@ async function run() {
   await refresh(1);
   assert.equal(input("caption").value, "Source caption", "authoring values, not render defaults");
   assert.equal(input("width").disabled, false, "property capability is independent of geometry");
-  assert.equal(row("visible").querySelector("select")!.value, "false");
+  assert.equal(valueSelect("visible").value, "false");
   assert.ok(row("orientation").textContent?.includes(designerStrings.unset));
-  assert.equal(row("value").querySelector("select")!.value, "string", "string false retains type");
+  assert.equal(typeSelect("value").value, "string", "string false retains type");
   assert.equal(input("value").value, "false");
-  assert.equal(edits().length, 0, "rendering does not write source");
+  assert.ok(
+    Array.from(root.querySelectorAll<HTMLDetailsElement>("details.property-category")).every(
+      (category) => category.open,
+    ),
+    "property categories start open",
+  );
+  const valueTypeMenu = row("value").querySelector<HTMLDetailsElement>(
+    "details.property-value-menu",
+  )!;
+  assert.equal(valueTypeMenu.open, false, "value type details start closed");
+  assert.equal(
+    valueTypeMenu.querySelector("summary")!.getAttribute("aria-label"),
+    `${designerStrings.propertyValue}: ${designerStrings.valueType}`,
+  );
+  await act(() => valueTypeMenu.querySelector("summary")!.click());
+  assert.equal(valueTypeMenu.open, true, "the value type menu opens on demand");
+  assert.equal(edits().length, 0, "opening the type menu does not write source");
 
   await type("caption", "日本語 <script>literal</script>");
   await key("caption", "Enter");
@@ -258,6 +317,13 @@ async function run() {
   await refresh(1);
   assert.equal(input("width").value, "200");
   assert.ok(row("width").textContent?.includes("out_of_range: Too wide Use a smaller width"));
+  const editsBeforePaneSwitch = edits().length;
+  for (const tab of ["structure", "tabOrder", "properties"]) {
+    await act(() => root.querySelector<HTMLButtonElement>(`#designer-tab-${tab}`)!.click());
+  }
+  assert.equal(input("width").value, "200", "right-pane tabs retain a rejected field draft");
+  assert.ok(row("width").textContent?.includes("out_of_range: Too wide Use a smaller width"));
+  assert.equal(edits().length, editsBeforePaneSwitch, "pane navigation does not resubmit a draft");
   await blur("width");
   assert.equal(edits().length, 2, "failed draft is not resent by delayed blur");
   await key("width", "Escape");
@@ -293,27 +359,27 @@ async function run() {
   await blur("caption");
   assert.equal(input("caption").value, "Retry");
 
-  await choose("caption", "null");
+  await chooseType("caption", "null");
   assert.deepEqual(edits().at(-1)!.operations, [
     { type: "setFormProperty", field: "caption", value: null },
   ]);
   await acknowledge();
-  await choose("value", "boolean");
+  await chooseType("value", "boolean");
   assert.deepEqual(edits().at(-1)!.operations, [
     { type: "setFormProperty", field: "value", value: false },
   ]);
   await acknowledge();
-  await choose("orientation", "vertical");
+  await chooseValue("orientation", "vertical");
   assert.deepEqual(edits().at(-1)!.operations, [
     { type: "setFormProperty", field: "orientation", value: "vertical" },
   ]);
   await acknowledge();
-  await choose("selectedIndex", "1");
+  await chooseValue("selectedIndex", "1");
   assert.deepEqual(edits().at(-1)!.operations, [
     { type: "setFormProperty", field: "selectedIndex", value: 1 },
   ]);
   await acknowledge();
-  await choose("enabled", "true");
+  await chooseValue("enabled", "true");
   assert.deepEqual(edits().at(-1)!.operations, [
     { type: "setFormProperty", field: "enabled", value: true },
   ]);
@@ -401,9 +467,19 @@ async function run() {
     },
   };
   await refresh(5);
-  assert.equal(row("caption").querySelector("select")!.value, "null");
+  assert.equal(typeSelect("caption").value, "null");
   assert.ok(row("caption").textContent?.includes(designerStrings.nullValue));
   assert.ok(!row("caption").textContent?.includes(designerStrings.unset));
+  const beforeNullTypeRestore = edits().length;
+  await chooseType("caption", "string");
+  assert.equal(input("caption").value, "", "returning from null restores the string editor");
+  assert.equal(
+    edits().length,
+    beforeNullTypeRestore,
+    "restoring a type alone does not edit source",
+  );
+  await key("caption", "Escape");
+  assert.equal(typeSelect("caption").value, "null", "Escape restores the explicit null source");
   assert.equal(input("width").value, "0");
   assert.equal(input("value").value, "");
   assert.ok(!row("value").textContent?.includes(designerStrings.unset));
@@ -524,7 +600,7 @@ async function run() {
     ],
   });
   // An unrelated edit reply must not replace the deferred response for Label1.
-  await choose("caption", "string");
+  await chooseType("caption", "string");
   await type("caption", "Other target edit");
   await key("caption", "Enter");
   await acknowledge();
@@ -548,7 +624,7 @@ async function run() {
     assert.ok(row(field).querySelector('[role="alert"]'));
     await key(field, "Escape");
   }
-  await choose("value", "number");
+  await chooseType("value", "number");
   for (const value of ["9007199254740993", "0.100000000000000000001", "1e-400"]) {
     const before = edits().length;
     await type("value", value);
@@ -565,7 +641,7 @@ async function run() {
     assert.equal(edits().length, before + 1);
     assert.equal((edits().at(-1)!.operations[0] as { value: number }).value, Number(value));
     await acknowledge();
-    await choose("value", "number");
+    await chooseType("value", "number");
   }
   await key("value", "Escape");
   await type("caption", "Hidden panel draft");
@@ -584,7 +660,7 @@ async function run() {
       .querySelector(".form")!
       .dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
   });
-  await choose("caption", "string");
+  await chooseType("caption", "string");
   await type("caption", "Form-only draft");
   const beforeIdentity = edits().length;
   await act(() => {

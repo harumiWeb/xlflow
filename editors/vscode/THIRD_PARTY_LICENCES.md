@@ -26,3 +26,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Codicons
+
+The Designer uses Microsoft's Codicons, version 0.0.46-24, from
+[microsoft/vscode-codicons](https://github.com/microsoft/vscode-codicons),
+under [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/).
+The upstream CSS and font are used without changes. The full upstream licence
+and its attribution for Jason Long's Git logo (CC BY 3.0) are shipped in
+`dist/userFormDesigner/CODICONS-LICENSE.txt`.
