@@ -18,6 +18,11 @@ const common = {
 Promise.all([
   esbuild.build({
     ...common,
+    entryPoints: ["test/userFormBuild.test.ts"],
+    outfile: "dist/test/userFormBuild.test.js",
+  }),
+  esbuild.build({
+    ...common,
     jsx: "automatic",
     jsxImportSource: "preact",
     entryPoints: ["test/userFormPropertyEditors.test.tsx"],

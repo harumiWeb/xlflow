@@ -71,12 +71,14 @@ export function StructureTree({
   strings,
   busy,
   onSelect,
+  onDelete,
 }: {
   document: DesignerDocument;
   selectionIds: string[];
   strings: DesignerStrings;
   busy: boolean;
   onSelect: (id?: string) => void;
+  onDelete?: () => boolean;
 }) {
   const { root, entries } = createTree(document);
   const selectionKey = JSON.stringify(selectionIds);
@@ -211,12 +213,35 @@ export function StructureTree({
   };
 
   const onTreeKeyDown = (event: KeyboardEvent) => {
+    if (
+      busy ||
+      event.isComposing ||
+      (event.target as Element).closest(
+        "input, textarea, select, [contenteditable]:not([contenteditable='false'])",
+      )
+    )
+      return;
     const target = (event.target as Element).closest<HTMLElement>("[role='treeitem']");
     if (!target) return;
     const id = target.dataset.structureId ?? "";
     const index = visibleEntries.findIndex(({ entry }) => entry.id === id);
     const entry = entries.get(id);
     if (!entry || index < 0) return;
+
+    if (
+      (event.key === "Backspace" || event.key === "Delete") &&
+      !event.repeat &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.shiftKey &&
+      id &&
+      selectionIds.includes(id) &&
+      onDelete?.()
+    ) {
+      event.preventDefault();
+      return;
+    }
 
     switch (event.key) {
       case "ArrowDown":

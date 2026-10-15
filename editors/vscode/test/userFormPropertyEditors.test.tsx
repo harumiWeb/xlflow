@@ -238,7 +238,19 @@ async function run() {
   )!;
   assert.ok(unsetBoolean.indeterminate, "unset boolean is distinct from false");
 
+  await host({ type: "historyState", canUndo: true, canRedo: true });
+  assert.equal(root.querySelector<HTMLButtonElement>(".history-undo")!.disabled, false);
   const launcher = await open("font");
+  assert.equal(
+    root.querySelector<HTMLButtonElement>(".history-undo")!.disabled,
+    true,
+    "modal disables Undo",
+  );
+  assert.equal(
+    root.querySelector<HTMLButtonElement>(".history-redo")!.disabled,
+    true,
+    "modal disables Redo",
+  );
   assert.equal(field("Name").value, "My unavailable font");
   assert.equal(field("Charset").value, "17", "arbitrary numeric charset remains editable");
   assert.ok(
@@ -256,6 +268,11 @@ async function run() {
   assert.equal(edits().length, 0);
   await click(button("Cancel"));
   assert.equal(dialog(), null);
+  assert.equal(
+    root.querySelector<HTMLButtonElement>(".history-undo")!.disabled,
+    false,
+    "closing modal restores history availability",
+  );
   assert.equal(root.querySelector<HTMLElement>(".form")!.style.fontSize, "12pt");
   assert.equal(document.activeElement, launcher, "focus returns to originating editor launcher");
   assert.equal(edits().length, 0, "Cancel emits no semantic operation");

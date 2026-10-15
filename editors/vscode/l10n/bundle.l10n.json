@@ -1,4 +1,17 @@
 {
+  "Configure [excel].path in xlflow.toml before building forms.": "Configure [excel].path in xlflow.toml before building forms.",
+  "A UserForm build is already in progress.": "A UserForm build is already in progress.",
+  "Select a form in an initialized xlflow project.": "Select a form in an initialized xlflow project.",
+  "Duplicate FormSpecs must be resolved before building:\n{files}": "Duplicate FormSpecs must be resolved before building:\n{files}",
+  "No persisted FormSpec is available to build. Excluded forms: {count}.": "No persisted FormSpec is available to build. Excluded forms: {count}.",
+  "Build Forms": "Build Forms",
+  "Workbook: {workbook}\n\nForms:\n{forms}\n\nExisting forms will be replaced (--overwrite). All workbook changes in the session will be saved after success.\nExcluded forms without a FormSpec: {excluded}.": "Workbook: {workbook}\n\nForms:\n{forms}\n\nExisting forms will be replaced (--overwrite). All workbook changes in the session will be saved after success.\nExcluded forms without a FormSpec: {excluded}.",
+  "Build UserForms in Excel?": "Build UserForms in Excel?",
+  "Form build inputs changed. Review the project and start the build again.": "Form build inputs changed. Review the project and start the build again.",
+  "Building UserForms": "Building UserForms",
+  "UserForm build failed: {error}": "UserForm build failed: {error}",
+  "Built and saved {count} UserForm(s).": "Built and saved {count} UserForm(s).",
+  "UserForm build stopped during {phase}.\nSucceeded: {succeeded}\nFailed: {failed}\nPending: {pending}\n{error}\nSuccessful builds may remain unsaved in Excel. Review the session state before saving or stopping it.": "UserForm build stopped during {phase}.\nSucceeded: {succeeded}\nFailed: {failed}\nPending: {pending}\n{error}\nSuccessful builds may remain unsaved in Excel. Review the session state before saving or stopping it.",
   "Restore Designer draft": "Restore Designer draft",
   "Resolve Designer conflict": "Resolve Designer conflict",
   "Save": "Save",
@@ -488,5 +501,11 @@
   "The assets directory cannot traverse symbolic links or junctions.": "The assets directory cannot traverse symbolic links or junctions.",
   "The created asset path changed; it was retained.": "The created asset path changed; it was retained.",
   "The created asset was replaced; it was retained.": "The created asset was replaced; it was retained.",
-  "The created asset changed; it was retained.": "The created asset changed; it was retained."
+  "The created asset changed; it was retained.": "The created asset changed; it was retained.",
+  "Undo": "Undo",
+  "Redo": "Redo",
+  "Save and Build": "Save and Build",
+  "The selected build sources have unsaved text or Designer drafts. Save them before building?": "The selected build sources have unsaved text or Designer drafts. Save them before building?",
+  "The document changed or could not be saved. Retry the build.": "The document changed or could not be saved. Retry the build.",
+  "Could not open the UserForm Designer: {error}": "Could not open the UserForm Designer: {error}"
 }

@@ -1,4 +1,7 @@
 {
+  "command.openUserFormDesigner.title": "Designerで開く",
+  "command.buildUserForm.title": "フォームをビルド",
+  "command.buildAllUserForms.title": "全フォームをビルド",
   "extension.displayName": "Xlflow - VBA Dev Tools",
   "extension.description": "Provides VBA syntax highlighting, LSP server, code import/export, Linter, Formatter, etc.",
   "customEditor.userFormDesigner.displayName": "xlflow UserForm デザイナー",

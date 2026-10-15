@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added a FormSpec editor context command to open Designer, native Undo/Redo
+  toolbar buttons, and Backspace deletion with existing subtree confirmation.
+- Added individual and all-form builds from the VS Code UserForms sidebar,
+  with explicit source saving, overwrite confirmation and session-backed builds.
+
 - Simplified UserForm Designer property inputs by removing type and null
   selectors. Existing absent/null fields remain unchanged until a concrete edit;
   false, zero and empty strings remain valid, and FormSpec/API null support is

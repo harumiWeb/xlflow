@@ -12,7 +12,13 @@ saved through the VS Code document lifecycle.
 The extension registers `xlflow.userFormDesigner` through
 `CustomEditorProvider` as an optional custom editor for `.yaml`, `.yml`, and
 `.json` files. Its `option` priority keeps the normal text editor available.
-Users can choose the visual editor with **Reopen Editor With...**.
+Users can choose the visual editor with **Reopen Editor With...** or the
+**xlflow: Open in Designer** source-editor context command. The command is
+available for local YAML/YML/JSON files and checks the same configured `specs`
+directory boundary before opening. It retains unsaved text and reuses the
+dedicated Designer resource without saving the source.
+Use the URI of the opened `TextDocument` when constructing that resource so
+Windows drive-letter normalization cannot disagree with its embedded source URI.
 Opening the file with the Designer redirects to its dedicated
 `xlflow-userform-designer` editor resource. The resource maps back to the
 original file URI, which remains the LSP and source-edit target. Separate
@@ -48,12 +54,17 @@ tokens. The canvas artboard retains MSForms preview colors; editor themes style
 the surrounding workspace, not authored control appearance. Codicon CSS/font
 assets and their licence are bundled locally under the Webview resource root.
 
-The single-row command toolbar exposes Cut/Copy/Paste/Delete as labelled icon
+The single-row command toolbar exposes Undo/Redo and Cut/Copy/Paste/Delete as labelled icon
 buttons, with Duplicate and Properties in More actions. Align and Size appear
 for two or more eligible siblings; Distribute appears for three or more; Order
 appears for at least one. Existing capability and busy guards still determine
 whether commands can execute. Menus support arrow/Home/End navigation, Escape,
 outside dismissal, and viewport-bound placement.
+
+Undo/Redo buttons delegate to VS Code native history for the dedicated Designer
+resource. They never introduce a Webview history stack or operate on a regular
+source editor. Availability follows host history state; edits, saving, conflicts
+and modal editors prevent toolbar history actions until the interaction finishes.
 
 The right pane has Properties, Structure, and Tab order tabs. Inactive panels
 remain mounted, preserving field drafts, replies, collection state, and pending
@@ -95,7 +106,8 @@ Neither the extension nor the Designer changes the user's global
 AutoSave behavior continue normally; edits in that document appear in the
 Designer immediately.
 
-Only the Designer Save button and its Designer-scoped Ctrl+S/Cmd+S command
+The Designer Save button, its Designer-scoped Ctrl+S/Cmd+S command, and the
+explicitly confirmed **Save and Build** action
 publish the current validated draft. Reconcile against the newest open
 `TextDocument`, apply source-preserving edits through VS Code document APIs,
 and call `TextDocument.save()`; never write the workspace file directly. On
@@ -169,6 +181,34 @@ history when external text changes are merged.
 VS Code backup and hot-exit recovery remain supported in addition to the
 URI-keyed internal checkpoint. Restoring a checkpoint recovers the pending
 source draft; source publication remains an explicit Designer action.
+
+## Sidebar form builds
+
+`xlflow.buildUserForm` builds the selected sidebar form; `xlflow.buildAllUserForms`
+builds all forms with canonical Specs in the selected project. Individual build
+is unavailable without a Spec. All-form builds exclude missing Specs with a
+reported count, reject duplicate Specs, and run in name order. Discovery uses
+the configured forms root and accepts YAML/YML/JSON directly inside `specs`.
+
+Before CLI mutation, show the configured workbook and target forms and confirm
+replacement of existing forms. Separately offer **Save and Build** or Cancel
+when targeted Designer drafts, source buffers or code-behind buffers have
+unsaved changes. Publish drafts through the provider's explicit save path,
+including retained checkpoints, and save only the targeted text documents.
+Any source conflict or failed save stops the build before workbook mutation.
+Build code inputs follow `discoverFormWriteComponent`: a matching
+`code/<FormName>.bas` is authoritative regardless of `[userform].code_source`;
+without it, workbook code is preserved. Do not derive build save targets from
+the sidebar's `.frm` display mode or save `.frm` as a substitute for the sidecar.
+
+Reuse a matching live session or create one, run each
+`form build <spec> --overwrite --session --no-save` sequentially through existing
+CLI coordination, and save the workbook once after all succeed. Stop only a
+session created by this operation after successful save. Stop subsequent builds
+on failure, retain the session with pending changes, and report completed,
+failed and unexecuted forms. Batch builds are not atomic. Refresh forms and
+workbook/session status after success or failure, and prevent concurrent build
+commands. CLI and FormSpec contracts remain unchanged.
 
 ## Source and preview protocol
 
@@ -491,8 +531,11 @@ Toolbox creates a new control. On successful insertion, select the new
 control and return the Toolbox to Pointer. Escape cancels pending placement
 without a source edit.
 
-The Designer offers a Delete toolbar action and handles Delete when the canvas
-has focus. It must not intercept Delete from a focused text or property input.
+The Designer offers a Delete toolbar action and handles Delete or Backspace when
+the canvas has focus, plus Backspace for selected controls in Structure. It must
+not intercept deletion from a focused text or property input, IME composition,
+modifier combinations or key repeat. All entry points reuse host subtree
+confirmation and one native history step.
 The keyboard event must target the canvas itself: focus on a Page-tab button
 must not delete a previously selected control through event bubbling.
 A control with no descendants is removed immediately. If descendants exist,

@@ -249,6 +249,18 @@ export class UserFormEditorProvider
       vscode.Uri.file(tmpdir()),
       "xlflow-userform-designer-drafts",
     ),
+    private readonly confirmBuildSave: () => PromiseLike<boolean> = async () => {
+      const save = vscode.l10n.t("Save and Build");
+      return (
+        (await vscode.window.showWarningMessage(
+          vscode.l10n.t(
+            "The selected build sources have unsaved text or Designer drafts. Save them before building?",
+          ),
+          { modal: true },
+          save,
+        )) === save
+      );
+    },
   ) {
     this.checkpoints = new DraftCheckpointStore(checkpointStorageRoot);
   }
@@ -427,6 +439,90 @@ export class UserFormEditorProvider
 
   public registerSaveCommand(command = designerSaveCommand): vscode.Disposable {
     return vscode.commands.registerCommand(command, () => this.publishActiveDocument());
+  }
+
+  /** Explicit, targeted publication; native Auto Save only stores checkpoints. */
+  public async prepareBuildSources(uris: readonly vscode.Uri[]): Promise<boolean> {
+    const sources = [
+      ...new Map(
+        uris.map((uri) => {
+          const source = designerSourceUri(uri);
+          return [source.toString(), source] as const;
+        }),
+      ).values(),
+    ];
+    const live = (uri: vscode.Uri) =>
+      [...this.documents.values()].find(
+        (document) => !document.closed && document.sourceUri.toString() === uri.toString(),
+      );
+    const hasPendingDraft = (uri: vscode.Uri) =>
+      this.edits.exclusive(uri, async () => {
+        const document = live(uri);
+        if (document)
+          return (
+            document.state.dirty ||
+            document.state.conflicted ||
+            document.reconciling ||
+            document.saving
+          );
+        const redirect = this.redirectDrafts.get(designerResourceUri(uri).toString());
+        if (redirect) return redirect.dirty || redirect.conflicted;
+        const checkpoint = await this.checkpoints.read(uri);
+        if (!checkpoint) return false;
+        const state = DraftState.restore(checkpoint.state);
+        return state.dirty || state.conflicted;
+      });
+    const temporary: UserFormCustomDocument[] = [];
+    const cancellation = new vscode.CancellationTokenSource();
+    try {
+      const pending: { uri: vscode.Uri; draft: boolean }[] = [];
+      for (const uri of sources) {
+        const source = await vscode.workspace.openTextDocument(uri);
+        const hasDraft = await hasPendingDraft(uri);
+        if (source.isDirty || hasDraft) pending.push({ uri, draft: hasDraft });
+      }
+      if (pending.length && !(await this.confirmBuildSave())) return false;
+      for (const { uri, draft } of pending) {
+        let document = live(uri);
+        if (!document && draft) {
+          document = await this.openCustomDocument(
+            designerResourceUri(uri),
+            { backupId: undefined, untitledDocumentData: undefined },
+            cancellation.token,
+          );
+          temporary.push(document);
+        }
+        if (document) {
+          if (document.state.conflicted)
+            throw new Error(
+              vscode.l10n.t("Resolve the YAML/JSON and Designer conflict before saving."),
+            );
+          await this.publishCustomDocument(document, cancellation.token);
+        } else {
+          const source = await vscode.workspace.openTextDocument(uri);
+          if (!(await source.save()) || source.isDirty)
+            throw new Error(
+              vscode.l10n.t("The document changed or could not be saved. Retry the build."),
+            );
+        }
+      }
+      // Include targets that became dirty while the save confirmation was open.
+      // Never start a build against a mixture of published and pending sources.
+      for (const uri of sources) {
+        const source = await vscode.workspace.openTextDocument(uri);
+        if (source.isDirty || (await hasPendingDraft(uri)))
+          throw new Error(
+            vscode.l10n.t("The document changed or could not be saved. Retry the build."),
+          );
+      }
+      return true;
+    } catch (error) {
+      void vscode.window.showErrorMessage(String(error));
+      return false;
+    } finally {
+      temporary.forEach((document) => document.dispose());
+      cancellation.dispose();
+    }
   }
 
   public async publishActiveDocument(): Promise<void> {
@@ -865,7 +961,23 @@ export class UserFormEditorProvider
         failed(error);
       }
     };
-    const sendDraftState = () =>
+    let historyRunning = false;
+    const sendHistoryState = () =>
+      send({
+        type: "historyState",
+        canUndo:
+          !historyRunning &&
+          !customDocument.saving &&
+          !customDocument.reconciling &&
+          customDocument.state.undoAvailable,
+        canRedo:
+          !historyRunning &&
+          !customDocument.saving &&
+          !customDocument.reconciling &&
+          customDocument.state.redoAvailable,
+      });
+    const sendDraftState = () => {
+      sendHistoryState();
       send({
         type: "draftState",
         dirty: customDocument.state.dirty,
@@ -873,6 +985,7 @@ export class UserFormEditorProvider
         saving: customDocument.saving || customDocument.reconciling,
         error: customDocument.saveError,
       });
+    };
     const applyDraft = async (edits: import("./protocol").SourceTextEdit[], label: string) => {
       const frame = customDocument.apply(edits, label);
       if (!frame) return;
@@ -1175,6 +1288,55 @@ export class UserFormEditorProvider
           void this.publishPanel(panel, customDocument).then(undefined, (error) =>
             vscode.window.showErrorMessage(String(error)),
           );
+        } else if (message.type === "history") {
+          const context = contextGeneration;
+          void (async () => {
+            let error: DesignerError | undefined;
+            let ownsHistory = false;
+            try {
+              if (historyRunning)
+                throw new Error(
+                  vscode.l10n.t("The document changed. Retry the operation on the updated form."),
+                );
+              historyRunning = true;
+              ownsHistory = true;
+              sendHistoryState();
+              // Drain pending edits without holding the queue during the native
+              // command: its CustomDocument callback acquires the same queue.
+              await this.edits.exclusive(customDocument.sourceUri, async () => {});
+              if (
+                disposed ||
+                customDocument.closed ||
+                context !== contextGeneration ||
+                !panel.active ||
+                customDocument.saving ||
+                customDocument.reconciling ||
+                customDocument.state.conflicted ||
+                document.version !== message.version ||
+                !(message.action === "undo"
+                  ? customDocument.state.undoAvailable
+                  : customDocument.state.redoAvailable)
+              )
+                throw new Error(
+                  vscode.l10n.t("The document changed. Retry the operation on the updated form."),
+                );
+              // Native custom-editor history uses the active editor resource.
+              // Never run this command for an inactive panel or a source editor.
+              await vscode.commands.executeCommand(message.action);
+            } catch (caught) {
+              error = { code: "historyUnavailable", message: String(caught) };
+            } finally {
+              if (ownsHistory) historyRunning = false;
+              sendHistoryState();
+            }
+            if (disposed || context !== contextGeneration) return;
+            replies.set(message.requestId, {
+              message: { type: "editResult", requestId: message.requestId, error },
+              sending: false,
+            });
+            flushReplies();
+            await update();
+          })();
         } else if (message.type === "pictureCancel") {
           pictures?.cancel();
           pictureBinding = undefined;

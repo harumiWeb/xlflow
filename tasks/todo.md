@@ -1,3 +1,18 @@
+# Designer actions and sidebar form build
+
+- [x] Add the source-editor context command with the existing FormSpec/resource boundary.
+- [x] Reuse native Undo/Redo and existing subtree confirmation for toolbar history and Backspace.
+- [x] Add individual/all form builds with targeted explicit saving, session reuse and partial-failure reporting.
+- [x] Verify extension regressions and real Excel builds; update specifications, guides and changelogs.
+
+Validation: full VS Code 1.142.0 tests, lint, documentation and changed-file
+format checks pass. Real Excel 16.0 x64 passed individual/batch creation,
+overwrite, existing-session reuse, partial-failure retention, nested snapshots
+and code-behind runtime assertions. Review fixed build save targets to follow
+the CLI's sidecar authority in both display modes. All test sessions stopped.
+Exact commands, results and limits:
+`C:\Users\HARUMI\orca\workspaces\xlflow\guppy\tmp_workspaces\designer-actions-build-20261016\verification.md`.
+
 # Designer concrete property inputs
 
 - [x] Remove scalar type/null selectors and typed-object null selectors while retaining metadata authority.

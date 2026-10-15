@@ -177,6 +177,8 @@ export const designerStrings = {
   closePane: "Close pane",
   openText: "Open source beside Designer",
   save: "Save",
+  undo: "Undo",
+  redo: "Redo",
   unsaved: "Designer changes not applied to YAML/JSON",
   sourceConflict: "YAML/JSON and Designer changes conflict. Resolve the conflict before saving.",
   useSource: "Use YAML/JSON changes",
@@ -313,6 +315,7 @@ export type HostMessage =
       error?: DesignerError;
     }
   | { type: "clipboardState"; available: boolean }
+  | { type: "historyState"; canUndo: boolean; canRedo: boolean }
   | { type: "draftState"; dirty: boolean; conflicted: boolean; saving: boolean; error?: string }
   | { type: "editingUnavailable" }
   | { type: "themeChanged" };
@@ -747,6 +750,7 @@ export type WebviewMessage =
   | { type: "ready" }
   | { type: "openText" }
   | { type: "save" }
+  | { type: "history"; action: "undo" | "redo"; requestId: number; version: number }
   | { type: "picturePick"; requestId: number; version: number; controlId: string }
   | { type: "pictureCommit"; requestId: number; version: number; controlId: string; token: string }
   | { type: "pictureCancel" }
@@ -821,6 +825,15 @@ export function isParentOperation(value: unknown): value is ParentOperation {
 export function isWebviewMessage(value: unknown): value is WebviewMessage {
   if (typeof value !== "object" || value === null) return false;
   const message = value as Record<string, unknown>;
+  if (message.type === "history")
+    return (
+      Object.keys(message).length === 4 &&
+      (message.action === "undo" || message.action === "redo") &&
+      Number.isSafeInteger(message.requestId) &&
+      Number(message.requestId) >= 0 &&
+      Number.isSafeInteger(message.version) &&
+      Number(message.version) >= 0
+    );
   if (message.type === "ready" || message.type === "openText" || message.type === "save")
     return Object.keys(message).length === 1;
   if (message.type === "pictureCancel") return Object.keys(message).length === 1;

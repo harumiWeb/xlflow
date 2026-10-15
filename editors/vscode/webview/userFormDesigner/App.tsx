@@ -76,6 +76,7 @@ export function App() {
   const [documentVersion, setDocumentVersion] = useState(0);
   const [reply, setReply] = useState<PropertyReply>();
   const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   const [draftState, setDraftState] = useState({
     dirty: false,
     conflicted: false,
@@ -117,6 +118,7 @@ export function App() {
   useEffect(() => {
     const listener = (event: MessageEvent<HostMessage>) => {
       const message = event.data;
+      if (message.type === "historyState") setHistory(message);
       if (message.type === "draftState")
         setDraftState({
           dirty: message.dirty,
@@ -397,11 +399,14 @@ export function App() {
     structuralEditable &&
     !error &&
     !busy &&
+    !draftState.saving &&
+    !draftState.conflicted &&
+    !editor &&
     (productivityEditable
       ? currentProductivitySelection.length > 0 || selectedCanDelete
       : selectedCanDelete);
   const remove = () => {
-    if (!canDelete || !selectedId) return;
+    if (!canDelete || !selectedId || pending.current) return;
     if (productivityEditable && currentProductivitySelection.length > 0)
       commit([{ type: "removeControls", controlIds: currentProductivitySelection, cascade: true }]);
     else commit([{ type: "removeControl", controlId: selectedId, cascade: true }]);
@@ -454,13 +459,21 @@ export function App() {
     });
   };
   const handleShortcut = (action: "copy" | "cut" | "paste" | "duplicate" | "delete") => {
-    if (!productivityEditable || busy || error) return false;
-    const parentId = document ? defaultPasteParent(document, selectedIds) : "";
     if (action === "delete") {
       if (!canDelete) return false;
       remove();
       return true;
     }
+    if (
+      !productivityEditable ||
+      busy ||
+      error ||
+      editor ||
+      draftState.saving ||
+      draftState.conflicted
+    )
+      return false;
+    const parentId = document ? defaultPasteParent(document, selectedIds) : "";
     if (action === "paste") {
       if (!clipboardAvailable || !structuralEditable || !canPasteInto(parentId)) return false;
       requestClipboard(action, [], parentId);
@@ -485,6 +498,23 @@ export function App() {
         )
         ?.focus(),
     );
+  };
+  const historyDisabled = busy || draftState.saving || draftState.conflicted || !!editor;
+  const requestHistory = (action: "undo" | "redo") => {
+    if (
+      historyDisabled ||
+      pending.current ||
+      !(action === "undo" ? history.canUndo : history.canRedo)
+    )
+      return;
+    const requestId = ++nextRequest.current;
+    pending.current = { requestId };
+    pendingStructural.current = true;
+    setBusy(true);
+    setEditError(undefined);
+    setContextMenu(undefined);
+    setTool(undefined);
+    bridge.postMessage({ type: "history", action, requestId, version: version.current });
   };
   const selectStructure = (id?: string) => {
     if (busy || draftState.saving || !document) return;
@@ -785,6 +815,20 @@ export function App() {
             </div>
             <section class="canvas-pane">
               <div class="canvas-command-bar">
+                {(["undo", "redo"] as const).map((action) => (
+                  <button
+                    type="button"
+                    class={`history-${action} icon-button`}
+                    title={strings[action]}
+                    aria-label={strings[action]}
+                    disabled={
+                      historyDisabled || !(action === "undo" ? history.canUndo : history.canRedo)
+                    }
+                    onClick={() => requestHistory(action)}
+                  >
+                    <Icon name={action} />
+                  </button>
+                ))}
                 <button
                   class="pane-toggle"
                   data-pane="toolbox"
@@ -1042,8 +1086,9 @@ export function App() {
                   document={document}
                   selectionIds={selectedIds}
                   strings={strings}
-                  busy={busy || draftState.saving}
+                  busy={busy || draftState.saving || draftState.conflicted || !!editor}
                   onSelect={selectStructure}
+                  onDelete={() => handleShortcut("delete")}
                 />
               </div>
               <div

@@ -106,6 +106,7 @@ interface DraftProviderTestExtension {
 
 export async function runUserFormDraftProviderAssertions(extensionUri: vscode.Uri): Promise<void> {
   await assertDraftEditUndoRedoAndSave(extensionUri, "yaml", yamlSource);
+  await assertPrepareBuildSources(extensionUri);
   await assertDraftEditUndoRedoAndSave(extensionUri, "yaml", crlfYamlSource);
   await assertDraftEditUndoRedoAndSave(extensionUri, "json", jsonSource);
   await assertMultilineCRLFPublication(extensionUri);
@@ -844,7 +845,52 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
       "native edit events dirty the custom tab",
     );
 
-    await vscode.commands.executeCommand("undo");
+    await waitFor(
+      () =>
+        hostMessages.some(
+          (message) =>
+            message.type === "document" && message.version === customDocument!.document.version,
+        ),
+      "latest Designer preview before toolbar Undo",
+    );
+    // Keep the Designer visible but inactive. Hidden Webviews can suspend
+    // message delivery, and host replies intentionally wait for visibility.
+    await vscode.window.showTextDocument(sourceDocument, { viewColumn: vscode.ViewColumn.Beside });
+    await waitFor(
+      () => nativePanel!.visible && !nativePanel!.active,
+      "source editor active beside Designer",
+    );
+    await transportPanel!.webview.postMessage({
+      type: "xlflow-test-history",
+      action: "undo",
+      requestId: 699,
+      version: customDocument.document.version,
+    });
+    await waitFor(
+      () =>
+        hostMessages.some(
+          (message) =>
+            message.type === "editResult" &&
+            message.requestId === 699 &&
+            message.error?.code === "historyUnavailable",
+        ),
+      "inactive Designer rejects history request",
+    );
+    assert.strictEqual(customDocument.document.getText(), firstExpected);
+    assert.strictEqual(sourceDocument.getText(), yamlSource);
+    const sourceTab = vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .find(
+        (tab) =>
+          tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === uri.toString(),
+      );
+    if (sourceTab) await vscode.window.tabGroups.close(sourceTab, true);
+    nativePanel!.reveal(nativePanel!.viewColumn);
+    await waitFor(() => nativePanel!.active, "restore Designer focus before toolbar Undo");
+    await transportPanel!.webview.postMessage({
+      type: "xlflow-test-toolbar-history",
+      action: "undo",
+    });
     await waitFor(
       () => customDocument!.document.getText() === yamlSource,
       "the registered Custom Editor native Undo command",
@@ -865,7 +911,22 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
       "native Undo returns the custom tab to clean",
     );
 
-    await vscode.commands.executeCommand("redo");
+    await waitFor(
+      () => hostMessages.some((message) => message.type === "historyState" && message.canRedo),
+      "Redo availability after native Undo",
+    );
+    await waitFor(
+      () =>
+        hostMessages.some(
+          (message) =>
+            message.type === "document" && message.version === customDocument!.document.version,
+        ),
+      "latest Designer preview before toolbar Redo",
+    );
+    await transportPanel!.webview.postMessage({
+      type: "xlflow-test-toolbar-history",
+      action: "redo",
+    });
     await waitFor(
       () => customDocument!.document.getText() === firstExpected,
       "the registered Custom Editor native Redo command",
@@ -1528,11 +1589,108 @@ async function assertMalformedCheckpointIsRetained(extensionUri: vscode.Uri): Pr
   }
 }
 
+async function assertPrepareBuildSources(extensionUri: vscode.Uri): Promise<void> {
+  for (const approve of [false, true]) {
+    let confirmations = 0;
+    await withTestEnvironment(
+      extensionUri,
+      "yaml",
+      yamlSource,
+      async (environment) => {
+        const { provider, customDocument, uri, directory } = environment;
+        await sendCaptionEdit(environment, 1900, "Build draft");
+        const codeUri = vscode.Uri.file(path.join(directory, "Main.bas"));
+        const unrelatedUri = vscode.Uri.file(path.join(directory, "Unrelated.bas"));
+        await writeFile(codeUri.fsPath, "Option Explicit\n");
+        await writeFile(unrelatedUri.fsPath, "Option Explicit\n");
+        const code = await vscode.workspace.openTextDocument(codeUri);
+        const unrelated = await vscode.workspace.openTextDocument(unrelatedUri);
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(codeUri, code.positionAt(code.getText().length), "' build\n");
+        edit.insert(
+          unrelatedUri,
+          unrelated.positionAt(unrelated.getText().length),
+          "' unrelated\n",
+        );
+        assert.ok(await vscode.workspace.applyEdit(edit));
+        assert.strictEqual(await provider.prepareBuildSources([uri, codeUri, uri]), approve);
+        assert.strictEqual(confirmations, 1, "one confirmation for all targeted sources");
+        assert.strictEqual(
+          await readFile(uri.fsPath, "utf8"),
+          approve ? replaceCaption(yamlSource, "Build draft") : yamlSource,
+        );
+        assert.strictEqual(customDocument.state.dirty, !approve);
+        assert.strictEqual(code.isDirty, !approve);
+        assert.strictEqual(unrelated.isDirty, true, "unrelated text is never saved");
+        assert.strictEqual(await readFile(unrelatedUri.fsPath, "utf8"), "Option Explicit\n");
+        await code.save();
+        await unrelated.save();
+        if (approve) {
+          assert.strictEqual(await provider.prepareBuildSources([uri, codeUri]), true);
+          assert.strictEqual(confirmations, 1, "clean sources need no confirmation");
+        }
+      },
+      async () => {
+        confirmations++;
+        return approve;
+      },
+    );
+  }
+  let confirmations = 0;
+  await withTestEnvironment(
+    extensionUri,
+    "yaml",
+    yamlSource,
+    async (environment) => {
+      const { provider, customDocument, uri, cancellation, checkpointRoot } = environment;
+      await sendCaptionEdit(environment, 1901, "Closed draft");
+      await provider.saveCustomDocument(customDocument, cancellation.token);
+      customDocument.dispose();
+      assert.strictEqual(await readFile(uri.fsPath, "utf8"), yamlSource);
+      assert.strictEqual(await provider.prepareBuildSources([uri]), true);
+      assert.strictEqual(confirmations, 1, "closed recoverable draft is included in confirmation");
+      assert.strictEqual(
+        await readFile(uri.fsPath, "utf8"),
+        replaceCaption(yamlSource, "Closed draft"),
+      );
+      const checkpoint = await new DraftCheckpointStore(checkpointRoot).read(uri);
+      assert.strictEqual(
+        checkpoint?.state.text,
+        checkpoint?.state.baseText,
+        "recovered draft is marked published",
+      );
+    },
+    async () => {
+      confirmations++;
+      return true;
+    },
+  );
+  await withTestEnvironment(
+    extensionUri,
+    "yaml",
+    yamlSource,
+    async (environment) => {
+      const { provider, customDocument, uri } = environment;
+      await sendCaptionEdit(environment, 1902, "Conflicting draft");
+      customDocument.state.retainConflict(replaceCaption(yamlSource, "External"));
+      assert.strictEqual(await provider.prepareBuildSources([uri]), false);
+      assert.strictEqual(await readFile(uri.fsPath, "utf8"), yamlSource);
+      assert.strictEqual(
+        customDocument.state.dirty,
+        true,
+        "a failed publication retains the draft",
+      );
+    },
+    async () => true,
+  );
+}
+
 async function withTestEnvironment(
   extensionUri: vscode.Uri,
   format: "yaml" | "json",
   initial: string,
   assertions: (environment: TestEnvironment) => Promise<void>,
+  confirmBuildSave?: () => PromiseLike<boolean>,
 ): Promise<void> {
   const { directory, uri } = await createWorkspaceFixture(format);
   const cancellation = new vscode.CancellationTokenSource();
@@ -1544,6 +1702,7 @@ async function withTestEnvironment(
     undefined,
     undefined,
     checkpointRoot,
+    confirmBuildSave,
   );
   const panel = createFakePanel();
   try {
@@ -1647,6 +1806,15 @@ function createTestClient(): TestClient {
         pageEditable: true,
         tabEditable: true,
         productivityEditable: true,
+        propertyGrid: {
+          form: {
+            descriptors: [
+              { field: "caption", valueType: "string", required: false, nullable: true },
+            ],
+            values: { caption: { present: true, value: captionValue(text) } },
+          },
+          controls: {},
+        },
         document: {
           form: { name: "Main", caption: captionValue(text) },
           controls: source?.controls ?? [],
@@ -1806,6 +1974,15 @@ window.addEventListener("message", event => {
   const message = event.data;
   if (message?.type === "xlflow-test-edit") {
     testApi.postMessage({ type: "edit", requestId: message.requestId, version: message.version, operations: message.operations });
+  } else if (message?.type === "xlflow-test-history") {
+    testApi.postMessage({ type: "history", action: message.action, requestId: message.requestId, version: message.version });
+  } else if (message?.type === "xlflow-test-toolbar-history") {
+    const input = document.querySelector('[data-property-field="caption"] input');
+    const button = document.querySelector('.history-' + message.action);
+    if (!input || !button || button.disabled) throw new Error("History toolbar is unavailable");
+    input.focus();
+    button.focus();
+    button.click();
   } else if (message?.type === "xlflow-test-save") {
     testApi.postMessage({ type: "save" });
   } else if (message?.type === "xlflow-test-resolve") {

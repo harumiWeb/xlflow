@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added **Open in Designer** to the FormSpec editor context menu, native
+  Undo/Redo toolbar buttons, and Backspace deletion in Canvas and Structure.
+- Added individual and all-form sidebar builds, with targeted source saving,
+  workbook overwrite confirmation and sequential session-backed execution.
+
 - Simplified UserForm Designer property inputs by removing type and null
   selectors. Existing absent/null fields remain unchanged until a concrete edit;
   false, zero and empty strings remain valid, and FormSpec/API null support is

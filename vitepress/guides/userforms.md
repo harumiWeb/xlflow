@@ -23,9 +23,12 @@ HIMETRIC rounding; xlflow does not compensate with a fixed offset.
 Open a canonical `.yaml`, `.yml`, or `.json` FormSpec directly under your
 configured forms root's `specs` directory, then use **Reopen Editor With... →
 xlflow UserForm Designer**. Select a control to drag it or resize with one of
-eight handles. Arrow keys move 1 point; Shift+Arrow moves 10 points. Holding
+eight handles. You can also right-click in the source editor and choose
+**xlflow: Open in Designer**; opening keeps unsaved source text intact.
+Arrow keys move 1 point; Shift+Arrow moves 10 points. Holding
 an arrow key creates one edit when the keys are released. Escape cancels an
-unfinished interaction. Use VS Code Undo/Redo to restore completed edits.
+unfinished interaction. Use VS Code Undo/Redo or the Canvas toolbar's Undo/Redo
+buttons to restore completed edits; both use the same native history.
 
 Designer actions are kept in a shared draft for the FormSpec. The Designer's
 **YAML/JSON not applied** badge shows whether that draft has been published to
@@ -86,8 +89,9 @@ Pages are one atomic, undoable edit. A new TabStrip starts with `Tab1` and
 `Tab2` and `selectedIndex: 0`. Existing authored empty MultiPages and
 TabStrips remain unchanged.
 
-Delete the selected control with the toolbar or Delete while the canvas has
-focus. Leaf controls are removed immediately. When a control has descendants,
+Delete the selected control with the toolbar or Delete/Backspace while the
+canvas has focus. Backspace also works in Structure. Leaf controls are removed
+immediately. When a control has descendants,
 a confirmation shows its name and descendant count; confirming removes the
 subtree as one undoable edit. Designer deletion does not intercept Delete in a
 focused input, so normal character deletion continues to work. Direct deletion

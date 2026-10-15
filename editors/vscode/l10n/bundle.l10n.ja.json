@@ -1,4 +1,17 @@
 {
+  "Configure [excel].path in xlflow.toml before building forms.": "フォームをビルドする前にxlflow.tomlの[excel].pathを設定してください。",
+  "A UserForm build is already in progress.": "UserFormのビルドはすでに実行中です。",
+  "Select a form in an initialized xlflow project.": "初期化済みのxlflowプロジェクトでフォームを選択してください。",
+  "Duplicate FormSpecs must be resolved before building:\n{files}": "ビルドの前に重複するFormSpecを解消してください:\n{files}",
+  "No persisted FormSpec is available to build. Excluded forms: {count}.": "ビルドできるFormSpecがありません。対象外のフォーム: {count}件。",
+  "Build Forms": "フォームをビルド",
+  "Workbook: {workbook}\n\nForms:\n{forms}\n\nExisting forms will be replaced (--overwrite). All workbook changes in the session will be saved after success.\nExcluded forms without a FormSpec: {excluded}.": "ブック: {workbook}\n\nフォーム:\n{forms}\n\n既存のフォームを上書きします（--overwrite）。成功後、セッション内のブックの変更をすべて保存します。\nFormSpecがなく対象外のフォーム: {excluded}件。",
+  "Build UserForms in Excel?": "ExcelブックにUserFormをビルドしますか？",
+  "Form build inputs changed. Review the project and start the build again.": "ビルド対象が変更されました。プロジェクトを確認してビルドをやり直してください。",
+  "Building UserForms": "UserFormをビルド中",
+  "UserForm build failed: {error}": "UserFormのビルドに失敗しました: {error}",
+  "Built and saved {count} UserForm(s).": "{count}件のUserFormをビルドして保存しました。",
+  "UserForm build stopped during {phase}.\nSucceeded: {succeeded}\nFailed: {failed}\nPending: {pending}\n{error}\nSuccessful builds may remain unsaved in Excel. Review the session state before saving or stopping it.": "フォームのビルドを {phase} で停止しました。\n成功: {succeeded}\n失敗: {failed}\n未実行: {pending}\n{error}\n成功した変更が Excel 内に未保存で残っている場合があります。保存や終了の前にセッション状態を確認してください。",
   "Restore Designer draft": "Designer のドラフトを復元",
   "Resolve Designer conflict": "Designer の競合を解決",
   "Save": "上書き保存",
@@ -488,5 +501,11 @@
   "The assets directory cannot traverse symbolic links or junctions.": "assets ディレクトリのパスにシンボリックリンクやジャンクションを含めることはできません。",
   "The created asset path changed; it was retained.": "作成したアセットのパスが変更されたため、ファイルを保持しました。",
   "The created asset was replaced; it was retained.": "作成したアセットが置き換えられたため、ファイルを保持しました。",
-  "The created asset changed; it was retained.": "作成したアセットが変更されたため、ファイルを保持しました。"
+  "The created asset changed; it was retained.": "作成したアセットが変更されたため、ファイルを保持しました。",
+  "Undo": "元に戻す",
+  "Redo": "やり直す",
+  "Save and Build": "保存してビルド",
+  "The selected build sources have unsaved text or Designer drafts. Save them before building?": "対象のソースまたはDesignerに未保存の変更があります。保存してからビルドしますか？",
+  "The document changed or could not be saved. Retry the build.": "ドキュメントが変更されたか、保存できませんでした。ビルドをやり直してください。",
+  "Could not open the UserForm Designer: {error}": "UserForm Designerを開けませんでした: {error}"
 }

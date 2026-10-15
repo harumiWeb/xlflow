@@ -1,5 +1,6 @@
 import * as path from "path";
 import * as vscode from "vscode";
+import { collectFormBuildSources } from "./userFormBuildWorkflow";
 import {
   cliUnavailableMessage,
   XlflowCliAvailability,
@@ -97,6 +98,7 @@ interface UserFormNode {
   kind: "userForm";
   name: string;
   codeSource: UserFormCodeSource;
+  buildable: boolean;
   workspaceUri: vscode.Uri;
   primaryUri?: vscode.Uri;
   primaryRelativePath?: string;
@@ -528,6 +530,21 @@ class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     }
 
     const forms = await discoverUserForms(state.workspaceFolder, state.configPath);
+    const config = Buffer.from(await vscode.workspace.fs.readFile(state.configPath)).toString(
+      "utf8",
+    );
+    const specsRoot = vscode.Uri.file(
+      path.resolve(
+        state.workspaceFolder.uri.fsPath,
+        readFormsRootFromToml(config).replace(/\\/g, "/"),
+        "specs",
+      ),
+    );
+    const specEntries = await readDirectorySafe(specsRoot);
+    const buildSources = collectFormBuildSources(
+      specEntries.filter(([, type]) => (type & vscode.FileType.File) !== 0).map(([name]) => name),
+    );
+    const buildableNames = new Set(buildSources.sources.map((source) => source.name.toLowerCase()));
     this.nodes = forms.map((form) => {
       const children: UserFormArtifactNode[] = form.artifacts.map((artifact) => ({
         kind: "userFormArtifact" as const,
@@ -548,6 +565,7 @@ class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         kind: "userForm",
         name: form.name,
         codeSource: form.codeSource,
+        buildable: buildableNames.has(form.name.toLowerCase()),
         workspaceUri: state.workspaceFolder.uri,
         primaryUri: primary?.uri,
         primaryRelativePath: primary?.relativePath,
@@ -561,7 +579,7 @@ class UserFormsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     if (element.kind === "userForm") {
       const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.Collapsed);
       item.iconPath = new vscode.ThemeIcon("window");
-      item.contextValue = userFormContextValue(element.codeSource);
+      item.contextValue = userFormContextValue(element.codeSource, element.buildable);
       item.resourceUri = element.primaryUri;
       item.tooltip = element.primaryUri?.fsPath;
       return item;
@@ -608,8 +626,8 @@ function primaryUserFormArtifact(
   );
 }
 
-export function userFormContextValue(codeSource: UserFormCodeSource): string {
-  return `xlflow.userForm.${codeSource}`;
+export function userFormContextValue(codeSource: UserFormCodeSource, buildable = false): string {
+  return `xlflow.userForm.${codeSource}${buildable ? ".buildable" : ""}`;
 }
 
 export function userFormArtifactContextValue(node: {
@@ -1027,7 +1045,7 @@ async function configuredWorkbook(state: Extract<XlflowProjectState, { kind: "re
   }
 }
 
-async function discoverUserForms(
+export async function discoverUserForms(
   folder: vscode.WorkspaceFolder,
   configPath: vscode.Uri,
 ): Promise<UserFormModel[]> {
@@ -1384,7 +1402,7 @@ function userFormArtifactIcon(node: UserFormArtifactNode): string {
 
 function isUserFormSpec(fileName: string): boolean {
   const lower = fileName.toLowerCase();
-  return lower.endsWith(".yaml") || lower.endsWith(".yml");
+  return lower.endsWith(".yaml") || lower.endsWith(".yml") || lower.endsWith(".json");
 }
 
 function basenameWithoutExtension(fileName: string): string {

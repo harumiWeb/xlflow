@@ -741,7 +741,12 @@ export function DesignerCanvas({
     onContextMenu?.(id, event.clientX, event.clientY);
   };
   const keyDown = (event: JSX.TargetedKeyboardEvent<HTMLDivElement>) => {
-    if ((event.target as Element).closest("input, textarea, select, [contenteditable='true']"))
+    if (
+      event.isComposing ||
+      (event.target as Element).closest(
+        "input, textarea, select, [contenteditable]:not([contenteditable='false'])",
+      )
+    )
       return;
     if (
       productivityEditable &&
@@ -768,13 +773,14 @@ export function DesignerCanvas({
       return;
     }
     if (
-      event.key === "Delete" &&
+      (event.key === "Delete" || event.key === "Backspace") &&
       event.target === event.currentTarget &&
       !busy &&
       !placing &&
       !event.repeat &&
       !event.ctrlKey &&
       !event.metaKey &&
+      !event.shiftKey &&
       !event.altKey
     ) {
       if (productivityEditable && onShortcut?.("delete")) {

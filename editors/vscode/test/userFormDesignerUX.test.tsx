@@ -209,6 +209,58 @@ async function run() {
   await act(() => render(null, root));
   await removedSelectionLeavesAValidRovingItem();
   await act(() => render(null, root));
+  await structureDeletionGuards();
+  await act(() => render(null, root));
+}
+
+async function structureDeletionGuards() {
+  let deletions = 0;
+  const show = async (busy = false) =>
+    act(() =>
+      render(
+        <StructureTree
+          document={model}
+          selectionIds={["nested"]}
+          strings={strings}
+          busy={busy}
+          onSelect={() => {}}
+          onDelete={() => {
+            deletions++;
+            return true;
+          }}
+        />,
+        root,
+      ),
+    );
+  await show();
+  const send = async (id: string, options: KeyboardEventInit = {}) => {
+    const event = new dom.window.KeyboardEvent("keydown", {
+      key: "Backspace",
+      bubbles: true,
+      cancelable: true,
+      ...options,
+    });
+    await act(() => item(id).dispatchEvent(event));
+    return event;
+  };
+  for (const guard of [
+    { repeat: true },
+    { isComposing: true },
+    { ctrlKey: true },
+    { altKey: true },
+    { metaKey: true },
+    { shiftKey: true },
+  ])
+    await send("nested", guard);
+  await send("");
+  await send("frame");
+  assert.equal(deletions, 0, "unselected focus, root, repeats, IME and modifiers cannot delete");
+  const removed = await send("nested");
+  assert.equal(deletions, 1);
+  assert.equal(removed.defaultPrevented, true);
+  await show(true);
+  await send("nested");
+  assert.equal(deletions, 1, "busy structure never deletes");
 }
 
 run().catch((error) => {
