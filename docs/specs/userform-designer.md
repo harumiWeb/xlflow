@@ -61,10 +61,10 @@ local tab order. Tabs support arrow/Home/End navigation. Tab-order document and
 parent changes reset the local order; changing right-pane tabs does not.
 
 Properties use two columns (name/value), initially expanded category sections,
-and a target name/type header. A row's value-type details menu exposes only
-metadata-authorized scalar type choices and explicit null. Opening details
-alone is not an edit. Presence, null, scalar values, numeric precision, and edit
-confirmation retain the contracts below. Existing Page/TabStrip editors and
+and a target name/type header. Property inputs offer concrete values without
+type or explicit-null selectors. Existing absent and null source states remain
+unchanged until concrete confirmation. Presence, scalar values, numeric precision,
+and edit confirmation retain the contracts below. Existing Page/TabStrip editors and
 Page destinations remain in collapsible sections within Properties.
 
 Structure displays the form and canonical parent hierarchy in stable sibling
@@ -607,8 +607,9 @@ are relative to the form or selected control. Descriptors derive from the Go
 FormSpec contract and scalar edit support for that target; TypeScript owns
 labels, categories and display order, not another validation/applicability
 schema. The UI supports string, number, integer, boolean and enum inputs;
-scalar `value` retains its chosen type, including string `"false"` versus
-boolean `false`.
+scalar `value` with `valueType: any` retains its authored concrete scalar type,
+including string `"false"` versus boolean `false`. An absent or null `any` value
+uses text input; text content does not infer a different type.
 
 `values` comes from original source syntax, not the normalized document or
 renderer. `{present: false, value: null}` means absent;
@@ -658,8 +659,12 @@ above. Switching selection preserves dirty Property Grid field drafts and
 their matching edit replies, including field-level rejection diagnostics,
 until corrected or canceled. Source edits and
 undo/redo refresh values from source. Selection and rendering alone never
-produce source edits. Explicit null is allowed only for nullable fields
-accepted by canonical validation; there is no property removal action.
+produce source edits. The Designer offers no explicit-null input or type selector,
+including for typed object properties. Existing nulls remain intact until the
+user confirms a concrete value for that field. False, zero and empty strings
+remain valid values. Canonical validation and semantic-edit APIs still accept
+explicit null for permitted nullable fields; this UI policy changes neither
+their contract nor the source schema. There is no property removal action.
 
 The host retains edit results while the panel is hidden and replays them when
 the same Webview becomes visible. A failed message delivery keeps its result

@@ -740,32 +740,6 @@ button:disabled {
   padding: 0;
   font-size: 0.9em;
 }
-.property-value-menu {
-  position: relative;
-  flex-shrink: 0;
-}
-.property-value-menu > summary {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  cursor: pointer;
-  width: 22px;
-  height: 24px;
-  list-style: none;
-}
-.property-value-menu > summary::marker {
-  content: "";
-}
-.property-value-menu[open] {
-  flex-basis: 100%;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.property-value-menu select {
-  width: auto;
-  flex: 1;
-}
 .property-error {
   grid-column: 1 / -1;
 }
@@ -958,9 +932,6 @@ body.vscode-high-contrast-light button {
 .property-value > .property-state[id] {
   order: 1;
 }
-.property-value-menu {
-  order: 2;
-}
 .property-value .property-error {
   flex-basis: 100%;
   order: 3;
@@ -1145,10 +1116,6 @@ body.vscode-high-contrast-light button {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-}
-.property-value > .property-object-state {
-  flex: 0 1 64px;
-  width: 64px;
 }
 .property-editor-launch {
   flex: 0 0 24px;

@@ -21,6 +21,16 @@ must not materialize default values. Unknown or ambiguous source syntax must
 not produce guessed editable state. Custom ActiveX and individual Tab records
 do not acquire typed built-in editors.
 
+The Designer offers concrete values only, with no value-type or explicit-null
+selector in scalar rows or object editors. Existing source nulls and absent
+fields remain unchanged until the user confirms a concrete value for that
+field; opening, focusing, canceling or rendering must not materialize defaults.
+False, zero and empty strings remain valid concrete values. For `valueType: any`,
+retain the authored concrete scalar type; absent or null values use text input.
+Do not infer a new type from text such as `false`, `0` or `null`. This is a UI
+policy only: FormSpec validation, nullable metadata and semantic-edit wire
+contracts retain their existing null support.
+
 ## Font and Color source forms
 
 ```yaml
@@ -67,8 +77,8 @@ selecting a swatch changes only the modal draft until OK. Arrow keys move focus
 within the RGB palette; direct RGB and raw OLE input remain available.
 `textAlign` uses 1/2/3 for Left/Center/Right where the contract permits it;
 `borderStyle` uses the contract's numeric choices. Both use inline ComboBoxes.
-Boolean properties use checkboxes. State/type choices remain separate from
-editor launchers, and simple inputs do not display a dedicated editor ellipsis.
+Boolean properties use checkboxes. Rows show the property name and concrete
+value input without state/type selectors; simple inputs have no editor ellipsis.
 
 Legacy property-bag representations remain readable. On confirmation, insert
 or update the typed field and remove only that property's matching legacy key

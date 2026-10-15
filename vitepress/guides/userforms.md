@@ -184,8 +184,13 @@ Page tab for Page properties. The Property Grid uses metadata from the running
 LSP in name/value columns. Property names remain English regardless of the UI
 language; categories, help and actions are localized. Categories can collapse.
 Strings/numbers confirm with Enter or on blur; Escape cancels the draft.
-Booleans use checkboxes and enums use ComboBoxes. State/type controls distinguish
-unset, explicit null, empty string, false and zero; null does not remove a key.
+Booleans use checkboxes and enums use ComboBoxes. There are no type or `null`
+selectors: enter a concrete value directly. Existing unset and `null` fields
+stay unchanged until you confirm a concrete value; opening or focusing an input
+does not fill defaults. Empty strings, false and zero remain valid values.
+Fields supporting any scalar keep their existing concrete type; unset or null
+values use text input without inferring types from what you type. FormSpec files
+still support `null`; edit the source to set null or remove a property.
 
 Dedicated Font and Color dialogs preview both a sample and the Canvas. Font
 supports family, point size, styles and numeric charset, with representative

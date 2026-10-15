@@ -1,3 +1,16 @@
+# Designer concrete property inputs
+
+- [x] Remove scalar type/null selectors and typed-object null selectors while retaining metadata authority.
+- [x] Preserve existing absent/null source states until concrete confirmation; keep false, zero and empty strings valid. For `valueType: any`, retain an authored concrete type or use text without type inference.
+- [x] Remove only obsolete selector CSS and align specifications, Japanese/English guides and both changelogs; leave FormSpec/API null support unchanged.
+- [x] Validate targeted property-grid regressions, extension checks and formatting before marking complete.
+
+Validation: `test:designer` and full `pnpm run test` passed with VS Code 1.142.0,
+including existing null scalar/object preservation and concrete-value edits.
+Lint, docs, changed-file formatting and diff checks pass. Dark Japanese and
+narrow light English displays were inspected; bounded read-only review found no
+actionable issues. This UI-only change did not rerun Excel integration.
+
 # UserForm typed property editors
 
 - [x] Reset independent control Font presentation to prevent inherited family, size, Bold, Italic, Underline and StrikeThrough. Real Webview regressions cover Form/Frame, default and partial child Fonts, explicit child Fonts and source immutability; full VS Code 1.142.0 tests, lint, docs and formatting pass.

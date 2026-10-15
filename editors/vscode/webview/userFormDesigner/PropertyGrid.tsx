@@ -84,7 +84,7 @@ interface Props {
   editorEnabled?: boolean;
   onPosition?: () => void;
 }
-type ValueKind = "string" | "number" | "boolean" | "null";
+type ValueKind = "string" | "number" | "boolean";
 interface Draft {
   text: string;
   kind: ValueKind;
@@ -108,17 +108,15 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
     return {
       text: value == null ? "" : String(value),
       kind:
-        value === null
-          ? "null"
-          : typeof value === "number"
-            ? "number"
-            : typeof value === "boolean"
-              ? "boolean"
-              : descriptor.valueType === "number" || descriptor.valueType === "integer"
-                ? "number"
-                : descriptor.valueType === "boolean"
-                  ? "boolean"
-                  : "string",
+        typeof value === "number"
+          ? "number"
+          : typeof value === "boolean"
+            ? "boolean"
+            : descriptor.valueType === "number" || descriptor.valueType === "integer"
+              ? "number"
+              : descriptor.valueType === "boolean"
+                ? "boolean"
+                : "string",
       dirty: false,
       version,
     };
@@ -170,10 +168,7 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
     )
       return;
     let value: ScalarValue = d.text;
-    if (d.kind === "null") {
-      if (!descriptor.nullable || descriptor.required) return;
-      value = null;
-    } else if (d.kind === "boolean") value = d.text === "true";
+    if (d.kind === "boolean") value = d.text === "true";
     else if (d.kind === "number") {
       value = Number(d.text);
       if (!d.text.trim() || !Number.isFinite(value)) {
@@ -226,71 +221,21 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
   // VBE property names are identifiers and stay English in every UI language.
   const fieldLabel =
     designerStrings[labels[descriptor.field]] ?? objectLabels[descriptor.field] ?? descriptor.field;
-  const kinds: ValueKind[] =
-    descriptor.valueType === "any"
-      ? ["string", "number", "boolean"]
-      : [
-          descriptor.valueType === "integer"
-            ? "number"
-            : descriptor.valueType === "object"
-              ? "string"
-              : descriptor.valueType,
-        ];
-  if (descriptor.nullable && !descriptor.required) kinds.push("null");
+  // Source null remains intact until a concrete edit. It is an input hint,
+  // never an authorable Designer value or a reason to hide the actual editor.
+  const unconfigured = (!source?.present || source.value === null) && !draft.dirty;
+  const placeholder = source?.present && source.value === null ? strings.nullValue : strings.unset;
   return (
     <div class="property-row" data-property-field={descriptor.field}>
       <label for={id}>{fieldLabel}</label>
       <div class="property-value">
-        {!source?.present && !draft.dirty && <span class="property-state">{strings.unset}</span>}
-        {(descriptor.valueType === "any" || kinds.includes("null")) && (
-          <details class="property-value-menu">
-            <summary aria-label={`${fieldLabel}: ${strings.valueType}`}>
-              <Icon name="chevron-down" />
-            </summary>
-            <select
-              aria-label={`${fieldLabel}: ${strings.valueType}`}
-              value={draft.kind}
-              disabled={disabled}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  update(fromSource());
-                }
-              }}
-              onChange={(event) => {
-                const kind = event.currentTarget.value as ValueKind;
-                change(
-                  kind === "boolean" ? "false" : kind === "null" ? "" : current.current.text,
-                  kind,
-                );
-                if (kind === "boolean" || kind === "null") commit();
-              }}
-            >
-              {kinds.map((kind) => (
-                <option value={kind}>
-                  {kind === "string"
-                    ? strings.typeString
-                    : kind === "number"
-                      ? strings.typeNumber
-                      : kind === "boolean"
-                        ? strings.typeBoolean
-                        : strings.nullValue}
-                </option>
-              ))}
-            </select>
-          </details>
-        )}
-        {draft.kind === "null" ? (
-          <span id={id} class="property-state">
-            {strings.nullValue}
-          </span>
-        ) : descriptor.editor === "boolean" && draft.kind === "boolean" ? (
+        {descriptor.editor === "boolean" && draft.kind === "boolean" ? (
           <input
             id={id}
             type="checkbox"
             checked={draft.text === "true"}
             ref={(element) => {
-              if (element) element.indeterminate = !source?.present && !draft.dirty;
+              if (element) element.indeterminate = unconfigured;
             }}
             disabled={disabled}
             aria-invalid={!!error}
@@ -302,7 +247,7 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
         ) : descriptor.allowedValues || draft.kind === "boolean" ? (
           <select
             id={id}
-            value={!source?.present && !draft.dirty ? "__unset__" : draft.text}
+            value={unconfigured ? "__unset__" : draft.text}
             disabled={disabled}
             aria-invalid={!!error}
             aria-describedby={error ? `${id}-error` : undefined}
@@ -317,9 +262,9 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
               }
             }}
           >
-            {!source?.present && !draft.dirty && (
+            {unconfigured && (
               <option value="__unset__" disabled>
-                {strings.unset}
+                {placeholder}
               </option>
             )}
             {(descriptor.allowedValues ?? ["true", "false"])
@@ -339,6 +284,7 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
             type="text"
             inputMode={draft.kind === "number" ? "decimal" : undefined}
             value={draft.text}
+            placeholder={unconfigured ? placeholder : undefined}
             disabled={disabled}
             aria-invalid={!!error}
             aria-describedby={error ? `${id}-error` : undefined}
@@ -410,21 +356,6 @@ function ObjectPropertyRow(props: Props & { descriptor: PropertyDescriptor }) {
           )}
           {summary}
         </span>
-        {descriptor.nullable && !descriptor.required && (
-          <select
-            class="property-object-state"
-            aria-label={`${label}: ${strings.valueType}`}
-            value={state?.present && state.value === null ? "null" : "object"}
-            disabled={!props.editable || props.busy || !props.editorEnabled}
-            onChange={(event) => {
-              if (event.currentTarget.value === "null") props.onCommit(descriptor.field, null);
-              else props.onOpenEditor?.(descriptor);
-            }}
-          >
-            <option value="object">{label}</option>
-            <option value="null">{strings.nullValue}</option>
-          </select>
-        )}
         <button
           type="button"
           class="property-editor-launch"

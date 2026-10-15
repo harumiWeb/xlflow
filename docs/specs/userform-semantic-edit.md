@@ -272,6 +272,12 @@ source scalar and never deletes its key. Absent, null, empty string, false and
 zero are distinct authored states. An explicit value matching a normalized
 default must not be mistaken for an absent-field no-op.
 
+The Designer presents only concrete value inputs and has no explicit-null or
+type selector. It preserves existing source nulls until the user confirms a
+concrete edit. This UI policy does not change the nullable source or operation
+contract above. For `valueType: any`, the UI keeps the authored concrete scalar
+type, or uses text for absent/null values, without inferring types from input.
+
 Property removal is unsupported. `observed` fields, arbitrary property bags,
 unmodeled collections, picture data/actions, and non-scalar property values are
 not edit targets. Page and TabStrip collection operations are limited to the

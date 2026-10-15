@@ -490,6 +490,58 @@ async function run() {
   const styled = previewDocument(source, { controlId: "label", values: { font: { size: 99 } } });
   assert.notEqual(styled, source);
   assert.equal(JSON.stringify(source), before, "preview never mutates authored model");
+  const nullGrid = {
+    ...grid,
+    controls: {
+      ...grid.controls,
+      label: {
+        ...grid.controls.label,
+        values: {
+          ...grid.controls.label.values,
+          font: { present: true, value: null },
+          backColor: { present: true, value: null },
+        },
+      },
+    },
+  };
+  const nullSnapshot = JSON.stringify(nullGrid);
+  await host({
+    type: "document",
+    version: 4,
+    document: source,
+    propertyEditable: true,
+    propertyEditorVersion: 1,
+    propertyGrid: nullGrid,
+  });
+  await select("label");
+  const beforeNullObjects = edits().length;
+  assert.equal(
+    root.querySelector(".property-object-state, .property-value-menu"),
+    null,
+    "Designer exposes no type/null selectors",
+  );
+  await open("font");
+  assert.equal(field("Name").value, "");
+  await click(button("OK"));
+  assert.equal(
+    edits().length,
+    beforeNullObjects,
+    "confirming an untouched null object preserves source",
+  );
+  await open("backColor");
+  await click(button("Cancel"));
+  assert.equal(edits().length, beforeNullObjects, "opening/cancelling null Color leaves it intact");
+  await open("font");
+  await input(field("Size"), "10");
+  await click(button("OK"));
+  assert.deepEqual(
+    edits().at(-1)!.operations,
+    [{ type: "setControlProperty", controlId: "label", field: "font", value: { size: 10 } }],
+    "confirming a concrete Font replaces null without filling defaults",
+  );
+  await host({ type: "editResult", requestId: edits().at(-1)!.requestId });
+  assert.equal(JSON.stringify(nullGrid), nullSnapshot, "source null metadata is never mutated");
+  await refresh(4);
   const localized = {
     ...designerStrings,
     ...editorStrings,

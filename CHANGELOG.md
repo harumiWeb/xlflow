@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Simplified UserForm Designer property inputs by removing type and null
+  selectors. Existing absent/null fields remain unchanged until a concrete edit;
+  false, zero and empty strings remain valid, and FormSpec/API null support is
+  unchanged.
+
 - Fixed Designer previews incorrectly inheriting Form/Frame ForeColor or Font
   settings into existing child controls without their own authored settings.
 
@@ -26,8 +31,8 @@ All notable changes to xlflow will be documented in this file.
 - Refined the VS Code UserForm Designer with a compact contextual toolbar,
   grouped Toolbox, two-column Property Grid, Properties/Structure/Tab order
   tabs, independently scrolling panes, and compact layouts below 900 px.
-  Type/null controls move into row details; Structure selects nested and
-  overlapping controls without changing source hierarchy.
+  Structure selects nested and overlapping controls without changing source
+  hierarchy.
 
 - New Toolbox MultiPages start with two Pages and select the first; new
   TabStrips start with two tabs and select the first. MultiPage and both Pages

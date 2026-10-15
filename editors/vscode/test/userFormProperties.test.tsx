@@ -159,11 +159,6 @@ function valueSelect(field: string): HTMLSelectElement {
   assert.ok(result, `property value select ${field}`);
   return result;
 }
-function typeSelect(field: string): HTMLSelectElement {
-  const result = row(field).querySelector<HTMLSelectElement>(".property-value-menu select");
-  assert.ok(result, `property type select ${field}`);
-  return result;
-}
 async function type(field: string, value: string) {
   await act(() => {
     const element = input(field);
@@ -186,16 +181,6 @@ async function blur(field: string) {
 async function chooseValue(field: string, value: string) {
   await act(() => {
     const select = valueSelect(field);
-    select.value = value;
-    select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-  });
-}
-async function chooseType(field: string, value: string) {
-  await act(() => {
-    const menu = row(field).querySelector<HTMLDetailsElement>("details.property-value-menu");
-    assert.ok(menu, `property type menu ${field}`);
-    if (!menu.open) menu.querySelector("summary")!.click();
-    const select = typeSelect(field);
     select.value = value;
     select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   });
@@ -252,6 +237,201 @@ async function run() {
   }
   await act(() => render(null, targetTypeRoot));
 
+  // Metadata and existing concrete values select the editor. Null remains a
+  // source state, never an authorable value or an instruction to infer a type.
+  const scalarCases = [
+    { field: "caption", valueType: "string", source: null, text: "", expected: "" },
+    { field: "width", valueType: "number", source: null, text: "0", expected: 0 },
+    { field: "value", valueType: "any", source: null, text: "false", expected: "false" },
+    { field: "value", valueType: "any", source: undefined, text: "0", expected: "0" },
+    { field: "value", valueType: "any", source: "false", text: "0", expected: "0" },
+    { field: "value", valueType: "any", source: 10, text: "0", expected: 0 },
+  ] as const;
+  for (const test of scalarCases) {
+    const commits: unknown[] = [];
+    const container = document.createElement("div");
+    await act(() =>
+      render(
+        <PropertyGrid
+          drafts={{ values: new Map(), replies: new Map() }}
+          target={{
+            descriptors: [
+              { field: test.field, valueType: test.valueType, required: false, nullable: true },
+            ],
+            values: {
+              [test.field]: { present: test.source !== undefined, value: test.source ?? null },
+            },
+          }}
+          title="Null compatibility"
+          version={1}
+          editable={true}
+          busy={false}
+          strings={designerStrings}
+          onCommit={(field: string, value: unknown) => {
+            commits.push({ field, value });
+            return commits.length;
+          }}
+        />,
+        container,
+      ),
+    );
+    const element = container.querySelector<HTMLInputElement>("input")!;
+    assert.ok(element);
+    assert.equal(container.querySelectorAll("select, .property-value-menu").length, 0);
+    if (test.source === null) assert.equal(element.placeholder, designerStrings.nullValue);
+    await act(() => {
+      element.dispatchEvent(new dom.window.FocusEvent("focus", { bubbles: true }));
+      element.dispatchEvent(new dom.window.FocusEvent("blur", { bubbles: true }));
+    });
+    assert.equal(commits.length, 0, "opening/focus/blur preserves the source state");
+    await act(() => {
+      element.value = "discard";
+      element.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await act(() => {
+      element.dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    await act(() => {
+      element.dispatchEvent(new dom.window.FocusEvent("blur", { bubbles: true }));
+    });
+    assert.equal(commits.length, 0, "Escape never replaces null or an existing value");
+    assert.equal(element.value, test.source == null ? "" : String(test.source));
+    await act(() => {
+      element.value = test.text;
+      element.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await act(() => {
+      element.dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    await act(() => {
+      element.dispatchEvent(new dom.window.FocusEvent("blur", { bubbles: true }));
+    });
+    assert.deepEqual(
+      commits,
+      [{ field: test.field, value: test.expected }],
+      "one concrete edit retains false/string/zero/empty semantics",
+    );
+    await act(() => render(null, container));
+  }
+
+  for (const source of [undefined, null, true, false] as const) {
+    for (const checkbox of [false, true]) {
+      const commits: unknown[] = [];
+      const container = document.createElement("div");
+      await act(() =>
+        render(
+          <PropertyGrid
+            drafts={{ values: new Map(), replies: new Map() }}
+            target={{
+              descriptors: [
+                {
+                  field: "value",
+                  valueType: "any",
+                  required: false,
+                  nullable: true,
+                  ...(checkbox ? ({ valueType: "boolean", editor: "boolean" } as const) : {}),
+                },
+              ],
+              values: { value: { present: source !== undefined, value: source ?? null } },
+            }}
+            title="Boolean compatibility"
+            version={1}
+            editable={true}
+            busy={false}
+            strings={designerStrings}
+            onCommit={(_field: string, value: unknown) => {
+              commits.push(value);
+              return commits.length;
+            }}
+          />,
+          container,
+        ),
+      );
+      assert.equal(container.querySelectorAll(".property-value-menu").length, 0);
+      const element = container.querySelector<HTMLInputElement | HTMLSelectElement>(
+        "input, select",
+      )!;
+      if (!checkbox && source == null) {
+        assert.equal(element.tagName, "INPUT", "unset/null any defaults to text");
+      } else {
+        if (checkbox) assert.equal((element as HTMLInputElement).indeterminate, source == null);
+        await act(() => {
+          if (checkbox) (element as HTMLInputElement).checked = source !== true;
+          else element.value = source === false ? "true" : "false";
+          element.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+        });
+        assert.deepEqual(commits, [checkbox ? source !== true : source === false]);
+      }
+      await act(() => render(null, container));
+    }
+  }
+
+  for (const source of [undefined, null] as const) {
+    const commits: unknown[] = [];
+    const container = document.createElement("div");
+    await act(() =>
+      render(
+        <PropertyGrid
+          drafts={{ values: new Map(), replies: new Map() }}
+          target={{
+            descriptors: [
+              {
+                field: "selectedIndex",
+                valueType: "integer",
+                required: false,
+                nullable: true,
+                allowedValues: ["0", "1"],
+              },
+            ],
+            values: { selectedIndex: { present: source !== undefined, value: source ?? null } },
+          }}
+          title="Enum compatibility"
+          version={1}
+          editable={true}
+          busy={false}
+          strings={designerStrings}
+          onCommit={(_field: string, value: unknown) => {
+            commits.push(value);
+            return commits.length;
+          }}
+        />,
+        container,
+      ),
+    );
+    const select = container.querySelector("select")!;
+    assert.equal(
+      select.selectedOptions[0].disabled,
+      true,
+      "source state is a disabled placeholder",
+    );
+    assert.equal(
+      select.selectedOptions[0].textContent,
+      source === null ? designerStrings.nullValue : designerStrings.unset,
+    );
+    assert.equal(
+      Array.from(select.options)
+        .filter((option) => !option.disabled)
+        .some((option) => option.value === "null"),
+      false,
+    );
+    await act(() => {
+      select.dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    assert.deepEqual(commits, [], "Escape and opening the enum preserve null/unset");
+    await act(() => {
+      select.value = "0";
+      select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    assert.deepEqual(commits, [0]);
+    await act(() => render(null, container));
+  }
+
   const { App } = require("../webview/userFormDesigner/App");
   await act(() => {
     render(null, root);
@@ -269,25 +449,22 @@ async function run() {
   assert.equal(input("width").disabled, false, "property capability is independent of geometry");
   assert.equal(valueSelect("visible").value, "false");
   assert.ok(row("orientation").textContent?.includes(designerStrings.unset));
-  assert.equal(typeSelect("value").value, "string", "string false retains type");
   assert.equal(input("value").value, "false");
+  assert.equal(input("value").inputMode, "", "string false retains its text editor");
   assert.ok(
     Array.from(root.querySelectorAll<HTMLDetailsElement>("details.property-category")).every(
       (category) => category.open,
     ),
     "property categories start open",
   );
-  const valueTypeMenu = row("value").querySelector<HTMLDetailsElement>(
-    "details.property-value-menu",
-  )!;
-  assert.equal(valueTypeMenu.open, false, "value type details start closed");
   assert.equal(
-    valueTypeMenu.querySelector("summary")!.getAttribute("aria-label"),
-    `${designerStrings.propertyValue}: ${designerStrings.valueType}`,
+    root.querySelectorAll(".property-value-menu, .property-object-state").length,
+    0,
+    "scalar and object properties have no type or null selectors",
   );
-  await act(() => valueTypeMenu.querySelector("summary")!.click());
-  assert.equal(valueTypeMenu.open, true, "the value type menu opens on demand");
-  assert.equal(edits().length, 0, "opening the type menu does not write source");
+  await act(() => input("caption").focus());
+  await blur("caption");
+  assert.equal(edits().length, 0, "opening and focusing unchanged fields does not write source");
 
   await type("caption", "日本語 <script>literal</script>");
   await key("caption", "Enter");
@@ -382,16 +559,6 @@ async function run() {
   await blur("caption");
   assert.equal(input("caption").value, "Retry");
 
-  await chooseType("caption", "null");
-  assert.deepEqual(edits().at(-1)!.operations, [
-    { type: "setFormProperty", field: "caption", value: null },
-  ]);
-  await acknowledge();
-  await chooseType("value", "boolean");
-  assert.deepEqual(edits().at(-1)!.operations, [
-    { type: "setFormProperty", field: "value", value: false },
-  ]);
-  await acknowledge();
   await chooseValue("orientation", "vertical");
   assert.deepEqual(edits().at(-1)!.operations, [
     { type: "setFormProperty", field: "orientation", value: "vertical" },
@@ -490,19 +657,19 @@ async function run() {
     },
   };
   await refresh(5);
-  assert.equal(typeSelect("caption").value, "null");
-  assert.ok(row("caption").textContent?.includes(designerStrings.nullValue));
+  assert.equal(input("caption").value, "");
+  assert.equal(input("caption").placeholder, designerStrings.nullValue);
   assert.ok(!row("caption").textContent?.includes(designerStrings.unset));
-  const beforeNullTypeRestore = edits().length;
-  await chooseType("caption", "string");
-  assert.equal(input("caption").value, "", "returning from null restores the string editor");
-  assert.equal(
-    edits().length,
-    beforeNullTypeRestore,
-    "restoring a type alone does not edit source",
-  );
+  await act(() => input("caption").focus());
+  await blur("caption");
+  await type("caption", "Discard null replacement");
   await key("caption", "Escape");
-  assert.equal(typeSelect("caption").value, "null", "Escape restores the explicit null source");
+  await blur("caption");
+  assert.equal(
+    input("caption").placeholder,
+    designerStrings.nullValue,
+    "Escape preserves source null",
+  );
   assert.equal(input("width").value, "0");
   assert.equal(input("value").value, "");
   assert.ok(!row("value").textContent?.includes(designerStrings.unset));
@@ -624,7 +791,6 @@ async function run() {
     ],
   });
   // An unrelated edit reply must not replace the deferred response for Label1.
-  await chooseType("caption", "string");
   await type("caption", "Other target edit");
   await key("caption", "Enter");
   await acknowledge();
@@ -648,7 +814,18 @@ async function run() {
     assert.ok(row(field).querySelector('[role="alert"]'));
     await key(field, "Escape");
   }
-  await chooseType("value", "number");
+  grid = {
+    ...grid,
+    controls: {
+      ...grid.controls,
+      label: {
+        ...grid.controls.label,
+        values: { ...grid.controls.label.values, value: { present: true, value: 0 } },
+      },
+    },
+  };
+  await refresh(7);
+  assert.equal(input("value").inputMode, "decimal", "existing any numbers keep numeric editing");
   for (const value of ["9007199254740993", "0.100000000000000000001", "1e-400"]) {
     const before = edits().length;
     await type("value", value);
@@ -665,7 +842,6 @@ async function run() {
     assert.equal(edits().length, before + 1);
     assert.equal((edits().at(-1)!.operations[0] as { value: number }).value, Number(value));
     await acknowledge();
-    await chooseType("value", "number");
   }
   await key("value", "Escape");
   await type("caption", "Hidden panel draft");
@@ -684,7 +860,6 @@ async function run() {
       .querySelector(".form")!
       .dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
   });
-  await chooseType("caption", "string");
   await type("caption", "Form-only draft");
   const beforeIdentity = edits().length;
   await act(() => {
@@ -730,6 +905,12 @@ async function run() {
   assert.equal(input("caption").value, "Control-only draft");
   assert.ok(row("caption").textContent?.includes("Control rejected"));
   assert.ok(!row("caption").textContent?.includes("Form rejected"));
+  assert.ok(
+    edits().every((edit) =>
+      edit.operations.every((operation) => !("value" in operation) || operation.value !== null),
+    ),
+    "Designer never emits null assignments",
+  );
   await act(() => {
     render(null, root);
   });
