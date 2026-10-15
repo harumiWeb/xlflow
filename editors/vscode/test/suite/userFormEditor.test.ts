@@ -77,6 +77,66 @@ export async function runUserFormEditorAssertions(): Promise<void> {
   );
   assert.ok(!isWebviewMessage({ ...edit, operations: [{ ...property, controlId: "label" }] }));
   assert.ok(!isWebviewMessage({ ...edit, operations: [property, property] }));
+  for (const [field, value] of [
+    ["font", { bold: false, charset: 0 }],
+    ["foreColor", { kind: "ole", value: "0x80000123" }],
+    ["picture", { remove: true }],
+  ])
+    assert.ok(isWebviewMessage({ ...edit, operations: [{ ...property, field, value }] }));
+  assert.ok(
+    !isWebviewMessage({ ...edit, operations: [{ ...property, field: "properties", value: {} }] }),
+  );
+  assert.ok(
+    !isWebviewMessage({
+      ...edit,
+      operations: [
+        {
+          type: "setTabProperty",
+          controlId: "tabs",
+          index: 0,
+          field: "font",
+          value: { bold: true },
+        },
+      ],
+    }),
+  );
+  assert.ok(isWebviewMessage({ ...edit, operations: [{ type: "setGeometry", width: 280 }] }));
+  assert.ok(
+    isWebviewMessage({
+      ...edit,
+      operations: [{ type: "setGeometry", controlId: "label", left: 0, height: 10 }],
+    }),
+  );
+  for (const op of [
+    { type: "setGeometry" },
+    { type: "setGeometry", left: 2 },
+    { type: "setGeometry", width: 0 },
+    { type: "setGeometry", width: NaN },
+    { type: "setGeometry", width: 10, arbitrary: true },
+  ])
+    assert.ok(!isWebviewMessage({ ...edit, operations: [op] }));
+  assert.ok(
+    isWebviewMessage({ type: "picturePick", requestId: 1, version: 3, controlId: "image" }),
+  );
+  assert.ok(
+    isWebviewMessage({
+      type: "pictureCommit",
+      requestId: 2,
+      version: 3,
+      controlId: "image",
+      token: "selection",
+    }),
+  );
+  assert.ok(isWebviewMessage({ type: "pictureCancel" }));
+  assert.ok(
+    !isWebviewMessage({
+      type: "picturePick",
+      requestId: 1,
+      version: 3,
+      controlId: "image",
+      path: "C:/arbitrary.bmp",
+    }),
+  );
   assert.ok(
     !isWebviewMessage({
       ...edit,

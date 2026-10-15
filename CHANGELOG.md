@@ -4,8 +4,22 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed Designer previews incorrectly inheriting Form/Frame ForeColor or Font
+  settings into existing child controls without their own authored settings.
+
+- UserForm Color editors now provide a 48-color palette and metadata-backed
+  system-color swatches alongside direct RGB/OLE input.
+
 - `pack` now shows individual input errors and remediation in normal output;
   blank-project encoding failures include a copyable `xlflow.toml` example.
+
+- Added opt-in typed UserForm property editors for partial Font, RGB/system/OLE
+  Color, Image BMP/JPEG assets and single-target Position. Modal and Canvas
+  previews stay outside draft history until OK; stale input remains visible
+  with confirmation disabled. Image imports occur only on confirmation and
+  retain content-addressed assets for Undo/Redo. Go/LSP metadata remains the
+  authority, with scalar-client compatibility and edited-property-only legacy
+  migration.
 
 - UserForm Designer property names stay English regardless of the UI language.
 

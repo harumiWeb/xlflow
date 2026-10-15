@@ -7,13 +7,31 @@ import type {
   DesignerStrings,
   PropertyDescriptor,
   PropertyTarget,
+  PropertyValue,
   ScalarValue,
 } from "../../src/userFormEditor/protocol";
+import { objectValue } from "./propertyEditors/types";
+import { editorRegistry } from "./propertyEditors/registry";
+import { colorStyle } from "./propertyEditors/appearance";
+import { validNumericInput } from "./propertyEditors/numeric";
 
 // Presentation only. The server owns types, applicability and authoring values.
 const categories = {
   identity: ["name", "tag"],
-  appearance: ["caption", "text", "value", "controlTipText"],
+  appearance: [
+    "caption",
+    "text",
+    "value",
+    "font",
+    "foreColor",
+    "backColor",
+    "textAlign",
+    "borderStyle",
+    "picture",
+    "pictureAlignment",
+    "pictureSizeMode",
+    "controlTipText",
+  ],
   layout: ["left", "top", "width", "height"],
   behavior: ["enabled", "visible"],
   navigation: ["tabIndex", "selectedIndex", "accelerator"],
@@ -61,7 +79,10 @@ interface Props {
   busy: boolean;
   strings: DesignerStrings;
   reply?: PropertyReply;
-  onCommit: (field: string, value: ScalarValue) => number | undefined;
+  onCommit: (field: string, value: PropertyValue) => number | undefined;
+  onOpenEditor?: (descriptor: PropertyDescriptor) => void;
+  editorEnabled?: boolean;
+  onPosition?: () => void;
 }
 type ValueKind = "string" | "number" | "boolean" | "null";
 interface Draft {
@@ -167,6 +188,10 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
         update({ ...d, error: strings.invalidNumberPrecision });
         return;
       }
+      if (!validNumericInput(d.text, descriptor)) {
+        update({ ...d, error: strings.invalidValue });
+        return;
+      }
     }
     if (
       descriptor.allowedValues &&
@@ -199,11 +224,18 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
     : draft.error;
   const disabled = !editable || busy;
   // VBE property names are identifiers and stay English in every UI language.
-  const fieldLabel = designerStrings[labels[descriptor.field]] ?? descriptor.field;
+  const fieldLabel =
+    designerStrings[labels[descriptor.field]] ?? objectLabels[descriptor.field] ?? descriptor.field;
   const kinds: ValueKind[] =
     descriptor.valueType === "any"
       ? ["string", "number", "boolean"]
-      : [descriptor.valueType === "integer" ? "number" : descriptor.valueType];
+      : [
+          descriptor.valueType === "integer"
+            ? "number"
+            : descriptor.valueType === "object"
+              ? "string"
+              : descriptor.valueType,
+        ];
   if (descriptor.nullable && !descriptor.required) kinds.push("null");
   return (
     <div class="property-row" data-property-field={descriptor.field}>
@@ -213,7 +245,7 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
         {(descriptor.valueType === "any" || kinds.includes("null")) && (
           <details class="property-value-menu">
             <summary aria-label={`${fieldLabel}: ${strings.valueType}`}>
-              <Icon name="ellipsis" />
+              <Icon name="chevron-down" />
             </summary>
             <select
               aria-label={`${fieldLabel}: ${strings.valueType}`}
@@ -252,6 +284,21 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
           <span id={id} class="property-state">
             {strings.nullValue}
           </span>
+        ) : descriptor.editor === "boolean" && draft.kind === "boolean" ? (
+          <input
+            id={id}
+            type="checkbox"
+            checked={draft.text === "true"}
+            ref={(element) => {
+              if (element) element.indeterminate = !source?.present && !draft.dirty;
+            }}
+            disabled={disabled}
+            aria-invalid={!!error}
+            onChange={(event) => {
+              change(String(event.currentTarget.checked));
+              commit();
+            }}
+          />
         ) : descriptor.allowedValues || draft.kind === "boolean" ? (
           <select
             id={id}
@@ -275,9 +322,16 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
                 {strings.unset}
               </option>
             )}
-            {(descriptor.allowedValues ?? ["true", "false"]).map((value) => (
-              <option value={value}>{value}</option>
-            ))}
+            {(descriptor.allowedValues ?? ["true", "false"])
+              .map((value) => ({
+                value,
+                label:
+                  descriptor.suggestions?.find((hint) => String(hint.value) === value)?.label ??
+                  value,
+              }))
+              .map((choice) => (
+                <option value={String(choice.value)}>{choice.label}</option>
+              ))}
           </select>
         ) : (
           <input
@@ -313,6 +367,79 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
   );
 }
 
+const objectLabels: Record<string, string> = {
+  font: "Font",
+  foreColor: "ForeColor",
+  backColor: "BackColor",
+  picture: "Picture",
+  pictureAlignment: "PictureAlignment",
+  pictureSizeMode: "PictureSizeMode",
+  textAlign: "TextAlign",
+  borderStyle: "BorderStyle",
+};
+function ObjectPropertyRow(props: Props & { descriptor: PropertyDescriptor }) {
+  const { descriptor, target, strings } = props;
+  const state = target.values[descriptor.field];
+  const value = objectValue(state?.value);
+  const label = objectLabels[descriptor.field] ?? descriptor.field;
+  const summary = !state?.present
+    ? strings.unset
+    : state.value === null
+      ? strings.nullValue
+      : descriptor.editor === "font"
+        ? [value.name, typeof value.size === "number" ? `${value.size} pt` : undefined]
+            .filter((item) => item !== undefined)
+            .join(", ") || "Font"
+        : descriptor.editor === "color"
+          ? String(value.value ?? "Color")
+          : descriptor.editor === "picture"
+            ? typeof value.path === "string"
+              ? value.path
+              : value.remove === true
+                ? "(removed)"
+                : "Picture"
+            : "";
+  const supported = !!descriptor.editor && Object.hasOwn(editorRegistry, descriptor.editor);
+  return (
+    <div class="property-row" data-property-field={descriptor.field}>
+      <label>{label}</label>
+      <div class="property-value object-property-value">
+        <span class="property-object-summary" title={summary}>
+          {descriptor.editor === "color" && (
+            <span class="color-swatch" style={{ backgroundColor: colorStyle(state?.value) }} />
+          )}
+          {summary}
+        </span>
+        {descriptor.nullable && !descriptor.required && (
+          <select
+            class="property-object-state"
+            aria-label={`${label}: ${strings.valueType}`}
+            value={state?.present && state.value === null ? "null" : "object"}
+            disabled={!props.editable || props.busy || !props.editorEnabled}
+            onChange={(event) => {
+              if (event.currentTarget.value === "null") props.onCommit(descriptor.field, null);
+              else props.onOpenEditor?.(descriptor);
+            }}
+          >
+            <option value="object">{label}</option>
+            <option value="null">{strings.nullValue}</option>
+          </select>
+        )}
+        <button
+          type="button"
+          class="property-editor-launch"
+          aria-label={`${label}…`}
+          title={`${label}…`}
+          disabled={!supported || !props.editable || props.busy || !props.editorEnabled}
+          onClick={() => props.onOpenEditor?.(descriptor)}
+        >
+          <Icon name="ellipsis" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function PropertyGrid(props: Props) {
   const groups = Object.keys(categories) as Category[];
   return (
@@ -321,6 +448,16 @@ export function PropertyGrid(props: Props) {
         {props.strings.properties}: {props.title}
       </h2>
       {props.targetType && <p class="property-grid-target-type">{props.targetType}</p>}
+      {props.onPosition && (
+        <button
+          class="position-editor-launch"
+          type="button"
+          onClick={props.onPosition}
+          disabled={!props.editable || props.busy || !props.editorEnabled}
+        >
+          Position…
+        </button>
+      )}
       {!props.editable && <p class="notice">{props.strings.propertyReadOnly}</p>}
       {groups.map((category) => {
         const order: readonly string[] = categories[category];
@@ -335,13 +472,27 @@ export function PropertyGrid(props: Props) {
           descriptors.length > 0 && (
             <details class="property-category" open>
               <summary>{props.strings[category]}</summary>
-              {descriptors.map((descriptor) => (
-                <PropertyRow
-                  key={JSON.stringify([props.draftId ?? props.controlId ?? null, descriptor.field])}
-                  {...props}
-                  descriptor={descriptor}
-                />
-              ))}
+              {descriptors.map((descriptor) =>
+                descriptor.valueType === "object" ? (
+                  <ObjectPropertyRow
+                    key={JSON.stringify([
+                      props.draftId ?? props.controlId ?? null,
+                      descriptor.field,
+                    ])}
+                    {...props}
+                    descriptor={descriptor}
+                  />
+                ) : (
+                  <PropertyRow
+                    key={JSON.stringify([
+                      props.draftId ?? props.controlId ?? null,
+                      descriptor.field,
+                    ])}
+                    {...props}
+                    descriptor={descriptor}
+                  />
+                ),
+              )}
             </details>
           )
         );

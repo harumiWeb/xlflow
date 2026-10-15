@@ -219,6 +219,19 @@ signal that it is ready and can ask VS Code to open the backing document in the
 normal text editor. Completed geometry interactions send semantic edits; the
 Webview never serializes or replaces the source document.
 
+## Typed editor version 1
+
+The opt-in Font, Color, Image and Position framework is specified in
+[userform-property-editors.md](userform-property-editors.md), supplementing the
+scalar grid below. `userFormPropertyEditors: 1` plus preview request
+`propertyEditorVersion: 1` enables Go-derived editor kinds and child metadata;
+older clients retain scalar metadata. Dedicated modal input previews the
+Canvas without changing the shared Designer draft or native history. OK is
+one validated Designer action; explicit Designer Save still publishes source.
+External source changes or LSP restart retain modal input, remove temporary
+preview and disable OK until the editor is reopened. Property names remain
+English; actions/help/errors remain localized.
+
 ## Rendering
 
 The Webview uses Preact and TypeScript to render the FormSpec form and its
@@ -620,9 +633,10 @@ fields. Selecting a Page by its stable ID in the Page list or by a rendered
 header shows that Page's metadata fields and excludes Page geometry. Page
 preview navigation is transient; explicit MultiPage and TabStrip
 `selectedIndex` edits continue through this Property Grid. Form fields include
-`name`, `caption`, `width`, `height` and the supported `build.*` paths;
-legacy and build fields are separate and never redirect to each other.
-Control fields are limited to supported authored scalars for their type.
+`name`, `caption`, `width` and `height`; removed `build.*` aliases are not
+editable. Negotiated version 1 additionally exposes the typed appearance fields.
+Without editor-version negotiation, control fields are limited to supported
+authored scalars for their type.
 Valid custom ProgID controls retain canonical common scalar fields, without
 acquiring built-in type-specific fields.
 Observed/snapshot values, identity/type/parent topology, collections, pictures
@@ -786,7 +800,7 @@ property pair and the exact three-operation MultiPage creation sequence above.
 Other property pairs and mixed property/geometry edits remain rejected;
 duplicate dimensions, nulls and nonnumeric values in a form resize pair are
 invalid. A failed MultiPage sequence returns no partial edit.
-Its payload supplies `field` and an explicit scalar `value`, plus `controlId`
+Scalar property payloads supply `field` and an explicit scalar `value`, plus `controlId`
 for `setControlProperty`. Missing `value` is invalid; explicit null must survive
 transport as a present value. Both Webview boundary and RPC validate payload
 shape, while canonical parsing/validation decides FormSpec semantics.

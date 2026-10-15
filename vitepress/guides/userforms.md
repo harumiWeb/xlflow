@@ -180,30 +180,47 @@ above; opening source or changing a pane does not publish them.
 ### Edit properties
 
 Select the background for form properties, a control for its properties, or a
-Page tab for Page properties. The Property Grid shows supported scalar fields
-from the running LSP in name/value columns. Categories can be collapsed. Use
-the row's ellipsis menu for permitted type changes or explicit null; simply
-opening the menu does not edit a value. Form legacy fields and `build.*` fields are separate;
-changing `form.name` does not rename the file, code sidecar or VBA references.
-Page geometry, observed fields, lists/tabs, pictures and property bags are not
-edited in this grid.
+Page tab for Page properties. The Property Grid uses metadata from the running
+LSP in name/value columns. Property names remain English regardless of the UI
+language; categories, help and actions are localized. Categories can collapse.
+Strings/numbers confirm with Enter or on blur; Escape cancels the draft.
+Booleans use checkboxes and enums use ComboBoxes. State/type controls distinguish
+unset, explicit null, empty string, false and zero; null does not remove a key.
 
-Confirm text/number input with Enter or by leaving the field; Escape cancels
-the draft. Boolean/enum choices confirm immediately. Each confirmation creates
-one native undoable source edit in YAML, YML or JSON. Invalid input keeps its
-field error without changing source. A source update invalidates an unconfirmed
-Property Grid field entry; re-enter it against the refreshed document.
+Dedicated Font and Color dialogs preview both a sample and the Canvas. Font
+supports family, point size, styles and numeric charset, with representative
+families and free input. Colors retain RGB, named system or raw OLE identity;
+preview font fallback and system colors may differ from Excel. Applicable
+built-in fields come from Go metadata, not a bundled frontend schema. Custom
+ActiveX and individual Tab entries do not acquire typed editors. Page has no
+Font/ForeColor/BackColor/BorderStyle, and CommandButton has no TextAlign.
+TextProps font sizes use 0.05 pt increments; empty font names and non-ASCII
+updates to an existing StdFont are rejected without rewriting opaque data.
 
-Unset, explicit null, empty string, false and zero are distinct. The grid does
-not fill authored fields from measured or preview defaults. Explicit null is
-available only for supported optional fields; it does not remove the key. To
-restore an unset field, remove its key in the text editor. Ambiguous authored
-state can disable the grid while the valid preview remains visible.
+Image controls offer a native BMP/JPEG picker and picture alignment/size modes.
+A file inside the project uses its relative path. An external file is imported
+only on OK into `<forms-root>/assets/<full-lowercase-SHA256>.bmp|jpg`; identical
+content is reused and successful assets remain after Undo for Redo. Cancel
+creates no asset. Remove explicitly authors `picture: { remove: true }`.
+Position changes only edited axes in one action: Left/Top/Width/Height for one
+control, Width/Height for the form; Page and multiple selection are excluded.
 
-Property editing requires the LSP's `userFormPropertyEdit` capability. Older
-geometry-capable servers still allow move/resize; preview-only servers remain
-read-only. Editing FormSpec source does not require Excel and does not apply
-changes to a workbook automatically.
+Opening or cancelling a modal creates no draft edit or history. OK creates one
+native undoable Designer action; explicit Designer Save still publishes source.
+If source changes or the LSP restarts, the modal keeps its input, removes its
+Canvas preview and disables OK. Cancel and reopen against the refreshed source.
+A failed confirmation retains input and its error. Modal input never fills
+source fields from preview defaults. Legacy properties migrate only when that
+specific property is confirmed, retaining unrelated property-bag entries.
+
+Scalar property editing requires `userFormPropertyEdit`. Typed dialogs require
+editor capability version 1; older servers retain their advertised scalar or
+geometry behavior. Source syntax that cannot be edited safely can disable the
+grid while leaving a valid preview visible. Page geometry, observed fields,
+arbitrary property bags and generic property removal remain outside the grid.
+Changing `form.name` does not rename files, code sidecars or VBA references.
+FormSpec source editing does not require Excel or automatically apply changes
+to a workbook.
 
 ## MultiPage and TabStrip
 

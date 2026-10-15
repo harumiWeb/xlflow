@@ -42,6 +42,7 @@ import {
   stableDelta,
 } from "../../src/userFormEditor/geometry";
 import type { Geometry, ResizeHandle, DropTarget } from "../../src/userFormEditor/geometry";
+import { appearanceStyle } from "./propertyEditors/appearance";
 const px = (points: number) => `${pointsToPixels(points)}px`;
 
 export function ControlGlyph({ control }: { control: DesignerControl }) {
@@ -86,7 +87,28 @@ export function ControlGlyph({ control }: { control: DesignerControl }) {
     case "scrollbar":
       return <span class="scrollbar">◂ ━ ▸</span>;
     case "image":
-      return <span class="placeholder">▧ Image</span>;
+      return control.picturePreview && control.picture?.remove !== true ? (
+        <img
+          class="control-picture"
+          src={control.picturePreview}
+          alt=""
+          draggable={false}
+          style={{
+            objectFit:
+              control.pictureSizeMode === 1
+                ? "fill"
+                : control.pictureSizeMode === 3
+                  ? "contain"
+                  : "none",
+            objectPosition:
+              ["left top", "right top", "center", "left bottom", "right bottom"][
+                control.pictureAlignment ?? 2
+              ] ?? "center",
+          }}
+        />
+      ) : (
+        <span class="placeholder">▧ Image</span>
+      );
     case "frame":
       return <span class="frame-caption">{caption}</span>;
     case "multipage":
@@ -830,13 +852,14 @@ export function DesignerCanvas({
           data-control-id={control.id}
           title={`${control.name} (${control.type})${control.approximate ? ` — ${approximateBounds}` : ""}`}
           style={{
+            ...appearanceStyle(shown),
             left: px(shown.left),
             top: px(shown.top),
             width: px(shown.width),
             height: px(shown.height),
           }}
         >
-          <ControlGlyph control={control} />
+          <ControlGlyph control={shown} />
           {type === "multipage" ? (
             <>
               <div class="tabs">
@@ -869,6 +892,7 @@ export function DesignerCanvas({
                   data-container-id={page.id}
                   title={page.name}
                   style={{
+                    ...appearanceStyle(page),
                     left: px(insets.left),
                     top: px(insets.top),
                     right: px(insets.right),
@@ -1105,6 +1129,7 @@ export function DesignerCanvas({
               class={`form ${showGrid ? "show-grid" : ""} ${selectedId === undefined ? "form-selected" : ""}`}
               data-container-id=""
               style={{
+                ...appearanceStyle(document),
                 width: px((formResizePreview ?? document).width),
                 height: px((formResizePreview ?? document).height),
                 backgroundSize: `${px(gridSize)} ${px(gridSize)}`,

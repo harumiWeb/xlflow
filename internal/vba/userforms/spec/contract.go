@@ -29,6 +29,11 @@ const (
 )
 
 type PropertyContract struct {
+	Editor             string
+	Children           map[string]PropertyContract
+	Minimum            *float64
+	Maximum            *float64
+	ExclusiveMinimum   bool
 	ValueType          ValueType
 	Required           bool
 	SupportLevel       SupportLevel
@@ -57,7 +62,7 @@ type Contract struct {
 	Controls                map[string]ControlContract
 }
 
-var userFormContract = newUserFormContract()
+var userFormContract = withPropertyEditors(newUserFormContract())
 
 func UserFormContract() Contract {
 	return cloneContract(userFormContract)
@@ -465,6 +470,13 @@ func clonePropertyMap(values map[string]PropertyContract) map[string]PropertyCon
 }
 
 func clonePropertyContract(value PropertyContract) PropertyContract {
+	if value.Minimum != nil {
+		value.Minimum = new(*value.Minimum)
+	}
+	if value.Maximum != nil {
+		value.Maximum = new(*value.Maximum)
+	}
+	value.Children = clonePropertyMap(value.Children)
 	value.AllowedValues = append([]string(nil), value.AllowedValues...)
 	value.ApplicableControls = append([]string(nil), value.ApplicableControls...)
 	return value

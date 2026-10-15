@@ -57,7 +57,7 @@ func (op *Operation) UnmarshalJSON(data []byte) error {
 func EditableFormProperties() map[string]spec.PropertyContract {
 	result := map[string]spec.PropertyContract{}
 	for name, contract := range spec.UserFormContract().FormProperties {
-		if contract.IncludeInAuthoring && scalarContract(contract) && hasYAMLField(reflect.TypeFor[spec.FormSpecForm](), name) {
+		if contract.IncludeInAuthoring && scalarContract(contract) && !editorPropertyName(name) && hasYAMLField(reflect.TypeFor[spec.FormSpecForm](), name) {
 			result[name] = contract
 		}
 	}
@@ -72,7 +72,7 @@ func EditableControlProperties(typeName string) map[string]spec.PropertyContract
 		if slices.Contains([]string{"id", "type", "parentId", "zIndex"}, name) {
 			continue
 		}
-		if contract.IncludeInAuthoring && scalarContract(contract) && hasYAMLField(reflect.TypeFor[spec.FormSpecControl](), name) {
+		if contract.IncludeInAuthoring && scalarContract(contract) && !editorPropertyName(name) && hasYAMLField(reflect.TypeFor[spec.FormSpecControl](), name) {
 			result[name] = contract
 		}
 	}
@@ -83,7 +83,7 @@ func EditableControlProperties(typeName string) map[string]spec.PropertyContract
 func EditableTabProperties() map[string]spec.PropertyContract {
 	result := map[string]spec.PropertyContract{}
 	for name, contract := range spec.UserFormContract().TabProperties {
-		if contract.IncludeInAuthoring && scalarContract(contract) && hasYAMLField(reflect.TypeFor[spec.FormSpecTab](), name) {
+		if contract.IncludeInAuthoring && scalarContract(contract) && !editorPropertyName(name) && hasYAMLField(reflect.TypeFor[spec.FormSpecTab](), name) {
 			result[name] = contract
 		}
 	}
@@ -104,20 +104,36 @@ func checkPropertyValue(op Operation, contract spec.PropertyContract) error {
 			return failure(-1, op, "UFE003", "The number cannot be written without precision loss.", "Use the source editor for this value.")
 		}
 	}
+	if typedPropertyContract(op.Field, contract) {
+		return checkTypedValue(op, contract)
+	}
 	_, err := scalar(op.Value)
 	return err
 }
 
 type PropertyDescriptor struct {
-	Field         string         `json:"field"`
-	ValueType     spec.ValueType `json:"valueType"`
-	Required      bool           `json:"required"`
-	Nullable      bool           `json:"nullable"`
-	AllowedValues []string       `json:"allowedValues,omitempty"`
+	Field            string               `json:"field"`
+	ValueType        spec.ValueType       `json:"valueType"`
+	Required         bool                 `json:"required"`
+	Nullable         bool                 `json:"nullable"`
+	AllowedValues    []string             `json:"allowedValues,omitempty"`
+	Editor           string               `json:"editor,omitempty"`
+	Children         []PropertyDescriptor `json:"children,omitempty"`
+	Suggestions      []PropertySuggestion `json:"suggestions,omitempty"`
+	Minimum          *float64             `json:"minimum,omitempty"`
+	Maximum          *float64             `json:"maximum,omitempty"`
+	ExclusiveMinimum bool                 `json:"exclusiveMinimum,omitzero"`
+}
+
+// Suggestions are named hints, never a restriction on accepted values.
+type PropertySuggestion struct {
+	Value any    `json:"value"`
+	Label string `json:"label"`
 }
 
 type PropertyState struct {
 	Present bool `json:"present"`
+	Legacy  bool `json:"legacy,omitzero"`
 	Value   any  `json:"value"`
 }
 
@@ -132,7 +148,7 @@ type PropertyGridData struct {
 	Tabs     map[string][]PropertyTarget `json:"tabs,omitempty"`
 }
 
-func propertyTarget(properties map[string]spec.PropertyContract, lookup func(string) (any, bool, error)) (PropertyTarget, error) {
+func propertyTarget(properties map[string]spec.PropertyContract, lookup func(string) (any, bool, error), editorVersion ...bool) (PropertyTarget, error) {
 	target := PropertyTarget{Descriptors: []PropertyDescriptor{}, Values: map[string]PropertyState{}}
 	for _, name := range slices.Sorted(maps.Keys(properties)) {
 		contract := properties[name]
@@ -140,16 +156,41 @@ func propertyTarget(properties map[string]spec.PropertyContract, lookup func(str
 		if err != nil {
 			return PropertyTarget{}, err
 		}
+		legacy := false
+		if !present && legacyPropertyName(name) != "" {
+			for _, alias := range []string{legacyPropertyName(name), name} {
+				if alias == "" {
+					continue
+				}
+				raw, exists, lookupErr := lookup("properties." + alias)
+				if lookupErr != nil {
+					return PropertyTarget{}, lookupErr
+				}
+				if exists {
+					value, err = legacyEditorValue(name, raw)
+					if err != nil {
+						return PropertyTarget{}, err
+					}
+					present, legacy = true, true
+					break
+				}
+			}
+		}
 		if present {
-			if _, err := scalar(value); err != nil {
-				return PropertyTarget{}, failure(-1, Operation{Field: name}, "UFE005", "Authored property is not a scalar value.", "Use the source editor for this property.")
+			if err := checkMetadataValue(value, contract); err != nil {
+				return PropertyTarget{}, failure(-1, Operation{Field: name}, "UFE005", "Authored property cannot be represented by this editor.", "Use the source editor for this property.")
 			}
 			if !propertyNumberRoundTrips(value) {
 				return PropertyTarget{}, propertyPrecisionError(name)
 			}
 		}
-		target.Descriptors = append(target.Descriptors, PropertyDescriptor{Field: name, ValueType: contract.ValueType, Required: contract.Required, Nullable: !contract.Required, AllowedValues: slices.Clone(contract.AllowedValues)})
-		target.Values[name] = PropertyState{Present: present, Value: value}
+		descriptor := propertyDescriptor(name, contract)
+		if len(editorVersion) == 0 || !editorVersion[0] {
+			descriptor.Editor = ""
+			descriptor.Children = nil
+		}
+		target.Descriptors = append(target.Descriptors, descriptor)
+		target.Values[name] = PropertyState{Present: present, Legacy: legacy, Value: value}
 	}
 	return target, nil
 }
@@ -181,10 +222,15 @@ func propertyNumberRoundTrips(value any) bool {
 
 // PropertyGrid reports authored presence and scalar values from original syntax,
 // never values filled in by FormSpec normalization or observed snapshots.
-func PropertyGrid(input spec.SpecInput, source []byte) (PropertyGridData, error) {
+func PropertyGrid(input spec.SpecInput, source []byte, editorVersion ...int) (PropertyGridData, error) {
 	model, err := spec.ParseFormSpec(input, source)
 	if err != nil {
 		return PropertyGridData{}, validationError(-1, Operation{}, err)
+	}
+	extended := len(editorVersion) > 0 && editorVersion[0] == 1
+	formProperties := EditableFormProperties()
+	if extended {
+		formProperties = EditableFormEditorProperties()
 	}
 	result := PropertyGridData{Controls: map[string]PropertyTarget{}}
 	if input.Format == "json" {
@@ -208,7 +254,7 @@ func PropertyGrid(input spec.SpecInput, source []byte) (PropertyGridData, error)
 				return value, true, err
 			}
 		}
-		result.Form, err = propertyTarget(EditableFormProperties(), lookup(jsonSourceMemberValue(root, "form")))
+		result.Form, err = propertyTarget(formProperties, lookup(jsonSourceMemberValue(root, "form")), extended)
 		if err != nil {
 			return PropertyGridData{}, err
 		}
@@ -218,7 +264,7 @@ func PropertyGrid(input spec.SpecInput, source []byte) (PropertyGridData, error)
 			if len(nodes[control.ID]) != 1 {
 				continue
 			} // Inferred IDs are not editable source targets.
-			target, err := propertyTarget(EditableControlProperties(control.Type), lookup(nodes[control.ID][0]))
+			target, err := propertyTarget(editablePropertiesForControl(control, extended), lookup(nodes[control.ID][0]), extended)
 			if err != nil {
 				return PropertyGridData{}, err
 			}
@@ -265,21 +311,15 @@ func PropertyGrid(input spec.SpecInput, source []byte) (PropertyGridData, error)
 			if node == nil {
 				return nil, false, nil
 			}
+			if err := validateYAMLPropertyPrecision(node, path); err != nil {
+				return nil, true, err
+			}
 			var value any
 			err := node.Decode(&value)
-			if err == nil && node.Kind == yaml.ScalarNode && node.Tag == "!!float" {
-				// YAML Decode already rounds floats, so inspect original syntax too.
-				original := rational(json.Number(strings.ReplaceAll(node.Value, "_", "")))
-				encoded, encodeErr := json.Marshal(value)
-				decoded := rational(json.Number(encoded))
-				if encodeErr != nil || original == nil || decoded == nil || original.Cmp(decoded) != 0 {
-					return nil, true, propertyPrecisionError(path)
-				}
-			}
 			return value, true, err
 		}
 	}
-	result.Form, err = propertyTarget(EditableFormProperties(), lookup(field(engine.root, "form")))
+	result.Form, err = propertyTarget(formProperties, lookup(field(engine.root, "form")), extended)
 	if err != nil {
 		return PropertyGridData{}, err
 	}
@@ -287,7 +327,7 @@ func PropertyGrid(input spec.SpecInput, source []byte) (PropertyGridData, error)
 		if field(control.node, "id") == nil {
 			continue
 		}
-		target, err := propertyTarget(EditableControlProperties(control.model.Type), lookup(control.node))
+		target, err := propertyTarget(editablePropertiesForControl(control.model, extended), lookup(control.node), extended)
 		if err != nil {
 			return PropertyGridData{}, err
 		}

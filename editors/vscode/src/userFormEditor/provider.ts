@@ -35,9 +35,12 @@ import { designerDocument } from "./model";
 import { tmpdir } from "node:os";
 import { UserFormCustomDocument, virtualTextDocument } from "./customDocument";
 import { DraftCheckpointStore, decodeDraftCheckpoint } from "./checkpoint";
+import { pictureAssetReferenced } from "./pictureReferences";
 import { DraftState, computeSourceChanges } from "./draft";
 import type { DraftFrame } from "./draft";
 import { designerResourceUri, designerSourceUri } from "./resource";
+import { PictureImportSession } from "./pictures";
+import type { PictureCommitReceipt } from "./pictures";
 
 export type DeleteConfirmation = (name: string, descendants: number) => PromiseLike<boolean>;
 const confirmSubtreeDeletion: DeleteConfirmation = async (name, descendants) => {
@@ -620,6 +623,7 @@ export class UserFormEditorProvider
     let timer: NodeJS.Timeout | undefined;
     let editable = false;
     let propertyEditable = false;
+    let propertyEditorVersion = 0;
     let structuralEditable = false;
     let parentEditable = false;
     let pageEditable = false;
@@ -630,7 +634,10 @@ export class UserFormEditorProvider
     let contextGeneration = 0;
     const replies = new Map<
       number,
-      { message: Extract<HostMessage, { type: "editResult" }>; sending: boolean }
+      {
+        message: Extract<HostMessage, { type: "editResult" | "pictureSelection" }>;
+        sending: boolean;
+      }
     >();
     const flushReplies = () => {
       if (!ready || disposed || !panel.visible) return;
@@ -667,6 +674,7 @@ export class UserFormEditorProvider
       if (message.type === "document") editable = message.editable === true;
       if (message.type === "document") propertyEditable = message.propertyEditable === true;
       if (message.type === "document") {
+        propertyEditorVersion = message.propertyEditorVersion ?? 0;
         structuralEditable = message.structuralEditable === true;
         parentEditable = message.parentEditable === true;
         pageEditable = message.pageEditable === true;
@@ -676,6 +684,7 @@ export class UserFormEditorProvider
       }
       if (message.type === "invalidDocument" || message.type === "editingUnavailable") {
         editable = false;
+        propertyEditorVersion = 0;
         propertyEditable = false;
         structuralEditable = false;
         parentEditable = false;
@@ -684,6 +693,177 @@ export class UserFormEditorProvider
         productivityEditable = false;
       }
       if (ready && !disposed && panel.visible) void panel.webview.postMessage(message);
+    };
+    let pictures: PictureImportSession | undefined;
+    let pictureBinding:
+      | { version: number; controlId: string; generation: number; context: number }
+      | undefined;
+    const pictureCurrent = (version: number, controlId: string) =>
+      !disposed &&
+      ready &&
+      panel.visible &&
+      propertyEditable &&
+      propertyEditorVersion === 1 &&
+      !customDocument.state.conflicted &&
+      !customDocument.reconciling &&
+      !customDocument.saving &&
+      document.version === version &&
+      latestDocument?.version === version &&
+      latestDocument.document.controls.some(
+        (control) =>
+          control.id === controlId &&
+          control.type === "Image" &&
+          (!control.progId || control.progId.toLowerCase() === "forms.image.1"),
+      );
+    const pictureReferenced = async (relative: string) => {
+      const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+      if (!folder) return true;
+      const documents = this.documents;
+      const redirectDrafts = this.redirectDrafts;
+      const checkpoints = this.checkpoints;
+      const checkpointRevision = checkpoints.revision;
+      if (checkpoints.writing) return true;
+      return pictureAssetReferenced(relative, {
+        checkpointStable: () => !checkpoints.writing && checkpoints.revision === checkpointRevision,
+        *openTexts() {
+          // Text documents can be dirty without any Designer being open, and
+          // untitled buffers or other workspace folders can retain references.
+          for (const text of vscode.workspace.textDocuments) yield text.getText();
+          for (const open of documents.values()) {
+            yield JSON.stringify(open.state.serialize());
+            yield open.sourceDocument.getText();
+          }
+          for (const state of redirectDrafts.values()) yield JSON.stringify(state.serialize());
+        },
+        async *sourceTexts() {
+          const files = await vscode.workspace.findFiles(
+            new vscode.RelativePattern(folder, "**/*.{yaml,yml,json}"),
+            "**/{node_modules,.git,tmp_workspaces}/**",
+          );
+          for (const file of files)
+            yield Buffer.from(await vscode.workspace.fs.readFile(file)).toString("utf8");
+        },
+        async *checkpointTexts() {
+          // Checkpoints live outside the project and remain after their native
+          // editor closes. Scan the entire store, including in-flight .tmp files.
+          const root = vscode.Uri.joinPath(checkpoints.location(document.uri), "..");
+          let entries: [string, vscode.FileType][];
+          try {
+            entries = await vscode.workspace.fs.readDirectory(root);
+          } catch (error) {
+            if (error instanceof vscode.FileSystemError && error.code === "FileNotFound") return;
+            throw error;
+          }
+          for (const [name, type] of entries) {
+            if (type !== vscode.FileType.File)
+              throw new Error("Unknown Designer checkpoint entry.");
+            yield Buffer.from(
+              await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, name)),
+            ).toString("utf8");
+          }
+        },
+      });
+    };
+    const handlePicture = async (
+      message: Extract<WebviewMessage, { type: "picturePick" | "pictureCommit" }>,
+    ) => {
+      const requestContext = contextGeneration;
+      const reply = (result: Extract<HostMessage, { type: "editResult" | "pictureSelection" }>) => {
+        if (disposed || requestContext !== contextGeneration) return;
+        replies.set(message.requestId, { message: result, sending: false });
+        flushReplies();
+      };
+      const failed = (error: unknown) =>
+        reply({
+          type: message.type === "picturePick" ? "pictureSelection" : "editResult",
+          requestId: message.requestId,
+          error: { code: "pictureUnavailable", message: String(error) },
+        });
+      if (!pictureCurrent(message.version, message.controlId)) {
+        failed(vscode.l10n.t("The document changed. Cancel and reopen the editor."));
+        return;
+      }
+      try {
+        if (message.type === "picturePick") {
+          const folder = vscode.workspace.getWorkspaceFolder(document.uri)!;
+          const config = Buffer.from(
+            await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folder.uri, "xlflow.toml")),
+          ).toString("utf8");
+          pictures?.cancel();
+          const session = new PictureImportSession({
+            projectRoot: folder.uri.fsPath,
+            formsRoot: readFormsRootFromToml(config),
+            sourceURI: document.uri.toString(),
+            validate: (request) => this.clients.requestUserFormPicture(request),
+          });
+          pictures = session;
+          const binding = {
+            version: message.version,
+            controlId: message.controlId,
+            generation,
+            context: requestContext,
+          };
+          pictureBinding = binding;
+          const selection = await session.open();
+          if (
+            !pictureCurrent(message.version, message.controlId) ||
+            binding.generation !== generation ||
+            requestContext !== contextGeneration ||
+            pictures !== session
+          ) {
+            session.cancel();
+            throw new Error(vscode.l10n.t("The document changed. Cancel and reopen the editor."));
+          }
+          reply({ type: "pictureSelection", requestId: message.requestId, selection });
+          return;
+        }
+        const session = pictures;
+        const binding = pictureBinding;
+        if (
+          !session ||
+          !binding ||
+          binding.version !== message.version ||
+          binding.controlId !== message.controlId ||
+          binding.generation !== generation ||
+          binding.context !== requestContext
+        )
+          throw new Error(vscode.l10n.t("The picture selection expired. Select it again."));
+        let receipt: PictureCommitReceipt | undefined;
+        const operations: SemanticOperation[] = [];
+        const current = () =>
+          pictureCurrent(message.version, message.controlId) &&
+          binding.generation === generation &&
+          requestContext === contextGeneration;
+        let error: DesignerError | undefined;
+        try {
+          error = await this.edits.run(
+            document,
+            message.version,
+            operations,
+            this.clients,
+            current,
+            async () => {
+              receipt = await session.commit(message.token);
+              operations.push({
+                type: "setControlProperty",
+                controlId: message.controlId,
+                field: "picture",
+                value: receipt.picture,
+              });
+              return undefined;
+            },
+            applyDraft,
+          );
+          if (!error && receipt) session.accept(receipt);
+        } catch (caught) {
+          error = { code: "pictureUnavailable", message: String(caught) };
+        }
+        if (error) await session.rollback({ token: message.token }, pictureReferenced);
+        reply({ type: "editResult", requestId: message.requestId, error });
+        await update();
+      } catch (error) {
+        failed(error);
+      }
     };
     const sendDraftState = () =>
       send({
@@ -752,7 +932,24 @@ export class UserFormEditorProvider
               },
             };
           }
-          return this.clients.requestUserFormPreview(document);
+          const preview = await this.clients.requestUserFormPreview(document);
+          if (preview.propertyEditorVersion === 1 && preview.document) {
+            await Promise.all(
+              preview.document.controls.map(async (control) => {
+                if (control.type !== "Image" || !control.picture?.path) return;
+                try {
+                  const image = await this.clients.requestUserFormPicture({
+                    uri: document.uri.toString(),
+                    path: control.picture.path,
+                  });
+                  if (!image.error) control.picturePreview = image.dataURI;
+                } catch {
+                  /* The typed source remains available when an asset is unavailable. */
+                }
+              }),
+            );
+          }
+          return preview;
         },
         () => document.version,
         send,
@@ -978,6 +1175,11 @@ export class UserFormEditorProvider
           void this.publishPanel(panel, customDocument).then(undefined, (error) =>
             vscode.window.showErrorMessage(String(error)),
           );
+        } else if (message.type === "pictureCancel") {
+          pictures?.cancel();
+          pictureBinding = undefined;
+        } else if (message.type === "picturePick" || message.type === "pictureCommit") {
+          void handlePicture(message);
         } else if (message.type === "resolveConflict") {
           void this.edits
             .exclusive(document.uri, async () => {
@@ -1050,7 +1252,14 @@ export class UserFormEditorProvider
                           ?.parentId === c.id)),
                 )
               : false;
+          const typedEditor =
+            operation.type === "setGeometry" ||
+            (property &&
+              "value" in operation &&
+              typeof operation.value === "object" &&
+              operation.value !== null);
           const permitted = () =>
+            (!typedEditor || propertyEditorVersion === 1) &&
             !customDocument.state.conflicted &&
             !customDocument.reconciling &&
             !customDocument.saving &&
@@ -1073,7 +1282,7 @@ export class UserFormEditorProvider
                       ? structuralEditable && parentEditable
                       : structural
                         ? structuralEditable
-                        : property
+                        : property || operation.type === "setGeometry"
                           ? propertyEditable
                           : editable) &&
             generation === editGeneration;
@@ -1142,6 +1351,7 @@ export class UserFormEditorProvider
       disposed = true;
       replies.clear();
       if (timer) clearTimeout(timer);
+      pictures?.cancel();
       sync.dispose();
       subscriptions.forEach((subscription) => subscription.dispose());
     };
@@ -1155,7 +1365,7 @@ export function designerHTML(webview: vscode.Webview, resources: vscode.Uri): st
   const style = webview.asWebviewUri(vscode.Uri.joinPath(resources, "app.css"));
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource}; font-src ${webview.cspSource};">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource}; font-src ${webview.cspSource}; img-src data:;">
 <link rel="stylesheet" href="${style}"><title>xlflow UserForm Designer</title></head>
 <body><div id="app"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
 }

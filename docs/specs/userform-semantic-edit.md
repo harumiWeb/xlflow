@@ -350,6 +350,30 @@ or ambiguous syntax must not produce guessed metadata; the adapter can retain
 its valid canonical preview while reporting property metadata unavailable.
 No frontend validation rules replace canonical parsing and validation.
 
+## Typed editor operations
+
+Editor version 1 supplements the scalar operations with explicitly modeled
+`font`, `foreColor`, `backColor` and Image `picture` objects. It also exposes
+applicable typed enum fields. It does not authorize arbitrary object writes.
+The Go property contract supplies child descriptors and applicability.
+`setFormProperty` and `setControlProperty` retain explicit value presence and
+canonical final validation. Font edits preserve omitted members; matching
+legacy bag keys migrate only when that property is confirmed, atomically with
+the typed insertion/update. Unrelated legacy entries remain untouched.
+
+`setGeometry` sets only supplied axes in one transaction. Its optional
+`controlId` targets a single control; absent ID targets form width/height only.
+At least one axis is required. Page and multiple selection are not targets.
+It is a single confirmation, not a series of move/resize history entries.
+
+YAML/YML/JSON edits preserve unrelated source comments, order and formatting.
+Typed values do not change absence/null semantics or permit generic removal;
+picture removal requires `{remove: true}`, never null. Conflicting typed and
+legacy representations fail before publication. See
+[userform-property-editors.md](userform-property-editors.md) for negotiation,
+partial values and verification requirements. The scalar-only exclusions
+in the original contract continue to apply to clients that have not negotiated editor version 1.
+
 ## Transaction and identity rules
 
 Operations execute in the supplied order against a private working FormSpec.
@@ -446,7 +470,8 @@ The implementation is pure Go and must cover these behaviors:
   validation codes, messages, and suggestions.
 - Explicit `form` paths update only the named legacy or `build.*` field.
   Unsupported observed fields, property removal, property bags, collections,
-  pictures, and non-scalar values are rejected.
+  arbitrary object values are rejected; the explicitly modeled typed editor
+  properties are the only object-write exception.
 - YAML/YML/JSON support all operations, including single-control
   `reorderControl` and every productivity operation. Cover local edits,
   replacement/insertion including missing `build`, escaped keys, duplicate-key

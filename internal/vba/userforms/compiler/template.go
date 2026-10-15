@@ -105,6 +105,16 @@ func validateTemplateCoordinateSystem(form, coordinateSystem string) error {
 }
 
 func overlayTemplateForm(base *oforms.Form, target *spec.FormSpecForm, desired spec.FormSpecForm) error {
+	target.Font = overlayFont(target.Font, desired.Font)
+	if desired.BackColor != nil {
+		target.BackColor = desired.BackColor
+	}
+	if desired.ForeColor != nil {
+		target.ForeColor = desired.ForeColor
+	}
+	if desired.BorderStyle != nil {
+		target.BorderStyle = desired.BorderStyle
+	}
 	if desired.Caption != nil {
 		target.Caption = new(*desired.Caption)
 	}
@@ -216,6 +226,7 @@ func overlayTemplateControl(base *oforms.Form, target *spec.FormSpecControl, des
 			target.Unsupported = nil
 		}
 	}
+	overlayTypedControl(target, desired)
 	return nil
 }
 

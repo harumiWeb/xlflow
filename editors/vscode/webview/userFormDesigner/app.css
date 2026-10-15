@@ -136,6 +136,13 @@ header {
   position: absolute;
   box-sizing: border-box;
   white-space: pre-wrap;
+  /* Existing MSForms children keep independent appearance settings. Prevent
+     container inheritance; authored inline colors/font members still win. */
+  color: #111;
+  font:
+    11px Tahoma,
+    sans-serif;
+  text-decoration: none;
 }
 .textbox,
 .combobox,
@@ -975,4 +982,199 @@ body.vscode-high-contrast-light button {
 }
 .structure-tree-row > .codicon {
   flex-shrink: 0;
+}
+.property-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 35%);
+}
+.property-modal {
+  color: var(--vscode-foreground);
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
+  box-shadow: 0 8px 28px var(--vscode-widget-shadow, rgb(0 0 0 / 35%));
+  width: min(520px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 16px;
+  box-sizing: border-box;
+}
+.property-modal h2 {
+  margin: 0 0 16px;
+  font-size: 15px;
+}
+.property-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.property-modal button {
+  min-height: 26px;
+}
+.property-modal input,
+.property-modal select {
+  min-width: 0;
+  min-height: 26px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+  padding: 3px 6px;
+  font: inherit;
+}
+.property-modal :focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+.property-editor-fields {
+  display: grid;
+  gap: 10px;
+}
+.property-editor-field {
+  display: grid;
+  grid-template-columns: minmax(95px, 1fr) minmax(0, 2fr);
+  align-items: center;
+  gap: 10px;
+}
+.property-editor-field input[type="checkbox"] {
+  justify-self: start;
+  min-height: auto;
+}
+.font-editor-sample {
+  overflow-wrap: anywhere;
+  border: 1px solid var(--vscode-panel-border);
+  padding: 16px;
+  margin-top: 16px;
+}
+.color-editor {
+  display: grid;
+  grid-template-columns: minmax(60px, 1fr) minmax(0, 3fr);
+  align-items: center;
+  gap: 12px;
+}
+.color-editor-sample {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  border: 1px solid var(--vscode-panel-border);
+  padding: 10px;
+  color: var(--vscode-editor-foreground, var(--vscode-foreground));
+  background: var(--vscode-editor-background);
+}
+.color-picker-tabs {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.color-picker-tabs button {
+  color: var(--vscode-foreground);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 4px 10px;
+}
+.color-picker-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-hoverBackground);
+}
+.color-palette,
+.color-system-list {
+  grid-column: 1 / -1;
+}
+.color-palette {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 28px));
+  gap: 4px;
+  padding: 4px;
+}
+.property-modal .color-palette-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid #808080;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 40%);
+  forced-color-adjust: none;
+}
+.color-palette-swatch[aria-pressed="true"] {
+  outline: 2px solid var(--vscode-focusBorder, Highlight);
+  outline-offset: 1px;
+  box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 3px #000;
+}
+.color-system-list {
+  display: grid;
+  max-height: 180px;
+  overflow-y: auto;
+  gap: 2px;
+}
+.color-system-choice {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  text-align: left;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  border: 1px solid transparent;
+  padding: 4px 8px;
+}
+.color-system-choice[aria-pressed="true"] {
+  border-color: var(--vscode-focusBorder);
+}
+.color-swatch {
+  display: inline-block;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--vscode-contrastBorder, var(--vscode-panel-border));
+  background-image: linear-gradient(45deg, transparent 50%, rgb(127 127 127 / 12%) 50%);
+}
+.property-object-summary {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.property-value > .property-object-state {
+  flex: 0 1 64px;
+  width: 64px;
+}
+.property-editor-launch {
+  flex: 0 0 24px;
+  width: 24px;
+  min-height: 24px;
+  padding: 2px;
+}
+.position-editor-launch {
+  margin: 0 0 8px;
+}
+.picture-editor img {
+  display: block;
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  margin-bottom: 8px;
+}
+.picture-editor button {
+  margin: 0 8px 8px 0;
+}
+.picture-editor-path {
+  overflow-wrap: anywhere;
+}
+.control-picture {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
 }

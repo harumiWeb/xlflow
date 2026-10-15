@@ -232,9 +232,17 @@ export function CollectionEditor({
               drafts={drafts}
               reply={reply}
               onCommit={(field, value) =>
-                onCommit([
-                  { type: "setTabProperty", controlId: selected.id, index: tabIndex, field, value },
-                ])
+                value === null || typeof value !== "object"
+                  ? onCommit([
+                      {
+                        type: "setTabProperty",
+                        controlId: selected.id,
+                        index: tabIndex,
+                        field,
+                        value,
+                      },
+                    ])
+                  : undefined
               }
             />
           )}

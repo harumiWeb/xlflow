@@ -174,6 +174,16 @@ func CompileNew(input spec.FormSpec, codePage uint16) (*oforms.Form, error) {
 		}
 		return nil, &Error{Code: code, Form: form.Form.Name, Reason: err.Error(), Cause: err}
 	}
+	edits, err := generationTypedEdits(form)
+	if err != nil {
+		return nil, fail(GenerationInvalid, "", "typed properties", err.Error())
+	}
+	if len(edits) != 0 {
+		result, err = oforms.ApplyEdits(result, edits, codePage)
+		if err != nil {
+			return nil, fail(GenerationInvalid, "", "typed properties", err.Error())
+		}
+	}
 	return result, nil
 }
 
@@ -255,6 +265,9 @@ func generationControlDefinition(control spec.FormSpecControl, tabIndex int) (of
 	}
 	values := make(map[string]any, len(props))
 	for _, key := range slices.Sorted(maps.Keys(props)) {
+		if hasTypedProperty(control, key) {
+			continue
+		}
 		name, known := propertyNames[key]
 		if !known || !applicableProperty(kind, key) {
 			return oforms.ControlDefinition{}, generationFailure(GenerationUnsupported, "properties."+key, "property is not supported for this control")

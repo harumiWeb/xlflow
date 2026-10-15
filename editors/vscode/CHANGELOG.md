@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Fixed child Label/control colors and fonts changing with Form or Frame
+  ForeColor/Font in the Designer preview when Excel keeps independent settings.
+
+- Added Palette/System tabs to UserForm Color editors, with 48 RGB swatches,
+  system-color previews and keyboard navigation.
+
+- Added opt-in typed UserForm property editors for partial Font, RGB/system/OLE
+  Color, Image BMP/JPEG assets and single-target Position. Modal and Canvas
+  previews stay outside draft history until OK; stale input remains visible
+  with confirmation disabled. Image imports occur only on confirmation and
+  retain content-addressed assets for Undo/Redo. Go/LSP metadata remains the
+  authority, with scalar-client compatibility and edited-property-only legacy
+  migration.
+
 - UserForm Designer property names stay English regardless of the UI language.
 
 - Refined the VS Code UserForm Designer with a compact contextual toolbar,

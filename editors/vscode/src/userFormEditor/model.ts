@@ -14,6 +14,10 @@ export function designerDocument(spec: PreviewDocument, warnings: string[] = [])
   const width = form.width;
   const height = form.height;
   return {
+    font: form.font,
+    foreColor: form.foreColor,
+    backColor: form.backColor,
+    borderStyle: form.borderStyle,
     name: form.name,
     caption: form.caption ?? form.name,
     width: width ?? 240,

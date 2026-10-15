@@ -101,6 +101,57 @@ Every authored control requires `id`, `name`, and `type`. Controls are a flat li
 | `Page`          | `Forms.Page.1`          | `caption`, `controlTipText`, `tag`, `accelerator` (strings)                      |
 | `TabStrip`      | `Forms.TabStrip.1`      | `selectedIndex` (integer; zero-based Tab index or `-1`), `tabs` (Tab array)      |
 
+### Font, colors and appearance
+
+FormSpec remains version 1. Applicable built-in controls and the form accept
+partial `font` objects and typed colors:
+
+```yaml
+form:
+  name: Main
+  font: { name: Tahoma, size: 9, bold: false, charset: 128 }
+  foreColor: { kind: rgb, value: "#203040" }
+  backColor: { kind: system, value: buttonFace }
+```
+
+Font members are `name`, `size` (points), `bold`, `italic`, `underline`,
+`strikeThrough` and numeric `charset`; omit members to retain existing values.
+Page, Image, SpinButton and ScrollBar do not accept Font. Custom ActiveX and
+individual Tab records do not gain these built-in typed fields.
+
+`foreColor` and `backColor` use `{ kind, value }`. RGB is `#RRGGBB`, system
+colors use names such as `buttonFace`, and raw OLE is `0xXXXXXXXX`, for example
+`{ kind: ole, value: "0x8000000F" }`. System and unknown OLE values preserve
+their meaning rather than being rewritten to current RGB. Image supports
+BackColor only. Applicable controls expose `textAlign` (1 Left, 2 Center,
+3 Right) and `borderStyle` through the canonical contract. Image additionally
+exposes `pictureAlignment` (0 TopLeft, 1 TopRight, 2 Center, 3 BottomLeft,
+4 BottomRight) and `pictureSizeMode` (0 Clip, 1 Stretch, 3 Zoom).
+
+The built-in applicability matrix is:
+
+| Target                               | Font | ForeColor | BackColor | BorderStyle | TextAlign |
+| ------------------------------------ | ---- | --------- | --------- | ----------- | --------- |
+| Form                                 | Yes  | Yes       | Yes       | Yes         | No        |
+| Label, TextBox, ComboBox, ListBox    | Yes  | Yes       | Yes       | Yes         | Yes       |
+| CheckBox, OptionButton, ToggleButton | Yes  | Yes       | Yes       | No          | Yes       |
+| CommandButton                        | Yes  | Yes       | Yes       | No          | No        |
+| Frame                                | Yes  | Yes       | Yes       | Yes         | No        |
+| MultiPage, TabStrip                  | Yes  | Yes       | Yes       | No          | No        |
+| Image                                | No   | No        | Yes       | Yes         | No        |
+| SpinButton, ScrollBar                | No   | Yes       | Yes       | No          | No        |
+| Page                                 | No   | No        | No        | No          | No        |
+
+Page has none of these appearance properties, and CommandButton has no
+TextAlign. Font size updates persisted as TextProps require 0.05 pt increments;
+explicitly empty font names and non-ASCII updates to an existing StdFont are
+rejected. Existing unsupported font records are preserved on no-op.
+
+Legacy property-bag values remain readable. Confirming a typed property in
+the Designer migrates only its matching legacy key; unrelated bag values are
+retained. Equal typed/legacy values may coexist; conflicting values are errors.
+Opening a dialog never fills omitted source values from rendering defaults.
+
 ### Image pictures
 
 An Image may reference a BMP or JPEG file using a path relative to the xlflow
@@ -235,6 +286,9 @@ The LSP also provides context-aware completion and Hover for known UserForm YAML
 | `UFV006`–`UFV012` | Unsupported control type, duplicate ID, invalid parent reference, parent cycle, invalid parent type, or type/ProgID mismatch. |
 | `UFV013`–`UFV015` | Support-level, custom-control, or snapshot-only unresolved-control warning.                                                   |
 | `UFV016`          | Invalid form dimension (finite, non-negative, representable HIMETRIC required).                                               |
+
+`UFV021` reports invalid typed appearance values or conflicting typed/legacy
+representations. `UFV019` remains reserved for Tab validation.
 
 The removed `form.build` aliases are reported as unknown fields (`UFV001`).
 

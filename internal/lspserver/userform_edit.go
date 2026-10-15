@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"reflect"
+	"strconv"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -152,7 +154,7 @@ func isUserFormEditOperation(operationType formsedit.OperationType) bool {
 		return true
 	}
 	switch operationType {
-	case formsedit.MoveControl, formsedit.ResizeControl,
+	case formsedit.SetGeometry, formsedit.MoveControl, formsedit.ResizeControl,
 		formsedit.SetFormProperty, formsedit.SetControlProperty,
 		formsedit.AddControl, formsedit.RemoveControl, formsedit.SetParent,
 		formsedit.AddPage, formsedit.RemovePage, formsedit.ReorderPage,
@@ -234,7 +236,7 @@ func validateUserFormEditTransaction(operations []formsedit.Operation) *userForm
 	}
 	if len(operations) == 1 {
 		switch operations[0].Type {
-		case formsedit.SetFormProperty, formsedit.SetControlProperty,
+		case formsedit.SetGeometry, formsedit.SetFormProperty, formsedit.SetControlProperty,
 			formsedit.MoveControl, formsedit.ResizeControl,
 			formsedit.AddControl, formsedit.RemoveControl, formsedit.SetParent,
 			formsedit.AddPage, formsedit.RemovePage, formsedit.ReorderPage,
@@ -353,6 +355,8 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		return parseUserFormProductivityOperation(raw, fields, operationType)
 	}
 	switch operationType {
+	case formsedit.SetGeometry:
+		allowed = []string{"type", "controlId", "left", "top", "width", "height"}
 	case formsedit.MoveControl:
 		allowed = []string{"type", "controlId", "left", "top"}
 	case formsedit.ResizeControl:
@@ -384,12 +388,47 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 	default:
 		return formsedit.Operation{}, &userFormEditError{Code: compiler.Unsupported, Message: fmt.Sprintf("operation %q is not exposed by the LSP edit method", operationType)}
 	}
-	if operationType == formsedit.RemoveControl || operationType == formsedit.RemovePage {
+	if operationType == formsedit.SetGeometry {
+		if err := validateJSONFieldSet(fields, []string{"type"}, []string{"controlId", "left", "top", "width", "height"}); err != nil {
+			return formsedit.Operation{}, invalidUserFormEditParams(err)
+		}
+	} else if operationType == formsedit.RemoveControl || operationType == formsedit.RemovePage {
 		if err := validateJSONFieldSet(fields, []string{"type", "controlId"}, []string{"cascade"}); err != nil {
 			return formsedit.Operation{}, invalidUserFormEditParams(err)
 		}
 	} else if err := validateJSONFields(fields, allowed); err != nil {
 		return formsedit.Operation{}, invalidUserFormEditParams(err)
+	}
+	if operationType == formsedit.SetGeometry {
+		op := formsedit.Operation{Type: operationType}
+		if _, exists := fields["controlId"]; exists {
+			id, err := decodeRequiredJSONString(fields, "controlId")
+			if err != nil {
+				return op, invalidUserFormEditParams(err)
+			}
+			op.ControlID = id
+		}
+		count := 0
+		for _, axis := range []struct {
+			key   string
+			value **float64
+		}{{"left", &op.Left}, {"top", &op.Top}, {"width", &op.Width}, {"height", &op.Height}} {
+			if raw, present := fields[axis.key]; present {
+				value, err := decodeExactGeometryNumber(raw)
+				if err != nil {
+					return op, invalidUserFormEditParams(err)
+				}
+				if op.ControlID == "" && (axis.key == "left" || axis.key == "top") {
+					return op, invalidUserFormEditParams(fmt.Errorf("form geometry accepts only width and height"))
+				}
+				*axis.value = new(value)
+				count++
+			}
+		}
+		if count == 0 {
+			return op, invalidUserFormEditParams(fmt.Errorf("setGeometry requires at least one changed axis"))
+		}
+		return op, nil
 	}
 	if operationType == formsedit.AddControl {
 		control, err := decodeUserFormControl(fields["control"])
@@ -492,7 +531,7 @@ func parseUserFormEditOperation(raw []byte) (formsedit.Operation, *userFormEditE
 		if err != nil {
 			return formsedit.Operation{}, invalidUserFormEditParams(err)
 		}
-		value, err := decodeJSONScalar(fields, "value")
+		value, err := decodeUserFormPropertyValue(fields, field)
 		if err != nil {
 			return formsedit.Operation{}, invalidUserFormEditParams(err)
 		}
@@ -923,6 +962,32 @@ func decodeRequiredJSONInt(fields map[string]json.RawMessage, key string) (int, 
 	return value, nil
 }
 
+func decodeUserFormPropertyValue(fields map[string]json.RawMessage, field string) (any, error) {
+	if field != "font" && field != "foreColor" && field != "backColor" && field != "picture" {
+		return decodeJSONScalar(fields, "value")
+	}
+	raw, ok := fields["value"]
+	if !ok {
+		return nil, fmt.Errorf("missing payload field value")
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, nil
+	}
+	if err := rejectDuplicateJSONFields(raw); err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var object map[string]any
+	if err := decoder.Decode(&object); err != nil {
+		return nil, err
+	}
+	if object == nil {
+		return nil, fmt.Errorf("typed property must be an object")
+	}
+	return object, nil
+}
+
 func decodeJSONScalar(fields map[string]json.RawMessage, key string) (any, error) {
 	raw, ok := fields[key]
 	if !ok {
@@ -1068,6 +1133,19 @@ func validateJSONFieldSet(fields map[string]json.RawMessage, required, optional 
 		}
 	}
 	return nil
+}
+
+func decodeExactGeometryNumber(raw json.RawMessage) (float64, error) {
+	value, err := decodeFiniteJSONNumber(raw)
+	if err != nil {
+		return 0, err
+	}
+	original, valid := new(big.Rat).SetString(strings.TrimSpace(string(raw)))
+	roundTrip, roundValid := new(big.Rat).SetString(strconv.FormatFloat(value, 'g', -1, 64))
+	if !valid || !roundValid || original.Cmp(roundTrip) != 0 {
+		return 0, fmt.Errorf("geometry number cannot be represented without precision loss")
+	}
+	return value, nil
 }
 
 func decodeFiniteJSONNumber(raw json.RawMessage) (float64, error) {

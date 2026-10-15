@@ -27,29 +27,45 @@ Ctrl+S／Cmd+Sでソースへ反映します。ビューやタブの操作だけ
 ## UserForm Designer のプロパティ編集
 
 設定した forms root（標準は `src/forms`）直下の `specs` にある `.yaml`、
-`.yml`、`.json` の FormSpec を開き、**Reopen Editor With... → xlflow
-UserForm Designer** を選びます。背景はフォーム、コントロールはその対象、
-Page タブは Page のプロパティを選択します。Property Grid は接続中 LSP の
-メタデータから、対応する scalar フィールドを名前／値の2列で表示します。
-カテゴリは折りたためます。型変更や明示的nullは各行の「…」メニューから操作し、
-メニューを開くだけでは値を変更しません。
-
+`.yml`、`.json` を **Reopen Editor With... → xlflow UserForm Designer** で開きます。
+背景はフォーム、コントロールはその対象、Page タブは Page を選択します。
+Property Grid は接続中 LSP のメタデータから名前／値の2列を表示します。
+プロパティ名は言語設定にかかわらず英語、カテゴリ・説明・操作は表示言語に従います。
 文字列・数値は Enter またはフォーカスを外して確定し、Escape で取り消します。
-boolean／enum は選択時に確定します。一確定は一つのソース編集となり、VS Code の
-undo/redo を利用できます。不正な入力はエラーとともに残り、ソースは変更しません。
-外部のソース変更で古い入力が失効した場合は、更新後の文書に対して再入力します。
+boolean はチェックボックス、enum は ComboBox で編集します。
 
-未設定・明示的 null・空文字・false・0 は別の状態です。観測値や描画の補完値を
-authoring 値として書き戻しません。null は対応する optional フィールドだけに設定でき、
-削除を意味しません。未設定に戻すにはテキストエディターでキーを削除します。
-legacy フィールドと `build.*` は別々に編集します。`form.name` の変更はファイル名、
-コード sidecar、VBA 参照を改名しません。Page の geometry、observed、コレクション、
-picture、任意 property bag は Property Grid の編集対象外です。
+Font ダイアログでは名前、ポイント単位のサイズ、装飾、数値の charset を指定し、
+現在値・代表的な候補・自由入力を利用できます。Color は RGB、system、OLE を区別し、
+system 色の意味や未知の OLE 値を保持します。ダイアログと Canvas に一時表示し、
+フォントの代替表示や system 色は Excel と異なる場合があります。対応項目は Go/LSP が
+決定し、custom ActiveX や個々の Tab レコードに型付きEditorは追加しません。
+Page は Font／ForeColor／BackColor／BorderStyle、CommandButton は TextAlign の対象外です。
+TextProps のフォントサイズは 0.05 pt 単位です。空のフォント名や既存 StdFont への
+非ASCII名の更新は拒否し、未編集の不透明なフォント情報は保持します。
 
-プロパティ編集には `userFormPropertyEdit` capability が必要です。古い geometry 対応
-サーバーでは移動・リサイズを維持し、preview のみのサーバーでは読み取り専用です。
-ソースが曖昧な場合は有効なプレビューを保ったままプロパティ編集を無効にします。
-FormSpec のソース編集に Excel は不要で、ブックへ自動適用はしません。
+Image はネイティブのファイル選択で BMP／JPEG を指定できます。プロジェクト内の画像は
+相対パスを利用し、外部画像は OK 時だけ設定した forms root の
+`assets/<full-lowercase-SHA256>.bmp|jpg` へ取り込みます。同一内容は再利用し、
+Undo 後も Redo のため画像を保持します。Cancel は画像を作りません。
+明示的な削除だけが `picture: { remove: true }` になります。PictureAlignment と
+PictureSizeMode も編集できます。Position は単一コントロールの Left／Top／Width／Height、
+フォームの Width／Height が対象で、変更した軸だけを一括確定します。Page・複数選択は対象外です。
+
+開くだけ・入力中・Cancel では Designer の下書きや履歴を変更しません。OK は一つの
+undo/redo 可能な編集です。ソースへの反映は引き続き Designer の明示的な保存で行います。
+ソース変更や LSP 再起動時はダイアログ入力を残し、一時プレビューを解除して OK を無効化します。
+Cancel して開き直してください。確定失敗時も入力とエラーを保持します。
+legacy property bag は確定した項目だけを型付き表現へ移行し、他の項目を保持します。
+
+未設定・明示的 null・空文字・false・0 は別の状態です。描画の補完値を書き戻しません。
+null はキー削除を意味せず、未設定に戻すにはテキストエディターで削除します。
+Page の geometry、observed、任意 property bag の直接編集は対象外です。
+`form.name` の変更はファイル、コード sidecar、VBA 参照を改名しません。
+
+scalar 編集には `userFormPropertyEdit`、型付きEditorには version 1 の対応が必要です。
+旧サーバーでは通知された既存の scalar／geometry 機能を維持します。ソースが曖昧な場合は
+有効なプレビューを保ったまま編集を無効にします。FormSpec 編集に Excel は不要で、
+ブックへ自動適用はしません。
 
 ## UserForm Designer の Toolbox と構造編集
 

@@ -40,43 +40,50 @@ func HoverYAML(source string, pos Position) *Hover {
 }
 
 func propertyAtPath(doc *Document, path string) (forms.PropertyContract, string, bool) {
-	contract := forms.UserFormContract()
 	parent := parentPath(path)
 	name := lastPathSegment(path)
 	switch {
-	case parent == "":
-		property, ok := lookupProperty(contract.DocumentProperties, name)
-		return property, "document root", ok
-	case parent == "form":
-		property, ok := lookupProperty(contract.FormProperties, name)
-		return property, "form", ok
 	case parent == "form.observed":
 		property, ok := forms.LookupFormObservedProperty(name)
 		return property, "captured form state", ok
-	case isTabPath(parent):
-		property, ok := forms.LookupTabProperty(name)
-		return property, "TabStrip tab", ok
-	case isPictureActionPath(parent):
-		control := controlAtPath(doc.Source, parentPath(parent))
-		if strings.EqualFold(control.Type, "Image") {
-			property, ok := forms.LookupPictureActionProperty(name)
-			return property, "Image picture action", ok
-		}
-	case isControlPath(parent):
-		control := controlAtPath(doc.Source, parent)
-		if property, ok := forms.LookupControlProperty(control.Type, name); ok {
-			if _, common := contract.CommonControlProperties[name]; common {
-				return property, "all controls", true
-			}
-			return property, control.Type, true
-		}
 	case strings.HasSuffix(parent, ".observed") && isControlPath(strings.TrimSuffix(parent, ".observed")):
-		controlPath := strings.TrimSuffix(parent, ".observed")
-		control := controlAtPath(doc.Source, controlPath)
+		control := controlAtPath(doc.Source, strings.TrimSuffix(parent, ".observed"))
 		property, ok := forms.LookupObservedControlProperty(control.Type, name)
 		return property, "captured " + control.Type + " control state", ok
 	}
-	return forms.PropertyContract{}, "", false
+	property, ok := propertyAt(doc.Source, parent, name)
+	if !ok {
+		return forms.PropertyContract{}, "", false
+	}
+	scope := "document root"
+	switch {
+	case parent == "form":
+		scope = "form"
+	case strings.HasPrefix(parent, "form."):
+		scope = "form " + strings.TrimPrefix(parent, "form.")
+	case isTabPath(parent):
+		scope = "TabStrip tab"
+	default:
+		owner := parent
+		for owner != "" && !isControlPath(owner) {
+			owner = parentPath(owner)
+		}
+		if owner != "" {
+			control := controlAtPath(doc.Source, owner)
+			scope = control.Type
+			if owner == parent {
+				if _, common := lookupProperty(forms.UserFormContract().CommonControlProperties, name); common {
+					scope = "all controls"
+				}
+			} else {
+				scope += " " + strings.TrimPrefix(parent, owner+".")
+				if object, known := propertyAt(doc.Source, parentPath(parent), lastPathSegment(parent)); known && object.Editor == "picture" {
+					scope += " action"
+				}
+			}
+		}
+	}
+	return property, scope, true
 }
 
 func controlTypeHover(doc *Document, controlPath string, field FieldNodes) *Hover {

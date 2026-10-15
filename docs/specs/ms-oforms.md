@@ -140,9 +140,9 @@ that list rather than silently discarded. Site `Name` is already represented
 by the control's canonical `name` field.
 Unmodeled `BooleanProperties`, control flag bits outside the projected
 `Enabled` bit, and site flags that differ from the persisted default are also
-reported. For nested containers, their level-specific font, picture, mouse icon,
-and extra streams are attached to the owning control's unsupported list and
-warning.
+reported. Supported level-specific fonts project to the typed `font` field.
+Unmodeled or opaque font state, container pictures, mouse icons and extra
+streams remain attached to the owning control's unsupported list and warning.
 Form-level unsupported state is summarized by a form warning. Raw persistence
 details used only for lossless replay are not exposed as property-bag values.
 The file-pull publisher additionally appends the operational warning
@@ -466,6 +466,30 @@ input before allocating or slicing. Serialization validates all forms before
 the enclosing CFB is published. A malformed retained count, length,
 `ObjectStreamSize`, or nested ownership relationship therefore fails instead
 of producing a partial `vbaProject.bin`.
+
+## Typed appearance edits
+
+The typed editor contract adds partial Font edits for supported StdFont and
+TextProps records, RGB/system/raw-OLE colors and applicable numeric appearance
+enums. Persist omitted font members and unrelated record state unchanged.
+Known system colors retain their system identity; unknown OLE values retain
+all 32 bits. Never replace persisted font information with browser defaults.
+Unsupported or opaque font mutation fails instead of rebuilding lossy state.
+All authoring paths use the shared canonical compiler; no per-property COM
+fallback is introduced. Source no-ops retain the existing lossless contract.
+TextProps FontHeight is measured in whole twips (0.05 pt); StdFont size uses
+1/10000 pt, independently of host DPI. Reject unrepresentable updates rather
+than rounding silently. Reject explicitly empty font names and non-ASCII
+StdFont face-name updates. Preserve existing opaque font data on no-op.
+TextProps Bold updates set FontWeight to 700/400 as well as the FontEffects
+bit. In focused Excel observations, the bit alone left Weight at 400 and the
+font regular; projection honors an explicit weight over the bit.
+Page exposes none of Font/ForeColor/BackColor/BorderStyle, and CommandButton
+has no TextAlign. Typed appearance validation uses UFV021; UFV019 is reserved
+for Tab validation.
+See [userform-property-editors.md](userform-property-editors.md) for scope and
+verification requirements. These requirements are distinct from the historical
+Excel fixture evidence recorded below.
 
 ## Verification
 

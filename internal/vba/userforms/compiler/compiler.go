@@ -145,7 +145,13 @@ func compilePropertyEdits(base *oforms.Form, before, after spec.FormSpec, codePa
 				return nil, c.fail(Invalid, edit.Control, edit.path, "edited property is missing after read-back")
 			}
 		}
-		if !reflect.DeepEqual(got, edit.Value) {
+		matches := reflect.DeepEqual(got, edit.Value)
+		if patch, ok := edit.Value.(oforms.Font); ok {
+			if actual, ok := got.(oforms.Font); ok {
+				matches = fontMatches(patch, actual)
+			}
+		}
+		if !matches {
 			return nil, c.fail(Invalid, edit.Control, edit.path, "edited value differs after read-back")
 		}
 	}
@@ -170,6 +176,12 @@ func editedRootProperty(form *oforms.Form, name string) (any, bool) {
 	}
 	root := form.Levels[0].Record
 	switch name {
+	case "Font":
+		font, err := oforms.ReadLevelFont(form.Levels[0])
+		if err != nil || font == nil {
+			return nil, false
+		}
+		return *font, true
 	case "Caption":
 		value, found := root.Strings["Caption"]
 		return value.Text, found
@@ -183,7 +195,8 @@ func editedRootProperty(form *oforms.Form, name string) (any, bool) {
 		}
 		return size.Height, true
 	default:
-		return nil, false
+		value, found := root.Values[name]
+		return value, found
 	}
 }
 
@@ -192,6 +205,24 @@ func editedProperty(control *oforms.Control, name string) (any, bool) {
 		return nil, false
 	}
 	switch name {
+	case "Font":
+		font, err := oforms.ReadControlFont(control)
+		if err != nil || font == nil {
+			return nil, false
+		}
+		return *font, true
+	case "TextAlign":
+		if control.Record == nil || control.Record.TextProps == nil {
+			return nil, false
+		}
+		v, ok := control.Record.TextProps.Values["ParagraphAlign"]
+		switch v {
+		case 2:
+			v = 3
+		case 3:
+			v = 2
+		}
+		return v, ok
 	case "Picture":
 		if control.Record == nil {
 			return nil, false
@@ -256,6 +287,9 @@ func normalizedCopy(input spec.FormSpec) (spec.FormSpec, error) {
 		copied.Form.Observed = new(*copied.Form.Observed)
 	}
 	copied = spec.NormalizeFormSpec(copied)
+	for i := range copied.Controls {
+		promoteLegacyAppearance(&copied.Controls[i])
+	}
 	for _, issue := range spec.ValidateFormSpecStrict(copied) {
 		if issue.Severity == spec.SeverityError {
 			return spec.FormSpec{}, fmt.Errorf("%s: %s", issue.Field, issue.Message)
@@ -313,6 +347,14 @@ func (c *compilation) topology() error {
 
 func (c *compilation) formEdits() error {
 	old, next := c.before.Form, c.after.Form
+	if err := c.typedEdits("", "Form", "form", []typedField{
+		{"font", old.Font, next.Font, c.actual.Form.Font},
+		{"foreColor", old.ForeColor, next.ForeColor, c.actual.Form.ForeColor},
+		{"backColor", old.BackColor, next.BackColor, c.actual.Form.BackColor},
+		{"borderStyle", old.BorderStyle, next.BorderStyle, c.actual.Form.BorderStyle},
+	}); err != nil {
+		return err
+	}
 	for _, field := range []struct {
 		name   string
 		before *float64
@@ -364,6 +406,9 @@ func (c *compilation) formEdits() error {
 }
 
 func (c *compilation) controlEdits(old, next, actual spec.FormSpecControl, path string) error {
+	if err := c.typedEdits(old.Name, old.Type, path, controlTypedFields(old, next, actual)); err != nil {
+		return err
+	}
 	if strings.EqualFold(old.Type, "Page") {
 		if !reflect.DeepEqual(old.Left, next.Left) || !reflect.DeepEqual(old.Top, next.Top) || !reflect.DeepEqual(old.Width, next.Width) || !reflect.DeepEqual(old.Height, next.Height) {
 			return c.fail(Unsupported, old.Name, path+".geometry", "Page geometry is derived from its MultiPage")
@@ -511,7 +556,7 @@ func sameBaseline(property string, before, actual, convertedBefore, convertedAct
 }
 
 func supportedControl(kind string) bool {
-	return slices.Contains([]string{"label", "textbox", "combobox", "listbox", "commandbutton", "checkbox", "optionbutton", "image", "frame", "multipage", "page", "tabstrip"}, strings.ToLower(kind))
+	return slices.Contains([]string{"label", "textbox", "combobox", "listbox", "commandbutton", "checkbox", "optionbutton", "togglebutton", "spinbutton", "scrollbar", "image", "frame", "multipage", "page", "tabstrip"}, strings.ToLower(kind))
 }
 
 func convertValue(kind, property string, value any) (any, error) {
@@ -611,6 +656,9 @@ func (c *compilation) propertyEdits(old, next, actual spec.FormSpecControl, path
 	slices.Sort(keys)
 	for _, key := range keys {
 		oldValue, newValue := previous[key], desired[key]
+		if hasTypedProperty(next, key) {
+			continue
+		}
 		if reflect.DeepEqual(oldValue, newValue) {
 			continue
 		}
@@ -786,6 +834,9 @@ func numberValue(value any) (float64, bool) {
 func binaryProperty(control *oforms.Control, name string) (any, bool) {
 	if control == nil {
 		return nil, false
+	}
+	if control.MultiPage != nil && (name == "BackColor" || name == "ForeColor") {
+		return binaryProperty(control.MultiPage.Hidden, name)
 	}
 	if name == "Tag" || name == "ControlTipText" {
 		v := control.Site.Strings[name]

@@ -101,6 +101,12 @@ window.addEventListener("message", e => {
     const arrowBounds = arrow?.getBoundingClientRect();
     testApi.postMessage({
       type: "testSnapshot", version: e.data.version,
+      formColor: document.querySelector('.form') && getComputedStyle(document.querySelector('.form')).color,
+      controlColors: Object.fromEntries([...document.querySelectorAll('.control[data-control-id]')].map(control => [control.dataset.controlId, getComputedStyle(control).color])),
+      controlFonts: Object.fromEntries([...document.querySelectorAll('.control[data-control-id]')].map(control => {
+        const style = getComputedStyle(control);
+        return [control.dataset.controlId, { weight: style.fontWeight, style: style.fontStyle, family: style.fontFamily, size: style.fontSize, decoration: style.textDecorationLine }];
+      })),
       count: document.querySelectorAll(".control").length,
       title: document.querySelector(".form-title")?.textContent,
       header: document.querySelector("header")?.textContent,
@@ -1597,6 +1603,137 @@ window.addEventListener("message", e => {
     );
     assert.deepStrictEqual(scrolled.violations, []);
     assert.deepStrictEqual(scrolled.runtimeErrors, []);
+    const colorModel = designerDocument({
+      form: {
+        name: "Colors",
+        width: 300,
+        height: 220,
+        foreColor: { kind: "rgb", value: "#FF0000" },
+      },
+      controls: [
+        { id: "defaultLabel", name: "DefaultLabel", type: "Label" },
+        {
+          id: "explicitLabel",
+          name: "ExplicitLabel",
+          type: "Label",
+          foreColor: { kind: "rgb", value: "#0000FF" },
+        },
+        {
+          id: "frame",
+          name: "Frame1",
+          type: "Frame",
+          left: 0,
+          top: 40,
+          width: 200,
+          height: 140,
+          foreColor: { kind: "rgb", value: "#008000" },
+        },
+        { id: "nestedDefault", name: "NestedDefault", type: "Label", parentId: "frame" },
+        {
+          id: "nestedExplicit",
+          name: "NestedExplicit",
+          type: "Label",
+          parentId: "frame",
+          top: 30,
+          foreColor: { kind: "rgb", value: "#0000FF" },
+        },
+      ],
+    });
+    const colorSource = JSON.stringify(colorModel);
+    const colors = await snapshot({ type: "document", version: 122, document: colorModel });
+    assert.strictEqual(colors.formColor, "rgb(255, 0, 0)");
+    assert.deepStrictEqual(
+      colors.controlColors,
+      {
+        defaultLabel: "rgb(17, 17, 17)",
+        explicitLabel: "rgb(0, 0, 255)",
+        frame: "rgb(0, 128, 0)",
+        nestedDefault: "rgb(17, 17, 17)",
+        nestedExplicit: "rgb(0, 0, 255)",
+      },
+      "Form/Frame ForeColor must not recolor existing children without their own authored color",
+    );
+    colorModel.foreColor = { kind: "rgb", value: "#FF00FF" };
+    const changedColors = await snapshot({ type: "document", version: 123, document: colorModel });
+    assert.strictEqual(changedColors.formColor, "rgb(255, 0, 255)");
+    assert.deepStrictEqual(
+      changedColors.controlColors,
+      colors.controlColors,
+      "changing only Form.ForeColor preserves child colors",
+    );
+    colorModel.foreColor = { kind: "rgb", value: "#FF0000" };
+    assert.strictEqual(
+      JSON.stringify(colorModel),
+      colorSource,
+      "rendering must not author default ForeColor values",
+    );
+    assert.deepStrictEqual(changedColors.violations, []);
+    assert.deepStrictEqual(changedColors.runtimeErrors, []);
+    const defaultFonts = changedColors.controlFonts as Record<string, Record<string, string>>;
+    colorModel.font = {
+      name: "Arial",
+      size: 24,
+      bold: true,
+      italic: true,
+      underline: true,
+      strikeThrough: true,
+    };
+    colorModel.controls.find((control) => control.id === "frame")!.font = {
+      name: "Courier New",
+      size: 18,
+      bold: true,
+      italic: true,
+      underline: true,
+      strikeThrough: true,
+    };
+    colorModel.controls.find((control) => control.id === "explicitLabel")!.font = {
+      name: "Georgia",
+      size: 15,
+      bold: true,
+      italic: false,
+      underline: true,
+      strikeThrough: false,
+    };
+    colorModel.controls.find((control) => control.id === "nestedExplicit")!.font = { bold: false };
+    const fontSource = JSON.stringify(colorModel);
+    const fonts = await snapshot({ type: "document", version: 124, document: colorModel });
+    const renderedFonts = fonts.controlFonts as Record<string, Record<string, string>>;
+    assert.deepStrictEqual(
+      renderedFonts.defaultLabel,
+      defaultFonts.defaultLabel,
+      "Form Font must not change an existing child's default font",
+    );
+    assert.deepStrictEqual(
+      renderedFonts.nestedDefault,
+      defaultFonts.nestedDefault,
+      "Frame Font must not change nested child fonts",
+    );
+    assert.deepStrictEqual(
+      renderedFonts.nestedExplicit,
+      defaultFonts.nestedExplicit,
+      "a partial Font must not inherit unspecified members from its parent",
+    );
+    assert.deepStrictEqual(
+      renderedFonts.explicitLabel,
+      {
+        weight: "700",
+        style: "normal",
+        family: "Georgia, sans-serif",
+        size: "20px",
+        decoration: "underline",
+      },
+      "explicit child Font remains effective independently",
+    );
+    assert.strictEqual(renderedFonts.frame.weight, "700", "container's own Font remains effective");
+    assert.strictEqual(renderedFonts.frame.style, "italic");
+    assert.strictEqual(renderedFonts.frame.decoration, "underline line-through");
+    assert.strictEqual(
+      JSON.stringify(colorModel),
+      fontSource,
+      "font preview defaults must never be authored",
+    );
+    assert.deepStrictEqual(fonts.violations, []);
+    assert.deepStrictEqual(fonts.runtimeErrors, []);
   } finally {
     subscription.dispose();
     panel.dispose();

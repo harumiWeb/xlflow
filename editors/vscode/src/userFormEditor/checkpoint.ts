@@ -37,6 +37,16 @@ export function decodeDraftCheckpoint(value: unknown, sourceUri: vscode.Uri): Dr
 /** Durable Designer checkpoints are independent of publishing source files. */
 export class DraftCheckpointStore {
   private clock = 0;
+  private mutationRevision = 0;
+  private writesPending = 0;
+
+  get revision(): number {
+    return this.mutationRevision;
+  }
+
+  get writing(): boolean {
+    return this.writesPending !== 0;
+  }
 
   constructor(private readonly root: vscode.Uri) {}
 
@@ -86,10 +96,12 @@ export class DraftCheckpointStore {
       state,
     };
     DraftState.restore(state);
-    await vscode.workspace.fs.createDirectory(this.root);
     const destination = this.location(sourceUri);
     const temporary = vscode.Uri.joinPath(this.root, `${randomUUID()}.tmp`);
+    this.mutationRevision++;
+    this.writesPending++;
     try {
+      await vscode.workspace.fs.createDirectory(this.root);
       await vscode.workspace.fs.writeFile(
         temporary,
         Buffer.from(JSON.stringify(checkpoint), "utf8"),
@@ -103,6 +115,8 @@ export class DraftCheckpointStore {
       } catch {
         /* Renamed or never created. */
       }
+      this.writesPending--;
+      this.mutationRevision++;
     }
   }
 }

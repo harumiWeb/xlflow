@@ -1,14 +1,21 @@
 import { render } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type {
   DesignerDocument,
   HostMessage,
   WebviewMessage,
   PropertyGridData,
   SemanticOperation,
+  PropertyDescriptor,
+  PropertyValue,
 } from "../../src/userFormEditor/protocol";
 import { DesignerCanvas } from "./DesignerCanvas";
 import { PropertyGrid } from "./PropertyGrid";
+import { PropertyEditorHost } from "./propertyEditors/EditorHost";
+import type { PictureReply } from "./propertyEditors/EditorHost";
+import type { EditorSession, EditorPreview, PictureSelection } from "./propertyEditors/types";
+import { objectValue } from "./propertyEditors/types";
+import { metadataAppearanceDocument, previewDocument } from "./propertyEditors/appearance";
 import { Toolbox } from "./Toolbox";
 import { CollectionEditor } from "./CollectionEditor";
 import type { ActivePages } from "../../src/userFormEditor/collections";
@@ -50,6 +57,11 @@ export function App() {
   const [propertyError, setPropertyError] = useState<string>();
   const [editable, setEditable] = useState(false);
   const [propertyEditable, setPropertyEditable] = useState(false);
+  const [editorVersion, setEditorVersion] = useState(0);
+  const [editorEpoch, setEditorEpoch] = useState(0);
+  const [editor, setEditor] = useState<EditorSession>();
+  const [editorPreview, setEditorPreview] = useState<EditorPreview>();
+  const [pictureReply, setPictureReply] = useState<PictureReply>();
   const [structuralEditable, setStructuralEditable] = useState(false);
   const [parentEditable, setParentEditable] = useState(false);
   const [pageEditable, setPageEditable] = useState(false);
@@ -134,6 +146,7 @@ export function App() {
         setEditable(message.editable === true);
         setPropertyGrid(message.propertyGrid);
         setPropertyEditable(message.propertyEditable === true);
+        setEditorVersion(message.propertyEditorVersion ?? 0);
         setStructuralEditable(message.structuralEditable === true);
         setParentEditable(message.parentEditable === true);
         setPageEditable(message.pageEditable === true);
@@ -177,7 +190,9 @@ export function App() {
         if (!pending.current) setBusy(false);
         setError(undefined);
       }
+      if (message.type === "pictureSelection") setPictureReply(message);
       if (message.type === "invalidDocument") {
+        setEditorEpoch((epoch) => epoch + 1);
         setError(message.error.message);
         setEditable(false);
         setPropertyEditable(false);
@@ -193,6 +208,8 @@ export function App() {
         setBusy(false);
       }
       if (message.type === "editingUnavailable") {
+        setEditorEpoch((epoch) => epoch + 1);
+        setEditorVersion(0);
         setEditable(false);
         setPropertyEditable(false);
         setStructuralEditable(false);
@@ -260,6 +277,7 @@ export function App() {
     )
       return;
     const property =
+      operation.type === "setGeometry" ||
       operation.type === "setFormProperty" ||
       operation.type === "setControlProperty" ||
       operation.type === "setTabProperty" ||
@@ -281,6 +299,7 @@ export function App() {
       "setTabOrder",
       "pasteControls",
     ].includes(operation.type);
+    if (operation.type === "setGeometry" && editorVersion !== 1) return;
     if (productivity && !productivityEditable) return;
     if (
       page
@@ -317,11 +336,16 @@ export function App() {
     const requestId = ++nextRequest.current;
     pending.current = {
       requestId,
-      field: "field" in operation ? operation.field : undefined,
+      field:
+        "field" in operation
+          ? operation.field
+          : operation.type === "setGeometry"
+            ? "$geometry"
+            : undefined,
       controlId:
         operation.type === "setTabProperty"
           ? `tab:${operation.controlId}:${operation.index}`
-          : operation.type === "setControlProperty"
+          : operation.type === "setControlProperty" || operation.type === "setGeometry"
             ? operation.controlId
             : undefined,
     };
@@ -485,6 +509,140 @@ export function App() {
     setRevealId(undefined);
   }, [revealId, activePages]);
   const selectedControl = document?.controls.find((control) => control.id === selectedId);
+  // Canvas treats a new document as an external update and cancels gestures.
+  // Selection, focus, and toolbar renders must preserve this object identity.
+  const canvasDocument = useMemo(
+    () =>
+      document
+        ? previewDocument(
+            metadataAppearanceDocument(document, propertyGrid),
+            editor && editor.version === documentVersion && editor.epoch === editorEpoch
+              ? editorPreview
+              : undefined,
+          )
+        : undefined,
+    [document, propertyGrid, editor, editorPreview, documentVersion, editorEpoch],
+  );
+  const selectedTarget = selectedId ? propertyGrid?.controls[selectedId] : propertyGrid?.form;
+  const positionFields =
+    selectedTarget?.descriptors.filter(
+      (descriptor) =>
+        (selectedId ? ["left", "top", "width", "height"] : ["width", "height"]).includes(
+          descriptor.field,
+        ) &&
+        (descriptor.valueType === "number" || descriptor.valueType === "integer"),
+    ) ?? [];
+  const canOpenEditor =
+    editorVersion === 1 &&
+    propertyEditable &&
+    !error &&
+    !busy &&
+    !draftState.saving &&
+    !draftState.conflicted &&
+    !editor &&
+    selectedIds.length <= 1;
+  const openEditor = (descriptor: PropertyDescriptor) => {
+    if (!canOpenEditor || pending.current || !selectedTarget) return;
+    setEditor({
+      descriptor,
+      controlId: selectedId,
+      version: documentVersion,
+      epoch: editorEpoch,
+      returnFocus: window.document.activeElement as HTMLElement,
+      picturePreview:
+        selectedControl?.picturePreview ??
+        (selectedId === undefined ? document?.picturePreview : undefined),
+      value: selectedTarget.values[descriptor.field]?.present
+        ? selectedTarget.values[descriptor.field].value
+        : undefined,
+      title: descriptor.field[0].toUpperCase() + descriptor.field.slice(1),
+    });
+  };
+  const openPosition = () => {
+    if (!canOpenEditor || pending.current || !selectedTarget || !positionFields.length) return;
+    setEditor({
+      descriptor: {
+        field: "$geometry",
+        valueType: "object",
+        required: false,
+        nullable: false,
+        children: positionFields,
+      },
+      returnFocus: window.document.activeElement as HTMLElement,
+      controlId: selectedId,
+      version: documentVersion,
+      epoch: editorEpoch,
+      title: "Position",
+      value: Object.fromEntries(
+        positionFields
+          .filter((field) => selectedTarget.values[field.field]?.present)
+          .map((field) => [field.field, selectedTarget.values[field.field].value]),
+      ),
+    });
+  };
+  const closeEditor = () => {
+    setEditor(undefined);
+    setEditorPreview(undefined);
+    bridge.postMessage({ type: "pictureCancel" });
+  };
+  const commitEditor = (value: PropertyValue) => {
+    if (!editor) return;
+    if (editor.descriptor.field === "$geometry") {
+      const previous = objectValue(editor.value);
+      const changed = Object.fromEntries(
+        Object.entries(objectValue(value)).filter(
+          ([field, next]) => next !== previous[field] && typeof next === "number",
+        ),
+      );
+      if (!Object.keys(changed).length) {
+        closeEditor();
+        return;
+      }
+      return commit([
+        {
+          type: "setGeometry",
+          ...(editor.controlId === undefined ? {} : { controlId: editor.controlId }),
+          ...changed,
+        },
+      ]);
+    }
+    return commit([
+      editor.controlId === undefined
+        ? { type: "setFormProperty", field: editor.descriptor.field, value }
+        : {
+            type: "setControlProperty",
+            controlId: editor.controlId,
+            field: editor.descriptor.field,
+            value,
+          },
+    ]);
+  };
+  const pickPicture = () => {
+    if (!editor?.controlId || editor.version !== version.current || busy) return;
+    const requestId = ++nextRequest.current;
+    bridge.postMessage({
+      type: "picturePick",
+      requestId,
+      version: version.current,
+      controlId: editor.controlId,
+    });
+    return requestId;
+  };
+  const commitPicture = (selection: PictureSelection) => {
+    if (!editor?.controlId || pending.current || editor.version !== version.current || busy) return;
+    const requestId = ++nextRequest.current;
+    pending.current = { requestId, field: "picture", controlId: editor.controlId };
+    setEditError(undefined);
+    setBusy(true);
+    bridge.postMessage({
+      type: "pictureCommit",
+      requestId,
+      version: version.current,
+      controlId: editor.controlId,
+      token: selection.token,
+    });
+    return requestId;
+  };
   const closePane = () => {
     const pane = mobilePane;
     setMobilePane(undefined);
@@ -567,6 +725,23 @@ export function App() {
           </>
         )}
       </div>
+      {editor && (
+        <PropertyEditorHost
+          session={editor}
+          version={documentVersion}
+          epoch={editorEpoch}
+          busy={busy || draftState.saving || draftState.conflicted}
+          strings={strings}
+          reply={reply}
+          pictureReply={pictureReply}
+          onClose={closeEditor}
+          onPreview={setEditorPreview}
+          onCommit={commitEditor}
+          onPickPicture={pickPicture}
+          onCommitPicture={commitPicture}
+          onReleasePicture={() => bridge.postMessage({ type: "pictureCancel" })}
+        />
+      )}
       {document && (
         <>
           <div
@@ -682,7 +857,7 @@ export function App() {
                 }
               >
                 <DesignerCanvas
-                  document={document}
+                  document={canvasDocument!}
                   approximateBounds={strings.approximateBounds}
                   editable={editable}
                   formResizable={
@@ -706,7 +881,7 @@ export function App() {
                   onActivePageChange={(owner, page) =>
                     setActivePages((current) => ({ ...current, [owner]: page }))
                   }
-                  busy={busy || draftState.saving}
+                  busy={busy || draftState.saving || !!editor}
                   zoom={zoom}
                   showGrid={showGrid}
                   snapping={snapping}
@@ -813,6 +988,13 @@ export function App() {
                     busy={busy || draftState.saving}
                     strings={strings}
                     reply={reply}
+                    editorEnabled={canOpenEditor}
+                    onOpenEditor={openEditor}
+                    onPosition={
+                      editorVersion === 1 && positionFields.length > 0 && selectedIds.length <= 1
+                        ? openPosition
+                        : undefined
+                    }
                     onCommit={(field, value) =>
                       commit([
                         selectedId

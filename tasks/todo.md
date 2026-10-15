@@ -1,3 +1,25 @@
+# UserForm typed property editors
+
+- [x] Reset independent control Font presentation to prevent inherited family, size, Bold, Italic, Underline and StrikeThrough. Real Webview regressions cover Form/Frame, default and partial child Fonts, explicit child Fonts and source immutability; full VS Code 1.142.0 tests, lint, docs and formatting pass.
+
+- [x] Prevent Form/Frame ForeColor inheriting into default child controls. Reproduced with computed-style assertions in real VS Code, then verified independent default/explicit/nested colors; full VS Code 1.142.0 tests, lint, docs and formatting checks pass.
+
+- [x] Add VBE-style 48-color Palette/System choices, preserving modal-only previews, raw OLE input and metadata authority for system colors; verify selection, keyboard navigation, Cancel and atomic OK.
+
+- [x] Add partial Font, semantic Color and enum contracts with backward-compatible metadata and source-preserving editing.
+- [x] Implement shared binary read/generate/mutate/projection and preserve unedited state.
+- [x] Add modal editor registry, live previews, native Image assets and atomic Position editing.
+- [x] Verify old/new capability combinations, cancellation, stale drafts and native Undo/Redo.
+- [x] Update ADR/specs/schema/guides/changelogs and validate session-backed Excel and pack artifacts.
+
+Validation: full UserForm and LSP tests, focused CLI tests, vet, complete VS Code
+1.142.0 tests, lint, documentation and formatting checks passed. Real Excel
+16.0 x64 passed full appearance/image assertions, blank/template pack artifacts,
+partial-update preservation and file push. Review fixed rollback reference checks
+for unsaved buffers and closed Designer checkpoints. Evidence and exact commands:
+`C:\Users\HARUMI\orca\workspaces\xlflow\guppy\tmp_workspaces\userform-property-editors-20261015-202945\verification.md`.
+No remote CI or supervised final review was run.
+
 # Designer form resize
 
 - [x] Add selected form edge/corner drag handles and client-size preview with zoom, snapping and child bounds.
