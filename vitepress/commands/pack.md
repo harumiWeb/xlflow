@@ -20,6 +20,20 @@ directory. Success reports `pack.check=true` and omits `output`.
 
 `--blank` is mutually exclusive with `--template`. It requires `ThisWorkbook.bas` and `Sheet1.bas`, rejects additional document modules, and uses `[pack.blank].code_page` for project text encoding (manual configuration default `1252`; use `932` for Japanese). `new` and `init` seed this setting from the actual VBA project's `PROJECTCODEPAGE`; managed source stays UTF-8. VBA project LCID records always use the MS-OVBA-required value `0x00000409`.
 
+If Japanese text fails with `pack_source_encoding_failed`, add or update this
+section in `xlflow.toml`, then rerun `pack --blank`:
+
+```toml
+[pack.blank]
+code_page = 932
+```
+
+Keep source files as UTF-8. The setting chooses the generated VBA project's
+code page; it does not change source-file encoding. Normal output and `--json`
+both show the failing source location and remediation. For other languages,
+choose the intended project's code page. In template mode, the template's code
+page takes precedence.
+
 Blank mode can create empty UserForms and common controls from canonical
 `src/forms/specs/<Name>.yaml` (or JSON/YML) specs. In the default sidecar mode,
 code comes from `src/forms/code/<Name>.bas`, falling back to matching `.frm`

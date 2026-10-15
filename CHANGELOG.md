@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- `pack` now shows individual input errors and remediation in normal output;
+  blank-project encoding failures include a copyable `xlflow.toml` example.
+
 - UserForm Designer property names stay English regardless of the UI language.
 
 - Refined the VS Code UserForm Designer with a compact contextual toolbar,

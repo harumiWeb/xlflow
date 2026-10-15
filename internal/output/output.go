@@ -463,6 +463,7 @@ func renderHuman(env Envelope, opts Options) string {
 	case "export-image":
 		b.WriteString(r.renderExportImage(env))
 	case "pack":
+		b.WriteString(r.renderPackIssues(env))
 		b.WriteString(r.renderExportImage(env))
 	case "build":
 		b.WriteString(r.renderBuild(env))
