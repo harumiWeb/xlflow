@@ -561,6 +561,9 @@ See [ADR-0069](../adr/ADR-0069-userform-designer-frame-parenting.md).
 
 ## Property Grid and authored source states
 
+Property names use their English identifier labels regardless of the UI language,
+matching VBE. Categories, descriptions, and editing messages remain localized.
+
 The running LSP supplies `propertyGrid` alongside the canonical preview
 document. The form and each explicit control ID have a property target:
 

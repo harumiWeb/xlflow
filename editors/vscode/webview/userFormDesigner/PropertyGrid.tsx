@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { numberRoundTrips } from "./numbers";
 import { Icon } from "./Icon";
+import { designerStrings } from "../../src/userFormEditor/protocol";
 import type {
   DesignerError,
   DesignerStrings,
@@ -197,7 +198,8 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
     ? [strings.staleProperty, draft.error].filter(Boolean).join("\n")
     : draft.error;
   const disabled = !editable || busy;
-  const fieldLabel = strings[labels[descriptor.field]] ?? descriptor.field;
+  // VBE property names are identifiers and stay English in every UI language.
+  const fieldLabel = designerStrings[labels[descriptor.field]] ?? descriptor.field;
   const kinds: ValueKind[] =
     descriptor.valueType === "any"
       ? ["string", "number", "boolean"]

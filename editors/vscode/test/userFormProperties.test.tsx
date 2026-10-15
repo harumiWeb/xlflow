@@ -217,7 +217,16 @@ async function run() {
         version={1}
         editable={true}
         busy={false}
-        strings={designerStrings}
+        strings={{
+          ...designerStrings,
+          properties: "プロパティ",
+          appearance: "外観",
+          ...Object.fromEntries(
+            Object.keys(designerStrings)
+              .filter((key) => key.startsWith("property"))
+              .map((key) => [key, `翻訳:${key}`]),
+          ),
+        }}
         onCommit={() => undefined}
       />,
       targetTypeRoot,
@@ -227,6 +236,20 @@ async function run() {
     targetTypeRoot.querySelector(".property-grid-target-type")?.textContent,
     "MSForms.TextBox",
   );
+  assert.ok(targetTypeRoot.querySelector("h2")?.textContent?.includes("プロパティ"));
+  assert.ok(targetTypeRoot.textContent?.includes("外観"));
+  for (const field of target().descriptors) {
+    const expected = field.field[0].toUpperCase() + field.field.slice(1);
+    // Unknown metadata fields retain their wire name rather than inventing a label.
+    const label = targetTypeRoot.querySelector(
+      `[data-property-field="${field.field}"] > label`,
+    )?.textContent;
+    assert.equal(
+      label,
+      field.field === "orientation" ? field.field : expected,
+      `property name stays English with Japanese UI: ${field.field}`,
+    );
+  }
   await act(() => render(null, targetTypeRoot));
 
   const { App } = require("../webview/userFormDesigner/App");
@@ -488,7 +511,8 @@ async function run() {
     strings: { ...designerStrings, properties: "プロパティ", propertyWidth: "幅", layout: "配置" },
   });
   assert.ok(root.querySelector(".property-grid h2")!.textContent?.includes("プロパティ"));
-  assert.equal(row("width").querySelector("label")!.textContent, "幅");
+  assert.equal(row("width").querySelector("label")!.textContent, "Width");
+  assert.ok(root.querySelector(".property-grid")!.textContent?.includes("配置"));
   assert.equal(
     edits().length,
     beforeSelection,

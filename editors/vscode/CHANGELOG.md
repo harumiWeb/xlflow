@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- UserForm Designer property names stay English regardless of the UI language.
+
 - Refined the VS Code UserForm Designer with a compact contextual toolbar,
   grouped Toolbox, two-column Property Grid, Properties/Structure/Tab order
   tabs, independently scrolling panes, and compact layouts below 900 px.
