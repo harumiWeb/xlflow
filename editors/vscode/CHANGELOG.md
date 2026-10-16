@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Made SpinButton previews closer to VBE with full-size raised arrow buttons
+  in horizontal and vertical layouts.
+
+- Made ScrollBar previews closer to VBE, with arrows at both ends, a classic
+  track and raised thumb in horizontal and vertical layouts.
+
 - Fixed the invisible Designer Undo icon; Undo and Redo now both use bundled
   icon glyphs.
 

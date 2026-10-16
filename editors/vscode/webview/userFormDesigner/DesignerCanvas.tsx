@@ -80,12 +80,35 @@ export function ControlGlyph({ control }: { control: DesignerControl }) {
       );
     case "spinbutton":
       return (
-        <span class="spin">
-          ▴<br />▾
+        <span
+          class={`spinbutton-chrome ${control.width >= control.height ? "horizontal" : "vertical"}`}
+          aria-hidden="true"
+        >
+          <span class="spinbutton-arrow decrement">
+            <span />
+          </span>
+          <span class="spinbutton-arrow increment">
+            <span />
+          </span>
         </span>
       );
     case "scrollbar":
-      return <span class="scrollbar">◂ ━ ▸</span>;
+      return (
+        <span
+          class={`scrollbar-chrome ${control.width >= control.height ? "horizontal" : "vertical"}`}
+          aria-hidden="true"
+        >
+          <span class="scrollbar-arrow decrement">
+            <span />
+          </span>
+          <span class="scrollbar-track">
+            <span class="scrollbar-thumb" />
+          </span>
+          <span class="scrollbar-arrow increment">
+            <span />
+          </span>
+        </span>
+      );
     case "image":
       return control.picturePreview && control.picture?.remove !== true ? (
         <img

@@ -1,3 +1,15 @@
+# Designer SpinButton appearance
+
+- [x] Replace text arrows with two raised buttons filling the control.
+- [x] Follow horizontal and vertical control proportions.
+- [x] Verify visual appearance and rebuild the VSIX.
+
+# Designer ScrollBar appearance
+
+- [x] Replace the centered text glyph with end arrows, track and raised thumb.
+- [x] Match horizontal and vertical auto-orientation to the preview dimensions.
+- [x] Verify native layout, visual appearance and rebuild the VSIX.
+
 # Designer Undo/Redo buttons
 
 - [x] Inspect host availability and shipped toolbar icon rendering.

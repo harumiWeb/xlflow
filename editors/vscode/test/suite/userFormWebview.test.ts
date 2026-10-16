@@ -110,6 +110,28 @@ window.addEventListener("message", e => {
     const arrow = document.querySelector(".combo-arrow");
     const comboBounds = combo?.getBoundingClientRect();
     const arrowBounds = arrow?.getBoundingClientRect();
+    const nativeRect = element => {
+      if (!element) return null;
+      const { left, top, right, bottom, width, height } = element.getBoundingClientRect();
+      return { left, top, right, bottom, width, height };
+    };
+    const scrollbars = [...document.querySelectorAll(".control.scrollbar")].map(control => {
+      const chrome = control.querySelector(".scrollbar-chrome");
+      const decrement = chrome?.querySelector(".scrollbar-arrow.decrement");
+      const track = chrome?.querySelector(".scrollbar-track");
+      const thumb = track?.querySelector(".scrollbar-thumb");
+      const increment = chrome?.querySelector(".scrollbar-arrow.increment");
+      return {
+        id: control.dataset.controlId,
+        orientation: chrome?.classList.contains("horizontal") ? "horizontal" : chrome?.classList.contains("vertical") ? "vertical" : undefined,
+        control: nativeRect(control),
+        decrement: nativeRect(decrement),
+        track: nativeRect(track),
+        thumb: nativeRect(thumb),
+        increment: nativeRect(increment),
+        thumbShadow: thumb ? getComputedStyle(thumb).boxShadow : null
+      };
+    });
     testApi.postMessage({
       type: "testSnapshot", version: e.data.version,
       formColor: document.querySelector('.form') && getComputedStyle(document.querySelector('.form')).color,
@@ -186,6 +208,7 @@ window.addEventListener("message", e => {
         shadow: getComputedStyle(combo).boxShadow,
         arrowShadow: getComputedStyle(arrow).boxShadow
       },
+      scrollbars,
       violations
       , runtimeErrors
     });
@@ -295,6 +318,120 @@ window.addEventListener("message", e => {
     assert.strictEqual(valid.count, 4);
     assert.ok(String(valid.header).includes("読み取り専用プレビュー"));
     assert.ok(String(valid.header).includes("テキストエディターを開く"));
+    const scrollbarDocument = designerDocument({
+      form: { name: "ScrollBars", width: 300, height: 180 },
+      controls: [
+        {
+          id: "horizontalScrollbar",
+          name: "HorizontalScrollBar",
+          type: "ScrollBar",
+          left: 12,
+          top: 20,
+          width: 120,
+          height: 18,
+        },
+        {
+          id: "verticalScrollbar",
+          name: "VerticalScrollBar",
+          type: "ScrollBar",
+          left: 150,
+          top: 20,
+          width: 18,
+          height: 120,
+        },
+      ],
+    });
+    const scrollbarSource = JSON.stringify(scrollbarDocument);
+    const scrollbarSnapshot = await snapshot({
+      type: "document",
+      version: 125,
+      document: scrollbarDocument,
+    });
+    type NativeRect = {
+      left: number;
+      top: number;
+      right: number;
+      bottom: number;
+      width: number;
+      height: number;
+    };
+    type ScrollbarGeometry = {
+      id: string;
+      orientation?: string;
+      control: NativeRect | null;
+      decrement: NativeRect | null;
+      track: NativeRect | null;
+      thumb: NativeRect | null;
+      increment: NativeRect | null;
+      thumbShadow: string | null;
+    };
+    const scrollbars = scrollbarSnapshot.scrollbars as ScrollbarGeometry[];
+    assert.strictEqual(scrollbars.length, 2, "horizontal and vertical ScrollBars render chrome");
+    const requireRect = (rect: NativeRect | null, part: string): NativeRect => {
+      assert.ok(rect, `${part} has native CSSOM geometry`);
+      assert.ok(rect.width > 0 && rect.height > 0, `${part} has nonzero size`);
+      return rect;
+    };
+    const assertScrollbarGeometry = (
+      geometry: ScrollbarGeometry,
+      orientation: "horizontal" | "vertical",
+    ): void => {
+      assert.strictEqual(geometry.orientation, orientation);
+      const control = requireRect(geometry.control, `${geometry.id} control`);
+      const decrement = requireRect(geometry.decrement, `${geometry.id} decrement arrow`);
+      const track = requireRect(geometry.track, `${geometry.id} track`);
+      const thumb = requireRect(geometry.thumb, `${geometry.id} thumb`);
+      const increment = requireRect(geometry.increment, `${geometry.id} increment arrow`);
+      const start = orientation === "horizontal" ? "left" : "top";
+      const end = orientation === "horizontal" ? "right" : "bottom";
+      assert.ok(
+        Math.abs(decrement[start] - control[start]) <= 1,
+        `${orientation} decrement arrow is at the start edge`,
+      );
+      assert.ok(
+        Math.abs(increment[end] - control[end]) <= 1,
+        `${orientation} increment arrow is at the end edge`,
+      );
+      assert.ok(
+        decrement[end] <= track[start] + 1 && track[end] <= increment[start] + 1,
+        `${orientation} track lies between the arrow buttons`,
+      );
+      assert.ok(
+        Math.abs(thumb[start] - track[start]) <= 1,
+        `${orientation} thumb starts at the beginning of the track`,
+      );
+      assert.ok(
+        thumb.left >= track.left - 1 &&
+          thumb.right <= track.right + 1 &&
+          thumb.top >= track.top - 1 &&
+          thumb.bottom <= track.bottom + 1,
+        `${orientation} thumb stays inside the track`,
+      );
+      assert.notStrictEqual(
+        geometry.thumbShadow,
+        "none",
+        `${orientation} thumb has raised shading`,
+      );
+    };
+    const horizontalScrollbar = scrollbars.find(({ id }) => id === "horizontalScrollbar");
+    const verticalScrollbar = scrollbars.find(({ id }) => id === "verticalScrollbar");
+    assert.ok(horizontalScrollbar, "horizontal ScrollBar is present");
+    assert.ok(verticalScrollbar, "vertical ScrollBar is present");
+    assertScrollbarGeometry(horizontalScrollbar, "horizontal");
+    assertScrollbarGeometry(verticalScrollbar, "vertical");
+    assert.deepStrictEqual(
+      scrollbarSnapshot.editMessages,
+      [],
+      "rendering ScrollBars emits no edit operations",
+    );
+    assert.strictEqual(
+      JSON.stringify(scrollbarDocument),
+      scrollbarSource,
+      "rendering preserves the authored ScrollBar model",
+    );
+    assert.deepStrictEqual(scrollbarSnapshot.violations, []);
+    assert.deepStrictEqual(scrollbarSnapshot.runtimeErrors, []);
+    await snapshot({ type: "document", version: 1, document });
     const centers = valid.buttonCenters as {
       type: string;
       delta: number;

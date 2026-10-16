@@ -153,9 +153,7 @@ header {
   overflow: hidden;
 }
 .commandbutton,
-.togglebutton,
-.spinbutton,
-.scrollbar {
+.togglebutton {
   border: 1px outset #aaa;
   background: #ddd;
   text-align: center;
@@ -207,6 +205,99 @@ header {
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
   border-top: 4px solid #000;
+}
+.control.scrollbar,
+.control.spinbutton {
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: #f0f0f0;
+}
+.scrollbar-chrome,
+.spinbutton-chrome {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+.scrollbar-chrome.horizontal {
+  grid-template-columns: min(16px, 50%) minmax(0, 1fr) min(16px, 50%);
+}
+.scrollbar-chrome.vertical {
+  grid-template-rows: min(16px, 50%) minmax(0, 1fr) min(16px, 50%);
+}
+.spinbutton-chrome.horizontal {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.spinbutton-chrome.vertical {
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+.scrollbar-arrow,
+.scrollbar-thumb,
+.spinbutton-arrow {
+  box-sizing: border-box;
+  border: 1px solid;
+  border-color: #fff #404040 #404040 #fff;
+  box-shadow:
+    inset 1px 1px 0 #dfdfdf,
+    inset -1px -1px 0 #808080;
+  background: #f0f0f0;
+}
+.scrollbar-arrow,
+.spinbutton-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.scrollbar-arrow > span,
+.spinbutton-arrow > span {
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+}
+.spinbutton-arrow > span {
+  border-width: 6px;
+}
+.scrollbar-chrome.horizontal .decrement > span,
+.spinbutton-chrome.horizontal .decrement > span {
+  border-left: 0;
+  border-right-color: #000;
+}
+.scrollbar-chrome.horizontal .increment > span,
+.spinbutton-chrome.horizontal .increment > span {
+  border-right: 0;
+  border-left-color: #000;
+}
+.scrollbar-chrome.vertical .decrement > span,
+.spinbutton-chrome.vertical .decrement > span {
+  border-top: 0;
+  border-bottom-color: #000;
+}
+.scrollbar-chrome.vertical .increment > span,
+.spinbutton-chrome.vertical .increment > span {
+  border-bottom: 0;
+  border-top-color: #000;
+}
+.scrollbar-track {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: repeating-conic-gradient(#f0f0f0 0 25%, #fff 0 50%) 0 0 / 2px 2px;
+}
+.scrollbar-thumb {
+  display: block;
+}
+.scrollbar-chrome.horizontal .scrollbar-thumb {
+  width: min(16px, 100%);
+  height: 100%;
+}
+.scrollbar-chrome.vertical .scrollbar-thumb {
+  width: 100%;
+  height: min(16px, 100%);
 }
 .frame,
 .multipage {
@@ -1077,7 +1168,9 @@ body.vscode-high-contrast-light button {
 .color-palette-swatch[aria-pressed="true"] {
   outline: 2px solid var(--vscode-focusBorder, Highlight);
   outline-offset: 1px;
-  box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 3px #000;
+  box-shadow:
+    inset 0 0 0 2px #fff,
+    inset 0 0 0 3px #000;
 }
 .color-system-list {
   display: grid;

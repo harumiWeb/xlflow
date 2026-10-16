@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated UserForm Designer SpinButton previews with two raised arrow buttons
+  that fill the control and follow its horizontal or vertical proportions.
+
+- Updated UserForm Designer ScrollBar previews with end arrows, a classic track
+  and raised thumb, following the control's horizontal or vertical proportions.
+
 - Fixed the missing UserForm Designer Undo icon by using a glyph included in
   the extension's bundled icon font.
 
