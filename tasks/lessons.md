@@ -159,6 +159,7 @@
 - When the user confirms a feature has never been released, evaluate a single clear schema and execution contract without preserving speculative compatibility aliases or divergent authoring paths.
 
 - Designer pointer regressions must dispatch to the element found at the on-screen coordinates in the native Webview, including control interiors and a second press to drag an existing selection. Dispatching directly to a control wrapper bypasses transparent overlays and cannot establish that real clicks select it.
+- Designer double-click regressions must include native press/release cycles with pointer capture. A synthetic dblclick, even after hit-testing, does not exercise Chromium's capture-based event retargeting.
 - Verify preview collection order against the canonical compiler before changing selectedIndex semantics; source order and zIndex order may differ. Test mixed inner/outer dimensions and explicit empty values, and route Webview UI strings through extension localization.
 - When matching control text placement, verify both axes in the actual Webview with single-line and multiline captions. CSS text-align alone does not verify vertical placement; preserve control-specific layout rather than centering every control.
 - When reproducing MSForms control chrome from a reference image, model dropdown buttons as sized elements and distinguish raised button edges from recessed input edges; a text arrow alone does not reproduce the control.
@@ -166,3 +167,7 @@
 # UserForm Designer property names
 
 - Property Gridのプロパティ名はVBEに合わせてUI言語に依存しない英語表記にする。カテゴリや説明の翻訳と、プロパティ識別子の表示を区別する。
+
+# UserForm event handlers
+
+- For VBE-backed event stubs, use the verified VBE object identifier (the form root is UserForm), preserve observed parameter passing and signatures exactly, and check case-insensitive conflicts against both procedures and module-level declarations before appending a handler.

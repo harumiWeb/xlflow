@@ -19,6 +19,12 @@ import {
 } from "./startupTelemetry";
 import { resolveWorkspaceRoot } from "./xlflow";
 import type {
+  UserFormEventEditRequest,
+  UserFormEventEditResult,
+  UserFormEventsRequest,
+  UserFormEventsResult,
+} from "./userFormEditor/events";
+import type {
   PreviewResult,
   EditResult,
   CopyResult,
@@ -75,6 +81,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
           userFormPageEdit?: boolean;
           userFormTabEdit?: boolean;
           userFormProductivityEdit?: boolean;
+          userFormEvents?: number;
         }
       | undefined;
     if (experimental?.userFormPreview !== true)
@@ -98,6 +105,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       pageEditable: experimental.userFormPageEdit === true,
       tabEditable: experimental.userFormTabEdit === true,
       productivityEditable: experimental.userFormProductivityEdit === true,
+      eventEditable: experimental.userFormEvents === 1,
     };
   }
 
@@ -292,6 +300,61 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       text,
       controlIds,
     });
+    if (generation !== this.previewGeneration || client !== this.client)
+      throw new Error(vscode.l10n.t("The language server connection changed."));
+    return result;
+  }
+
+  public async requestUserFormEvents(
+    document: vscode.TextDocument,
+    request: UserFormEventsRequest,
+  ): Promise<UserFormEventsResult> {
+    const client = this.client;
+    const generation = this.previewGeneration;
+    const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+    const experimental = client?.initializeResult?.capabilities.experimental as
+      | { userFormEvents?: number }
+      | undefined;
+    if (
+      !client?.isRunning() ||
+      folder?.uri.toString() !== this.workspaceFolderKey ||
+      experimental?.userFormEvents !== 1
+    )
+      throw new Error(vscode.l10n.t("Update xlflow to a version supporting UserForm events."));
+    if (request.uri !== document.uri.toString())
+      throw new Error(vscode.l10n.t("The UserForm source changed. Retry the event operation."));
+    const result = await client.sendRequest<UserFormEventsResult>("xlflow/userFormEvents", request);
+    if (generation !== this.previewGeneration || client !== this.client)
+      throw new Error(vscode.l10n.t("The language server connection changed."));
+    return result;
+  }
+
+  public async requestUserFormEventEdit(
+    document: vscode.TextDocument,
+    request: UserFormEventEditRequest,
+  ): Promise<UserFormEventEditResult> {
+    const client = this.client;
+    const generation = this.previewGeneration;
+    const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+    const codeUri = vscode.Uri.parse(request.codeURI);
+    const codeFolder = vscode.workspace.getWorkspaceFolder(codeUri);
+    const experimental = client?.initializeResult?.capabilities.experimental as
+      | { userFormEvents?: number }
+      | undefined;
+    if (
+      !client?.isRunning() ||
+      folder?.uri.toString() !== this.workspaceFolderKey ||
+      codeFolder?.uri.toString() !== this.workspaceFolderKey ||
+      codeUri.scheme !== "file" ||
+      experimental?.userFormEvents !== 1
+    )
+      throw new Error(vscode.l10n.t("Update xlflow to a version supporting UserForm events."));
+    if (request.uri !== document.uri.toString())
+      throw new Error(vscode.l10n.t("The UserForm source changed. Retry the event operation."));
+    const result = await client.sendRequest<UserFormEventEditResult>(
+      "xlflow/userFormEventEdit",
+      request,
+    );
     if (generation !== this.previewGeneration || client !== this.client)
       throw new Error(vscode.l10n.t("The language server connection changed."));
     return result;

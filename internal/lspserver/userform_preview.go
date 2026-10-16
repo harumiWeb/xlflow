@@ -76,6 +76,14 @@ func (s *Server) userFormSpecInput(uri string) (forms.SpecInput, *userFormPrevie
 }
 
 func (s *Server) dispatchRequest(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) bool {
+	if req.Method == userFormEventsMethod {
+		s.dispatchUserFormEvents(ctx, conn, req)
+		return true
+	}
+	if req.Method == userFormEventEditMethod {
+		s.dispatchUserFormEventEdit(ctx, conn, req)
+		return true
+	}
 	if req.Method == userFormPictureMethod {
 		s.dispatchUserFormPicture(ctx, conn, req)
 		return true

@@ -4,6 +4,7 @@ import { runUserFormEditAssertions } from "./userFormEdits.test";
 import { runUserFormProviderAssertions } from "./userFormProvider.test";
 import { runUserFormClipboardAssertions } from "./userFormClipboard.test";
 import { runUserFormDraftProviderAssertions } from "./userFormDraftProvider.test";
+import { runUserFormEventsAssertions } from "./userFormEvents.test";
 import { runOpenDesignerTests } from "./openDesigner.test";
 import { runUserFormBuildAssertions } from "./userFormBuild.test";
 import {
@@ -1104,6 +1105,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     ["formulaEmpty"],
   );
   await runUserFormClipboardAssertions(extension.extensionUri);
+  await runUserFormEventsAssertions(extension.extensionUri);
 }
 
 async function assertRulesRegistryBehavior(): Promise<void> {

@@ -76,6 +76,8 @@ export function App() {
   const [documentVersion, setDocumentVersion] = useState(0);
   const [reply, setReply] = useState<PropertyReply>();
   const [busy, setBusy] = useState(false);
+  const [eventPending, setEventPending] = useState(false);
+  const [eventError, setEventError] = useState<string>();
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   const [draftState, setDraftState] = useState({
     dirty: false,
@@ -95,6 +97,7 @@ export function App() {
   const version = useRef(0);
   const nextRequest = useRef(0);
   const pending = useRef<PropertyReply>();
+  const pendingEvent = useRef<{ requestId: number; version: number }>();
   const pendingAdd = useRef<string>();
   const pendingStructural = useRef(false);
   const pendingActive = useRef<{ owner: string; page: string }>();
@@ -128,6 +131,11 @@ export function App() {
         });
       if (message.type === "localization") setStrings(message.strings);
       if (message.type === "document") {
+        if (pendingEvent.current && message.version !== pendingEvent.current.version) {
+          pendingEvent.current = undefined;
+          setEventPending(false);
+        }
+        setEventError(undefined);
         if (
           pending.current &&
           pending.current.field === undefined &&
@@ -194,6 +202,9 @@ export function App() {
       }
       if (message.type === "pictureSelection") setPictureReply(message);
       if (message.type === "invalidDocument") {
+        pendingEvent.current = undefined;
+        setEventPending(false);
+        setEventError(undefined);
         setEditorEpoch((epoch) => epoch + 1);
         setError(message.error.message);
         setEditable(false);
@@ -259,6 +270,11 @@ export function App() {
           setEditError(message.error.message);
           setBusy(false);
         } else setEditError(undefined);
+      }
+      if (message.type === "eventResult" && message.requestId === pendingEvent.current?.requestId) {
+        pendingEvent.current = undefined;
+        setEventPending(false);
+        setEventError(message.error);
       }
       if (message.type === "clipboardState") setClipboardAvailable(message.available);
     };
@@ -499,6 +515,34 @@ export function App() {
         ?.focus(),
     );
   };
+  const requestOpenEvent = (targetId?: string, choose = false) => {
+    const current = currentDocument.current;
+    if (
+      !current ||
+      current.eventEditable !== true ||
+      pendingEvent.current ||
+      pending.current ||
+      busy ||
+      error ||
+      draftState.saving ||
+      draftState.conflicted ||
+      editor ||
+      tool ||
+      selectedIds.length > 1
+    )
+      return;
+    const requestId = ++nextRequest.current;
+    pendingEvent.current = { requestId, version: version.current };
+    setEventError(undefined);
+    setEventPending(true);
+    bridge.postMessage({
+      type: "openEvent",
+      requestId,
+      version: version.current,
+      targetId,
+      choose,
+    });
+  };
   const historyDisabled = busy || draftState.saving || draftState.conflicted || !!editor;
   const requestHistory = (action: "undo" | "redo") => {
     if (
@@ -733,6 +777,12 @@ export function App() {
             {document && error && <p>{strings.lastValid}</p>}
           </div>
         )}
+        {eventPending && <p role="status">{strings.eventPending}</p>}
+        {eventError && (
+          <div role="alert" class="error">
+            {strings.eventError}: {eventError}
+          </div>
+        )}
         {!document && !error && <p>{strings.loading}</p>}
         {document &&
           !editable &&
@@ -840,27 +890,32 @@ export function App() {
                   <Icon name="tools" />
                   {strings.toolbox}
                 </button>
-                {document && productivityEditable && (
+                {document && (productivityEditable || document.eventEditable === true) && (
                   <ProductivityToolbar
                     document={document}
                     selectionIds={selectedIds}
                     strings={strings}
-                    enabled={editable && !error}
-                    structuralEnabled={structuralEditable && !error}
+                    enabled={productivityEditable && editable && !error}
+                    structuralEnabled={productivityEditable && structuralEditable && !error}
+                    eventEditable={document.eventEditable === true}
+                    eventPending={eventPending}
                     duplicateEditable={
                       !error && canPasteInto(defaultDuplicateParent(document, selectedIds))
                     }
                     clipboardAvailable={clipboardAvailable}
                     canPaste={
+                      productivityEditable &&
                       structuralEditable &&
                       !error &&
                       canPasteInto(defaultPasteParent(document, selectedIds))
                     }
-                    busy={busy || draftState.saving}
+                    busy={busy || draftState.saving || draftState.conflicted || !!editor}
                     contextMenu={contextMenu}
+                    contextMenuOnly={!productivityEditable}
                     onOperation={(operation) => commit([operation])}
                     onClipboard={requestClipboard}
                     onProperties={openProperties}
+                    onOpenEvent={requestOpenEvent}
                     onCloseMenu={() => setContextMenu(undefined)}
                   />
                 )}
@@ -921,6 +976,8 @@ export function App() {
                   parentEditable={parentEditable && !error}
                   pageEditable={pageEditable && !error}
                   productivityEditable={productivityEditable && !error}
+                  eventEditable={document.eventEditable === true}
+                  eventPending={eventPending}
                   activePages={activePages}
                   onActivePageChange={(owner, page) =>
                     setActivePages((current) => ({ ...current, [owner]: page }))
@@ -939,9 +996,11 @@ export function App() {
                   onSelectionChangeMany={setSelectedIds}
                   onCommit={commit}
                   onContextMenu={(id, x, y) => {
-                    if (productivityEditable) setContextMenu({ x, y });
+                    if (productivityEditable || document.eventEditable === true)
+                      setContextMenu({ x, y });
                     else setSelectedId(id);
                   }}
+                  onOpenEvent={requestOpenEvent}
                   onShortcut={handleShortcut}
                   placing={!!tool && structuralEditable && !error}
                   onCancelPlacement={() => setTool(undefined)}
@@ -1087,8 +1146,11 @@ export function App() {
                   selectionIds={selectedIds}
                   strings={strings}
                   busy={busy || draftState.saving || draftState.conflicted || !!editor}
+                  eventEditable={document.eventEditable === true}
+                  eventPending={eventPending}
                   onSelect={selectStructure}
                   onDelete={() => handleShortcut("delete")}
+                  onOpenEvent={requestOpenEvent}
                 />
               </div>
               <div

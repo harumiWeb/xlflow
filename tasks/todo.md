@@ -1,3 +1,31 @@
+# Designer native double-click
+
+- [x] Reproduce viewport-retargeted double-clicks missed by direct event dispatch.
+- [x] Recover the visual target without changing pointer capture or drag behavior.
+- [x] Verify native mouse double-clicks and rebuild the VSIX.
+
+Validation: the focused regression failed before the fix and passed afterward.
+The full VS Code suite passes with native Chromium control/form double-clicks
+and drag assertions. Type checks, lint, docs, scoped formatting, and packaging
+pass. Evidence: `C:\Users\HARUMI\orca\workspaces\xlflow\guppy\tmp_workspaces\userform-doubleclick-20261016\verification.md`.
+
+# Designer event code navigation
+
+- [x] Add an Excel-verified Go event catalogue and versioned LSP list/edit requests.
+- [x] Connect Designer double-click and event selection to targeted, native-undoable sidecar/frm code edits.
+- [x] Verify source publication, existing-handler navigation, stale requests and UI gestures.
+- [x] Verify generated code with real Excel and update contracts, guides and changelogs.
+
+Validation: full VS Code 1.142.0 suite, type checks, lint, documentation and
+changed-file format checks pass. Native tests cover targeted saving, code Undo,
+dirty buffers, both code modes, Page owners, unchanged preview refreshes and
+source/connection invalidation. Go LSP/UserForm suites pass. Real Excel verified
+all 222 declarations and representative runtime events, with saved worksheet
+sentinels in sidecar and frm modes. Review findings about linked code paths and
+existing-file creation were fixed; junction regressions pass. Excel sessions
+stopped. Exact commands, evidence and limits:
+`C:\Users\HARUMI\orca\workspaces\xlflow\guppy\tmp_workspaces\userform-events-20261016\verification.md`.
+
 # Designer actions and sidebar form build
 
 - [x] Add the source-editor context command with the existing FormSpec/resource boundary.

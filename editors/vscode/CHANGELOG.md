@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fixed native Designer double-clicks being ignored after pointer capture
+  retargeted them to the viewport.
+
+- Added default-event navigation by double-click and **Open event…** selection
+  in Designer, with existing-handler navigation and native undoable code
+  generation in the configured sidecar or frm source.
+
 - Added **Open in Designer** to the FormSpec editor context menu, native
   Undo/Redo toolbar buttons, and Backspace deletion in Canvas and Structure.
 - Added individual and all-form sidebar builds, with targeted source saving,

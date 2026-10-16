@@ -70,24 +70,60 @@ export function StructureTree({
   selectionIds,
   strings,
   busy,
+  eventEditable = false,
+  eventPending = false,
   onSelect,
   onDelete,
+  onOpenEvent,
 }: {
   document: DesignerDocument;
   selectionIds: string[];
   strings: DesignerStrings;
   busy: boolean;
+  eventEditable?: boolean;
+  eventPending?: boolean;
   onSelect: (id?: string) => void;
   onDelete?: () => boolean;
+  onOpenEvent?: (targetId?: string, choose?: boolean) => void;
 }) {
   const { root, entries } = createTree(document);
   const selectionKey = JSON.stringify(selectionIds);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set([""]));
   const [focusedId, setFocusedId] = useState(() => selectionIds.at(-1) ?? "");
   const [focusMoved, setFocusMoved] = useState(false);
+  const [contextMenu, setContextMenu] = useState<
+    { x: number; y: number; targetId?: string } | undefined
+  >();
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const focusAfterRender = useRef<string | undefined>(undefined);
   const previousSelectionKey = useRef(selectionKey);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const popup = contextMenuRef.current;
+    if (popup) {
+      const bounds = popup.getBoundingClientRect();
+      popup.style.left = `${Math.max(4, Math.min(contextMenu.x, window.innerWidth - bounds.width - 4))}px`;
+      popup.style.top = `${Math.max(4, Math.min(contextMenu.y, window.innerHeight - bounds.height - 4))}px`;
+      popup.querySelector<HTMLButtonElement>('button[role="menuitem"]')?.focus();
+    }
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu(undefined);
+    };
+    const outside = (event: PointerEvent) => {
+      if (!contextMenuRef.current?.contains(event.target as Node)) setContextMenu(undefined);
+    };
+    window.addEventListener("keydown", keydown, true);
+    window.addEventListener("pointerdown", outside, true);
+    return () => {
+      window.removeEventListener("keydown", keydown, true);
+      window.removeEventListener("pointerdown", outside, true);
+    };
+  }, [contextMenu]);
   const previousParents = useRef(new Map<string, string>());
   const activeStructureId =
     typeof window === "undefined"
@@ -299,6 +335,12 @@ export function StructureTree({
         aria-selected={selected}
         aria-expanded={hasChildren ? expanded : undefined}
         tabIndex={rovingId === entry.id ? 0 : -1}
+        onContextMenu={(event) => {
+          if (!eventEditable || !onOpenEvent) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setContextMenu({ x: event.clientX, y: event.clientY, targetId: entry.control?.id });
+        }}
         ref={(element) => {
           if (element) itemRefs.current.set(entry.id, element);
           else itemRefs.current.delete(entry.id);
@@ -345,6 +387,33 @@ export function StructureTree({
       onKeyDown={onTreeKeyDown}
     >
       {renderEntry(root, 1)}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          class="designer-context-menu"
+          role="menu"
+          style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          <button
+            role="menuitem"
+            type="button"
+            disabled={
+              busy || eventPending || selectionIds.length > 1 || !eventEditable || !onOpenEvent
+            }
+            onClick={() => {
+              const targetId = contextMenu.targetId;
+              setContextMenu(undefined);
+              onOpenEvent?.(targetId, true);
+            }}
+          >
+            {eventPending ? strings.eventPending : strings.openEvent}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

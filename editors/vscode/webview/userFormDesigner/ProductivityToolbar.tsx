@@ -25,13 +25,17 @@ export function ProductivityToolbar({
   enabled,
   structuralEnabled,
   duplicateEditable = true,
+  eventEditable = false,
+  eventPending = false,
   clipboardAvailable,
   canPaste,
   busy,
   contextMenu,
+  contextMenuOnly = false,
   onOperation,
   onClipboard,
   onProperties,
+  onOpenEvent,
   onCloseMenu,
 }: {
   document: DesignerDocument;
@@ -40,10 +44,13 @@ export function ProductivityToolbar({
   enabled: boolean;
   structuralEnabled: boolean;
   duplicateEditable?: boolean;
+  eventEditable?: boolean;
+  eventPending?: boolean;
   clipboardAvailable: boolean;
   canPaste: boolean;
   busy: boolean;
   contextMenu?: { x: number; y: number };
+  contextMenuOnly?: boolean;
   onOperation: (operation: SemanticOperation) => void;
   onClipboard: (
     action: ProductivityClipboardAction,
@@ -51,6 +58,7 @@ export function ProductivityToolbar({
     parentId: string,
   ) => void;
   onProperties: () => void;
+  onOpenEvent?: (targetId?: string, choose?: boolean) => void;
   onCloseMenu: () => void;
 }) {
   const controls = siblingSelection(document, selectionIds);
@@ -71,6 +79,13 @@ export function ProductivityToolbar({
   const pasteAllowed = clipboardAvailable && canPaste && !busy;
   const cutAllowed = canCopy && structuralEnabled;
   const duplicateAllowed = canCopy && structuralEnabled && duplicateEditable;
+  const canOpenEvent =
+    eventEditable &&
+    !eventPending &&
+    !busy &&
+    selectionIds.length === 1 &&
+    !!primaryId &&
+    !!onOpenEvent;
   const canRemove =
     selectionIds.some((id) =>
       document.controls.some(
@@ -154,6 +169,11 @@ export function ProductivityToolbar({
     onProperties();
     onCloseMenu();
   };
+  const openEvent = () => {
+    if (!canOpenEvent || !primaryId) return;
+    onOpenEvent?.(primaryId, true);
+    onCloseMenu();
+  };
   const runClipboard = (action: ProductivityClipboardAction) => {
     clipboard(action);
     onCloseMenu();
@@ -169,7 +189,11 @@ export function ProductivityToolbar({
 
   return (
     <>
-      <section class="productivity-toolbar" aria-label={strings.productivity}>
+      <section
+        class="productivity-toolbar"
+        aria-label={strings.productivity}
+        hidden={contextMenuOnly}
+      >
         <div class="productivity-command-row">
           {(
             [
@@ -295,6 +319,9 @@ export function ProductivityToolbar({
             >
               {strings.duplicate}
             </button>
+            <button role="menuitem" type="button" disabled={!canOpenEvent} onClick={openEvent}>
+              {eventPending ? strings.eventPending : strings.openEvent}
+            </button>
             <button
               role="menuitem"
               type="button"
@@ -306,7 +333,20 @@ export function ProductivityToolbar({
           </CommandMenu>
         </div>
       </section>
-      {contextMenu && (
+      {contextMenu && contextMenuOnly && (
+        <div
+          ref={menuRef}
+          class="designer-context-menu"
+          role="menu"
+          style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button role="menuitem" type="button" disabled={!canOpenEvent} onClick={openEvent}>
+            {eventPending ? strings.eventPending : strings.openEvent}
+          </button>
+        </div>
+      )}
+      {contextMenu && !contextMenuOnly && (
         <div
           ref={menuRef}
           class="designer-context-menu"
@@ -348,6 +388,9 @@ export function ProductivityToolbar({
             onClick={() => runClipboard("duplicate")}
           >
             {strings.duplicate}
+          </button>
+          <button role="menuitem" type="button" disabled={!canOpenEvent} onClick={openEvent}>
+            {eventPending ? strings.eventPending : strings.openEvent}
           </button>
           <hr />
           <button

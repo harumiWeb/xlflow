@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed UserForm Designer double-click event navigation after native pointer
+  capture retargeted clicks to the viewport.
+
+- Added UserForm Designer event navigation: double-click opens or creates the
+  default event, and an event picker offers VBE-verified declarations. Code
+  edits respect sidecar/frm mode and remain separate from Designer draft history.
+
 - Added a FormSpec editor context command to open Designer, native Undo/Redo
   toolbar buttons, and Backspace deletion with existing subtree confirmation.
 - Added individual and all-form builds from the VS Code UserForms sidebar,

@@ -55,6 +55,11 @@ async function renderTree(
   selectionIds: string[],
   onSelect: (id?: string) => void = () => {},
   busy = false,
+  eventOptions: {
+    eventEditable?: boolean;
+    eventPending?: boolean;
+    onOpenEvent?: (targetId?: string, choose?: boolean) => void;
+  } = {},
 ) {
   await act(() =>
     render(
@@ -63,7 +68,10 @@ async function renderTree(
         selectionIds={selectionIds}
         strings={strings}
         busy={busy}
+        eventEditable={eventOptions.eventEditable}
+        eventPending={eventOptions.eventPending}
         onSelect={onSelect}
+        onOpenEvent={eventOptions.onOpenEvent}
       />,
       root,
     ),
@@ -211,6 +219,8 @@ async function run() {
   await act(() => render(null, root));
   await structureDeletionGuards();
   await act(() => render(null, root));
+  await structureEventContextMenuUsesTheInnermostTarget();
+  await act(() => render(null, root));
 }
 
 async function structureDeletionGuards() {
@@ -261,6 +271,70 @@ async function structureDeletionGuards() {
   await show(true);
   await send("nested");
   assert.equal(deletions, 1, "busy structure never deletes");
+}
+
+async function structureEventContextMenuUsesTheInnermostTarget() {
+  const opened: [string | undefined, boolean | undefined][] = [];
+  const onOpenEvent = (targetId?: string, choose?: boolean) => opened.push([targetId, choose]);
+  const contextMenu = async (id: string) => {
+    const event = new dom.window.MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 18,
+      clientY: 24,
+      button: 2,
+    });
+    await act(() => item(id).dispatchEvent(event));
+    return event;
+  };
+  const activateEventAction = async () => {
+    const action = root.querySelector<HTMLButtonElement>(
+      '.designer-context-menu button[role="menuitem"]',
+    );
+    assert.ok(action, "event context menu action is rendered");
+    await act(() => action.click());
+  };
+
+  await renderTree(model, ["nested"], () => {}, false, { eventEditable: true, onOpenEvent });
+  const childContext = await contextMenu("nested");
+  assert.equal(childContext.defaultPrevented, true);
+  await activateEventAction();
+  assert.deepEqual(
+    opened,
+    [["nested", true]],
+    "nested rows stop the parent Frame menu from replacing them",
+  );
+
+  await renderTree(model, [], () => {}, false, { eventEditable: true, onOpenEvent });
+  await contextMenu("");
+  await activateEventAction();
+  assert.deepEqual(
+    opened.at(-1),
+    [undefined, true],
+    "the form root requests the form event chooser",
+  );
+
+  await renderTree(model, ["alpha", "nested"], () => {}, false, {
+    eventEditable: true,
+    onOpenEvent,
+  });
+  await contextMenu("nested");
+  const multiSelectionAction = root.querySelector<HTMLButtonElement>(
+    '.designer-context-menu button[role="menuitem"]',
+  )!;
+  assert.equal(multiSelectionAction.disabled, true, "multi-selection disables event opening");
+
+  await renderTree(model, ["nested"], () => {}, false, {
+    eventEditable: true,
+    eventPending: true,
+    onOpenEvent,
+  });
+  await contextMenu("nested");
+  const pendingAction = root.querySelector<HTMLButtonElement>(
+    '.designer-context-menu button[role="menuitem"]',
+  )!;
+  assert.equal(pendingAction.textContent, designerStrings.eventPending);
+  assert.equal(pendingAction.disabled, true, "pending event requests disable repeat actions");
 }
 
 run().catch((error) => {

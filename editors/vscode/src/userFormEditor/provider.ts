@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
+import * as path from "path";
 import { randomBytes } from "crypto";
 import type { XlflowLanguageClientManager } from "../client";
-import { readFormsRootFromToml } from "../sidebar";
+import { readFormsRootFromToml, readUserFormCodeSourceFromToml } from "../sidebar";
 import { isFormSpecPath, PreviewSynchronizer } from "./document";
 import { designerStrings, isProductivityOperation, isWebviewMessage } from "./protocol";
 import type {
@@ -41,6 +42,133 @@ import type { DraftFrame } from "./draft";
 import { designerResourceUri, designerSourceUri } from "./resource";
 import { PictureImportSession } from "./pictures";
 import type { PictureCommitReceipt } from "./pictures";
+import { UserFormEventQueue, resolveUserFormCodeTarget, validEventRange } from "./events";
+import type {
+  UserFormEventDescriptor,
+  UserFormEventEditResult,
+  UserFormEventsResult,
+} from "./events";
+
+export type ConfirmEventSave = () => PromiseLike<boolean>;
+export type ChooseUserFormEvent = (
+  events: readonly UserFormEventDescriptor[],
+  defaultEvent: UserFormEventDescriptor,
+) => PromiseLike<string | undefined>;
+
+const promptToSaveEvent: ConfirmEventSave = async () => {
+  const save = vscode.l10n.t("Save and Continue");
+  const cancel = vscode.l10n.t("Cancel");
+  return (
+    (await vscode.window.showWarningMessage(
+      vscode.l10n.t(
+        "This UserForm has unsaved Designer or source changes. Save them before opening event code?",
+      ),
+      { modal: true },
+      save,
+      cancel,
+    )) === save
+  );
+};
+
+const chooseUserFormEvent: ChooseUserFormEvent = (events, defaultEvent) =>
+  new Promise((resolve) => {
+    const picker = vscode.window.createQuickPick<vscode.QuickPickItem>();
+    const items = [...events]
+      .sort((left, right) => Number(right.isDefault) - Number(left.isDefault))
+      .map((event) => ({ label: event.name, description: event.signature, event }));
+    const highlighted = items.find((item) => item.event.name === defaultEvent.name);
+    picker.items = items;
+    picker.activeItems = highlighted ? [highlighted] : [];
+    picker.placeholder = vscode.l10n.t("Choose a UserForm event.");
+    let settled = false;
+    const finish = (name: string | undefined) => {
+      if (settled) return;
+      settled = true;
+      picker.dispose();
+      resolve(name);
+    };
+    picker.onDidAccept(() => finish(picker.selectedItems[0]?.label));
+    picker.onDidHide(() => finish(undefined));
+    picker.show();
+  });
+
+function validUserFormEventsResult(
+  result: UserFormEventsResult,
+  version: number,
+  targetId: string | undefined,
+  objectName: string,
+): boolean {
+  return (
+    !!result &&
+    result.version === version &&
+    result.targetId === targetId &&
+    typeof result.objectName === "string" &&
+    result.objectName.toLowerCase() === objectName.toLowerCase() &&
+    Array.isArray(result.events) &&
+    result.events.length > 0 &&
+    result.events.every(
+      (event) =>
+        !!event &&
+        typeof event.name === "string" &&
+        event.name.length > 0 &&
+        typeof event.signature === "string" &&
+        typeof event.isDefault === "boolean",
+    ) &&
+    new Set(result.events.map((event) => event.name.toLowerCase())).size === result.events.length &&
+    result.events.filter((event) => event.isDefault).length === 1
+  );
+}
+
+function eventEditText(text: string, edits: UserFormEventEditResult["edits"]): string | undefined {
+  let previousEnd = -1;
+  const offsets = edits.map((edit) => {
+    if (!edit || typeof edit.newText !== "string" || !validEventRange(edit.range, text))
+      return undefined;
+    const start = offsetAtText(text, edit.range.start);
+    const end = offsetAtText(text, edit.range.end);
+    if (start < previousEnd || end < start) return undefined;
+    previousEnd = end;
+    return { start, end, newText: edit.newText };
+  });
+  if (offsets.some((edit) => edit === undefined)) return undefined;
+  let updated = text;
+  for (const edit of [...offsets].reverse())
+    updated = updated!.slice(0, edit!.start) + edit!.newText + updated!.slice(edit!.end);
+  return updated;
+}
+
+function offsetAtText(text: string, position: { line: number; character: number }): number {
+  const lines = text.split(/\r\n|\r|\n/);
+  let offset = 0;
+  for (let line = 0; line < position.line; line++) {
+    offset += lines[line].length;
+    const start = text.slice(offset).match(/^(\r\n|\r|\n)/)?.[0] ?? "";
+    offset += start.length;
+  }
+  return offset + position.character;
+}
+
+function eventIndent(text: string, uri: vscode.Uri): string {
+  const lines = text.split(/\r\n|\r|\n/);
+  for (let index = 0; index < lines.length; index++) {
+    if (!/^\s*(?:(?:Private|Public|Friend)\s+)?(?:Sub|Function)\b/i.test(lines[index])) continue;
+    for (const bodyLine of lines.slice(index + 1)) {
+      if (!bodyLine.trim() || /^\s*End\s+(?:Sub|Function)\b/i.test(bodyLine)) continue;
+      const indentation = /^[\t ]*/.exec(bodyLine)?.[0] ?? "";
+      if (indentation.length > 0) return indentation;
+    }
+  }
+  const editor = vscode.workspace.getConfiguration("editor", uri);
+  const tabSize = editor.get<number>("tabSize", 4);
+  const width = Number.isSafeInteger(tabSize) && tabSize > 0 ? tabSize : 4;
+  return editor.get<boolean>("insertSpaces", true) ? " ".repeat(width) : "\t";
+}
+
+function eventNewline(text: string, eol: vscode.EndOfLine | undefined): string {
+  const fallback = eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+  const newline = /\r\n|\r|\n/.exec(text)?.[0];
+  return newline === "\r" ? fallback : (newline ?? fallback);
+}
 
 export type DeleteConfirmation = (name: string, descendants: number) => PromiseLike<boolean>;
 const confirmSubtreeDeletion: DeleteConfirmation = async (name, descendants) => {
@@ -227,6 +355,8 @@ export class UserFormEditorProvider
   implements vscode.CustomEditorProvider<UserFormCustomDocument>, vscode.Disposable
 {
   private readonly edits = new DocumentEditQueue();
+  private readonly eventEdits = new UserFormEventQueue();
+  private readonly pendingEvents = new Set<string>();
   private readonly clipboard = new DesignerClipboard();
   private readonly documents = new Map<string, UserFormCustomDocument>();
   private readonly customEdits = new vscode.EventEmitter<
@@ -261,6 +391,8 @@ export class UserFormEditorProvider
         )) === save
       );
     },
+    private readonly confirmEventSave: ConfirmEventSave = promptToSaveEvent,
+    private readonly chooseEvent: ChooseUserFormEvent = chooseUserFormEvent,
   ) {
     this.checkpoints = new DraftCheckpointStore(checkpointStorageRoot);
   }
@@ -425,16 +557,16 @@ export class UserFormEditorProvider
     document: UserFormCustomDocument,
     token: vscode.CancellationToken,
   ): Promise<void> {
-    await this.edits.exclusive(document.sourceUri, () =>
-      (async () => {
-        await document.save(async () => {
-          const result = await this.clients.requestUserFormPreview(document.document);
-          if (result.error || !result.document)
-            throw new Error(result.error?.message ?? "The UserForm draft is invalid.");
-        }, token);
-        await this.checkpointDocument(document, token);
-      })(),
-    );
+    // Native TextDocument.save() runs VS Code save participants. Drain prior
+    // Designer work, then release the URI queue so participant callbacks can
+    // safely enqueue source reconciliation or checkpoints for the same URI.
+    await this.edits.exclusive(document.sourceUri, async () => {});
+    await document.save(async () => {
+      const result = await this.clients.requestUserFormPreview(document.document);
+      if (result.error || !result.document)
+        throw new Error(result.error?.message ?? "The UserForm draft is invalid.");
+    }, token);
+    await this.edits.exclusive(document.sourceUri, () => this.checkpointDocument(document, token));
   }
 
   public registerSaveCommand(command = designerSaveCommand): vscode.Disposable {
@@ -725,13 +857,16 @@ export class UserFormEditorProvider
     let pageEditable = false;
     let tabEditable = false;
     let productivityEditable = false;
+    let eventEditableCapability = false;
+    let eventConnectionGeneration = 0;
+    const eventCapabilitiesByVersion = new Map<number, boolean>();
     let latestDocument: { version: number; document: DesignerDocument } | undefined;
     let generation = 0;
     let contextGeneration = 0;
     const replies = new Map<
       number,
       {
-        message: Extract<HostMessage, { type: "editResult" | "pictureSelection" }>;
+        message: Extract<HostMessage, { type: "editResult" | "pictureSelection" | "eventResult" }>;
         sending: boolean;
       }
     >();
@@ -752,6 +887,19 @@ export class UserFormEditorProvider
       }
     };
     const send = (message: HostMessage) => {
+      if (message.type === "document") {
+        const capability = eventCapabilitiesByVersion.get(message.version);
+        if (capability !== undefined) eventEditableCapability = capability;
+        const blocked =
+          customDocument.state.conflicted || customDocument.saving || customDocument.reconciling;
+        message = {
+          ...message,
+          document: {
+            ...message.document,
+            eventEditable: eventEditableCapability && !blocked,
+          },
+        };
+      }
       if (
         message.type === "document" &&
         (customDocument.state.conflicted || customDocument.saving || customDocument.reconciling)
@@ -779,6 +927,9 @@ export class UserFormEditorProvider
         latestDocument = { version: message.version, document: message.document };
       }
       if (message.type === "invalidDocument" || message.type === "editingUnavailable") {
+        eventConnectionGeneration++;
+        eventEditableCapability = false;
+        eventCapabilitiesByVersion.clear();
         editable = false;
         propertyEditorVersion = 0;
         propertyEditable = false;
@@ -1046,6 +1197,9 @@ export class UserFormEditorProvider
             };
           }
           const preview = await this.clients.requestUserFormPreview(document);
+          eventCapabilitiesByVersion.set(version, preview.eventEditable === true);
+          for (const key of eventCapabilitiesByVersion.keys())
+            if (key !== version) eventCapabilitiesByVersion.delete(key);
           if (preview.propertyEditorVersion === 1 && preview.document) {
             await Promise.all(
               preview.document.controls.map(async (control) => {
@@ -1233,6 +1387,345 @@ export class UserFormEditorProvider
         this.clipboard.pasted(document.uri.toString(), destinationParent, clipboardGeneration);
       return { selectionIds };
     };
+    const runOpenEvent = async (
+      message: Extract<WebviewMessage, { type: "openEvent" }>,
+    ): Promise<void> => {
+      const requestContext = contextGeneration;
+      const requestConnection = eventConnectionGeneration;
+      const initialSnapshot = latestDocument;
+      const staleError = () =>
+        new Error(vscode.l10n.t("The UserForm changed. Retry opening the event."));
+      const targetControl = (snapshot: typeof latestDocument) =>
+        message.targetId
+          ? snapshot?.document.controls.find((control) => control.id === message.targetId)
+          : undefined;
+      const eventOwner = (snapshot: typeof latestDocument) => {
+        const selected = targetControl(snapshot);
+        if (!selected) return undefined;
+        if (selected.type.toLowerCase() !== "page") return selected;
+        if (!selected.parentId) return undefined;
+        const parent = snapshot?.document.controls.find(
+          (control) => control.id === selected.parentId,
+        );
+        return parent?.type.toLowerCase() === "multipage" ? parent : undefined;
+      };
+      const initialControl = targetControl(initialSnapshot);
+      const initialOwner = eventOwner(initialSnapshot);
+      const initialFormName = initialSnapshot?.document.name;
+      const initialEventObjectName = message.targetId ? initialOwner?.name : "UserForm";
+      const initialTargetName = initialControl?.name;
+      const initialTargetType = initialControl?.type.toLowerCase();
+      const initialTargetProgId = initialControl?.progId?.toLowerCase() ?? "";
+      const initialOwnerId = initialOwner?.id;
+      const initialOwnerType = initialOwner?.type.toLowerCase();
+      const initialOwnerProgId = initialOwner?.progId?.toLowerCase() ?? "";
+      const active = () =>
+        !disposed &&
+        !customDocument.closed &&
+        ready &&
+        panel.active &&
+        panel.visible &&
+        requestContext === contextGeneration &&
+        requestConnection === eventConnectionGeneration &&
+        eventEditableCapability &&
+        !customDocument.state.conflicted &&
+        !customDocument.reconciling &&
+        !customDocument.saving;
+      // Replaying or refreshing an identical preview is not a source change.
+      // Bind event operations to source revisions and connection invalidation.
+      const current = (version: number) =>
+        active() &&
+        document.version === version &&
+        latestDocument?.version === version &&
+        latestDocument.document.eventEditable === true;
+      if (
+        !active() ||
+        !initialSnapshot ||
+        initialSnapshot.version !== message.version ||
+        document.version !== message.version ||
+        initialSnapshot.document.eventEditable !== true ||
+        (message.targetId !== undefined && !initialControl) ||
+        (message.targetId !== undefined && !initialOwner) ||
+        !initialFormName ||
+        !initialEventObjectName
+      )
+        throw staleError();
+
+      const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+      if (!folder || folder.uri.scheme !== "file" || document.uri.scheme !== "file")
+        throw new Error(vscode.l10n.t("Open this UserForm from a file-based xlflow workspace."));
+      const readSettings = async () => {
+        const configUri = vscode.Uri.joinPath(folder.uri, "xlflow.toml");
+        let config: string;
+        try {
+          config = Buffer.from(await vscode.workspace.fs.readFile(configUri)).toString("utf8");
+        } catch {
+          throw new Error(vscode.l10n.t("This workspace has no xlflow.toml."));
+        }
+        return {
+          formsRoot: readFormsRootFromToml(config),
+          codeSource: readUserFormCodeSourceFromToml(config),
+        };
+      };
+      let settings = await readSettings();
+      if (!current(message.version)) throw staleError();
+
+      if (customDocument.state.dirty || customDocument.sourceDocument.isDirty) {
+        if (!(await this.confirmEventSave())) return;
+        if (!current(message.version)) throw staleError();
+        const cancellation = new vscode.CancellationTokenSource();
+        try {
+          // publishCustomDocument drains the Designer queue and invokes native
+          // TextDocument.save() after releasing it; save participants may
+          // safely enqueue work for this same source URI.
+          await this.publishCustomDocument(customDocument, cancellation.token);
+        } finally {
+          cancellation.dispose();
+        }
+        if (!active()) throw staleError();
+        await update();
+        if (!active()) throw staleError();
+        if (!latestDocument || latestDocument.version !== document.version) {
+          await update();
+          if (!active()) throw staleError();
+        }
+        const saved = latestDocument;
+        if (!saved || saved.version !== document.version || customDocument.state.dirty)
+          throw staleError();
+        const savedControl = targetControl(saved);
+        const savedOwner = eventOwner(saved);
+        if (
+          saved.document.name.toLowerCase() !== initialFormName.toLowerCase() ||
+          (message.targetId !== undefined &&
+            (!savedControl ||
+              savedControl.name.toLowerCase() !== initialTargetName!.toLowerCase() ||
+              savedControl.type.toLowerCase() !== initialTargetType ||
+              (savedControl.progId?.toLowerCase() ?? "") !== initialTargetProgId ||
+              !savedOwner ||
+              savedOwner.id !== initialOwnerId ||
+              savedOwner.name.toLowerCase() !== initialEventObjectName.toLowerCase() ||
+              savedOwner.type.toLowerCase() !== initialOwnerType ||
+              (savedOwner.progId?.toLowerCase() ?? "") !== initialOwnerProgId))
+        )
+          throw staleError();
+        const savedSettings = await readSettings();
+        if (
+          savedSettings.formsRoot !== settings.formsRoot ||
+          savedSettings.codeSource !== settings.codeSource
+        )
+          throw new Error(
+            vscode.l10n.t("The UserForm source configuration changed. Retry the event."),
+          );
+        settings = savedSettings;
+      }
+
+      const operationSnapshot = latestDocument;
+      const operationVersion = document.version;
+      const owner = eventOwner(operationSnapshot);
+      const formName = operationSnapshot?.document.name;
+      const eventObjectName = message.targetId ? owner?.name : "UserForm";
+      const stillCurrent = () => {
+        const target = targetControl(latestDocument);
+        const owner = eventOwner(latestDocument);
+        return (
+          current(operationVersion) &&
+          !!formName &&
+          latestDocument?.document.name.toLowerCase() === initialFormName.toLowerCase() &&
+          !!eventObjectName &&
+          eventObjectName.toLowerCase() === initialEventObjectName.toLowerCase() &&
+          (message.targetId === undefined ||
+            (!!target &&
+              target.id === message.targetId &&
+              target.name.toLowerCase() === initialTargetName!.toLowerCase() &&
+              target.type.toLowerCase() === initialTargetType &&
+              (target.progId?.toLowerCase() ?? "") === initialTargetProgId &&
+              !!owner &&
+              owner.id === initialOwnerId &&
+              owner.name.toLowerCase() === initialEventObjectName.toLowerCase() &&
+              owner.type.toLowerCase() === initialOwnerType &&
+              (owner.progId?.toLowerCase() ?? "") === initialOwnerProgId))
+        );
+      };
+      if (!stillCurrent()) throw staleError();
+
+      const listRequest = {
+        uri: document.uri.toString(),
+        version: operationVersion,
+        text: document.getText(),
+        ...(message.targetId ? { targetId: message.targetId } : {}),
+      };
+      const eventList = await this.clients.requestUserFormEvents(document, listRequest);
+      if (!stillCurrent()) throw staleError();
+      if (eventList.error) throw new Error(eventList.error);
+      if (
+        !validUserFormEventsResult(eventList, operationVersion, message.targetId, eventObjectName!)
+      )
+        throw new Error(
+          vscode.l10n.t("The language server returned an invalid UserForm event list."),
+        );
+      const defaultEvent = eventList.events.find((event) => event.isDefault)!;
+      const eventName = message.choose
+        ? await this.chooseEvent(eventList.events, defaultEvent)
+        : defaultEvent.name;
+      if (eventName === undefined) return;
+      if (!stillCurrent()) throw staleError();
+      if (!eventList.events.some((event) => event.name === eventName))
+        throw new Error(vscode.l10n.t("The selected UserForm event is no longer available."));
+
+      const codeTarget = await resolveUserFormCodeTarget(
+        folder.uri,
+        settings.formsRoot,
+        settings.codeSource,
+        formName!,
+      );
+      if (!stillCurrent()) throw staleError();
+      const transaction = await this.eventEdits.run(codeTarget.uri, async () => {
+        if (!stillCurrent()) throw staleError();
+        let codeDocument: vscode.TextDocument | undefined;
+        if (codeTarget.exists) {
+          codeDocument = await vscode.workspace.openTextDocument(codeTarget.uri);
+        } else {
+          try {
+            await vscode.workspace.fs.stat(codeTarget.uri);
+            throw new Error(
+              vscode.l10n.t("The UserForm code file appeared during the event operation."),
+            );
+          } catch (error) {
+            if (!(error instanceof vscode.FileSystemError) || error.code !== "FileNotFound")
+              throw error;
+          }
+        }
+        const codeVersion = codeDocument?.version ?? 0;
+        const codeText = codeDocument?.getText() ?? "";
+        const editRequest = {
+          ...listRequest,
+          eventName,
+          codeURI: codeTarget.uri.toString(),
+          codeVersion,
+          codeText,
+          indent: eventIndent(codeText, codeTarget.uri),
+          newline: eventNewline(codeText, codeDocument?.eol),
+          codeSource: settings.codeSource,
+        };
+        const result: UserFormEventEditResult = await this.clients.requestUserFormEventEdit(
+          document,
+          editRequest,
+        );
+        if (!stillCurrent()) throw staleError();
+        if (
+          result.version !== operationVersion ||
+          result.codeVersion !== codeVersion ||
+          typeof result.created !== "boolean" ||
+          !Array.isArray(result.edits)
+        )
+          throw new Error(vscode.l10n.t("The language server returned an invalid event edit."));
+        if (result.error) throw new Error(result.error);
+        const latestSettings = await readSettings();
+        if (
+          latestSettings.formsRoot !== settings.formsRoot ||
+          latestSettings.codeSource !== settings.codeSource
+        )
+          throw new Error(
+            vscode.l10n.t("The UserForm source configuration changed. Retry the event."),
+          );
+        if (
+          (result.created && !result.edits.length) ||
+          (!codeTarget.exists && (!result.created || !result.edits.length))
+        )
+          throw new Error(
+            vscode.l10n.t("The UserForm code file changed during the event operation."),
+          );
+        const updatedText = eventEditText(codeText, result.edits);
+        if (updatedText === undefined || !validEventRange(result.selection, updatedText))
+          throw new Error(vscode.l10n.t("The language server returned invalid event edit ranges."));
+        if (
+          codeDocument &&
+          (codeDocument.isClosed ||
+            codeDocument.version !== codeVersion ||
+            codeDocument.getText() !== codeText)
+        )
+          throw new Error(vscode.l10n.t("The UserForm code changed during the event operation."));
+        if (!codeDocument) {
+          try {
+            await vscode.workspace.fs.stat(codeTarget.uri);
+            throw new Error(
+              vscode.l10n.t("The UserForm code file appeared during the event operation."),
+            );
+          } catch (error) {
+            if (!(error instanceof vscode.FileSystemError) || error.code !== "FileNotFound")
+              throw error;
+          }
+        }
+        if (!stillCurrent()) throw staleError();
+        if (result.edits.length > 0) {
+          const workspaceEdit = new vscode.WorkspaceEdit();
+          if (!codeTarget.exists) {
+            if (codeTarget.codeSource !== "sidecar")
+              throw new Error(vscode.l10n.t("Only a sidecar UserForm code file can be created."));
+            await vscode.workspace.fs.createDirectory(
+              vscode.Uri.file(path.dirname(codeTarget.uri.fsPath)),
+            );
+            try {
+              await vscode.workspace.fs.stat(codeTarget.uri);
+              throw new Error(
+                vscode.l10n.t("The UserForm code file appeared during the event operation."),
+              );
+            } catch (error) {
+              if (!(error instanceof vscode.FileSystemError) || error.code !== "FileNotFound")
+                throw error;
+            }
+            workspaceEdit.createFile(codeTarget.uri, { ignoreIfExists: false });
+          }
+          workspaceEdit.set(
+            codeTarget.uri,
+            result.edits.map(
+              (edit): vscode.TextEdit =>
+                new vscode.TextEdit(
+                  new vscode.Range(
+                    edit.range.start.line,
+                    edit.range.start.character,
+                    edit.range.end.line,
+                    edit.range.end.character,
+                  ),
+                  edit.newText,
+                ),
+            ),
+          );
+          if (!stillCurrent()) throw staleError();
+          if (!(await vscode.workspace.applyEdit(workspaceEdit)))
+            throw new Error(vscode.l10n.t("VS Code could not apply the UserForm event edit."));
+        }
+        return result.selection;
+      });
+
+      if (!stillCurrent()) throw staleError();
+      // Opening or revealing an editor may invoke native VS Code callbacks.
+      // The per-code-file queue is released before this call.
+      const codeDocument = await vscode.workspace.openTextDocument(codeTarget.uri);
+      if (!stillCurrent()) throw staleError();
+      await vscode.window.showTextDocument(codeDocument, {
+        viewColumn: vscode.ViewColumn.Beside,
+        selection: new vscode.Range(
+          transaction.start.line,
+          transaction.start.character,
+          transaction.end.line,
+          transaction.end.character,
+        ),
+      });
+    };
+    const handleOpenEvent = async (
+      message: Extract<WebviewMessage, { type: "openEvent" }>,
+    ): Promise<void> => {
+      const key = customDocument.sourceUri.toString();
+      if (this.pendingEvents.has(key))
+        throw new Error(vscode.l10n.t("A UserForm event operation is already pending."));
+      this.pendingEvents.add(key);
+      try {
+        await runOpenEvent(message);
+      } finally {
+        this.pendingEvents.delete(key);
+      }
+    };
     const watcher = vscode.workspace.createFileSystemWatcher("**/xlflow.toml");
     const subscriptions: vscode.Disposable[] = [
       watcher,
@@ -1368,6 +1861,25 @@ export class UserFormEditorProvider
               });
               flushReplies();
               await update();
+            });
+        } else if (message.type === "openEvent") {
+          const editContext = contextGeneration;
+          void handleOpenEvent(message)
+            .then(
+              () => undefined,
+              (error: unknown) => String(error),
+            )
+            .then((error) => {
+              if (disposed || contextGeneration !== editContext) return;
+              replies.set(message.requestId, {
+                message: {
+                  type: "eventResult",
+                  requestId: message.requestId,
+                  ...(error ? { error } : {}),
+                },
+                sending: false,
+              });
+              flushReplies();
             });
         } else {
           const editGeneration = generation;

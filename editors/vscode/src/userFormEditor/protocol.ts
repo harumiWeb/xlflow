@@ -131,6 +131,7 @@ export interface PreviewDocument {
 
 export interface PreviewResult {
   version: number;
+  eventEditable?: boolean;
   editable?: boolean;
   propertyEditable?: boolean;
   propertyEditorVersion?: number;
@@ -160,6 +161,7 @@ export interface DesignerDocument extends AppearanceProperties {
   width: number;
   height: number;
   approximate: boolean;
+  eventEditable: boolean;
   controls: DesignerControl[];
   warnings: string[];
 }
@@ -176,6 +178,9 @@ export const designerStrings = {
   selectionBounds: "Position and size",
   closePane: "Close pane",
   openText: "Open source beside Designer",
+  openEvent: "Open event…",
+  eventPending: "Opening event…",
+  eventError: "Could not open event",
   save: "Save",
   undo: "Undo",
   redo: "Redo",
@@ -308,6 +313,7 @@ export type HostMessage =
     }
   | { type: "invalidDocument"; version: number; error: DesignerError }
   | { type: "editResult"; requestId: number; error?: DesignerError; selectionIds?: string[] }
+  | { type: "eventResult"; requestId: number; error?: string }
   | {
       type: "pictureSelection";
       requestId: number;
@@ -750,6 +756,13 @@ export type WebviewMessage =
   | { type: "ready" }
   | { type: "openText" }
   | { type: "save" }
+  | {
+      type: "openEvent";
+      requestId: number;
+      version: number;
+      targetId?: string;
+      choose: boolean;
+    }
   | { type: "history"; action: "undo" | "redo"; requestId: number; version: number }
   | { type: "picturePick"; requestId: number; version: number; controlId: string }
   | { type: "pictureCommit"; requestId: number; version: number; controlId: string; token: string }
@@ -836,6 +849,20 @@ export function isWebviewMessage(value: unknown): value is WebviewMessage {
     );
   if (message.type === "ready" || message.type === "openText" || message.type === "save")
     return Object.keys(message).length === 1;
+  if (message.type === "openEvent")
+    return (
+      Object.keys(message).every((key) =>
+        ["type", "requestId", "version", "targetId", "choose"].includes(key),
+      ) &&
+      Object.keys(message).length === (Object.hasOwn(message, "targetId") ? 5 : 4) &&
+      Number.isSafeInteger(message.requestId) &&
+      Number(message.requestId) >= 0 &&
+      Number.isSafeInteger(message.version) &&
+      Number(message.version) >= 0 &&
+      (message.targetId === undefined ||
+        (typeof message.targetId === "string" && message.targetId.length > 0)) &&
+      typeof message.choose === "boolean"
+    );
   if (message.type === "pictureCancel") return Object.keys(message).length === 1;
   if (message.type === "picturePick" || message.type === "pictureCommit") {
     const keys = [

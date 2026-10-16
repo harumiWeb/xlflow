@@ -210,6 +210,96 @@ failed and unexecuted forms. Batch builds are not atomic. Refresh forms and
 workbook/session status after success or failure, and prevent concurrent build
 commands. CLI and FormSpec contracts remain unchanged.
 
+## Event code navigation
+
+Single-click retains normal selection. Double-click on one standard control or
+the form background opens its default event. **Open event…** in selected
+control actions and the Structure context menu opens a native event picker.
+Nested targets must not bubble to a parent. Ignore drag/resize/marquee gestures,
+placement mode, multiple selection, modal editors, pending requests, saving,
+conflicts and invalid previews. Page/Tab entries target their owning MultiPage
+or TabStrip rather than generating independent Page/Tab procedures.
+
+Pointer capture can retarget a native double-click to the viewport even after
+pointerup releases capture. In that case resolve the actual hit element using
+the mouse coordinates, then apply the same form/target and exclusion checks.
+
+The Go event catalogue owns the supported event set, declaration parameters and
+defaults for UserForm and the 14 standard Toolbox types. It is independent of
+TypeDB's incomplete event-generation metadata. Unsupported custom controls have
+no generated signatures. The Webview sends stable target IDs, never arbitrary
+procedure declarations or destination paths.
+
+The LSP advertises `experimental.userFormEvents: 1`. An older server keeps other
+Designer features available with event actions disabled. The host obtains an
+event list with `xlflow/userFormEvents` and an insertion/navigation plan with
+`xlflow/userFormEventEdit`. Both operate on explicitly supplied source text and
+echo revisions. The edit request additionally supplies the current code URI,
+version, text, code source mode, indentation and newline; the response contains
+minimal text edits and a UTF-16 body selection. Requests cannot target unrelated
+code files or mismatch the configured source mode.
+The response's `created` flag means a new handler was generated, including when
+the code file already exists. File creation is a separate host decision.
+
+Before code generation, explicitly publish and save only the targeted FormSpec
+if its Designer draft or text buffer is dirty, with **Save and Continue** or
+Cancel. Native custom-document Auto Save is not explicit source publication.
+After saving or picking an event, revalidate the source, selected target and
+configuration. A later cancellation does not roll back a completed source save.
+
+Code destination follows `[userform].code_source`, including its legacy default:
+sidecar mode edits the real-cased `code/<FormName>.bas`, creating it with
+`Option Explicit` when absent; frm mode edits an existing matching exported
+form's VBA body. Preserve Designer/Attribute sections and `.frx` bytes. Refuse
+ambiguous names, duplicate candidates, missing frm files and inconsistent
+Spec basename / form name / frm identity. Do not implicitly migrate code modes
+or synchronize another artifact. `form build` retains its existing sidecar-only
+code authority described above.
+
+Code paths stay inside the workspace and must not traverse symbolic links or
+Windows junctions, including a linked code file. Check existing path components
+before proposing or applying edits; missing sidecar suffixes remain valid.
+
+Use the existing VBA syntax parser for case-insensitive top-level declaration
+lookup; comments and string literals cannot identify a handler. An unambiguous
+existing Sub opens at its body without changing the declaration or contents.
+Ambiguous/conditional declarations, incompatible same-name declarations and
+unsafe syntax prevent generation. Append missing handlers with the verified
+`Private Sub` declaration, an indented blank body and `End Sub`. Retain existing
+newline style and use the code editor's indentation settings.
+
+Serialize code operations by destination URI, read dirty code buffers as the
+authority and reject stale source/code revisions before applying one native
+WorkspaceEdit. Code-editor Undo is separate from Designer draft history. Open
+and reveal the resulting body beside Designer; do not auto-save code, build a
+workbook, invoke Excel or run a procedure. Renaming, deleting or copying layout
+controls does not rename, delete or transplant existing event handlers.
+
+An unchanged preview replay or refresh does not invalidate an event request.
+Revalidate actual source revisions and target identities; connection loss,
+invalid documents and changed code-source settings still invalidate the request.
+
+### VBE event evidence
+
+Excel 16.0 x64's `CodeModule.CreateEventProc` produced 222 supported declarations
+across UserForm and the 14 standard types. The catalogue retains exact ByVal,
+implicit ByRef and `MSForms.Return*` parameter declarations, including Index on
+applicable MultiPage/TabStrip events. TypeLib default flags confirm Click for
+UserForm, Label, Frame, CommandButton, ListBox, CheckBox, OptionButton and
+ToggleButton; Change for TextBox, ComboBox, SpinButton, ScrollBar, MultiPage
+and TabStrip. Image's Click/DblClick are hidden and CreateEventProc rejects
+them. An actual VBE Designer double-click generates Image BeforeDragOver, so
+that is its visible default. Owned Excel process exit was confirmed after
+declaration collection and the native Image gesture observation.
+
+Required regressions cover the complete catalogue, exact parameter types,
+existing code navigation, comment/string false matches, conditional/duplicate
+declarations, newline preservation, UTF-16 positions, source-save cancellation,
+dirty buffers, new-sidecar Undo, stale replies, repeated gestures, custom roots,
+both code modes and older-server capability fallback. Focused real Excel
+validation must compile generated declarations and exercise representative
+runtime events; source-only tests cannot establish handler compatibility.
+
 ## Source and preview protocol
 
 The extension host reads the URI-shared custom-document draft, including

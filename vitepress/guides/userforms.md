@@ -181,6 +181,37 @@ pane over the canvas.
 Designer. Use the header Save action to publish Designer changes as described
 above; opening source or changing a pane does not publish them.
 
+### Open event code
+
+Double-click a standard control or the form background to open its default
+event in the VBA editor. For example, TextBox opens Change, CommandButton and
+ListBox open Click, and MultiPage opens Change. **Open event…** in the selected
+control's actions or the Structure context menu lets you choose another event,
+including UserForm Initialize. An existing handler opens at its body; a missing
+handler is appended with the VBE-compatible declaration and an empty body.
+
+If the Designer draft or its YAML/YML/JSON source is unsaved, choose **Save and
+Continue** or cancel. Only that form's source is saved. Generated code stays
+unsaved in its editor and uses normal code-editor Undo independently of layout
+Undo. The action does not build a workbook or run Excel.
+
+The code destination follows `[userform].code_source` in `xlflow.toml`:
+`sidecar` edits `<forms-root>/code/<FormName>.bas` and creates it when missing;
+`frm` edits the VBA portion of the existing matching `.frm`. Missing or
+ambiguous frm files require correction before generation. Existing dirty code
+is preserved, and existing declarations are never replaced automatically.
+Renaming or deleting a control does not rename or remove its old handlers.
+
+Event selection supports the standard Toolbox controls and UserForm itself.
+Page and Tab entries use the owning MultiPage or TabStrip. Image opens
+BeforeDragOver, matching the tested VBE behavior; its hidden Click/DblClick
+members are not offered. Custom ActiveX controls require handwritten handlers.
+Update xlflow if the installed LSP does not support event navigation.
+
+`form build` always consumes matching sidecar code, including in frm mode.
+When editing frm code, use the project's existing frm push workflow or migrate
+explicitly to sidecar mode before a canonical form build.
+
 ### Edit properties
 
 Select the background for form properties, a control for its properties, or a

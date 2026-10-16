@@ -9,7 +9,11 @@ export function pixelsToPoints(pixels: number, zoom = 1): number {
   return (pixels * 72) / (96 * zoom);
 }
 
-export function designerDocument(spec: PreviewDocument, warnings: string[] = []): DesignerDocument {
+export function designerDocument(
+  spec: PreviewDocument,
+  warnings: string[] = [],
+  eventEditable = false,
+): DesignerDocument {
   const form = spec.form;
   const width = form.width;
   const height = form.height;
@@ -23,6 +27,7 @@ export function designerDocument(spec: PreviewDocument, warnings: string[] = [])
     width: width ?? 240,
     height: height ?? 180,
     approximate: width == null || height == null,
+    eventEditable,
     warnings,
     controls: spec.controls.map((control) => {
       const effective = control;
