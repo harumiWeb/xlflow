@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed the missing UserForm Designer Undo icon by using a glyph included in
+  the extension's bundled icon font.
+
 - Fixed UserForm Designer double-click event navigation after native pointer
   capture retargeted clicks to the viewport.
 

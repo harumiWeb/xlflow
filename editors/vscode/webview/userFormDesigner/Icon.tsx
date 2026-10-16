@@ -1,3 +1,4 @@
 export function Icon({ name }: { name: string }) {
-  return <span class={`codicon codicon-${name}`} aria-hidden="true" />;
+  const codiconName = name === "undo" ? "discard" : name;
+  return <span class={`codicon codicon-${codiconName}`} aria-hidden="true" />;
 }

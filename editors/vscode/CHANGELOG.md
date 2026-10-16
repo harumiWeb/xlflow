@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed the invisible Designer Undo icon; Undo and Redo now both use bundled
+  icon glyphs.
+
 - Fixed native Designer double-clicks being ignored after pointer capture
   retargeted them to the viewport.
 

@@ -1,4 +1,5 @@
 import * as assert from "assert";
+import { NativeDesignerMouse } from "./designerNativeMouse";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "fs/promises";
 import * as path from "path";
 import * as vscode from "vscode";
@@ -811,10 +812,27 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
     );
 
     const firstExpected = replaceCaption(yamlSource, "Native Save");
-    await postTestEdit(transportPanel!, customDocument, 1, "Native Save");
+    const propertyMouse = await NativeDesignerMouse.connect();
+    try {
+      if (!(await propertyMouse.isVisible(".properties-pane")))
+        await propertyMouse.clickSelector('.pane-toggle[data-pane="properties"]');
+      await propertyMouse.clickSelector("#designer-tab-properties");
+      await propertyMouse.replaceText('[data-property-field="caption"] input', "Native Save");
+      await propertyMouse.clickSelector(
+        (await propertyMouse.isVisible(".properties-pane .pane-close"))
+          ? ".properties-pane .pane-close"
+          : ".form-title",
+      );
+    } finally {
+      propertyMouse.close();
+    }
     await waitFor(
       () => events.length === 1,
       "the registered provider to emit its native edit event",
+    );
+    await waitFor(
+      () => findCustomTab(viewType, designerUri)?.isDirty === true,
+      "the native custom-tab dirty state after the property edit",
     );
     const originalUndo = customDocument.undo.bind(customDocument);
     const originalRedo = customDocument.redo.bind(customDocument);
@@ -853,6 +871,70 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
         ),
       "latest Designer preview before toolbar Undo",
     );
+    const nativeMouse = await NativeDesignerMouse.connect();
+    try {
+      await nativeMouse.clickSelector(".history-undo");
+    } finally {
+      nativeMouse.close();
+    }
+    await waitFor(
+      () => customDocument!.document.getText() === yamlSource,
+      "the registered Custom Editor native Undo command",
+    );
+    assert.strictEqual(
+      sourceDocument.getText(),
+      yamlSource,
+      "native Undo leaves the source buffer untouched",
+    );
+    assert.strictEqual(
+      await readFile(uri.fsPath, "utf8"),
+      yamlSource,
+      "native Undo leaves disk untouched",
+    );
+    assert.strictEqual(
+      findCustomTab(viewType, designerUri)?.isDirty,
+      false,
+      "native Undo returns the custom tab to clean",
+    );
+
+    await waitFor(
+      () => hostMessages.some((message) => message.type === "historyState" && message.canRedo),
+      "Redo availability after native Undo",
+    );
+    await waitFor(
+      () =>
+        hostMessages.some(
+          (message) =>
+            message.type === "document" && message.version === customDocument!.document.version,
+        ),
+      "latest Designer preview before toolbar Redo",
+    );
+    const redoMouse = await NativeDesignerMouse.connect();
+    try {
+      await redoMouse.clickSelector(".history-redo");
+    } finally {
+      redoMouse.close();
+    }
+    await waitFor(
+      () => customDocument!.document.getText() === firstExpected,
+      "the registered Custom Editor native Redo command",
+    );
+    assert.strictEqual(
+      sourceDocument.getText(),
+      yamlSource,
+      "native Redo leaves the source buffer untouched",
+    );
+    assert.strictEqual(
+      await readFile(uri.fsPath, "utf8"),
+      yamlSource,
+      "native Redo leaves disk untouched",
+    );
+    assert.strictEqual(
+      findCustomTab(viewType, designerUri)?.isDirty,
+      true,
+      "native Redo restores the dirty draft",
+    );
+
     // Keep the Designer visible but inactive. Hidden Webviews can suspend
     // message delivery, and host replies intentionally wait for visibility.
     await vscode.window.showTextDocument(sourceDocument, { viewColumn: vscode.ViewColumn.Beside });
@@ -887,65 +969,6 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
     if (sourceTab) await vscode.window.tabGroups.close(sourceTab, true);
     nativePanel!.reveal(nativePanel!.viewColumn);
     await waitFor(() => nativePanel!.active, "restore Designer focus before toolbar Undo");
-    await transportPanel!.webview.postMessage({
-      type: "xlflow-test-toolbar-history",
-      action: "undo",
-    });
-    await waitFor(
-      () => customDocument!.document.getText() === yamlSource,
-      "the registered Custom Editor native Undo command",
-    );
-    assert.strictEqual(
-      sourceDocument.getText(),
-      yamlSource,
-      "native Undo leaves the source buffer untouched",
-    );
-    assert.strictEqual(
-      await readFile(uri.fsPath, "utf8"),
-      yamlSource,
-      "native Undo leaves disk untouched",
-    );
-    assert.strictEqual(
-      findCustomTab(viewType, designerUri)?.isDirty,
-      false,
-      "native Undo returns the custom tab to clean",
-    );
-
-    await waitFor(
-      () => hostMessages.some((message) => message.type === "historyState" && message.canRedo),
-      "Redo availability after native Undo",
-    );
-    await waitFor(
-      () =>
-        hostMessages.some(
-          (message) =>
-            message.type === "document" && message.version === customDocument!.document.version,
-        ),
-      "latest Designer preview before toolbar Redo",
-    );
-    await transportPanel!.webview.postMessage({
-      type: "xlflow-test-toolbar-history",
-      action: "redo",
-    });
-    await waitFor(
-      () => customDocument!.document.getText() === firstExpected,
-      "the registered Custom Editor native Redo command",
-    );
-    assert.strictEqual(
-      sourceDocument.getText(),
-      yamlSource,
-      "native Redo leaves the source buffer untouched",
-    );
-    assert.strictEqual(
-      await readFile(uri.fsPath, "utf8"),
-      yamlSource,
-      "native Redo leaves disk untouched",
-    );
-    assert.strictEqual(
-      findCustomTab(viewType, designerUri)?.isDirty,
-      true,
-      "native Redo restores the dirty draft",
-    );
 
     await vscode.commands.executeCommand("workbench.action.files.save");
     await waitForAsync(
@@ -1976,13 +1999,6 @@ window.addEventListener("message", event => {
     testApi.postMessage({ type: "edit", requestId: message.requestId, version: message.version, operations: message.operations });
   } else if (message?.type === "xlflow-test-history") {
     testApi.postMessage({ type: "history", action: message.action, requestId: message.requestId, version: message.version });
-  } else if (message?.type === "xlflow-test-toolbar-history") {
-    const input = document.querySelector('[data-property-field="caption"] input');
-    const button = document.querySelector('.history-' + message.action);
-    if (!input || !button || button.disabled) throw new Error("History toolbar is unavailable");
-    input.focus();
-    button.focus();
-    button.click();
   } else if (message?.type === "xlflow-test-save") {
     testApi.postMessage({ type: "save" });
   } else if (message?.type === "xlflow-test-resolve") {

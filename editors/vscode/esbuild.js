@@ -49,6 +49,13 @@ Promise.all([
   }),
   esbuild.build({
     ...common,
+    jsx: "automatic",
+    jsxImportSource: "preact",
+    entryPoints: ["test/userFormDesignerIcon.test.tsx"],
+    outfile: "dist/test/userFormDesignerIcon.test.js",
+  }),
+  esbuild.build({
+    ...common,
     entryPoints: ["test/userFormDraft.test.ts"],
     outfile: "dist/test/userFormDraft.test.js",
   }),

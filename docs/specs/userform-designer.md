@@ -66,6 +66,11 @@ resource. They never introduce a Webview history stack or operate on a regular
 source editor. Availability follows host history state; edits, saving, conflicts
 and modal editors prevent toolbar history actions until the interaction finishes.
 
+Both history icons must resolve to glyphs in the bundled Codicon CSS. Undo uses
+the `discard` glyph because the bundled font does not define `undo`. Verify
+history navigation with native mouse clicks after a property edit through the UI,
+including the responsive properties pane, rather than only posting history messages.
+
 The right pane has Properties, Structure, and Tab order tabs. Inactive panels
 remain mounted, preserving field drafts, replies, collection state, and pending
 local tab order. Tabs support arrow/Home/End navigation. Tab-order document and

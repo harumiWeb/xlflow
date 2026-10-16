@@ -1,3 +1,15 @@
+# Designer Undo/Redo buttons
+
+- [x] Inspect host availability and shipped toolbar icon rendering.
+- [x] Verify actual mouse clicks against registered native Designer history.
+- [x] Fix confirmed defects and update regression coverage and VSIX.
+
+Validation: the bundled Codicon CSS lacks `undo`; the supported `discard` glyph
+fixes the icon and the glyph regression fails before/passes after the fix. Native
+VS Code tests exercise property text input, responsive pane navigation and actual
+Undo/Redo mouse clicks. The full suite, type checks, lint, docs and packaging pass.
+History availability follows confirmed Designer edits and native Undo/Redo state.
+
 # Designer native double-click
 
 - [x] Reproduce viewport-retargeted double-clicks missed by direct event dispatch.
