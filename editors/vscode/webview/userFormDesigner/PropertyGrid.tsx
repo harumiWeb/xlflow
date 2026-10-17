@@ -1,17 +1,37 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { numberRoundTrips } from "./numbers";
+import { Icon } from "./Icon";
+import { designerStrings } from "../../src/userFormEditor/protocol";
 import type {
   DesignerError,
   DesignerStrings,
   PropertyDescriptor,
   PropertyTarget,
+  PropertyValue,
   ScalarValue,
 } from "../../src/userFormEditor/protocol";
+import { objectValue } from "./propertyEditors/types";
+import { editorRegistry } from "./propertyEditors/registry";
+import { colorStyle } from "./propertyEditors/appearance";
+import { validNumericInput } from "./propertyEditors/numeric";
 
 // Presentation only. The server owns types, applicability and authoring values.
 const categories = {
   identity: ["name", "tag"],
-  appearance: ["caption", "text", "value", "controlTipText"],
+  appearance: [
+    "caption",
+    "text",
+    "value",
+    "font",
+    "foreColor",
+    "backColor",
+    "textAlign",
+    "borderStyle",
+    "picture",
+    "pictureAlignment",
+    "pictureSizeMode",
+    "controlTipText",
+  ],
   layout: ["left", "top", "width", "height"],
   behavior: ["enabled", "visible"],
   navigation: ["tabIndex", "selectedIndex", "accelerator"],
@@ -53,14 +73,18 @@ interface Props {
   // A collection entry keeps its draft identity when its wire index changes.
   draftId?: string;
   title: string;
+  targetType?: string;
   version: number;
   editable: boolean;
   busy: boolean;
   strings: DesignerStrings;
   reply?: PropertyReply;
-  onCommit: (field: string, value: ScalarValue) => number | undefined;
+  onCommit: (field: string, value: PropertyValue) => number | undefined;
+  onOpenEditor?: (descriptor: PropertyDescriptor) => void;
+  editorEnabled?: boolean;
+  onPosition?: () => void;
 }
-type ValueKind = "string" | "number" | "boolean" | "null";
+type ValueKind = "string" | "number" | "boolean";
 interface Draft {
   text: string;
   kind: ValueKind;
@@ -84,17 +108,15 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
     return {
       text: value == null ? "" : String(value),
       kind:
-        value === null
-          ? "null"
-          : typeof value === "number"
-            ? "number"
-            : typeof value === "boolean"
-              ? "boolean"
-              : descriptor.valueType === "number" || descriptor.valueType === "integer"
-                ? "number"
-                : descriptor.valueType === "boolean"
-                  ? "boolean"
-                  : "string",
+        typeof value === "number"
+          ? "number"
+          : typeof value === "boolean"
+            ? "boolean"
+            : descriptor.valueType === "number" || descriptor.valueType === "integer"
+              ? "number"
+              : descriptor.valueType === "boolean"
+                ? "boolean"
+                : "string",
       dirty: false,
       version,
     };
@@ -146,10 +168,7 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
     )
       return;
     let value: ScalarValue = d.text;
-    if (d.kind === "null") {
-      if (!descriptor.nullable || descriptor.required) return;
-      value = null;
-    } else if (d.kind === "boolean") value = d.text === "true";
+    if (d.kind === "boolean") value = d.text === "true";
     else if (d.kind === "number") {
       value = Number(d.text);
       if (!d.text.trim() || !Number.isFinite(value)) {
@@ -162,6 +181,10 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
       }
       if (!numberRoundTrips(d.text, value)) {
         update({ ...d, error: strings.invalidNumberPrecision });
+        return;
+      }
+      if (!validNumericInput(d.text, descriptor)) {
+        update({ ...d, error: strings.invalidValue });
         return;
       }
     }
@@ -195,108 +218,155 @@ function PropertyRow({ descriptor, ...props }: Props & { descriptor: PropertyDes
     ? [strings.staleProperty, draft.error].filter(Boolean).join("\n")
     : draft.error;
   const disabled = !editable || busy;
-  const kinds: ValueKind[] =
-    descriptor.valueType === "any"
-      ? ["string", "number", "boolean"]
-      : [descriptor.valueType === "integer" ? "number" : descriptor.valueType];
-  if (descriptor.nullable && !descriptor.required) kinds.push("null");
+  // VBE property names are identifiers and stay English in every UI language.
+  const fieldLabel =
+    designerStrings[labels[descriptor.field]] ?? objectLabels[descriptor.field] ?? descriptor.field;
+  // Source null remains intact until a concrete edit. It is an input hint,
+  // never an authorable Designer value or a reason to hide the actual editor.
+  const unconfigured = (!source?.present || source.value === null) && !draft.dirty;
+  const placeholder = source?.present && source.value === null ? strings.nullValue : strings.unset;
   return (
     <div class="property-row" data-property-field={descriptor.field}>
-      <label for={id}>{strings[labels[descriptor.field]] ?? descriptor.field}</label>
-      {!source?.present && !draft.dirty && <span class="property-state">{strings.unset}</span>}
-      {(descriptor.valueType === "any" || kinds.includes("null")) && (
-        <select
-          aria-label={`${strings[labels[descriptor.field]] ?? descriptor.field}: ${strings.valueType}`}
-          value={draft.kind}
-          disabled={disabled}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              update(fromSource());
-            }
-          }}
-          onChange={(event) => {
-            const kind = event.currentTarget.value as ValueKind;
-            change(
-              kind === "boolean" ? "false" : kind === "null" ? "" : current.current.text,
-              kind,
-            );
-            if (kind === "boolean" || kind === "null") commit();
-          }}
-        >
-          {kinds.map((kind) => (
-            <option value={kind}>
-              {kind === "string"
-                ? strings.typeString
-                : kind === "number"
-                  ? strings.typeNumber
-                  : kind === "boolean"
-                    ? strings.typeBoolean
-                    : strings.nullValue}
-            </option>
-          ))}
-        </select>
-      )}
-      {draft.kind === "null" ? (
-        <span id={id} class="property-state">
-          {strings.nullValue}
-        </span>
-      ) : descriptor.allowedValues || draft.kind === "boolean" ? (
-        <select
-          id={id}
-          value={!source?.present && !draft.dirty ? "__unset__" : draft.text}
-          disabled={disabled}
-          aria-invalid={!!error}
-          aria-describedby={error ? `${id}-error` : undefined}
-          onChange={(event) => {
-            change(event.currentTarget.value);
-            commit();
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              update(fromSource());
-            }
-          }}
-        >
-          {!source?.present && !draft.dirty && (
-            <option value="__unset__" disabled>
-              {strings.unset}
-            </option>
-          )}
-          {(descriptor.allowedValues ?? ["true", "false"]).map((value) => (
-            <option value={value}>{value}</option>
-          ))}
-        </select>
-      ) : (
-        <input
-          id={id}
-          type="text"
-          inputMode={draft.kind === "number" ? "decimal" : undefined}
-          value={draft.text}
-          disabled={disabled}
-          aria-invalid={!!error}
-          aria-describedby={error ? `${id}-error` : undefined}
-          onInput={(event) => change(event.currentTarget.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.isComposing) return;
-            if (event.key === "Enter") {
-              event.preventDefault();
+      <label for={id}>{fieldLabel}</label>
+      <div class="property-value">
+        {descriptor.editor === "boolean" && draft.kind === "boolean" ? (
+          <input
+            id={id}
+            type="checkbox"
+            checked={draft.text === "true"}
+            ref={(element) => {
+              if (element) element.indeterminate = unconfigured;
+            }}
+            disabled={disabled}
+            aria-invalid={!!error}
+            onChange={(event) => {
+              change(String(event.currentTarget.checked));
               commit();
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              update(fromSource());
-            }
-          }}
-        />
-      )}
-      {error && (
-        <p id={`${id}-error`} role="alert" class="property-error">
-          {error}
-        </p>
-      )}
+            }}
+          />
+        ) : descriptor.allowedValues || draft.kind === "boolean" ? (
+          <select
+            id={id}
+            value={unconfigured ? "__unset__" : draft.text}
+            disabled={disabled}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${id}-error` : undefined}
+            onChange={(event) => {
+              change(event.currentTarget.value);
+              commit();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                update(fromSource());
+              }
+            }}
+          >
+            {unconfigured && (
+              <option value="__unset__" disabled>
+                {placeholder}
+              </option>
+            )}
+            {(descriptor.allowedValues ?? ["true", "false"])
+              .map((value) => ({
+                value,
+                label:
+                  descriptor.suggestions?.find((hint) => String(hint.value) === value)?.label ??
+                  value,
+              }))
+              .map((choice) => (
+                <option value={String(choice.value)}>{choice.label}</option>
+              ))}
+          </select>
+        ) : (
+          <input
+            id={id}
+            type="text"
+            inputMode={draft.kind === "number" ? "decimal" : undefined}
+            value={draft.text}
+            placeholder={unconfigured ? placeholder : undefined}
+            disabled={disabled}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${id}-error` : undefined}
+            onInput={(event) => change(event.currentTarget.value)}
+            onBlur={commit}
+            onKeyDown={(event) => {
+              if (event.isComposing) return;
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commit();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                update(fromSource());
+              }
+            }}
+          />
+        )}
+        {error && (
+          <p id={`${id}-error`} role="alert" class="property-error">
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const objectLabels: Record<string, string> = {
+  font: "Font",
+  foreColor: "ForeColor",
+  backColor: "BackColor",
+  picture: "Picture",
+  pictureAlignment: "PictureAlignment",
+  pictureSizeMode: "PictureSizeMode",
+  textAlign: "TextAlign",
+  borderStyle: "BorderStyle",
+};
+function ObjectPropertyRow(props: Props & { descriptor: PropertyDescriptor }) {
+  const { descriptor, target, strings } = props;
+  const state = target.values[descriptor.field];
+  const value = objectValue(state?.value);
+  const label = objectLabels[descriptor.field] ?? descriptor.field;
+  const summary = !state?.present
+    ? strings.unset
+    : state.value === null
+      ? strings.nullValue
+      : descriptor.editor === "font"
+        ? [value.name, typeof value.size === "number" ? `${value.size} pt` : undefined]
+            .filter((item) => item !== undefined)
+            .join(", ") || "Font"
+        : descriptor.editor === "color"
+          ? String(value.value ?? "Color")
+          : descriptor.editor === "picture"
+            ? typeof value.path === "string"
+              ? value.path
+              : value.remove === true
+                ? "(removed)"
+                : "Picture"
+            : "";
+  const supported = !!descriptor.editor && Object.hasOwn(editorRegistry, descriptor.editor);
+  return (
+    <div class="property-row" data-property-field={descriptor.field}>
+      <label>{label}</label>
+      <div class="property-value object-property-value">
+        <span class="property-object-summary" title={summary}>
+          {descriptor.editor === "color" && (
+            <span class="color-swatch" style={{ backgroundColor: colorStyle(state?.value) }} />
+          )}
+          {summary}
+        </span>
+        <button
+          type="button"
+          class="property-editor-launch"
+          aria-label={`${label}…`}
+          title={`${label}…`}
+          disabled={!supported || !props.editable || props.busy || !props.editorEnabled}
+          onClick={() => props.onOpenEditor?.(descriptor)}
+        >
+          <Icon name="ellipsis" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -308,6 +378,17 @@ export function PropertyGrid(props: Props) {
       <h2>
         {props.strings.properties}: {props.title}
       </h2>
+      {props.targetType && <p class="property-grid-target-type">{props.targetType}</p>}
+      {props.onPosition && (
+        <button
+          class="position-editor-launch"
+          type="button"
+          onClick={props.onPosition}
+          disabled={!props.editable || props.busy || !props.editorEnabled}
+        >
+          Position…
+        </button>
+      )}
       {!props.editable && <p class="notice">{props.strings.propertyReadOnly}</p>}
       {groups.map((category) => {
         const order: readonly string[] = categories[category];
@@ -320,16 +401,30 @@ export function PropertyGrid(props: Props) {
           });
         return (
           descriptors.length > 0 && (
-            <fieldset>
-              <legend>{props.strings[category]}</legend>
-              {descriptors.map((descriptor) => (
-                <PropertyRow
-                  key={JSON.stringify([props.draftId ?? props.controlId ?? null, descriptor.field])}
-                  {...props}
-                  descriptor={descriptor}
-                />
-              ))}
-            </fieldset>
+            <details class="property-category" open>
+              <summary>{props.strings[category]}</summary>
+              {descriptors.map((descriptor) =>
+                descriptor.valueType === "object" ? (
+                  <ObjectPropertyRow
+                    key={JSON.stringify([
+                      props.draftId ?? props.controlId ?? null,
+                      descriptor.field,
+                    ])}
+                    {...props}
+                    descriptor={descriptor}
+                  />
+                ) : (
+                  <PropertyRow
+                    key={JSON.stringify([
+                      props.draftId ?? props.controlId ?? null,
+                      descriptor.field,
+                    ])}
+                    {...props}
+                    descriptor={descriptor}
+                  />
+                ),
+              )}
+            </details>
           )
         );
       })}

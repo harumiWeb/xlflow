@@ -21,6 +21,7 @@ xlflow.toml
 # OS / Editor
 .DS_Store
 .vscode/
+/.vscode-test/
 .idea/
 
 tmp_workspaces/

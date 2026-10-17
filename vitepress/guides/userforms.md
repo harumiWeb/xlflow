@@ -23,9 +23,12 @@ HIMETRIC rounding; xlflow does not compensate with a fixed offset.
 Open a canonical `.yaml`, `.yml`, or `.json` FormSpec directly under your
 configured forms root's `specs` directory, then use **Reopen Editor With... →
 xlflow UserForm Designer**. Select a control to drag it or resize with one of
-eight handles. Arrow keys move 1 point; Shift+Arrow moves 10 points. Holding
+eight handles. You can also right-click in the source editor and choose
+**xlflow: Open in Designer**; opening keeps unsaved source text intact.
+Arrow keys move 1 point; Shift+Arrow moves 10 points. Holding
 an arrow key creates one edit when the keys are released. Escape cancels an
-unfinished interaction. Use VS Code Undo/Redo to restore completed edits.
+unfinished interaction. Use VS Code Undo/Redo or the Canvas toolbar's Undo/Redo
+buttons to restore completed edits; both use the same native history.
 
 Designer actions are kept in a shared draft for the FormSpec. The Designer's
 **YAML/JSON not applied** badge shows whether that draft has been published to
@@ -86,8 +89,9 @@ Pages are one atomic, undoable edit. A new TabStrip starts with `Tab1` and
 `Tab2` and `selectedIndex: 0`. Existing authored empty MultiPages and
 TabStrips remain unchanged.
 
-Delete the selected control with the toolbar or Delete while the canvas has
-focus. Leaf controls are removed immediately. When a control has descendants,
+Delete the selected control with the toolbar or Delete/Backspace while the
+canvas has focus. Backspace also works in Structure. Leaf controls are removed
+immediately. When a control has descendants,
 a confirmation shows its name and descendant count; confirming removes the
 subtree as one undoable edit. Designer deletion does not intercept Delete in a
 focused input, so normal character deletion continues to work. Direct deletion
@@ -158,31 +162,105 @@ VS Code Undo step. Copy alone does not edit the document. Productivity actions
 require the LSP's `userFormProductivityEdit` plus the applicable existing
 geometry, property, structural, parent, or Page capability.
 
+### Workspace and navigation
+
+The compact toolbar above the canvas groups alignment, distribution, size, and
+z-order commands in menus. Alignment and size appear for at least two sibling
+controls; distribution needs three. **More actions** contains Duplicate and
+Properties. Grid, Snap, and Zoom are in the footer.
+
+The right pane has **Properties**, **Structure**, and **Tab order** tabs.
+Structure lets you select overlapping or invisible controls by name. Selecting
+a control on an inactive Page reveals that Page without editing its source
+selectedIndex. Expand containers with the disclosure arrows; use arrow keys
+for navigation and Enter/Space to select. Structure does not drag controls into
+a different parent. Below 900 px, toolbar buttons open Toolbox or the right
+pane over the canvas.
+
+**Open source beside Designer** opens the YAML/YML/JSON editor alongside the
+Designer. Use the header Save action to publish Designer changes as described
+above; opening source or changing a pane does not publish them.
+
+### Open event code
+
+Double-click a standard control or the form background to open its default
+event in the VBA editor. For example, TextBox opens Change, CommandButton and
+ListBox open Click, and MultiPage opens Change. **Open event…** in the selected
+control's actions or the Structure context menu lets you choose another event,
+including UserForm Initialize. An existing handler opens at its body; a missing
+handler is appended with the VBE-compatible declaration and an empty body.
+
+If the Designer draft or its YAML/YML/JSON source is unsaved, choose **Save and
+Continue** or cancel. Only that form's source is saved. Generated code stays
+unsaved in its editor and uses normal code-editor Undo independently of layout
+Undo. The action does not build a workbook or run Excel.
+
+The code destination follows `[userform].code_source` in `xlflow.toml`:
+`sidecar` edits `<forms-root>/code/<FormName>.bas` and creates it when missing;
+`frm` edits the VBA portion of the existing matching `.frm`. Missing or
+ambiguous frm files require correction before generation. Existing dirty code
+is preserved, and existing declarations are never replaced automatically.
+Renaming or deleting a control does not rename or remove its old handlers.
+
+Event selection supports the standard Toolbox controls and UserForm itself.
+Page and Tab entries use the owning MultiPage or TabStrip. Image opens
+BeforeDragOver, matching the tested VBE behavior; its hidden Click/DblClick
+members are not offered. Custom ActiveX controls require handwritten handlers.
+Update xlflow if the installed LSP does not support event navigation.
+
+`form build` always consumes matching sidecar code, including in frm mode.
+When editing frm code, use the project's existing frm push workflow or migrate
+explicitly to sidecar mode before a canonical form build.
+
 ### Edit properties
 
 Select the background for form properties, a control for its properties, or a
-Page tab for Page properties. The Property Grid shows supported scalar fields
-from the running LSP. Form legacy fields and `build.*` fields are separate;
-changing `form.name` does not rename the file, code sidecar or VBA references.
-Page geometry, observed fields, lists/tabs, pictures and property bags are not
-edited in this grid.
+Page tab for Page properties. The Property Grid uses metadata from the running
+LSP in name/value columns. Property names remain English regardless of the UI
+language; categories, help and actions are localized. Categories can collapse.
+Strings/numbers confirm with Enter or on blur; Escape cancels the draft.
+Booleans use checkboxes and enums use ComboBoxes. There are no type or `null`
+selectors: enter a concrete value directly. Existing unset and `null` fields
+stay unchanged until you confirm a concrete value; opening or focusing an input
+does not fill defaults. Empty strings, false and zero remain valid values.
+Fields supporting any scalar keep their existing concrete type; unset or null
+values use text input without inferring types from what you type. FormSpec files
+still support `null`; edit the source to set null or remove a property.
 
-Confirm text/number input with Enter or by leaving the field; Escape cancels
-the draft. Boolean/enum choices confirm immediately. Each confirmation creates
-one native undoable source edit in YAML, YML or JSON. Invalid input keeps its
-field error without changing source. A source update invalidates an unconfirmed
-Property Grid field entry; re-enter it against the refreshed document.
+Dedicated Font and Color dialogs preview both a sample and the Canvas. Font
+supports family, point size, styles and numeric charset, with representative
+families and free input. Colors retain RGB, named system or raw OLE identity;
+preview font fallback and system colors may differ from Excel. Applicable
+built-in fields come from Go metadata, not a bundled frontend schema. Custom
+ActiveX and individual Tab entries do not acquire typed editors. Page has no
+Font/ForeColor/BackColor/BorderStyle, and CommandButton has no TextAlign.
+TextProps font sizes use 0.05 pt increments; empty font names and non-ASCII
+updates to an existing StdFont are rejected without rewriting opaque data.
 
-Unset, explicit null, empty string, false and zero are distinct. The grid does
-not fill authored fields from measured or preview defaults. Explicit null is
-available only for supported optional fields; it does not remove the key. To
-restore an unset field, remove its key in the text editor. Ambiguous authored
-state can disable the grid while the valid preview remains visible.
+Image controls offer a native BMP/JPEG picker and picture alignment/size modes.
+A file inside the project uses its relative path. An external file is imported
+only on OK into `<forms-root>/assets/<full-lowercase-SHA256>.bmp|jpg`; identical
+content is reused and successful assets remain after Undo for Redo. Cancel
+creates no asset. Remove explicitly authors `picture: { remove: true }`.
+Position changes only edited axes in one action: Left/Top/Width/Height for one
+control, Width/Height for the form; Page and multiple selection are excluded.
 
-Property editing requires the LSP's `userFormPropertyEdit` capability. Older
-geometry-capable servers still allow move/resize; preview-only servers remain
-read-only. Editing FormSpec source does not require Excel and does not apply
-changes to a workbook automatically.
+Opening or cancelling a modal creates no draft edit or history. OK creates one
+native undoable Designer action; explicit Designer Save still publishes source.
+If source changes or the LSP restarts, the modal keeps its input, removes its
+Canvas preview and disables OK. Cancel and reopen against the refreshed source.
+A failed confirmation retains input and its error. Modal input never fills
+source fields from preview defaults. Legacy properties migrate only when that
+specific property is confirmed, retaining unrelated property-bag entries.
+
+Scalar property editing requires `userFormPropertyEdit`. Typed dialogs require
+editor capability version 1; older servers retain their advertised scalar or
+geometry behavior. Source syntax that cannot be edited safely can disable the
+grid while leaving a valid preview visible. Page geometry, observed fields,
+arbitrary property bags and generic property removal remain outside the grid.
+Changing `form.name` does not rename files, code sidecars or VBA references.
+FormSpec source editing does not require Excel or automatically apply changes
+to a workbook.
 
 ## MultiPage and TabStrip
 
@@ -200,7 +278,7 @@ Page geometry comes from its owning MultiPage, so do not author Page
 `left`/`top`/`width`/`height`. See the [UserForm specification](../reference/userform-spec)
 for the complete schema, snapshot shape, and generation details.
 
-The Designer's tab-order editor lists direct controls for one form, Frame, or
+The right pane's **Tab order** editor lists direct controls for one form, Frame, or
 Page parent when the LSP metadata exposes `tabIndex`. Hidden and disabled
 controls remain in the list; Page controls and TabStrip tab records do not.
 Initial order uses authored numeric `tabIndex`, ascending, then z-order for

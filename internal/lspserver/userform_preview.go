@@ -11,9 +11,10 @@ import (
 )
 
 type userFormPreviewParams struct {
-	URI     string `json:"uri"`
-	Version int    `json:"version"`
-	Text    string `json:"text"`
+	PropertyEditorVersion int    `json:"propertyEditorVersion,omitzero"`
+	URI                   string `json:"uri"`
+	Version               int    `json:"version"`
+	Text                  string `json:"text"`
 }
 
 type userFormPreviewError struct {
@@ -48,7 +49,7 @@ func (s *Server) userFormPreview(params userFormPreviewParams) userFormPreviewRe
 		return result
 	}
 	result.Document, result.Warnings = &doc, doc.ValidationWarnings
-	grid, err := formsedit.PropertyGrid(input, []byte(params.Text))
+	grid, err := formsedit.PropertyGrid(input, []byte(params.Text), params.PropertyEditorVersion)
 	if err != nil {
 		// A preview-valid source can be ambiguous for source-preserving edits.
 		// Retain rendering, but do not publish guessed authoring values.
@@ -75,6 +76,18 @@ func (s *Server) userFormSpecInput(uri string) (forms.SpecInput, *userFormPrevie
 }
 
 func (s *Server) dispatchRequest(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) bool {
+	if req.Method == userFormEventsMethod {
+		s.dispatchUserFormEvents(ctx, conn, req)
+		return true
+	}
+	if req.Method == userFormEventEditMethod {
+		s.dispatchUserFormEventEdit(ctx, conn, req)
+		return true
+	}
+	if req.Method == userFormPictureMethod {
+		s.dispatchUserFormPicture(ctx, conn, req)
+		return true
+	}
 	if req.Method == userFormCopyMethod {
 		s.dispatchUserFormCopy(ctx, conn, req)
 		return true

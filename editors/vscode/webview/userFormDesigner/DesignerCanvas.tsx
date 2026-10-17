@@ -42,6 +42,7 @@ import {
   stableDelta,
 } from "../../src/userFormEditor/geometry";
 import type { Geometry, ResizeHandle, DropTarget } from "../../src/userFormEditor/geometry";
+import { appearanceStyle } from "./propertyEditors/appearance";
 const px = (points: number) => `${pointsToPixels(points)}px`;
 
 export function ControlGlyph({ control }: { control: DesignerControl }) {
@@ -79,14 +80,58 @@ export function ControlGlyph({ control }: { control: DesignerControl }) {
       );
     case "spinbutton":
       return (
-        <span class="spin">
-          ▴<br />▾
+        <span
+          class={`spinbutton-chrome ${control.width >= control.height ? "horizontal" : "vertical"}`}
+          aria-hidden="true"
+        >
+          <span class="spinbutton-arrow decrement">
+            <span />
+          </span>
+          <span class="spinbutton-arrow increment">
+            <span />
+          </span>
         </span>
       );
     case "scrollbar":
-      return <span class="scrollbar">◂ ━ ▸</span>;
+      return (
+        <span
+          class={`scrollbar-chrome ${control.width >= control.height ? "horizontal" : "vertical"}`}
+          aria-hidden="true"
+        >
+          <span class="scrollbar-arrow decrement">
+            <span />
+          </span>
+          <span class="scrollbar-track">
+            <span class="scrollbar-thumb" />
+          </span>
+          <span class="scrollbar-arrow increment">
+            <span />
+          </span>
+        </span>
+      );
     case "image":
-      return <span class="placeholder">▧ Image</span>;
+      return control.picturePreview && control.picture?.remove !== true ? (
+        <img
+          class="control-picture"
+          src={control.picturePreview}
+          alt=""
+          draggable={false}
+          style={{
+            objectFit:
+              control.pictureSizeMode === 1
+                ? "fill"
+                : control.pictureSizeMode === 3
+                  ? "contain"
+                  : "none",
+            objectPosition:
+              ["left top", "right top", "center", "left bottom", "right bottom"][
+                control.pictureAlignment ?? 2
+              ] ?? "center",
+          }}
+        />
+      ) : (
+        <span class="placeholder">▧ Image</span>
+      );
     case "frame":
       return <span class="frame-caption">{caption}</span>;
     case "multipage":
@@ -125,6 +170,8 @@ export function DesignerCanvas({
   activePages,
   onActivePageChange,
   busy = false,
+  eventEditable = false,
+  eventPending = false,
   zoom = 1,
   showGrid = true,
   snapping = false,
@@ -137,6 +184,7 @@ export function DesignerCanvas({
   onCommit = () => {},
   onFormResize,
   onContextMenu,
+  onOpenEvent,
   onShortcut,
   placing = false,
   onPlace,
@@ -159,6 +207,8 @@ export function DesignerCanvas({
   activePages?: ActivePages;
   onActivePageChange?: (ownerId: string, pageId: string) => void;
   busy?: boolean;
+  eventEditable?: boolean;
+  eventPending?: boolean;
   zoom?: number;
   showGrid?: boolean;
   snapping?: boolean;
@@ -171,6 +221,7 @@ export function DesignerCanvas({
   onCommit?: (operations: (GeometryOperation | ParentOperation | ProductivityOperation)[]) => void;
   onFormResize?: (operations: PropertyOperation[]) => void;
   onContextMenu?: (controlId: string, x: number, y: number) => void;
+  onOpenEvent?: (targetId?: string, choose?: boolean) => void;
   onShortcut?: (action: "copy" | "cut" | "paste" | "duplicate" | "delete") => boolean;
   placing?: boolean;
   onPlace?: (left: number, top: number, parentId?: string) => void;
@@ -586,7 +637,7 @@ export function DesignerCanvas({
       if (form && form.contains(target) && !busy) {
         event.preventDefault();
         cancel();
-        canvas.current?.focus();
+        canvas.current?.focus({ preventScroll: true });
         const bounds = form.getBoundingClientRect();
         const point = {
           left: pixelsToPoints(event.clientX - bounds.left, zoom),
@@ -614,7 +665,7 @@ export function DesignerCanvas({
       | undefined;
     if (formHandle) {
       event.preventDefault();
-      canvas.current?.focus();
+      canvas.current?.focus({ preventScroll: true });
       startFormResize(formHandle, event.clientX, event.clientY, event.pointerId);
       if (formResizeGesture.current) {
         try {
@@ -636,7 +687,7 @@ export function DesignerCanvas({
         : undefined;
     const control = document.controls.find((c) => c.id === id);
     setNotice(undefined);
-    canvas.current?.focus();
+    canvas.current?.focus({ preventScroll: true });
     if (!control) {
       setSelection([]);
       const form = canvas.current?.querySelector<HTMLElement>(".form");
@@ -698,28 +749,87 @@ export function DesignerCanvas({
     }
   };
   const contextMenu = (event: JSX.TargetedMouseEvent<HTMLDivElement>) => {
-    if (!productivityEditable) return;
+    if (!productivityEditable && !eventEditable) return;
     const target = event.target as Element;
-    if (target.closest("[data-page-tab]")) return;
     const blankArea = target.closest<HTMLElement>(".container-content, .page-content, .form");
     const candidate = target.closest<HTMLElement>(
       ".control[data-control-id], .selection-outline[data-control-id]",
     );
+    const tab = target.closest<HTMLElement>("[data-page-tab]");
+    const page = target.closest<HTMLElement>(".page-content[data-container-id]");
     const id =
-      candidate && (!blankArea || blankArea.contains(candidate))
-        ? candidate.dataset.controlId
-        : undefined;
+      tab?.dataset.pageTab ??
+      (page && (!candidate || !page.contains(candidate))
+        ? page.dataset.containerId
+        : candidate && (!blankArea || blankArea.contains(candidate))
+          ? candidate.dataset.controlId
+          : undefined);
     if (!id) return;
     event.preventDefault();
     if (document.controls.find((control) => control.id === id)?.type.toLowerCase() === "page")
       setSelection([id]);
     else if (!selectionIds.includes(id)) setSelection([id]);
     else setSelection(promoteSelection(document, selectionIds, id));
-    canvas.current?.focus();
+    canvas.current?.focus({ preventScroll: true });
     onContextMenu?.(id, event.clientX, event.clientY);
   };
+  const openEventOnDoubleClick = (event: JSX.TargetedMouseEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    if (
+      event.detail < 2 ||
+      !eventEditable ||
+      !onOpenEvent ||
+      busy ||
+      eventPending ||
+      placing ||
+      selectionIds.length > 1 ||
+      gesture.current ||
+      formResizeGesture.current ||
+      marquee.current ||
+      preview ||
+      formResizePreview ||
+      groupPreview ||
+      marqueeBox ||
+      destination?.valid === false
+    )
+      return;
+
+    // Chromium targets click/dblclick at the pointer-capture element even
+    // when capture was released during pointerup. Recover the visual target
+    // when that element is our viewport, keeping ordinary bubbling intact.
+    const target =
+      event.target === event.currentTarget
+        ? event.currentTarget.ownerDocument.elementFromPoint?.(event.clientX, event.clientY)
+        : (event.target as Element);
+    if (!target) return;
+    if (
+      target.closest(
+        "[data-handle], [data-form-handle], .marquee-selection, .drop-target, .group-selection-outline",
+      )
+    )
+      return;
+    const form = canvas.current?.querySelector<HTMLElement>(".form");
+    if (!form?.contains(target)) return;
+
+    const page = target.closest<HTMLElement>(".page-content[data-container-id]");
+    const candidate = target.closest<HTMLElement>(
+      ".control[data-control-id], .selection-outline[data-control-id]",
+    );
+    const tab = target.closest<HTMLElement>("[data-page-tab]");
+    const targetId =
+      tab?.dataset.pageTab ??
+      (page && (!candidate || !page.contains(candidate))
+        ? page.dataset.containerId
+        : candidate?.dataset.controlId);
+    onOpenEvent(targetId, false);
+  };
   const keyDown = (event: JSX.TargetedKeyboardEvent<HTMLDivElement>) => {
-    if ((event.target as Element).closest("input, textarea, select, [contenteditable='true']"))
+    if (
+      event.isComposing ||
+      (event.target as Element).closest(
+        "input, textarea, select, [contenteditable]:not([contenteditable='false'])",
+      )
+    )
       return;
     if (
       productivityEditable &&
@@ -746,13 +856,14 @@ export function DesignerCanvas({
       return;
     }
     if (
-      event.key === "Delete" &&
+      (event.key === "Delete" || event.key === "Backspace") &&
       event.target === event.currentTarget &&
       !busy &&
       !placing &&
       !event.repeat &&
       !event.ctrlKey &&
       !event.metaKey &&
+      !event.shiftKey &&
       !event.altKey
     ) {
       if (productivityEditable && onShortcut?.("delete")) {
@@ -830,13 +941,14 @@ export function DesignerCanvas({
           data-control-id={control.id}
           title={`${control.name} (${control.type})${control.approximate ? ` — ${approximateBounds}` : ""}`}
           style={{
+            ...appearanceStyle(shown),
             left: px(shown.left),
             top: px(shown.top),
             width: px(shown.width),
             height: px(shown.height),
           }}
         >
-          <ControlGlyph control={control} />
+          <ControlGlyph control={shown} />
           {type === "multipage" ? (
             <>
               <div class="tabs">
@@ -869,6 +981,7 @@ export function DesignerCanvas({
                   data-container-id={page.id}
                   title={page.name}
                   style={{
+                    ...appearanceStyle(page),
                     left: px(insets.left),
                     top: px(insets.top),
                     right: px(insets.right),
@@ -947,7 +1060,7 @@ export function DesignerCanvas({
           onClick={() => {
             cancel();
             setSelection([]);
-            canvas.current?.focus();
+            canvas.current?.focus({ preventScroll: true });
           }}
         >
           {document.name}
@@ -963,7 +1076,7 @@ export function DesignerCanvas({
               onClick={() => {
                 cancel();
                 setSelection([control.id]);
-                canvas.current?.focus();
+                canvas.current?.focus({ preventScroll: true });
               }}
             >
               {control.name}
@@ -982,6 +1095,7 @@ export function DesignerCanvas({
         tabIndex={0}
         aria-label={document.name}
         onPointerDown={pointerDown}
+        onDblClick={openEventOnDoubleClick}
         onContextMenu={contextMenu}
         onPointerMove={(event) => {
           const current = gesture.current;
@@ -1105,6 +1219,7 @@ export function DesignerCanvas({
               class={`form ${showGrid ? "show-grid" : ""} ${selectedId === undefined ? "form-selected" : ""}`}
               data-container-id=""
               style={{
+                ...appearanceStyle(document),
                 width: px((formResizePreview ?? document).width),
                 height: px((formResizePreview ?? document).height),
                 backgroundSize: `${px(gridSize)} ${px(gridSize)}`,

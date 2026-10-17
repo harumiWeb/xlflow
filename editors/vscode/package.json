@@ -38,11 +38,12 @@
     "bundle": "node esbuild.js",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
-    "test": "pnpm run compile && node ./dist/test/userFormDraft.test.js && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormProductivity.test.js && node ./dist/test/userFormCollections.test.js && node ./dist/test/runTest.js",
-    "test:designer": "pnpm run compile && node ./dist/test/userFormDraft.test.js && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormProductivity.test.js && node ./dist/test/userFormCollections.test.js",
+    "test": "pnpm run compile && node ./dist/test/userFormBuild.test.js && node ./dist/test/userFormPropertyEditors.test.js && node ./dist/test/userFormPictures.test.js && node ./dist/test/userFormPictureReferences.test.js && node ./dist/test/userFormDesignerUX.test.js && node ./dist/test/userFormDesignerIcon.test.js && node ./dist/test/userFormDraft.test.js && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormProductivity.test.js && node ./dist/test/userFormCollections.test.js && node ./dist/test/runTest.js",
+    "test:designer": "pnpm run compile && node ./dist/test/userFormBuild.test.js && node ./dist/test/userFormPropertyEditors.test.js && node ./dist/test/userFormPictures.test.js && node ./dist/test/userFormPictureReferences.test.js && node ./dist/test/userFormDesignerUX.test.js && node ./dist/test/userFormDesignerIcon.test.js && node ./dist/test/userFormDraft.test.js && node ./dist/test/userFormRendering.test.js && node ./dist/test/userFormProperties.test.js && node ./dist/test/userFormStructure.test.js && node ./dist/test/userFormParenting.test.js && node ./dist/test/userFormProductivity.test.js && node ./dist/test/userFormCollections.test.js",
     "lint": "oxlint ."
   },
   "dependencies": {
+    "@vscode/codicons": "0.0.46-24",
     "preact": "^10.29.1",
     "vscode-languageclient": "^10.0.0"
   },
@@ -216,6 +217,25 @@
         "command": "xlflow.restartLanguageServer",
         "title": "%command.restartLanguageServer.title%",
         "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.openUserFormDesigner",
+        "title": "%command.openUserFormDesigner.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "xlflow.buildUserForm",
+        "title": "%command.buildUserForm.title%",
+        "category": "%command.category%",
+        "icon": "$(tools)",
+        "enablement": "xlflow.projectReady && !xlflow.formBuildRunning && !xlflow.workbookBusy && viewItem =~ /^xlflow\\.userForm\\..*\\.buildable$/"
+      },
+      {
+        "command": "xlflow.buildAllUserForms",
+        "title": "%command.buildAllUserForms.title%",
+        "category": "%command.category%",
+        "icon": "$(tools)",
+        "enablement": "xlflow.projectReady && !xlflow.formBuildRunning && !xlflow.workbookBusy"
       },
       {
         "command": "xlflow.userFormDesigner.save",
@@ -560,6 +580,13 @@
       }
     ],
     "menus": {
+      "editor/context": [
+        {
+          "command": "xlflow.openUserFormDesigner",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.(yaml|yml|json)$/i",
+          "group": "navigation@90"
+        }
+      ],
       "view/title": [
         {
           "command": "xlflow.refreshProject",
@@ -627,6 +654,11 @@
           "group": "navigation@2"
         },
         {
+          "command": "xlflow.buildAllUserForms",
+          "when": "view == xlflow.userForms",
+          "group": "navigation@2.5"
+        },
+        {
           "command": "xlflow.collapseUserForms",
           "when": "view == xlflow.userForms",
           "group": "navigation@3"
@@ -671,6 +703,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "xlflow.buildUserForm",
+          "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userForm\\./",
+          "group": "inline@1"
+        },
+        {
+          "command": "xlflow.buildUserForm",
+          "when": "view == xlflow.userForms && viewItem =~ /^xlflow\\.userForm\\./",
+          "group": "1_modification@0"
+        },
         {
           "command": "xlflow.openModule",
           "when": "view == xlflow.modules && viewItem =~ /^xlflow\\.module\\.(standard|class|document)$/",
@@ -891,6 +933,8 @@
     ]
   },
   "activationEvents": [
+    "onCommand:xlflow.buildAllUserForms",
+    "onCommand:xlflow.buildUserForm",
     "onCommand:xlflow.checkEnvironment",
     "onCommand:xlflow.checkForUpdates",
     "onCommand:xlflow.collapseModules",
@@ -922,6 +966,7 @@
     "onCommand:xlflow.openOutput",
     "onCommand:xlflow.openProcedure",
     "onCommand:xlflow.openUserFormArtifact",
+    "onCommand:xlflow.openUserFormDesigner",
     "onCommand:xlflow.openWorkbook",
     "onCommand:xlflow.pruneBackups",
     "onCommand:xlflow.pull",

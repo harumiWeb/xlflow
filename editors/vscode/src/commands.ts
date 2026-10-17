@@ -11,6 +11,7 @@ import { checkVbaLanguageAssociation } from "./languageAssociation";
 import { XlflowChannels } from "./logging";
 import { XlflowProjectStateService } from "./projectState";
 import { SessionManager } from "./session";
+import { UserFormBuildController } from "./userFormBuild";
 import { XlflowUpdateService } from "./updateCheck";
 import {
   resolveWorkspaceRoot,
@@ -167,6 +168,7 @@ interface RunArgsChoice {
 }
 
 interface CommandRefreshHooks {
+  prepareBuildSources(uris: readonly vscode.Uri[]): Promise<boolean>;
   refreshAll(): Promise<void>;
   refreshProject(): Promise<void> | void;
   refreshModules(): Promise<void>;
@@ -185,7 +187,14 @@ export function registerCommands(
   projectState: XlflowProjectStateService,
   hooks: CommandRefreshHooks,
 ): void {
+  const formBuild = new UserFormBuildController(projectState, channels, sessionManager, hooks);
   context.subscriptions.push(
+    vscode.commands.registerCommand("xlflow.buildUserForm", (value: unknown) =>
+      formBuild.build(value),
+    ),
+    vscode.commands.registerCommand("xlflow.buildAllUserForms", () =>
+      formBuild.build(undefined, true),
+    ),
     vscode.commands.registerCommand("xlflow.restartLanguageServer", async () => {
       await clientManager.restart();
     }),

@@ -22,6 +22,7 @@ import (
 type OperationType string
 
 const (
+	SetGeometry        OperationType = "setGeometry"
 	SetFormProperty    OperationType = "setFormProperty"
 	SetControlProperty OperationType = "setControlProperty"
 	MoveControl        OperationType = "moveControl"
@@ -387,6 +388,8 @@ func (e *engine) apply(op Operation) error {
 		return err
 	}
 	switch op.Type {
+	case SetGeometry:
+		return e.setGeometry(op)
 	case SetFormProperty:
 		return e.setForm(op)
 	case AddControl:
@@ -418,14 +421,14 @@ func (e *engine) apply(op Operation) error {
 			if op.Field == "id" || op.Field == "type" || op.Field == "parentId" || op.Field == "zIndex" {
 				return failure(-1, op, "UFE005", "This structural field cannot be set as a property.", "Use a structural operation; ID and type are immutable.")
 			}
-			contract, ok := EditableControlProperties(c.model.Type)[op.Field]
+			contract, ok := editablePropertiesForControl(c.model, true)[op.Field]
 			if !ok {
 				return unsupportedProperty(op)
 			}
 			if err := checkPropertyValue(op, contract); err != nil {
 				return err
 			}
-			return e.setControl(op.ControlID, op.Field, op.Value)
+			return e.setAuthoredProperty(op, contract)
 		case MoveControl:
 			if op.Left == nil || op.Top == nil {
 				return missingGeometry(op)
@@ -484,6 +487,8 @@ func unsupported() error {
 func checkPayload(op Operation) error {
 	allowed := map[string]bool{}
 	switch op.Type {
+	case SetGeometry:
+		allowed["controlId"], allowed["left"], allowed["top"], allowed["width"], allowed["height"] = true, true, true, true, true
 	case SetFormProperty:
 		allowed["field"], allowed["value"] = true, true
 	case SetControlProperty:
@@ -613,12 +618,15 @@ func scalar(value any) (*yaml.Node, error) {
 
 func (e *engine) setForm(op Operation) error {
 	parts := strings.Split(op.Field, ".")
-	contract, ok := EditableFormProperties()[op.Field]
+	contract, ok := EditableFormEditorProperties()[op.Field]
 	if !ok {
 		return unsupportedProperty(op)
 	}
 	if err := checkPropertyValue(op, contract); err != nil {
 		return err
+	}
+	if editorPropertyName(op.Field) {
+		return e.setAuthoredProperty(op, contract)
 	}
 	form := field(e.root, "form")
 	if e.unsafeTarget(form) {

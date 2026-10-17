@@ -1,5 +1,7 @@
 import * as assert from "node:assert/strict";
 import { render } from "preact";
+import type { ComponentProps } from "preact";
+import { TabOrderEditor } from "../webview/userFormDesigner/TabOrderEditor";
 import { act } from "preact/test-utils";
 import { designerDocument, pointsToPixels } from "../src/userFormEditor/model";
 import {
@@ -18,10 +20,42 @@ import type {
   PropertyGridData,
   ProductivityOperation,
   SemanticOperation,
+  WebviewMessage,
 } from "../src/userFormEditor/protocol";
 import { DesignerCanvas } from "../webview/userFormDesigner/DesignerCanvas";
-import { ProductivityToolbar } from "../webview/userFormDesigner/ProductivityToolbar";
+import { ProductivityToolbar as CommandToolbar } from "../webview/userFormDesigner/ProductivityToolbar";
 
+// Keep the established operation regressions exercising both extracted UI
+// components, without coupling tab-order authoring to toolbar placement.
+function ProductivityToolbar({
+  propertyGrid,
+  tabEnabled,
+  ...props
+}: ComponentProps<typeof CommandToolbar> & {
+  propertyGrid?: PropertyGridData;
+  tabEnabled: boolean;
+}) {
+  return (
+    <>
+      <CommandToolbar {...props} />
+      <TabOrderEditor
+        document={props.document}
+        selectionIds={props.selectionIds}
+        propertyGrid={propertyGrid}
+        strings={props.strings}
+        tabEnabled={tabEnabled}
+        busy={props.busy}
+        onOperation={props.onOperation}
+      />
+    </>
+  );
+}
+async function openCommands(label: string) {
+  const matches = [...root.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')];
+  const button = matches.find((button) => button.textContent === label);
+  assert.ok(button, `missing menu ${label}`);
+  await act(() => button.click());
+}
 const { JSDOM } = require("jsdom");
 const dom = new JSDOM('<!doctype html><html><body><div id="app"></div></body></html>', {
   url: "https://designer.test/",
@@ -120,6 +154,21 @@ async function click(selector: string) {
   const element = root.querySelector(selector);
   assert.ok(element, selector);
   await act(() => element.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
+}
+
+async function doubleClick(selector: string) {
+  const element = root.querySelector(selector);
+  assert.ok(element, selector);
+  await act(() =>
+    element.dispatchEvent(
+      new dom.window.MouseEvent("dblclick", {
+        bubbles: true,
+        cancelable: true,
+        detail: 2,
+        button: 0,
+      }),
+    ),
+  );
 }
 
 async function run() {
@@ -516,6 +565,194 @@ async function run() {
   assert.ok(root.querySelector('.selection-outline[data-control-id="b"]'));
 
   await act(() => render(null, root));
+  const openedEvents: [string | undefined, boolean | undefined][] = [];
+  await act(() =>
+    render(
+      <DesignerCanvas
+        document={model}
+        eventEditable
+        onOpenEvent={(targetId, choose) => openedEvents.push([targetId, choose])}
+      />,
+      root,
+    ),
+  );
+  await doubleClick('.control[data-control-id="nested"]');
+  assert.deepEqual(
+    openedEvents,
+    [["nested", false]],
+    "a nested control opens its own event once without bubbling to the Frame",
+  );
+  await doubleClick(".form");
+  assert.deepEqual(
+    openedEvents.at(-1),
+    [undefined, false],
+    "the form background opens form events",
+  );
+  await doubleClick("[data-page-tab]");
+  assert.deepEqual(
+    openedEvents.at(-1),
+    ["page", false],
+    "Page tabs pass their own id through for host-side event redirection",
+  );
+
+  const hitTestDescriptor = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
+  let hitElement: Element | null = root.querySelector('.control[data-control-id="nested"]');
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => hitElement,
+  });
+  try {
+    const beforeCapturedDoubleClick = openedEvents.length;
+    await doubleClick(".designer-viewport");
+    assert.equal(
+      openedEvents.length,
+      beforeCapturedDoubleClick + 1,
+      "pointer capture retargets native double-clicks to the viewport; resolve the hit control",
+    );
+    assert.deepEqual(openedEvents.at(-1), ["nested", false]);
+
+    hitElement = root.querySelector(".form");
+    await doubleClick(".designer-viewport");
+    assert.deepEqual(openedEvents.at(-1), [undefined, false]);
+
+    hitElement = document.body;
+    const beforeOutsideClick = openedEvents.length;
+    await doubleClick(".designer-viewport");
+    assert.equal(openedEvents.length, beforeOutsideClick, "outside hits cannot open form events");
+  } finally {
+    if (hitTestDescriptor) Object.defineProperty(document, "elementFromPoint", hitTestDescriptor);
+    else Reflect.deleteProperty(document, "elementFromPoint");
+  }
+
+  await act(() =>
+    render(
+      <DesignerCanvas
+        document={model}
+        eventEditable
+        selectedIds={["a", "b"]}
+        onSelectionChangeMany={() => {}}
+        onOpenEvent={(targetId, choose) => openedEvents.push([targetId, choose])}
+      />,
+      root,
+    ),
+  );
+  const beforeMultiSelectionDoubleClick = openedEvents.length;
+  await doubleClick('.control[data-control-id="a"]');
+  assert.equal(
+    openedEvents.length,
+    beforeMultiSelectionDoubleClick,
+    "multi-selection suppresses events",
+  );
+
+  await act(() =>
+    render(
+      <DesignerCanvas
+        document={model}
+        onOpenEvent={(targetId, choose) => openedEvents.push([targetId, choose])}
+      />,
+      root,
+    ),
+  );
+  const beforeMissingCapability = openedEvents.length;
+  await doubleClick('.control[data-control-id="a"]');
+  assert.equal(
+    openedEvents.length,
+    beforeMissingCapability,
+    "a missing event capability is treated as disabled",
+  );
+
+  await act(() =>
+    render(
+      <DesignerCanvas
+        document={model}
+        editable
+        eventEditable
+        onOpenEvent={(targetId, choose) => openedEvents.push([targetId, choose])}
+      />,
+      root,
+    ),
+  );
+  await pointer('.control[data-control-id="a"]', "pointerdown", 12, 12);
+  await pointer(".designer-viewport", "pointermove", 35, 30);
+  const beforeDragDoubleClick = openedEvents.length;
+  await doubleClick('.control[data-control-id="a"]');
+  assert.equal(
+    openedEvents.length,
+    beforeDragDoubleClick,
+    "an active drag suppresses event opening",
+  );
+  await pointer(".designer-viewport", "pointercancel", 35, 30);
+
+  await act(() =>
+    render(
+      <DesignerCanvas
+        document={model}
+        eventEditable
+        formResizable
+        selectedIds={[]}
+        onSelectionChangeMany={() => {}}
+        onOpenEvent={(targetId, choose) => openedEvents.push([targetId, choose])}
+      />,
+      root,
+    ),
+  );
+  assert.ok(root.querySelector(".form-resize-se"), "form resize handle is shown with no selection");
+  await pointer(".form-resize-se", "pointerdown", 300, 180);
+  const beforeResizeDoubleClick = openedEvents.length;
+  await doubleClick(".form");
+  assert.equal(
+    openedEvents.length,
+    beforeResizeDoubleClick,
+    "form resize suppresses event opening",
+  );
+  await pointer(".designer-viewport", "pointercancel", 300, 180);
+
+  await act(() =>
+    render(
+      <DesignerCanvas
+        document={model}
+        eventEditable
+        productivityEditable
+        onOpenEvent={(targetId, choose) => openedEvents.push([targetId, choose])}
+      />,
+      root,
+    ),
+  );
+  await pointer(".form", "pointerdown", 0, 0);
+  await pointer(".designer-viewport", "pointermove", 45, 45);
+  const beforeMarqueeDoubleClick = openedEvents.length;
+  await doubleClick(".form");
+  assert.equal(
+    openedEvents.length,
+    beforeMarqueeDoubleClick,
+    "marquee selection suppresses event opening",
+  );
+  await pointer(".designer-viewport", "pointercancel", 45, 45);
+
+  await act(() =>
+    render(
+      <DesignerCanvas
+        document={model}
+        eventEditable
+        parentEditable
+        placing
+        placementSize={{ width: 1000, height: 1000 }}
+        onOpenEvent={(targetId, choose) => openedEvents.push([targetId, choose])}
+      />,
+      root,
+    ),
+  );
+  await pointer(".designer-viewport", "pointermove", 0, 0);
+  assert.ok(root.querySelector(".drop-target.invalid"), "invalid placement preview is visible");
+  const beforeInvalidPreviewDoubleClick = openedEvents.length;
+  await doubleClick(".form");
+  assert.equal(
+    openedEvents.length,
+    beforeInvalidPreviewDoubleClick,
+    "an invalid placement preview suppresses event opening",
+  );
+
+  await act(() => render(null, root));
   await act(() => render(<DesignerCanvas document={model} productivityEditable />, root));
   const setRect = (selector: string, left: number, top: number, right: number, bottom: number) => {
     const element = root.querySelector<HTMLElement>(selector);
@@ -595,6 +832,7 @@ async function run() {
       root,
     ),
   );
+  await openCommands(designerStrings.align);
   const alignLeft = root.querySelectorAll<HTMLButtonElement>("button");
   const alignButton = [...alignLeft].find(
     (button) => button.textContent === designerStrings.alignLeft,
@@ -606,6 +844,7 @@ async function run() {
     anchorId: "c",
     alignment: "left",
   });
+  await openCommands(designerStrings.distribute);
   const distribute = [...root.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === designerStrings.distributeHorizontal,
   )!;
@@ -663,6 +902,7 @@ async function run() {
       root,
     ),
   );
+  await openCommands(designerStrings.moreActions);
   const duplicateFrame = [...root.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === designerStrings.duplicate,
   )!;
@@ -812,6 +1052,7 @@ async function run() {
     controlId: "b",
     cascade: true,
   });
+  await openCommands(designerStrings.moreActions);
   const customProperties = [...root.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === designerStrings.propertiesAction,
   )!;
@@ -847,6 +1088,87 @@ async function run() {
   );
 
   const childMetadata = propertyGrid.controls.a;
+  const toolbarEventRequests: [string | undefined, boolean | undefined][] = [];
+  await act(() =>
+    render(
+      <CommandToolbar
+        {...toolbarProps}
+        selectionIds={["a"]}
+        eventEditable
+        contextMenu={{ x: 3, y: 4 }}
+        onOpenEvent={(targetId, choose) => toolbarEventRequests.push([targetId, choose])}
+      />,
+      root,
+    ),
+  );
+  const openEventButton = [
+    ...root.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]'),
+  ].find((button) => button.textContent === designerStrings.openEvent);
+  assert.ok(openEventButton, "the selected-control context menu exposes Open Event");
+  assert.equal(openEventButton.disabled, false);
+  await act(() => openEventButton.click());
+  assert.deepEqual(toolbarEventRequests, [["a", true]]);
+
+  await act(() =>
+    render(
+      <CommandToolbar
+        {...toolbarProps}
+        selectionIds={["a"]}
+        eventEditable
+        eventPending
+        contextMenu={{ x: 3, y: 4 }}
+        onOpenEvent={(targetId, choose) => toolbarEventRequests.push([targetId, choose])}
+      />,
+      root,
+    ),
+  );
+  const pendingEventButton = [
+    ...root.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]'),
+  ].find((button) => button.textContent === designerStrings.eventPending);
+  assert.ok(pendingEventButton);
+  assert.equal(
+    pendingEventButton.disabled,
+    true,
+    "a pending request disables repeated event opens",
+  );
+
+  await act(() =>
+    render(
+      <CommandToolbar
+        {...toolbarProps}
+        selectionIds={["a", "b"]}
+        eventEditable
+        contextMenu={{ x: 3, y: 4 }}
+        onOpenEvent={(targetId, choose) => toolbarEventRequests.push([targetId, choose])}
+      />,
+      root,
+    ),
+  );
+  const multiEventButton = [
+    ...root.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]'),
+  ].find((button) => button.textContent === designerStrings.openEvent);
+  assert.ok(multiEventButton);
+  assert.equal(multiEventButton.disabled, true, "event opening is unavailable for multi-selection");
+
+  await act(() =>
+    render(
+      <CommandToolbar
+        {...toolbarProps}
+        selectionIds={["a"]}
+        eventEditable
+        contextMenuOnly
+        contextMenu={{ x: 3, y: 4 }}
+      />,
+      root,
+    ),
+  );
+  assert.equal(root.querySelector(".productivity-toolbar")?.hasAttribute("hidden"), true);
+  assert.equal(
+    root.querySelectorAll('.designer-context-menu button[role="menuitem"]').length,
+    1,
+    "event-only capability keeps the context menu focused on opening events",
+  );
+
   const nestedMetadata: PropertyGridData = {
     ...propertyGrid,
     controls: { ...propertyGrid.controls, nested: childMetadata, "page-child": childMetadata },
@@ -901,7 +1223,18 @@ async function run() {
     },
     contextMenu: { x: 3, y: 4 },
   };
-  await act(() => render(<ProductivityToolbar {...menuProps} />, root));
+  let paneClosures = 0;
+  const paneKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape" && !event.defaultPrevented) paneClosures++;
+  };
+  await act(() =>
+    render(
+      <div onKeyDown={paneKeyDown}>
+        <ProductivityToolbar {...menuProps} />
+      </div>,
+      root,
+    ),
+  );
   const enabledMenuItems = [
     ...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'),
   ];
@@ -919,9 +1252,12 @@ async function run() {
   await pointer('[role="menu"]', "pointerdown", 0, 0);
   assert.equal(menuClosures, 0, "inside pointer-down keeps menu open");
   await act(() =>
-    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape" })),
+    enabledMenuItems[0].dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    ),
   );
   assert.equal(menuClosures, 1);
+  assert.equal(paneClosures, 0, "Escape closes the context menu before the enclosing pane");
   await act(() =>
     document.body.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true })),
   );
@@ -932,9 +1268,157 @@ async function run() {
   );
   assert.equal(menuClosures, 2, "unmount removes menu listeners");
 
+  for (const [selection, groups] of [
+    [[], [designerStrings.moreActions]],
+    [["a"], [designerStrings.order, designerStrings.moreActions]],
+    [
+      ["a", "b"],
+      [
+        designerStrings.align,
+        designerStrings.sameSize,
+        designerStrings.order,
+        designerStrings.moreActions,
+      ],
+    ],
+    [
+      ["a", "b", "c"],
+      [
+        designerStrings.align,
+        designerStrings.distribute,
+        designerStrings.sameSize,
+        designerStrings.order,
+        designerStrings.moreActions,
+      ],
+    ],
+    [["a", "nested"], [designerStrings.moreActions]],
+  ] as [string[], string[]][]) {
+    await act(() => render(<CommandToolbar {...toolbarProps} selectionIds={selection} />, root));
+    assert.deepEqual(
+      [...root.querySelectorAll('[aria-haspopup="menu"]')].map((button) => button.textContent),
+      groups,
+      "command groups reflect eligible sibling selection count",
+    );
+  }
+  await act(() =>
+    render(
+      <div onKeyDown={paneKeyDown}>
+        <CommandToolbar {...toolbarProps} selectionIds={["a", "b", "c"]} busy />
+      </div>,
+      root,
+    ),
+  );
+  await openCommands(designerStrings.align);
+  assert.equal(
+    root.querySelectorAll('[role="menuitem"]:not(:disabled)').length,
+    0,
+    "busy layout commands stay disabled",
+  );
+  const alignTrigger = [...root.querySelectorAll<HTMLButtonElement>('[aria-haspopup="menu"]')].find(
+    (button) => button.textContent === designerStrings.align,
+  )!;
+  await act(() =>
+    root
+      .querySelector('[role="menu"]')!
+      .dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+      ),
+  );
+  assert.equal(root.querySelector('[role="menu"]'), null);
+  assert.equal(document.activeElement, alignTrigger, "Escape returns focus to the group trigger");
+  assert.equal(paneClosures, 0, "Escape closes the command menu before the enclosing pane");
+  await act(() => render(null, root));
+  await appEventProtocolUsesDedicatedPendingAndReplies();
   await act(() => render(null, root));
   process.stdout.write(
     "UserForm productivity selection, transaction, and toolbar assertions passed\n",
+  );
+}
+
+async function appEventProtocolUsesDedicatedPendingAndReplies() {
+  const sent: WebviewMessage[] = [];
+  Object.assign(globalThis, {
+    acquireVsCodeApi: () => ({
+      postMessage: (message: WebviewMessage) => sent.push(message),
+      getState: () => undefined,
+      setState: () => {},
+    }),
+  });
+  await act(() => {
+    require("../webview/userFormDesigner/App");
+  });
+  const appDocument = { ...model, name: "EventForm", eventEditable: true };
+  const sendHost = async (data: unknown) =>
+    act(() => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data })));
+  await sendHost({
+    type: "document",
+    version: 73,
+    document: appDocument,
+    editable: false,
+    propertyGrid: { form: { descriptors: [], values: {} }, controls: {} },
+  });
+
+  await doubleClick('.control[data-control-id="a"]');
+  const firstRequest = sent.filter((message) => message.type === "openEvent").at(-1);
+  assert.ok(firstRequest && firstRequest.type === "openEvent");
+  assert.deepEqual(firstRequest, {
+    type: "openEvent",
+    requestId: firstRequest.requestId,
+    version: 73,
+    targetId: "a",
+    choose: false,
+  });
+  assert.ok(root.textContent?.includes(designerStrings.eventPending));
+  const requestCount = sent.filter((message) => message.type === "openEvent").length;
+  await doubleClick('.control[data-control-id="a"]');
+  assert.equal(
+    sent.filter((message) => message.type === "openEvent").length,
+    requestCount,
+    "an outstanding event request blocks duplicate opens",
+  );
+
+  await sendHost({
+    type: "eventResult",
+    requestId: firstRequest.requestId,
+    error: "No default event procedure exists.",
+  });
+  assert.equal(root.textContent?.includes(designerStrings.eventPending), false);
+  assert.ok(root.textContent?.includes(designerStrings.eventError));
+  assert.ok(root.textContent?.includes("No default event procedure exists."));
+
+  const rightClick = new dom.window.MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    clientX: 24,
+    clientY: 32,
+    button: 2,
+  });
+  await act(() => root.querySelector('.control[data-control-id="a"]')!.dispatchEvent(rightClick));
+  const chooseAction = [
+    ...root.querySelectorAll<HTMLButtonElement>('.designer-context-menu button[role="menuitem"]'),
+  ].find((button) => button.textContent === designerStrings.openEvent);
+  assert.ok(
+    chooseAction,
+    "event capability exposes a canvas context menu without productivity edits",
+  );
+  await act(() => chooseAction.click());
+  const chooserRequest = sent.filter((message) => message.type === "openEvent").at(-1);
+  assert.ok(chooserRequest && chooserRequest.type === "openEvent");
+  assert.equal(chooserRequest.targetId, "a");
+  assert.equal(chooserRequest.choose, true);
+
+  await sendHost({ type: "eventResult", requestId: chooserRequest.requestId });
+  await sendHost({
+    type: "draftState",
+    dirty: false,
+    conflicted: true,
+    saving: false,
+  });
+  const countBeforeConflict = sent.filter((message) => message.type === "openEvent").length;
+  await doubleClick('.control[data-control-id="a"]');
+  assert.equal(
+    sent.filter((message) => message.type === "openEvent").length,
+    countBeforeConflict,
+    "source conflict suppresses event requests",
   );
 }
 

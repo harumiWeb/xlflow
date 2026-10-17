@@ -1,0 +1,16 @@
+export const propertyEditorStrings = {
+  editorCancel: "Cancel",
+  editorOK: "OK",
+  editorStale: "The source changed. Cancel and reopen the editor to use the current document.",
+  editorApproximate: "Font fallback and system colors are approximate previews.",
+  editorFontSample: "The quick brown fox / 日本語のサンプル 0123456789",
+  editorChoosePicture: "Choose BMP or JPEG…",
+  editorRemovePicture: "Remove picture",
+  editorPicturePending: "Choosing picture…",
+  editorPictureHelp: "External files are imported into project assets only when you confirm.",
+  editorPosition: "Position and size",
+  editorInvalid: "Enter a value matching the property metadata.",
+  editorUnavailable: "This editor requires a newer xlflow language server.",
+  editorPalette: "Palette",
+  editorSystemColors: "System",
+};

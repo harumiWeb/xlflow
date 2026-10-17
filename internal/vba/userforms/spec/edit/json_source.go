@@ -461,6 +461,16 @@ func applyJSON(input spec.SpecInput, source []byte, operations []Operation) (Res
 			types = jsonControlTypes(model)
 			continue
 		}
+		if op.Type == SetGeometry || ((op.Type == SetFormProperty || op.Type == SetControlProperty) && editorPropertyName(op.Field)) {
+			edits, editErr := jsonEditorOperation(updated, root, nodes, model, op)
+			if editErr != nil {
+				return Result{}, annotate(index, op, editErr)
+			}
+			if err := applyEdits(edits); err != nil {
+				return Result{}, annotate(index, op, err)
+			}
+			continue
+		}
 		var target *jsonSourceNode
 		var originalTarget *jsonSourceNode
 		values := map[string]json.RawMessage{}

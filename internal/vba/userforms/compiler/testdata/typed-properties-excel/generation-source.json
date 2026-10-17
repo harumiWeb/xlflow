@@ -1,0 +1,400 @@
+{
+  "schemaVersion": 1,
+  "kind": "xlflow.userform",
+  "basis": "designer",
+  "coordinateSystem": "points",
+  "form": {
+    "name": "TypedProperties",
+    "caption": "Typed properties",
+    "width": 360,
+    "height": 230,
+    "font": {
+      "name": "Tahoma",
+      "size": 9.5,
+      "bold": true,
+      "italic": false,
+      "underline": false,
+      "strikeThrough": false,
+      "charset": 128
+    },
+    "backColor": {
+      "kind": "system",
+      "value": "buttonFace"
+    },
+    "foreColor": {
+      "kind": "system",
+      "value": "windowText"
+    },
+    "borderStyle": 1
+  },
+  "controls": [
+    {
+      "id": "label",
+      "name": "LabelTyped",
+      "type": "Label",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "textAlign": 2,
+      "borderStyle": 1,
+      "left": 8,
+      "top": 8,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "textbox",
+      "name": "TextBoxTyped",
+      "type": "TextBox",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "textAlign": 2,
+      "borderStyle": 1,
+      "left": 92,
+      "top": 8,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "combobox",
+      "name": "ComboBoxTyped",
+      "type": "ComboBox",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "textAlign": 2,
+      "borderStyle": 1,
+      "left": 176,
+      "top": 8,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "listbox",
+      "name": "ListBoxTyped",
+      "type": "ListBox",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "textAlign": 2,
+      "borderStyle": 1,
+      "left": 260,
+      "top": 8,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "commandbutton",
+      "name": "CommandButtonTyped",
+      "type": "CommandButton",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "left": 8,
+      "top": 53,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "checkbox",
+      "name": "CheckBoxTyped",
+      "type": "CheckBox",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "textAlign": 2,
+      "left": 92,
+      "top": 53,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "optionbutton",
+      "name": "OptionButtonTyped",
+      "type": "OptionButton",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "textAlign": 2,
+      "left": 176,
+      "top": 53,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "togglebutton",
+      "name": "ToggleButtonTyped",
+      "type": "ToggleButton",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "textAlign": 2,
+      "left": 260,
+      "top": 53,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "spinbutton",
+      "name": "SpinButtonTyped",
+      "type": "SpinButton",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "left": 8,
+      "top": 98,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "scrollbar",
+      "name": "ScrollBarTyped",
+      "type": "ScrollBar",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "left": 92,
+      "top": 98,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "image",
+      "name": "ImageTyped",
+      "type": "Image",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "borderStyle": 1,
+      "left": 176,
+      "top": 98,
+      "width": 76,
+      "height": 35,
+      "pictureAlignment": 4,
+      "pictureSizeMode": 3,
+      "picture": {
+        "path": "src/forms/assets/one.bmp"
+      }
+    },
+    {
+      "id": "frame",
+      "name": "FrameTyped",
+      "type": "Frame",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "borderStyle": 1,
+      "left": 260,
+      "top": 98,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "multipage",
+      "name": "MultiPageTyped",
+      "type": "MultiPage",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "left": 8,
+      "top": 143,
+      "width": 76,
+      "height": 35
+    },
+    {
+      "id": "page",
+      "name": "PageTyped",
+      "type": "Page",
+      "parentId": "multipage",
+      "caption": "Page"
+    },
+    {
+      "id": "tabstrip",
+      "name": "TabStripTyped",
+      "type": "TabStrip",
+      "backColor": {
+        "kind": "rgb",
+        "value": "#DDEEFF"
+      },
+      "foreColor": {
+        "kind": "rgb",
+        "value": "#123456"
+      },
+      "font": {
+        "name": "Tahoma",
+        "size": 12.5,
+        "bold": true,
+        "italic": true,
+        "underline": true,
+        "strikeThrough": true,
+        "charset": 128
+      },
+      "left": 176,
+      "top": 143,
+      "width": 76,
+      "height": 35,
+      "tabs": [
+        {
+          "name": "TabOne",
+          "caption": "One",
+          "enabled": true,
+          "visible": true
+        }
+      ],
+      "selectedIndex": 0
+    }
+  ],
+  "warnings": []
+}

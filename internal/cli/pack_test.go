@@ -291,6 +291,96 @@ func TestPackCommandReportsSourceEncodingDiagnosticsInBuildAndCheck(t *testing.T
 	}
 }
 
+func TestPackCommandEncodingGuidanceInHumanAndJSONOutput(t *testing.T) {
+	for _, blank := range []bool{true, false} {
+		for _, check := range []bool{true, false} {
+			for _, asJSON := range []bool{true, false} {
+				t.Run(fmt.Sprintf("blank=%t/check=%t/json=%t", blank, check, asJSON), func(t *testing.T) {
+					dir := t.TempDir()
+					writePackProject(t, dir, false)
+					writePackSourceTree(t, dir, false)
+					configPath := filepath.Join(dir, config.FileName)
+					configBody, err := os.ReadFile(configPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					// Reproduce an older/manual project with no explicit code_page.
+					if !bytes.Contains(configBody, []byte("code_page = 1252")) {
+						t.Fatal("fixture must start with the default code page")
+					}
+					configBody = bytes.ReplaceAll(configBody, []byte("code_page = 1252"), nil)
+					if err := os.WriteFile(configPath, configBody, 0o644); err != nil {
+						t.Fatal(err)
+					}
+					runeText := "戻"
+					if !blank {
+						runeText = "😀"
+					}
+					sourcePath := filepath.Join(dir, "src", "modules", "Module1.bas")
+					source := []byte("Attribute VB_Name = \"Module1\"\r\nOption Explicit\r\n' " + runeText + "\r\n")
+					writePackSourceModule(t, dir, filepath.Join("src", "modules", "Module1.bas"), source)
+					args := []string{"pack"}
+					if blank {
+						args = append(args, "--blank")
+					}
+					if check {
+						args = append(args, "--check")
+					} else {
+						args = append(args, "--out", "dist/Book.xlsm")
+					}
+					if asJSON {
+						args = append(args, "--json")
+					}
+					stdout, err := runPackCommandForTest(dir, args...)
+					if err == nil || output.ExitCode(err) != output.ExitValidation {
+						t.Fatalf("err=%v, want validation failure\n%s", err, stdout)
+					}
+					guidance := stdout
+					if asJSON {
+						var env struct {
+							Issues []struct {
+								Message    string `json:"message"`
+								Suggestion string `json:"suggestion"`
+							} `json:"issues"`
+						}
+						if err := json.Unmarshal([]byte(stdout), &env); err != nil || len(env.Issues) != 1 {
+							t.Fatalf("invalid JSON diagnostics: %v\n%s", err, stdout)
+						}
+						guidance = env.Issues[0].Message + "\n" + env.Issues[0].Suggestion
+						if strings.Contains(stdout, "Pack input issues") {
+							t.Fatal("human diagnostics leaked into JSON")
+						}
+					} else {
+						for _, want := range []string{"Pack input issues", "src/modules/Module1.bas:3:3", "pack_source_encoding_failed", "Suggestion:"} {
+							if !strings.Contains(stdout, want) {
+								t.Fatalf("missing %q\n%s", want, stdout)
+							}
+						}
+					}
+					if blank {
+						for _, want := range []string{"戻", "1252", "xlflow.toml", "[pack.blank]\ncode_page = 932", "UTF-8"} {
+							if !strings.Contains(guidance, want) {
+								t.Fatalf("missing %q\n%s", want, stdout)
+							}
+						}
+					} else if !strings.Contains(guidance, "template's VBA codepage is authoritative") || strings.Contains(guidance, "code_page = 932") {
+						t.Fatalf("template guidance must not suggest blank config\n%s", stdout)
+					}
+					for path, want := range map[string][]byte{configPath: configBody, sourcePath: source} {
+						got, err := os.ReadFile(path)
+						if err != nil || !bytes.Equal(got, want) {
+							t.Fatalf("preflight changed %s: %v", path, err)
+						}
+					}
+					if _, err := os.Stat(filepath.Join(dir, "dist", "Book.xlsm")); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("preflight published artifact: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestPackCommandReportsCanonicalFormSpecEncodingLocation(t *testing.T) {
 	dir := t.TempDir()
 	writePackProject(t, dir, false)

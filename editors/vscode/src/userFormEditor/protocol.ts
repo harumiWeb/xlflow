@@ -1,4 +1,5 @@
 import { controlMetadata } from "./toolbox";
+import { propertyEditorStrings } from "./propertyEditorStrings";
 import type { NewControl } from "./toolbox";
 
 export interface DesignerError {
@@ -18,16 +19,52 @@ export interface DesignerError {
 }
 
 export type ScalarValue = string | number | boolean | null;
+export interface FontValue {
+  name?: string | null;
+  size?: number | null;
+  bold?: boolean | null;
+  italic?: boolean | null;
+  underline?: boolean | null;
+  strikeThrough?: boolean | null;
+  charset?: number | null;
+}
+export interface ColorValue {
+  kind: "rgb" | "system" | "ole";
+  value: string;
+}
+export interface PictureValue {
+  path?: string;
+  remove?: true;
+}
+export type PropertyValue = ScalarValue | FontValue | ColorValue | PictureValue;
+export interface AppearanceProperties {
+  font?: FontValue | null;
+  foreColor?: ColorValue | null;
+  backColor?: ColorValue | null;
+  textAlign?: number | null;
+  borderStyle?: number | null;
+  picture?: PictureValue | null;
+  pictureAlignment?: number | null;
+  pictureSizeMode?: number | null;
+  picturePreview?: string;
+}
 export interface PropertyDescriptor {
   field: string;
-  valueType: "string" | "number" | "integer" | "boolean" | "any";
+  valueType: "string" | "number" | "integer" | "boolean" | "any" | "object";
   required: boolean;
   nullable: boolean;
   allowedValues?: string[];
+  editor?: string;
+  children?: PropertyDescriptor[];
+  minimum?: number;
+  maximum?: number;
+  suggestions?: { value: string | number; label: string }[];
+  exclusiveMinimum?: boolean;
 }
 export interface PropertyState {
   present: boolean;
-  value: ScalarValue;
+  legacy?: boolean;
+  value: PropertyValue;
 }
 export interface PropertyTarget {
   descriptors: PropertyDescriptor[];
@@ -49,7 +86,7 @@ export interface SpecTab {
   accelerator?: string;
 }
 
-export interface SpecControl {
+export interface SpecControl extends AppearanceProperties {
   id: string;
   parentId?: string;
   type: string;
@@ -71,7 +108,7 @@ export interface SpecControl {
   observed?: Partial<Omit<SpecControl, "observed">>;
 }
 
-export interface FormDimensions {
+export interface FormDimensions extends AppearanceProperties {
   caption?: string | null;
   width?: number | null;
   height?: number | null;
@@ -94,8 +131,10 @@ export interface PreviewDocument {
 
 export interface PreviewResult {
   version: number;
+  eventEditable?: boolean;
   editable?: boolean;
   propertyEditable?: boolean;
+  propertyEditorVersion?: number;
   structuralEditable?: boolean;
   parentEditable?: boolean;
   pageEditable?: boolean;
@@ -116,20 +155,35 @@ export interface DesignerControl extends Omit<SpecControl, "observed"> {
   approximate: boolean;
 }
 
-export interface DesignerDocument {
+export interface DesignerDocument extends AppearanceProperties {
   name: string;
   caption: string;
   width: number;
   height: number;
   approximate: boolean;
+  eventEditable: boolean;
   controls: DesignerControl[];
   warnings: string[];
 }
 
 export const designerStrings = {
+  ...propertyEditorStrings,
   header: "xlflow UserForm Designer",
-  openText: "Open text editor",
+  designerView: "Designer",
+  structure: "Structure",
+  commonControls: "Common",
+  containers: "Containers",
+  order: "Order",
+  moreActions: "More actions",
+  selectionBounds: "Position and size",
+  closePane: "Close pane",
+  openText: "Open source beside Designer",
+  openEvent: "Open event…",
+  eventPending: "Opening event…",
+  eventError: "Could not open event",
   save: "Save",
+  undo: "Undo",
+  redo: "Redo",
   unsaved: "Designer changes not applied to YAML/JSON",
   sourceConflict: "YAML/JSON and Designer changes conflict. Resolve the conflict before saving.",
   useSource: "Use YAML/JSON changes",
@@ -248,6 +302,7 @@ export type HostMessage =
       document: DesignerDocument;
       editable?: boolean;
       propertyEditable?: boolean;
+      propertyEditorVersion?: number;
       structuralEditable?: boolean;
       parentEditable?: boolean;
       pageEditable?: boolean;
@@ -258,7 +313,15 @@ export type HostMessage =
     }
   | { type: "invalidDocument"; version: number; error: DesignerError }
   | { type: "editResult"; requestId: number; error?: DesignerError; selectionIds?: string[] }
+  | { type: "eventResult"; requestId: number; error?: string }
+  | {
+      type: "pictureSelection";
+      requestId: number;
+      selection?: { token: string; name: string; dataURI: string; width: number; height: number };
+      error?: DesignerError;
+    }
   | { type: "clipboardState"; available: boolean }
+  | { type: "historyState"; canUndo: boolean; canRedo: boolean }
   | { type: "draftState"; dirty: boolean; conflicted: boolean; saving: boolean; error?: string }
   | { type: "editingUnavailable" }
   | { type: "themeChanged" };
@@ -268,8 +331,16 @@ export type GeometryOperation =
   | { type: "resizeControl"; controlId: string; width: number; height: number };
 
 export type PropertyOperation =
-  | { type: "setFormProperty"; field: string; value: ScalarValue }
-  | { type: "setControlProperty"; controlId: string; field: string; value: ScalarValue };
+  | { type: "setFormProperty"; field: string; value: PropertyValue }
+  | { type: "setControlProperty"; controlId: string; field: string; value: PropertyValue };
+export interface SetGeometryOperation {
+  type: "setGeometry";
+  controlId?: string;
+  left?: number;
+  top?: number;
+  width?: number;
+  height?: number;
+}
 export type StructuralOperation =
   | { type: "addControl"; control: NewControl }
   | { type: "removeControl"; controlId: string; cascade: boolean };
@@ -332,6 +403,7 @@ export type ProductivityOperation =
     };
 export type SemanticOperation =
   | GeometryOperation
+  | SetGeometryOperation
   | PropertyOperation
   | StructuralOperation
   | ParentOperation
@@ -662,7 +734,11 @@ export function isPropertyOperation(value: unknown): value is PropertyOperation 
     (op.value === null ||
       typeof op.value === "string" ||
       typeof op.value === "boolean" ||
-      (typeof op.value === "number" && Number.isFinite(op.value)))
+      (typeof op.value === "number" && Number.isFinite(op.value)) ||
+      (["font", "foreColor", "backColor", "picture"].includes(op.field as string) &&
+        typeof op.value === "object" &&
+        op.value !== null &&
+        !Array.isArray(op.value)))
   );
 }
 
@@ -680,6 +756,17 @@ export type WebviewMessage =
   | { type: "ready" }
   | { type: "openText" }
   | { type: "save" }
+  | {
+      type: "openEvent";
+      requestId: number;
+      version: number;
+      targetId?: string;
+      choose: boolean;
+    }
+  | { type: "history"; action: "undo" | "redo"; requestId: number; version: number }
+  | { type: "picturePick"; requestId: number; version: number; controlId: string }
+  | { type: "pictureCommit"; requestId: number; version: number; controlId: string; token: string }
+  | { type: "pictureCancel" }
   | { type: "resolveConflict"; choice: "source" | "designer" }
   | {
       type: "clipboard";
@@ -708,6 +795,27 @@ export function isGeometryOperation(value: unknown): value is GeometryOperation 
   );
 }
 
+export function isSetGeometryOperation(value: unknown): value is SetGeometryOperation {
+  if (typeof value !== "object" || value === null) return false;
+  const op = value as Record<string, unknown>;
+  const axes = ["left", "top", "width", "height"];
+  return (
+    op.type === "setGeometry" &&
+    Object.keys(op).every((key) => ["type", "controlId", ...axes].includes(key)) &&
+    (!Object.hasOwn(op, "controlId") ||
+      (typeof op.controlId === "string" && op.controlId.length > 0)) &&
+    (op.controlId !== undefined || (!Object.hasOwn(op, "left") && !Object.hasOwn(op, "top"))) &&
+    axes.some((key) => Object.hasOwn(op, key)) &&
+    axes.every(
+      (key) =>
+        !Object.hasOwn(op, key) ||
+        (typeof op[key] === "number" &&
+          Number.isFinite(op[key]) &&
+          (!["width", "height"].includes(key) || Number(op[key]) > 0)),
+    )
+  );
+}
+
 export function isParentOperation(value: unknown): value is ParentOperation {
   if (typeof value !== "object" || value === null) return false;
   const op = value as Record<string, unknown>;
@@ -730,8 +838,53 @@ export function isParentOperation(value: unknown): value is ParentOperation {
 export function isWebviewMessage(value: unknown): value is WebviewMessage {
   if (typeof value !== "object" || value === null) return false;
   const message = value as Record<string, unknown>;
+  if (message.type === "history")
+    return (
+      Object.keys(message).length === 4 &&
+      (message.action === "undo" || message.action === "redo") &&
+      Number.isSafeInteger(message.requestId) &&
+      Number(message.requestId) >= 0 &&
+      Number.isSafeInteger(message.version) &&
+      Number(message.version) >= 0
+    );
   if (message.type === "ready" || message.type === "openText" || message.type === "save")
     return Object.keys(message).length === 1;
+  if (message.type === "openEvent")
+    return (
+      Object.keys(message).every((key) =>
+        ["type", "requestId", "version", "targetId", "choose"].includes(key),
+      ) &&
+      Object.keys(message).length === (Object.hasOwn(message, "targetId") ? 5 : 4) &&
+      Number.isSafeInteger(message.requestId) &&
+      Number(message.requestId) >= 0 &&
+      Number.isSafeInteger(message.version) &&
+      Number(message.version) >= 0 &&
+      (message.targetId === undefined ||
+        (typeof message.targetId === "string" && message.targetId.length > 0)) &&
+      typeof message.choose === "boolean"
+    );
+  if (message.type === "pictureCancel") return Object.keys(message).length === 1;
+  if (message.type === "picturePick" || message.type === "pictureCommit") {
+    const keys = [
+      "type",
+      "requestId",
+      "version",
+      "controlId",
+      ...(message.type === "pictureCommit" ? ["token"] : []),
+    ];
+    return (
+      Object.keys(message).length === keys.length &&
+      Object.keys(message).every((key) => keys.includes(key)) &&
+      Number.isSafeInteger(message.requestId) &&
+      Number(message.requestId) >= 0 &&
+      Number.isSafeInteger(message.version) &&
+      Number(message.version) >= 0 &&
+      typeof message.controlId === "string" &&
+      message.controlId.length > 0 &&
+      (message.type !== "pictureCommit" ||
+        (typeof message.token === "string" && message.token.length > 0))
+    );
+  }
   if (message.type === "resolveConflict")
     return (
       Object.keys(message).length === 2 && ["source", "designer"].includes(String(message.choice))
@@ -753,6 +906,7 @@ export function isWebviewMessage(value: unknown): value is WebviewMessage {
     (isInitialMultiPageOperations(operations) ||
       (operations.length === 1 &&
         (isPropertyOperation(operations[0]) ||
+          isSetGeometryOperation(operations[0]) ||
           (isStructuralOperation(operations[0]) &&
             (operations[0].type !== "addControl" ||
               (operations[0].control.type !== "MultiPage" &&

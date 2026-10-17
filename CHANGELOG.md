@@ -4,6 +4,60 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed UserForm image replacement pickers invalidating the selected picture
+  when cancelled or when the replacement fails validation.
+
+- Updated UserForm Designer SpinButton previews with two raised arrow buttons
+  that fill the control and follow its horizontal or vertical proportions.
+
+- Updated UserForm Designer ScrollBar previews with end arrows, a classic track
+  and raised thumb, following the control's horizontal or vertical proportions.
+
+- Fixed the missing UserForm Designer Undo icon by using a glyph included in
+  the extension's bundled icon font.
+
+- Fixed UserForm Designer double-click event navigation after native pointer
+  capture retargeted clicks to the viewport.
+
+- Added UserForm Designer event navigation: double-click opens or creates the
+  default event, and an event picker offers VBE-verified declarations. Code
+  edits respect sidecar/frm mode and remain separate from Designer draft history.
+
+- Added a FormSpec editor context command to open Designer, native Undo/Redo
+  toolbar buttons, and Backspace deletion with existing subtree confirmation.
+- Added individual and all-form builds from the VS Code UserForms sidebar,
+  with explicit source saving, overwrite confirmation and session-backed builds.
+
+- Simplified UserForm Designer property inputs by removing type and null
+  selectors. Existing absent/null fields remain unchanged until a concrete edit;
+  false, zero and empty strings remain valid, and FormSpec/API null support is
+  unchanged.
+
+- Fixed Designer previews incorrectly inheriting Form/Frame ForeColor or Font
+  settings into existing child controls without their own authored settings.
+
+- UserForm Color editors now provide a 48-color palette and metadata-backed
+  system-color swatches alongside direct RGB/OLE input.
+
+- `pack` now shows individual input errors and remediation in normal output;
+  blank-project encoding failures include a copyable `xlflow.toml` example.
+
+- Added opt-in typed UserForm property editors for partial Font, RGB/system/OLE
+  Color, Image BMP/JPEG assets and single-target Position. Modal and Canvas
+  previews stay outside draft history until OK; stale input remains visible
+  with confirmation disabled. Image imports occur only on confirmation and
+  retain content-addressed assets for Undo/Redo. Go/LSP metadata remains the
+  authority, with scalar-client compatibility and edited-property-only legacy
+  migration.
+
+- UserForm Designer property names stay English regardless of the UI language.
+
+- Refined the VS Code UserForm Designer with a compact contextual toolbar,
+  grouped Toolbox, two-column Property Grid, Properties/Structure/Tab order
+  tabs, independently scrolling panes, and compact layouts below 900 px.
+  Structure selects nested and overlapping controls without changing source
+  hierarchy.
+
 - New Toolbox MultiPages start with two Pages and select the first; new
   TabStrips start with two tabs and select the first. MultiPage and both Pages
   are created as one undoable edit, while existing authored empty collections

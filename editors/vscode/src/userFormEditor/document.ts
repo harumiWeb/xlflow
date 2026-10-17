@@ -56,6 +56,7 @@ export class PreviewSynchronizer {
         version,
         editable: result.editable ?? false,
         propertyEditable: result.propertyEditable ?? false,
+        propertyEditorVersion: result.propertyEditorVersion,
         structuralEditable: result.structuralEditable ?? false,
         parentEditable: result.parentEditable ?? false,
         pageEditable: result.pageEditable ?? false,

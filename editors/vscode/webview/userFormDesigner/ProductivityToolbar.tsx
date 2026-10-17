@@ -1,21 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { isDesignerFrame, isDesignerPage } from "../../src/userFormEditor/geometry";
+import { useEffect, useRef } from "preact/hooks";
+import { CommandMenu } from "./CommandMenu";
+import { Icon } from "./Icon";
 import type {
   DesignerDocument,
   DesignerStrings,
   SemanticOperation,
-  PropertyGridData,
 } from "../../src/userFormEditor/protocol";
 import {
   alignOperation,
   defaultDuplicateParent,
   defaultPasteParent,
   distributeOperation,
-  eligibleTabOrder,
   reorderOperation,
   sameSizeOperation,
   siblingSelection,
-  tabOrderOperation,
 } from "../../src/userFormEditor/productivity";
 
 export type ProductivityClipboardAction = "copy" | "cut" | "paste" | "duplicate";
@@ -23,33 +21,36 @@ export type ProductivityClipboardAction = "copy" | "cut" | "paste" | "duplicate"
 export function ProductivityToolbar({
   document,
   selectionIds,
-  propertyGrid,
   strings,
   enabled,
   structuralEnabled,
   duplicateEditable = true,
-  tabEnabled,
+  eventEditable = false,
+  eventPending = false,
   clipboardAvailable,
   canPaste,
   busy,
   contextMenu,
+  contextMenuOnly = false,
   onOperation,
   onClipboard,
   onProperties,
+  onOpenEvent,
   onCloseMenu,
 }: {
   document: DesignerDocument;
   selectionIds: string[];
-  propertyGrid?: PropertyGridData;
   strings: DesignerStrings;
   enabled: boolean;
   structuralEnabled: boolean;
   duplicateEditable?: boolean;
-  tabEnabled: boolean;
+  eventEditable?: boolean;
+  eventPending?: boolean;
   clipboardAvailable: boolean;
   canPaste: boolean;
   busy: boolean;
   contextMenu?: { x: number; y: number };
+  contextMenuOnly?: boolean;
   onOperation: (operation: SemanticOperation) => void;
   onClipboard: (
     action: ProductivityClipboardAction,
@@ -57,6 +58,7 @@ export function ProductivityToolbar({
     parentId: string,
   ) => void;
   onProperties: () => void;
+  onOpenEvent?: (targetId?: string, choose?: boolean) => void;
   onCloseMenu: () => void;
 }) {
   const controls = siblingSelection(document, selectionIds);
@@ -65,8 +67,8 @@ export function ProductivityToolbar({
   const anchor = primaryId ?? "";
   const parentForPaste = defaultPasteParent(document, selectionIds);
   const originalParent = defaultDuplicateParent(document, selectionIds);
-  const canArrange = enabled && ids.length >= 2;
-  const canReorder = enabled && ids.length >= 1;
+  const canArrange = enabled && !busy && ids.length >= 2;
+  const canReorder = enabled && !busy && ids.length >= 1;
   const canSelect = ids.length >= 1;
   const hasSelectedControl = selectionIds.some((id) =>
     document.controls.some((control) => control.id === id),
@@ -77,6 +79,13 @@ export function ProductivityToolbar({
   const pasteAllowed = clipboardAvailable && canPaste && !busy;
   const cutAllowed = canCopy && structuralEnabled;
   const duplicateAllowed = canCopy && structuralEnabled && duplicateEditable;
+  const canOpenEvent =
+    eventEditable &&
+    !eventPending &&
+    !busy &&
+    selectionIds.length === 1 &&
+    !!primaryId &&
+    !!onOpenEvent;
   const canRemove =
     selectionIds.some((id) =>
       document.controls.some(
@@ -94,12 +103,21 @@ export function ProductivityToolbar({
           'button[role="menuitem"]:not(:disabled)',
         ) ?? [],
       );
+    const popup = menuRef.current;
+    if (popup) {
+      const bounds = popup.getBoundingClientRect();
+      popup.style.left = `${Math.max(4, Math.min(contextMenu.x, window.innerWidth - bounds.width - 4))}px`;
+      popup.style.top = `${Math.max(4, Math.min(contextMenu.y, window.innerHeight - bounds.height - 4))}px`;
+    }
     items()[0]?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         onCloseMenu();
-        window.document.querySelector<HTMLElement>(".designer-viewport")?.focus();
+        window.document
+          .querySelector<HTMLElement>(".designer-viewport")
+          ?.focus({ preventScroll: true });
       } else if (
         menuRef.current?.contains(event.target as Node) &&
         ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
@@ -120,53 +138,14 @@ export function ProductivityToolbar({
     const outside = (event: PointerEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) onCloseMenu();
     };
-    window.addEventListener("keydown", keydown);
+    window.addEventListener("keydown", keydown, true);
     window.addEventListener("pointerdown", outside, true);
     return () => {
-      window.removeEventListener("keydown", keydown);
+      window.removeEventListener("keydown", keydown, true);
       window.removeEventListener("pointerdown", outside, true);
     };
   }, [contextMenu, onCloseMenu]);
 
-  const parentChoices = useMemo(() => {
-    const seen = new Set<string>();
-    const choices = eligibleParents(document, propertyGrid);
-    return choices.filter((id) => {
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-  }, [document, propertyGrid]);
-  const preferredParent = controls[0]?.parentId ?? "";
-  const [tabParent, setTabParent] = useState(preferredParent);
-  const [tabOrder, setTabOrder] = useState(() =>
-    eligibleTabOrder(document, propertyGrid, tabParent),
-  );
-  useEffect(() => {
-    const nextParent = parentChoices.includes(preferredParent) ? preferredParent : "";
-    setTabParent(nextParent);
-  }, [document, propertyGrid, preferredParent]);
-  useEffect(() => {
-    setTabOrder(eligibleTabOrder(document, propertyGrid, tabParent));
-  }, [document, propertyGrid, tabParent]);
-  const canonicalTabOrder = eligibleTabOrder(document, propertyGrid, tabParent);
-  const tabOrderChanged =
-    canonicalTabOrder.length === tabOrder.length &&
-    canonicalTabOrder.some((id, index) => id !== tabOrder[index]);
-  const tabIndexesAreSequential = tabOrder.every((id, index) => {
-    const state = propertyGrid?.controls[id]?.values.tabIndex;
-    return state?.present === true && typeof state.value === "number" && state.value === index;
-  });
-  const tabOrderNeedsApply = tabOrderChanged || !tabIndexesAreSequential;
-  const setTabPosition = (index: number, delta: -1 | 1) => {
-    const destination = index + delta;
-    if (destination < 0 || destination >= tabOrder.length) return;
-    setTabOrder((current) => {
-      const next = [...current];
-      [next[index], next[destination]] = [next[destination], next[index]];
-      return next;
-    });
-  };
   const clipboard = (action: ProductivityClipboardAction) =>
     onClipboard(
       action,
@@ -190,6 +169,11 @@ export function ProductivityToolbar({
     onProperties();
     onCloseMenu();
   };
+  const openEvent = () => {
+    if (!canOpenEvent || !primaryId) return;
+    onOpenEvent?.(primaryId, true);
+    onCloseMenu();
+  };
   const runClipboard = (action: ProductivityClipboardAction) => {
     clipboard(action);
     onCloseMenu();
@@ -205,177 +189,164 @@ export function ProductivityToolbar({
 
   return (
     <>
-      <section class="productivity-toolbar" aria-label={strings.productivity}>
+      <section
+        class="productivity-toolbar"
+        aria-label={strings.productivity}
+        hidden={contextMenuOnly}
+      >
         <div class="productivity-command-row">
-          <button type="button" disabled={!cutAllowed} onClick={() => clipboard("cut")}>
-            {strings.cut}
-          </button>
-          <button type="button" disabled={!canCopy} onClick={() => clipboard("copy")}>
-            {strings.copy}
-          </button>
-          <button type="button" disabled={!pasteAllowed} onClick={() => clipboard("paste")}>
-            {strings.paste}
-          </button>
-          <button type="button" disabled={!canRemove} onClick={remove}>
-            {strings.deleteItem}
-          </button>
-          <button type="button" disabled={!duplicateAllowed} onClick={() => clipboard("duplicate")}>
-            {strings.duplicate}
-          </button>
+          {(
+            [
+              ["cut", strings.cut, "screen-cut", cutAllowed],
+              ["copy", strings.copy, "copy", canCopy],
+              ["paste", strings.paste, "clippy", pasteAllowed],
+            ] as const
+          ).map(([action, label, icon, allowed]) => (
+            <button
+              type="button"
+              class="icon-button"
+              aria-label={label}
+              title={label}
+              disabled={!allowed}
+              onClick={() => clipboard(action)}
+            >
+              <Icon name={icon} />
+              <span class="sr-only">{label}</span>
+            </button>
+          ))}
           <button
             type="button"
-            disabled={!canReorder}
-            onClick={() => onOperation(reorderOperation(ids, "front"))}
+            class="icon-button"
+            aria-label={strings.deleteItem}
+            title={strings.deleteItem}
+            disabled={!canRemove}
+            onClick={remove}
           >
-            {strings.bringToFront}
+            <Icon name="trash" />
+            <span class="sr-only">{strings.deleteItem}</span>
           </button>
-          <button
-            type="button"
-            disabled={!canReorder}
-            onClick={() => onOperation(reorderOperation(ids, "back"))}
-          >
-            {strings.sendToBack}
-          </button>
-          <button type="button" disabled={!hasSelectedControl} onClick={showProperties}>
-            {strings.propertiesAction}
-          </button>
-          <span class="productivity-selection-count" aria-live="polite">
-            {strings.selectionCount}: {selectionIds.length}
-          </span>
+          <span class="toolbar-separator" aria-hidden="true" />
+          {ids.length >= 2 && (
+            <CommandMenu label={strings.align}>
+              {(
+                [
+                  ["left", strings.alignLeft],
+                  ["center", strings.alignCenter],
+                  ["right", strings.alignRight],
+                  ["top", strings.alignTop],
+                  ["middle", strings.alignMiddle],
+                  ["bottom", strings.alignBottom],
+                ] as const
+              ).map(([alignment, label]) => (
+                <button
+                  role="menuitem"
+                  type="button"
+                  disabled={!canArrange}
+                  onClick={() => onOperation(alignOperation(ids, anchor, alignment))}
+                >
+                  {label}
+                </button>
+              ))}
+            </CommandMenu>
+          )}
+          {ids.length >= 3 && (
+            <CommandMenu label={strings.distribute}>
+              <button
+                role="menuitem"
+                type="button"
+                disabled={!canArrange}
+                onClick={() => onOperation(distributeOperation(ids, "horizontal"))}
+              >
+                {strings.distributeHorizontal}
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                disabled={!canArrange}
+                onClick={() => onOperation(distributeOperation(ids, "vertical"))}
+              >
+                {strings.distributeVertical}
+              </button>
+            </CommandMenu>
+          )}
+          {ids.length >= 2 && (
+            <CommandMenu label={strings.sameSize}>
+              {(
+                [
+                  ["width", strings.sameWidth],
+                  ["height", strings.sameHeight],
+                  ["size", strings.sameDimensions],
+                ] as const
+              ).map(([dimension, label]) => (
+                <button
+                  role="menuitem"
+                  type="button"
+                  disabled={!canArrange}
+                  onClick={() => onOperation(sameSizeOperation(ids, anchor, dimension))}
+                >
+                  {label}
+                </button>
+              ))}
+            </CommandMenu>
+          )}
+          {ids.length >= 1 && (
+            <CommandMenu label={strings.order}>
+              {(
+                [
+                  ["front", strings.bringToFront],
+                  ["forward", strings.bringForward],
+                  ["backward", strings.sendBackward],
+                  ["back", strings.sendToBack],
+                ] as const
+              ).map(([command, label]) => (
+                <button
+                  role="menuitem"
+                  type="button"
+                  disabled={!canReorder}
+                  onClick={() => zOrder(command)}
+                >
+                  {label}
+                </button>
+              ))}
+            </CommandMenu>
+          )}
+          <CommandMenu label={strings.moreActions}>
+            <button
+              role="menuitem"
+              type="button"
+              disabled={!duplicateAllowed}
+              onClick={() => clipboard("duplicate")}
+            >
+              {strings.duplicate}
+            </button>
+            <button role="menuitem" type="button" disabled={!canOpenEvent} onClick={openEvent}>
+              {eventPending ? strings.eventPending : strings.openEvent}
+            </button>
+            <button
+              role="menuitem"
+              type="button"
+              disabled={!hasSelectedControl}
+              onClick={showProperties}
+            >
+              {strings.propertiesAction}
+            </button>
+          </CommandMenu>
         </div>
-        <details>
-          <summary>
-            {strings.align} / {strings.distribute} / {strings.sameSize}
-          </summary>
-          <div class="productivity-command-row">
-            {(
-              [
-                ["left", strings.alignLeft],
-                ["center", strings.alignCenter],
-                ["right", strings.alignRight],
-                ["top", strings.alignTop],
-                ["middle", strings.alignMiddle],
-                ["bottom", strings.alignBottom],
-              ] as const
-            ).map(([alignment, label]) => (
-              <button
-                type="button"
-                disabled={!canArrange}
-                onClick={() => onOperation(alignOperation(ids, anchor, alignment))}
-              >
-                {label}
-              </button>
-            ))}
-            <button
-              type="button"
-              disabled={!enabled || ids.length < 3}
-              onClick={() => onOperation(distributeOperation(ids, "horizontal"))}
-            >
-              {strings.distributeHorizontal}
-            </button>
-            <button
-              type="button"
-              disabled={!enabled || ids.length < 3}
-              onClick={() => onOperation(distributeOperation(ids, "vertical"))}
-            >
-              {strings.distributeVertical}
-            </button>
-            {(
-              [
-                ["width", strings.sameWidth],
-                ["height", strings.sameHeight],
-                ["size", strings.sameDimensions],
-              ] as const
-            ).map(([dimension, label]) => (
-              <button
-                type="button"
-                disabled={!canArrange}
-                onClick={() => onOperation(sameSizeOperation(ids, anchor, dimension))}
-              >
-                {label}
-              </button>
-            ))}
-            <button
-              type="button"
-              disabled={!canReorder}
-              onClick={() => onOperation(reorderOperation(ids, "forward"))}
-            >
-              {strings.bringForward}
-            </button>
-            <button
-              type="button"
-              disabled={!canReorder}
-              onClick={() => onOperation(reorderOperation(ids, "backward"))}
-            >
-              {strings.sendBackward}
-            </button>
-          </div>
-        </details>
-        <details>
-          <summary>{strings.tabOrder}</summary>
-          <div class="tab-order-editor">
-            <label>
-              {strings.tabOrderParent}
-              <select
-                aria-label={strings.tabOrderParent}
-                value={tabParent}
-                disabled={!tabEnabled || busy}
-                onChange={(event) => setTabParent(event.currentTarget.value)}
-              >
-                {parentChoices.map((parentId) => (
-                  <option value={parentId}>
-                    {parentId
-                      ? (document.controls.find((control) => control.id === parentId)?.name ??
-                        parentId)
-                      : document.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {tabOrder.length === 0 ? (
-              <p class="notice">{strings.noEditableTabOrder}</p>
-            ) : (
-              <ol>
-                {tabOrder.map((id, index) => {
-                  const control = document.controls.find((candidate) => candidate.id === id);
-                  if (!control) return null;
-                  return (
-                    <li key={id}>
-                      <span>
-                        {index}. {control.name}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label={`${strings.moveUp}: ${control.name}`}
-                        disabled={!tabEnabled || busy || index === 0}
-                        onClick={() => setTabPosition(index, -1)}
-                      >
-                        {strings.moveUp}
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`${strings.moveDown}: ${control.name}`}
-                        disabled={!tabEnabled || busy || index === tabOrder.length - 1}
-                        onClick={() => setTabPosition(index, 1)}
-                      >
-                        {strings.moveDown}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-            <button
-              type="button"
-              disabled={!tabEnabled || busy || !tabOrderNeedsApply}
-              onClick={() => onOperation(tabOrderOperation(tabParent, tabOrder))}
-            >
-              {strings.applyTabOrder}
-            </button>
-          </div>
-        </details>
       </section>
-      {contextMenu && (
+      {contextMenu && contextMenuOnly && (
+        <div
+          ref={menuRef}
+          class="designer-context-menu"
+          role="menu"
+          style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button role="menuitem" type="button" disabled={!canOpenEvent} onClick={openEvent}>
+            {eventPending ? strings.eventPending : strings.openEvent}
+          </button>
+        </div>
+      )}
+      {contextMenu && !contextMenuOnly && (
         <div
           ref={menuRef}
           class="designer-context-menu"
@@ -417,6 +388,9 @@ export function ProductivityToolbar({
             onClick={() => runClipboard("duplicate")}
           >
             {strings.duplicate}
+          </button>
+          <button role="menuitem" type="button" disabled={!canOpenEvent} onClick={openEvent}>
+            {eventPending ? strings.eventPending : strings.openEvent}
           </button>
           <hr />
           <button
@@ -464,25 +438,4 @@ export function ProductivityToolbar({
       )}
     </>
   );
-}
-
-function eligibleParents(document: DesignerDocument, propertyGrid?: PropertyGridData): string[] {
-  const eligibleIds = new Set(
-    document.controls
-      .filter(
-        (control) =>
-          control.type.toLowerCase() !== "page" &&
-          propertyGrid?.controls[control.id]?.descriptors.some(
-            (descriptor) => descriptor.field === "tabIndex",
-          ),
-      )
-      .map((control) => control.parentId ?? ""),
-  );
-  return [
-    "",
-    ...[...eligibleIds].filter((id) => {
-      const parent = id && document.controls.find((control) => control.id === id);
-      return !!parent && (isDesignerFrame(parent) || isDesignerPage(document, parent));
-    }),
-  ];
 }

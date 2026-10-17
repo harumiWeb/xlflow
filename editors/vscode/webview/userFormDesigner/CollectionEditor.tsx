@@ -94,10 +94,10 @@ export function CollectionEditor({
   return (
     <>
       {owner && (
-        <section class="collection-editor" aria-label={strings.pages}>
-          <h2>
+        <details class="collection-editor" aria-label={strings.pages} open>
+          <summary>
             {strings.pages}: {owner.name}
-          </h2>
+          </summary>
           {!pageEditable && <p class="notice">{strings.collectionReadOnly}</p>}
           <button
             disabled={pageDisabled}
@@ -151,13 +151,13 @@ export function CollectionEditor({
               </li>
             ))}
           </ul>
-        </section>
+        </details>
       )}
       {selected?.type.toLowerCase() === "tabstrip" && (
-        <section class="collection-editor" aria-label={strings.tabs}>
-          <h2>
+        <details class="collection-editor" aria-label={strings.tabs} open>
+          <summary>
             {strings.tabs}: {selected.name}
-          </h2>
+          </summary>
           {!tabEditable && <p class="notice">{strings.collectionReadOnly}</p>}
           <button
             disabled={tabDisabled || !tabTargets}
@@ -232,16 +232,25 @@ export function CollectionEditor({
               drafts={drafts}
               reply={reply}
               onCommit={(field, value) =>
-                onCommit([
-                  { type: "setTabProperty", controlId: selected.id, index: tabIndex, field, value },
-                ])
+                value === null || typeof value !== "object"
+                  ? onCommit([
+                      {
+                        type: "setTabProperty",
+                        controlId: selected.id,
+                        index: tabIndex,
+                        field,
+                        value,
+                      },
+                    ])
+                  : undefined
               }
             />
           )}
-        </section>
+        </details>
       )}
       {selected && canEditGeometry(selected) && (
-        <section class="collection-editor">
+        <details class="collection-editor">
+          <summary>{strings.moveToPage}</summary>
           <label>
             {strings.moveToPage}
             <select
@@ -267,7 +276,7 @@ export function CollectionEditor({
               ))}
             </select>
           </label>
-        </section>
+        </details>
       )}
     </>
   );

@@ -447,6 +447,18 @@ export class DraftState {
     return this.history.slice(0, this.cursor);
   }
 
+  get undoAvailable(): boolean {
+    return !this._conflicted && this.cursor > 0 && this.canUndo(this.history[this.cursor - 1]);
+  }
+
+  get redoAvailable(): boolean {
+    return (
+      !this._conflicted &&
+      this.cursor < this.history.length &&
+      this.canRedo(this.history[this.cursor])
+    );
+  }
+
   canUndo(frame: DraftFrame): boolean {
     return this.cursor > 0 && this.history[this.cursor - 1] === frame && frame.after === this._text;
   }

@@ -1,0 +1,105 @@
+import * as assert from "assert";
+import * as vscode from "vscode";
+import { isDesignerSource, openDesignerCommand } from "../../src/userFormEditor/openDesigner";
+import { designerResourceUri, designerSourceUri } from "../../src/userFormEditor/resource";
+
+export async function runOpenDesignerTests(): Promise<void> {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  assert.ok(folder, "the native test workspace is required");
+  const created: vscode.Uri[] = [];
+  try {
+    for (const extension of ["yaml", "yml", "json"]) {
+      const uri = vscode.Uri.joinPath(
+        folder.uri,
+        "src",
+        "forms",
+        "specs",
+        `ContextMenu.${extension}`,
+      );
+      created.push(uri);
+      const text =
+        extension === "json"
+          ? '{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"ContextMenu"},"controls":[]}\n'
+          : "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: ContextMenu\ncontrols: []\n";
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(text));
+      const document = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(document);
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(
+        uri,
+        document.positionAt(text.length),
+        extension === "json" ? " " : "# unsaved source\n",
+      );
+      assert.ok(await vscode.workspace.applyEdit(edit));
+      const dirtyText = document.getText();
+      assert.ok(await isDesignerSource(uri));
+      assert.strictEqual(
+        designerSourceUri(designerResourceUri(document.uri)).toString(),
+        document.uri.toString(),
+      );
+      await vscode.commands.executeCommand(openDesignerCommand, uri);
+      const matches = () =>
+        vscode.window.tabGroups.all
+          .flatMap((group) => group.tabs)
+          .filter(
+            (tab) =>
+              tab.input instanceof vscode.TabInputCustom &&
+              tab.input.uri.toString() === designerResourceUri(document.uri).toString(),
+          );
+      assert.strictEqual(
+        matches().length,
+        1,
+        "the context command opens the dedicated Designer resource",
+      );
+      await vscode.commands.executeCommand(openDesignerCommand, uri);
+      assert.strictEqual(matches().length, 1, "repeated opening reuses the Designer");
+      const tab = matches()[0];
+      assert.ok(tab.input instanceof vscode.TabInputCustom);
+      assert.strictEqual(designerSourceUri(tab.input.uri).toString(), document.uri.toString());
+      assert.strictEqual(document.getText(), dirtyText);
+      assert.ok(document.isDirty, "opening must not save source changes");
+      assert.strictEqual(
+        Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8"),
+        text,
+      );
+      // Restore the text without publishing, then clean up only this test's tabs.
+      const restore = new vscode.WorkspaceEdit();
+      restore.replace(
+        uri,
+        new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
+        text,
+      );
+      await vscode.workspace.applyEdit(restore);
+      await document.save();
+    }
+    assert.strictEqual(
+      await isDesignerSource(vscode.Uri.joinPath(folder.uri, "other.yaml")),
+      false,
+    );
+    assert.strictEqual(
+      await isDesignerSource(
+        vscode.Uri.joinPath(folder.uri, "src", "forms", "specs", "nested", "Other.yaml"),
+      ),
+      false,
+    );
+    assert.strictEqual(await isDesignerSource(vscode.Uri.parse("untitled:Main.yaml")), false);
+  } finally {
+    const sourceKeys = new Set(
+      created.flatMap((uri) => [
+        uri.toString(),
+        designerResourceUri(vscode.Uri.parse(uri.toString())).toString(),
+      ]),
+    );
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        if (
+          (tab.input instanceof vscode.TabInputCustom ||
+            tab.input instanceof vscode.TabInputText) &&
+          sourceKeys.has(tab.input.uri.toString())
+        )
+          await vscode.window.tabGroups.close(tab, true);
+      }
+    }
+    for (const uri of created) await vscode.workspace.fs.delete(uri);
+  }
+}

@@ -19,6 +19,7 @@ import { XlflowCapabilitiesService } from "./capabilities";
 import { XlflowRulesRegistryService } from "./rulesRegistry";
 import { setXlflowCapabilitiesService, setXlflowCliAvailabilityService } from "./xlflow";
 import { designerViewType, UserFormEditorProvider } from "./userFormEditor/provider";
+import { registerOpenDesignerCommand } from "./userFormEditor/openDesigner";
 
 let clientManager: XlflowLanguageClientManager | undefined;
 let testController: XlflowTestController | undefined;
@@ -53,6 +54,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     formEditor,
     formEditor.registerSaveCommand(),
+    registerOpenDesignerCommand(),
     vscode.window.registerCustomEditorProvider(designerViewType, formEditor, {
       supportsMultipleEditorsPerDocument: true,
     }),
@@ -133,6 +135,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     sessionManager,
     projectState,
     {
+      prepareBuildSources: (uris) => formEditor.prepareBuildSources(uris),
       refreshAll: refreshSelectedProject,
       refreshProject: () => {
         sidebar?.refreshProjectViews();

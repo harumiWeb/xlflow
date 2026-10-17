@@ -1,3 +1,119 @@
+# PR #933 review follow-up
+
+- [x] Validate checkbox/select submission against synchronous draft refs and regression tests.
+- [x] Preserve a staged image when a replacement picker is cancelled or fails; cover host transactions.
+- [x] Assess frm discovery errors against duplicate detection and selected-path link validation.
+- [x] Run extension checks before pushing confirmed fixes to the existing PR.
+
+Review disposition: checkbox/select changes synchronously update the draft ref
+and existing DOM submission tests pass. frm discovery stays fail-closed because
+an unreadable subtree can conceal a duplicate code target. Picture replacement
+is fixed with host/Webview regressions covering cancel, failure, successful
+replacement and late results after modal cancellation. Complete extension tests,
+type checks, lint, docs and scoped formatting pass.
+
+# Designer SpinButton appearance
+
+- [x] Replace text arrows with two raised buttons filling the control.
+- [x] Follow horizontal and vertical control proportions.
+- [x] Verify visual appearance and rebuild the VSIX.
+
+# Designer ScrollBar appearance
+
+- [x] Replace the centered text glyph with end arrows, track and raised thumb.
+- [x] Match horizontal and vertical auto-orientation to the preview dimensions.
+- [x] Verify native layout, visual appearance and rebuild the VSIX.
+
+# Designer Undo/Redo buttons
+
+- [x] Inspect host availability and shipped toolbar icon rendering.
+- [x] Verify actual mouse clicks against registered native Designer history.
+- [x] Fix confirmed defects and update regression coverage and VSIX.
+
+Validation: the bundled Codicon CSS lacks `undo`; the supported `discard` glyph
+fixes the icon and the glyph regression fails before/passes after the fix. Native
+VS Code tests exercise property text input, responsive pane navigation and actual
+Undo/Redo mouse clicks. The full suite, type checks, lint, docs and packaging pass.
+History availability follows confirmed Designer edits and native Undo/Redo state.
+
+# Designer native double-click
+
+- [x] Reproduce viewport-retargeted double-clicks missed by direct event dispatch.
+- [x] Recover the visual target without changing pointer capture or drag behavior.
+- [x] Verify native mouse double-clicks and rebuild the VSIX.
+
+Validation: the focused regression failed before the fix and passed afterward.
+The full VS Code suite passes with native Chromium control/form double-clicks
+and drag assertions. Type checks, lint, docs, scoped formatting, and packaging
+pass. Evidence: `C:\Users\HARUMI\orca\workspaces\xlflow\guppy\tmp_workspaces\userform-doubleclick-20261016\verification.md`.
+
+# Designer event code navigation
+
+- [x] Add an Excel-verified Go event catalogue and versioned LSP list/edit requests.
+- [x] Connect Designer double-click and event selection to targeted, native-undoable sidecar/frm code edits.
+- [x] Verify source publication, existing-handler navigation, stale requests and UI gestures.
+- [x] Verify generated code with real Excel and update contracts, guides and changelogs.
+
+Validation: full VS Code 1.142.0 suite, type checks, lint, documentation and
+changed-file format checks pass. Native tests cover targeted saving, code Undo,
+dirty buffers, both code modes, Page owners, unchanged preview refreshes and
+source/connection invalidation. Go LSP/UserForm suites pass. Real Excel verified
+all 222 declarations and representative runtime events, with saved worksheet
+sentinels in sidecar and frm modes. Review findings about linked code paths and
+existing-file creation were fixed; junction regressions pass. Excel sessions
+stopped. Exact commands, evidence and limits:
+`C:\Users\HARUMI\orca\workspaces\xlflow\guppy\tmp_workspaces\userform-events-20261016\verification.md`.
+
+# Designer actions and sidebar form build
+
+- [x] Add the source-editor context command with the existing FormSpec/resource boundary.
+- [x] Reuse native Undo/Redo and existing subtree confirmation for toolbar history and Backspace.
+- [x] Add individual/all form builds with targeted explicit saving, session reuse and partial-failure reporting.
+- [x] Verify extension regressions and real Excel builds; update specifications, guides and changelogs.
+
+Validation: full VS Code 1.142.0 tests, lint, documentation and changed-file
+format checks pass. Real Excel 16.0 x64 passed individual/batch creation,
+overwrite, existing-session reuse, partial-failure retention, nested snapshots
+and code-behind runtime assertions. Review fixed build save targets to follow
+the CLI's sidecar authority in both display modes. All test sessions stopped.
+Exact commands, results and limits:
+`C:\Users\HARUMI\orca\workspaces\xlflow\guppy\tmp_workspaces\designer-actions-build-20261016\verification.md`.
+
+# Designer concrete property inputs
+
+- [x] Remove scalar type/null selectors and typed-object null selectors while retaining metadata authority.
+- [x] Preserve existing absent/null source states until concrete confirmation; keep false, zero and empty strings valid. For `valueType: any`, retain an authored concrete type or use text without type inference.
+- [x] Remove only obsolete selector CSS and align specifications, Japanese/English guides and both changelogs; leave FormSpec/API null support unchanged.
+- [x] Validate targeted property-grid regressions, extension checks and formatting before marking complete.
+
+Validation: `test:designer` and full `pnpm run test` passed with VS Code 1.142.0,
+including existing null scalar/object preservation and concrete-value edits.
+Lint, docs, changed-file formatting and diff checks pass. Dark Japanese and
+narrow light English displays were inspected; bounded read-only review found no
+actionable issues. This UI-only change did not rerun Excel integration.
+
+# UserForm typed property editors
+
+- [x] Reset independent control Font presentation to prevent inherited family, size, Bold, Italic, Underline and StrikeThrough. Real Webview regressions cover Form/Frame, default and partial child Fonts, explicit child Fonts and source immutability; full VS Code 1.142.0 tests, lint, docs and formatting pass.
+
+- [x] Prevent Form/Frame ForeColor inheriting into default child controls. Reproduced with computed-style assertions in real VS Code, then verified independent default/explicit/nested colors; full VS Code 1.142.0 tests, lint, docs and formatting checks pass.
+
+- [x] Add VBE-style 48-color Palette/System choices, preserving modal-only previews, raw OLE input and metadata authority for system colors; verify selection, keyboard navigation, Cancel and atomic OK.
+
+- [x] Add partial Font, semantic Color and enum contracts with backward-compatible metadata and source-preserving editing.
+- [x] Implement shared binary read/generate/mutate/projection and preserve unedited state.
+- [x] Add modal editor registry, live previews, native Image assets and atomic Position editing.
+- [x] Verify old/new capability combinations, cancellation, stale drafts and native Undo/Redo.
+- [x] Update ADR/specs/schema/guides/changelogs and validate session-backed Excel and pack artifacts.
+
+Validation: full UserForm and LSP tests, focused CLI tests, vet, complete VS Code
+1.142.0 tests, lint, documentation and formatting checks passed. Real Excel
+16.0 x64 passed full appearance/image assertions, blank/template pack artifacts,
+partial-update preservation and file push. Review fixed rollback reference checks
+for unsaved buffers and closed Designer checkpoints. Evidence and exact commands:
+`C:\Users\HARUMI\orca\workspaces\xlflow\guppy\tmp_workspaces\userform-property-editors-20261015-202945\verification.md`.
+No remote CI or supervised final review was run.
+
 # Designer form resize
 
 - [x] Add selected form edge/corner drag handles and client-size preview with zoom, snapping and child bounds.

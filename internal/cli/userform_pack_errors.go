@@ -36,7 +36,7 @@ func (a *app) writePackDiagnostics(err error, blank bool, template string) (bool
 			origin := "template"
 			if blank {
 				origin = "pack.blank.code_page"
-				suggestion = "Set [pack.blank].code_page in xlflow.toml to the intended VBA project codepage (932 for Japanese). Keep source files as UTF-8."
+				suggestion = "Set [pack.blank].code_page in xlflow.toml to the intended VBA project codepage. For a Japanese project, add or update this section:\n[pack.blank]\ncode_page = 932\nKeep source files as UTF-8."
 			}
 			issues = append(issues, lint.Issue{Severity: "error", Code: "pack_source_encoding_failed", File: item.Path, Line: item.Line, Column: item.Column, Message: fmt.Sprintf("Character %q (U+%04X) cannot be represented by VBA codepage %d.", item.Rune, item.Rune, item.CodePage), Suggestion: suggestion})
 			payload := item.Details()

@@ -233,6 +233,33 @@ async function run() {
   );
   assert.equal(edits().length, 0);
   await refresh(1);
+  const undoButton = root.querySelector<HTMLButtonElement>(".history-undo")!;
+  const redoButton = root.querySelector<HTMLButtonElement>(".history-redo")!;
+  assert.equal(undoButton.disabled, true);
+  assert.equal(redoButton.disabled, true);
+  await host({ type: "historyState", canUndo: true, canRedo: false });
+  assert.equal(undoButton.disabled, false);
+  assert.equal(redoButton.disabled, true);
+  for (const state of [
+    { saving: true, conflicted: false },
+    { saving: false, conflicted: true },
+  ]) {
+    await host({ type: "draftState", dirty: true, ...state });
+    assert.equal(undoButton.disabled, true, "history is disabled while saving or conflicted");
+  }
+  await host({ type: "draftState", dirty: true, saving: false, conflicted: false });
+  await click(undoButton);
+  const historyRequest = messages.at(-1)!;
+  assert.equal(historyRequest.type, "history");
+  if (historyRequest.type !== "history") throw new Error("Expected history request");
+  assert.equal(isWebviewMessage(historyRequest), true);
+  assert.equal(isWebviewMessage({ ...historyRequest, action: "delete" }), false);
+  assert.equal(isWebviewMessage({ ...historyRequest, requestId: -1 }), false);
+  assert.equal(isWebviewMessage({ ...historyRequest, version: -1 }), false);
+  assert.equal(undoButton.disabled, true, "only one history request can be in flight");
+  await host({ type: "editResult", requestId: historyRequest.requestId });
+  await host({ type: "historyState", canUndo: false, canRedo: true });
+  assert.equal(redoButton.disabled, false);
   assert.ok(
     !root.textContent?.includes(designerStrings.readOnly),
     "structural-only servers are editable",
@@ -346,7 +373,23 @@ async function run() {
     "Delete from a focused Page tab must not delete the previously selected control",
   );
   await act(() => (root.querySelector(".designer-viewport") as HTMLElement).focus());
-  await key(root.querySelector(".designer-viewport")!, "Delete");
+  const viewport = root.querySelector(".designer-viewport")!;
+  for (const guard of [
+    { repeat: true },
+    { isComposing: true },
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+    { shiftKey: true },
+  ]) {
+    await act(() =>
+      viewport.dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", { key: "Backspace", bubbles: true, ...guard }),
+      ),
+    );
+    assert.equal(edits().length, beforeFocusedPageDelete, "guarded Backspace never deletes");
+  }
+  await key(viewport, "Backspace");
   assert.deepEqual(edits().at(-1)!.operations, [
     { type: "removeControl", controlId: "label", cascade: true },
   ]);
@@ -410,6 +453,7 @@ async function run() {
   });
   const nameInput = root.querySelector<HTMLInputElement>('[data-property-field="name"] input')!;
   await key(nameInput, "Delete");
+  await key(nameInput, "Backspace");
   assert.equal(edits().length, beforePage, "Delete in a property input cannot delete a control");
   await act(() => {
     nameInput.value = "RenamedLabel";

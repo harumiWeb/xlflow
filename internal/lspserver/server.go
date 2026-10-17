@@ -788,7 +788,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	s.codeActionDocumentChanges.Store(versionedActions)
 	s.applyDeclarationPriorityOptions(params)
 	capabilities := s.handler.CreateServerCapabilities()
-	capabilities.Experimental = map[string]any{"declarationPriority": true, "userFormPreview": true, "userFormEdit": true, "userFormPropertyEdit": true, "userFormStructuralEdit": true, "userFormParentEdit": true, "userFormPageEdit": true, "userFormTabEdit": true, "userFormProductivityEdit": true}
+	capabilities.Experimental = map[string]any{"declarationPriority": true, "userFormPreview": true, "userFormEdit": true, "userFormPropertyEdit": true, "userFormPropertyEditors": 1, "userFormPicture": true, "userFormStructuralEdit": true, "userFormParentEdit": true, "userFormPageEdit": true, "userFormTabEdit": true, "userFormProductivityEdit": true, "userFormEvents": 1}
 	if capabilities.CodeLensProvider != nil {
 		resolveProvider := false
 		capabilities.CodeLensProvider.ResolveProvider = &resolveProvider

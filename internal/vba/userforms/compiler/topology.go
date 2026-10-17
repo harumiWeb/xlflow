@@ -211,6 +211,23 @@ func CompileEdits(base *oforms.Form, before, after spec.FormSpec, codePage uint1
 		}
 		return nil, &Error{Code: code, Form: base.Name, Property: "controls", Reason: err.Error(), Cause: err}
 	}
+	var added spec.FormSpec
+	for _, control := range next.Controls {
+		previous, retained := oldByName[control.Name]
+		if !retained || !strings.EqualFold(previous.Type, control.Type) {
+			added.Controls = append(added.Controls, control)
+		}
+	}
+	edits, err := generationTypedEdits(added)
+	if err != nil {
+		return nil, templateError(base, Invalid, "", "controls", err.Error())
+	}
+	if len(edits) > 0 {
+		result, err = oforms.ApplyEdits(result, edits, codePage)
+		if err != nil {
+			return nil, templateError(base, Invalid, "", "controls", err.Error())
+		}
+	}
 	return compileTabIntent(base, result, old, next, codePage)
 }
 

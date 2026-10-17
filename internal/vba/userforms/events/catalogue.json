@@ -1,0 +1,1334 @@
+[
+  {
+    "type": "UserForm",
+    "name": "Activate",
+    "signature": "Private Sub {object}_Activate()",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "AddControl",
+    "signature": "Private Sub {object}_AddControl(ByVal Control As MSForms.Control)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Control As MSForms.Control, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal State As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Control As MSForms.Control, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click()",
+    "isDefault": true
+  },
+  {
+    "type": "UserForm",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "Deactivate",
+    "signature": "Private Sub {object}_Deactivate()",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "Initialize",
+    "signature": "Private Sub {object}_Initialize()",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "Layout",
+    "signature": "Private Sub {object}_Layout()",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "QueryClose",
+    "signature": "Private Sub {object}_QueryClose(Cancel As Integer, CloseMode As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "RemoveControl",
+    "signature": "Private Sub {object}_RemoveControl(ByVal Control As MSForms.Control)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "Resize",
+    "signature": "Private Sub {object}_Resize()",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "Scroll",
+    "signature": "Private Sub {object}_Scroll(ByVal ActionX As MSForms.fmScrollAction, ByVal ActionY As MSForms.fmScrollAction, ByVal RequestDx As Single, ByVal RequestDy As Single, ByVal ActualDx As MSForms.ReturnSingle, ByVal ActualDy As MSForms.ReturnSingle)",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "Terminate",
+    "signature": "Private Sub {object}_Terminate()",
+    "isDefault": false
+  },
+  {
+    "type": "UserForm",
+    "name": "Zoom",
+    "signature": "Private Sub {object}_Zoom(Percent As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "Label",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "Label",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "Label",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click()",
+    "isDefault": true
+  },
+  {
+    "type": "Label",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "Label",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "Label",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "Label",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "Label",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "AfterUpdate",
+    "signature": "Private Sub {object}_AfterUpdate()",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "BeforeUpdate",
+    "signature": "Private Sub {object}_BeforeUpdate(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "Change",
+    "signature": "Private Sub {object}_Change()",
+    "isDefault": true
+  },
+  {
+    "type": "TextBox",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "DropButtonClick",
+    "signature": "Private Sub {object}_DropButtonClick()",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "TextBox",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "AfterUpdate",
+    "signature": "Private Sub {object}_AfterUpdate()",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "BeforeUpdate",
+    "signature": "Private Sub {object}_BeforeUpdate(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "Change",
+    "signature": "Private Sub {object}_Change()",
+    "isDefault": true
+  },
+  {
+    "type": "ComboBox",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click()",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "DropButtonClick",
+    "signature": "Private Sub {object}_DropButtonClick()",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "ComboBox",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "AfterUpdate",
+    "signature": "Private Sub {object}_AfterUpdate()",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "BeforeUpdate",
+    "signature": "Private Sub {object}_BeforeUpdate(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "Change",
+    "signature": "Private Sub {object}_Change()",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click()",
+    "isDefault": true
+  },
+  {
+    "type": "ListBox",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "ListBox",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click()",
+    "isDefault": true
+  },
+  {
+    "type": "CommandButton",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "CommandButton",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "AfterUpdate",
+    "signature": "Private Sub {object}_AfterUpdate()",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "BeforeUpdate",
+    "signature": "Private Sub {object}_BeforeUpdate(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "Change",
+    "signature": "Private Sub {object}_Change()",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click()",
+    "isDefault": true
+  },
+  {
+    "type": "CheckBox",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "CheckBox",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "AfterUpdate",
+    "signature": "Private Sub {object}_AfterUpdate()",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "BeforeUpdate",
+    "signature": "Private Sub {object}_BeforeUpdate(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "Change",
+    "signature": "Private Sub {object}_Change()",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click()",
+    "isDefault": true
+  },
+  {
+    "type": "OptionButton",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "OptionButton",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "AfterUpdate",
+    "signature": "Private Sub {object}_AfterUpdate()",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "BeforeUpdate",
+    "signature": "Private Sub {object}_BeforeUpdate(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "Change",
+    "signature": "Private Sub {object}_Change()",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click()",
+    "isDefault": true
+  },
+  {
+    "type": "ToggleButton",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "ToggleButton",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "AfterUpdate",
+    "signature": "Private Sub {object}_AfterUpdate()",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "BeforeUpdate",
+    "signature": "Private Sub {object}_BeforeUpdate(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "Change",
+    "signature": "Private Sub {object}_Change()",
+    "isDefault": true
+  },
+  {
+    "type": "SpinButton",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "SpinDown",
+    "signature": "Private Sub {object}_SpinDown()",
+    "isDefault": false
+  },
+  {
+    "type": "SpinButton",
+    "name": "SpinUp",
+    "signature": "Private Sub {object}_SpinUp()",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "AfterUpdate",
+    "signature": "Private Sub {object}_AfterUpdate()",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "BeforeUpdate",
+    "signature": "Private Sub {object}_BeforeUpdate(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "Change",
+    "signature": "Private Sub {object}_Change()",
+    "isDefault": true
+  },
+  {
+    "type": "ScrollBar",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "ScrollBar",
+    "name": "Scroll",
+    "signature": "Private Sub {object}_Scroll()",
+    "isDefault": false
+  },
+  {
+    "type": "Image",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": true
+  },
+  {
+    "type": "Image",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "Image",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "Image",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "Image",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "Image",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "AddControl",
+    "signature": "Private Sub {object}_AddControl(ByVal Control As MSForms.Control)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Cancel As MSForms.ReturnBoolean, ByVal Control As MSForms.Control, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal State As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Cancel As MSForms.ReturnBoolean, ByVal Control As MSForms.Control, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click()",
+    "isDefault": true
+  },
+  {
+    "type": "Frame",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "Layout",
+    "signature": "Private Sub {object}_Layout()",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "RemoveControl",
+    "signature": "Private Sub {object}_RemoveControl(ByVal Control As MSForms.Control)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "Scroll",
+    "signature": "Private Sub {object}_Scroll(ByVal ActionX As MSForms.fmScrollAction, ByVal ActionY As MSForms.fmScrollAction, ByVal RequestDx As Single, ByVal RequestDy As Single, ByVal ActualDx As MSForms.ReturnSingle, ByVal ActualDy As MSForms.ReturnSingle)",
+    "isDefault": false
+  },
+  {
+    "type": "Frame",
+    "name": "Zoom",
+    "signature": "Private Sub {object}_Zoom(Percent As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "AddControl",
+    "signature": "Private Sub {object}_AddControl(ByVal Index As Long, ByVal Control As MSForms.Control)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Index As Long, ByVal Cancel As MSForms.ReturnBoolean, ByVal Control As MSForms.Control, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal State As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Index As Long, ByVal Cancel As MSForms.ReturnBoolean, ByVal Control As MSForms.Control, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "Change",
+    "signature": "Private Sub {object}_Change()",
+    "isDefault": true
+  },
+  {
+    "type": "MultiPage",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click(ByVal Index As Long)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Index As Long, ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Index As Long, ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "Layout",
+    "signature": "Private Sub {object}_Layout(ByVal Index As Long)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Index As Long, ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Index As Long, ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Index As Long, ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "RemoveControl",
+    "signature": "Private Sub {object}_RemoveControl(ByVal Index As Long, ByVal Control As MSForms.Control)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "Scroll",
+    "signature": "Private Sub {object}_Scroll(ByVal Index As Long, ByVal ActionX As MSForms.fmScrollAction, ByVal ActionY As MSForms.fmScrollAction, ByVal RequestDx As Single, ByVal RequestDy As Single, ByVal ActualDx As MSForms.ReturnSingle, ByVal ActualDy As MSForms.ReturnSingle)",
+    "isDefault": false
+  },
+  {
+    "type": "MultiPage",
+    "name": "Zoom",
+    "signature": "Private Sub {object}_Zoom(ByVal Index As Long, Percent As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "BeforeDragOver",
+    "signature": "Private Sub {object}_BeforeDragOver(ByVal Index As Long, ByVal Cancel As MSForms.ReturnBoolean, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal DragState As MSForms.fmDragState, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "BeforeDropOrPaste",
+    "signature": "Private Sub {object}_BeforeDropOrPaste(ByVal Index As Long, ByVal Cancel As MSForms.ReturnBoolean, ByVal Action As MSForms.fmAction, ByVal Data As MSForms.DataObject, ByVal X As Single, ByVal Y As Single, ByVal Effect As MSForms.ReturnEffect, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "Change",
+    "signature": "Private Sub {object}_Change()",
+    "isDefault": true
+  },
+  {
+    "type": "TabStrip",
+    "name": "Click",
+    "signature": "Private Sub {object}_Click(ByVal Index As Long)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "DblClick",
+    "signature": "Private Sub {object}_DblClick(ByVal Index As Long, ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "Enter",
+    "signature": "Private Sub {object}_Enter()",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "Error",
+    "signature": "Private Sub {object}_Error(ByVal Number As Integer, ByVal Description As MSForms.ReturnString, ByVal SCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, ByVal CancelDisplay As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "Exit",
+    "signature": "Private Sub {object}_Exit(ByVal Cancel As MSForms.ReturnBoolean)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "KeyDown",
+    "signature": "Private Sub {object}_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "KeyPress",
+    "signature": "Private Sub {object}_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "KeyUp",
+    "signature": "Private Sub {object}_KeyUp(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "MouseDown",
+    "signature": "Private Sub {object}_MouseDown(ByVal Index As Long, ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "MouseMove",
+    "signature": "Private Sub {object}_MouseMove(ByVal Index As Long, ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  },
+  {
+    "type": "TabStrip",
+    "name": "MouseUp",
+    "signature": "Private Sub {object}_MouseUp(ByVal Index As Long, ByVal Button As Integer, ByVal Shift As Integer, ByVal X As Single, ByVal Y As Single)",
+    "isDefault": false
+  }
+]

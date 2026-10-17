@@ -12,7 +12,13 @@ saved through the VS Code document lifecycle.
 The extension registers `xlflow.userFormDesigner` through
 `CustomEditorProvider` as an optional custom editor for `.yaml`, `.yml`, and
 `.json` files. Its `option` priority keeps the normal text editor available.
-Users can choose the visual editor with **Reopen Editor With...**.
+Users can choose the visual editor with **Reopen Editor With...** or the
+**xlflow: Open in Designer** source-editor context command. The command is
+available for local YAML/YML/JSON files and checks the same configured `specs`
+directory boundary before opening. It retains unsaved text and reuses the
+dedicated Designer resource without saving the source.
+Use the URI of the opened `TextDocument` when constructing that resource so
+Windows drive-letter normalization cannot disagree with its embedded source URI.
 Opening the file with the Designer redirects to its dedicated
 `xlflow-userform-designer` editor resource. The resource maps back to the
 original file URI, which remains the LSP and source-edit target. Separate
@@ -26,6 +32,65 @@ and other JSON files are not UserForm documents. The file must belong to an
 xlflow project with `xlflow.toml` and be handled by the currently selected
 project's single xlflow LSP client. Opening a document associated with another
 project, or without a compatible LSP connection, produces an editor error.
+
+## Workspace UI
+
+The Webview fills its editor area. A compact header shows the form name,
+Designer view, **Open source beside Designer**, explicit Save, and pending-source
+state. Source opening retains the existing side-by-side text-editor behavior;
+it does not publish the draft. Conflict and error messages stay available above
+the workspace.
+
+The workspace has a 160 px Toolbox, a flexible canvas, and a 300 px right pane.
+Each pane scrolls independently. Below 900 px, Toolbox and the right pane open
+from toolbar buttons as overlays, with only one overlay open at a time.
+Canvas scroll position is retained in Webview state. Grid, Snap, Zoom, selection
+count, and single-control bounds appear in the footer. These display settings
+are never FormSpec edits.
+
+Toolbox groups ordinary controls under Common and Frame/MultiPage/TabStrip under
+Containers. Neutral controls use VS Code hover, selection, focus, and contrast
+tokens. The canvas artboard retains MSForms preview colors; editor themes style
+the surrounding workspace, not authored control appearance. Codicon CSS/font
+assets and their licence are bundled locally under the Webview resource root.
+
+The single-row command toolbar exposes Undo/Redo and Cut/Copy/Paste/Delete as labelled icon
+buttons, with Duplicate and Properties in More actions. Align and Size appear
+for two or more eligible siblings; Distribute appears for three or more; Order
+appears for at least one. Existing capability and busy guards still determine
+whether commands can execute. Menus support arrow/Home/End navigation, Escape,
+outside dismissal, and viewport-bound placement.
+
+Undo/Redo buttons delegate to VS Code native history for the dedicated Designer
+resource. They never introduce a Webview history stack or operate on a regular
+source editor. Availability follows host history state; edits, saving, conflicts
+and modal editors prevent toolbar history actions until the interaction finishes.
+
+Both history icons must resolve to glyphs in the bundled Codicon CSS. Undo uses
+the `discard` glyph because the bundled font does not define `undo`. Verify
+history navigation with native mouse clicks after a property edit through the UI,
+including the responsive properties pane, rather than only posting history messages.
+
+The right pane has Properties, Structure, and Tab order tabs. Inactive panels
+remain mounted, preserving field drafts, replies, collection state, and pending
+local tab order. Tabs support arrow/Home/End navigation. Tab-order document and
+parent changes reset the local order; changing right-pane tabs does not.
+
+Properties use two columns (name/value), initially expanded category sections,
+and a target name/type header. Property inputs offer concrete values without
+type or explicit-null selectors. Existing absent and null source states remain
+unchanged until concrete confirmation. Presence, scalar values, numeric precision,
+and edit confirmation retain the contracts below. Existing Page/TabStrip editors and
+Page destinations remain in collapsible sections within Properties.
+
+Structure displays the form and canonical parent hierarchy in stable sibling
+z-order, including invisible and custom controls. TabStrip tab records are not
+controls and do not appear as children. Selection mirrors canvas selection;
+tree activation selects one target. Selecting a descendant on an inactive Page
+reveals its ancestor Pages and scrolls the rendered target into view without
+editing selectedIndex or any source field. Form activation selects form
+properties. Arrow keys navigate/expand/collapse, Home/End move focus, and
+Enter/Space activate selection. Structure does not author parent changes.
 
 ## Deferred-save draft and document lifecycle
 
@@ -46,7 +111,8 @@ Neither the extension nor the Designer changes the user's global
 AutoSave behavior continue normally; edits in that document appear in the
 Designer immediately.
 
-Only the Designer Save button and its Designer-scoped Ctrl+S/Cmd+S command
+The Designer Save button, its Designer-scoped Ctrl+S/Cmd+S command, and the
+explicitly confirmed **Save and Build** action
 publish the current validated draft. Reconcile against the newest open
 `TextDocument`, apply source-preserving edits through VS Code document APIs,
 and call `TextDocument.save()`; never write the workspace file directly. On
@@ -121,6 +187,124 @@ VS Code backup and hot-exit recovery remain supported in addition to the
 URI-keyed internal checkpoint. Restoring a checkpoint recovers the pending
 source draft; source publication remains an explicit Designer action.
 
+## Sidebar form builds
+
+`xlflow.buildUserForm` builds the selected sidebar form; `xlflow.buildAllUserForms`
+builds all forms with canonical Specs in the selected project. Individual build
+is unavailable without a Spec. All-form builds exclude missing Specs with a
+reported count, reject duplicate Specs, and run in name order. Discovery uses
+the configured forms root and accepts YAML/YML/JSON directly inside `specs`.
+
+Before CLI mutation, show the configured workbook and target forms and confirm
+replacement of existing forms. Separately offer **Save and Build** or Cancel
+when targeted Designer drafts, source buffers or code-behind buffers have
+unsaved changes. Publish drafts through the provider's explicit save path,
+including retained checkpoints, and save only the targeted text documents.
+Any source conflict or failed save stops the build before workbook mutation.
+Build code inputs follow `discoverFormWriteComponent`: a matching
+`code/<FormName>.bas` is authoritative regardless of `[userform].code_source`;
+without it, workbook code is preserved. Do not derive build save targets from
+the sidebar's `.frm` display mode or save `.frm` as a substitute for the sidecar.
+
+Reuse a matching live session or create one, run each
+`form build <spec> --overwrite --session --no-save` sequentially through existing
+CLI coordination, and save the workbook once after all succeed. Stop only a
+session created by this operation after successful save. Stop subsequent builds
+on failure, retain the session with pending changes, and report completed,
+failed and unexecuted forms. Batch builds are not atomic. Refresh forms and
+workbook/session status after success or failure, and prevent concurrent build
+commands. CLI and FormSpec contracts remain unchanged.
+
+## Event code navigation
+
+Single-click retains normal selection. Double-click on one standard control or
+the form background opens its default event. **Open event…** in selected
+control actions and the Structure context menu opens a native event picker.
+Nested targets must not bubble to a parent. Ignore drag/resize/marquee gestures,
+placement mode, multiple selection, modal editors, pending requests, saving,
+conflicts and invalid previews. Page/Tab entries target their owning MultiPage
+or TabStrip rather than generating independent Page/Tab procedures.
+
+Pointer capture can retarget a native double-click to the viewport even after
+pointerup releases capture. In that case resolve the actual hit element using
+the mouse coordinates, then apply the same form/target and exclusion checks.
+
+The Go event catalogue owns the supported event set, declaration parameters and
+defaults for UserForm and the 14 standard Toolbox types. It is independent of
+TypeDB's incomplete event-generation metadata. Unsupported custom controls have
+no generated signatures. The Webview sends stable target IDs, never arbitrary
+procedure declarations or destination paths.
+
+The LSP advertises `experimental.userFormEvents: 1`. An older server keeps other
+Designer features available with event actions disabled. The host obtains an
+event list with `xlflow/userFormEvents` and an insertion/navigation plan with
+`xlflow/userFormEventEdit`. Both operate on explicitly supplied source text and
+echo revisions. The edit request additionally supplies the current code URI,
+version, text, code source mode, indentation and newline; the response contains
+minimal text edits and a UTF-16 body selection. Requests cannot target unrelated
+code files or mismatch the configured source mode.
+The response's `created` flag means a new handler was generated, including when
+the code file already exists. File creation is a separate host decision.
+
+Before code generation, explicitly publish and save only the targeted FormSpec
+if its Designer draft or text buffer is dirty, with **Save and Continue** or
+Cancel. Native custom-document Auto Save is not explicit source publication.
+After saving or picking an event, revalidate the source, selected target and
+configuration. A later cancellation does not roll back a completed source save.
+
+Code destination follows `[userform].code_source`, including its legacy default:
+sidecar mode edits the real-cased `code/<FormName>.bas`, creating it with
+`Option Explicit` when absent; frm mode edits an existing matching exported
+form's VBA body. Preserve Designer/Attribute sections and `.frx` bytes. Refuse
+ambiguous names, duplicate candidates, missing frm files and inconsistent
+Spec basename / form name / frm identity. Do not implicitly migrate code modes
+or synchronize another artifact. `form build` retains its existing sidecar-only
+code authority described above.
+
+Code paths stay inside the workspace and must not traverse symbolic links or
+Windows junctions, including a linked code file. Check existing path components
+before proposing or applying edits; missing sidecar suffixes remain valid.
+
+Use the existing VBA syntax parser for case-insensitive top-level declaration
+lookup; comments and string literals cannot identify a handler. An unambiguous
+existing Sub opens at its body without changing the declaration or contents.
+Ambiguous/conditional declarations, incompatible same-name declarations and
+unsafe syntax prevent generation. Append missing handlers with the verified
+`Private Sub` declaration, an indented blank body and `End Sub`. Retain existing
+newline style and use the code editor's indentation settings.
+
+Serialize code operations by destination URI, read dirty code buffers as the
+authority and reject stale source/code revisions before applying one native
+WorkspaceEdit. Code-editor Undo is separate from Designer draft history. Open
+and reveal the resulting body beside Designer; do not auto-save code, build a
+workbook, invoke Excel or run a procedure. Renaming, deleting or copying layout
+controls does not rename, delete or transplant existing event handlers.
+
+An unchanged preview replay or refresh does not invalidate an event request.
+Revalidate actual source revisions and target identities; connection loss,
+invalid documents and changed code-source settings still invalidate the request.
+
+### VBE event evidence
+
+Excel 16.0 x64's `CodeModule.CreateEventProc` produced 222 supported declarations
+across UserForm and the 14 standard types. The catalogue retains exact ByVal,
+implicit ByRef and `MSForms.Return*` parameter declarations, including Index on
+applicable MultiPage/TabStrip events. TypeLib default flags confirm Click for
+UserForm, Label, Frame, CommandButton, ListBox, CheckBox, OptionButton and
+ToggleButton; Change for TextBox, ComboBox, SpinButton, ScrollBar, MultiPage
+and TabStrip. Image's Click/DblClick are hidden and CreateEventProc rejects
+them. An actual VBE Designer double-click generates Image BeforeDragOver, so
+that is its visible default. Owned Excel process exit was confirmed after
+declaration collection and the native Image gesture observation.
+
+Required regressions cover the complete catalogue, exact parameter types,
+existing code navigation, comment/string false matches, conditional/duplicate
+declarations, newline preservation, UTF-16 positions, source-save cancellation,
+dirty buffers, new-sidecar Undo, stale replies, repeated gestures, custom roots,
+both code modes and older-server capability fallback. Focused real Excel
+validation must compile generated declarations and exercise representative
+runtime events; source-only tests cannot establish handler compatibility.
+
 ## Source and preview protocol
 
 The extension host reads the URI-shared custom-document draft, including
@@ -169,6 +353,19 @@ The host-to-Webview protocol carries a rendered `document`, an
 signal that it is ready and can ask VS Code to open the backing document in the
 normal text editor. Completed geometry interactions send semantic edits; the
 Webview never serializes or replaces the source document.
+
+## Typed editor version 1
+
+The opt-in Font, Color, Image and Position framework is specified in
+[userform-property-editors.md](userform-property-editors.md), supplementing the
+scalar grid below. `userFormPropertyEditors: 1` plus preview request
+`propertyEditorVersion: 1` enables Go-derived editor kinds and child metadata;
+older clients retain scalar metadata. Dedicated modal input previews the
+Canvas without changing the shared Designer draft or native history. OK is
+one validated Designer action; explicit Designer Save still publishes source.
+External source changes or LSP restart retain modal input, remove temporary
+preview and disable OK until the editor is reopened. Property names remain
+English; actions/help/errors remain localized.
 
 ## Rendering
 
@@ -429,8 +626,11 @@ Toolbox creates a new control. On successful insertion, select the new
 control and return the Toolbox to Pointer. Escape cancels pending placement
 without a source edit.
 
-The Designer offers a Delete toolbar action and handles Delete when the canvas
-has focus. It must not intercept Delete from a focused text or property input.
+The Designer offers a Delete toolbar action and handles Delete or Backspace when
+the canvas has focus, plus Backspace for selected controls in Structure. It must
+not intercept deletion from a focused text or property input, IME composition,
+modifier combinations or key repeat. All entry points reuse host subtree
+confirmation and one native history step.
 The keyboard event must target the canvas itself: focus on a Page-tab button
 must not delete a previously selected control through event bubbling.
 A control with no descendants is removed immediately. If descendants exist,
@@ -512,6 +712,9 @@ See [ADR-0069](../adr/ADR-0069-userform-designer-frame-parenting.md).
 
 ## Property Grid and authored source states
 
+Property names use their English identifier labels regardless of the UI language,
+matching VBE. Categories, descriptions, and editing messages remain localized.
+
 The running LSP supplies `propertyGrid` alongside the canonical preview
 document. The form and each explicit control ID have a property target:
 
@@ -542,8 +745,9 @@ are relative to the form or selected control. Descriptors derive from the Go
 FormSpec contract and scalar edit support for that target; TypeScript owns
 labels, categories and display order, not another validation/applicability
 schema. The UI supports string, number, integer, boolean and enum inputs;
-scalar `value` retains its chosen type, including string `"false"` versus
-boolean `false`.
+scalar `value` with `valueType: any` retains its authored concrete scalar type,
+including string `"false"` versus boolean `false`. An absent or null `any` value
+uses text input; text content does not infer a different type.
 
 `values` comes from original source syntax, not the normalized document or
 renderer. `{present: false, value: null}` means absent;
@@ -568,9 +772,10 @@ fields. Selecting a Page by its stable ID in the Page list or by a rendered
 header shows that Page's metadata fields and excludes Page geometry. Page
 preview navigation is transient; explicit MultiPage and TabStrip
 `selectedIndex` edits continue through this Property Grid. Form fields include
-`name`, `caption`, `width`, `height` and the supported `build.*` paths;
-legacy and build fields are separate and never redirect to each other.
-Control fields are limited to supported authored scalars for their type.
+`name`, `caption`, `width` and `height`; removed `build.*` aliases are not
+editable. Negotiated version 1 additionally exposes the typed appearance fields.
+Without editor-version negotiation, control fields are limited to supported
+authored scalars for their type.
 Valid custom ProgID controls retain canonical common scalar fields, without
 acquiring built-in type-specific fields.
 Observed/snapshot values, identity/type/parent topology, collections, pictures
@@ -592,8 +797,12 @@ above. Switching selection preserves dirty Property Grid field drafts and
 their matching edit replies, including field-level rejection diagnostics,
 until corrected or canceled. Source edits and
 undo/redo refresh values from source. Selection and rendering alone never
-produce source edits. Explicit null is allowed only for nullable fields
-accepted by canonical validation; there is no property removal action.
+produce source edits. The Designer offers no explicit-null input or type selector,
+including for typed object properties. Existing nulls remain intact until the
+user confirms a concrete value for that field. False, zero and empty strings
+remain valid values. Canonical validation and semantic-edit APIs still accept
+explicit null for permitted nullable fields; this UI policy changes neither
+their contract nor the source schema. There is no property removal action.
 
 The host retains edit results while the panel is hidden and replays them when
 the same Webview becomes visible. A failed message delivery keeps its result
@@ -734,7 +943,7 @@ property pair and the exact three-operation MultiPage creation sequence above.
 Other property pairs and mixed property/geometry edits remain rejected;
 duplicate dimensions, nulls and nonnumeric values in a form resize pair are
 invalid. A failed MultiPage sequence returns no partial edit.
-Its payload supplies `field` and an explicit scalar `value`, plus `controlId`
+Scalar property payloads supply `field` and an explicit scalar `value`, plus `controlId`
 for `setControlProperty`. Missing `value` is invalid; explicit null must survive
 transport as a present value. Both Webview boundary and RPC validate payload
 shape, while canonical parsing/validation decides FormSpec semantics.

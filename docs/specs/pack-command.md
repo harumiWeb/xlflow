@@ -104,6 +104,14 @@ VBA project and seed `[pack.blank].code_page` with that value. This records
 the project's encoding for later blank packs; it does not convert or rewrite
 the UTF-8 source tree.
 
+When blank generation rejects an unrepresentable character, both normal and
+JSON output include the source location, character, target code page, and
+remediation. The suggestion includes a copyable Japanese-project example:
+`[pack.blank]` followed by `code_page = 932`; users add or update the existing
+section in `xlflow.toml`. Source stays UTF-8. Template-mode failures instead
+explain that the template's code page is authoritative. No configuration is
+rewritten and no code page is inferred from the machine or source text by pack.
+
 Blank projects retain a deterministic Project CLSID and matching unprotected-project protection tuple. The Windows/Excel release gate opens two independently generated blank workbooks in one Excel instance, runs both projects, verifies all baseline references are unbroken, and confirms that one project can reference the other after assigning it a distinct VBA project name. Two projects named `VBAProject` cannot reference each other until one is renamed; that name-level ambiguity is independent of the shared deterministic CLSID.
 
 ### VBA container compatibility

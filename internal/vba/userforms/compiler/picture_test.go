@@ -140,7 +140,7 @@ func TestExcelAuthoredBMPAndJPEGLoadPicturePersistAsValidatedBMP(t *testing.T) {
 						break
 					}
 				}
-				if snapshotControl == nil || snapshotControl.Properties["pictureAlignment"] != 3 || snapshotControl.Properties["pictureSizeMode"] != 3 {
+				if snapshotControl == nil || snapshotControl.PictureAlignment == nil || *snapshotControl.PictureAlignment != 3 || snapshotControl.PictureSizeMode == nil || *snapshotControl.PictureSizeMode != 3 {
 					t.Fatalf("projected %s display properties = %#v, want 3/3", name, snapshotControl)
 				}
 				if slices.Contains(snapshotControl.Unsupported, "pictureAlignment") || slices.Contains(snapshotControl.Unsupported, "pictureSizeMode") || !slices.Contains(snapshotControl.Unsupported, "picture") {
@@ -178,7 +178,7 @@ func TestCompileNewImagePictureAndDisplayProperties(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if projected.Controls[0].Properties["pictureAlignment"] != 3 || projected.Controls[0].Properties["pictureSizeMode"] != 3 {
+	if projected.Controls[0].PictureAlignment == nil || *projected.Controls[0].PictureAlignment != 3 || projected.Controls[0].PictureSizeMode == nil || *projected.Controls[0].PictureSizeMode != 3 {
 		t.Fatalf("generated display properties = %#v", projected.Controls[0].Properties)
 	}
 	input.Controls[0].Picture.Data[0] ^= 0xff

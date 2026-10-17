@@ -216,6 +216,11 @@ func (s *projectionState) projectControls(controls []*oforms.Control, parentID s
 
 		unsupported := unsupportedControlProperties(source, control.Type)
 		unsupported = append(unsupported, unsupportedLevelProperties(source.Level)...)
+		if control.Type == "Page" && source.Level != nil && len(source.Level.FontRaw) > 0 {
+			// Page has no runtime Font property (Excel CallByName returns 438).
+			// Its stored FormStream font remains opaque preservation metadata.
+			unsupported = append(unsupported, "font")
+		}
 		if !known {
 			unsupported = append(unsupported, forms.UnsupportedControlTypeProperty)
 		}
@@ -275,6 +280,7 @@ func projectTabs(tabs []oforms.Tab) []forms.FormSpecTab {
 
 func projectForm(level *oforms.Level, result *forms.FormSpec) {
 	record := level.Record
+	projectTypedForm(level, &result.Form)
 	if caption, ok := record.Strings["Caption"]; ok {
 		result.Form.Caption = new(caption.Text)
 	}
@@ -290,7 +296,7 @@ func projectForm(level *oforms.Level, result *forms.FormSpec) {
 	}
 	unsupported := unsupportedRecordProperties(record, map[string]bool{
 		"BooleanProperties": isDefaultBooleanProperties("Form", record.Values["BooleanProperties"]),
-		"Caption":           true, "DisplayedSize": true,
+		"Caption":           true, "DisplayedSize": true, "BackColor": true, "ForeColor": true, "BorderStyle": true,
 	})
 	unsupported = append(unsupported, unsupportedLevelProperties(level)...)
 	slices.Sort(unsupported)
@@ -304,6 +310,7 @@ func projectForm(level *oforms.Level, result *forms.FormSpec) {
 }
 
 func projectControl(source *oforms.Control, target *forms.FormSpecControl) {
+	projectTypedControl(source, target)
 	if source.Site != nil {
 		if source.Site.Position != nil && target.Type != "Page" {
 			target.Left = new(points(source.Site.Position.Left))
@@ -359,16 +366,6 @@ func projectControl(source *oforms.Control, target *forms.FormSpecControl) {
 	} else {
 		target.Enabled = new(true)
 	}
-	if strings.EqualFold(target.Type, "Image") {
-		for _, name := range []string{"PictureAlignment", "PictureSizeMode"} {
-			if value, ok := record.Values[name]; ok {
-				if target.Properties == nil {
-					target.Properties = make(map[string]any)
-				}
-				target.Properties[lowerFirst(name)] = int(value)
-			}
-		}
-	}
 }
 
 func unsupportedControlProperties(control *oforms.Control, controlType string) []string {
@@ -403,6 +400,9 @@ func unsupportedControlProperties(control *oforms.Control, controlType string) [
 		projected["ListIndex"] = supportsSelectedIndex(controlType)
 		projected["Value"] = supportsControlValue(controlType)
 		projected["Position"] = supportsNumericControlValue(controlType)
+		for _, name := range []string{"BackColor", "ForeColor", "BorderStyle"} {
+			_, projected[name] = forms.LookupControlProperty(controlType, lowerFirst(name))
+		}
 		projected["BooleanProperties"] = isDefaultBooleanProperties(controlType, control.Record.Values["BooleanProperties"])
 		if strings.EqualFold(controlType, "Image") {
 			projected["PictureAlignment"] = true
@@ -484,7 +484,7 @@ func unsupportedLevelProperties(level *oforms.Level) []string {
 	if len(level.MouseIconRaw) > 0 {
 		unsupported = append(unsupported, "mouseIcon")
 	}
-	if len(level.FontRaw) > 0 {
+	if _, err := oforms.ReadLevelFont(level); len(level.FontRaw) > 0 && err != nil {
 		unsupported = append(unsupported, "font")
 	}
 	if len(level.PictureRaw) > 0 {
@@ -556,7 +556,7 @@ func unsupportedRecordProperties(record *oforms.Record, projected map[string]boo
 	for name := range record.Pictures {
 		unsupported = append(unsupported, lowerFirst(name))
 	}
-	if hasPersistedTextProperties(record.TextProps) {
+	if hasUnprojectedTextProperties(record.TextProps) {
 		unsupported = append(unsupported, "textProps")
 	}
 	if len(record.TailRaw) > 0 {
@@ -565,9 +565,12 @@ func unsupportedRecordProperties(record *oforms.Record, projected map[string]boo
 	return unsupported
 }
 
-func hasPersistedTextProperties(record *oforms.Record) bool {
-	return record != nil && (record.Mask != 0 || len(record.Values) != 0 || len(record.Strings) != 0 ||
-		len(record.Sizes) != 0 || len(record.Arrays) != 0 || len(record.Pictures) != 0 || len(record.TailRaw) != 0)
+func hasUnprojectedTextProperties(record *oforms.Record) bool {
+	if record == nil {
+		return false
+	}
+	weight, stored := record.Values["FontWeight"]
+	return record.Mask&^uint64(1<<0|1<<1|1<<2|1<<4|1<<6|1<<7) != 0 || (stored && weight != 400 && weight != 700) || record.Values["FontEffects"]&^int64(15) != 0 || len(record.TailRaw) > 0
 }
 
 func points(value int32) float64 {

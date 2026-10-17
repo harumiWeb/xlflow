@@ -221,8 +221,47 @@ func applyPersistenceEdit(form *Form, edit Edit, cp uint16, records map[*Record]
 			return fmt.Errorf("%w: control not found", ErrInvalidEdit)
 		}
 		r = control.Record
-	} else if edit.Property != "Caption" && edit.Property != "Width" && edit.Property != "Height" {
+	} else if edit.Property != "Caption" && edit.Property != "Width" && edit.Property != "Height" && edit.Property != "Font" && edit.Property != "BackColor" && edit.Property != "ForeColor" && edit.Property != "BorderStyle" {
 		return ErrUnsupportedEdit
+	}
+	if edit.Property == "Font" {
+		return applyFontEdit(form, control, edit, cp, records)
+	}
+	if control != nil && control.MultiPage != nil && (edit.Property == "BackColor" || edit.Property == "ForeColor") {
+		// The runtime MultiPage exposes the hidden TabStrip colors. Colors in
+		// its enclosing FormStream are a separate container state.
+		control = control.MultiPage.Hidden
+		if control == nil {
+			return ErrUnsupportedEdit
+		}
+		r = control.Record
+	}
+	if edit.Property == "TextAlign" {
+		if control == nil || r == nil || r.TextProps == nil {
+			return ErrUnsupportedEdit
+		}
+		value, ok := editInteger(edit.Value)
+		if !ok || value < 1 || value > 3 {
+			return ErrInvalidEdit
+		}
+		// PARAFORMAT_Alignment uses right=2/center=3; MSForms TextAlign
+		// uses center=2/right=3. This translation is deliberately reversible.
+		switch value {
+		case 2:
+			value = 3
+		case 3:
+			value = 2
+		}
+		if err := setGenerationProperty(r.TextProps, &textPropsSpec, "ParagraphAlign", value); err != nil {
+			return err
+		}
+		raw, err := encodeEditedRecord(r.TextProps, &textPropsSpec)
+		if err != nil {
+			return err
+		}
+		r.TextProps.Raw = raw
+		records[r] = edit
+		return nil
 	}
 	if control != nil {
 		s := control.Site
@@ -326,7 +365,7 @@ func applyPersistenceEdit(form *Form, edit Edit, cp uint16, records map[*Record]
 	if spec == nil {
 		return ErrUnsupportedEdit
 	}
-	if control != nil && control.Level != nil && control.CLSIDCacheIndex != 14 && (control.MultiPage == nil || edit.Property != "Width" && edit.Property != "Height") {
+	if control != nil && control.Level != nil && control.CLSIDCacheIndex != 14 && control.CLSIDCacheIndex != 7 && (control.MultiPage == nil || edit.Property != "Width" && edit.Property != "Height" && edit.Property != "BackColor" && edit.Property != "ForeColor") {
 		return ErrUnsupportedEdit
 	}
 	property := edit.Property
@@ -387,7 +426,7 @@ func applyPersistenceEdit(form *Form, edit Edit, cp uint16, records map[*Record]
 		}
 		property = "VariousPropertyBits"
 		edit.Value = editedBit(flags, v)
-	case "Caption", "Value", "GroupName", "BackColor", "ForeColor", "BorderColor", "BorderStyle", "MaxLength":
+	case "Caption", "Value", "GroupName", "BackColor", "ForeColor", "BorderColor", "BorderStyle", "MaxLength", "PictureAlignment", "PictureSizeMode":
 	default:
 		return ErrUnsupportedEdit
 	}
@@ -412,6 +451,12 @@ func applyPersistenceEdit(form *Form, edit Edit, cp uint16, records map[*Record]
 				return ErrInvalidEdit
 			}
 			if property == "BorderStyle" && v > 1 {
+				return ErrInvalidEdit
+			}
+			if property == "PictureAlignment" && (control == nil || control.CLSIDCacheIndex != 12 || v > 4) {
+				return ErrInvalidEdit
+			}
+			if property == "PictureSizeMode" && (control == nil || control.CLSIDCacheIndex != 12 || v != 0 && v != 1 && v != 3) {
 				return ErrInvalidEdit
 			}
 			if property == "MaxLength" && v > math.MaxInt32 {

@@ -4,6 +4,9 @@ import { runUserFormEditAssertions } from "./userFormEdits.test";
 import { runUserFormProviderAssertions } from "./userFormProvider.test";
 import { runUserFormClipboardAssertions } from "./userFormClipboard.test";
 import { runUserFormDraftProviderAssertions } from "./userFormDraftProvider.test";
+import { runUserFormEventsAssertions } from "./userFormEvents.test";
+import { runOpenDesignerTests } from "./openDesigner.test";
+import { runUserFormBuildAssertions } from "./userFormBuild.test";
 import {
   runUserFormWebviewAssertions,
   runCustomEditorRegistrationAssertions,
@@ -123,6 +126,8 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     vscode.extensions.getExtension("harumiweb.xlflow-vscode");
   assert.ok(extension, "extension should be discoverable");
   await extension.activate();
+  await runOpenDesignerTests();
+  await runUserFormBuildAssertions();
   assertLocalizationResources(extension.extensionPath);
   await runUserFormWebviewAssertions(extension.extensionUri);
   await runCustomEditorRegistrationAssertions();
@@ -1100,6 +1105,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
     ["formulaEmpty"],
   );
   await runUserFormClipboardAssertions(extension.extensionUri);
+  await runUserFormEventsAssertions(extension.extensionUri);
 }
 
 async function assertRulesRegistryBehavior(): Promise<void> {

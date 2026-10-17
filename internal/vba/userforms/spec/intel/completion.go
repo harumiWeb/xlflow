@@ -139,24 +139,7 @@ func completionLineContext(line string, pos Position) lineCompletionContext {
 }
 
 func propertyCompletions(doc *Document, parent string, context CursorContext, line lineCompletionContext, pos Position) []CompletionItem {
-	contract := forms.UserFormContract()
-	var properties map[string]forms.PropertyContract
-	switch {
-	case parent == "":
-		properties = contract.DocumentProperties
-	case parent == "form":
-		properties = contract.FormProperties
-	case isPictureActionPath(parent):
-		if strings.EqualFold(controlAtPath(doc.Source, parentPath(parent)).Type, "Image") {
-			properties = forms.PictureActionProperties()
-		}
-	case isControlPath(parent):
-		properties = controlProperties(contract, controlAtPath(doc.Source, parent))
-	case isTabPath(parent):
-		properties = contract.TabProperties
-	default:
-		return nil
-	}
+	properties := propertiesAt(doc.Source, parent)
 
 	existing := make(map[string]bool, len(context.ExistingKeys))
 	for _, key := range context.ExistingKeys {
@@ -239,45 +222,30 @@ func valueCompletions(doc *Document, context CursorContext, line lineCompletionC
 	return nil
 }
 
-func propertyAt(source, parent, name string) (forms.PropertyContract, bool) {
+// propertiesAt resolves children through the same contract used for top-level
+// completion. This works for any modeled nested object without a second schema.
+func propertiesAt(source, parent string) map[string]forms.PropertyContract {
 	contract := forms.UserFormContract()
-	if parent == "" {
-		return lookupProperty(contract.DocumentProperties, name)
-	}
-	if parent == "form" {
-		return lookupProperty(contract.FormProperties, name)
-	}
-	if isTabPath(parent) {
-		return forms.LookupTabProperty(name)
-	}
-	if isPictureActionPath(parent) {
-		if strings.EqualFold(controlAtPath(source, parentPath(parent)).Type, "Image") {
-			return forms.LookupPictureActionProperty(name)
+	switch {
+	case parent == "":
+		return contract.DocumentProperties
+	case parent == "form":
+		return contract.FormProperties
+	case isTabPath(parent):
+		return contract.TabProperties
+	case isControlPath(parent):
+		return controlProperties(contract, controlAtPath(source, parent))
+	default:
+		property, ok := propertyAt(source, parentPath(parent), lastPathSegment(parent))
+		if ok {
+			return property.Children
 		}
-		return forms.PropertyContract{}, false
+		return nil
 	}
-	if !isControlPath(parent) {
-		return forms.PropertyContract{}, false
-	}
-	control := controlAtPath(source, parent)
-	if property, ok := lookupProperty(contract.CommonControlProperties, name); ok {
-		return property, true
-	}
-	if control.isKnownType() && !control.isCustomProgID() {
-		return forms.LookupControlProperty(control.Type, name)
-	}
-	return forms.PropertyContract{}, false
 }
 
-func isPictureActionPath(path string) bool {
-	if !strings.HasSuffix(path, ".picture") {
-		return false
-	}
-	controlPath := strings.TrimSuffix(path, ".picture")
-	if !isControlPath(controlPath) {
-		return false
-	}
-	return isControlPath(controlPath)
+func propertyAt(source, parent, name string) (forms.PropertyContract, bool) {
+	return lookupProperty(propertiesAt(source, parent), name)
 }
 
 func lookupProperty(properties map[string]forms.PropertyContract, name string) (forms.PropertyContract, bool) {
@@ -450,8 +418,7 @@ func (control controlInfo) isCustomProgID() bool {
 	if strings.TrimSpace(control.progID) == "" {
 		return false
 	}
-	_, known := forms.LookupControlContractByProgID(control.progID)
-	return !known
+	return !forms.ProgIDMatchesControlType(control.Type, control.progID)
 }
 
 // controlsInSource deliberately scans source text rather than decoded structs.

@@ -53,6 +53,34 @@ Decoded bytes are held in the compiler's in-memory `FormSpecPicture.Data`
 field. That field is excluded from YAML and JSON serialization; project source
 contains only the relative asset path or explicit removal intent.
 
+## Designer picker and staged imports
+
+The typed Image editor uses an extension-native BMP/JPEG picker. Picking a
+file stages its bytes for preview and does not copy an external file yet.
+On OK, validate the bytes through the canonical image contract. Reuse a
+project-contained relative path; otherwise import into the configured
+`<forms-root>/assets/<full-lowercase-SHA256>.bmp|jpg`, hashing the image bytes.
+Reuse identical files and reject collisions with different content. Resolve
+symlinks/junctions for containment checks. Cancel leaves project assets and
+source unchanged.
+
+Reopening the picker retains the previous staged selection until a replacement
+has passed validation. Cancelling or failing the replacement keeps that preview
+and its token usable for OK. Closing the editor invalidates pending picker
+results; a late result cannot publish a new selection into the closed session.
+
+After successful import, submit one semantic picture edit. A failed edit may
+remove only a newly created, still-unreferenced asset. Existing/shared assets
+must remain. Successful assets survive source Undo so Redo can resolve them.
+The preview is temporary and does not modify the shared Designer draft or
+history until OK; stale dialogs retain input but clear preview and disable OK.
+Explicit Remove uses `picture: { remove: true }`.
+
+PictureAlignment uses 0 TopLeft, 1 TopRight, 2 Center, 3 BottomLeft, 4
+BottomRight. PictureSizeMode uses 0 Clip, 1 Stretch, 3 Zoom. PicturePosition,
+non-Image pictures, PNG/GIF and custom ActiveX are excluded. See
+[userform-property-editors.md](userform-property-editors.md).
+
 ## File push and pack
 
 `push --backend file` passes canonical FormSpecs and resolved assets through

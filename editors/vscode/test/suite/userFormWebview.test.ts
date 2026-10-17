@@ -1,4 +1,5 @@
 import * as assert from "assert";
+import { NativeDesignerMouse } from "./designerNativeMouse";
 import * as vscode from "vscode";
 import { mkdtemp, readFile, unlink, rm, writeFile } from "fs/promises";
 import * as os from "os";
@@ -27,8 +28,10 @@ export async function runUserFormWebviewAssertions(extensionUri: vscode.Uri): Pr
 const testApi = acquireVsCodeApi();
 const editMessages = [];
 const clipboardMessages = [];
+const openEventMessages = [];
+let hitTestControlId;
 window.acquireVsCodeApi = () => ({
-  postMessage(message) { if (message.type === "edit") editMessages.push(message); if (message.type === "clipboard") clipboardMessages.push(message); testApi.postMessage(message); },
+  postMessage(message) { if (message.type === "edit") editMessages.push(message); if (message.type === "clipboard") clipboardMessages.push(message); if (message.type === "openEvent") openEventMessages.push(message); testApi.postMessage(message); },
   getState: () => testApi.getState(), setState: (state) => testApi.setState(state)
 });
 const violations = [];
@@ -41,14 +44,16 @@ window.addEventListener("securitypolicyviolation", e => violations.push(e.violat
 window.addEventListener("message", e => {
   if (!["document", "invalidDocument", "testAction"].includes(e.data.type)) return;
   setTimeout(async () => {
+    if (e.data.clearEditMessages) editMessages.length = 0;
     for (const action of e.data.actions ?? []) {
       let target = document.querySelector(action.selector);
       if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: action.selector}); return; }
       const props = { bubbles: true, cancelable: true, ...action.props };
+      if (props.expandIfCollapsed && target.closest('[role="treeitem"]')?.getAttribute('aria-expanded') === 'true') continue;
       if (props.formPoints) {
         // Establish focus/scroll before computing synthetic pointer coordinates;
         // the real pointer-down handler focuses the canvas and may scroll it.
-        if (action.event === 'pointerdown') {
+        if (action.event === 'pointerdown' && !props.preserveScroll) {
           const canvas = document.querySelector('.designer-viewport');
           canvas.focus({ preventScroll: true });
           canvas.scrollIntoView({ block: 'start', inline: 'start', behavior: 'instant' });
@@ -72,12 +77,20 @@ window.addEventListener("message", e => {
           props.clientY = pointerHandleOrigin.y + props.handleDelta[1] * 96 * zoom / 72;
         }
       }
+      if (props.centerHitTest) {
+        const bounds = target.getBoundingClientRect();
+        props.clientX = (bounds.left + bounds.right) / 2;
+        props.clientY = (bounds.top + bounds.bottom) / 2;
+        props.hitTest = true;
+      }
       if (props.hitTest) {
         target = document.elementFromPoint(props.clientX, props.clientY);
         if (!target) { testApi.postMessage({type: "testSnapshot", version: e.data.version, missingTarget: "hit test " + action.selector}); return; }
+        if (props.expectControlHit) hitTestControlId = target.closest('[data-control-id]')?.dataset.controlId;
       }
+      if (action.event === "scroll") { if ("scrollTop" in props) target.scrollTop = props.scrollTop; if ("scrollLeft" in props) target.scrollLeft = props.scrollLeft; }
       if (action.event === "change" || action.event === "input") { if ("value" in props) target.value = props.value; if ("checked" in props) target.checked = props.checked; }
-      target.dispatchEvent(["change", "input"].includes(action.event) ? new Event(action.event, props) : action.event.startsWith("key") ? new KeyboardEvent(action.event, props) : action.event === "focusout" ? new FocusEvent("blur", props) : new PointerEvent(action.event, props));
+      target.dispatchEvent(["change", "input"].includes(action.event) ? new Event(action.event, props) : action.event.startsWith("key") ? new KeyboardEvent(action.event, props) : action.event === "focusout" ? new FocusEvent("blur", props) : action.event === "dblclick" ? new MouseEvent(action.event, { ...props, detail: props.detail ?? 2 }) : new PointerEvent(action.event, props));
       if (action.event === 'pointerup' || action.event === 'pointercancel') pointerFormOrigin = undefined;
       await new Promise(resolve => setTimeout(resolve, 30));
     }
@@ -97,8 +110,36 @@ window.addEventListener("message", e => {
     const arrow = document.querySelector(".combo-arrow");
     const comboBounds = combo?.getBoundingClientRect();
     const arrowBounds = arrow?.getBoundingClientRect();
+    const nativeRect = element => {
+      if (!element) return null;
+      const { left, top, right, bottom, width, height } = element.getBoundingClientRect();
+      return { left, top, right, bottom, width, height };
+    };
+    const scrollbars = [...document.querySelectorAll(".control.scrollbar")].map(control => {
+      const chrome = control.querySelector(".scrollbar-chrome");
+      const decrement = chrome?.querySelector(".scrollbar-arrow.decrement");
+      const track = chrome?.querySelector(".scrollbar-track");
+      const thumb = track?.querySelector(".scrollbar-thumb");
+      const increment = chrome?.querySelector(".scrollbar-arrow.increment");
+      return {
+        id: control.dataset.controlId,
+        orientation: chrome?.classList.contains("horizontal") ? "horizontal" : chrome?.classList.contains("vertical") ? "vertical" : undefined,
+        control: nativeRect(control),
+        decrement: nativeRect(decrement),
+        track: nativeRect(track),
+        thumb: nativeRect(thumb),
+        increment: nativeRect(increment),
+        thumbShadow: thumb ? getComputedStyle(thumb).boxShadow : null
+      };
+    });
     testApi.postMessage({
       type: "testSnapshot", version: e.data.version,
+      formColor: document.querySelector('.form') && getComputedStyle(document.querySelector('.form')).color,
+      controlColors: Object.fromEntries([...document.querySelectorAll('.control[data-control-id]')].map(control => [control.dataset.controlId, getComputedStyle(control).color])),
+      controlFonts: Object.fromEntries([...document.querySelectorAll('.control[data-control-id]')].map(control => {
+        const style = getComputedStyle(control);
+        return [control.dataset.controlId, { weight: style.fontWeight, style: style.fontStyle, family: style.fontFamily, size: style.fontSize, decoration: style.textDecorationLine }];
+      })),
       count: document.querySelectorAll(".control").length,
       title: document.querySelector(".form-title")?.textContent,
       header: document.querySelector("header")?.textContent,
@@ -143,6 +184,12 @@ window.addEventListener("message", e => {
       })(),
       editMessages,
       clipboardMessages,
+      openEventMessages,
+      hitTestControlId,
+      tabOrderItems: [...document.querySelectorAll(".tab-order-editor li > span")].map(item => item.textContent),
+      activeRightTab: document.querySelector('[role="tab"][aria-selected="true"]')?.id,
+      canvasScroll: (() => { const c = document.querySelector(".canvas-scroll"); return c && {left:c.scrollLeft, top:c.scrollTop, width:c.clientWidth, height:c.clientHeight}; })(),
+      codiconLoaded: document.fonts.check('16px codicon'),
       images: document.querySelectorAll("img").length,
       propertyTitle: document.querySelector(".property-grid h2")?.textContent,
       propertyRows: [...document.querySelectorAll("[data-property-field]")].map(row => ({
@@ -161,6 +208,7 @@ window.addEventListener("message", e => {
         shadow: getComputedStyle(combo).boxShadow,
         arrowShadow: getComputedStyle(arrow).boxShadow
       },
+      scrollbars,
       violations
       , runtimeErrors
     });
@@ -197,6 +245,7 @@ window.addEventListener("message", e => {
           type: "testAction";
           version: number;
           actions: { selector: string; event: string; props?: Record<string, unknown> }[];
+          clearEditMessages?: boolean;
         },
   ) => {
     const response = new Promise<Record<string, unknown>>((resolve) =>
@@ -269,6 +318,120 @@ window.addEventListener("message", e => {
     assert.strictEqual(valid.count, 4);
     assert.ok(String(valid.header).includes("読み取り専用プレビュー"));
     assert.ok(String(valid.header).includes("テキストエディターを開く"));
+    const scrollbarDocument = designerDocument({
+      form: { name: "ScrollBars", width: 300, height: 180 },
+      controls: [
+        {
+          id: "horizontalScrollbar",
+          name: "HorizontalScrollBar",
+          type: "ScrollBar",
+          left: 12,
+          top: 20,
+          width: 120,
+          height: 18,
+        },
+        {
+          id: "verticalScrollbar",
+          name: "VerticalScrollBar",
+          type: "ScrollBar",
+          left: 150,
+          top: 20,
+          width: 18,
+          height: 120,
+        },
+      ],
+    });
+    const scrollbarSource = JSON.stringify(scrollbarDocument);
+    const scrollbarSnapshot = await snapshot({
+      type: "document",
+      version: 125,
+      document: scrollbarDocument,
+    });
+    type NativeRect = {
+      left: number;
+      top: number;
+      right: number;
+      bottom: number;
+      width: number;
+      height: number;
+    };
+    type ScrollbarGeometry = {
+      id: string;
+      orientation?: string;
+      control: NativeRect | null;
+      decrement: NativeRect | null;
+      track: NativeRect | null;
+      thumb: NativeRect | null;
+      increment: NativeRect | null;
+      thumbShadow: string | null;
+    };
+    const scrollbars = scrollbarSnapshot.scrollbars as ScrollbarGeometry[];
+    assert.strictEqual(scrollbars.length, 2, "horizontal and vertical ScrollBars render chrome");
+    const requireRect = (rect: NativeRect | null, part: string): NativeRect => {
+      assert.ok(rect, `${part} has native CSSOM geometry`);
+      assert.ok(rect.width > 0 && rect.height > 0, `${part} has nonzero size`);
+      return rect;
+    };
+    const assertScrollbarGeometry = (
+      geometry: ScrollbarGeometry,
+      orientation: "horizontal" | "vertical",
+    ): void => {
+      assert.strictEqual(geometry.orientation, orientation);
+      const control = requireRect(geometry.control, `${geometry.id} control`);
+      const decrement = requireRect(geometry.decrement, `${geometry.id} decrement arrow`);
+      const track = requireRect(geometry.track, `${geometry.id} track`);
+      const thumb = requireRect(geometry.thumb, `${geometry.id} thumb`);
+      const increment = requireRect(geometry.increment, `${geometry.id} increment arrow`);
+      const start = orientation === "horizontal" ? "left" : "top";
+      const end = orientation === "horizontal" ? "right" : "bottom";
+      assert.ok(
+        Math.abs(decrement[start] - control[start]) <= 1,
+        `${orientation} decrement arrow is at the start edge`,
+      );
+      assert.ok(
+        Math.abs(increment[end] - control[end]) <= 1,
+        `${orientation} increment arrow is at the end edge`,
+      );
+      assert.ok(
+        decrement[end] <= track[start] + 1 && track[end] <= increment[start] + 1,
+        `${orientation} track lies between the arrow buttons`,
+      );
+      assert.ok(
+        Math.abs(thumb[start] - track[start]) <= 1,
+        `${orientation} thumb starts at the beginning of the track`,
+      );
+      assert.ok(
+        thumb.left >= track.left - 1 &&
+          thumb.right <= track.right + 1 &&
+          thumb.top >= track.top - 1 &&
+          thumb.bottom <= track.bottom + 1,
+        `${orientation} thumb stays inside the track`,
+      );
+      assert.notStrictEqual(
+        geometry.thumbShadow,
+        "none",
+        `${orientation} thumb has raised shading`,
+      );
+    };
+    const horizontalScrollbar = scrollbars.find(({ id }) => id === "horizontalScrollbar");
+    const verticalScrollbar = scrollbars.find(({ id }) => id === "verticalScrollbar");
+    assert.ok(horizontalScrollbar, "horizontal ScrollBar is present");
+    assert.ok(verticalScrollbar, "vertical ScrollBar is present");
+    assertScrollbarGeometry(horizontalScrollbar, "horizontal");
+    assertScrollbarGeometry(verticalScrollbar, "vertical");
+    assert.deepStrictEqual(
+      scrollbarSnapshot.editMessages,
+      [],
+      "rendering ScrollBars emits no edit operations",
+    );
+    assert.strictEqual(
+      JSON.stringify(scrollbarDocument),
+      scrollbarSource,
+      "rendering preserves the authored ScrollBar model",
+    );
+    assert.deepStrictEqual(scrollbarSnapshot.violations, []);
+    assert.deepStrictEqual(scrollbarSnapshot.runtimeErrors, []);
+    await snapshot({ type: "document", version: 1, document });
     const centers = valid.buttonCenters as {
       type: string;
       delta: number;
@@ -323,6 +486,7 @@ window.addEventListener("message", e => {
 
     const interactive = {
       ...document,
+      eventEditable: true,
       controls: document.controls.map((control) => ({ ...control })),
     };
     interactive.controls[0] = {
@@ -333,6 +497,79 @@ window.addEventListener("message", e => {
       height: 18,
     };
     await snapshot({ type: "document", version: 4, document: interactive, editable: true });
+    const nativeMouse = await NativeDesignerMouse.connect();
+    try {
+      const initialNative = await snapshot({ type: "testAction", version: 99, actions: [] });
+      const initialOpenEvents = (initialNative.openEventMessages as unknown[]).length;
+      const controlPoint = await nativeMouse.doubleClick("control");
+      assert.strictEqual(controlPoint.hitInForm, true);
+      assert.strictEqual(controlPoint.hitControlId, "label");
+      const openedControl = await snapshot({ type: "testAction", version: 100, actions: [] });
+      const controlOpenEvents = openedControl.openEventMessages as {
+        type: string;
+        requestId: number;
+        version: number;
+        targetId?: string;
+        choose: boolean;
+      }[];
+      assert.strictEqual(controlOpenEvents.length, initialOpenEvents + 1);
+      assert.deepStrictEqual(controlOpenEvents.at(-1), {
+        type: "openEvent",
+        requestId: controlOpenEvents.at(-1)!.requestId,
+        version: 4,
+        targetId: "label",
+        choose: false,
+      });
+      await panel.webview.postMessage({
+        type: "eventResult",
+        requestId: controlOpenEvents.at(-1)!.requestId,
+      });
+      await snapshot({ type: "testAction", version: 101, actions: [] });
+
+      const formPoint = await nativeMouse.doubleClick("form");
+      assert.strictEqual(formPoint.hitInForm, true);
+      assert.strictEqual(formPoint.hitControlId, undefined);
+      const openedForm = await snapshot({ type: "testAction", version: 102, actions: [] });
+      const formOpenEvents = openedForm.openEventMessages as {
+        type: string;
+        requestId: number;
+        version: number;
+        targetId?: string;
+        choose: boolean;
+      }[];
+      assert.strictEqual(formOpenEvents.length, initialOpenEvents + 2);
+      assert.deepStrictEqual(formOpenEvents.at(-1), {
+        type: "openEvent",
+        requestId: formOpenEvents.at(-1)!.requestId,
+        version: 4,
+        choose: false,
+      });
+      await panel.webview.postMessage({
+        type: "eventResult",
+        requestId: formOpenEvents.at(-1)!.requestId,
+      });
+      await snapshot({ type: "testAction", version: 103, actions: [] });
+
+      await nativeMouse.dragControl();
+      const afterNativeDrag = await snapshot({ type: "testAction", version: 104, actions: [] });
+      assert.strictEqual(
+        (afterNativeDrag.openEventMessages as unknown[]).length,
+        initialOpenEvents + 2,
+        "native control drag does not open an event",
+      );
+      const dragEdits = afterNativeDrag.editMessages as { requestId: number }[];
+      assert.strictEqual(dragEdits.length, 1, "native drag still commits its control move");
+      await panel.webview.postMessage({ type: "editResult", requestId: dragEdits[0].requestId });
+      await snapshot({ type: "document", version: 4, document: interactive, editable: true });
+      await snapshot({
+        type: "testAction",
+        version: 105,
+        actions: [],
+        clearEditMessages: true,
+      });
+    } finally {
+      nativeMouse.close();
+    }
     const pointer = (
       selector: string,
       event: string,
@@ -1202,6 +1439,37 @@ window.addEventListener("message", e => {
     ]);
     assert.deepStrictEqual(tabSelected.violations, []);
     await panel.webview.postMessage({ type: "editResult", requestId: tabRequest.requestId });
+    const treeSelected = await snapshot({
+      type: "testAction",
+      version: 90,
+      actions: [
+        { selector: "#designer-tab-structure", event: "click" },
+        {
+          selector:
+            '[data-structure-id="multi"] > .structure-tree-row > .structure-tree-disclosure',
+          event: "click",
+          props: { expandIfCollapsed: true },
+        },
+        {
+          selector:
+            '[data-structure-id="page-b"] > .structure-tree-row > .structure-tree-disclosure',
+          event: "click",
+          props: { expandIfCollapsed: true },
+        },
+        { selector: '[data-structure-id="child-b"] > .structure-tree-row', event: "click" },
+      ],
+    });
+    assert.strictEqual(treeSelected.missingTarget, undefined);
+    assert.strictEqual(treeSelected.activeRightTab, "designer-tab-structure");
+    assert.deepStrictEqual(treeSelected.selectedIds, ["child-b"]);
+    assert.ok((treeSelected.worldPositions as { id: string }[]).some((c) => c.id === "child-b"));
+    assert.ok(!(treeSelected.worldPositions as { id: string }[]).some((c) => c.id === "child-a"));
+    assert.strictEqual(
+      (treeSelected.editMessages as unknown[]).length,
+      (tabSelected.editMessages as unknown[]).length,
+      "Structure selection changes no source",
+    );
+    assert.strictEqual(treeSelected.codiconLoaded, true);
     const productivityDocument = designerDocument({
       form: { name: "Productivity", width: 400, height: 240 },
       controls: [
@@ -1393,11 +1661,35 @@ window.addEventListener("message", e => {
       type: "editResult",
       requestId: copyRequests.at(-1)!.requestId,
     });
+    const reorderedLocalTabs = await snapshot({
+      type: "testAction",
+      version: 104,
+      actions: [
+        { selector: "#designer-tab-tabOrder", event: "click" },
+        { selector: '.tab-order-editor button[aria-label="Move down: TextBox2"]', event: "click" },
+        { selector: "#designer-tab-structure", event: "click" },
+        { selector: "#designer-tab-tabOrder", event: "click" },
+      ],
+    });
+    assert.deepStrictEqual(reorderedLocalTabs.tabOrderItems, ["0. Label1", "1. TextBox2"]);
+    assert.strictEqual(
+      (reorderedLocalTabs.editMessages as unknown[]).length,
+      groupRequests.length,
+      "right tabs retain local order without applying",
+    );
+    // Restore the original order before testing the established normalization.
+    await snapshot({
+      type: "testAction",
+      version: 104,
+      actions: [
+        { selector: '.tab-order-editor button[aria-label="Move down: Label1"]', event: "click" },
+      ],
+    });
     const assignedTabs = await snapshot({
       type: "testAction",
       version: 105,
       actions: [
-        { selector: ".productivity-toolbar details:last-of-type summary", event: "click" },
+        { selector: "#designer-tab-tabOrder", event: "click" },
         { selector: ".tab-order-editor > button", event: "click" },
       ],
     });
@@ -1470,6 +1762,203 @@ window.addEventListener("message", e => {
     ]);
     assert.deepStrictEqual(rootResized.violations, []);
     assert.deepStrictEqual(rootResized.runtimeErrors, []);
+    const resizeRequest = (rootResized.editMessages as { requestId: number }[]).at(-1)!;
+    await panel.webview.postMessage({ type: "editResult", requestId: resizeRequest.requestId });
+    const scrolledDocument = designerDocument({
+      form: { name: "ScrollCheck", width: 1600, height: 1000 },
+      controls: [
+        {
+          id: "scrolled",
+          name: "ScrolledLabel",
+          type: "Label",
+          left: 180,
+          top: 180,
+          width: 72,
+          height: 24,
+        },
+      ],
+    });
+    const beforeScroll = await snapshot({
+      type: "document",
+      version: 120,
+      document: scrolledDocument,
+      editable: true,
+    });
+    const scrolled = await snapshot({
+      type: "testAction",
+      version: 121,
+      actions: [
+        { selector: ".designer-toolbar select", event: "change", props: { value: "1.5" } },
+        { selector: ".snap-toggle input", event: "change", props: { checked: false } },
+        { selector: ".canvas-scroll", event: "scroll", props: { scrollLeft: 160, scrollTop: 180 } },
+        {
+          selector: '.control[data-control-id="scrolled"]',
+          event: "pointerdown",
+          props: {
+            pointerId: 1,
+            button: 0,
+            formPoints: [190, 190],
+            hitTest: true,
+            preserveScroll: true,
+          },
+        },
+        {
+          selector: ".designer-viewport",
+          event: "pointermove",
+          props: { pointerId: 1, formPoints: [198, 196] },
+        },
+        {
+          selector: ".designer-viewport",
+          event: "pointerup",
+          props: { pointerId: 1, formPoints: [198, 196] },
+        },
+      ],
+    });
+    assert.strictEqual(scrolled.missingTarget, undefined);
+    const scrollState = scrolled.canvasScroll as { left: number; top: number };
+    assert.strictEqual(scrollState.left, 160, "canvas focus preserves horizontal scroll");
+    assert.strictEqual(scrollState.top, 180, "canvas focus preserves vertical scroll");
+    assert.strictEqual(
+      (scrolled.editMessages as unknown[]).length,
+      (beforeScroll.editMessages as unknown[]).length + 1,
+    );
+    assert.deepStrictEqual(
+      (scrolled.editMessages as { operations: unknown[] }[]).at(-1)!.operations,
+      [{ type: "moveControl", controlId: "scrolled", left: 188, top: 186 }],
+    );
+    assert.deepStrictEqual(scrolled.violations, []);
+    assert.deepStrictEqual(scrolled.runtimeErrors, []);
+    const colorModel = designerDocument({
+      form: {
+        name: "Colors",
+        width: 300,
+        height: 220,
+        foreColor: { kind: "rgb", value: "#FF0000" },
+      },
+      controls: [
+        { id: "defaultLabel", name: "DefaultLabel", type: "Label" },
+        {
+          id: "explicitLabel",
+          name: "ExplicitLabel",
+          type: "Label",
+          foreColor: { kind: "rgb", value: "#0000FF" },
+        },
+        {
+          id: "frame",
+          name: "Frame1",
+          type: "Frame",
+          left: 0,
+          top: 40,
+          width: 200,
+          height: 140,
+          foreColor: { kind: "rgb", value: "#008000" },
+        },
+        { id: "nestedDefault", name: "NestedDefault", type: "Label", parentId: "frame" },
+        {
+          id: "nestedExplicit",
+          name: "NestedExplicit",
+          type: "Label",
+          parentId: "frame",
+          top: 30,
+          foreColor: { kind: "rgb", value: "#0000FF" },
+        },
+      ],
+    });
+    const colorSource = JSON.stringify(colorModel);
+    const colors = await snapshot({ type: "document", version: 122, document: colorModel });
+    assert.strictEqual(colors.formColor, "rgb(255, 0, 0)");
+    assert.deepStrictEqual(
+      colors.controlColors,
+      {
+        defaultLabel: "rgb(17, 17, 17)",
+        explicitLabel: "rgb(0, 0, 255)",
+        frame: "rgb(0, 128, 0)",
+        nestedDefault: "rgb(17, 17, 17)",
+        nestedExplicit: "rgb(0, 0, 255)",
+      },
+      "Form/Frame ForeColor must not recolor existing children without their own authored color",
+    );
+    colorModel.foreColor = { kind: "rgb", value: "#FF00FF" };
+    const changedColors = await snapshot({ type: "document", version: 123, document: colorModel });
+    assert.strictEqual(changedColors.formColor, "rgb(255, 0, 255)");
+    assert.deepStrictEqual(
+      changedColors.controlColors,
+      colors.controlColors,
+      "changing only Form.ForeColor preserves child colors",
+    );
+    colorModel.foreColor = { kind: "rgb", value: "#FF0000" };
+    assert.strictEqual(
+      JSON.stringify(colorModel),
+      colorSource,
+      "rendering must not author default ForeColor values",
+    );
+    assert.deepStrictEqual(changedColors.violations, []);
+    assert.deepStrictEqual(changedColors.runtimeErrors, []);
+    const defaultFonts = changedColors.controlFonts as Record<string, Record<string, string>>;
+    colorModel.font = {
+      name: "Arial",
+      size: 24,
+      bold: true,
+      italic: true,
+      underline: true,
+      strikeThrough: true,
+    };
+    colorModel.controls.find((control) => control.id === "frame")!.font = {
+      name: "Courier New",
+      size: 18,
+      bold: true,
+      italic: true,
+      underline: true,
+      strikeThrough: true,
+    };
+    colorModel.controls.find((control) => control.id === "explicitLabel")!.font = {
+      name: "Georgia",
+      size: 15,
+      bold: true,
+      italic: false,
+      underline: true,
+      strikeThrough: false,
+    };
+    colorModel.controls.find((control) => control.id === "nestedExplicit")!.font = { bold: false };
+    const fontSource = JSON.stringify(colorModel);
+    const fonts = await snapshot({ type: "document", version: 124, document: colorModel });
+    const renderedFonts = fonts.controlFonts as Record<string, Record<string, string>>;
+    assert.deepStrictEqual(
+      renderedFonts.defaultLabel,
+      defaultFonts.defaultLabel,
+      "Form Font must not change an existing child's default font",
+    );
+    assert.deepStrictEqual(
+      renderedFonts.nestedDefault,
+      defaultFonts.nestedDefault,
+      "Frame Font must not change nested child fonts",
+    );
+    assert.deepStrictEqual(
+      renderedFonts.nestedExplicit,
+      defaultFonts.nestedExplicit,
+      "a partial Font must not inherit unspecified members from its parent",
+    );
+    assert.deepStrictEqual(
+      renderedFonts.explicitLabel,
+      {
+        weight: "700",
+        style: "normal",
+        family: "Georgia, sans-serif",
+        size: "20px",
+        decoration: "underline",
+      },
+      "explicit child Font remains effective independently",
+    );
+    assert.strictEqual(renderedFonts.frame.weight, "700", "container's own Font remains effective");
+    assert.strictEqual(renderedFonts.frame.style, "italic");
+    assert.strictEqual(renderedFonts.frame.decoration, "underline line-through");
+    assert.strictEqual(
+      JSON.stringify(colorModel),
+      fontSource,
+      "font preview defaults must never be authored",
+    );
+    assert.deepStrictEqual(fonts.violations, []);
+    assert.deepStrictEqual(fonts.runtimeErrors, []);
   } finally {
     subscription.dispose();
     panel.dispose();

@@ -806,7 +806,7 @@ func TestProjectImagePictureDisplayProperties(t *testing.T) {
 		t.Fatal(err)
 	}
 	image := got.Controls[0]
-	if image.Properties["pictureAlignment"] != 3 || image.Properties["pictureSizeMode"] != 3 {
+	if image.PictureAlignment == nil || *image.PictureAlignment != 3 || image.PictureSizeMode == nil || *image.PictureSizeMode != 3 {
 		t.Fatalf("Image properties = %#v, want alignment and size mode 3", image.Properties)
 	}
 	if !slices.Equal(image.Unsupported, []string{"picture"}) {

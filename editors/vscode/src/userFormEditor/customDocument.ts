@@ -23,6 +23,7 @@ export class UserFormCustomDocument implements vscode.CustomDocument {
   private appliedSource: string | undefined;
   private observedSource: string;
   private sourceEpoch = 0;
+  private sourceChangedWhileSaving = false;
 
   constructor(
     public sourceDocument: vscode.TextDocument,
@@ -90,7 +91,15 @@ export class UserFormCustomDocument implements vscode.CustomDocument {
   }
 
   private observeSource(text: string): void {
-    if (this.appliedSource === text || (this.saving && text === this.state.text)) {
+    // TextDocument save participants can change the source buffer while
+    // save() is awaiting VS Code. The save transaction rebases from that final
+    // saved buffer; queueing reconciliation here would race that rebase.
+    if (this.saving) {
+      this.observedSource = text;
+      this.sourceChangedWhileSaving = true;
+      return;
+    }
+    if (this.appliedSource === text) {
       this.observedSource = text;
       return;
     }
@@ -170,7 +179,10 @@ export class UserFormCustomDocument implements vscode.CustomDocument {
 
   async save(validate: () => Promise<void>, cancellation: vscode.CancellationToken): Promise<void> {
     if (this.closed) throw new Error("The Designer is closed.");
+    if (this.saving)
+      throw new Error(vscode.l10n.t("A UserForm source save is already in progress."));
     this.saving = true;
+    this.sourceChangedWhileSaving = false;
     this.saveError = undefined;
     this.changed.fire();
     try {
@@ -241,12 +253,22 @@ export class UserFormCustomDocument implements vscode.CustomDocument {
       // so our own edit cannot conflict with its formatted counterpart.
       this.state.markSaved();
       this.state.synchronize(this.sourceDocument.getText());
+      this.sourceChangedWhileSaving = false;
     } catch (error) {
       this.saveError = String(error);
       throw error;
     } finally {
+      const reconcileFailedSave =
+        this.sourceChangedWhileSaving && this.state.baseText !== this.sourceDocument.getText();
+      this.sourceChangedWhileSaving = false;
       this.saving = false;
       this.changed.fire();
+      if (reconcileFailedSave) {
+        // A failed native save may still have changed the in-memory source
+        // buffer. Reconcile it after releasing the save transaction.
+        this.observedSource = this.state.baseText;
+        this.observeSource(this.sourceDocument.getText());
+      }
     }
   }
 

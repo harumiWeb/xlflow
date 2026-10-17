@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+- Keep the selected UserForm picture usable after cancelling or failing a
+  replacement selection, and reject late picker results after closing the editor.
+
+- Made SpinButton previews closer to VBE with full-size raised arrow buttons
+  in horizontal and vertical layouts.
+
+- Made ScrollBar previews closer to VBE, with arrows at both ends, a classic
+  track and raised thumb in horizontal and vertical layouts.
+
+- Fixed the invisible Designer Undo icon; Undo and Redo now both use bundled
+  icon glyphs.
+
+- Fixed native Designer double-clicks being ignored after pointer capture
+  retargeted them to the viewport.
+
+- Added default-event navigation by double-click and **Open event…** selection
+  in Designer, with existing-handler navigation and native undoable code
+  generation in the configured sidecar or frm source.
+
+- Added **Open in Designer** to the FormSpec editor context menu, native
+  Undo/Redo toolbar buttons, and Backspace deletion in Canvas and Structure.
+- Added individual and all-form sidebar builds, with targeted source saving,
+  workbook overwrite confirmation and sequential session-backed execution.
+
+- Simplified UserForm Designer property inputs by removing type and null
+  selectors. Existing absent/null fields remain unchanged until a concrete edit;
+  false, zero and empty strings remain valid, and FormSpec/API null support is
+  unchanged.
+
+- Fixed child Label/control colors and fonts changing with Form or Frame
+  ForeColor/Font in the Designer preview when Excel keeps independent settings.
+
+- Added Palette/System tabs to UserForm Color editors, with 48 RGB swatches,
+  system-color previews and keyboard navigation.
+
+- Added opt-in typed UserForm property editors for partial Font, RGB/system/OLE
+  Color, Image BMP/JPEG assets and single-target Position. Modal and Canvas
+  previews stay outside draft history until OK; stale input remains visible
+  with confirmation disabled. Image imports occur only on confirmation and
+  retain content-addressed assets for Undo/Redo. Go/LSP metadata remains the
+  authority, with scalar-client compatibility and edited-property-only legacy
+  migration.
+
+- UserForm Designer property names stay English regardless of the UI language.
+
+- Refined the VS Code UserForm Designer with a compact contextual toolbar,
+  grouped Toolbox, two-column Property Grid, Properties/Structure/Tab order
+  tabs, independently scrolling panes, and compact layouts below 900 px.
+  Structure selects nested and overlapping controls without changing source
+  hierarchy.
+
 - New Toolbox MultiPages start with two Pages and `selectedIndex: 0`; their
   control and Pages are created atomically as one native Undo step. New
   TabStrips start with `Tab1`, `Tab2`, and `selectedIndex: 0`. MultiPage and

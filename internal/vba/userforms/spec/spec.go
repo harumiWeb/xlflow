@@ -42,11 +42,15 @@ type FormSpec struct {
 }
 
 type FormSpecForm struct {
-	Name     string                `json:"name" yaml:"name"`
-	Caption  *string               `json:"caption,omitempty" yaml:"caption,omitempty"`
-	Width    *float64              `json:"width,omitempty" yaml:"width,omitempty"`
-	Height   *float64              `json:"height,omitempty" yaml:"height,omitempty"`
-	Observed *FormSpecObservedForm `json:"observed,omitempty" yaml:"observed,omitempty"`
+	Font        *FormSpecFont         `json:"font,omitempty" yaml:"font,omitempty"`
+	ForeColor   *FormSpecColor        `json:"foreColor,omitempty" yaml:"foreColor,omitempty"`
+	BackColor   *FormSpecColor        `json:"backColor,omitempty" yaml:"backColor,omitempty"`
+	BorderStyle *int                  `json:"borderStyle,omitempty" yaml:"borderStyle,omitempty"`
+	Name        string                `json:"name" yaml:"name"`
+	Caption     *string               `json:"caption,omitempty" yaml:"caption,omitempty"`
+	Width       *float64              `json:"width,omitempty" yaml:"width,omitempty"`
+	Height      *float64              `json:"height,omitempty" yaml:"height,omitempty"`
+	Observed    *FormSpecObservedForm `json:"observed,omitempty" yaml:"observed,omitempty"`
 }
 
 type FormSpecObservedForm struct {
@@ -60,33 +64,40 @@ type FormSpecObservedForm struct {
 }
 
 type FormSpecControl struct {
-	ID             string                   `json:"id,omitempty" yaml:"id,omitempty"`
-	ParentID       string                   `json:"parentId,omitempty" yaml:"parentId,omitempty"`
-	ZIndex         *int                     `json:"zIndex,omitempty" yaml:"zIndex,omitempty"`
-	Type           string                   `json:"type" yaml:"type"`
-	Name           string                   `json:"name" yaml:"name"`
-	ProgID         string                   `json:"progId,omitempty" yaml:"progId,omitempty"`
-	Caption        *string                  `json:"caption,omitempty" yaml:"caption,omitempty"`
-	Tag            *string                  `json:"tag,omitempty" yaml:"tag,omitempty"`
-	ControlTipText *string                  `json:"controlTipText,omitempty" yaml:"controlTipText,omitempty"`
-	Accelerator    *string                  `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
-	Text           *string                  `json:"text,omitempty" yaml:"text,omitempty"`
-	Value          any                      `json:"value,omitempty" yaml:"value,omitempty"`
-	Left           *float64                 `json:"left,omitempty" yaml:"left,omitempty"`
-	Top            *float64                 `json:"top,omitempty" yaml:"top,omitempty"`
-	Width          *float64                 `json:"width,omitempty" yaml:"width,omitempty"`
-	Height         *float64                 `json:"height,omitempty" yaml:"height,omitempty"`
-	TabIndex       *int                     `json:"tabIndex,omitempty" yaml:"tabIndex,omitempty"`
-	SelectedIndex  *int                     `json:"selectedIndex,omitempty" yaml:"selectedIndex,omitempty"`
-	Enabled        *bool                    `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Visible        *bool                    `json:"visible,omitempty" yaml:"visible,omitempty"`
-	List           []string                 `json:"list,omitempty" yaml:"list,omitempty"`
-	Tabs           []FormSpecTab            `json:"tabs" yaml:"tabs"`
-	Unsupported    []string                 `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
-	Picture        *FormSpecPicture         `json:"picture,omitempty" yaml:"picture,omitempty"`
-	Controls       []FormSpecControl        `json:"controls,omitempty" yaml:"controls,omitempty"`
-	Properties     map[string]any           `json:"properties,omitempty" yaml:"properties,omitempty"`
-	Observed       *FormSpecObservedControl `json:"observed,omitempty" yaml:"observed,omitempty"`
+	Font             *FormSpecFont            `json:"font,omitempty" yaml:"font,omitempty"`
+	ForeColor        *FormSpecColor           `json:"foreColor,omitempty" yaml:"foreColor,omitempty"`
+	BackColor        *FormSpecColor           `json:"backColor,omitempty" yaml:"backColor,omitempty"`
+	TextAlign        *int                     `json:"textAlign,omitempty" yaml:"textAlign,omitempty"`
+	BorderStyle      *int                     `json:"borderStyle,omitempty" yaml:"borderStyle,omitempty"`
+	PictureAlignment *int                     `json:"pictureAlignment,omitempty" yaml:"pictureAlignment,omitempty"`
+	PictureSizeMode  *int                     `json:"pictureSizeMode,omitempty" yaml:"pictureSizeMode,omitempty"`
+	ID               string                   `json:"id,omitempty" yaml:"id,omitempty"`
+	ParentID         string                   `json:"parentId,omitempty" yaml:"parentId,omitempty"`
+	ZIndex           *int                     `json:"zIndex,omitempty" yaml:"zIndex,omitempty"`
+	Type             string                   `json:"type" yaml:"type"`
+	Name             string                   `json:"name" yaml:"name"`
+	ProgID           string                   `json:"progId,omitempty" yaml:"progId,omitempty"`
+	Caption          *string                  `json:"caption,omitempty" yaml:"caption,omitempty"`
+	Tag              *string                  `json:"tag,omitempty" yaml:"tag,omitempty"`
+	ControlTipText   *string                  `json:"controlTipText,omitempty" yaml:"controlTipText,omitempty"`
+	Accelerator      *string                  `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
+	Text             *string                  `json:"text,omitempty" yaml:"text,omitempty"`
+	Value            any                      `json:"value,omitempty" yaml:"value,omitempty"`
+	Left             *float64                 `json:"left,omitempty" yaml:"left,omitempty"`
+	Top              *float64                 `json:"top,omitempty" yaml:"top,omitempty"`
+	Width            *float64                 `json:"width,omitempty" yaml:"width,omitempty"`
+	Height           *float64                 `json:"height,omitempty" yaml:"height,omitempty"`
+	TabIndex         *int                     `json:"tabIndex,omitempty" yaml:"tabIndex,omitempty"`
+	SelectedIndex    *int                     `json:"selectedIndex,omitempty" yaml:"selectedIndex,omitempty"`
+	Enabled          *bool                    `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Visible          *bool                    `json:"visible,omitempty" yaml:"visible,omitempty"`
+	List             []string                 `json:"list,omitempty" yaml:"list,omitempty"`
+	Tabs             []FormSpecTab            `json:"tabs" yaml:"tabs"`
+	Unsupported      []string                 `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
+	Picture          *FormSpecPicture         `json:"picture,omitempty" yaml:"picture,omitempty"`
+	Controls         []FormSpecControl        `json:"controls,omitempty" yaml:"controls,omitempty"`
+	Properties       map[string]any           `json:"properties,omitempty" yaml:"properties,omitempty"`
+	Observed         *FormSpecObservedControl `json:"observed,omitempty" yaml:"observed,omitempty"`
 }
 
 // FormSpecPicture describes an Image control picture action. Data contains
@@ -467,6 +478,7 @@ func ValidateFormSpecStrict(spec FormSpec) []ValidationIssue {
 		issues = append(issues, requiredFieldIssue("form.name"))
 	}
 	issues = append(issues, validateFormDimensions(spec.Form)...)
+	issues = append(issues, validateTypedForm(spec.Form)...)
 	ids := make(map[string]struct{}, len(spec.Controls))
 	controlsByID := make(map[string]FormSpecControl, len(spec.Controls))
 	for i, control := range spec.Controls {
@@ -547,6 +559,7 @@ func ValidateFormSpecControl(control FormSpecControl, path string) error {
 
 func ValidateFormSpecControlIssues(control FormSpecControl, path string) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
+	issues = append(issues, validateTypedControl(control, path)...)
 	if strings.TrimSpace(control.ID) == "" {
 		issues = append(issues, requiredFieldIssue(path+".id"))
 	}
@@ -1192,8 +1205,13 @@ func validateObjectProperties(root map[string]any, properties map[string]Propert
 			issues = append(issues, validationIssue("UFV002", SeverityError, fmt.Sprintf("%s must be %s.", field, property.ValueType), field, "", ""))
 			continue
 		}
-		if len(property.AllowedValues) > 0 && !valueInAllowedValues(value, property.AllowedValues) {
+		if value != nil && len(property.AllowedValues) > 0 && !valueInAllowedValues(value, property.AllowedValues) {
 			issues = append(issues, validationIssue("UFV003", SeverityError, fmt.Sprintf("%s must be one of: %s.", field, strings.Join(property.AllowedValues, ", ")), field, "", ""))
+		}
+		if value != nil && property.Children != nil {
+			if object, ok := asObjectMap(value); ok {
+				issues = append(issues, validateObjectProperties(object, property.Children, field, nil)...)
+			}
 		}
 		if property.SupportLevel != "" && property.SupportLevel != SupportLevelSupported {
 			issues = append(issues, validationIssue("UFV013", SeverityWarning, fmt.Sprintf("%s has %s support.", field, property.SupportLevel), field, supportSuggestion(property.SupportLevel), property.SupportLevel))
