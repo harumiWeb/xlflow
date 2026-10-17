@@ -393,8 +393,8 @@ func integerValueProperties(description string) map[string]PropertyContract {
 
 func listControlProperties() map[string]PropertyContract {
 	properties := typeProperties("text", "Displayed text.", "value", "Current control value.")
-	properties["list"] = property(ValueTypeStringArray, false, SupportLevelObservedOnly, "Design-time list items captured from Excel; build attempts to apply them best-effort.", true)
-	properties["selectedIndex"] = property(ValueTypeInteger, false, SupportLevelObservedOnly, "Selected list index captured from Excel; build attempts to apply it best-effort.", true)
+	properties["list"] = property(ValueTypeStringArray, false, SupportLevelObservedOnly, "Captured list items; pure-Go compilation cannot author list persistence.", true)
+	properties["selectedIndex"] = property(ValueTypeInteger, false, SupportLevelObservedOnly, "Captured list selection; pure-Go compilation cannot author list selection persistence.", true)
 	return properties
 }
 

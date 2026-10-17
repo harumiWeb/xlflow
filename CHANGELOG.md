@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Expanded the bundled agent skill's UserForm guidance with a generated property
+  contract, field/value and applicability guidance, and complete authoring
+  examples. Documentation checks detect stale contract metadata.
+
 - Fixed UserForm file projections and Excel snapshots to emit authored values
   once instead of duplicating them under `observed`. Genuine Page geometry and
   form outer/inside measurements remain captured; existing YAML/YML/JSON

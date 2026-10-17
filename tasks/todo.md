@@ -1,3 +1,17 @@
+# Agent skill FormSpec authoring guidance
+
+- [x] Separate workflow, property guidance, generated contract and complete examples.
+- [x] Document field types, enums, applicability, edit semantics and missing-property limits.
+- [x] Generate property metadata from the shared contract and detect stale documentation.
+- [x] Review links, formatting and generated output against the implementation.
+
+Validation: documentation checks/build, scoped formatting, generator lint and
+diff checks pass. Generated metadata is bundled with the skill and checked
+without rewriting files. Read-only review identified legacy list-persistence
+advice; guidance and metadata descriptions now distinguish ComboBox string
+values from rejected list/selection and ListBox text/value edits. No runtime
+semantics changed; unit tests and Excel execution were not run for this update.
+
 # UserForm observation and diagnostics UX
 
 - [x] Stop synthesizing duplicate observed values; keep legacy input and genuine observation-only state.

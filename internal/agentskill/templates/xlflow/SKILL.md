@@ -252,6 +252,11 @@ actually provide.
 
 ## Dispatch to Specialized References
 
+For FormSpec authoring, start with [forms.md](references/forms.md), then load
+[property guidance](references/forms-properties.md) and the generated
+[property contract](references/forms-contract.md) before choosing control fields.
+Use [complete examples](references/forms-examples.md) when creating a layout.
+
 | Task or signal                                                                                                                                                                   | Load this reference                                       |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
 | Writing tests, selecting tests, test metadata, hooks, or test failures                                                                                                           | [testing.md](references/testing.md)                       |

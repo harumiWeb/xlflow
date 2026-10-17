@@ -259,7 +259,12 @@ requested state and applies it to an independent model; a stale, invalid, or
 unsupported edit returns an error without changing the input model. Callers
 publish only a fully compiled result.
 
-`ComboBox` and `ListBox` `list` and `selectedIndex` are observed-only: xlflow attempts to apply them, but round-trip fidelity is not guaranteed. `MultiPage` and `TabStrip` `selectedIndex` are modeled authoring fields.
+`ComboBox` and `ListBox` `list` and `selectedIndex` are observed-only. The shared
+pure-Go compiler rejects list/selection edits and ListBox text/value edits
+because persisted list state is not established; ComboBox string text/value
+edits are modeled. New generation rejects a nonempty list or explicit list
+selectedIndex. Use runtime VBA initialization for list items and selection.
+`MultiPage` and `TabStrip` `selectedIndex` are modeled authoring fields.
 
 ### Parent and Custom-Control Rules
 
@@ -270,17 +275,17 @@ publish only a fully compiled result.
   children, and `Page` accepts controls but can only be parented by
   `MultiPage`.
 - `TabStrip` does not contain controls; model tabs with its `tabs` property.
-- A custom `type` requires an explicit custom `progId`. xlflow validates common fields but emits a `custom/unchecked` warning because type-specific properties cannot be verified.
+- A custom `type` requires an explicit custom `progId`. xlflow validates common fields but emits a `custom/unchecked` warning because type-specific properties cannot be verified. Accepted metadata does not imply generation support: the shared pure-Go compiler rejects custom ActiveX generation, including Excel-backed `form build`.
 
 ## Support Levels
 
-| Level            | Meaning                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------ |
-| Supported        | xlflow validates and applies the field as part of the normal Designer build.               |
-| Best-effort      | xlflow attempts to apply it; inspect the rebuilt form to confirm the result.               |
-| Observed-only    | Captured list state that may be applied best-effort but is not guaranteed to round-trip.   |
-| Snapshot-only    | Capture metadata, not normal authored build intent.                                        |
-| Custom/unchecked | Accepted for compatibility, but xlflow cannot validate detailed control-specific behavior. |
+| Level            | Meaning                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------- |
+| Supported        | xlflow validates and applies the field as part of the normal Designer build.                |
+| Best-effort      | xlflow attempts to apply it; inspect the rebuilt form to confirm the result.                |
+| Observed-only    | Captured state with limited persistence; current pure-Go list/selection edits are rejected. |
+| Snapshot-only    | Capture metadata, not normal authored build intent.                                         |
+| Custom/unchecked | Accepted for compatibility, but xlflow cannot validate detailed control-specific behavior.  |
 
 ## Validation and Editor Diagnostics
 
