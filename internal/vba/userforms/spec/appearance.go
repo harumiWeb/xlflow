@@ -217,7 +217,11 @@ func legacyAppearanceEqual(name string, typed, legacy any) bool {
 		if json.Unmarshal(body, &color) == nil {
 			ole, err := ColorOLE(color)
 			n, ok := rawFloat64(legacy)
-			return err == nil && ok && (n == float64(ole) || n == float64(int32(ole)))
+			signed := int64(ole)
+			if ole > math.MaxInt32 {
+				signed -= 1 << 32
+			}
+			return err == nil && ok && (n == float64(ole) || n == float64(signed))
 		}
 	}
 	a, _ := json.Marshal(typed)
