@@ -368,7 +368,7 @@ func TestTabOperationsPreserveSelectionAndAuthoredNull(t *testing.T) {
 	}
 }
 
-func TestTabRemovalLeavesObservedSelectionValidationAuthoritative(t *testing.T) {
+func TestTabRemovalPreservesHistoricalObservedSelection(t *testing.T) {
 	for _, format := range []string{"yaml", "json"} {
 		t.Run(format, func(t *testing.T) {
 			source := pageTabsYAML
@@ -387,9 +387,12 @@ func TestTabRemovalLeavesObservedSelectionValidationAuthoritative(t *testing.T) 
 			input := []byte(source)
 			original := bytes.Clone(input)
 			result, err := Apply(spec.SpecInput{Format: format}, input, []Operation{{Type: RemoveTab, ControlID: "strip", Index: new(0)}})
-			structured, ok := errors.AsType[*Error](err)
-			if !ok || len(structured.Diagnostics) == 0 || structured.Diagnostics[0].Code != "UFV020" || !reflect.DeepEqual(result, Result{}) || !bytes.Equal(input, original) {
-				t.Fatalf("observed selected index should reject the transaction: %+v %v", result, err)
+			if err != nil || !bytes.Equal(input, original) {
+				t.Fatalf("historical selection must not block authored tab removal or mutate input: %+v %v", result, err)
+			}
+			strip := result.Document.Controls[slices.IndexFunc(result.Document.Controls, func(control spec.FormSpecControl) bool { return control.ID == "strip" })]
+			if len(strip.Tabs) != 1 || strip.SelectedIndex == nil || *strip.SelectedIndex != 0 || strip.Observed == nil || strip.Observed.SelectedIndex == nil || *strip.Observed.SelectedIndex != 1 || strip.Observed.Tabs != nil {
+				t.Fatalf("authored selection must adjust while the historical observation stays unchanged: %+v", strip)
 			}
 		})
 	}

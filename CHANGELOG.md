@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed retained TabStrip observations incorrectly blocking authored tab removal
+  when the historical selection has no captured tab collection.
+
 - Expanded the bundled agent skill's UserForm guidance with a generated property
   contract, field/value and applicability guidance, and complete authoring
   examples. Documentation checks detect stale contract metadata.

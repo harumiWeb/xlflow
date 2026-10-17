@@ -1,3 +1,17 @@
+# PR #935 review follow-up
+
+- [x] Compare retained TabStrip observations with the authored/observed validation contract.
+- [x] Stop bounding historical selectedIndex by the current authored tabs.
+- [x] Review the native navigation coverage observation and record its limits.
+- [x] Run affected lint/docs checks and prepare the fix and English PR description.
+
+Disposition: the historical TabStrip selection finding is valid. Captured
+selection now uses only captured tabs for upper-bound validation; the existing
+YAML/JSON edit test expectations reflect successful removal and preserved
+observations. Native problem navigation remains a coverage limitation rather
+than a confirmed implementation defect. Scoped lint, docs, formatting and diff
+checks passed; tests and Excel were not rerun for this follow-up.
+
 # Agent skill FormSpec authoring guidance
 
 - [x] Validate Pass 1 findings against compiler and normalization behavior.

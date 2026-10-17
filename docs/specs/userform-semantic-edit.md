@@ -66,6 +66,12 @@ including Page geometry and form outer and inside dimensions. Existing
 localized source edits. An edit never promotes an existing observation into an
 authored property or creates an observation that was absent from the source.
 
+A retained TabStrip `observed.selectedIndex` is bounded only by its captured
+`observed.tabs` collection when that collection is present. Without captured
+tabs, only the minimum value of -1 is checked. Current authored tabs never
+provide the bound for historical observations: removing or clearing authored
+tabs must not reinterpret a preserved snapshot selection.
+
 This boundary prevents normalization details from becoming authored source.
 An edit to one scalar should replace that scalar or insert one mapping entry;
 it must not rewrite unrelated controls or the whole document as a recovery

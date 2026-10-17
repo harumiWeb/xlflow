@@ -612,13 +612,10 @@ func ValidateFormSpecControlIssues(control FormSpecControl, path string) []Valid
 			} else {
 				issues = append(issues, validateFormSpecTabs(control.Observed.Tabs, path+".observed.tabs")...)
 			}
-			observedTabs := control.Observed.Tabs
-			if observedTabs == nil {
-				// Older input can capture only the selection. Validate it against
-				// the authored collection without synthesizing an observed copy.
-				observedTabs = control.Tabs
-			}
-			issues = append(issues, validateSelectedIndex(control.Observed.SelectedIndex, observedTabs, path+".observed.selectedIndex", strings.EqualFold(strings.TrimSpace(control.Type), "TabStrip") && observedTabs != nil)...)
+			// Historical selection belongs to the captured collection, which may
+			// differ from authored tabs after an edit. Without captured tabs,
+			// validate only the minimum index, never the current authored bound.
+			issues = append(issues, validateSelectedIndex(control.Observed.SelectedIndex, control.Observed.Tabs, path+".observed.selectedIndex", strings.EqualFold(strings.TrimSpace(control.Type), "TabStrip") && control.Observed.Tabs != nil)...)
 		}
 	} else if control.Observed != nil && control.Observed.Tabs != nil {
 		issues = append(issues, invalidControlPropertyIssue(path+".observed.tabs", control.Type))
