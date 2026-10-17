@@ -45,7 +45,8 @@ All notable changes to xlflow will be documented in this file.
   toolbar buttons, and Backspace deletion with existing subtree confirmation.
 - FormSpecs in the standard `src/forms/specs` directory now open in the VS Code
   UserForm Designer by default; YAML and JSON files outside that directory keep
-  the text editor by default.
+  the text editor by default. FormSpecs under a configured nonstandard forms
+  root remain available through **Reopen Editor With...**.
 - Added individual and all-form builds from the VS Code UserForms sidebar,
   with explicit source saving, overwrite confirmation and session-backed builds.
 

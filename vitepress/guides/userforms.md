@@ -21,10 +21,11 @@ HIMETRIC rounding; xlflow does not compensate with a fixed offset.
 ## Visual layout in VS Code
 
 FormSpecs directly under the standard `src/forms/specs` directory open in the
-Designer by default. If your project uses another forms root, open the source
-and right-click in the editor to choose **xlflow: Open in Designer**. Opening
-keeps unsaved source text intact. Select a control to drag it or resize with
-one of eight handles.
+Designer by default. If your project uses another forms root, open a FormSpec
+with **Reopen Editor With... → xlflow UserForm Designer** or right-click in the
+source editor and choose **xlflow: Open in Designer**. Opening keeps unsaved
+source text intact. Select a control to drag it or resize with one of eight
+handles.
 Arrow keys move 1 point; Shift+Arrow moves 10 points. Holding
 an arrow key creates one edit when the keys are released. Escape cancels an
 unfinished interaction. Use VS Code Undo/Redo or the Canvas toolbar's Undo/Redo

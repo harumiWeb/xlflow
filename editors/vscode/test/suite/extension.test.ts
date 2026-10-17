@@ -1276,6 +1276,15 @@ function assertLocalizationResources(extensionPath: string): void {
     when: "activeCustomEditorId == xlflow.userFormDesigner",
   });
   assert.strictEqual(
+    readPath(manifest, ["contributes", "customEditors", 0, "selector", 0, "filenamePattern"]),
+    "**/specs/*.{yaml,yml,json}",
+  );
+  assert.strictEqual(readPath(manifest, ["contributes", "customEditors", 0, "priority"]), "option");
+  assert.deepStrictEqual(
+    readPath(manifest, ["contributes", "configurationDefaults", "workbench.editorAssociations"]),
+    { "**/src/forms/specs/*.{yaml,yml,json}": "xlflow.userFormDesigner" },
+  );
+  assert.strictEqual(
     packageNls["command.userFormDesigner.save.title"],
     "Save UserForm Designer Changes to Source",
   );

@@ -993,6 +993,8 @@ async function assertRegisteredProviderNativeSave(extensionUri: vscode.Uri): Pro
       "native checkpoint acknowledgement does not clear the Designer draft badge",
     );
 
+    nativePanel!.reveal(nativePanel!.viewColumn);
+    await waitFor(() => nativePanel!.active, "restore Designer focus before explicit publication");
     await vscode.commands.executeCommand(testSaveCommand);
     await waitForAsync(
       async () =>

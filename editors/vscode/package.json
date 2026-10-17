@@ -74,10 +74,10 @@
         "displayName": "%customEditor.userFormDesigner.displayName%",
         "selector": [
           {
-            "filenamePattern": "**/src/forms/specs/*.{yaml,yml,json}"
+            "filenamePattern": "**/specs/*.{yaml,yml,json}"
           }
         ],
-        "priority": "default"
+        "priority": "option"
       }
     ],
     "configuration": {
@@ -156,6 +156,9 @@
       }
     },
     "configurationDefaults": {
+      "workbench.editorAssociations": {
+        "**/src/forms/specs/*.{yaml,yml,json}": "xlflow.userFormDesigner"
+      },
       "[vba]": {
         "editor.quickSuggestions": {
           "other": "on",

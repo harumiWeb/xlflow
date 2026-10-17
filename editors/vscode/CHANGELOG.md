@@ -8,7 +8,9 @@
   at the bottom of the Designer. Problem items retain LSP severity, code, field,
   and source location, with version-safe navigation for unsaved drafts.
 - Open FormSpecs in the standard `src/forms/specs` directory with the UserForm
-  Designer by default; other YAML and JSON files keep the text editor.
+  Designer by default; other YAML and JSON files keep the text editor by
+  default, while custom forms roots retain the Designer through **Reopen Editor
+  With...**.
 
 - Keep the selected UserForm picture usable after cancelling or failing a
   replacement selection, and reject late picker results after closing the editor.
