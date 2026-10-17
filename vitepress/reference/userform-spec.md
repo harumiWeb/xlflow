@@ -39,7 +39,7 @@ Do not add snapshot-oriented fields such as `warnings` to a new spec unless they
 | `name`            | string | Yes      | Supported. VBA UserForm component name.                                                                                                     |
 | `caption`         | string | No       | Supported.                                                                                                                                  |
 | `width`, `height` | number | No       | Persisted MS-OFORMS `DisplayedSize` in points. New forms default to 240 × 180; omitted dimensions on existing template forms are preserved. |
-| `observed`        | object | No       | Snapshot-only captured state, including runtime and persisted dimensions.                                                                   |
+| `observed`        | object | No       | Genuine snapshot observations, including measured outer and inside dimensions; not a source of authoring values.                            |
 
 ## Controls
 
@@ -50,7 +50,10 @@ persisted `DisplayedSize`; inspection fields named `client_width` and
 `ClientWidth` / `ClientHeight`. VBFrame client properties are compiler-
 maintained companion values and never seed root authoring dimensions. Runtime
 MSForms `InsideWidth` / `InsideHeight` are separate observations and are not
-converted to or from these values. Excel import/export may normalize
+converted to or from these values. `form.observed` can retain captured outer
+`width`/`height` and `insideWidth`/`insideHeight` when available. It does not synthesize
+`clientWidth`/`clientHeight` by copying the authored `form.width`/`height`.
+Excel import/export may normalize
 `DisplayedSize`, so snapshots report the actual persisted size and exact
 round-trip equality with authored points is not guaranteed. The pure-Go
 nearest-integer HIMETRIC rounding contract is separate. The legacy
@@ -65,21 +68,21 @@ require prebuilt `.frm` or `.frx` files.
 
 Every authored control requires `id`, `name`, and `type`. Controls are a flat list; use `parentId` to place a child inside a container.
 
-| Common field                     | Type                  | Support          | Notes                                                                                  |
-| -------------------------------- | --------------------- | ---------------- | -------------------------------------------------------------------------------------- |
-| `id`                             | string                | Supported        | Stable, unique identifier used by `parentId`.                                          |
-| `name`                           | string                | Supported        | VBA control name.                                                                      |
-| `type`                           | string                | Supported        | One of the built-in types below, or a custom type with `progId`.                       |
-| `progId`                         | string                | Supported        | Must match a known built-in `type` when both are known.                                |
-| `parentId`                       | string                | Supported        | Must reference another control ID and obey the built-in parent/child rules below.      |
-| `zIndex`                         | integer               | Supported        | Sibling ordering hint.                                                                 |
-| `left`, `top`, `width`, `height` | number                | Supported        | Designer coordinates in points; these are not authoring fields for `Page`.             |
-| `tabIndex`                       | integer               | Supported        | Designer tab order.                                                                    |
-| `enabled`, `visible`             | boolean               | Supported        | Initial control state.                                                                 |
-| `picture`                        | object                | Image only       | Project-relative BMP/JPEG asset path or explicit `{ remove: true }`.                   |
-| `observed`, `unsupported`        | object / string array | Snapshot-only    | Captured state; do not use as normal authoring fields.                                 |
-| `controls`                       | array                 | Snapshot-only    | Legacy nested form accepted for compatibility; prefer flat `controls` plus `parentId`. |
-| `properties`                     | object                | Custom/unchecked | Unchecked property bag; avoid it in hand-authored built-in controls.                   |
+| Common field                     | Type                  | Support          | Notes                                                                                           |
+| -------------------------------- | --------------------- | ---------------- | ----------------------------------------------------------------------------------------------- |
+| `id`                             | string                | Supported        | Stable, unique identifier used by `parentId`.                                                   |
+| `name`                           | string                | Supported        | VBA control name.                                                                               |
+| `type`                           | string                | Supported        | One of the built-in types below, or a custom type with `progId`.                                |
+| `progId`                         | string                | Supported        | Must match a known built-in `type` when both are known.                                         |
+| `parentId`                       | string                | Supported        | Must reference another control ID and obey the built-in parent/child rules below.               |
+| `zIndex`                         | integer               | Supported        | Sibling ordering hint.                                                                          |
+| `left`, `top`, `width`, `height` | number                | Supported        | Designer coordinates in points; these are not authoring fields for `Page`.                      |
+| `tabIndex`                       | integer               | Supported        | Designer tab order.                                                                             |
+| `enabled`, `visible`             | boolean               | Supported        | Initial control state.                                                                          |
+| `picture`                        | object                | Image only       | Project-relative BMP/JPEG asset path or explicit `{ remove: true }`.                            |
+| `observed`, `unsupported`        | object / string array | Snapshot-only    | Genuine captured state; do not use as authoring fields or duplicate authored scalar/tab values. |
+| `controls`                       | array                 | Snapshot-only    | Legacy nested form accepted for compatibility; prefer flat `controls` plus `parentId`.          |
+| `properties`                     | object                | Custom/unchecked | Unchecked property bag; avoid it in hand-authored built-in controls.                            |
 
 ### Built-in Control Types
 
@@ -245,12 +248,23 @@ are snapshot-only values under `observed`. New pure-Go generation lays out
 standard top tabs using fixed 96-DPI geometry and an explicit Tahoma 8.25pt
 font, independent of the build host's display and font settings.
 
+File projections and Excel snapshots retain captured Page geometry and form
+outer/inside measurements. They do not add observed copies of authored
+captions, control scalar properties, TabStrip tab data, or client dimensions.
+Existing `observed` values in YAML, YML, and JSON remain accepted and are kept
+by localized source edits; they are never promoted into authoring properties.
+
 Modeled UserForm edits are all-or-nothing. The Go compiler validates the
 requested state and applies it to an independent model; a stale, invalid, or
 unsupported edit returns an error without changing the input model. Callers
 publish only a fully compiled result.
 
-`ComboBox` and `ListBox` `list` and `selectedIndex` are observed-only: xlflow attempts to apply them, but round-trip fidelity is not guaranteed. `MultiPage` and `TabStrip` `selectedIndex` are modeled authoring fields.
+`ComboBox` and `ListBox` `list` and `selectedIndex` are observed-only. The shared
+pure-Go compiler rejects list/selection edits and ListBox text/value edits
+because persisted list state is not established; ComboBox string text/value
+edits are modeled. New generation rejects a nonempty list or explicit list
+selectedIndex. Use runtime VBA initialization for list items and selection.
+`MultiPage` and `TabStrip` `selectedIndex` are modeled authoring fields.
 
 ### Parent and Custom-Control Rules
 
@@ -261,38 +275,38 @@ publish only a fully compiled result.
   children, and `Page` accepts controls but can only be parented by
   `MultiPage`.
 - `TabStrip` does not contain controls; model tabs with its `tabs` property.
-- A custom `type` requires an explicit custom `progId`. xlflow validates common fields but emits a `custom/unchecked` warning because type-specific properties cannot be verified.
+- A custom `type` requires an explicit custom `progId`. xlflow validates common fields but emits a `custom/unchecked` warning because type-specific properties cannot be verified. Accepted metadata does not imply generation support: the shared pure-Go compiler rejects custom ActiveX generation, including Excel-backed `form build`.
 
 ## Support Levels
 
-| Level            | Meaning                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------ |
-| Supported        | xlflow validates and applies the field as part of the normal Designer build.               |
-| Best-effort      | xlflow attempts to apply it; inspect the rebuilt form to confirm the result.               |
-| Observed-only    | Captured list state that may be applied best-effort but is not guaranteed to round-trip.   |
-| Snapshot-only    | Capture metadata, not normal authored build intent.                                        |
-| Custom/unchecked | Accepted for compatibility, but xlflow cannot validate detailed control-specific behavior. |
+| Level            | Meaning                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------- |
+| Supported        | xlflow validates and applies the field as part of the normal Designer build.                |
+| Best-effort      | xlflow attempts to apply it; inspect the rebuilt form to confirm the result.                |
+| Observed-only    | Captured state with limited persistence; current pure-Go list/selection edits are rejected. |
+| Snapshot-only    | Capture metadata, not normal authored build intent.                                         |
+| Custom/unchecked | Accepted for compatibility, but xlflow cannot validate detailed control-specific behavior.  |
 
 ## Validation and Editor Diagnostics
 
 `form build` reports all detected contract issues before Excel opens. YAML files directly under the configured `src/forms/specs` directory receive the same live diagnostics in the xlflow LSP.
 
-The LSP also provides context-aware completion and Hover for known UserForm YAML fields, built-in control types, and built-in ProgIDs. Hover shows the expected value type, required status, applicable controls, and support level. In particular, root `width` and `height` author persisted MS-OFORMS `DisplayedSize`; `ComboBox` and `ListBox` list selection state is observed-only; and `warnings`, `observed`, `unsupported`, and `properties` are snapshot-oriented or custom/unchecked metadata rather than normal build inputs.
+The LSP also provides context-aware completion and Hover for known UserForm YAML fields, built-in control types, and built-in ProgIDs. Hover shows the expected value type, required status, applicable controls, and support level. In particular, root `width` and `height` author persisted MS-OFORMS `DisplayedSize`; `ComboBox` and `ListBox` list selection state is observed-only; and `warnings`, `observed`, `unsupported`, and `properties` are snapshot-oriented or custom/unchecked metadata rather than normal build inputs. Snapshot-only support metadata does not produce a generic `UFV013` warning by presence alone; real custom, observed-only, and best-effort warnings remain. A persisted warning entry with a message is reported with its original code and message at `warnings[i].message`; the mere presence of `warnings`, `observed`, or `unsupported` containers is not a warning.
 
-| Code              | Meaning                                                                                                                       |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `UFY001`          | YAML parse error.                                                                                                             |
-| `UFV001`–`UFV005` | Unknown field, invalid value type/fixed value, missing required field, or unsupported property.                               |
-| `UFV006`–`UFV012` | Unsupported control type, duplicate ID, invalid parent reference, parent cycle, invalid parent type, or type/ProgID mismatch. |
-| `UFV013`–`UFV015` | Support-level, custom-control, or snapshot-only unresolved-control warning.                                                   |
-| `UFV016`          | Invalid form dimension (finite, non-negative, representable HIMETRIC required).                                               |
+| Code              | Meaning                                                                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `UFY001`          | YAML parse error.                                                                                                                  |
+| `UFV001`–`UFV005` | Unknown field, invalid value type/fixed value, missing required field, or unsupported property.                                    |
+| `UFV006`–`UFV012` | Unsupported control type, duplicate ID, invalid parent reference, parent cycle, invalid parent type, or type/ProgID mismatch.      |
+| `UFV013`–`UFV015` | Support-level warning (generic snapshot-only presence is suppressed), custom-control warning, or unresolved snapshot-only control. |
+| `UFV016`          | Invalid form dimension (finite, non-negative, representable HIMETRIC required).                                                    |
 
 `UFV021` reports invalid typed appearance values or conflicting typed/legacy
 representations. `UFV019` remains reserved for Tab validation.
 
 The removed `form.build` aliases are reported as unknown fields (`UFV001`).
 
-For a Designer capture, use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml`. Captured `warnings`, `observed`, and other snapshot fields are preserved for review, but new authoring should begin with the minimal form above. Keep authored specs directly in `src/forms/specs/` so the LSP recognizes them; files outside that configured location are intentionally ignored.
+For a Designer capture, use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml`. Captured `warnings`, `observed`, and other snapshot fields are preserved for review, but new authoring should begin with the minimal form above. New projections do not duplicate authored values under `observed`; existing observed source values are preserved by local edits and never become authoring values. Keep authored specs directly in `src/forms/specs/` so the LSP recognizes them; files outside that configured location are intentionally ignored.
 
 ## Related
 

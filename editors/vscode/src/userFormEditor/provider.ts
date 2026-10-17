@@ -43,6 +43,7 @@ import { designerResourceUri, designerSourceUri } from "./resource";
 import { PictureImportSession } from "./pictures";
 import type { PictureCommitReceipt, PictureSelection } from "./pictures";
 import { UserFormEventQueue, resolveUserFormCodeTarget, validEventRange } from "./events";
+import { problemForRequest, problemSourceRange } from "./problems";
 import type {
   UserFormEventDescriptor,
   UserFormEventEditResult,
@@ -1738,6 +1739,62 @@ export class UserFormEditorProvider
         this.pendingEvents.delete(key);
       }
     };
+    const handleOpenProblem = async (
+      message: Extract<WebviewMessage, { type: "openProblem" }>,
+    ): Promise<void> => {
+      const snapshot = latestDocument;
+      const problem = problemForRequest(snapshot, document.version, message.version, message.index);
+      if (
+        !problem ||
+        disposed ||
+        customDocument.closed ||
+        customDocument.state.conflicted ||
+        customDocument.saving ||
+        customDocument.reconciling
+      )
+        return;
+
+      const previewText = document.getText();
+      const sourceDocument = customDocument.sourceDocument;
+      const sourceVersion = sourceDocument.version;
+      const sourceText = sourceDocument.getText();
+      const range = await problemSourceRange(
+        problem,
+        message.index,
+        previewText,
+        sourceText,
+        sourceVersion,
+        () => this.clients.requestUserFormPreview(sourceDocument),
+      );
+      if (
+        disposed ||
+        customDocument.closed ||
+        customDocument.state.conflicted ||
+        customDocument.saving ||
+        customDocument.reconciling ||
+        document.version !== message.version ||
+        latestDocument?.version !== message.version ||
+        latestDocument.document.warnings[message.index] !== problem ||
+        document.getText() !== previewText ||
+        customDocument.sourceDocument !== sourceDocument ||
+        sourceDocument.version !== sourceVersion ||
+        sourceDocument.getText() !== sourceText
+      )
+        return;
+
+      const selection = range
+        ? new vscode.Range(
+            range.start.line,
+            range.start.character,
+            range.end.line,
+            range.end.character,
+          )
+        : undefined;
+      await vscode.window.showTextDocument(sourceDocument, {
+        viewColumn: vscode.ViewColumn.Beside,
+        ...(selection ? { selection } : {}),
+      });
+    };
     const watcher = vscode.workspace.createFileSystemWatcher("**/xlflow.toml");
     const subscriptions: vscode.Disposable[] = [
       watcher,
@@ -1789,6 +1846,8 @@ export class UserFormEditorProvider
           void vscode.window.showTextDocument(customDocument.sourceDocument, {
             viewColumn: vscode.ViewColumn.Beside,
           });
+        } else if (message.type === "openProblem") {
+          void handleOpenProblem(message);
         } else if (message.type === "save") {
           void this.publishPanel(panel, customDocument).then(undefined, (error) =>
             vscode.window.showErrorMessage(String(error)),

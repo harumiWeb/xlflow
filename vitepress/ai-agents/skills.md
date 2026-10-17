@@ -6,17 +6,28 @@ The normal loop is: orient, analyze structural impact when relevant, edit source
 
 The installed Skill loads specialized guidance only when the task requires it:
 
-| Task                                  | Reference                     |
-| ------------------------------------- | ----------------------------- |
-| Tests and test failures               | `references/testing.md`       |
-| Formula-driven behavior               | `references/formulas.md`      |
-| UserForm design and inspection        | `references/forms.md`         |
-| Interactive dialogs and unattended UI | `references/xlflow-ui.md`     |
-| Runtime diagnostics                   | `references/debugging.md`     |
-| Recovery-required state               | `references/recovery.md`      |
-| Call graph, impact, and dependencies  | `references/code-analysis.md` |
+| Task                                    | Reference                        |
+| --------------------------------------- | -------------------------------- |
+| Tests and test failures                 | `references/testing.md`          |
+| Formula-driven behavior                 | `references/formulas.md`         |
+| UserForm design and inspection          | `references/forms.md`            |
+| FormSpec field syntax and edit rules    | `references/forms-properties.md` |
+| Property types, enums and applicability | `references/forms-contract.md`   |
+| Complete UserForm authoring examples    | `references/forms-examples.md`   |
+| Interactive dialogs and unattended UI   | `references/xlflow-ui.md`        |
+| Runtime diagnostics                     | `references/debugging.md`        |
+| Recovery-required state                 | `references/recovery.md`         |
+| Call graph, impact, and dependencies    | `references/code-analysis.md`    |
 
 This structure keeps detailed workflows available without turning `SKILL.md` into a CLI reference. In particular, recovery remains fail-closed: when xlflow reports that recovery is required, stop normal workbook operations and follow the recovery reference.
+
+The FormSpec references are bundled with the installed skill. The property
+contract is generated from the same metadata used by UserForm validation and
+editor intelligence. Maintainers run `pnpm docs:generate-form-skill` after
+changing that metadata; `pnpm docs:check` rejects a stale generated reference.
+The companion guidance explains additional compiler limits, and the examples
+show complete input, grouped-choice and page/image forms. MSForms properties
+absent from the xlflow contract should not be guessed into a spec.
 
 Supported provider targets:
 

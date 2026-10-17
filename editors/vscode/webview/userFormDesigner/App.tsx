@@ -29,6 +29,7 @@ import "./app.css";
 import { Icon } from "./Icon";
 import { TabOrderEditor } from "./TabOrderEditor";
 import { StructureTree } from "./StructureTree";
+import { ProblemsPanel } from "./ProblemsPanel";
 import {
   orderedChildren,
   zoomLevels,
@@ -797,11 +798,6 @@ export function App() {
             {(document.approximate || document.controls.some((c) => c.approximate)) && (
               <p class="notice">{strings.approximate}</p>
             )}
-            {document.warnings.map((warning, index) => (
-              <p class="notice" key={index}>
-                {warning}
-              </p>
-            ))}
           </>
         )}
       </div>
@@ -1176,6 +1172,14 @@ export function App() {
             <span aria-live="polite">
               {strings.selectionCount}: {selectedIds.length}
             </span>
+            <ProblemsPanel
+              problems={error ? [] : document.warnings}
+              version={documentVersion}
+              strings={strings}
+              onOpenProblem={(version, index) =>
+                bridge.postMessage({ type: "openProblem", version, index })
+              }
+            />
             {selectedIds.length === 1 && selectedControl && (
               <span class="selection-bounds" aria-label={strings.selectionBounds}>
                 x:{selectedControl.left} y:{selectedControl.top} w:{selectedControl.width} h:

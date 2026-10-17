@@ -2,11 +2,13 @@ package lspserver
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/sourcegraph/jsonrpc2"
@@ -115,6 +117,191 @@ func TestUserFormPreviewJSONAndWarnings(t *testing.T) {
 	result = s.userFormPreview(userFormPreviewParams{URI: pathToFileURI(filepath.Join(root, "src/forms/specs/Main.yml")), Text: source})
 	if result.Error != nil || result.Document == nil || len(result.Warnings) == 0 {
 		t.Fatalf("warning preview: %+v", result)
+	}
+}
+
+func TestUserFormPreviewWarningRanges(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{opts: Options{RootDir: root, Config: config.Default()}}
+	const yamlSource = `schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form:
+  name: Main
+  observed:
+    insideWidth: 200
+controls: []
+warnings:
+  - code: unsupported_properties
+    message: Captured "caption" warning.
+    control: Label1
+`
+	const yamlUnicodeSource = `schemaVersion: 1
+kind: xlflow.userform
+basis: designer
+form:
+  name: Main
+  observed:
+    insideWidth: 200
+controls: []
+warnings: [{code: unsupported_properties, control: "😀", message: "Captured warning."}]
+`
+	const jsonSource = `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Main","caption":"😀","observed":{"insideWidth":200}},"controls":[{"id":"label","type":"Label","name":"Label1","unsupported":["specialEffect"],"observed":{"caption":"old","width":10}}],"warnings":[{"code":"unsupported_properties","message":"Unsupported \"caption\" 😀 property\nwas captured.","control":"Label1"}]}`
+	jsonCRLF := strings.ReplaceAll(jsonSource, `,"`, ",\r\n\"")
+	for _, test := range []struct {
+		name    string
+		ext     string
+		source  string
+		message string
+		start   int
+		end     int
+	}{
+		{
+			name:    "yaml",
+			ext:     "yaml",
+			source:  yamlSource,
+			message: `Captured "caption" warning.`,
+			start:   strings.Index(yamlSource, "message: ") + len("message: "),
+			end:     strings.Index(yamlSource, "\n    control:"),
+		},
+		{
+			name:    "yml-crlf",
+			ext:     "yml",
+			source:  strings.ReplaceAll(yamlSource, "\n", "\r\n"),
+			message: `Captured "caption" warning.`,
+		},
+		{
+			name:    "yaml-unicode-before-field",
+			ext:     "yaml",
+			source:  yamlUnicodeSource,
+			message: "Captured warning.",
+		},
+		{
+			name:    "json-unicode-escaped-single-line",
+			ext:     "json",
+			source:  jsonSource,
+			message: "Unsupported \"caption\" 😀 property\nwas captured.",
+		},
+		{
+			name:    "json-crlf",
+			ext:     "json",
+			source:  jsonCRLF,
+			message: "Unsupported \"caption\" 😀 property\nwas captured.",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if strings.HasPrefix(test.name, "yml") {
+				test.start = strings.Index(test.source, "message: ") + len("message: ")
+				test.end = strings.Index(test.source[test.start:], "\r\n    control:") + test.start
+			} else if test.name == "yaml-unicode-before-field" {
+				messageField := strings.Index(test.source, `message: "`)
+				test.start = messageField + len("message: ")
+				test.end = test.start + strings.Index(test.source[test.start+1:], `"`) + 2
+			} else if strings.HasPrefix(test.name, "json") {
+				test.start, test.end = userFormPreviewJSONMessageRange(t, test.source)
+			}
+			uri := pathToFileURI(filepath.Join(root, "src", "forms", "specs", "Main."+test.ext))
+			result := s.userFormPreview(userFormPreviewParams{URI: uri, Version: 12, Text: test.source})
+			if result.Error != nil || result.Document == nil || result.Version != 12 || len(result.Warnings) != 1 {
+				t.Fatalf("preview warning: %+v", result)
+			}
+			warning := result.Warnings[0]
+			if warning.Code != "unsupported_properties" || warning.Field != "warnings[0].message" || warning.Message != test.message {
+				t.Fatalf("captured warning = %+v", warning)
+			}
+			for _, got := range result.Warnings {
+				if got.Code == "UFV013" {
+					t.Fatalf("observed metadata produced UFV013: %+v", result.Warnings)
+				}
+			}
+			want := userFormPreviewTestRange(test.source, test.start, test.end)
+			if warning.Range == nil || *warning.Range != want {
+				t.Fatalf("warning range = %+v, want %#v", warning.Range, want)
+			}
+			requireLowercasePreviewRangeWire(t, warning, want)
+		})
+	}
+}
+
+func userFormPreviewJSONMessageRange(t *testing.T, source string) (int, int) {
+	t.Helper()
+	marker := `"message":`
+	start := strings.Index(source, marker)
+	if start < 0 {
+		t.Fatal("JSON warning message field not found")
+	}
+	start += len(marker)
+	for start < len(source) && (source[start] == ' ' || source[start] == '\t' || source[start] == '\r' || source[start] == '\n') {
+		start++
+	}
+	if start >= len(source) || source[start] != '"' {
+		t.Fatal("JSON warning message is not a string")
+	}
+	for end := start + 1; end < len(source); end++ {
+		switch source[end] {
+		case '\\':
+			end++
+		case '"':
+			return start, end + 1
+		}
+	}
+	t.Fatal("JSON warning message string was not terminated")
+	return 0, 0
+}
+
+func userFormPreviewTestRange(source string, start, end int) protocol.Range {
+	return protocol.Range{
+		Start: userFormPreviewTestPosition(source, start),
+		End:   userFormPreviewTestPosition(source, end),
+	}
+}
+
+func userFormPreviewTestPosition(source string, offset int) protocol.Position {
+	prefix := source[:offset]
+	line := strings.Count(prefix, "\n")
+	lineStart := strings.LastIndexAny(prefix, "\r\n") + 1
+	return protocol.Position{Line: uint32(line), Character: uint32(len(utf16.Encode([]rune(prefix[lineStart:]))))}
+}
+
+func requireLowercasePreviewRangeWire(t *testing.T, warning userFormPreviewWarning, want protocol.Range) {
+	t.Helper()
+	body, err := json.Marshal(warning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	rangeBody, ok := fields["range"]
+	if !ok || fields["Range"] != nil {
+		t.Fatalf("warning range wire field = %s", body)
+	}
+	var rangeFields map[string]json.RawMessage
+	if err := json.Unmarshal(rangeBody, &rangeFields); err != nil {
+		t.Fatal(err)
+	}
+	if rangeFields["start"] == nil || rangeFields["end"] == nil || rangeFields["Start"] != nil || rangeFields["End"] != nil {
+		t.Fatalf("range wire fields = %s", rangeBody)
+	}
+	var positions struct {
+		Start protocol.Position `json:"start"`
+		End   protocol.Position `json:"end"`
+	}
+	if err := json.Unmarshal(rangeBody, &positions); err != nil {
+		t.Fatal(err)
+	}
+	if positions.Start != want.Start || positions.End != want.End {
+		t.Fatalf("encoded range = %+v, want %+v", positions, want)
+	}
+	for name, raw := range map[string]json.RawMessage{"start": rangeFields["start"], "end": rangeFields["end"]} {
+		var coordinateFields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &coordinateFields); err != nil {
+			t.Fatal(err)
+		}
+		if coordinateFields["line"] == nil || coordinateFields["character"] == nil || coordinateFields["Line"] != nil || coordinateFields["Character"] != nil {
+			t.Fatalf("%s coordinate wire fields = %s", name, raw)
+		}
 	}
 }
 

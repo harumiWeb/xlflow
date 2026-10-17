@@ -612,6 +612,9 @@ func ValidateFormSpecControlIssues(control FormSpecControl, path string) []Valid
 			} else {
 				issues = append(issues, validateFormSpecTabs(control.Observed.Tabs, path+".observed.tabs")...)
 			}
+			// Historical selection belongs to the captured collection, which may
+			// differ from authored tabs after an edit. Without captured tabs,
+			// validate only the minimum index, never the current authored bound.
 			issues = append(issues, validateSelectedIndex(control.Observed.SelectedIndex, control.Observed.Tabs, path+".observed.selectedIndex", strings.EqualFold(strings.TrimSpace(control.Type), "TabStrip") && control.Observed.Tabs != nil)...)
 		}
 	} else if control.Observed != nil && control.Observed.Tabs != nil {
@@ -744,6 +747,42 @@ func validateRawFormSpec(root map[string]any) []ValidationIssue {
 		flatControls, controlIssues := validateRawControls(rawControls, "controls", "")
 		issues = append(issues, controlIssues...)
 		issues = append(issues, validateRawControlStructure(flatControls)...)
+	}
+	issues = append(issues, validateCapturedWarnings(root["warnings"])...)
+	return issues
+}
+
+// Captured warnings describe actual inspection limitations. Report their
+// content once instead of warning that the snapshot container is present.
+func validateCapturedWarnings(value any) []ValidationIssue {
+	items, ok := asSlice(value)
+	if !ok {
+		return nil // The document-level contract validates the container type.
+	}
+	properties := map[string]PropertyContract{
+		"code":    property(ValueTypeString, false, SupportLevelSupported, "Captured warning code.", false),
+		"message": property(ValueTypeString, false, SupportLevelSupported, "Captured warning message.", false),
+		"control": property(ValueTypeString, false, SupportLevelSupported, "Affected control name.", false),
+	}
+	issues := make([]ValidationIssue, 0, len(items))
+	for index, item := range items {
+		path := fmt.Sprintf("warnings[%d]", index)
+		entry, ok := asObjectMap(item)
+		if !ok {
+			// The enclosing object-array contract reports malformed entries.
+			continue
+		}
+		entryIssues := validateObjectProperties(entry, properties, path, nil)
+		issues = append(issues, entryIssues...)
+		if hasValidationErrors(entryIssues) {
+			continue
+		}
+		message, _ := stringField(entry, "message")
+		if strings.TrimSpace(message) == "" {
+			continue
+		}
+		code, _ := stringField(entry, "code")
+		issues = append(issues, validationIssue(code, SeverityWarning, message, path+".message", "", ""))
 	}
 	return issues
 }
@@ -1213,7 +1252,7 @@ func validateObjectProperties(root map[string]any, properties map[string]Propert
 				issues = append(issues, validateObjectProperties(object, property.Children, field, nil)...)
 			}
 		}
-		if property.SupportLevel != "" && property.SupportLevel != SupportLevelSupported {
+		if property.SupportLevel != "" && property.SupportLevel != SupportLevelSupported && property.SupportLevel != SupportLevelSnapshotOnly {
 			issues = append(issues, validationIssue("UFV013", SeverityWarning, fmt.Sprintf("%s has %s support.", field, property.SupportLevel), field, supportSuggestion(property.SupportLevel), property.SupportLevel))
 		}
 	}
@@ -1672,7 +1711,6 @@ func FormSpecFromInspectSnapshot(snapshot any) (FormSpec, error) {
 	observed := &FormSpecObservedForm{}
 	if caption, ok := stringField(root, "caption"); ok {
 		form.Caption = new(caption)
-		observed.Caption = &caption
 	}
 	if width, ok := optionalFloatField(root, "width"); ok {
 		observed.Width = &width
@@ -1686,7 +1724,6 @@ func FormSpecFromInspectSnapshot(snapshot any) (FormSpec, error) {
 			return FormSpec{}, fmt.Errorf("snapshot client_width is outside the supported finite non-negative HIMETRIC range")
 		}
 		form.Width = new(width)
-		observed.ClientWidth = new(width)
 	} else {
 		missingClientDimensions = append(missingClientDimensions, "client_width")
 	}
@@ -1695,7 +1732,6 @@ func FormSpecFromInspectSnapshot(snapshot any) (FormSpec, error) {
 			return FormSpec{}, fmt.Errorf("snapshot client_height is outside the supported finite non-negative HIMETRIC range")
 		}
 		form.Height = new(height)
-		observed.ClientHeight = new(height)
 	} else {
 		missingClientDimensions = append(missingClientDimensions, "client_height")
 	}
@@ -1802,63 +1838,9 @@ func (s *normalizeControlState) uniqueControlID(name string) string {
 }
 
 func normalizeObservedControl(control FormSpecControl) FormSpecControl {
-	if control.Observed == nil {
-		control.Observed = &FormSpecObservedControl{}
-	}
-	if control.Observed.Caption == nil && control.Caption != nil {
-		control.Observed.Caption = control.Caption
-	}
-	if control.Observed.Tag == nil && control.Tag != nil {
-		control.Observed.Tag = control.Tag
-	}
-	if control.Observed.ControlTipText == nil && control.ControlTipText != nil {
-		control.Observed.ControlTipText = control.ControlTipText
-	}
-	if control.Observed.Accelerator == nil && control.Accelerator != nil {
-		control.Observed.Accelerator = control.Accelerator
-	}
-	if control.Observed.Text == nil && control.Text != nil {
-		control.Observed.Text = control.Text
-	}
-	if control.Observed.Value == nil && control.Value != nil {
-		control.Observed.Value = control.Value
-	}
-	if control.Observed.Left == nil && control.Left != nil {
-		control.Observed.Left = control.Left
-	}
-	if control.Observed.Top == nil && control.Top != nil {
-		control.Observed.Top = control.Top
-	}
-	if control.Observed.Width == nil && control.Width != nil {
-		control.Observed.Width = control.Width
-	}
-	if control.Observed.Height == nil && control.Height != nil {
-		control.Observed.Height = control.Height
-	}
-	if control.Observed.TabIndex == nil && control.TabIndex != nil {
-		control.Observed.TabIndex = control.TabIndex
-	}
-	if control.Observed.SelectedIndex == nil && control.SelectedIndex != nil {
-		control.Observed.SelectedIndex = control.SelectedIndex
-	}
-	if control.Observed.Tabs == nil && control.Tabs != nil {
-		control.Observed.Tabs = slices.Clone(control.Tabs)
-	}
-	if control.Observed.Enabled == nil && control.Enabled != nil {
-		control.Observed.Enabled = control.Enabled
-	}
-	if control.Observed.Visible == nil && control.Visible != nil {
-		control.Observed.Visible = control.Visible
-	}
-	if len(control.Observed.List) == 0 && len(control.List) > 0 {
-		control.Observed.List = append([]string(nil), control.List...)
-	}
-	if len(control.Observed.Unsupported) == 0 && len(control.Unsupported) > 0 {
-		control.Observed.Unsupported = append([]string(nil), control.Unsupported...)
-	}
-	if len(control.Observed.Properties) == 0 && len(control.Properties) > 0 {
-		control.Observed.Properties = cloneMap(control.Properties)
-	}
+	// Normalization preserves supplied observations, but authored values do not
+	// establish captured state. In particular, repeated parse/normalize cycles
+	// must not grow a second copy of each authoring property.
 	if !hasObservedControlValues(control.Observed) {
 		control.Observed = nil
 	}
@@ -2183,17 +2165,6 @@ func hasObservedControlValues(observed *FormSpecObservedControl) bool {
 			len(observed.List) > 0 ||
 			len(observed.Unsupported) > 0 ||
 			len(observed.Properties) > 0)
-}
-
-func cloneMap(value map[string]any) map[string]any {
-	if len(value) == 0 {
-		return nil
-	}
-	cloned := make(map[string]any, len(value))
-	for key, item := range value {
-		cloned[key] = item
-	}
-	return cloned
 }
 
 func asObjectMap(value any) (map[string]any, bool) {

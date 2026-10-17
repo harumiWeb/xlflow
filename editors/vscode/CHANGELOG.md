@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Moved structured UserForm validation warnings into a collapsed Problems panel
+  at the bottom of the Designer. Problem items retain LSP severity, code, field,
+  and source location, with version-safe navigation for unsaved drafts.
+
 - Keep the selected UserForm picture usable after cancelling or failing a
   replacement selection, and reject late picker results after closing the editor.
 

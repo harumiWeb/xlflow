@@ -4,6 +4,15 @@ Load this reference before creating or editing a UserForm, changing Designer or
 code authority, extracting pictures, or inspecting form behavior. For building a
 separate release workbook, also load [pack.md](pack.md).
 
+## Authoring References
+
+Before choosing fields or values, read [property guidance](forms-properties.md).
+Use the generated [property contract](forms-contract.md) for exact keys, types,
+enum choices and control applicability, and [complete examples](forms-examples.md)
+for input forms, grouped choices and page/image layouts. These files are bundled
+with this skill; use them instead of guessing from general MSForms knowledge.
+Return here for source authority, applying changes and proof.
+
 ## Choose the Workbook Boundary
 
 | Goal                                                              | Workflow                                                     | Evidence provided                                                            |
@@ -102,7 +111,8 @@ End Sub
 Use file push to apply it to a configured, closed `.xlsm`, or pack to create a
 separate workbook. No `.frx` is required for supported canonical generation.
 `form.width` and `form.height` directly author the persisted MS-OFORMS
-`DisplayedSize` / VBFrame `ClientWidth` and `ClientHeight`, in points. Omitted
+`DisplayedSize`, in points. VBFrame client dimensions are compiler-maintained
+companion values and never seed these authoring dimensions. Omitted
 axes default to 240 × 180 only for new forms; omitted dimensions on existing
 template forms are preserved. Runtime `InsideWidth` / `InsideHeight` are
 separate observations and are never converted with a fixed offset. The removed
@@ -138,8 +148,10 @@ Built-in controls include Label, TextBox, ComboBox, ListBox, CommandButton,
 CheckBox, OptionButton, ToggleButton, SpinButton, ScrollBar, Image, Frame,
 MultiPage, Page and TabStrip. Support is property- and backend-specific; use
 contract diagnostics instead of assuming every captured field is authorable.
-Custom ActiveX is outside pure-Go generation; Excel builds may accept explicit
-custom ProgIDs with reduced validation and `custom/unchecked` warnings.
+Custom ActiveX is outside pure-Go generation, including Excel-backed form build
+which uses the same compiler. Accepted custom metadata and `custom/unchecked`
+validation warnings do not establish generation support; retained opaque state
+can still limit edits.
 
 Frames can contain controls and nested Frames. A MultiPage contains only Pages;
 a Page belongs to a MultiPage, and its controls belong under that Page. A
@@ -175,8 +187,9 @@ unique ignoring case. On edits, omitted `tabs` preserves the collection while
 `tabs: []` removes it. Page geometry is derived from its MultiPage; do not copy
 Page observed bounds into authored `left`/`top`/`width`/`height` fields. New
 pure-Go MultiPage layout uses fixed 96-DPI geometry. ComboBox/ListBox list and
-selection capture has weaker persistence guarantees; do not equate it with the
-modeled MultiPage/TabStrip collection contract.
+selection are captured state: the pure-Go compiler rejects edits to their list
+or selectedIndex and to ListBox text/value. Use runtime initialization when
+needed; do not equate them with modeled MultiPage/TabStrip collections.
 
 ## Image Assets
 

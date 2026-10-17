@@ -946,6 +946,109 @@ button:disabled {
   flex-shrink: 0;
   color: var(--vscode-descriptionForeground);
 }
+.designer-problems {
+  position: relative;
+  flex-shrink: 0;
+}
+.designer-problems-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+}
+.designer-problems-severity-icon {
+  font-size: 14px;
+}
+.designer-problems-severity-error {
+  color: var(--vscode-errorForeground);
+}
+.designer-problems-severity-warning {
+  color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
+}
+.designer-problems-severity-information,
+.designer-problems-severity-info,
+.designer-problems-severity-hint {
+  color: var(--vscode-editorInfo-foreground, var(--vscode-descriptionForeground));
+}
+.designer-problems-panel {
+  position: absolute;
+  z-index: 100020;
+  bottom: calc(100% + 5px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - 24px));
+  max-height: min(220px, 32vh);
+  overflow: hidden;
+  color: var(--vscode-foreground);
+  background: var(--vscode-panel-background);
+  border: 1px solid var(--vscode-panel-border);
+  box-shadow: 0 4px 14px #0005;
+}
+.designer-problems-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.designer-problems-heading h2 {
+  margin: 0;
+  font-size: 1em;
+  font-weight: 600;
+}
+.designer-problems-empty {
+  margin: 12px;
+}
+.designer-problems-list {
+  overflow: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.designer-problem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  width: 100%;
+  gap: 4px 10px;
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  color: var(--vscode-foreground);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.designer-problem:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.designer-problem:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+.designer-problem-severity {
+  color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
+  font-weight: 600;
+}
+.designer-problem-error .designer-problem-severity {
+  color: var(--vscode-errorForeground);
+}
+.designer-problem-information .designer-problem-severity,
+.designer-problem-info .designer-problem-severity,
+.designer-problem-hint .designer-problem-severity {
+  color: var(--vscode-editorInfo-foreground, var(--vscode-descriptionForeground));
+}
+.designer-problem-field {
+  color: var(--vscode-descriptionForeground);
+}
+.designer-problem-message {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 .designer-toolbar {
   align-items: center;
   display: flex;

@@ -31,6 +31,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - uses: actions/configure-pages@v4
       - run: pnpm install --frozen-lockfile
       - run: pnpm docs:check

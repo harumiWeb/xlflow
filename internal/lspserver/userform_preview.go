@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
+	vbaintel "github.com/harumiWeb/xlflow/internal/vba/intel"
 	forms "github.com/harumiWeb/xlflow/internal/vba/userforms/spec"
 	formsedit "github.com/harumiWeb/xlflow/internal/vba/userforms/spec/edit"
+	formsintel "github.com/harumiWeb/xlflow/internal/vba/userforms/spec/intel"
 	"github.com/sourcegraph/jsonrpc2"
+	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
 type userFormPreviewParams struct {
@@ -27,10 +31,15 @@ type userFormPreviewError struct {
 type userFormPreviewResult struct {
 	Version       int                         `json:"version"`
 	Document      *forms.FormSpec             `json:"document,omitempty"`
-	Warnings      []forms.ValidationIssue     `json:"warnings,omitempty"`
+	Warnings      []userFormPreviewWarning    `json:"warnings,omitempty"`
 	Error         *userFormPreviewError       `json:"error,omitempty"`
 	PropertyGrid  *formsedit.PropertyGridData `json:"propertyGrid,omitempty"`
 	PropertyError *userFormPreviewError       `json:"propertyError,omitempty"`
+}
+
+type userFormPreviewWarning struct {
+	forms.ValidationIssue
+	Range *protocol.Range `json:"range,omitempty"`
 }
 
 func (s *Server) userFormPreview(params userFormPreviewParams) userFormPreviewResult {
@@ -48,7 +57,20 @@ func (s *Server) userFormPreview(params userFormPreviewParams) userFormPreviewRe
 		}
 		return result
 	}
-	result.Document, result.Warnings = &doc, doc.ValidationWarnings
+	result.Document = &doc
+	var syntax *formsintel.Document
+	var jsonSyntax *formsintel.JSONDocument
+	switch input.Format {
+	case "yaml":
+		syntax = formsintel.ParseYAML(params.Text)
+	case "json":
+		jsonSyntax = formsintel.ParseJSON(params.Text)
+	}
+	for _, issue := range doc.ValidationWarnings {
+		warning := userFormPreviewWarning{ValidationIssue: issue}
+		warning.Range = userFormPreviewIssueRange(syntax, jsonSyntax, issue)
+		result.Warnings = append(result.Warnings, warning)
+	}
 	grid, err := formsedit.PropertyGrid(input, []byte(params.Text), params.PropertyEditorVersion)
 	if err != nil {
 		// A preview-valid source can be ambiguous for source-preserving edits.
@@ -58,6 +80,80 @@ func (s *Server) userFormPreview(params userFormPreviewParams) userFormPreviewRe
 		result.PropertyGrid = &grid
 	}
 	return result
+}
+
+func userFormPreviewIssueRange(yamlSyntax *formsintel.Document, jsonSyntax *formsintel.JSONDocument, issue forms.ValidationIssue) *protocol.Range {
+	var r vbaintel.Range
+	switch {
+	case yamlSyntax != nil && yamlSyntax.ParseError == nil:
+		r = userFormValidationIssueRange(yamlSyntax, issue)
+	case jsonSyntax != nil && jsonSyntax.ParseError == nil:
+		r = userFormJSONValidationIssueRange(jsonSyntax, issue)
+	default:
+		return nil
+	}
+	return &protocol.Range{
+		Start: protocol.Position{Line: uint32(r.Start.Line), Character: uint32(r.Start.Character)},
+		End:   protocol.Position{Line: uint32(r.End.Line), Character: uint32(r.End.Character)},
+	}
+}
+func userFormJSONValidationIssueRange(syntax *formsintel.JSONDocument, issue forms.ValidationIssue) vbaintel.Range {
+	if syntax == nil {
+		return vbaintel.Range{}
+	}
+	if field, ok := syntax.Field(issue.Field); ok {
+		if userFormIssueUsesKeyRange(issue.Code) || isEmptyRange(field.ValueRange) {
+			return userFormPreviewIntelRange(field.KeyRange)
+		}
+		return userFormPreviewIntelRange(field.ValueRange)
+	}
+	return userFormJSONNearestFieldRange(syntax, issue.Field)
+}
+
+func userFormJSONNearestFieldRange(syntax *formsintel.JSONDocument, path string) vbaintel.Range {
+	for current := path; ; current = userFormParentPath(current) {
+		if field, ok := syntax.Field(current); ok {
+			return userFormPreviewIntelRange(field.KeyRange)
+		}
+		if field, ok := userFormJSONFirstChildField(syntax, current); ok {
+			return userFormPreviewIntelRange(field.KeyRange)
+		}
+		if current == "" {
+			break
+		}
+	}
+	if field, ok := userFormJSONFirstChildField(syntax, ""); ok {
+		return userFormPreviewIntelRange(field.KeyRange)
+	}
+	return vbaintel.Range{}
+}
+
+func userFormPreviewIntelRange(r formsintel.Range) vbaintel.Range {
+	return vbaintel.Range{
+		Start: vbaintel.Position{Line: r.Start.Line, Character: r.Start.Character},
+		End:   vbaintel.Position{Line: r.End.Line, Character: r.End.Character},
+	}
+}
+
+func userFormJSONFirstChildField(syntax *formsintel.JSONDocument, parent string) (formsintel.JSONFieldNodes, bool) {
+	prefix := parent
+	if prefix != "" {
+		prefix += "."
+	}
+	var (
+		first formsintel.JSONFieldNodes
+		found bool
+	)
+	for path, field := range syntax.Fields {
+		rest := strings.TrimPrefix(path, prefix)
+		if path == prefix || !strings.HasPrefix(path, prefix) || strings.Contains(rest, ".") || strings.Contains(rest, "[") {
+			continue
+		}
+		if !found || positionBefore(field.KeyRange.Start, first.KeyRange.Start) {
+			first, found = field, true
+		}
+	}
+	return first, found
 }
 
 func (s *Server) userFormSpecInput(uri string) (forms.SpecInput, *userFormPreviewError) {

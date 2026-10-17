@@ -17,7 +17,8 @@
     "docs:normalize-demos": "node scripts/docs/normalize-demo-pages.mjs",
     "docs:generate-reference": "node scripts/docs/generate-reference-inventory.mjs",
     "docs:generate-cli": "node scripts/docs/generate-cli-inventory.mjs",
-    "docs:check": "node scripts/docs/check-docs.mjs && node scripts/docs/check-links.mjs && node scripts/docs/generate-reference-inventory.mjs --check && node scripts/docs/generate-cli-inventory.mjs --check",
+    "docs:generate-form-skill": "node scripts/docs/generate-form-skill.mjs",
+    "docs:check": "node scripts/docs/check-docs.mjs && node scripts/docs/check-links.mjs && node scripts/docs/generate-reference-inventory.mjs --check && node scripts/docs/generate-cli-inventory.mjs --check && node scripts/docs/generate-form-skill.mjs --check",
     "lint": "oxlint editors/vscode"
   },
   "devDependencies": {

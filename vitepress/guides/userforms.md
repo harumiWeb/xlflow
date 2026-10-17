@@ -181,6 +181,16 @@ pane over the canvas.
 Designer. Use the header Save action to publish Designer changes as described
 above; opening source or changing a pane does not publish them.
 
+The bottom **Problems** panel starts collapsed and shows a **Problems N**
+count. Expand it to review structured issues with their severity, code, message,
+and source field. Activate an issue to open the YAML/YML/JSON source at that
+field. Use Tab/Shift+Tab to move among the panel controls, Enter or Space to
+activate an issue, and Escape to collapse the panel and return focus to the
+Problems toggle. Actionable validation and edit errors remain inline beside
+the affected field or interaction, so they are visible while the panel is
+collapsed. Captured warning entries keep their original code and message;
+snapshot containers alone do not create warnings.
+
 ### Open event code
 
 Double-click a standard control or the form background to open its default

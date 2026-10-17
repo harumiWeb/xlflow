@@ -329,7 +329,7 @@ func newUserFormContract() Contract {
 			"combobox":      control("ComboBox", "Forms.ComboBox.1", false, listControlProperties()),
 			"listbox":       control("ListBox", "Forms.ListBox.1", false, listControlProperties()),
 			"commandbutton": control("CommandButton", "Forms.CommandButton.1", false, typeProperties("caption", "Button caption.")),
-			"checkbox":      control("CheckBox", "Forms.CheckBox.1", false, typeProperties("caption", "CheckBox caption.", "value", "CheckBox checked state or tri-state value.")),
+			"checkbox":      control("CheckBox", "Forms.CheckBox.1", false, typeProperties("caption", "CheckBox caption.", "value", "CheckBox checked state: Boolean or 0/1/-1; tri-state is not supported.")),
 			"optionbutton":  control("OptionButton", "Forms.OptionButton.1", false, typeProperties("caption", "OptionButton caption.", "value", "OptionButton selected state.")),
 			"togglebutton":  control("ToggleButton", "Forms.ToggleButton.1", false, typeProperties("caption", "ToggleButton caption.", "value", "ToggleButton selected state.")),
 			"spinbutton":    control("SpinButton", "Forms.SpinButton.1", false, integerValueProperties("SpinButton value.")),
@@ -393,8 +393,8 @@ func integerValueProperties(description string) map[string]PropertyContract {
 
 func listControlProperties() map[string]PropertyContract {
 	properties := typeProperties("text", "Displayed text.", "value", "Current control value.")
-	properties["list"] = property(ValueTypeStringArray, false, SupportLevelObservedOnly, "Design-time list items captured from Excel; build attempts to apply them best-effort.", true)
-	properties["selectedIndex"] = property(ValueTypeInteger, false, SupportLevelObservedOnly, "Selected list index captured from Excel; build attempts to apply it best-effort.", true)
+	properties["list"] = property(ValueTypeStringArray, false, SupportLevelObservedOnly, "Captured list items; pure-Go compilation cannot author list persistence.", true)
+	properties["selectedIndex"] = property(ValueTypeInteger, false, SupportLevelObservedOnly, "Captured list selection; pure-Go compilation cannot author list selection persistence.", true)
 	return properties
 }
 

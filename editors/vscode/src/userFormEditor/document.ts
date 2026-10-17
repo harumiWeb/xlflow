@@ -64,10 +64,7 @@ export class PreviewSynchronizer {
         productivityEditable: result.productivityEditable ?? false,
         propertyGrid: result.propertyGrid,
         propertyError: result.propertyError,
-        document: designerDocument(
-          result.document,
-          (result.warnings ?? []).map((w) => w.message),
-        ),
+        document: designerDocument(result.document, result.warnings ?? []),
       };
       this.status = undefined;
       send(this.lastDocument);

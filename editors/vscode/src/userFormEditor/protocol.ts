@@ -129,6 +129,26 @@ export interface PreviewDocument {
   controls: SpecControl[];
 }
 
+export interface SourcePosition {
+  line: number;
+  character: number;
+}
+export interface SourceRange {
+  start: SourcePosition;
+  end: SourcePosition;
+}
+
+/** Mirrors forms.ValidationIssue; range is added only by the LSP preview transport. */
+export interface DesignerProblem {
+  code?: string;
+  severity?: string;
+  message?: string;
+  field?: string;
+  suggestion?: string;
+  support?: string;
+  range?: SourceRange;
+}
+
 export interface PreviewResult {
   version: number;
   eventEditable?: boolean;
@@ -143,7 +163,7 @@ export interface PreviewResult {
   propertyGrid?: PropertyGridData;
   propertyError?: DesignerError;
   document?: PreviewDocument;
-  warnings?: { code: string; message: string }[];
+  warnings?: DesignerProblem[];
   error?: DesignerError;
 }
 
@@ -163,7 +183,7 @@ export interface DesignerDocument extends AppearanceProperties {
   approximate: boolean;
   eventEditable: boolean;
   controls: DesignerControl[];
-  warnings: string[];
+  warnings: DesignerProblem[];
 }
 
 export const designerStrings = {
@@ -291,6 +311,13 @@ export const designerStrings = {
   selectionCount: "Selected controls",
   propertiesAction: "Properties",
   selectControls: "Select controls",
+  problems: "Problems",
+  closeProblems: "Close Problems panel",
+  noProblems: "No problems",
+  problemSeverityError: "Error",
+  problemSeverityWarning: "Warning",
+  problemSeverityInformation: "Information",
+  problemSeverityHint: "Hint",
 };
 export type DesignerStrings = typeof designerStrings;
 
@@ -755,6 +782,7 @@ export interface EditResult {
 export type WebviewMessage =
   | { type: "ready" }
   | { type: "openText" }
+  | { type: "openProblem"; version: number; index: number }
   | { type: "save" }
   | {
       type: "openEvent";
@@ -838,6 +866,14 @@ export function isParentOperation(value: unknown): value is ParentOperation {
 export function isWebviewMessage(value: unknown): value is WebviewMessage {
   if (typeof value !== "object" || value === null) return false;
   const message = value as Record<string, unknown>;
+  if (message.type === "openProblem")
+    return (
+      Object.keys(message).length === 3 &&
+      Number.isSafeInteger(message.version) &&
+      Number(message.version) >= 0 &&
+      Number.isSafeInteger(message.index) &&
+      Number(message.index) >= 0
+    );
   if (message.type === "history")
     return (
       Object.keys(message).length === 4 &&

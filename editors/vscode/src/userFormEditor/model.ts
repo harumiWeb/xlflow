@@ -1,4 +1,4 @@
-import type { DesignerDocument, PreviewDocument } from "./protocol";
+import type { DesignerDocument, DesignerProblem, PreviewDocument } from "./protocol";
 import { controlDefaults } from "./toolbox";
 
 export function pointsToPixels(points: number, zoom = 1): number {
@@ -11,7 +11,7 @@ export function pixelsToPoints(pixels: number, zoom = 1): number {
 
 export function designerDocument(
   spec: PreviewDocument,
-  warnings: string[] = [],
+  warnings: DesignerProblem[] = [],
   eventEditable = false,
 ): DesignerDocument {
   const form = spec.form;
@@ -28,7 +28,7 @@ export function designerDocument(
     height: height ?? 180,
     approximate: width == null || height == null,
     eventEditable,
-    warnings,
+    warnings: warnings.map((warning) => ({ ...warning })),
     controls: spec.controls.map((control) => {
       const effective = control;
       const defaults = controlDefaults(control.type);

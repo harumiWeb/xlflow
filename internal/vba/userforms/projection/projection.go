@@ -205,7 +205,6 @@ func (s *projectionState) projectControls(controls []*oforms.Control, parentID s
 				}
 			} else {
 				control.Tabs = projectTabs(tabStrip.Tabs)
-				control.Observed = &forms.FormSpecObservedControl{Tabs: projectTabs(tabStrip.Tabs)}
 				selectedIndex := tabStrip.SelectedIndex
 				if len(tabStrip.Tabs) == 0 {
 					selectedIndex = -1
@@ -289,10 +288,6 @@ func projectForm(level *oforms.Level, result *forms.FormSpec) {
 		clientHeight := points(size.Height)
 		result.Form.Width = &clientWidth
 		result.Form.Height = &clientHeight
-		result.Form.Observed = &forms.FormSpecObservedForm{
-			ClientWidth:  &clientWidth,
-			ClientHeight: &clientHeight,
-		}
 	}
 	unsupported := unsupportedRecordProperties(record, map[string]bool{
 		"BooleanProperties": isDefaultBooleanProperties("Form", record.Values["BooleanProperties"]),

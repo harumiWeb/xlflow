@@ -1,3 +1,56 @@
+# PR #935 review follow-up
+
+- [x] Compare retained TabStrip observations with the authored/observed validation contract.
+- [x] Stop bounding historical selectedIndex by the current authored tabs.
+- [x] Review the native navigation coverage observation and record its limits.
+- [x] Run affected lint/docs checks and prepare the fix and English PR description.
+
+Disposition: the historical TabStrip selection finding is valid. Captured
+selection now uses only captured tabs for upper-bound validation; the existing
+YAML/JSON edit test expectations reflect successful removal and preserved
+observations. Native problem navigation remains a coverage limitation rather
+than a confirmed implementation defect. Scoped lint, docs, formatting and diff
+checks passed; tests and Excel were not rerun for this follow-up.
+
+# Agent skill FormSpec authoring guidance
+
+- [x] Validate Pass 1 findings against compiler and normalization behavior.
+- [x] Correct CheckBox state guidance and clarify legacy nested controls in generated references.
+- [x] Verify review fixes and complete fresh Pass 2 independent review.
+
+- [x] Separate workflow, property guidance, generated contract and complete examples.
+- [x] Document field types, enums, applicability, edit semantics and missing-property limits.
+- [x] Generate property metadata from the shared contract and detect stale documentation.
+- [x] Review links, formatting and generated output against the implementation.
+
+Validation: documentation checks/build, scoped formatting, generator lint and
+diff checks pass. Generated metadata is bundled with the skill and checked
+without rewriting files. Read-only review identified legacy list-persistence
+advice; guidance and metadata descriptions now distinguish ComboBox string
+values from rejected list/selection and ListBox text/value edits. No runtime
+semantics changed. Independent Pass 2 reviewed commit `22d38be1` and passed
+without findings; spec/compiler/agentskill tests, docs checks and formatting
+passed. Review reports are retained under `tmp_workspaces/final-review`, and
+both temporary review environments were removed. Excel and remote Linux CI
+were not run for this update.
+
+# UserForm observation and diagnostics UX
+
+- [x] Stop synthesizing duplicate observed values; keep legacy input and genuine observation-only state.
+- [x] Replace snapshot-container support warnings with actionable captured warnings through shared validation.
+- [x] Add a collapsed, accessible Designer problems panel with structured issues and source navigation.
+- [x] Update ADR/specifications, user guidance and changelogs.
+- [x] Run focused Go and extension checks and review compatibility and source preservation.
+
+Validation: Go UserForm/LSP/CLI/file pull/push/pack suites, full VS Code suite,
+Designer DOM tests, type checks, lint/docs/build and packaging pass. A copied
+real workbook produces 213 rather than 344 YAML lines, preserves three actual
+warnings, and leaves the original workbook unchanged. Live LSP preview assertions
+pass for current/legacy YAML and Unicode JSON. Probe cleanup required terminating
+its own LSP process after shutdown; native problem-navigation integration is not
+directly tested. Evidence and commands:
+`tmp_workspaces/userform-observed-20261017-e2e/verification.md`.
+
 # PR #933 review follow-up
 
 - [x] Validate checkbox/select submission against synchronous draft refs and regression tests.
