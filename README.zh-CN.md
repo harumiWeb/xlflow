@@ -33,7 +33,7 @@
 <div align="center">
 
 ![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/harumiweb/xlflow/total) ![VS Marketplace](https://vsmarketplacebadges.dev/version-short/harumiweb.xlflow-vscode.svg)
-![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow) [![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/harumiWeb)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/harumiWeb)
 
 </div>
 
@@ -54,16 +54,6 @@
 这些[示例](example)由 AI 智能体借助 xlflow 根据简短的自然语言指令创建。
 
 <table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/images/world-news.png" alt="世界新闻" width="100%">
-      <sub>使用 NewsAPI 汇总世界新闻并显示在 Excel 中的宏</sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/images/stock-price.png" alt="股票价格" width="100%">
-      <sub>获取股价并显示在 Excel 中的宏</sub>
-    </td>
-  </tr>
   <tr>
     <td align="center" width="50%">
       <img src="docs/images/gen-qrcode.png" alt="生成二维码" width="100%">
@@ -134,6 +124,31 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 > [!IMPORTANT]
 > xlflow 的工作簿执行以 **Windows 为主**。操作工作簿时会在 Windows 上通过 `.NET` Excel bridge 使用 **Microsoft Excel + COM**。WSL 可以作为开发前端，将 Excel 相关命令委托给 Windows 端的 xlflow。
+
+---
+
+## VS Code 扩展
+
+xlflow 也致力于成为适合人类使用的 Excel VBA 宏开发工具，并提供 VS Code 扩展。
+该扩展可通过图形界面调用 xlflow CLI 的大部分主要操作。
+
+它还与 LSP 服务器集成，为手动编写代码提供基于类型推断的补全、跳转到定义和实时诊断等功能。
+
+可从 [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harumiWeb.xlflow-vscode) 安装。
+
+![演示](/editors/vscode/images/demo.gif)
+
+> [!IMPORTANT]
+> xlflow 扩展只是通过图形界面调用 xlflow CLI 的封装。
+> 使用扩展时也必须安装 xlflow CLI。
+
+### UserForm Designer
+
+VSCode 扩展功能还提供了 UserForm Designer。
+用户无需打开 VBE，即可在 VSCode 上直观地创建和编辑 UserForm。
+此外，由于内部将 UserForm 的状态以 yaml 格式保存，因此也支持与 AI 代理共同编辑。
+
+![UserForm Designer](/editors/vscode/images/userform_designer.gif)
 
 ---
 
@@ -499,23 +514,6 @@ End If
 ```
 
 `run --headless` 会解析为 `headless`，`run --interactive` 会解析为 `interactive`，`test` 会解析为 `test`。普通 `run` 除非 xlflow 执行进程的环境变量 `XLFLOW_MODE=interactive|headless|ci|agent|test` 已设置，否则会使用 `interactive`。
-
----
-
-## VS Code 扩展
-
-xlflow 也致力于成为适合人类使用的 Excel VBA 宏开发工具，并提供 VS Code 扩展。
-该扩展可通过图形界面调用 xlflow CLI 的大部分主要操作。
-
-它还与 LSP 服务器集成，为手动编写代码提供基于类型推断的补全、跳转到定义和实时诊断等功能。
-
-可从 [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harumiWeb.xlflow-vscode) 安装。
-
-![演示](/editors/vscode/images/demo.gif)
-
-> [!IMPORTANT]
-> xlflow 扩展只是通过图形界面调用 xlflow CLI 的封装。
-> 使用扩展时也必须安装 xlflow CLI。
 
 ---
 

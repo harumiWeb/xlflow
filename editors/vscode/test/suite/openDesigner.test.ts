@@ -72,6 +72,32 @@ export async function runOpenDesignerTests(): Promise<void> {
       await vscode.workspace.applyEdit(restore);
       await document.save();
     }
+    const defaultUri = vscode.Uri.joinPath(folder.uri, "src", "forms", "specs", "DefaultOpen.yaml");
+    created.push(defaultUri);
+    await vscode.workspace.fs.writeFile(
+      defaultUri,
+      Buffer.from(
+        "schemaVersion: 1\nkind: xlflow.userform\nbasis: designer\nform:\n  name: DefaultOpen\ncontrols: []\n",
+      ),
+    );
+    await vscode.commands.executeCommand("vscode.open", defaultUri);
+    const defaultTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    assert.ok(defaultTab?.input instanceof vscode.TabInputCustom);
+    assert.strictEqual(
+      defaultTab.input.viewType,
+      "xlflow.userFormDesigner",
+      "opening a standard FormSpec uses the Designer by default",
+    );
+
+    const unrelatedUri = vscode.Uri.joinPath(folder.uri, "other.yaml");
+    created.push(unrelatedUri);
+    await vscode.workspace.fs.writeFile(unrelatedUri, Buffer.from("name: unrelated\n"));
+    await vscode.commands.executeCommand("vscode.open", unrelatedUri);
+    assert.strictEqual(
+      vscode.window.activeTextEditor?.document.uri.toString(),
+      unrelatedUri.toString(),
+      "an unrelated YAML file keeps the text editor as its default",
+    );
     assert.strictEqual(
       await isDesignerSource(vscode.Uri.joinPath(folder.uri, "other.yaml")),
       false,

@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.36.0
+
 - Fixed retained TabStrip observations incorrectly blocking authored tab removal
   when the historical selection has no captured tab collection.
 
@@ -41,6 +43,9 @@ All notable changes to xlflow will be documented in this file.
 
 - Added a FormSpec editor context command to open Designer, native Undo/Redo
   toolbar buttons, and Backspace deletion with existing subtree confirmation.
+- FormSpecs in the standard `src/forms/specs` directory now open in the VS Code
+  UserForm Designer by default; YAML and JSON files outside that directory keep
+  the text editor by default.
 - Added individual and all-form builds from the VS Code UserForms sidebar,
   with explicit source saving, overwrite confirmation and session-backed builds.
 

@@ -1,7 +1,7 @@
 {
   "name": "xlflow-vscode",
   "displayName": "%extension.displayName%",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "%extension.description%",
   "categories": [
     "Formatters",
@@ -74,10 +74,10 @@
         "displayName": "%customEditor.userFormDesigner.displayName%",
         "selector": [
           {
-            "filenamePattern": "*.{yaml,yml,json}"
+            "filenamePattern": "**/src/forms/specs/*.{yaml,yml,json}"
           }
         ],
-        "priority": "option"
+        "priority": "default"
       }
     ],
     "configuration": {
