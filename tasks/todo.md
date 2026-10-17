@@ -1,5 +1,9 @@
 # Agent skill FormSpec authoring guidance
 
+- [x] Validate Pass 1 findings against compiler and normalization behavior.
+- [x] Correct CheckBox state guidance and clarify legacy nested controls in generated references.
+- [ ] Verify review fixes and complete fresh Pass 2 independent review.
+
 - [x] Separate workflow, property guidance, generated contract and complete examples.
 - [x] Document field types, enums, applicability, edit semantics and missing-property limits.
 - [x] Generate property metadata from the shared contract and detect stale documentation.
