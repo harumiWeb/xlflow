@@ -485,9 +485,26 @@ async function run() {
       requestId: secondPick.requestId,
       selection: { ...selection, token: "commit-token" },
     });
+  for (const error of [undefined, { code: "invalid_picture", message: "Invalid replacement" }]) {
+    await click(
+      Array.from(dialog().querySelectorAll("button")).find((element) =>
+        element.textContent?.startsWith("Choose BMP"),
+      )!,
+    );
+    const replacement = messages.findLast((message) => message.type === "picturePick")!;
+    if (replacement.type === "picturePick")
+      await host({ type: "pictureSelection", requestId: replacement.requestId, error });
+    assert.equal(
+      dialog().querySelector("img")?.getAttribute("src"),
+      selection.dataURI,
+      "cancelled or failed replacement keeps the selected preview",
+    );
+    assert.equal(button("OK").disabled, false);
+  }
   await click(button("OK"));
   const pictureCommit = messages.findLast((message) => message.type === "pictureCommit")!;
   assert.equal(pictureCommit.type, "pictureCommit");
+  if (pictureCommit.type === "pictureCommit") assert.equal(pictureCommit.token, "commit-token");
   assert.equal(edits().length, beforePicture, "picture commit uses host asset transaction only");
   if (pictureCommit.type === "pictureCommit")
     await host({

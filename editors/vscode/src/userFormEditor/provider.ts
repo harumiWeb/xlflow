@@ -41,7 +41,7 @@ import { DraftState, computeSourceChanges } from "./draft";
 import type { DraftFrame } from "./draft";
 import { designerResourceUri, designerSourceUri } from "./resource";
 import { PictureImportSession } from "./pictures";
-import type { PictureCommitReceipt } from "./pictures";
+import type { PictureCommitReceipt, PictureSelection } from "./pictures";
 import { UserFormEventQueue, resolveUserFormCodeTarget, validEventRange } from "./events";
 import type {
   UserFormEventDescriptor,
@@ -942,6 +942,7 @@ export class UserFormEditorProvider
       if (ready && !disposed && panel.visible) void panel.webview.postMessage(message);
     };
     let pictures: PictureImportSession | undefined;
+    let picturePickGeneration = 0;
     let pictureBinding:
       | { version: number; controlId: string; generation: number; context: number }
       | undefined;
@@ -1032,34 +1033,45 @@ export class UserFormEditorProvider
       }
       try {
         if (message.type === "picturePick") {
+          const pickGeneration = ++picturePickGeneration;
           const folder = vscode.workspace.getWorkspaceFolder(document.uri)!;
           const config = Buffer.from(
             await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folder.uri, "xlflow.toml")),
           ).toString("utf8");
-          pictures?.cancel();
           const session = new PictureImportSession({
             projectRoot: folder.uri.fsPath,
             formsRoot: readFormsRootFromToml(config),
             sourceURI: document.uri.toString(),
             validate: (request) => this.clients.requestUserFormPicture(request),
           });
-          pictures = session;
           const binding = {
             version: message.version,
             controlId: message.controlId,
             generation,
             context: requestContext,
           };
-          pictureBinding = binding;
-          const selection = await session.open();
+          let selection: PictureSelection | undefined;
+          try {
+            selection = await session.open();
+          } catch (error) {
+            session.cancel();
+            throw error;
+          }
           if (
             !pictureCurrent(message.version, message.controlId) ||
             binding.generation !== generation ||
             requestContext !== contextGeneration ||
-            pictures !== session
+            pickGeneration !== picturePickGeneration
           ) {
             session.cancel();
             throw new Error(vscode.l10n.t("The document changed. Cancel and reopen the editor."));
+          }
+          // A cancelled/failed replacement keeps the selection still displayed
+          // by the modal valid. Publish only a successfully staged replacement.
+          if (selection) {
+            pictures?.cancel();
+            pictures = session;
+            pictureBinding = binding;
           }
           reply({ type: "pictureSelection", requestId: message.requestId, selection });
           return;
@@ -1831,6 +1843,7 @@ export class UserFormEditorProvider
             await update();
           })();
         } else if (message.type === "pictureCancel") {
+          picturePickGeneration++;
           pictures?.cancel();
           pictureBinding = undefined;
         } else if (message.type === "picturePick" || message.type === "pictureCommit") {

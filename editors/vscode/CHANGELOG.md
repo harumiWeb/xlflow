@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep the selected UserForm picture usable after cancelling or failing a
+  replacement selection, and reject late picker results after closing the editor.
+
 - Made SpinButton previews closer to VBE with full-size raised arrow buttons
   in horizontal and vertical layouts.
 

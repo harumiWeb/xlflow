@@ -172,3 +172,7 @@
 # UserForm event handlers
 
 - For VBE-backed event stubs, use the verified VBE object identifier (the form root is UserForm), preserve observed parameter passing and signatures exactly, and check case-insensitive conflicts against both procedures and module-level declarations before appending a handler.
+
+# Staged picture replacement
+
+- Keep the last valid staged selection until a replacement picker succeeds. Test select/reopen/Cancel/OK across the host and Webview, and invalidate pending picks before asynchronous work so closing the modal cannot reactivate a late selection.

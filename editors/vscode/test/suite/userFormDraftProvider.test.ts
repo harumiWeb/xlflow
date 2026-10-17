@@ -11,6 +11,8 @@ import { designerResourceUri } from "../../src/userFormEditor/resource";
 import { createControl } from "../../src/userFormEditor/toolbox";
 import { initialControlOperations } from "../../src/userFormEditor/collections";
 import { designerDocument } from "../../src/userFormEditor/model";
+import { PictureImportSession } from "../../src/userFormEditor/pictures";
+import type { PictureSelection } from "../../src/userFormEditor/pictures";
 import type {
   HostMessage,
   SemanticOperation,
@@ -108,6 +110,7 @@ interface DraftProviderTestExtension {
 export async function runUserFormDraftProviderAssertions(extensionUri: vscode.Uri): Promise<void> {
   await assertDraftEditUndoRedoAndSave(extensionUri, "yaml", yamlSource);
   await assertPrepareBuildSources(extensionUri);
+  await assertReplacementPictureSelection(extensionUri);
   await assertDraftEditUndoRedoAndSave(extensionUri, "yaml", crlfYamlSource);
   await assertDraftEditUndoRedoAndSave(extensionUri, "json", jsonSource);
   await assertMultilineCRLFPublication(extensionUri);
@@ -1708,16 +1711,144 @@ async function assertPrepareBuildSources(extensionUri: vscode.Uri): Promise<void
   );
 }
 
+async function assertReplacementPictureSelection(extensionUri: vscode.Uri): Promise<void> {
+  const initial = JSON.stringify({
+    ...JSON.parse(jsonSource),
+    controls: [{ id: "image", name: "Image1", type: "Image", progId: "Forms.Image.1" }],
+  });
+  const selection = (token: string): PictureSelection => ({
+    token,
+    name: `${token}.bmp`,
+    dataURI: "data:image/bmp;base64,Qk0=",
+    width: 2,
+    height: 3,
+  });
+  const originalOpen = PictureImportSession.prototype.open;
+  const originalCancel = PictureImportSession.prototype.cancel;
+  const originalCommit = PictureImportSession.prototype.commit;
+  const staged = new WeakMap<PictureImportSession, PictureSelection>();
+  let pick: () => Promise<PictureSelection | undefined>;
+  PictureImportSession.prototype.open = async function () {
+    const result = await pick();
+    if (result) staged.set(this, result);
+    return result;
+  };
+  PictureImportSession.prototype.cancel = function () {
+    staged.delete(this);
+    originalCancel.call(this);
+  };
+  PictureImportSession.prototype.commit = async function (token) {
+    assert.strictEqual(staged.get(this)?.token, token, "commit uses the active staged selection");
+    return { token, picture: { path: `src/forms/assets/${token}.bmp` } };
+  };
+  try {
+    for (const outcome of ["cancel", "error", "replace", "close"] as const) {
+      await withTestEnvironment(
+        extensionUri,
+        "json",
+        initial,
+        async (environment) => {
+          const { panel, customDocument, client } = environment;
+          client.client.requestUserFormEdit = async (document, version, text, operations) => {
+            const operation = operations[0];
+            assert.strictEqual(operation.type, "setControlProperty");
+            if (operation.type !== "setControlProperty") throw new Error("Expected picture edit");
+            assert.strictEqual(operation.field, "picture");
+            const source = JSON.parse(text);
+            source.controls[0].picture = operation.value;
+            return {
+              version,
+              edits: [
+                {
+                  range: new vscode.Range(document.positionAt(0), document.positionAt(text.length)),
+                  newText: JSON.stringify(source),
+                },
+              ],
+            };
+          };
+          const sendPick = (requestId: number) =>
+            panel.receive({
+              type: "picturePick",
+              requestId,
+              controlId: "image",
+              version: customDocument.document.version,
+            });
+          const reply = (requestId: number) =>
+            waitFor(
+              () =>
+                panel.messages.find(
+                  (message): message is Extract<HostMessage, { type: "pictureSelection" }> =>
+                    message.type === "pictureSelection" && message.requestId === requestId,
+                ),
+              `picture selection ${requestId}`,
+            );
+          pick = async () => selection("first");
+          sendPick(2100);
+          assert.strictEqual((await reply(2100)).selection?.token, "first");
+          let finishPick: ((value: PictureSelection) => void) | undefined;
+          let started = false;
+          pick = async () => {
+            started = true;
+            if (outcome === "error") throw new Error("invalid replacement");
+            if (outcome === "close")
+              return new Promise((resolve) => {
+                finishPick = resolve;
+              });
+            return outcome === "replace" ? selection("second") : undefined;
+          };
+          sendPick(2101);
+          await waitFor(() => started, "replacement picker started");
+          if (outcome === "close") {
+            panel.receive({ type: "pictureCancel" });
+            finishPick!(selection("late"));
+          }
+          const replacement = await reply(2101);
+          assert.strictEqual(!!replacement.error, outcome === "error" || outcome === "close");
+          if (outcome === "close") return;
+          const token = outcome === "replace" ? "second" : "first";
+          panel.receive({
+            type: "pictureCommit",
+            requestId: 2102,
+            controlId: "image",
+            version: customDocument.document.version,
+            token,
+          });
+          assert.strictEqual(
+            (await waitForReply(panel, 2102)).error,
+            undefined,
+            `${outcome} replacement retains a committable displayed selection`,
+          );
+          assert.deepStrictEqual(JSON.parse(customDocument.state.text).controls[0].picture, {
+            path: `src/forms/assets/${token}.bmp`,
+          });
+          assert.strictEqual(
+            environment.sourceDocument.getText(),
+            initial,
+            "picture commit remains a draft edit",
+          );
+        },
+        undefined,
+        true,
+      );
+    }
+  } finally {
+    PictureImportSession.prototype.open = originalOpen;
+    PictureImportSession.prototype.cancel = originalCancel;
+    PictureImportSession.prototype.commit = originalCommit;
+  }
+}
+
 async function withTestEnvironment(
   extensionUri: vscode.Uri,
   format: "yaml" | "json",
   initial: string,
   assertions: (environment: TestEnvironment) => Promise<void>,
   confirmBuildSave?: () => PromiseLike<boolean>,
+  typedProperties = false,
 ): Promise<void> {
   const { directory, uri } = await createWorkspaceFixture(format);
   const cancellation = new vscode.CancellationTokenSource();
-  const client = createTestClient();
+  const client = createTestClient(typedProperties);
   const checkpointRoot = vscode.Uri.file(path.join(directory, "checkpoints"));
   const provider = new UserFormEditorProvider(
     extensionUri,
@@ -1810,7 +1941,7 @@ async function postTestEdit(
   });
 }
 
-function createTestClient(): TestClient {
+function createTestClient(typedProperties = false): TestClient {
   const connection = new vscode.EventEmitter<void>();
   const client = {
     onDidChangePreviewConnection: connection.event,
@@ -1824,6 +1955,7 @@ function createTestClient(): TestClient {
         version: document.version,
         editable: true,
         propertyEditable: true,
+        ...(typedProperties ? { propertyEditorVersion: 1 } : {}),
         structuralEditable: true,
         parentEditable: true,
         pageEditable: true,

@@ -1,3 +1,17 @@
+# PR #933 review follow-up
+
+- [x] Validate checkbox/select submission against synchronous draft refs and regression tests.
+- [x] Preserve a staged image when a replacement picker is cancelled or fails; cover host transactions.
+- [x] Assess frm discovery errors against duplicate detection and selected-path link validation.
+- [x] Run extension checks before pushing confirmed fixes to the existing PR.
+
+Review disposition: checkbox/select changes synchronously update the draft ref
+and existing DOM submission tests pass. frm discovery stays fail-closed because
+an unreadable subtree can conceal a duplicate code target. Picture replacement
+is fixed with host/Webview regressions covering cancel, failure, successful
+replacement and late results after modal cancellation. Complete extension tests,
+type checks, lint, docs and scoped formatting pass.
+
 # Designer SpinButton appearance
 
 - [x] Replace text arrows with two raised buttons filling the control.

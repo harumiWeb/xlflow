@@ -64,6 +64,11 @@ Reuse identical files and reject collisions with different content. Resolve
 symlinks/junctions for containment checks. Cancel leaves project assets and
 source unchanged.
 
+Reopening the picker retains the previous staged selection until a replacement
+has passed validation. Cancelling or failing the replacement keeps that preview
+and its token usable for OK. Closing the editor invalidates pending picker
+results; a late result cannot publish a new selection into the closed session.
+
 After successful import, submit one semantic picture edit. A failed edit may
 remove only a newly created, still-unreferenced asset. Existing/shared assets
 must remain. Successful assets survive source Undo so Redo can resolve them.

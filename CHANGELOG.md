@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed UserForm image replacement pickers invalidating the selected picture
+  when cancelled or when the replacement fails validation.
+
 - Updated UserForm Designer SpinButton previews with two raised arrow buttons
   that fill the control and follow its horizontal or vertical proportions.
 
