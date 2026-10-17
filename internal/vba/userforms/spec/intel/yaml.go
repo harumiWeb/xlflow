@@ -149,11 +149,18 @@ func (d *Document) nodeStart(node *yaml.Node) Position {
 	}
 	lineIndex := node.Line - 1
 	line := d.line(lineIndex)
-	column := max(0, node.Column-1)
-	if column > len(line) {
-		column = len(line)
-	}
+	column := byteOffsetForRuneColumn(line, max(0, node.Column-1))
 	return positionForByte(line, lineIndex, column)
+}
+
+func byteOffsetForRuneColumn(line string, column int) int {
+	for offset := range line {
+		if column == 0 {
+			return offset
+		}
+		column--
+	}
+	return len(line)
 }
 
 func (d *Document) line(index int) string {

@@ -28,11 +28,11 @@ func TestProjectSimpleFixture(t *testing.T) {
 	if got.CoordinateSystem != "parent-relative" || got.Form.Name != "UserForm1" {
 		t.Fatalf("form identity = %#v", got.Form)
 	}
-	if got.Form.Observed == nil || got.Form.Observed.Width != nil || got.Form.Observed.Height != nil || got.Form.Observed.InsideWidth != nil || got.Form.Observed.InsideHeight != nil || got.Form.Observed.ClientWidth == nil || got.Form.Observed.ClientHeight == nil || *got.Form.Observed.ClientWidth <= 0 || *got.Form.Observed.ClientHeight <= 0 {
-		t.Fatalf("observed form dimensions = %#v", got.Form.Observed)
+	if got.Form.Observed != nil {
+		t.Fatalf("file projection duplicated authored dimensions: %#v", got.Form.Observed)
 	}
-	if got.Form.Width == nil || got.Form.Height == nil || *got.Form.Width != *got.Form.Observed.ClientWidth || *got.Form.Height != *got.Form.Observed.ClientHeight {
-		t.Fatalf("canonical form dimensions = %#v/%#v, want persisted client size %#v/%#v", got.Form.Width, got.Form.Height, got.Form.Observed.ClientWidth, got.Form.Observed.ClientHeight)
+	if size := form.Levels[0].Record.Sizes["DisplayedSize"]; got.Form.Width == nil || got.Form.Height == nil || *got.Form.Width != points(size.Width) || *got.Form.Height != points(size.Height) {
+		t.Fatalf("canonical form dimensions = %#v/%#v, want persisted size %#v", got.Form.Width, got.Form.Height, size)
 	}
 	if len(got.Controls) == 0 {
 		t.Fatal("projected form has no controls")
@@ -404,7 +404,7 @@ func TestProjectTabStripSnapshotCanBeWrittenAndLoaded(t *testing.T) {
 	if projected.Controls[0].SelectedIndex == nil || *projected.Controls[0].SelectedIndex != 1 {
 		t.Fatalf("TabStrip selectedIndex = %#v, want 1", projected.Controls[0].SelectedIndex)
 	}
-	if len(projected.Controls[0].Tabs) != 2 || projected.Controls[0].Tabs[0].Name != "TabAlpha" || projected.Controls[0].Observed == nil || len(projected.Controls[0].Observed.Tabs) != 2 {
+	if len(projected.Controls[0].Tabs) != 2 || projected.Controls[0].Tabs[0].Name != "TabAlpha" || projected.Controls[0].Observed != nil {
 		t.Fatalf("TabStrip tabs = %#v, observed=%#v", projected.Controls[0].Tabs, projected.Controls[0].Observed)
 	}
 	for _, property := range []string{"selectedIndex", "items", "tipStrings", "tabNames", "tags", "accelerators"} {
@@ -421,11 +421,11 @@ func TestProjectTabStripSnapshotCanBeWrittenAndLoaded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFormSpec: %v", err)
 	}
-	if loaded.Controls[0].SelectedIndex == nil || *loaded.Controls[0].SelectedIndex != 1 || len(loaded.Controls[0].Tabs) != 2 || loaded.Controls[0].Observed == nil || len(loaded.Controls[0].Observed.Tabs) != 2 {
-		t.Fatalf("loaded TabStrip = %#v, want selected index and both tab slices", loaded.Controls[0])
+	if loaded.Controls[0].SelectedIndex == nil || *loaded.Controls[0].SelectedIndex != 1 || len(loaded.Controls[0].Tabs) != 2 || loaded.Controls[0].Observed != nil {
+		t.Fatalf("loaded TabStrip = %#v, want selected index and authored tabs only", loaded.Controls[0])
 	}
-	if loaded.Controls[0].Tabs[0].ControlTipText == nil || *loaded.Controls[0].Tabs[0].ControlTipText != "alpha-tip" || loaded.Controls[0].Observed.Tabs[1].Visible == nil || *loaded.Controls[0].Observed.Tabs[1].Visible {
-		t.Fatalf("loaded tab metadata = %#v, observed=%#v", loaded.Controls[0].Tabs, loaded.Controls[0].Observed.Tabs)
+	if loaded.Controls[0].Tabs[0].ControlTipText == nil || *loaded.Controls[0].Tabs[0].ControlTipText != "alpha-tip" || loaded.Controls[0].Tabs[1].Visible == nil || *loaded.Controls[0].Tabs[1].Visible {
+		t.Fatalf("loaded tab metadata = %#v", loaded.Controls[0].Tabs)
 	}
 }
 
@@ -445,8 +445,8 @@ func TestProjectEmptyTabStripNormalizesSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	control := got.Controls[0]
-	if control.SelectedIndex == nil || *control.SelectedIndex != -1 || control.Tabs == nil || len(control.Tabs) != 0 || control.Observed == nil || control.Observed.Tabs == nil || len(control.Observed.Tabs) != 0 {
-		t.Fatalf("empty TabStrip projection = %#v, want empty tab slices and selectedIndex -1", control)
+	if control.SelectedIndex == nil || *control.SelectedIndex != -1 || control.Tabs == nil || len(control.Tabs) != 0 || control.Observed != nil {
+		t.Fatalf("empty TabStrip projection = %#v, want authored empty tabs and selectedIndex -1", control)
 	}
 
 	path := filepath.Join(t.TempDir(), "EmptyTabForm.json")

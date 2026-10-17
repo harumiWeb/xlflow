@@ -87,7 +87,6 @@ func TestMultiPageTopologySynchronizesPageSiteSelection(t *testing.T) {
 			case "remove selected":
 				desired.Controls = desired.Controls[:2]
 				desired.Controls[0].SelectedIndex = new(0)
-				desired.Controls[0].Observed.SelectedIndex = new(0)
 				wantIndex = 0
 			case "add unselected":
 				desired.Controls = append(desired.Controls, spec.FormSpecControl{ID: "c", ParentID: desired.Controls[0].ID, Name: "PageC", Type: "Page", ZIndex: new(2)})

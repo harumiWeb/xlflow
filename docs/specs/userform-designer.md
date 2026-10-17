@@ -92,6 +92,27 @@ editing selectedIndex or any source field. Form activation selects form
 properties. Arrow keys navigate/expand/collapse, Home/End move focus, and
 Enter/Space activate selection. Structure does not author parent changes.
 
+### Problems panel
+
+The Designer has a bottom **Problems** panel that is collapsed by default.
+The **Problems N** toggle shows the count and highest severity of current warning issues. Expanding
+it displays structured rows with severity, original code and message, and the
+source field when one is available. Activating a row opens the matching
+YAML/YML/JSON document at that field; a captured warning entry navigates to
+`warnings[i].message`.
+
+The toggle, close control, and issue rows participate in normal Tab and
+Shift+Tab navigation; Enter or Space activates the focused control. Escape,
+when focus is inside the panel or on its toggle, collapses the panel and returns
+focus to the Problems toggle. Actionable parse,
+validation, and edit errors remain inline at the affected field or interaction;
+they are not hidden behind the collapsed panel. Issue refreshes update the count
+without opening the panel. Navigation uses the current preview revision and
+issue index, with source ranges supplied by the LSP. If an unpublished draft
+differs from the source buffer, request a fresh source preview and match the
+issue before selecting its range. A stale or unmatched range is never applied;
+the source can still be opened without a selection.
+
 ## Deferred-save draft and document lifecycle
 
 The provider owns one custom document and source-text draft per eligible
@@ -347,6 +368,14 @@ connection generation is no longer current are discarded. Warnings are shown
 alongside a valid preview. If parsing, validation, project selection, or the
 LSP request fails, the Webview displays the error and retains the last valid
 rendered document. A later valid document automatically replaces that state.
+
+Persisted FormSpec warning entries with a message become warning issues that
+retain the entry's original code and message and point to
+`warnings[i].message`. The presence of `warnings`, `observed`, or `unsupported`
+containers alone does not create an issue. Suppress a generic `UFV013`
+support-level warning only for `SupportLevelSnapshotOnly`; retain substantive
+custom, observed-only, and best-effort warnings. These issues appear in the
+collapsed-by-default Problems panel and can navigate to their source field.
 
 The host-to-Webview protocol carries a rendered `document`, an
 `invalidDocument` status, or a `themeChanged` notification. The Webview can
@@ -1048,6 +1077,22 @@ z-order. Apply sends `setTabOrder{parentId,controlIds}` with the complete
 ordered list; the LSP assigns zero-based indexes in one edit. A source change
 discards a pending local order instead of rebasing it.
 
+## Problems panel verification requirements
+
+These are required implementation checks; they do not claim that the current
+implementation or test run has passed.
+
+Verify that the panel starts collapsed, its count matches the current warning
+issue list, and each row preserves severity, code, message, and available
+source field. Activating a row must open the source at that field. Exercise
+Tab/Shift+Tab, Enter, Space, Escape, and focus restoration with keyboard-only
+interaction.
+Confirm that actionable parse, validation, and edit errors remain visible inline
+while the panel is collapsed. Bare `warnings`, `observed`, and `unsupported`
+containers must not create issues; captured warning entries must navigate to
+`warnings[i].message`, and only generic `UFV013` warnings with
+`SupportLevelSnapshotOnly` are suppressed.
+
 ## Deferred-save verification requirements
 
 These are required implementation checks; they do not claim that the current
@@ -1191,5 +1236,6 @@ interpolated into the HTML document.
 - `docs/adr/ADR-0070-userform-designer-page-tab-collection-editing.md`
 - `docs/adr/ADR-0071-userform-designer-productivity-edits.md`
 - `docs/adr/ADR-0064-userform-designer-text-document-boundary.md`
+- `docs/adr/ADR-0076-userform-observations-and-designer-problems.md`
 - `docs/specs/ms-oforms.md`
 - `docs/specs/userform-picture-assets.md`

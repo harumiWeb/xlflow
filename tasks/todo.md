@@ -1,3 +1,20 @@
+# UserForm observation and diagnostics UX
+
+- [x] Stop synthesizing duplicate observed values; keep legacy input and genuine observation-only state.
+- [x] Replace snapshot-container support warnings with actionable captured warnings through shared validation.
+- [x] Add a collapsed, accessible Designer problems panel with structured issues and source navigation.
+- [x] Update ADR/specifications, user guidance and changelogs.
+- [x] Run focused Go and extension checks and review compatibility and source preservation.
+
+Validation: Go UserForm/LSP/CLI/file pull/push/pack suites, full VS Code suite,
+Designer DOM tests, type checks, lint/docs/build and packaging pass. A copied
+real workbook produces 213 rather than 344 YAML lines, preserves three actual
+warnings, and leaves the original workbook unchanged. Live LSP preview assertions
+pass for current/legacy YAML and Unicode JSON. Probe cleanup required terminating
+its own LSP process after shutdown; native problem-navigation integration is not
+directly tested. Evidence and commands:
+`tmp_workspaces/userform-observed-20261017-e2e/verification.md`.
+
 # PR #933 review follow-up
 
 - [x] Validate checkbox/select submission against synchronous draft refs and regression tests.

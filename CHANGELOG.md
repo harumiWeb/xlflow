@@ -4,6 +4,15 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed UserForm file projections and Excel snapshots to emit authored values
+  once instead of duplicating them under `observed`. Genuine Page geometry and
+  form outer/inside measurements remain captured; existing YAML/YML/JSON
+  observations are preserved by source edits and are never promoted to authored
+  values.
+- Added a collapsed-by-default UserForm Designer Problems panel with a current
+  issue count, structured warning details, source navigation, keyboard support,
+  and Escape handling. Actionable validation and edit errors remain inline.
+
 - Fixed UserForm image replacement pickers invalidating the selected picture
   when cancelled or when the replacement fails validation.
 

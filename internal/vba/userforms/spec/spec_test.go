@@ -88,7 +88,7 @@ func TestFormSpecFromInspectSnapshotConvertsDesignerPayload(t *testing.T) {
 	if spec.CoordinateSystem != "parent-relative" {
 		t.Fatalf("coordinate system = %q", spec.CoordinateSystem)
 	}
-	if spec.Form.Name != "UserForm1" || spec.Form.Caption == nil || *spec.Form.Caption != "Order Entry" || spec.Form.Observed == nil || spec.Form.Observed.Caption == nil || *spec.Form.Observed.Caption != "Order Entry" {
+	if spec.Form.Name != "UserForm1" || spec.Form.Caption == nil || *spec.Form.Caption != "Order Entry" || spec.Form.Observed == nil || spec.Form.Observed.Caption != nil {
 		t.Fatalf("form summary = %#v", spec.Form)
 	}
 	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != 308 || spec.Form.Observed.Height == nil || *spec.Form.Observed.Height != 372 || spec.Form.Width != nil || spec.Form.Height != nil {
@@ -113,8 +113,8 @@ func TestFormSpecFromInspectSnapshotConvertsDesignerPayload(t *testing.T) {
 	if len(control.List) != 2 || control.List[0] != "Alpha" {
 		t.Fatalf("list = %#v", control.List)
 	}
-	if control.Observed == nil || control.Observed.Width == nil || *control.Observed.Width != 120.0 {
-		t.Fatalf("observed control values = %#v", control.Observed)
+	if control.Observed != nil || control.Width == nil || *control.Width != 120.0 {
+		t.Fatalf("control values should be authored once: %#v", control)
 	}
 	child := spec.Controls[1]
 	if child.Name != "lblNested" || child.ParentID != control.ID {
@@ -140,8 +140,8 @@ func TestFormSpecFromInspectSnapshotSeedsAuthoredDimensionsFromClientFields(t *t
 	if spec.Form.Caption == nil || *spec.Form.Caption != "Order Entry" || spec.Form.Width == nil || *spec.Form.Width != 280 || spec.Form.Height == nil || *spec.Form.Height != 344 {
 		t.Fatalf("authored form values were not seeded from the inspect snapshot: %#v", spec.Form)
 	}
-	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != 308 || spec.Form.Observed.Height == nil || *spec.Form.Observed.Height != 372 || spec.Form.Observed.ClientWidth == nil || *spec.Form.Observed.ClientWidth != 280 || spec.Form.Observed.ClientHeight == nil || *spec.Form.Observed.ClientHeight != 344 {
-		t.Fatalf("observed form values did not preserve outer and client dimensions: %#v", spec.Form.Observed)
+	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != 308 || spec.Form.Observed.Height == nil || *spec.Form.Observed.Height != 372 || spec.Form.Observed.ClientWidth != nil || spec.Form.Observed.ClientHeight != nil {
+		t.Fatalf("observed form values should retain only distinct outer dimensions: %#v", spec.Form.Observed)
 	}
 	if len(spec.Warnings) != 0 {
 		t.Fatalf("complete client dimensions produced warnings: %#v", spec.Warnings)
@@ -174,7 +174,7 @@ func TestFormSpecFromInspectSnapshotPreservesZeroClientSizeAndDiagnosesMissingDi
 	if spec.Form.Width == nil || *spec.Form.Width != 0 || spec.Form.Height != nil {
 		t.Fatalf("client zero or missing height was not preserved: width=%v height=%v", spec.Form.Width, spec.Form.Height)
 	}
-	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != 308 || spec.Form.Observed.Height == nil || *spec.Form.Observed.Height != 372 || spec.Form.Observed.ClientWidth == nil || *spec.Form.Observed.ClientWidth != 0 || spec.Form.Observed.ClientHeight != nil {
+	if spec.Form.Observed == nil || spec.Form.Observed.Width == nil || *spec.Form.Observed.Width != 308 || spec.Form.Observed.Height == nil || *spec.Form.Observed.Height != 372 || spec.Form.Observed.ClientWidth != nil || spec.Form.Observed.ClientHeight != nil {
 		t.Fatalf("observed dimensions = %#v", spec.Form.Observed)
 	}
 	if len(spec.Warnings) != 1 || spec.Warnings[0].Code != "snapshot_client_dimensions_missing" || !strings.Contains(spec.Warnings[0].Message, "client_height") || strings.Contains(spec.Warnings[0].Message, "client_width and") {
@@ -253,14 +253,14 @@ func TestFormSpecFromInspectSnapshotMapsPagesTabsAndObservedPageGeometry(t *test
 	if len(tabStrip.Tabs) != 1 || tabStrip.Tabs[0].Name != "Main" || tabStrip.Tabs[0].ControlTipText == nil || *tabStrip.Tabs[0].ControlTipText != "Main view" || tabStrip.Tabs[0].Visible == nil || *tabStrip.Tabs[0].Visible {
 		t.Fatalf("TabStrip mapping = %#v", tabStrip)
 	}
-	if tabStrip.Observed == nil || len(tabStrip.Observed.Tabs) != 1 {
-		t.Fatalf("observed TabStrip tabs = %#v", tabStrip.Observed)
+	if tabStrip.Observed != nil {
+		t.Fatalf("TabStrip tabs should not be duplicated: %#v", tabStrip.Observed)
 	}
 	if spec.Controls[3].Tabs == nil || len(spec.Controls[3].Tabs) != 0 {
 		t.Fatalf("empty TabStrip tabs lost: %#v", spec.Controls[3].Tabs)
 	}
-	if spec.Controls[3].Observed == nil || spec.Controls[3].Observed.Tabs == nil || len(spec.Controls[3].Observed.Tabs) != 0 {
-		t.Fatalf("empty observed TabStrip tabs lost: %#v", spec.Controls[3].Observed)
+	if spec.Controls[3].Observed != nil {
+		t.Fatalf("empty TabStrip tabs should not be duplicated: %#v", spec.Controls[3].Observed)
 	}
 }
 
@@ -1082,7 +1082,7 @@ warnings:
 		{"UFV014", "controls[0].progId", SupportLevelCustomUnchecked},
 		{"UFV013", "controls[0].caption", SupportLevelCustomUnchecked},
 		{"UFV013", "controls[0].observed.text", SupportLevelCustomUnchecked},
-		{"UFV013", "warnings", SupportLevelSnapshotOnly},
+		{"captured", "warnings[0].message", ""},
 	} {
 		if !hasValidationIssueWithSupport(issues, want.code, want.field, want.support) {
 			t.Fatalf("missing warning %s at %s support %s in %+v", want.code, want.field, want.support, issues)

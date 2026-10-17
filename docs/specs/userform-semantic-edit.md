@@ -50,12 +50,21 @@ those downstream checks remain authoritative for writer capability.
 Semantic interpretation and source preservation use separate representations:
 
 - The canonical `spec.FormSpec` is the working semantic document used to
-  resolve targets and apply operations. Normalization may synthesize observed
-  values, control IDs, z-indices, or a flattened control view.
+  resolve targets and apply operations. Normalization may synthesize model-only
+  control IDs, z-indices, or a flattened control view, but it does not synthesize
+  observed copies from authored values.
 - A YAML syntax representation retains the original bytes, node boundaries,
   scalar spelling, comments, ordering, and whitespace needed to generate local
   source edits. It must not be reconstructed by serializing the normalized
   FormSpec.
+
+New file projections and Excel snapshots emit each authored value once. They do
+not duplicate authored captions, control scalar properties, client dimensions,
+or TabStrip tab data under `observed`. Genuine captured state remains available,
+including Page geometry and form outer and inside dimensions. Existing
+`observed` values in YAML, YML, and JSON remain accepted and are preserved by
+localized source edits. An edit never promotes an existing observation into an
+authored property or creates an observation that was absent from the source.
 
 This boundary prevents normalization details from becoming authored source.
 An edit to one scalar should replace that scalar or insert one mapping entry;
@@ -70,6 +79,16 @@ mappings and sequences may be regenerated as the smallest local container when
 an edit requires it. If the targeted value depends on an unsafe anchor, alias,
 or merge-key expansion, return a structured error; preserve unrelated anchors,
 aliases, and merge keys byte-for-byte.
+
+### Persisted warning entries
+
+Each valid persisted `warnings` entry with a message becomes a warning issue,
+retaining its original code and message and pointing to
+`warnings[i].message`. The presence of a `warnings`, `observed`, or
+`unsupported` container alone does not produce a warning. Suppress a generic
+`UFV013` support-level warning only when the property's support level is
+snapshot-only; retain substantive custom, observed-only, and best-effort
+warnings.
 
 ## Operation representation
 
@@ -486,7 +505,14 @@ The implementation is pure Go and must cover these behaviors:
 - Authored metadata distinguishes absent/null/empty/false/zero without exposing
   observed or renderer defaults as authored values. Cover missing `value`,
   explicit optional null round-trip, required-null rejection and insertion of
-  explicit values that happen to match normalized defaults.
+  explicit values that happen to match normalized defaults. Existing observed
+  values survive YAML/YML/JSON edits without promotion; projections do not
+  duplicate authored values under `observed`, while genuine Page geometry and
+  form outer/inside dimensions remain captured.
+- Snapshot-only fields and bare `warnings`, `observed`, or `unsupported`
+  containers do not create generic support warnings. A persisted warning entry
+  retains its code/message and maps to `warnings[i].message`; custom,
+  observed-only, and best-effort support warnings remain visible.
 - `Result.Edits` are deterministic, non-overlapping original-byte ranges whose
   application equals `Result.Source`; a no-op returns no edits.
 
@@ -606,6 +632,7 @@ VBIDE, or VBE behavior.
 - Issue #922
 - `docs/adr/ADR-0066-userform-designer-geometry-transactions.md`
 - `docs/adr/ADR-0065-userform-source-preserving-semantic-edits.md`
+- `docs/adr/ADR-0076-userform-observations-and-designer-problems.md`
 - `docs/adr/ADR-0071-userform-designer-productivity-edits.md`
 - `docs/specs/userform-designer.md`
 - `docs/specs/ms-oforms.md`

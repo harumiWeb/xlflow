@@ -1,6 +1,10 @@
 package intel
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf16"
+)
 
 func TestParseYAMLIndexesFieldPathsAndUTF16Ranges(t *testing.T) {
 	doc := ParseYAML(`schemaVersion: 1
@@ -34,6 +38,23 @@ form:
 	}
 	if id.ValueRange.End != (Position{Line: 3, Character: 16}) {
 		t.Fatalf("UTF-16 value end = %#v, want line 3 character 16", id.ValueRange.End)
+	}
+}
+
+func TestParseYAMLConvertsRuneColumnsAfterUnicode(t *testing.T) {
+	const source = `warnings: [{code: unsupported_properties, control: "😀", message: "Captured warning."}]`
+	doc := ParseYAML(source)
+	if doc.ParseError != nil {
+		t.Fatal(doc.ParseError)
+	}
+	field, ok := doc.Field("warnings[0].message")
+	if !ok {
+		t.Fatal("warnings[0].message was not indexed")
+	}
+	wantKey := Position{Character: len(utf16.Encode([]rune(source[:strings.Index(source, "message:")])))}
+	wantValue := Position{Character: len(utf16.Encode([]rune(source[:strings.Index(source, `"Captured`)])))}
+	if field.KeyRange.Start != wantKey || field.ValueRange.Start != wantValue {
+		t.Fatalf("Unicode-following starts = key %#v, value %#v; want key %#v, value %#v", field.KeyRange.Start, field.ValueRange.Start, wantKey, wantValue)
 	}
 }
 
