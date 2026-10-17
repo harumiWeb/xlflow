@@ -33,7 +33,7 @@
 <div align="center">
 
 ![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/harumiweb/xlflow/total) ![VS Marketplace](https://vsmarketplacebadges.dev/version-short/harumiweb.xlflow-vscode.svg)
-![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow) [![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/harumiWeb)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/harumiWeb)
 
 </div>
 
@@ -53,16 +53,6 @@ It turns `.xlsm` workbooks, `.xlam` Excel add-ins, and `.xlsb` Excel Binary Work
 These [samples](example) were created by an AI agent using xlflow with only minimal natural language instructions.
 
 <table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/images/world-news.png" alt="world news" width="100%">
-      <sub>Macro that summarizes world news in Excel using NewsAPI</sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/images/stock-price.png" alt="stock price" width="100%">
-      <sub>Macro that retrieves stock prices and displays them in Excel</sub>
-    </td>
-  </tr>
   <tr>
     <td align="center" width="50%">
       <img src="docs/images/gen-qrcode.png" alt="generate qrcode" width="100%">
@@ -142,6 +132,35 @@ Inside an xlflow workspace, use `xlflow pull --formulas --json` to refresh formu
 
 > [!IMPORTANT]
 > xlflow is **Windows-first** for workbook execution. Workbook operations use **Microsoft Excel + COM** through the `.NET` Excel bridge by default on Windows. WSL can be used as the development frontend by delegating Excel-related commands to the Windows installation.
+
+---
+
+## VS Code Extension
+
+To provide what we believe to be the most user-friendly Excel VBA macro development tool, xlflow also offers a compatible VS Code extension.
+This extension enables you to access most of the core functionality provided by the xlflow CLI through a graphical user interface.
+
+Furthermore, by integrating with an LSP server, it delivers several valuable features for manual code editing, including:
+
+- Type inference-based auto-completion
+- Definition jumping
+- Real-time diagnostics
+
+You can install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harumiWeb.xlflow-vscode).
+
+![Demo](/editors/vscode/images/demo.gif)
+
+> [!IMPORTANT]
+> Note that the xlflow extension is primarily a wrapper that facilitates calling the xlflow CLI through a GUI.
+> When using this extension, you must also ensure to install the xlflow CLI simultaneously.
+
+### UserForm Designer
+
+The VSCode extension also provides the UserForm Designer.
+Users can visually create and edit UserForms directly in VSCode without opening the VBE.
+In addition, since the state of the UserForm is saved in YAML format internally, collaborative editing with AI agents is also possible.
+
+![UserForm Designer](/editors/vscode/images/userform_designer.gif)
 
 ---
 
@@ -524,27 +543,6 @@ End If
 ```
 
 `run --headless` resolves to `headless`, `run --interactive` resolves to `interactive`, and `test` resolves to `test`. Plain `run` falls back to `interactive` unless the xlflow process environment sets `XLFLOW_MODE=interactive|headless|ci|agent|test`.
-
----
-
-## VS Code Extension
-
-To provide what we believe to be the most user-friendly Excel VBA macro development tool, xlflow also offers a compatible VS Code extension.
-This extension enables you to access most of the core functionality provided by the xlflow CLI through a graphical user interface.
-
-Furthermore, by integrating with an LSP server, it delivers several valuable features for manual code editing, including:
-
-- Type inference-based auto-completion
-- Definition jumping
-- Real-time diagnostics
-
-You can install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harumiWeb.xlflow-vscode).
-
-![Demo](/editors/vscode/images/demo.gif)
-
-> [!IMPORTANT]
-> Note that the xlflow extension is primarily a wrapper that facilitates calling the xlflow CLI through a GUI.
-> When using this extension, you must also ensure to install the xlflow CLI simultaneously.
 
 ---
 

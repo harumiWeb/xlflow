@@ -73,8 +73,10 @@ Specがないフォームはビルド対象外です。重複するSpecは解消
 
 ## UserForm Designer のプロパティ編集
 
-設定した forms root（標準は `src/forms`）直下の `specs` にある `.yaml`、
-`.yml`、`.json` を **Reopen Editor With... → xlflow UserForm Designer** で開きます。
+標準の `src/forms/specs` にある `.yaml`、`.yml`、`.json` は Designer で開きます。
+別の forms root を設定している場合は、**Reopen Editor With... → xlflow UserForm
+Designer** またはソースエディターの右クリックから **xlflow: Designerで開く** を選びます。
+テキストエディターへ戻す場合も **Reopen Editor With...** を使えます。
 背景はフォーム、コントロールはその対象、Page タブは Page を選択します。
 Property Grid は接続中 LSP のメタデータから名前／値の2列を表示します。
 プロパティ名は言語設定にかかわらず英語、カテゴリ・説明・操作は表示言語に従います。

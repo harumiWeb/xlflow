@@ -24,6 +24,8 @@
 
 ![Demo](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/demo.gif)
 
+![UserForm Designer](https://raw.githubusercontent.com/harumiWeb/xlflow/main/editors/vscode/images/userform_designer.gif)
+
 ## xlflowとは
 
 [xlflow](https://github.com/harumiWeb/xlflow) は、AIエージェントがExcel VBAマクロを自律的に開発可能にすることをファーストに作られた開発支援CLIツールです。

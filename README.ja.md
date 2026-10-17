@@ -33,7 +33,7 @@
 <div align="center">
 
 ![GitHub Release](https://img.shields.io/github/v/release/harumiWeb/xlflow?include_prereleases) ![WinGet Package Version](https://img.shields.io/winget/v/HarumiWeb.Xlflow) ![Scoop](https://img.shields.io/scoop/v/xlflow?bucket=https%3A%2F%2Fgithub.com%2FharumiWeb%2Fscoop-bucket) ![GitHub License](https://img.shields.io/github/license/harumiWeb/xlflow) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/harumiweb/xlflow/total) ![VS Marketplace](https://vsmarketplacebadges.dev/version-short/harumiweb.xlflow-vscode.svg)
-![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/harumiWeb/xlflow) [![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/harumiWeb)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/harumiWeb/xlflow) [![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/harumiWeb)
 
 </div>
 
@@ -54,16 +54,6 @@ VBA のエクスポート、編集、lint、インポート、テスト、デバ
 これらの [サンプル](example) は xlflow を使用して僅かな自然言語指示のみでAIエージェントによって作成されました。
 
 <table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/images/world-news.png" alt="world news" width="100%">
-      <sub>NewsAPIを使用して世界のニュースを Excel でまとめるマクロ</sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/images/stock-price.png" alt="stock price" width="100%">
-      <sub>株価を取得して Excel に表示するマクロ</sub>
-    </td>
-  </tr>
   <tr>
     <td align="center" width="50%">
       <img src="docs/images/gen-qrcode.png" alt="generate qrcode" width="100%">
@@ -134,6 +124,31 @@ pull → fmt → edit → push → lint → test/run → inspect
 
 > [!IMPORTANT]
 > xlflow は workbook 実行について **Windows-first** のツールです。Workbook 操作には Windows 上の **Microsoft Excel + COM** と `.NET` Excel bridge を使用します。WSL は Windows 側の xlflow へ Excel 関連コマンドを委譲することで、開発 frontend として利用できます。
+
+---
+
+## VS Code 拡張機能
+
+xlflowは人間にとっても最も優れたExcelVBAマクロ開発ツールを目指し、VS Code拡張機能も提供しています。
+拡張機能では、xlflow CLIが提供する主要操作の大部分をGUIから呼べるようにします。
+
+また、LSPサーバーとの連携によって**エディタ編集中の型推論に基づく入力補完、定義ジャンプ、リアルタイム診断**など人が手でコードを書く際に有用な機能を提供します。
+
+[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harumiWeb.xlflow-vscode) からインストールすることができます。
+
+![Demo](/editors/vscode/images/demo.gif)
+
+> [!IMPORTANT]
+> xlflow 拡張機能はあくまで xlflow CLI をGUIから呼び出すラッパーです。
+> 使用する場合は xlflow CLI も同時にインストールする必要があります。
+
+### UserForm Designer
+
+VSCode 拡張機能では、UserForm Designer も提供しています。
+ユーザーはVBEを開くことなく、VSCode上でUserFormを視覚的に作成・編集することができます。
+また、内部では、UserFormの状態をyaml形式で保存しているので、**AIエージェントとの共同編集も可能**です。
+
+![UserForm Designer](/editors/vscode/images/userform_designer.gif)
 
 ---
 
@@ -500,23 +515,6 @@ End If
 ```
 
 `run --headless` は `headless`、`run --interactive` は `interactive`、`test` は `test` に解決されます。plain `run` は、xlflow 実行プロセスの環境変数 `XLFLOW_MODE=interactive|headless|ci|agent|test` が無い限り `interactive` にフォールバックします。
-
----
-
-## VS Code 拡張機能
-
-xlflowは人間にとっても最も優れたExcelVBAマクロ開発ツールを目指し、VS Code拡張機能も提供しています。
-拡張機能では、xlflow CLIが提供する主要操作の大部分をGUIから呼べるようにします。
-
-また、LSPサーバーとの連携によって**エディタ編集中の型推論に基づく入力補完、定義ジャンプ、リアルタイム診断**など人が手でコードを書く際に有用な機能を提供します。
-
-[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harumiWeb.xlflow-vscode) からインストールすることができます。
-
-![Demo](/editors/vscode/images/demo.gif)
-
-> [!IMPORTANT]
-> xlflow 拡張機能はあくまで xlflow CLI をGUIから呼び出すラッパーです。
-> 使用する場合は xlflow CLI も同時にインストールする必要があります。
 
 ---
 

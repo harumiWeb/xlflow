@@ -10,12 +10,14 @@ saved through the VS Code document lifecycle.
 ## Editor selection and document eligibility
 
 The extension registers `xlflow.userFormDesigner` through
-`CustomEditorProvider` as an optional custom editor for `.yaml`, `.yml`, and
-`.json` files. Its `option` priority keeps the normal text editor available.
-Users can choose the visual editor with **Reopen Editor With...** or the
-**xlflow: Open in Designer** source-editor context command. The command is
-available for local YAML/YML/JSON files and checks the same configured `specs`
-directory boundary before opening. It retains unsaved text and reuses the
+`CustomEditorProvider` as an optional editor for YAML, YML, and JSON files
+directly under a `specs` directory. A contributed
+`workbench.editorAssociations` default opens files directly under the standard
+`src/forms/specs` directory in the Designer. Other files keep the normal text
+editor by default; projects with a nonstandard forms root can select the
+Designer with **Reopen Editor With...**. The **xlflow: Open in Designer**
+source-editor context command also checks the configured `specs` directory
+boundary before opening. Both workflows retain unsaved text and reuse the
 dedicated Designer resource without saving the source.
 Use the URI of the opened `TextDocument` when constructing that resource so
 Windows drive-letter normalization cannot disagree with its embedded source URI.
