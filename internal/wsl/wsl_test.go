@@ -11,12 +11,14 @@ import (
 
 func TestIsWSLFor(t *testing.T) {
 	tests := []struct {
-		name     string
-		goos     string
-		env      map[string]string
-		version  string
-		readErr  error
-		expected bool
+		name       string
+		goos       string
+		env        map[string]string
+		version    string
+		readErr    error
+		files      map[string]string
+		fileErrors map[string]error
+		expected   bool
 	}{
 		{name: "non linux", goos: "windows", env: map[string]string{"WSL_INTEROP": "/run/WSL/1"}},
 		{name: "interop", goos: "linux", env: map[string]string{"WSL_INTEROP": "/run/WSL/1"}, expected: true},
@@ -24,6 +26,13 @@ func TestIsWSLFor(t *testing.T) {
 		{name: "proc version", goos: "linux", version: "Linux version 5.15.90.1-microsoft-standard-WSL2", expected: true},
 		{name: "plain linux", goos: "linux", version: "Linux version 6.8.0"},
 		{name: "proc unavailable", goos: "linux", readErr: os.ErrNotExist},
+		{name: "docker WSL kernel", goos: "linux", version: "Linux microsoft-standard-WSL2", files: map[string]string{"/.dockerenv": ""}},
+		{name: "podman WSL kernel", goos: "linux", version: "Linux microsoft-standard-WSL2", files: map[string]string{"/run/.containerenv": "engine=podman"}},
+		{name: "docker inherited interop", goos: "linux", env: map[string]string{"WSL_INTEROP": "/run/WSL/1"}, files: map[string]string{"/.dockerenv": ""}},
+		{name: "podman inherited distro", goos: "linux", env: map[string]string{"WSL_DISTRO_NAME": "Ubuntu"}, files: map[string]string{"/run/.containerenv": ""}},
+		{name: "plain linux container", goos: "linux", version: "Linux version 6.8.0", files: map[string]string{"/.dockerenv": ""}},
+		{name: "unreadable markers preserve kernel detection", goos: "linux", version: "Linux microsoft-standard-WSL2", fileErrors: map[string]error{"/.dockerenv": os.ErrPermission, "/run/.containerenv": os.ErrPermission}, expected: true},
+		{name: "unreadable markers preserve interop", goos: "linux", env: map[string]string{"WSL_INTEROP": "/run/WSL/1"}, fileErrors: map[string]error{"/.dockerenv": os.ErrPermission, "/run/.containerenv": os.ErrPermission}, expected: true},
 	}
 
 	for _, test := range tests {
@@ -31,7 +40,18 @@ func TestIsWSLFor(t *testing.T) {
 			got := IsWSLFor(
 				test.goos,
 				func(key string) string { return test.env[key] },
-				func(string) ([]byte, error) { return []byte(test.version), test.readErr },
+				func(path string) ([]byte, error) {
+					if err := test.fileErrors[path]; err != nil {
+						return nil, err
+					}
+					if value, ok := test.files[path]; ok {
+						return []byte(value), nil
+					}
+					if path == "/proc/version" {
+						return []byte(test.version), test.readErr
+					}
+					return nil, os.ErrNotExist
+				},
 			)
 			if got != test.expected {
 				t.Fatalf("IsWSLFor() = %v, want %v", got, test.expected)

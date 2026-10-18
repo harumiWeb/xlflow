@@ -1,3 +1,10 @@
+# Issue #937: container host detection
+
+- [ ] Reproduce Docker/Podman marker precedence with focused host-detection tests.
+- [ ] Exclude recognized containers from WSL delegation without changing ordinary WSL safety gates.
+- [ ] Document the detection boundary and verify Windows/Linux regression suites.
+- [ ] Validate the saved-workbook round trip in Docker Desktop and record remaining limits.
+
 # PR #935 review follow-up
 
 - [x] Compare retained TabStrip observations with the authored/observed validation contract.
