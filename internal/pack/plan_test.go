@@ -3,6 +3,7 @@ package pack
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/pack/ovba"
@@ -60,6 +61,9 @@ func TestPlanProjectRejectsComprehensiveSourceIdentityFailures(t *testing.T) {
 		{"template-owned document case mismatch", []SourceModule{{Name: "thisworkbook", Type: ModuleTypeDocument, Source: "Option Explicit\r\n"}}},
 		{"template-owned document type mismatch", []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeForm, Source: "Attribute VB_Name = \"ThisWorkbook\"\r\n"}}},
 		{"document attribute header", []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Attribute VB_Name = \"ThisWorkbook\"\r\nOption Explicit\r\n"}}},
+		{"document host attribute header", []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Attribute VB_Base = \"0{00020819-0000-0000-C000-000000000046}\"\r\nOption Explicit\r\n"}}},
+		{"case-insensitive document host attribute header", []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "attribute VB_Base = \"0{00020819-0000-0000-C000-000000000046}\"\r\nOption Explicit\r\n"}}},
+		{"unknown document member attribute", []SourceModule{{Name: "ThisWorkbook", Type: ModuleTypeDocument, Source: "Option Explicit\r\nAttribute cbs.VB_Name = \"forged\"\r\n"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -69,6 +73,135 @@ func TestPlanProjectRejectsComprehensiveSourceIdentityFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPlanProjectPreservesDocumentMemberAttributes(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const memberAttribute = "Attribute cbs.VB_VarHelpID = -1"
+	savedBody := "Option Explicit\n" + memberAttribute + "\n" +
+		"Private Sub OriginalCode()\nEnd Sub\n"
+	seedDocumentModuleBody(t, project, "Sheet1", savedBody)
+	source := "Option Explicit\n" + memberAttribute + "\n" +
+		"Private Sub EditedCode()\nEnd Sub\n"
+	plan, err := PlanProject(project, []SourceModule{{
+		Name:       "Sheet1",
+		Type:       ModuleTypeDocument,
+		SourcePath: "src/workbook/Sheet1.bas",
+		Source:     source,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, module := range plan.modules {
+		if module.Name != "Sheet1" {
+			continue
+		}
+		if !strings.Contains(module.Source, "Attribute VB_Base = \"0{00020820-0000-0000-C000-000000000046}\"\r\n") {
+			t.Fatalf("template host attributes were not retained: %q", module.Source)
+		}
+		if !strings.Contains(module.Source, memberAttribute+"\r\n") || !strings.Contains(module.Source, "Private Sub EditedCode()\r\n") {
+			t.Fatalf("saved member attribute or edited code was not retained: %q", module.Source)
+		}
+		return
+	}
+	t.Fatal("plan omitted template document module Sheet1")
+}
+
+func TestPlanProjectRejectsNewOrModifiedDocumentMemberAttributes(t *testing.T) {
+	const savedAttribute = "Attribute cbs.VB_VarHelpID = -1"
+	cases := []struct {
+		name   string
+		source string
+	}{
+		{name: "new member attribute", source: "Option Explicit\n" + savedAttribute + "\nAttribute cbs.VB_Description = \"new\"\n"},
+		{name: "modified saved attribute", source: "Option Explicit\nAttribute cbs.VB_VarHelpID = 1\n"},
+		{name: "duplicate saved attribute", source: "Option Explicit\n" + savedAttribute + "\n" + savedAttribute + "\n"},
+		{name: "whitespace modified saved statement", source: "Option Explicit\n" + savedAttribute + " \n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedDocumentModuleBody(t, project, "Sheet1", "Option Explicit\n"+savedAttribute+"\n")
+			_, err = PlanProject(project, []SourceModule{{
+				Name:       "Sheet1",
+				Type:       ModuleTypeDocument,
+				SourcePath: "src/workbook/Sheet1.bas",
+				Source:     tc.source,
+			}})
+			if !errors.Is(err, ErrAmbiguousLayout) {
+				t.Fatalf("err = %v, want ErrAmbiguousLayout", err)
+			}
+		})
+	}
+}
+
+func seedDocumentModuleBody(t *testing.T, project *vbaproject.Project, name, body string) {
+	t.Helper()
+	for index := range project.Modules {
+		module := &project.Modules[index]
+		if module.Name != name {
+			continue
+		}
+		var header []string
+		for _, line := range strings.Split(strings.ReplaceAll(module.Source, "\r\n", "\n"), "\n") {
+			if !strings.HasPrefix(line, "Attribute ") {
+				break
+			}
+			header = append(header, line)
+		}
+		if len(header) == 0 {
+			t.Fatalf("document module %s has no leading host attributes", name)
+		}
+		module.Source = strings.Join(header, "\r\n") + "\r\n" + strings.ReplaceAll(body, "\n", "\r\n")
+		return
+	}
+	t.Fatalf("template has no document module %s", name)
+}
+
+func TestPlanProjectReusesExportEquivalentDocumentSource(t *testing.T) {
+	project, err := vbaproject.Read(readTestFile(t, "corpus", "p1_compiled.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sheet *vbaproject.Module
+	for index := range project.Modules {
+		if project.Modules[index].Name == "Sheet1" {
+			sheet = &project.Modules[index]
+			break
+		}
+	}
+	if sheet == nil {
+		t.Fatal("template has no Sheet1 document module")
+	}
+	sheet.Source = strings.TrimRight(sheet.Source, "\r\n") + "\r\n\r\n"
+	disk, err := vbaproject.ExportModuleSource(*sheet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanProject(project, []SourceModule{{
+		Name:       sheet.Name,
+		Type:       ModuleTypeDocument,
+		SourcePath: "src/workbook/Sheet1.bas",
+		Source:     disk,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, module := range plan.modules {
+		if module.Name == sheet.Name {
+			if module.Source != sheet.Source {
+				t.Fatalf("no-op plan changed document source\n got: %q\nwant: %q", module.Source, sheet.Source)
+			}
+			return
+		}
+	}
+	t.Fatal("plan omitted template document module Sheet1")
 }
 
 func TestPlanProjectReportsTypedSourceEncodingLocations(t *testing.T) {

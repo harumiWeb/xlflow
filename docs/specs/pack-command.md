@@ -220,6 +220,18 @@ ownership and reference records before artifact publication.
 - **Canonical UserForms**: supported new forms and existing Designer property updates follow the authority contract above; code follows `[userform].code_source`. Sources and compatibility artifacts are never rewritten.
 - **Legacy UserForm code-behind**: `.frm`-only existing forms preserve their Designer and update code from `.frm` or the configured sidecar. Artifact identity and sidecar layout remain validated.
 
+Document source contains the code body and member metadata, while its leading
+module and host `Attribute VB_*` headers remain owned by the template and are
+rejected in supplied source, even when they match the template. A member-
+qualified `Attribute` statement is retained only when the same statement,
+after newline normalization, already exists in the saved module source; new,
+changed, or excess duplicate statements fail with `pack_ambiguous_layout`.
+This preserves existing member metadata without defining which new VBA
+attribute syntax or values are valid. If a document's exported tracked source
+matches its supplied source, pack reuses the existing in-bin module source.
+Edited bodies preserve leading blank lines and terminal blank-line counts when
+converted back to the in-bin representation.
+
 Document-module topology remains template-authoritative: omission preserves
 the component and a source-only document module fails with
 `pack_ambiguous_layout`. UserForms follow the explicit authority contract above.
