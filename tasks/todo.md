@@ -1,9 +1,18 @@
 # Issue #937: container host detection
 
-- [ ] Reproduce Docker/Podman marker precedence with focused host-detection tests.
-- [ ] Exclude recognized containers from WSL delegation without changing ordinary WSL safety gates.
-- [ ] Document the detection boundary and verify Windows/Linux regression suites.
-- [ ] Validate the saved-workbook round trip in Docker Desktop and record remaining limits.
+- [x] Reproduce Docker/Podman marker precedence with focused host-detection tests.
+- [x] Exclude recognized containers from WSL delegation without changing ordinary WSL safety gates.
+- [x] Document the detection boundary and verify Windows/Linux regression suites.
+- [x] Validate the saved-workbook round trip in Docker Desktop and record remaining limits.
+
+Validation: implementation commit `45df6530` passes Windows wsl/filepush/cli
+tests and all 11 related Linux packages. Scoped golangci-lint, docs and staged
+format checks pass. Docker Desktop no-op/edit template pack, file push,
+re-pull, saved-file inspect/diff and rejection controls pass; non-VBA ZIP
+parts and the original workbook are preserved. Source and static-diagnostic
+comparisons pass (3 existing warnings, no new findings). VBE compile/runtime,
+ordinary WSL with a live Windows Excel session, and remote CI were not run.
+The read-only independent review found no confirmed actionable findings.
 
 # PR #935 review follow-up
 
