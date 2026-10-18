@@ -34,6 +34,14 @@ fallback.
 
 ## Lossless binary model
 
+Template pack and file push can explicitly request `--preserve-designer` for
+code-only updates. `CompileTemplateCodeOnly` runs the normal authoring validation
+and compilation, suppresses equal-caption VBFrame repair, and compares every
+serialized Designer stream and storage metadata entry against the template.
+Any actual Designer change fails before publication; changes are never silently
+discarded. New UserForms and source-owned UserForm topology are rejected.
+Normal authoring retains the existing explicit Caption synchronization contract.
+
 Decoded values never replace their persistence bytes. Strings retain their
 compression flag and original encoded bytes. Records retain masks, alignment
 padding, opaque pictures and arrays, raw tails, and the complete source record.

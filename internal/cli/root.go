@@ -2582,6 +2582,7 @@ func (a *app) packCommand() *cobra.Command {
 	var templatePath string
 	var blank bool
 	var check bool
+	var preserveDesigner bool
 	cmd := &cobra.Command{
 		Use:   "pack --out <path.xlsm>",
 		Short: "Build an .xlsm artifact from source",
@@ -2592,6 +2593,9 @@ func (a *app) packCommand() *cobra.Command {
 			}
 			if blank && cmd.Flags().Changed("template") {
 				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", errors.New("--blank and --template are mutually exclusive"))
+			}
+			if preserveDesigner && blank {
+				return a.writeFailure("pack", output.ExitConfig, "pack_args_invalid", errors.New("--preserve-designer requires a template and cannot be used with --blank"))
 			}
 
 			cfg, err := a.loadConfig("pack")
@@ -2671,6 +2675,10 @@ func (a *app) packCommand() *cobra.Command {
 			}
 			var workbookBytes []byte
 			var meta packpkg.PackMeta
+			templateOptions := packpkg.TemplateOptions{
+				UserFormTopology: cfg.Pack.UserFormTopology,
+				PreserveDesigner: preserveDesigner,
+			}
 			if blank {
 				if check {
 					meta, err = packpkg.CheckBlankWorkbook(sources, packpkg.BlankOptions{CodePage: cfg.Pack.Blank.CodePage})
@@ -2683,9 +2691,9 @@ func (a *app) packCommand() *cobra.Command {
 					return a.writeFailure("pack", output.ExitConfig, "pack_template_not_found", readErr)
 				}
 				if check {
-					meta, err = packpkg.CheckWorkbook(templateBytes, sources, packpkg.TemplateOptions{UserFormTopology: cfg.Pack.UserFormTopology})
+					meta, err = packpkg.CheckWorkbook(templateBytes, sources, templateOptions)
 				} else {
-					workbookBytes, meta, err = packpkg.BuildWorkbook(templateBytes, sources, packpkg.TemplateOptions{UserFormTopology: cfg.Pack.UserFormTopology})
+					workbookBytes, meta, err = packpkg.BuildWorkbook(templateBytes, sources, templateOptions)
 				}
 			}
 			if err != nil {
@@ -2776,6 +2784,7 @@ func (a *app) packCommand() *cobra.Command {
 	cmd.Flags().StringVar(&templatePath, "template", "", "workbook template path")
 	cmd.Flags().BoolVar(&blank, "blank", false, "create a fresh one-sheet workbook without a template")
 	cmd.Flags().BoolVar(&check, "check", false, "validate the same pack inputs without writing an artifact")
+	cmd.Flags().BoolVar(&preserveDesigner, "preserve-designer", false, "preserve existing UserForm Designer state exactly (template mode only)")
 	cmd.Flags().Bool("experimental", false, "deprecated no-op retained for command-line compatibility")
 	if err := cmd.Flags().MarkDeprecated("experimental", "pack is stable; remove --experimental"); err != nil {
 		panic(err)
@@ -2807,6 +2816,7 @@ func (a *app) pushCommand() *cobra.Command {
 	var backend string
 	var fast bool
 	var changedOnly bool
+	var preserveDesigner bool
 	var session bool
 	var noSave bool
 
@@ -2818,6 +2828,9 @@ func (a *app) pushCommand() *cobra.Command {
 			backend = strings.ToLower(strings.TrimSpace(backend))
 			if backend != "excel" && backend != "file" {
 				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", fmt.Errorf("--backend must be excel or file, got %q", backend))
+			}
+			if preserveDesigner && backend != "file" {
+				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", errors.New("--preserve-designer requires --backend file"))
 			}
 			if backend == "file" && (session || noSave) {
 				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", errors.New("--backend file cannot be combined with --session or --no-save"))
@@ -2833,7 +2846,7 @@ func (a *app) pushCommand() *cobra.Command {
 			}
 			workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 			if backend == "file" {
-				env, code, err := a.pushViaFile(cmd.Context(), cfg, pushOpts)
+				env, code, err := a.pushViaFile(cmd.Context(), cfg, pushOpts, preserveDesigner)
 				if err != nil {
 					return err
 				}
@@ -2852,6 +2865,7 @@ func (a *app) pushCommand() *cobra.Command {
 	cmd.Flags().StringVar(&backend, "backend", "excel", "push backend: excel or file")
 	cmd.Flags().BoolVar(&fast, "fast", false, "use development-oriented fast push defaults")
 	cmd.Flags().BoolVar(&changedOnly, "changed-only", false, "skip workbook updates when source state has not changed")
+	cmd.Flags().BoolVar(&preserveDesigner, "preserve-designer", false, "preserve existing UserForm Designer state exactly (file backend only)")
 	cmd.Flags().BoolVar(&session, "session", false, "force "+sessionUsageHint())
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "do not save after session push")
 	return cmd
@@ -3127,7 +3141,7 @@ func (e *filePushBlockedError) Error() string { return e.message }
 // from the tracked source tree and atomically replaces the saved workbook.
 // No Excel, COM, or VBIDE is involved, so the run works headless on any
 // platform; VBE compile validation is explicitly not performed.
-func (a *app) pushViaFile(ctx context.Context, cfg config.Config, pushOpts excel.PushOptions) (output.Envelope, int, error) {
+func (a *app) pushViaFile(ctx context.Context, cfg config.Config, pushOpts excel.PushOptions, preserveDesigner bool) (output.Envelope, int, error) {
 	workbookPath := workbookArgPath(a.cwd, cfg.Excel.Path)
 	if !strings.EqualFold(filepath.Ext(workbookPath), workbookformat.ExtXLSM) {
 		unsupported := workbookformat.UnsupportedError{Capability: "push --backend file", Extension: filepath.Ext(workbookPath)}
@@ -3148,12 +3162,13 @@ func (a *app) pushViaFile(ctx context.Context, cfg config.Config, pushOpts excel
 		return output.Envelope{}, output.ExitEnvironment, a.writeFailure("push", output.ExitEnvironment, "coordination_init_failed", err)
 	}
 	result, err := filepush.PushContext(ctx, a.cwd, cfg, workbookPath, filepush.Options{
-		BackupMode:   pushOpts.BackupMode,
-		ChangedOnly:  pushOpts.ChangedOnly,
-		Coordination: manager,
-		Wait:         a.wait,
-		WaitTimeout:  a.waitTimeout,
-		Guard:        a.guardFilePushWorkbook,
+		BackupMode:       pushOpts.BackupMode,
+		ChangedOnly:      pushOpts.ChangedOnly,
+		PreserveDesigner: preserveDesigner,
+		Coordination:     manager,
+		Wait:             a.wait,
+		WaitTimeout:      a.waitTimeout,
+		Guard:            a.guardFilePushWorkbook,
 	})
 	if err != nil {
 		code := filePushExitCode(err)

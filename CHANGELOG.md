@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `--preserve-designer` for template pack and file push. Code-only
+  updates preserve Designer streams and storage metadata, skip equal-caption
+  repair, and reject Designer changes before publication. Normal authoring
+  retains its existing Caption synchronization behavior.
 - Preserved document-module member attributes and source bytes across pull and
   template-pack round trips, including leading and terminal blank lines.
 - Fixed Docker and Podman containers sharing a WSL2 kernel being mistaken for

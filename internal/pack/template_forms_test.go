@@ -19,6 +19,51 @@ func authoredForm(name string) SourceModule {
 	return SourceModule{Name: name, Type: ModuleTypeForm, Source: "Option Explicit\n' updated form code", FormSpec: &spec.FormSpec{SchemaVersion: 1, Kind: "xlflow.userform", Basis: "designer", Form: spec.FormSpecForm{Name: name, Caption: new("日本語")}, Controls: []spec.FormSpecControl{{ID: "custom", Name: "Input", Type: "TextBox", Text: new("first")}}}}
 }
 
+func TestPreserveDesignerCodeOnlyAndRejectedAuthoring(t *testing.T) {
+	created, err := GenerateVBAProject(readTestFile(t, "corpus", "p1_compiled.bin"), []SourceModule{authoredForm("Login")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := vbaproject.Read(created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := oforms.SerializeForm(project.Forms[0], project.Props.CodePage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := authoredForm("Login")
+	source.Source += "\n' preserve designer code edit"
+	updated, err := GenerateVBAProject(created, []SourceModule{source}, TemplateOptions{PreserveDesigner: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readBack, err := vbaproject.Read(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := oforms.SerializeForm(readBack.Forms[0], readBack.Props.CodePage)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("Designer changed: %v", err)
+	}
+	if !bytes.Equal(project.ReferencesRaw, readBack.ReferencesRaw) || !strings.Contains(projectModuleSource(readBack, "Login"), "preserve designer code edit") {
+		t.Fatal("references changed or source update was lost")
+	}
+	source.FormSpec.Form.Caption = new("Explicit Designer edit")
+	if _, err := GenerateVBAProject(created, []SourceModule{source}, TemplateOptions{PreserveDesigner: true}); err == nil {
+		t.Fatal("Designer edit accepted")
+	}
+	if _, err := GenerateVBAProject(created, []SourceModule{authoredForm("NewForm")}, TemplateOptions{PreserveDesigner: true}); err == nil {
+		t.Fatal("new UserForm accepted")
+	}
+	if _, err := GenerateVBAProject(created, nil, TemplateOptions{PreserveDesigner: true, UserFormTopology: "source"}); !errors.Is(err, ErrAmbiguousLayout) {
+		t.Fatalf("source topology error = %v", err)
+	}
+	if _, err := GenerateVBAProject(created, []SourceModule{source}); err != nil {
+		t.Fatalf("normal authoring failed: %v", err)
+	}
+}
+
 func TestTemplateFormsAddEditRemoveAndPreserve(t *testing.T) {
 	base := readTestFile(t, "corpus", "p1_compiled.bin")
 	created, err := GenerateVBAProject(base, []SourceModule{authoredForm("Login")})

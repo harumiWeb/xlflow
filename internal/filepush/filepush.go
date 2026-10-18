@@ -38,6 +38,9 @@ type Options struct {
 	// ChangedOnly skips the rebuild when the recorded push state still covers
 	// the current source tree and saved workbook.
 	ChangedOnly bool
+	// PreserveDesigner validates UserForm code-only changes while requiring
+	// every existing Designer stream and storage to remain byte-identical.
+	PreserveDesigner bool
 	// Coordination is the lease manager for source-tree locks; nil creates the
 	// default manager.
 	Coordination *coordination.Manager
@@ -108,7 +111,7 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 	if err != nil {
 		return Result{}, err
 	}
-	fingerprint, err := computeFingerprint(workbookPath, snapshot.files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation)
+	fingerprint, err := computeFingerprint(workbookPath, snapshot.files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation, opts.PreserveDesigner)
 	if err != nil {
 		return Result{}, err
 	}
@@ -125,7 +128,7 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 	if err != nil {
 		return Result{}, err
 	}
-	lockedFingerprint, err := computeFingerprint(workbookPath, lockedSnapshot.files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation)
+	lockedFingerprint, err := computeFingerprint(workbookPath, lockedSnapshot.files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation, opts.PreserveDesigner)
 	if err != nil {
 		return Result{}, err
 	}
@@ -187,7 +190,7 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 		return Result{}, err
 	}
 
-	built, meta, err := packpkg.BuildWorkbook(template, snapshot.modules)
+	built, meta, err := packpkg.BuildWorkbook(template, snapshot.modules, packpkg.TemplateOptions{PreserveDesigner: opts.PreserveDesigner})
 	if err != nil {
 		return Result{}, err
 	}
@@ -198,7 +201,7 @@ func PushContext(ctx context.Context, root string, cfg config.Config, workbookPa
 	if err != nil {
 		return Result{}, err
 	}
-	latestFingerprint, err := computeFingerprint(workbookPath, latestSnapshot.files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation)
+	latestFingerprint, err := computeFingerprint(workbookPath, latestSnapshot.files, cfg.VBA.LineNumbers.Enabled, cfg.VBA.FolderAnnotation, opts.PreserveDesigner)
 	if err != nil {
 		return Result{}, err
 	}

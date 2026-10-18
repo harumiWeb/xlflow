@@ -8,6 +8,10 @@ xlflow pack --out build/Release.xlsm
 # Validate the same pipeline without writing an artifact
 xlflow pack --check
 
+# Update UserForm code while preserving saved Designer state
+xlflow pack --template build/Base.xlsm --preserve-designer --out build/Release.xlsm
+xlflow pack --template build/Base.xlsm --preserve-designer --check
+
 # No template: ThisWorkbook + one Sheet1
 xlflow pack --blank --out build/Release.xlsm
 xlflow pack --blank --check
@@ -54,7 +58,12 @@ parent changes, sibling ordering, and Image picture replacement/removal. The
 spec lists every control; omitted properties retain template values. Omitted
 root dimensions default to 240 by 180 points only for newly added forms;
 existing template forms preserve omitted dimensions. Existing forms without a
-spec retain legacy code-only updates.
+spec retain legacy code-only updates. Use `--preserve-designer` with
+`--template` when existing UserForms must remain byte-identical in Designer
+streams and storage. It validates canonical FormSpecs, allows code-behind
+updates, rejects new forms or any Designer-state change, and disables the
+normal equal-Caption compatibility repair. It also works with `--check`; the
+flag cannot be combined with `--blank`.
 `pack` does not compile or execute VBA, so successful JSON keeps
 `pack.backend = "pure-go"` and `pack.vbe_validation = "not_performed"`.
 

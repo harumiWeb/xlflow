@@ -1030,6 +1030,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `preprocessor_else`
 - `preprocessor_elseif`
 - `preprocessor_if`
+- `preserve_designer`
 - `probe_mode`
 - `procedure_call`
 - `procedure_catalog_builds`

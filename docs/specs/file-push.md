@@ -4,7 +4,7 @@
 
 ```text
 xlflow push [--backend excel|file] [--backup always|never] [--changed-only]
-            [--fast] [--json]
+            [--preserve-designer] [--fast] [--json]
 ```
 
 `excel` is the default backend and keeps the existing bridge/VBIDE contract:
@@ -14,6 +14,9 @@ modules are rewritten in place, and the workbook is saved by Excel.
 `--backend file` selects the pure-Go saved-workbook backend. Explicit backend
 requests never fall back. There is no `auto` for push. `--backend file`
 combined with `--session` or `--no-save` is rejected with `push_args_invalid`.
+`--preserve-designer` is available only with `--backend file`; the default and
+explicit Excel backends reject it with `push_args_invalid` before configuration
+or workbook preflight.
 
 ## Authority and host requirements
 
@@ -137,6 +140,11 @@ VB_*` lines stripped; an empty body becomes `Option Explicit`), matching
   The marker still fails with `FRM201` when `frm` code or compatibility
   artifacts are selected as import authority. File push never rewrites
   compatibility files in the source tree.
+- `--preserve-designer` validates canonical FormSpecs against saved forms while
+  allowing code-behind changes. New forms and any authored Designer change
+  fail before publication, and the compiler verifies every Designer stream
+  and storage record remains identical. Equal root Caption repair is disabled
+  in this mode.
 - File-push UserForm topology remains template-authoritative: forms absent
   from source are preserved, and `[pack].userform_topology` is ignored. In
   sidecar mode, a missing code sidecar preserves an existing form's code; an
@@ -181,7 +189,8 @@ does not roll back the already-published workbook.
 still hold:
 
 1. the source fingerprint (workbook path, per-file kind/path/hash entries,
-   `line_numbers_enabled`, and the effective `folder_annotation` mode)
+   `line_numbers_enabled`, the effective `folder_annotation` mode, and
+   `preserve_designer` policy)
    matches the current tree — compared order-insensitively. File-backend
    fingerprints additionally include canonical FormSpecs and referenced
    asset bytes; a fingerprint from a backend that did not include those inputs
@@ -200,6 +209,13 @@ their native form — Windows cannot see them, so no interop is claimed.
 
 A state file in the legacy bare-fingerprint shape has no delivery evidence and
 never justifies a skip. A skip is a successful no-op.
+
+The default `preserve_designer=false` does not add a policy entry, so legacy
+default-mode state remains compatible. When enabled, the fingerprint includes
+the versioned `policy/preserve_designer/v1` entry as well as the Go state field.
+The shared file entry makes older Excel bridges reject that state for a
+changed-only skip even though they ignore unknown JSON fields; switching either
+direction between strict and normal mode therefore rebuilds.
 
 ## Coordination
 

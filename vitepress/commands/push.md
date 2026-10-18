@@ -5,7 +5,7 @@ Import edited source files back into the configured workbook.
 ## Usage
 
 ```bash
-xlflow push [--backend <excel|file>] [--backup <always|never>] [--fast] [--changed-only] [--session] [--no-save]
+xlflow push [--backend <excel|file>] [--backup <always|never>] [--fast] [--changed-only] [--preserve-designer] [--session] [--no-save]
 ```
 
 ## Options and Arguments
@@ -16,6 +16,7 @@ xlflow push [--backend <excel|file>] [--backup <always|never>] [--fast] [--chang
 | `--backup <always\|never>` | Choose whether to create a rollback-capable workbook backup before modifying the workbook. | always  |
 | `--fast`                   | Use the faster import path when supported.                                                 | false   |
 | `--changed-only`           | Import only changed source files.                                                          | false   |
+| `--preserve-designer`      | Preserve existing UserForm Designer state exactly; requires `--backend file`.              | false   |
 | `--session`                | Push into the managed live workbook session.                                               | false   |
 | `--no-save`                | Leave the session workbook dirty after import.                                             | false   |
 | `--json`                   | Return import results and warnings.                                                        | false   |
@@ -26,6 +27,7 @@ xlflow push [--backend <excel|file>] [--backup <always|never>] [--fast] [--chang
 xlflow push --backup always --json
 xlflow push --session --fast --no-save --json
 xlflow push --backend file --json
+xlflow push --backend file --preserve-designer --changed-only --json
 ```
 
 ## File backend
@@ -47,6 +49,15 @@ import authority. Unsupported custom ActiveX cases fail without starting
 Excel. Custom-control compatibility requires Excel-authored `.frm` / `.frx`
 artifacts and an explicitly selected Excel workflow; file push never falls
 back to Excel.
+
+Add `--preserve-designer` when updating code on existing forms whose saved
+Designer state must remain byte-identical. The canonical FormSpec is validated
+against the saved form, but any new form, authored Designer change, or changed
+Designer stream/storage fails before publication. The option is file-backend
+only; the default and explicit Excel backends reject it during argument
+preflight. `--changed-only` fingerprints this policy, so switching between
+strict and normal file pushes rebuilds; the versioned policy marker also makes
+older Excel bridge state comparison fail safely.
 
 Because the backend replaces the saved workbook beneath any live Excel/VBE
 state, it refuses to run — before changing anything — when the workbook looks

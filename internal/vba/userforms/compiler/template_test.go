@@ -122,6 +122,15 @@ func TestCompileTemplateEqualExplicitRootCaptionRepairsLegacyVBFrame(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	preserved, err := CompileTemplateCodeOnly(base, desired, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preservedBytes, err := oforms.SerializeForm(preserved, 932)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDesignerBytes(t, before, preservedBytes)
 	result, err := CompileTemplate(base, desired, 932)
 	if err != nil {
 		t.Fatal(err)
