@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -48,7 +49,7 @@ func TestPushAppliesSourceTreeAndWritesState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := computeFingerprint(workbook, snapshot.files, false, cfg.VBA.FolderAnnotation)
+	current, err := computeFingerprint(workbook, snapshot.files, false, cfg.VBA.FolderAnnotation, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +79,58 @@ func TestPushChangedOnlySkipsUnchangedWorkbook(t *testing.T) {
 	}
 	if second.Backup != nil {
 		t.Fatal("skip must not create a backup")
+	}
+}
+
+func TestPushChangedOnlyTracksDesignerPreservationMode(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	writeTestFile(t, filepath.Join(root, "src", "modules", "Module1.bas"), moduleSource("Module1", "Option Explicit\n"))
+	cfg := testConfig()
+
+	if _, err := Push(root, cfg, workbook, Options{ChangedOnly: true, BackupMode: "never"}); err != nil {
+		t.Fatal(err)
+	}
+	preserved, err := Push(root, cfg, workbook, Options{ChangedOnly: true, BackupMode: "never", PreserveDesigner: true})
+	if err != nil || preserved.Skipped {
+		t.Fatalf("switching to Designer preservation reused the normal-mode state: %+v, %v", preserved, err)
+	}
+	state := readState(t, preserved.StatePath)
+	if !state.Fingerprint.PreserveDesigner {
+		t.Fatal("preserve-mode state did not record preserve_designer=true")
+	}
+	var hasVersionedPolicy bool
+	for _, entry := range state.Fingerprint.Files {
+		if entry.Kind == "policy" && entry.Path == preserveDesignerFingerprintVersion {
+			hasVersionedPolicy = true
+			break
+		}
+	}
+	if !hasVersionedPolicy {
+		t.Fatal("preserve-mode state omitted its shared versioned policy fingerprint entry")
+	}
+	// Older Excel bridges ignore the Go-only PreserveDesigner JSON field. The
+	// shared file-entry marker must still prevent them from matching normal mode.
+	bridgeView := state.Fingerprint
+	bridgeView.PreserveDesigner = false
+	snapshot, err := captureSourceSnapshot(root, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalFingerprint, err := computeFingerprint(workbook, snapshot.files, false, cfg.VBA.FolderAnnotation, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fingerprintEquals(bridgeView, normalFingerprint) {
+		t.Fatal("older Excel bridge could treat strict-mode state as normal mode and skip")
+	}
+	repeated, err := Push(root, cfg, workbook, Options{ChangedOnly: true, BackupMode: "never", PreserveDesigner: true})
+	if err != nil || !repeated.Skipped {
+		t.Fatalf("unchanged preserve-mode push = %+v, %v; want a changed-only skip", repeated, err)
+	}
+	normal, err := Push(root, cfg, workbook, Options{ChangedOnly: true, BackupMode: "never"})
+	if err != nil || normal.Skipped {
+		t.Fatalf("switching back to normal mode reused the preserve-mode state: %+v, %v", normal, err)
 	}
 }
 
@@ -220,6 +273,39 @@ func TestPushUpdatesUserFormCodeBehindFromSidecar(t *testing.T) {
 	// in memory only.
 	if body := mustRead(t, filepath.Join(root, "src", "forms", "UserForm1.frm")); bytes.Contains(body, []byte("SIDECAR")) {
 		t.Fatal("file push rewrote the tracked .frm")
+	}
+}
+
+func TestPushPreserveDesignerUpdatesCodeWithoutChangingFormModel(t *testing.T) {
+	root := newSourceTree(t)
+	workbook := writeWorkbook(t, root, readFixture(t, "p1_compiled.bin"))
+	cfg := testConfig()
+	cfg.UserForm.CodeSource = "sidecar"
+	writeTestFile(t, filepath.Join(root, "src", "forms", "specs", "Login.json"), `{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login","caption":"Initial"},"controls":[{"id":"text1","name":"TextBox1","type":"TextBox","text":"first"}]}`)
+	codePath := filepath.Join(root, "src", "forms", "code", "Login.bas")
+	writeTestFile(t, codePath, "Option Explicit\nPublic Sub Marker()\n    Debug.Print \"INITIAL\"\nEnd Sub\n")
+
+	if _, err := Push(root, cfg, workbook, Options{BackupMode: "never"}); err != nil {
+		t.Fatalf("create initial UserForm: %v", err)
+	}
+	before := readProject(t, workbook)
+	if len(before.Forms) != 1 {
+		t.Fatalf("initial forms = %+v, want Login", before.Forms)
+	}
+	writeTestFile(t, codePath, "Option Explicit\nPublic Sub Marker()\n    Debug.Print \"STRICT_CODE_ONLY\"\nEnd Sub\n")
+	result, err := Push(root, cfg, workbook, Options{BackupMode: "never", PreserveDesigner: true})
+	if err != nil {
+		t.Fatalf("preserve-designer file push: %v", err)
+	}
+	if result.Meta.Form != 1 {
+		t.Fatalf("form update metadata = %+v, want one form", result.Meta)
+	}
+	after := readProject(t, workbook)
+	if !reflect.DeepEqual(before.Forms, after.Forms) {
+		t.Fatal("preserve-designer file push changed a UserForm Designer stream or storage")
+	}
+	if got := moduleSourceOf(after, "Login"); !strings.Contains(got, "STRICT_CODE_ONLY") {
+		t.Fatalf("UserForm code-behind was not updated: %q", got)
 	}
 }
 
@@ -815,7 +901,7 @@ func TestPushStatePathsCanonicalAcrossHosts(t *testing.T) {
 		}
 	}
 
-	left, err := computeFingerprint(`/mnt/c/proj/build/Book.xlsm`, nil, false, "")
+	left, err := computeFingerprint(`/mnt/c/proj/build/Book.xlsm`, nil, false, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

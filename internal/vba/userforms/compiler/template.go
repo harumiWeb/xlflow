@@ -24,6 +24,41 @@ import (
 // observed values, warnings, and unsupported snapshot metadata do not become
 // edits. The returned model is independent of both inputs.
 func CompileTemplate(base *oforms.Form, desired spec.FormSpec, codePage uint16) (*oforms.Form, error) {
+	return compileTemplate(base, desired, codePage, true)
+}
+
+// CompileTemplateCodeOnly validates canonical authoring intent while retaining
+// every Designer stream and storage byte. Unlike normal authoring, supplying an
+// unchanged projected Caption does not request repair of the saved VBFrame.
+// Actual Designer changes are rejected rather than silently ignored.
+func CompileTemplateCodeOnly(base *oforms.Form, desired spec.FormSpec, codePage uint16) (*oforms.Form, error) {
+	result, err := compileTemplate(base, desired, codePage, false)
+	if err != nil {
+		return nil, err
+	}
+	before, err := oforms.SerializeForm(base, codePage)
+	if err != nil {
+		return nil, err
+	}
+	after, err := oforms.SerializeForm(result, codePage)
+	if err != nil {
+		return nil, err
+	}
+	unchanged := maps.Equal(before.Storages, after.Storages) && len(before.Streams) == len(after.Streams)
+	for path, raw := range before.Streams {
+		actual, exists := after.Streams[path]
+		if !exists || !bytes.Equal(raw, actual) {
+			unchanged = false
+			break
+		}
+	}
+	if !unchanged {
+		return nil, templateError(base, Unsupported, "", "form", "Designer changes are not allowed with preserve-designer")
+	}
+	return result, nil
+}
+
+func compileTemplate(base *oforms.Form, desired spec.FormSpec, codePage uint16, repairCaption bool) (*oforms.Form, error) {
 	if base == nil {
 		return nil, &Error{Code: Invalid, Property: "base", Reason: "base form is nil"}
 	}
@@ -68,7 +103,7 @@ func CompileTemplate(base *oforms.Form, desired spec.FormSpec, codePage uint16) 
 		return nil, err
 	}
 	caption, explicit := templateExplicitRootCaption(desired.Form)
-	if !explicit {
+	if !explicit || !repairCaption {
 		return result, nil
 	}
 	// CompileEdits updates the Unicode f-stream. Re-apply an explicit root

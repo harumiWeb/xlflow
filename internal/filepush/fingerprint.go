@@ -36,6 +36,9 @@ type sourceFingerprint struct {
 	// written before this field existed compare unequal and re-push, which
 	// is the safe direction.
 	FolderAnnotation string `json:"folder_annotation"`
+	// PreserveDesigner records the UserForm code-only compilation policy.
+	// Omission keeps the default mode compatible with older shared push state.
+	PreserveDesigner bool `json:"preserve_designer,omitzero"`
 }
 
 type pushSavedFile struct {
@@ -55,6 +58,8 @@ type pushState struct {
 	Fingerprint sourceFingerprint `json:"fingerprint"`
 	AppliedTo   *pushAppliedTo    `json:"applied_to"`
 }
+
+const preserveDesignerFingerprintVersion = "preserve_designer/v1"
 
 // runningOnWSL is stubbed by tests.
 var runningOnWSL = wsl.IsWSL
@@ -133,7 +138,7 @@ func isASCIILetter(b byte) bool {
 // computeFingerprint ports ComputeFingerprint: one entry per discovered file,
 // the normalized workbook path, and the transform toggles (line numbers,
 // folder annotation mode) that change the effective imported text.
-func computeFingerprint(workbookPath string, files []discoveredFile, lineNumbers bool, folderAnnotation string) (sourceFingerprint, error) {
+func computeFingerprint(workbookPath string, files []discoveredFile, lineNumbers bool, folderAnnotation string, preserveDesigner bool) (sourceFingerprint, error) {
 	entries := make([]sourceFileEntry, 0, len(files))
 	for _, file := range files {
 		body := file.Body
@@ -151,11 +156,24 @@ func computeFingerprint(workbookPath string, files []discoveredFile, lineNumbers
 			Hash: hex.EncodeToString(sum[:]),
 		})
 	}
+	if preserveDesigner {
+		// Keep this policy marker in the shared file-entry list as well as the
+		// Go-only field below. Older Excel bridges ignore unknown JSON fields,
+		// but compare every file entry, so a strict file-push state cannot be
+		// mistaken for a normal Excel-push fingerprint and skipped.
+		policyHash := sha256.Sum256([]byte("enabled"))
+		entries = append(entries, sourceFileEntry{
+			Kind: "policy",
+			Path: preserveDesignerFingerprintVersion,
+			Hash: hex.EncodeToString(policyHash[:]),
+		})
+	}
 	return sourceFingerprint{
 		WorkbookPath:       normalizeFingerprintPath(workbookPath),
 		Files:              entries,
 		LineNumbersEnabled: lineNumbers,
 		FolderAnnotation:   folderAnnotation,
+		PreserveDesigner:   preserveDesigner,
 	}, nil
 }
 
@@ -173,6 +191,9 @@ func fingerprintEquals(left, right sourceFingerprint) bool {
 		return false
 	}
 	if left.FolderAnnotation != right.FolderAnnotation {
+		return false
+	}
+	if left.PreserveDesigner != right.PreserveDesigner {
 		return false
 	}
 	if len(left.Files) != len(right.Files) {

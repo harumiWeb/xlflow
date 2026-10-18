@@ -15,14 +15,15 @@ See `docs/adr/ADR-0012-pack-command.md` for the rationale and
 ## Command
 
 ```text
-xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm> | --blank]
-xlflow [--json] pack --check [--template <path.xlsm> | --blank]
+xlflow [--json] pack --out <path.xlsm> [--template <path.xlsm> | --blank] [--preserve-designer]
+xlflow [--json] pack --check [--template <path.xlsm> | --blank] [--preserve-designer]
 ```
 
 - `--out <path>` (required): destination artifact path. Must end in `.xlsm`. May overwrite an existing output file, but must not resolve to the template or the configured source workbook (see Template handling). A missing `--out` fails with `pack_args_invalid` (exit 2).
 - `--template <path>` (optional): the workbook template the artifact is based on. When omitted, `pack` uses the source workbook configured in `xlflow.toml` under `[excel].path`. The template provides workbook structure — sheets, document-module hosts, and any existing designer streams; `pack` replaces only `xl/vbaProject.bin`.
 - `--blank` (optional): create a fresh workbook without reading a template. It is mutually exclusive with an explicit `--template`; passing `--blank` together with `--template` — including an explicitly empty `--template ''` — fails with `pack_args_invalid` (exit 2). When neither flag is provided, template mode keeps the `[excel].path` fallback.
 - `--check` (optional): run the same preflight, planning, FormSpec and picture compilation, VBA-project generation, and structural readback without publishing an `.xlsm`. `--out` is not required. Success reports `pack.check=true` and has no `output` field; no artifact or destination directory is created.
+- `--preserve-designer` (optional): template mode only; rejects `--blank`. Existing UserForms may receive code-behind updates only. The canonical FormSpec is validated against the saved Designer state, and any Designer stream or storage change fails before publication. An explicit root Caption does not trigger the normal compatibility repair of a missing `VBFrame` Caption.
 - `--json`: persistent global flag; emits the standard envelope (see Output / JSON contract).
 
 The first stable release accepts the former `--experimental` flag as a hidden,
@@ -425,7 +426,7 @@ remains a developer release gate and is recorded with the fixture evidence in
 
 ## UserForm authoring and compatibility
 
-`pack` uses the shared pure-Go UserForm compiler in blank and template modes. Blank mode uses source form authority and requires a canonical spec for every generated form. Template mode preserves forms omitted from source by default; explicit source topology removes omitted forms. A supplied canonical spec provides Designer intent for a new or edited form. Existing forms without a spec retain code-only updates and their saved Designer state under template topology, while explicit source topology requires canonical specs for every supplied form.
+`pack` uses the shared pure-Go UserForm compiler in blank and template modes. Blank mode uses source form authority and requires a canonical spec for every generated form. Template mode preserves forms omitted from source by default; explicit source topology removes omitted forms. A supplied canonical spec provides Designer intent for a new or edited form. Existing forms without a spec retain code-only updates and their saved Designer state under template topology, while explicit source topology requires canonical specs for every supplied form. `--preserve-designer` is a stricter template-mode policy: it rejects new forms and authored Designer changes and requires every existing form's Designer streams and storage metadata to remain identical. Code-behind can still change. The option is also honored by `--check` and never applies the normal equal-Caption repair.
 
 Canonical FormSpecs author supported Designer and picture state without prebuilt `.frm` / `.frx` inputs. Compatibility exports remain available, and `[userform].code_source` still selects embedded `.frm` code or a sidecar as the code-behind source. Omitted supported properties preserve template values; opaque or unsupported state is retained when untouched and causes validation failure if an edit cannot preserve it. New forms default omitted root dimensions to 240 by 180 points; omitted dimensions on existing forms preserve the template baseline.
 

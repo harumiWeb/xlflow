@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/filepush"
 	"github.com/harumiWeb/xlflow/internal/output"
@@ -43,6 +44,9 @@ func TestPushDefaultsToExcelBackend(t *testing.T) {
 	if flag == nil || flag.DefValue != "excel" {
 		t.Fatalf("push --backend default = %+v, want excel", flag)
 	}
+	if cmd.Flags().Lookup("preserve-designer") == nil {
+		t.Fatal("push command is missing --preserve-designer")
+	}
 }
 
 func TestPushRejectsInvalidBackendAndSessionCombos(t *testing.T) {
@@ -61,6 +65,22 @@ func TestPushRejectsInvalidBackendAndSessionCombos(t *testing.T) {
 	}
 }
 
+func TestPushPreserveDesignerRejectsExcelBackendsBeforeConfigLoad(t *testing.T) {
+	for _, args := range [][]string{
+		{"push", "--preserve-designer"},
+		{"push", "--backend", "excel", "--preserve-designer"},
+	} {
+		dir := t.TempDir()
+		stdout, err := runBuildCommandForTest(dir, append([]string{"--json"}, args...)...)
+		if err == nil || output.ExitCode(err) != output.ExitConfig || jsonErrorCode(t, stdout) != "push_args_invalid" {
+			t.Fatalf("%v: stdout=%s err=%v", args, stdout, err)
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, config.FileName)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("%v was not rejected before config loading: %v", args, statErr)
+		}
+	}
+}
+
 func TestPushFileBackendPublishesSavedWorkbook(t *testing.T) {
 	dir := t.TempDir()
 	writePackConfig(t, dir)
@@ -68,7 +88,7 @@ func TestPushFileBackendPublishesSavedWorkbook(t *testing.T) {
 	writePackTemplate(t, dir, readPackFixture(t, "testdata", "corpus", "p1_compiled.bin"))
 	stubClosedWorkbook(t)
 
-	stdout, err := runBuildCommandForTest(dir, "--json", "push", "--backend", "file")
+	stdout, err := runBuildCommandForTest(dir, "--json", "push", "--backend", "file", "--preserve-designer")
 	if err != nil {
 		t.Fatalf("push --backend file: %v\n%s", err, stdout)
 	}
@@ -91,6 +111,18 @@ func TestPushFileBackendPublishesSavedWorkbook(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".xlflow", "state", "push.json")); err != nil {
 		t.Fatalf("push state not written: %v", err)
+	}
+	stateBody, err := os.ReadFile(filepath.Join(dir, ".xlflow", "state", "push.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Fingerprint struct {
+			PreserveDesigner bool `json:"preserve_designer"`
+		} `json:"fingerprint"`
+	}
+	if err := json.Unmarshal(stateBody, &state); err != nil || !state.Fingerprint.PreserveDesigner {
+		t.Fatalf("push state did not record Designer preservation: state=%+v err=%v", state, err)
 	}
 }
 

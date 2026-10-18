@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
+	"github.com/harumiWeb/xlflow/internal/pack/cfb"
 	"github.com/harumiWeb/xlflow/internal/pack/vbaproject"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms/projection"
 )
@@ -33,7 +35,7 @@ func TestRootCommandIncludesPackCommand(t *testing.T) {
 	if cmd == nil || cmd.Name() != "pack" {
 		t.Fatalf("expected pack command, got %#v", cmd)
 	}
-	for _, name := range []string{"out", "template", "blank", "check"} {
+	for _, name := range []string{"out", "template", "blank", "check", "preserve-designer"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected pack command to define --%s", name)
 		}
@@ -82,6 +84,8 @@ func TestPackCommandCheckValidatesWithoutPublishing(t *testing.T) {
 			args := []string{"--json", "pack", "--check"}
 			if mode == "blank" {
 				args = append(args, "--blank")
+			} else {
+				args = append(args, "--preserve-designer")
 			}
 			stdout, err := runPackCommandForTest(dir, args...)
 			if err != nil {
@@ -98,10 +102,93 @@ func TestPackCommandCheckValidatesWithoutPublishing(t *testing.T) {
 			if payload["check"] != true || payload["base"] != mode {
 				t.Fatalf("pack check payload = %+v", payload)
 			}
+			if _, exists := payload["output"]; exists {
+				t.Fatalf("check mode reported an output artifact: %+v", payload)
+			}
 			if _, statErr := os.Stat(filepath.Join(dir, "dist", "Book.xlsm")); !errors.Is(statErr, os.ErrNotExist) {
 				t.Fatalf("check mode published an artifact, stat error = %v", statErr)
 			}
 		})
+	}
+}
+
+func TestPackPreserveDesignerKeepsTemplateBytesAndNormalCaptionRepair(t *testing.T) {
+	dir := t.TempDir()
+	specPath, codePath := preparePreserveDesignerPackProject(t, dir)
+
+	checkOutput, err := runPackCommandForTest(dir, "--json", "pack", "--check", "--preserve-designer")
+	if err != nil {
+		t.Fatalf("pack --check --preserve-designer: %v\n%s", err, checkOutput)
+	}
+	var checkEnv output.Envelope
+	if err := json.Unmarshal([]byte(checkOutput), &checkEnv); err != nil {
+		t.Fatalf("check JSON: %v\n%s", err, checkOutput)
+	}
+	if _, exists := cliObjectMap(checkEnv.Output)["path"]; exists {
+		t.Fatalf("check mode reported a published artifact: %+v", checkEnv.Output)
+	}
+
+	writePackSourceModule(t, dir, specPath, []byte(canonicalLoginSpec("Initial", "")))
+	writePackSourceModule(t, dir, codePath, []byte("Option Explicit\nPublic Sub Marker()\n    Debug.Print \"CODE_ONLY\"\nEnd Sub\n"))
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--out", "dist/Normal.xlsm")
+	if err != nil {
+		t.Fatalf("normal pack: %v\n%s", err, stdout)
+	}
+	normal := readPackedProjectForTest(t, filepath.Join(dir, "dist", "Normal.xlsm"))
+	if !bytes.Contains(normal.Forms[0].Levels[0].VBFrameRaw, []byte(`Caption = "Initial"`)) {
+		t.Fatalf("normal template mode stopped repairing equal root Caption: %q", normal.Forms[0].Levels[0].VBFrameRaw)
+	}
+
+	stdout, err = runPackCommandForTest(dir, "--json", "pack", "--preserve-designer", "--out", "dist/Strict.xlsm")
+	if err != nil {
+		t.Fatalf("strict pack: %v\n%s", err, stdout)
+	}
+	strict := readPackedProjectForTest(t, filepath.Join(dir, "dist", "Strict.xlsm"))
+	template := readPackedProjectForTest(t, filepath.Join(dir, "build", "Book.xlsm"))
+	if !reflect.DeepEqual(template.Forms, strict.Forms) {
+		t.Fatal("strict pack changed existing UserForm Designer streams or storage metadata")
+	}
+	if !strings.Contains(moduleSourceForTest(strict, "Login"), "CODE_ONLY") {
+		t.Fatalf("strict pack did not apply UserForm code update: %q", moduleSourceForTest(strict, "Login"))
+	}
+}
+
+func TestPackPreserveDesignerRejectsDesignerEditsAndUnsupportedProperties(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec string
+	}{
+		{name: "designer edit", spec: canonicalLoginSpec("Changed", "")},
+		{name: "unsupported property", spec: canonicalLoginSpec("Initial", `,"properties":{"UnknownAlias":"x"}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			specPath, _ := preparePreserveDesignerPackProject(t, dir)
+			writePackSourceModule(t, dir, specPath, []byte(tc.spec))
+
+			stdout, err := runPackCommandForTest(dir, "--json", "pack", "--preserve-designer", "--out", "dist/Rejected.xlsm")
+			if err == nil || output.ExitCode(err) != output.ExitValidation {
+				t.Fatalf("preserve-designer accepted %s: err=%v exit=%d\n%s", tc.name, err, output.ExitCode(err), stdout)
+			}
+			if code := errorCodeFromJSON(t, stdout); code == "" {
+				t.Fatalf("preserve-designer failure omitted its error code: %s", stdout)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, "dist", "Rejected.xlsm")); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("preserve-designer failure published output, stat error = %v", statErr)
+			}
+		})
+	}
+}
+
+func TestPackRejectsPreserveDesignerWithBlankBeforeProjectPreflight(t *testing.T) {
+	dir := t.TempDir()
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--blank", "--preserve-designer", "--out", "dist/Rejected.xlsm")
+	if err == nil || output.ExitCode(err) != output.ExitConfig || errorCodeFromJSON(t, stdout) != "pack_args_invalid" {
+		t.Fatalf("blank preserve-designer preflight: stdout=%s err=%v", stdout, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, config.FileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("blank preserve-designer was not rejected before config loading: %v", err)
 	}
 }
 
@@ -1433,6 +1520,63 @@ func writePackConfig(t *testing.T, dir string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func preparePreserveDesignerPackProject(t *testing.T, dir string) (specPath, codePath string) {
+	t.Helper()
+	writePackProject(t, dir, false)
+	writePackSourceTree(t, dir, false)
+	specPath = filepath.Join("src", "forms", "specs", "Login.json")
+	codePath = filepath.Join("src", "forms", "code", "Login.bas")
+	writePackSourceModule(t, dir, specPath, []byte(canonicalLoginSpec("Initial", "")))
+	writePackSourceModule(t, dir, codePath, []byte("Option Explicit\nPublic Sub Marker()\n    Debug.Print \"INITIAL\"\nEnd Sub\n"))
+
+	stdout, err := runPackCommandForTest(dir, "--json", "pack", "--out", "dist/Baseline.xlsm")
+	if err != nil {
+		t.Fatalf("create canonical UserForm baseline: %v\n%s", err, stdout)
+	}
+	baseline := readFileForTest(t, filepath.Join(dir, "dist", "Baseline.xlsm"))
+	project, err := vbaproject.Read(zipEntryBytes(t, baseline, "xl/vbaProject.bin"))
+	if err != nil {
+		t.Fatalf("read baseline VBA project: %v", err)
+	}
+	if len(project.Forms) != 1 || len(project.Forms[0].Levels) == 0 {
+		t.Fatalf("baseline UserForms = %+v, want one form with a root level", project.Forms)
+	}
+	form := project.Forms[0]
+	container, err := cfb.Open(zipEntryBytes(t, baseline, "xl/vbaProject.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := cfb.NewWriterForFormat(container.Format())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range container.StoragePaths() {
+		metadata, _ := container.Storage(path)
+		var parts []string
+		if path != "" {
+			parts = strings.Split(path, "/")
+		}
+		writer.AddStorage(parts, metadata)
+	}
+	for _, path := range container.Paths() {
+		raw, _ := container.Stream(path)
+		if path == form.Levels[0].Path+"/\x03VBFrame" {
+			raw = []byte("VERSION 5.00\r\nBegin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} " + form.Name + "\r\nEnd\r\n")
+		}
+		writer.AddStream(strings.Split(path, "/"), raw)
+	}
+	legacyTemplate, err := writer.Bytes()
+	if err != nil {
+		t.Fatalf("write legacy-caption template: %v", err)
+	}
+	writePackTemplate(t, dir, legacyTemplate)
+	return specPath, codePath
+}
+
+func canonicalLoginSpec(caption, controlProperties string) string {
+	return fmt.Sprintf(`{"schemaVersion":1,"kind":"xlflow.userform","basis":"designer","form":{"name":"Login","caption":%q},"controls":[{"id":"text1","name":"TextBox1","type":"TextBox","text":"first"%s}]}`, caption, controlProperties)
 }
 
 func writePackSourceTree(t *testing.T, dir string, includeForm bool) {

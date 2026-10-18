@@ -1,3 +1,11 @@
+# Issue #942: code-only Designer preservation
+
+- [x] Confirm the existing equal-caption repair contract and define an opt-in preservation mode.
+- [x] Validate FormSpecs while rejecting actual Designer changes; preserve normal authoring behavior.
+- [x] Add CLI/file-push integration with safe changed-only handling and rejection coverage.
+- [ ] Run affected Windows tests and the commit-pinned Linux suite with exact Designer/reference comparison.
+- [ ] Review and document the verified behavior, then prepare the upstream PR.
+
 # Issue #939: preserve document-module source round trips
 
 - [x] Add focused regressions for no-op and edited document source, unchanged saved member attributes, and rejected module headers.

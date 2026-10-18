@@ -50,10 +50,13 @@ type PackPlan struct {
 	project    *vbaproject.Project
 }
 
-// TemplateOptions controls whether omitted template forms survive packing.
+// TemplateOptions controls UserForm topology and Designer compilation policy.
 // Empty UserFormTopology retains the backwards-compatible template authority.
 type TemplateOptions struct {
 	UserFormTopology string
+	// PreserveDesigner rejects Designer edits and skips equal-caption repair
+	// during code-only template updates. Normal authoring remains the default.
+	PreserveDesigner bool
 }
 
 // PlanProject validates and reconciles sources against a parsed template
@@ -66,6 +69,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 		return PackPlan{}, fmt.Errorf("%w: multiple template options", ErrAmbiguousLayout)
 	}
 	formAuthority := AuthorityTemplate
+	preserveDesigner := len(options) == 1 && options[0].PreserveDesigner
 	if len(options) == 1 {
 		switch options[0].UserFormTopology {
 		case "", "template":
@@ -74,6 +78,9 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 		default:
 			return PackPlan{}, fmt.Errorf("%w: invalid UserForm topology %q", ErrAmbiguousLayout, options[0].UserFormTopology)
 		}
+	}
+	if preserveDesigner && formAuthority == AuthoritySource {
+		return PackPlan{}, fmt.Errorf("%w: preserve-designer requires template-owned UserForm topology", ErrAmbiguousLayout)
 	}
 	encodingIssues, err := collectSourceEncodingErrors(sources, project.Props.CodePage)
 	if err != nil {
@@ -88,7 +95,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 			}
 			validSources = append(validSources, source)
 		}
-		_, formDiagnostics := compileSourceForms(project, validSources)
+		_, formDiagnostics := compileSourceForms(project, validSources, preserveDesigner)
 		diagnostics = append(diagnostics, formDiagnostics...)
 		return PackPlan{}, combinePackDiagnostics(diagnostics)
 	}
@@ -153,7 +160,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 			}
 		}
 	}
-	compiledForms, diagnostics := compileSourceForms(project, sources)
+	compiledForms, diagnostics := compileSourceForms(project, sources, preserveDesigner)
 
 	plan := PackPlan{
 		Components: make([]PlannedComponent, 0, len(project.Modules)+len(sources)),
@@ -304,7 +311,7 @@ func PlanProject(project *vbaproject.Project, sources []SourceModule, options ..
 	return plan, nil
 }
 
-func compileSourceForms(project *vbaproject.Project, sources []SourceModule) (map[string]*oforms.Form, []error) {
+func compileSourceForms(project *vbaproject.Project, sources []SourceModule, preserveDesigner bool) (map[string]*oforms.Form, []error) {
 	templateForms := make(map[string]*oforms.Form, len(project.Forms))
 	for _, form := range project.Forms {
 		if form != nil {
@@ -320,7 +327,13 @@ func compileSourceForms(project *vbaproject.Project, sources []SourceModule) (ma
 		var form *oforms.Form
 		var err error
 		if base := templateForms[strings.ToLower(source.Name)]; base != nil {
-			form, err = compiler.CompileTemplate(base, *source.FormSpec, project.Props.CodePage)
+			if preserveDesigner {
+				form, err = compiler.CompileTemplateCodeOnly(base, *source.FormSpec, project.Props.CodePage)
+			} else {
+				form, err = compiler.CompileTemplate(base, *source.FormSpec, project.Props.CodePage)
+			}
+		} else if preserveDesigner {
+			err = &compiler.Error{Code: compiler.Unsupported, Form: source.Name, Reason: "new UserForms are not allowed with preserve-designer"}
 		} else {
 			form, err = compiler.CompileNew(*source.FormSpec, project.Props.CodePage)
 		}
