@@ -4,7 +4,7 @@
 - [x] Fix the document normalization inverse while retaining the existing export-side terminal-LF rule; retain only exact saved member-attribute statements in template pack.
 - [x] Verify pack, file-pull, file-push, and CLI packages on Windows and in the Linux builder without changing analyzer or VBA semantics.
 - [x] Update the pack source contract and Unreleased changelog, review the scoped diff, and commit the validated result locally.
-- [ ] Run the commit-pinned Phase1 suite in a standalone clone and verify the existing Frame lint rejection still preserves the source copy.
+- [x] Run the commit-pinned Phase1 suite in a standalone clone and verify the existing Frame lint rejection still preserves the source copy. All six groups passed against implementation `51420159712b79cccc4877ec523c3fbfe9144aae`; existing Frame/stdTable lint failures safely rejected file push.
 
 # Issue #937: container host detection
 
