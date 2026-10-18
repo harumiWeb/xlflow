@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed Docker and Podman containers sharing a WSL2 kernel being mistaken for
+  WSL hosts, allowing pure-Go saved-workbook commands to run locally without
+  requiring Windows interop.
+
 ## v0.36.0
 
 - Fixed retained TabStrip observations incorrectly blocking authored tab removal

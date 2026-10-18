@@ -50,6 +50,13 @@ func IsWSLFor(goos string, getenv func(string) string, readFile func(string) ([]
 	if goos != "linux" {
 		return false
 	}
+	// Containers may inherit both the WSL kernel and WSL environment variables,
+	// but do not have the host's Windows interop or mounted-drive namespace.
+	for _, marker := range []string{"/.dockerenv", "/run/.containerenv"} {
+		if _, err := readFile(marker); err == nil {
+			return false
+		}
+	}
 	if strings.TrimSpace(getenv("WSL_INTEROP")) != "" || strings.TrimSpace(getenv("WSL_DISTRO_NAME")) != "" {
 		return true
 	}
