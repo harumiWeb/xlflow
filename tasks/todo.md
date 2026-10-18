@@ -3,8 +3,19 @@
 - [x] Confirm the existing equal-caption repair contract and define an opt-in preservation mode.
 - [x] Validate FormSpecs while rejecting actual Designer changes; preserve normal authoring behavior.
 - [x] Add CLI/file-push integration with safe changed-only handling and rejection coverage.
-- [ ] Run affected Windows tests and the commit-pinned Linux suite with exact Designer/reference comparison.
-- [ ] Review and document the verified behavior, then prepare the upstream PR.
+- [x] Run affected Windows tests and the commit-pinned Linux suite with exact Designer/reference comparison.
+- [x] Review and document the verified behavior, then prepare the upstream PR.
+
+Validation: implementation `1a0a94b3` passed the affected Windows pack/compiler,
+file-push and full CLI tests (CLI: 185.827s), scoped golangci-lint, documentation
+and staged formatting checks. The pinned Docker run passed all 12 related Go
+packages, six helper tests, 29 Python tests and all six fixture groups
+(`suite-g27iy6ti`, 83.464s, 92 CLI calls). All 13 reference/Designer comparisons
+had zero differences, including Frame no-op and edited pack. Frame/stdTable
+file push safely rejected existing lint errors; 19 expected rejection records
+passed. Independent review findings in the added test fixtures were corrected
+and rechecked with no remaining findings. Excel/VBE compile and runtime were
+not performed. Remote CI results are separate from these local checks.
 
 # Issue #939: preserve document-module source round trips
 
