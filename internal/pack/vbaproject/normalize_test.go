@@ -236,6 +236,82 @@ func TestNormalizeDocumentEdited(t *testing.T) {
 	}
 }
 
+func TestNormalizeDocumentReusesExistingSourceWhenExportMatches(t *testing.T) {
+	header := strings.Join([]string{
+		`Attribute VB_Name = "Sheet1"`,
+		`Attribute VB_Base = "0{00020820-0000-0000-C000-000000000046}"`,
+		"Attribute VB_GlobalNameSpace = False",
+		"Attribute VB_Creatable = False",
+		"Attribute VB_PredeclaredId = True",
+		"Attribute VB_Exposed = True",
+		"Attribute VB_TemplateDerived = False",
+		"Attribute VB_Customizable = True",
+	}, "\r\n") + "\r\n"
+	existing := &Module{
+		Name:   "Sheet1",
+		Type:   ModuleDocument,
+		Source: header + "Option Explicit\r\n\r\n",
+	}
+	disk, err := ExportModuleSource(*existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := NormalizeModuleSource(ModuleDocument, disk, existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != existing.Source {
+		t.Fatalf("matching tracked source did not reuse existing module bytes\n got: %q\nwant: %q", got, existing.Source)
+	}
+}
+
+func TestNormalizeDocumentEditedSourceRoundTripsExport(t *testing.T) {
+	header := strings.Join([]string{
+		`Attribute VB_Name = "Sheet1"`,
+		`Attribute VB_Base = "0{00020820-0000-0000-C000-000000000046}"`,
+		"Attribute VB_GlobalNameSpace = False",
+		"Attribute VB_Creatable = False",
+		"Attribute VB_PredeclaredId = True",
+		"Attribute VB_Exposed = True",
+		"Attribute VB_TemplateDerived = False",
+		"Attribute VB_Customizable = True",
+	}, "\r\n") + "\r\n"
+	existing := &Module{
+		Name:   "Sheet1",
+		Type:   ModuleDocument,
+		Source: header + "Private Sub OldCode()\r\nEnd Sub\r\n",
+	}
+	cases := []struct {
+		name string
+		disk string
+	}{
+		{name: "one terminal newline", disk: "Option Explicit\n"},
+		{name: "two terminal newlines", disk: "Option Explicit\n\n"},
+		{name: "three terminal newlines", disk: "Option Explicit\n\n\n"},
+		{name: "leading blank line", disk: "\nOption Explicit\n"},
+		{name: "leading and trailing blank lines", disk: "\nOption Explicit\n\n\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			normalized, err := NormalizeModuleSource(ModuleDocument, tc.disk, existing)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(normalized, header) {
+				t.Fatalf("document host attributes changed\n got: %q\nwant prefix: %q", normalized, header)
+			}
+			exported, err := ExportModuleSource(Module{Name: "Sheet1", Type: ModuleDocument, Source: normalized})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := strings.ReplaceAll(tc.disk, "\r\n", "\n")
+			if exported != want {
+				t.Errorf("edited document did not round-trip\n got: %q\nwant: %q", exported, want)
+			}
+		})
+	}
+}
+
 func TestNormalizeFormKeepsExistingHeaderSwapsCode(t *testing.T) {
 	existing := &Module{
 		Name: "UserForm1",

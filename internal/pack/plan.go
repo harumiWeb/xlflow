@@ -350,8 +350,8 @@ func normalizePlannedSource(module vbaproject.Module, source SourceModule) (stri
 		// The synthetic disk header is only an in-memory code boundary.
 		source.Source = "Attribute VB_Name = \"" + source.Name + "\"\r\n" + source.Source
 	}
-	if source.Type == ModuleTypeDocument && hasAttribute(source.Source) {
-		return "", fmt.Errorf("%w: %s: document source must not contain Attribute headers", ErrAmbiguousLayout, sourceLabel(source))
+	if source.Type == ModuleTypeDocument && hasUnpreservedDocumentAttribute(source.Source, module.Source) {
+		return "", fmt.Errorf("%w: %s: document source contains a module header or member attribute not preserved from the saved module", ErrAmbiguousLayout, sourceLabel(source))
 	}
 	if source.Type == ModuleTypeForm || hasVBName(source.Source) {
 		if err := vbaproject.ValidateModuleIdentity(source.Name, source.Source); err != nil {
@@ -377,6 +377,50 @@ func hasAttribute(source string) bool {
 		}
 	}
 	return false
+}
+
+func hasUnpreservedDocumentAttribute(source, existing string) bool {
+	retained := make(map[string]int)
+	for line := range strings.SplitSeq(normalizeAttributeNewlines(existing), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if isMemberQualifiedAttributeStatement(trimmed) {
+			retained[line]++
+		}
+	}
+	for line := range strings.SplitSeq(normalizeAttributeNewlines(source), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !isAttributeStatement(trimmed) {
+			continue
+		}
+		if !isMemberQualifiedAttributeStatement(trimmed) {
+			return true
+		}
+		if retained[line] == 0 {
+			return true
+		}
+		retained[line]--
+	}
+	return false
+}
+
+func normalizeAttributeNewlines(source string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(source, "\r\n", "\n"), "\r", "\n")
+}
+
+func isAttributeStatement(line string) bool {
+	const keyword = "Attribute"
+	return len(line) > len(keyword) && strings.EqualFold(line[:len(keyword)], keyword) && (line[len(keyword)] == ' ' || line[len(keyword)] == '\t')
+}
+
+func isMemberQualifiedAttributeStatement(line string) bool {
+	const keyword = "Attribute"
+	if !isAttributeStatement(line) {
+		return false
+	}
+	statement := strings.TrimSpace(line[len(keyword):])
+	target, _, ok := strings.Cut(statement, "=")
+	target = strings.TrimSpace(target)
+	return ok && target != "" && !strings.ContainsAny(target, " \t") && strings.Contains(target, ".")
 }
 
 func hasVBName(source string) bool {

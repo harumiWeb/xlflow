@@ -247,9 +247,27 @@ func normalizeDocument(disk string, existing *Module) (string, error) {
 	if len(header) == 0 {
 		return "", fmt.Errorf("vbaproject: existing.Source has no Attribute header")
 	}
-	// disk is assumed to be already toCRLF'd by NormalizeModuleSource and to have a trailing \r\n
-	// (a different origin than normalizeClass, which gets its trailing CRLF from Split's empty element).
-	return strings.Join(header, "\r\n") + "\r\n" + disk, nil
+	if exported, err := ExportModuleSource(*existing); err == nil && exported == toLF(disk) {
+		return existing.Source, nil
+	}
+
+	// exportDocumentSource removes one leading body newline and one extra
+	// terminal newline. Add those back here so edited tracked source is the
+	// inverse of export while the stored module retains its host attributes.
+	body := disk
+	if strings.TrimSpace(body) == "" {
+		body = "Option Explicit\r\n"
+	} else {
+		if strings.HasPrefix(body, "\r\n") {
+			body = "\r\n" + body
+		}
+		if !strings.HasSuffix(body, "\r\n") {
+			body += "\r\n"
+		} else if strings.HasSuffix(strings.TrimSuffix(body, "\r\n"), "\r\n") {
+			body += "\r\n"
+		}
+	}
+	return strings.Join(header, "\r\n") + "\r\n" + body, nil
 }
 
 // normalizeStd: the disk .bas is almost identical to the in-bin form (Attribute VB_Name + code), so this is an identity transform.

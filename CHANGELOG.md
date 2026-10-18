@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Preserved document-module member attributes and source bytes across pull and
+  template-pack round trips, including leading and terminal blank lines.
 - Fixed Docker and Podman containers sharing a WSL2 kernel being mistaken for
   WSL hosts, allowing pure-Go saved-workbook commands to run locally without
   requiring Windows interop.

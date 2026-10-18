@@ -1,3 +1,11 @@
+# Issue #939: preserve document-module source round trips
+
+- [x] Add focused regressions for no-op and edited document source, unchanged saved member attributes, and rejected module headers.
+- [x] Fix the document normalization inverse while retaining the existing export-side terminal-LF rule; retain only exact saved member-attribute statements in template pack.
+- [x] Verify pack, file-pull, file-push, and CLI packages on Windows and in the Linux builder without changing analyzer or VBA semantics.
+- [x] Update the pack source contract and Unreleased changelog, review the scoped diff, and commit the validated result locally.
+- [ ] Run the commit-pinned Phase1 suite in a standalone clone and verify the existing Frame lint rejection still preserves the source copy.
+
 # Issue #937: container host detection
 
 - [x] Reproduce Docker/Podman marker precedence with focused host-detection tests.
