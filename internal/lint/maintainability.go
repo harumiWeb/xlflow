@@ -165,7 +165,7 @@ func (l Linter) maintainabilityIssues(path string, source []byte, root *tree_sit
 				add(node, "VB083", "Declare types explicitly instead of using DefType.")
 			}
 		case "option_statement":
-			if cfg.DetectRedundantOptionBaseZero && strings.EqualFold(strings.Join(strings.Fields(node.Utf8Text(source)), " "), "Option Base 0") {
+			if cfg.DetectRedundantOptionBaseZero && redundantOptionBaseZero(node, source) {
 				add(node, "VB086", "Option Base 0 restates the default.")
 			}
 		case "stop_statement":
@@ -198,6 +198,10 @@ func redundantStepOne(node *tree_sitter.Node, source []byte) *tree_sitter.Node {
 		return step
 	}
 	return nil
+}
+
+func redundantOptionBaseZero(node *tree_sitter.Node, source []byte) bool {
+	return node != nil && node.Kind() == "option_statement" && strings.EqualFold(strings.Join(strings.Fields(node.Utf8Text(source)), " "), "Option Base 0")
 }
 
 func startsWithKeyword(text, keyword string) bool {

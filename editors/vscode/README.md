@@ -169,6 +169,8 @@ The VBA language server also understands xlflow documentation comments written w
 
 When `[lint].detect_redundant_step_one = true`, the server offers **Remove redundant Step 1** for VB084. The correction preserves comments and line endings in the current editor buffer. Clauses split by a line continuation immediately before or inside `Step 1` retain their diagnostic without a correction. The existing opt-in VB044 correction updates procedure-name constants. Apply corrections through the editor's Quick Fix menu; normal Undo restores the original source.
 
+Quick Fix also offers **Remove optional Let** for VB080 and **Remove redundant Option Base 0** for VB086 when their lint rules are enabled. VB001 offers **Add Option Explicit** after exported module headers and attributes, preserving existing comments and line endings. Adding `Option Explicit` can expose undeclared variables; review the resulting diagnostics. Ambiguous conditional or continued option declarations retain their diagnostic without an insertion. These corrections apply individually; Fix All is not available.
+
 ## About the Command
 
 The command palette includes the following features:

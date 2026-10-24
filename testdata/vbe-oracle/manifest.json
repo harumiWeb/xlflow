@@ -18,6 +18,8 @@
     },
     { "id": "quickfix-step-one-before", "path": "cases/quickfix-step-one-before/case.json" },
     { "id": "quickfix-step-one-after", "path": "cases/quickfix-step-one-after/case.json" },
+    { "id": "quickfix-local-before", "path": "cases/quickfix-local-before/case.json" },
+    { "id": "quickfix-local-after", "path": "cases/quickfix-local-after/case.json" },
     { "id": "maintainability-global", "path": "cases/maintainability-global/case.json" },
     { "id": "maintainability-let", "path": "cases/maintainability-let/case.json" },
     { "id": "maintainability-error", "path": "cases/maintainability-error/case.json" },

@@ -132,6 +132,9 @@ func TestRedundantStepOneQuickFixWithholdsUnsafeOrInvisibleCorrections(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			analyzer := newTestAnalyzer(t)
 			analyzer.Config.Lint.DetectRedundantStepOne = !tc.disabled
+			if tc.disabled {
+				analyzer.Config.Lint.RequireOptionExplicit = false
+			}
 			source := "Option Explicit\nSub Work()\nDim i As Long\n" + tc.before + tc.header + "\nDebug.Print i\nNext i\nEnd Sub\n"
 			doc := Document{Path: filepath.Join(analyzer.RootDir, "Main.bas"), Source: source}
 			snapshot := NewAnalysisSnapshot(doc)
