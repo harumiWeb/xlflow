@@ -4,11 +4,11 @@
 - [x] Share selected-line assignment diagnostics and add conservative Set corrections.
 - [x] Cover type/binding ambiguity, source preservation, diagnostic association and discovery costs.
 - [x] Verify VBE controls/pairs, affected packages, docs and formatting/lint.
-- [ ] Commit and complete independent review.
+- [x] Commit and complete independent review.
 
 All five affected package suites passed (lint, intel, LSP, registry and oracle).
 Focused intel regressions pass after filtering suppression once per request;
-the final intel suite is rerun for that correction. Scoped golangci-lint reports
+the final complete intel suite also passed (66.867s). Scoped golangci-lint reports
 zero issues; docs and diff checks pass. Deterministic discovery coverage checks
 that a non-assignment selection builds no type index, a positive selection
 builds the index, and neither builds ProcedureIR/CFG across unrelated procedures.
@@ -23,6 +23,14 @@ Initial attempts failed fixture metadata validation and then rejected a mixed
 promotion batch containing asserted fixtures; they promoted no evidence. Full
 fixture schema validation and separate new/established runs resolved this.
 Runtime equivalence and remote CI remain unverified.
+
+Independent Pass 1 reviewed exact commit `2026d126` against `96471ade` and
+found no confirmed in-scope defects; focused intel/LSP tests passed independently.
+No fix batch or second review pass is required. The report and coordinator
+disposition are retained under `tmp_workspaces/final-review/issue949-pass1/`.
+The delivery was acknowledged and the worker released; all four dedicated
+review tabs were closed and the temporary worktree was removed, with absence
+confirmed through the terminal/worktree listings.
 
 # Issue #947: local diagnostic Quick Fixes
 
