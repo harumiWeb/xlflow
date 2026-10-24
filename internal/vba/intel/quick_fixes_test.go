@@ -3,6 +3,7 @@ package intel
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +11,40 @@ import (
 	"github.com/harumiWeb/xlflow/internal/lint"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
+
+func TestProcedureNameConstantQuickFixMatchesPublishedDiagnostic(t *testing.T) {
+	for _, literal := range []string{`"OldName"`, `"日本語😀""旧名"`} {
+		for _, eol := range []string{"\n", "\r\n"} {
+			t.Run(literal+"/"+strings.ReplaceAll(eol, "\n", "LF"), func(t *testing.T) {
+				analyzer := newTestAnalyzer(t)
+				analyzer.Config.Lint.ProcedureNameConstant.Enabled = true
+				analyzer.Config.Lint.ProcedureNameConstant.ConstantName = "PROCEDURE_NAME"
+				source := strings.ReplaceAll("Option Explicit\nPublic Sub Foo()\n    Const PROCEDURE_NAME As String = "+literal+"\nEnd Sub\n", "\n", eol)
+				doc := Document{Path: filepath.Join(analyzer.RootDir, "Main.bas"), Source: source}
+				diagnostics := analyzer.Diagnostics(doc)
+				index := slices.IndexFunc(diagnostics, func(d Diagnostic) bool { return d.Code == "VB044" })
+				if index < 0 {
+					t.Fatalf("VB044 diagnostic missing: %+v", diagnostics)
+					return
+				}
+				published := diagnostics[index]
+				start := strings.Index(source, literal)
+				wantRange := Range{Start: positionForByteOffset(source, start), End: positionForByteOffset(source, start+len(literal))}
+				actions, err := analyzer.CodeActionsContext(t.Context(), doc, wantRange, []string{"quickfix"})
+				if err != nil || len(actions) != 1 {
+					t.Fatalf("actions = %+v, err = %v", actions, err)
+					return
+				}
+				if !reflect.DeepEqual(actions[0].Diagnostics, []Diagnostic{published}) {
+					t.Fatalf("associated diagnostics = %+v, want published %+v", actions[0].Diagnostics, published)
+				}
+				if len(actions[0].Edits) != 1 || actions[0].Edits[0].Range != wantRange {
+					t.Fatalf("edits = %+v, want full literal range %+v", actions[0].Edits, wantRange)
+				}
+			})
+		}
+	}
+}
 
 func TestRedundantStepOneQuickFixPreservesSource(t *testing.T) {
 	for _, tc := range []struct {
