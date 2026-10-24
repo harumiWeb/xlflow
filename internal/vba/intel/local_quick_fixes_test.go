@@ -190,6 +190,9 @@ func TestLocalQuickFixWithholdsUnsafeOrInvisibleEdits(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			analyzer := newTestAnalyzer(t)
 			analyzer.Config.Lint = config.LintConfig{DetectLetAssignment: !tc.disabled, DetectRedundantOptionBaseZero: !tc.disabled}
+			if tc.disabled {
+				analyzer.DB = nil
+			}
 			doc := Document{Path: filepath.Join(analyzer.RootDir, "Main.bas"), Source: tc.source}
 			snapshot := NewAnalysisSnapshot(doc)
 			defer snapshot.Retire()

@@ -103,3 +103,47 @@ func TestCodeActionCorrectsRedundantStepInUnsavedBuffer(t *testing.T) {
 		t.Fatalf("VB084 edits = %+v", edits)
 	}
 }
+
+func TestCodeActionCorrectsSetInUnsavedBuffer(t *testing.T) {
+	for _, versioned := range []bool{false, true} {
+		root := t.TempDir()
+		s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(cleanup)
+		s.codeActionDocumentChanges.Store(versioned)
+		uri := protocol.DocumentUri(pathToFileURI(filepath.Join(root, "Main.bas")))
+		if _, err := s.docs.open(string(uri), "Option Explicit\r\nSub Work()\r\nDim count As Long\r\n    Set count = 1 ' keep 日本語😀\r\nEnd Sub\r\n", 9); err != nil {
+			t.Fatal(err)
+		}
+		result, err := s.codeAction(nil, &protocol.CodeActionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Range:        protocol.Range{Start: protocol.Position{Line: 3, Character: 8}, End: protocol.Position{Line: 3, Character: 13}},
+			Context:      protocol.CodeActionContext{Only: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		actions := result.([]protocol.CodeAction)
+		if len(actions) != 1 || len(actions[0].Diagnostics) != 1 || actions[0].Diagnostics[0].Code.Value != "VB037" {
+			t.Fatalf("actions = %+v", actions)
+			return
+		}
+		var edits []protocol.TextEdit
+		if versioned {
+			change := actions[0].Edit.DocumentChanges[0].(protocol.TextDocumentEdit)
+			if change.TextDocument.Version == nil || *change.TextDocument.Version != 9 {
+				t.Fatalf("version = %+v", change.TextDocument)
+			}
+			for _, edit := range change.Edits {
+				edits = append(edits, edit.(protocol.TextEdit))
+			}
+		} else {
+			edits = actions[0].Edit.Changes[uri]
+		}
+		if len(edits) != 1 || edits[0].NewText != "" || edits[0].Range != (protocol.Range{Start: protocol.Position{Line: 3, Character: 4}, End: protocol.Position{Line: 3, Character: 8}}) {
+			t.Fatalf("Set edits = %+v", edits)
+		}
+	}
+}

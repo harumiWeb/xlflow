@@ -1,3 +1,29 @@
+# Issue #949: type-backed Set Quick Fixes
+
+- [x] Confirm merged #948 and stage-three scope; create #949 before implementation.
+- [x] Share selected-line assignment diagnostics and add conservative Set corrections.
+- [x] Cover type/binding ambiguity, source preservation, diagnostic association and discovery costs.
+- [x] Verify VBE controls/pairs, affected packages, docs and formatting/lint.
+- [ ] Commit and complete independent review.
+
+All five affected package suites passed (lint, intel, LSP, registry and oracle).
+Focused intel regressions pass after filtering suppression once per request;
+the final intel suite is rerun for that correction. Scoped golangci-lint reports
+zero issues; docs and diff checks pass. Deterministic discovery coverage checks
+that a non-assignment selection builds no type index, a positive selection
+builds the index, and neither builds ProcedureIR/CFG across unrelated procedures.
+No whole-analyzer performance comparison or native VS Code apply/Undo is claimed.
+
+Fresh sequential VBE runs passed the known accept/reject controls,
+`quickfix-set-object-before`/`quickfix-set-object-after`, `set-scalar-target`,
+`scalar-assignment`, and `set-object-target`, all with compile invocation and
+cleanup confirmed. New object fixtures were explicitly promoted as policy;
+VB037 retains the existing rejected fixture and accepted negative controls.
+Initial attempts failed fixture metadata validation and then rejected a mixed
+promotion batch containing asserted fixtures; they promoted no evidence. Full
+fixture schema validation and separate new/established runs resolved this.
+Runtime equivalence and remote CI remain unverified.
+
 # Issue #947: local diagnostic Quick Fixes
 
 - [x] Confirm merged #946, existing diagnostic predicates, and stage-two scope; create #947 before implementation.

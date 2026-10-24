@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Offer individual VB036/VB037 Quick Fixes for typed variable assignments,
+  preserving source trivia and withholding ambiguous object/value edits.
+
 - Offer server-provided Quick Fixes for optional `Let`, redundant `Option Base 0`,
   and missing `Option Explicit` when the corresponding inspection is enabled.
 

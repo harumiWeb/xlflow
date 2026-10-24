@@ -19,7 +19,8 @@ buffer authoritative. Source edits use the editor's normal Undo mechanism.
 Filter `context.only` before computing action families. If all correction
 providers are disabled, a quickfix-only request does not parse the document.
 Enabled providers borrow the existing parsed snapshot and scan only their
-rule. They must not call complete lint or construct ProcedureIR/CFG to find
+rule. TypeDB-backed providers remain enabled when the DB is available and
+complete, independently of configurable syntax rules. They must not call complete lint or construct ProcedureIR/CFG to find
 corrections. Apply existing rule-specific inline suppressions and match the
 requested selection against the diagnostic or edit ranges.
 
@@ -70,6 +71,33 @@ Documentation generation retains its existing refactor kind and has no
 associated diagnostic. Fix All, CLI mutation, save-time fixes, and cross-file
 edits are outside this initial contract.
 
+## Type-backed Set corrections
+
+VB036 offers **Insert Set for object assignment**; VB037 offers **Remove Set
+from value assignment**. Both require an unrecovered CST, a complete TypeDB,
+and an unambiguous explicitly declared local, parameter or module variable in
+the current source. Array, function-return, property/member and conditional
+targets are excluded. Unknown, inferred-only, Object and Variant types cannot
+justify an edit. An identifier RHS must also bind to one such declaration.
+
+VB036 accepts only a typed object identifier RHS whose assignment compatibility
+is confirmed by TypeDB. It inserts `Set ` or replaces an explicit `Let` prefix.
+VB037 requires a scalar RHS identifier or scalar literal and removes only
+`Set` plus horizontal trivia. Calls, member expressions, New expressions,
+default-property access and other value expressions are deferred. Existing
+diagnostic predicates still decide whether an action can be published.
+
+Only selected physical assignment lines receive type-backed diagnostic
+evaluation. Reject labels, colon-separated statements, inline If, conditional
+compilation and physical continuations. Comments, indentation and EOL remain
+unchanged. VB036 follows normal suppression; VB037 remains non-suppressible.
+Associated diagnostics retain the exact published metadata and range.
+
+VB036 is an explicit object-reference intent correction, not a promise of
+runtime equivalence: adding Set changes the assignment semantics. Removing
+Set does not guarantee that unrelated conversions or runtime errors disappear.
+Neither correction is eligible for Fix All in this stage.
+
 ## Verification
 
 Focused tests cover exact output and unchanged non-target bytes, LF/CRLF,
@@ -88,3 +116,9 @@ The sequential `quickfix-local-before` / `quickfix-local-after` VBE pair covers
 the combined VB001/VB080/VB086 edits on a module whose variables are declared.
 These are policy observations, not compile-equivalent bindings or a promise
 that adding Option Explicit preserves compilation for undeclared variables.
+
+For Set corrections, `quickfix-set-object-before` / `quickfix-set-object-after`
+observe VB036 syntax on explicit Worksheet references and remain policy
+evidence. Existing `set-scalar-target`, `scalar-assignment` and
+`set-object-target` controls protect VB037's compile-error boundary. Focused
+tests compare correction output with these sources and published diagnostics.
