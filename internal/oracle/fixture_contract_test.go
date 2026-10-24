@@ -260,7 +260,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 190 || report.BoundFixtures != 154 || report.PartialFixtures != 0 || report.UnboundFixtures != 35 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 192 || report.BoundFixtures != 154 || report.PartialFixtures != 0 || report.UnboundFixtures != 37 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -441,6 +441,8 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"object-to-object-parameter",
 		"quickfix-local-after",
 		"quickfix-local-before",
+		"quickfix-set-object-after",
+		"quickfix-set-object-before",
 		"quickfix-step-one-after",
 		"quickfix-step-one-before",
 		"redim-fixed-array",

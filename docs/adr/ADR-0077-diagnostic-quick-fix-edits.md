@@ -19,7 +19,10 @@ future CLI would duplicate applicability and source-coordinate rules.
 - All edits in an action refer to the same captured source revision. Existing
   versioned edits, cancellation, and lifecycle validation remain authoritative.
   Legacy clients retain their existing unversioned-edit fallback.
-- Keep rule detection and correction applicability together in the lint layer.
+- Keep rule detection and correction applicability with their Go diagnostic owner:
+  syntax corrections in lint, TypeDB-backed assignment corrections in intel.
+  Reuse the assignment diagnostic predicate on selected candidate lines rather
+  than moving binding logic into lint or duplicating it in an editor adapter.
   Actions evaluate only enabled correction providers, apply normal inline
   suppression, and avoid whole-file lint and ProcedureIR/CFG construction.
 - Use registry `fix_available` for implemented correction capability. It does

@@ -1601,7 +1601,7 @@ func (a Analyzer) quickFixCodeActionsContext(ctx context.Context, doc Document, 
 	}
 	// Do not parse merely because VS Code asks for automatic code actions.
 	linter := lint.Linter{RootDir: a.RootDir, Config: a.Config}
-	if !linter.QuickFixesEnabled() {
+	if !linter.QuickFixesEnabled() && (a.DB == nil || a.TypeDBResolutionIncomplete) {
 		return nil, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -1659,7 +1659,11 @@ func (a Analyzer) quickFixCodeActionsContext(ctx context.Context, doc Document, 
 			Diagnostics: []Diagnostic{{Code: issue.Code, Severity: issue.Severity, Source: "xlflow", Message: lintDiagnosticMessage(issue), Range: diagnosticRange}},
 		})
 	}
-	return out, nil
+	semanticActions, err := a.setAssignmentQuickFixesContext(ctx, doc, parsed, selection)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, semanticActions...), nil
 }
 
 func documentSuppressionFile(root, path string) string {
@@ -3154,12 +3158,21 @@ func propertyAccessDiagnostic(code, rule string, lineNo int, line string, exprSt
 }
 
 func (a Analyzer) assignmentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
+	return a.assignmentDiagnosticsInLinesContext(ctx, doc, 0, -1)
+}
+
+// The same predicate serves diagnostics and selected-line correction discovery.
+func (a Analyzer) assignmentDiagnosticsInLinesContext(ctx context.Context, doc Document, start, end int) []Diagnostic {
 	if a.DB == nil {
 		return nil
 	}
 	var out []Diagnostic
 	lines := documentLines(doc)
-	for lineNo, line := range lines {
+	if end < 0 {
+		end = len(lines)
+	}
+	for lineNo := max(0, start); lineNo < min(end, len(lines)); lineNo++ {
+		line := lines[lineNo]
 		if lineNo&0x3f == 0 && ctx.Err() != nil {
 			return nil
 		}

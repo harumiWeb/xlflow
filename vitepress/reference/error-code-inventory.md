@@ -100,6 +100,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `block_kind`
 - `boolean_control_branch_count`
 - `boolean_controlled_statement_count`
+- `boolean_literal`
 - `boolean_parameter_count`
 - `branch_count`
 - `branch_false`
@@ -916,6 +917,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `not_vba_document`
 - `nothing_literal`
 - `number_format`
+- `number_literal`
 - `numeric_type_mismatch`
 - `object_candidate_procedures`
 - `object_entry_flow_evaluations`
@@ -1347,6 +1349,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `status_hint`
 - `stop_statement`
 - `storage_kinds`
+- `string_literal`
 - `structured_reference`
 - `style_included`
 - `sub_declaration`

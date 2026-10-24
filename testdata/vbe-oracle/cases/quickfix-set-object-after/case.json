@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "quickfix-set-object-after",
+  "description": "Observe after explicit Set insertion for a typed object-reference assignment.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "policy"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "policy-observation",
+    "binding_note": "VB036 is an inference warning, not a compile error. This pair observes syntax for an explicit object-reference correction; runtime equivalence and initialized object state are not established."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-10-24T10:48:18Z"
+      }
+    ]
+  }
+}

@@ -383,6 +383,7 @@ func TestCodeActionsContextFiltersKindsBeforeParsing(t *testing.T) {
 
 func TestCodeActionsContextDisabledVB044QuickFixSkipsParsing(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
+	analyzer.DB = nil // No type-backed correction provider is available.
 	analyzer.Config.Lint.RequireOptionExplicit = false
 	doc := Document{
 		Path:   filepath.Join(analyzer.RootDir, "Main.bas"),

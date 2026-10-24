@@ -1,10 +1,12 @@
 package lspserver
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
@@ -101,5 +103,147 @@ func TestCodeActionCorrectsRedundantStepInUnsavedBuffer(t *testing.T) {
 	edits := actions[0].Edit.Changes[protocol.DocumentUri(uri)]
 	if len(edits) != 1 || edits[0].NewText != "" || edits[0].Range != (protocol.Range{Start: protocol.Position{Line: 3, Character: 14}, End: protocol.Position{Line: 3, Character: 21}}) {
 		t.Fatalf("VB084 edits = %+v", edits)
+	}
+}
+
+func TestCodeActionCorrectsSetInUnsavedBuffer(t *testing.T) {
+	for _, versioned := range []bool{false, true} {
+		root := t.TempDir()
+		s := newSetQuickFixTestServer(t, root)
+		s.codeActionDocumentChanges.Store(versioned)
+		uri := protocol.DocumentUri(pathToFileURI(filepath.Join(root, "Main.bas")))
+		if _, err := s.docs.open(string(uri), "Option Explicit\r\nSub Work()\r\nDim count As Long\r\n    Set count = 1 ' keep 日本語😀\r\nEnd Sub\r\n", 9); err != nil {
+			t.Fatal(err)
+		}
+		result, err := s.codeAction(nil, &protocol.CodeActionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Range:        protocol.Range{Start: protocol.Position{Line: 3, Character: 8}, End: protocol.Position{Line: 3, Character: 13}},
+			Context:      protocol.CodeActionContext{Only: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		actions := result.([]protocol.CodeAction)
+		if len(actions) != 1 || len(actions[0].Diagnostics) != 1 || actions[0].Diagnostics[0].Code.Value != "VB037" {
+			t.Fatalf("actions = %+v", actions)
+			return
+		}
+		var edits []protocol.TextEdit
+		if versioned {
+			change := actions[0].Edit.DocumentChanges[0].(protocol.TextDocumentEdit)
+			if change.TextDocument.Version == nil || *change.TextDocument.Version != 9 {
+				t.Fatalf("version = %+v", change.TextDocument)
+			}
+			for _, edit := range change.Edits {
+				edits = append(edits, edit.(protocol.TextEdit))
+			}
+		} else {
+			edits = actions[0].Edit.Changes[uri]
+		}
+		if len(edits) != 1 || edits[0].NewText != "" || edits[0].Range != (protocol.Range{Start: protocol.Position{Line: 3, Character: 4}, End: protocol.Position{Line: 3, Character: 8}}) {
+			t.Fatalf("Set edits = %+v", edits)
+		}
+	}
+}
+
+func TestCodeActionWithholdsSetForDefaultMemberTypes(t *testing.T) {
+	root := t.TempDir()
+	s := newSetQuickFixTestServer(t, root)
+	for _, tc := range []struct {
+		typeName string
+		wantFix  bool
+	}{
+		{typeName: "QuickFix.Value"},
+		{typeName: "ProjectValue"},
+		{typeName: "QuickFix.Reference", wantFix: true},
+	} {
+		t.Run(tc.typeName, func(t *testing.T) {
+			typeName := tc.typeName
+			if typeName == "ProjectValue" {
+				classURI := pathToFileURI(filepath.Join(root, "ProjectValue.cls"))
+				if _, err := s.docs.open(classURI, "Attribute VB_Name = \"ProjectValue\"\nPublic Property Get Value() As Long\nAttribute Value.VB_UserMemId = 0\nValue = 1\nEnd Property\n", 1); err != nil {
+					t.Fatal(err)
+				}
+			}
+			uri := protocol.DocumentUri(pathToFileURI(filepath.Join(root, "Main.bas")))
+			source := "Option Explicit\nSub Work()\nDim target As " + typeName + "\nDim source As " + typeName + "\ntarget = source\nEnd Sub\n"
+			if _, err := s.docs.open(string(uri), source, 1); err != nil {
+				t.Fatal(err)
+			}
+			result, err := s.codeAction(nil, &protocol.CodeActionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+				Range:        protocol.Range{Start: protocol.Position{Line: 4}, End: protocol.Position{Line: 4, Character: 15}},
+				Context:      protocol.CodeActionContext{Only: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixes := 0
+			for _, action := range result.([]protocol.CodeAction) {
+				for _, diagnostic := range action.Diagnostics {
+					if diagnostic.Code != nil && diagnostic.Code.Value == "VB036" {
+						fixes++
+					}
+				}
+			}
+			if tc.wantFix && fixes != 1 || !tc.wantFix && fixes != 0 {
+				t.Fatalf("VB036 corrections = %d, want correction: %v", fixes, tc.wantFix)
+			}
+		})
+	}
+}
+
+func newSetQuickFixTestServer(t *testing.T, root string) *Server {
+	t.Helper()
+	dir := t.TempDir()
+	const output = "quickfix.generated.json"
+	if err := os.WriteFile(filepath.Join(dir, output), []byte(`{"types":[
+  {"name":"QuickFix.Value","library":"QuickFix","kind":"class","default_member":"Value","default_member_type":"Long"},
+  {"name":"QuickFix.Reference","library":"QuickFix","kind":"class"}
+]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := typedb.WriteManifest(dir, typedb.Manifest{
+		Libraries: []typedb.ManifestLibrary{{Name: "QuickFix", Output: output}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default(), TypeDBDir: dir})
+	if err != nil {
+		t.Fatal(err)
+		return nil
+	}
+	t.Cleanup(cleanup)
+	if s.analyzer.TypeDBResolutionIncomplete {
+		t.Fatal("fixture must provide a complete TypeDB")
+	}
+	return s
+}
+
+func TestCodeActionWithholdsSetWithIncompleteTypeDB(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default(), TypeDBDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	t.Cleanup(cleanup)
+	if !s.analyzer.TypeDBResolutionIncomplete {
+		t.Fatal("missing manifest must leave TypeDB incomplete")
+	}
+	uri := protocol.DocumentUri(pathToFileURI(filepath.Join(root, "Main.bas")))
+	if _, err := s.docs.open(string(uri), "Option Explicit\nSub Work()\nDim count As Long\nSet count = 1\nEnd Sub\n", 1); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.codeAction(nil, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+		Range:        protocol.Range{Start: protocol.Position{Line: 3}, End: protocol.Position{Line: 3, Character: 13}},
+		Context:      protocol.CodeActionContext{Only: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actions := result.([]protocol.CodeAction); len(actions) != 0 {
+		t.Fatalf("incomplete TypeDB produced actions: %+v", actions)
 	}
 }

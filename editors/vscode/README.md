@@ -171,6 +171,8 @@ When `[lint].detect_redundant_step_one = true`, the server offers **Remove redun
 
 Quick Fix also offers **Remove optional Let** for VB080 and **Remove redundant Option Base 0** for VB086 when their lint rules are enabled. VB001 offers **Add Option Explicit** after exported module headers and attributes, preserving existing comments and line endings. Adding `Option Explicit` can expose undeclared variables; review the resulting diagnostics. Ambiguous conditional or continued option declarations retain their diagnostic without an insertion. These corrections apply individually; Fix All is not available.
 
+VB036 and VB037 offer individual `Set` insertion/removal when the complete type database and explicit declarations establish the object/value assignment. Initial support covers plain variable targets with typed identifier sources, plus scalar literals for removal. Property/member targets, arrays, conditional or continued statements, late binding, and unknown types retain their diagnostics without a correction. Inserting `Set` explicitly changes the assignment to an object-reference assignment; review this intent before applying it.
+
 ## About the Command
 
 The command palette includes the following features:

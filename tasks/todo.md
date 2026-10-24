@@ -1,3 +1,77 @@
+# Issue #949: type-backed Set Quick Fixes
+
+- [x] Fix PR #950 CI by making TypeDB-dependent LSP tests use explicit manifest-backed fixtures.
+- [x] Verify complete/incomplete DB behavior and default-member positive/negative controls; prepare the verified correction for push.
+
+CI run `40090237013` failed the new LSP tests on both platforms: Linux lacked a
+generated manifest; Windows loaded Range metadata different from the developer
+cache. The tests now use `Options.TypeDBDir` with a compatible temporary manifest
+and explicit generated types, rather than relying on installed TypeLib data.
+Complete/incomplete DB cases and a reference-only positive control prevent
+vacuous withholding results. Production code is unchanged.
+Windows focused tests pass (1.183s), the full LSP suite passes (144.836s), scoped
+lint reports zero issues, and docs/diff checks pass. A clean Linux container
+also passes the focused cases (0.045s) using Go 1.26.10; its read-only source
+mount is this worktree, and the container was automatically removed.
+Linux command: `rtk docker run --rm --name xlflow-pr950-ci-tests --mount "type=bind,source=C:/Users/HARUMI/orca/workspaces/xlflow/tautog,target=/src,readonly" --workdir /src --env GOTOOLCHAIN=auto --env CGO_ENABLED=1 golang:1.26.9-bookworm go test ./internal/lspserver -run "TestCodeAction(CorrectsSet|WithholdsSet)" -count=1 -timeout 5m`.
+
+- [x] Address the additional default-member review: withhold VB036 for object types with default-member evidence; verify TypeDB/project metadata and production LSP behavior.
+
+Default-member follow-up: seven focused metadata cases failed before the guard
+and pass afterward. Named/flagged/ambiguous TypeDB defaults and project metadata
+withhold the correction without changing the VB036 diagnostic. Production LSP
+coverage verifies Range and unregistered project classes; the latter already
+fail DB assignability, so no project IR or metadata expansion is needed.
+After this guard, complete intel/LSP suites pass again (70.666s / 149.103s),
+scoped lint reports zero issues, docs/diff checks pass, and a separate read-only
+delta review found no confirmed defects. This is a conservative applicability
+policy based on existing metadata; no new VBE semantics or evidence is asserted.
+Command: `rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/vba/intel ./internal/lspserver -count=1 -timeout 10m`.
+
+- [x] Reproduce PR #950's indexed-property binding finding and isolate accessor-local candidates by declaration range.
+- [x] Verify accessor parameters/locals and preserve duplicate-binding rejection; prepare the review correction for push.
+
+PR #950 follow-up: focused accessor regressions failed before the scope fix and
+passed afterward, including snapshot/live paths and rejected ambiguous/Variant
+bindings. Complete intel/LSP suites pass (75.518s / 163.472s), scoped lint reports
+zero issues, and docs checks pass. A separate read-only review of this bounded
+delta found no confirmed defects; it did not independently execute the tests.
+This source-declaration identity correction does not change diagnostic or VBE
+type semantics, so the established oracle evidence is retained without rerunning
+Excel. Native editor application/Undo and new remote CI results remain separate.
+
+- [x] Confirm merged #948 and stage-three scope; create #949 before implementation.
+- [x] Share selected-line assignment diagnostics and add conservative Set corrections.
+- [x] Cover type/binding ambiguity, source preservation, diagnostic association and discovery costs.
+- [x] Verify VBE controls/pairs, affected packages, docs and formatting/lint.
+- [x] Commit and complete independent review.
+
+All five affected package suites passed (lint, intel, LSP, registry and oracle).
+Focused intel regressions pass after filtering suppression once per request;
+the final complete intel suite also passed (66.867s). Scoped golangci-lint reports
+zero issues; docs and diff checks pass. Deterministic discovery coverage checks
+that a non-assignment selection builds no type index, a positive selection
+builds the index, and neither builds ProcedureIR/CFG across unrelated procedures.
+No whole-analyzer performance comparison or native VS Code apply/Undo is claimed.
+
+Fresh sequential VBE runs passed the known accept/reject controls,
+`quickfix-set-object-before`/`quickfix-set-object-after`, `set-scalar-target`,
+`scalar-assignment`, and `set-object-target`, all with compile invocation and
+cleanup confirmed. New object fixtures were explicitly promoted as policy;
+VB037 retains the existing rejected fixture and accepted negative controls.
+Initial attempts failed fixture metadata validation and then rejected a mixed
+promotion batch containing asserted fixtures; they promoted no evidence. Full
+fixture schema validation and separate new/established runs resolved this.
+Runtime equivalence and remote CI remain unverified.
+
+Independent Pass 1 reviewed exact commit `2026d126` against `96471ade` and
+found no confirmed in-scope defects; focused intel/LSP tests passed independently.
+No fix batch or second review pass is required. The report and coordinator
+disposition are retained under `tmp_workspaces/final-review/issue949-pass1/`.
+The delivery was acknowledged and the worker released; all four dedicated
+review tabs were closed and the temporary worktree was removed, with absence
+confirmed through the terminal/worktree listings.
+
 # Issue #947: local diagnostic Quick Fixes
 
 - [x] Confirm merged #946, existing diagnostic predicates, and stage-two scope; create #947 before implementation.
