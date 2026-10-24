@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added document-local Quick Fixes for VB080 (`Let`), VB086 (`Option Base 0`),
+  and VB001 (`Option Explicit`), preserving source trivia and diagnostic policy.
+
 - Updated the Go patch baseline to 1.26.10 to address GO-2026-6809 in
   `crypto/x509`.
 

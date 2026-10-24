@@ -1,3 +1,19 @@
+# Issue #947: local diagnostic Quick Fixes
+
+- [x] Confirm merged #946, existing diagnostic predicates, and stage-two scope; create #947 before implementation.
+- [x] Add conservative VB080/VB086 edits and safe VB001 insertion using shared diagnostic association.
+- [x] Add source-preservation, suppression, EOL/Unicode, header, idempotency, and no-IR regressions.
+- [x] Verify VBE evidence, affected packages and registry/docs; complete lint and formatting through the commit checks.
+- [ ] Commit the implementation and complete independent review.
+
+Validation: all five affected package suites pass (lint, intel, LSP, rule registry,
+oracle), and generated documentation checks pass. The local VBE run passed
+`known-compile-accept`, `known-compile-reject`, `quickfix-local-before`, and
+`quickfix-local-after`, with compile invocation and Excel cleanup confirmed.
+The focused pair was explicitly promoted as policy evidence. Native VS Code
+application/Undo, runtime equivalence and remote CI are not established by
+these checks. Independent review follows the committed implementation.
+
 # PR #946 security CI follow-up
 
 - [x] Confirm the failing security job and the official GO-2026-6809 fix.

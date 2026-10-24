@@ -383,6 +383,7 @@ func TestCodeActionsContextFiltersKindsBeforeParsing(t *testing.T) {
 
 func TestCodeActionsContextDisabledVB044QuickFixSkipsParsing(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
+	analyzer.Config.Lint.RequireOptionExplicit = false
 	doc := Document{
 		Path:   filepath.Join(analyzer.RootDir, "Main.bas"),
 		Source: "Public Sub Run()\n    Const PROCEDURE_NAME As String = \"Old\"\nEnd Sub\n",

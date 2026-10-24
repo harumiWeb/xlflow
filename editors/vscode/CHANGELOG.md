@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Offer server-provided Quick Fixes for optional `Let`, redundant `Option Base 0`,
+  and missing `Option Explicit` when the corresponding inspection is enabled.
+
 - Offer a server-provided Quick Fix to remove redundant `Step 1` when VB084 is
   enabled. Corrections preserve comments and use the current editor buffer.
 

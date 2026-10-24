@@ -1016,7 +1016,7 @@ func (c *astLintContext) visit(node *tree_sitter.Node, inProcedure bool, inType 
 		}
 		return
 	case "option_statement":
-		if strings.EqualFold(normalizedNodeText(node, c.source), "Option Explicit") {
+		if optionExplicitStatement(node, c.source) {
 			c.hasOptionExplicit = true
 		}
 	case "type_declaration":

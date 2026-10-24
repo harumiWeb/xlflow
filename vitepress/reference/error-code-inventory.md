@@ -646,7 +646,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `frame_b`
 - `frame_main`
 - `freed_bytes`
+- `frm_begin_block`
+- `frm_begin_property_block`
 - `frm_path`
+- `frm_version_statement`
 - `frx_path`
 - `full_document_change`
 - `full_document_symbol_builds`

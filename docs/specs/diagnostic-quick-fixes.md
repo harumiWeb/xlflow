@@ -33,6 +33,9 @@ eligibility, or classify suppression comments as corrections.
 | ----- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
 | VB044 | Replace the procedure-name string constant | Existing configured constant-name, procedure, literal, and suppression contract                                              |
 | VB084 | Remove redundant `Step 1`                  | Enabled rule, unrecovered CST, literal step text `1`, verified Step token, horizontal whitespace throughout the removed span |
+| VB080 | Remove optional `Let`                      | Enabled rule, unrecovered CST, verified keyword and horizontal trivia before the assignment target                           |
+| VB086 | Remove redundant `Option Base 0`           | Enabled rule, unrecovered CST, existing diagnostic predicate, single physical line                                           |
+| VB001 | Insert `Option Explicit`                   | Enabled rule, unrecovered CST, proven absence and a safe module declaration boundary                                         |
 
 VB084 removes the clause and immediately preceding horizontal whitespace.
 Keep the following comment, statement separator, body, and original EOL.
@@ -41,7 +44,28 @@ occurs immediately before `Step` or between `Step` and `1`, offer no correction.
 Expressions such as `(1)`, `+1`, or `1 + 0` are outside the existing diagnostic
 predicate and must not be generalized by the correction provider.
 
-VB044 remains opt-in, and VB084 remains opt-in at information severity.
+VB080 removes the keyword and horizontal whitespace before the assignment
+target. A continuation after the assignment operator is preserved, but a
+continuation immediately after `Let` withholds the correction. Property Let
+declarations and ordinary assignments are outside this provider.
+
+VB086 removes only the statement's CST span, retaining indentation, comments,
+and the physical line ending. A now-blank line is intentional. It does not
+remove `Option Base 1` or a statement containing physical continuations.
+
+VB001 is an explicit policy correction: it may reveal undeclared-variable
+errors. It must never be treated as a behavior-neutral transformation or as
+eligible for initial Fix All support. Preserve export headers, module
+attributes, source encoding, and existing line endings at insertion.
+Insert immediately after the leading export header/module attributes, before
+existing options or following comments, so documentation stays attached to
+its declaration. With no export preamble, insert at byte zero. Infer the
+inserted EOL from the first existing line ending, defaulting to LF for an empty
+document. Refuse late/unsafe header placement and ambiguous conditional or
+continued `Option Explicit` spellings. Existing BOM rejection remains unchanged.
+
+VB001 retains its existing default-enabled warning policy. VB044 remains
+opt-in; VB080, VB084, and VB086 remain opt-in at information severity.
 Documentation generation retains its existing refactor kind and has no
 associated diagnostic. Fix All, CLI mutation, save-time fixes, and cross-file
 edits are outside this initial contract.
@@ -59,3 +83,8 @@ The local VBE probes `quickfix-step-one-before` and
 known accepted/rejected controls. They are maintainability observations, not
 compile-equivalent bindings for VB084. Compilation does not establish runtime
 equivalence; the correction removes only VBA's literal default step.
+
+The sequential `quickfix-local-before` / `quickfix-local-after` VBE pair covers
+the combined VB001/VB080/VB086 edits on a module whose variables are declared.
+These are policy observations, not compile-equivalent bindings or a promise
+that adding Option Explicit preserves compilation for undeclared variables.

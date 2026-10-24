@@ -204,7 +204,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Inline suppression          | yes                       |
 | Blocks source preflight     | no                        |
 | Real-time editor diagnostic | yes                       |
-| Fix available               | no                        |
+| Fix available               | yes                       |
 
 ## VB002
 
@@ -1854,7 +1854,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Inline suppression          | yes                     |
 | Blocks source preflight     | no                      |
 | Real-time editor diagnostic | yes                     |
-| Fix available               | no                      |
+| Fix available               | yes                     |
 
 ## VB081
 
@@ -1986,7 +1986,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Inline suppression          | yes                                 |
 | Blocks source preflight     | no                                  |
 | Real-time editor diagnostic | yes                                 |
-| Fix available               | no                                  |
+| Fix available               | yes                                 |
 
 ## VB087
 

@@ -8,7 +8,7 @@ import (
 )
 
 func TestQuickFixesUseDiagnosticPredicate(t *testing.T) {
-	source := []byte("Sub Work()\nDim i As Long\nFor i = 1 To 3 Step 1\nDebug.Print i\nNext i\nEnd Sub\n")
+	source := []byte("Option Explicit\nSub Work()\nDim i As Long\nFor i = 1 To 3 Step 1\nDebug.Print i\nNext i\nEnd Sub\n")
 	doc, err := vbaast.ParseDocument("Main.bas", source)
 	if err != nil {
 		t.Fatal(err)

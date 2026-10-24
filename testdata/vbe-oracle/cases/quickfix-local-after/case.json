@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "quickfix-local-after",
+  "description": "Observe after explicit VB001, VB080, and VB086 local corrections.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "policy"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "policy-observation",
+    "binding_note": "VB001 is policy; VB080 and VB086 are opt-in maintainability rules. This before/after pair observes syntax for explicit corrections, not compile-equivalent bindings or runtime equivalence."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-10-24T09:35:09Z"
+      }
+    ]
+  }
+}

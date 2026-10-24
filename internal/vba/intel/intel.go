@@ -1600,7 +1600,8 @@ func (a Analyzer) quickFixCodeActionsContext(ctx context.Context, doc Document, 
 		ctx = context.Background()
 	}
 	// Do not parse merely because VS Code asks for automatic code actions.
-	if !a.Config.Lint.ProcedureNameConstant.Enabled && !a.Config.Lint.DetectRedundantStepOne {
+	linter := lint.Linter{RootDir: a.RootDir, Config: a.Config}
+	if !linter.QuickFixesEnabled() {
 		return nil, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -1614,7 +1615,6 @@ func (a Analyzer) quickFixCodeActionsContext(ctx context.Context, doc Document, 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	linter := lint.Linter{RootDir: a.RootDir, Config: a.Config}
 	fixes, err := linter.QuickFixesParsedContext(ctx, parsed)
 	if err != nil {
 		return nil, err
