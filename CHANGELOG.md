@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated the Go patch baseline to 1.26.10 to address GO-2026-6809 in
+  `crypto/x509`.
+
 - Added an opt-in VB084 Quick Fix to remove redundant `Step 1` clauses while
   preserving comments and line endings, using shared diagnostic-associated
   source edits in the language server.

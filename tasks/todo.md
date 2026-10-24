@@ -1,3 +1,14 @@
+# PR #946 security CI follow-up
+
+- [x] Confirm the failing security job and the official GO-2026-6809 fix.
+- [x] Raise the Go patch baseline from 1.26.9 to 1.26.10; preserve CI scanning.
+- [x] Verify the full vulnerability scan and licence inventory with the patched toolchain.
+
+The patched toolchain reports zero affecting vulnerabilities; licence inventory
+matches all 39 CLI modules. The full Go suite is also running during preparation
+of this correction. Its result and the subsequent remote checks belong in the
+existing PR #946 validation record, separately from the confirmed local scan.
+
 # Issue #945: shared Quick Fix edits and VB084
 
 - [x] Record the shared edit contract and VB084 applicability in ADR/specs.
