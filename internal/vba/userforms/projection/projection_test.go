@@ -497,6 +497,7 @@ func TestProjectMultiPageAuthoredBaseline(t *testing.T) {
 			}
 			if source == nil {
 				t.Fatal("evidence form has no root MultiPage")
+				return
 			}
 			multiPage, ok := controlByName(got.Controls, source.Name)
 			if !ok {

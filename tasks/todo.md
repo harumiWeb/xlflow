@@ -1,3 +1,43 @@
+# PR #946 security CI follow-up
+
+- [x] Confirm the failing security job and the official GO-2026-6809 fix.
+- [x] Raise the Go patch baseline from 1.26.9 to 1.26.10; preserve CI scanning.
+- [x] Verify the full vulnerability scan and licence inventory with the patched toolchain.
+
+The patched toolchain reports zero affecting vulnerabilities; licence inventory
+matches all 39 CLI modules. The full Go suite is also running during preparation
+of this correction. Its result and the subsequent remote checks belong in the
+existing PR #946 validation record, separately from the confirmed local scan.
+
+# Issue #945: shared Quick Fix edits and VB084
+
+- [x] Record the shared edit contract and VB084 applicability in ADR/specs.
+- [x] Migrate VB044 and documentation actions to multiple edits with diagnostic association.
+- [x] Add opt-in VB084 correction with suppression, source-preservation, and no-IR coverage.
+- [x] Verify package tests, generated docs, formatting/lint, and self-review the final diff.
+- [x] Complete independent final review and resolve confirmed in-scope findings.
+
+Pass 1 disposition: the reported VB044 diagnostic-range mismatch is unsupported.
+`issueAt` retains the full range internally but intentionally omits public end
+positions; both published and associated diagnostics use the same one-unit
+range. Added direct full-diagnostic equality and full-literal edit coverage across
+LF/CRLF and Unicode literals, without changing production behavior. No confirmed
+in-scope defect remains, so no second full review pass is required.
+The complete intel package suite passes again after this regression coverage
+(`40.823s`). The reviewer report and coordinator disposition are preserved under
+`tmp_workspaces/final-review/issue945-pass1`; the review-only tabs and worktree
+have been removed.
+
+Validation: all five affected Go packages pass their complete suites; scoped
+golangci-lint reports zero issues, and docs/format/diff checks pass. VBE controls
+`known-compile-accept`/`known-compile-reject` and focused cases
+`quickfix-step-one-before`/`quickfix-step-one-after` pass with confirmed cleanup;
+both focused cases were explicitly promoted as maintainability observations.
+Runtime equivalence, native VS Code application/Undo, and remote CI are not
+independently verified by these checks.
+The full pre-commit lint additionally required explicit returns after existing
+nil/Fatal guards in eight tests; those changes do not affect production code.
+
 # Issue #942: code-only Designer preservation
 
 - [x] Confirm the existing equal-caption repair contract and define an opt-in preservation mode.

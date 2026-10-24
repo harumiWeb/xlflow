@@ -167,6 +167,8 @@ Common configuration options include:
 
 The VBA language server also understands xlflow documentation comments written with consecutive `'''` lines. Hover, Signature Help, Completion details, and diagnostics use those comments, along with Rubberduck-compatible `@Description` annotations when present. Type `'''` immediately before a procedure declaration, open the Quick Fix action, and accept `Generate documentation comment for ...` to insert a snippet with parameter and, where applicable, return placeholders. Type `@` inside an apostrophe comment to complete Rubberduck `@Description`, `@ModuleDescription`, `@VariableDescription`, and xlflow `@ExpectedError(...)`, `@Skip(...)`, and `@Todo(...)` snippets.
 
+When `[lint].detect_redundant_step_one = true`, the server offers **Remove redundant Step 1** for VB084. The correction preserves comments and line endings in the current editor buffer. Clauses split by a line continuation immediately before or inside `Step 1` retain their diagnostic without a correction. The existing opt-in VB044 correction updates procedure-name constants. Apply corrections through the editor's Quick Fix menu; normal Undo restores the original source.
+
 ## About the Command
 
 The command palette includes the following features:

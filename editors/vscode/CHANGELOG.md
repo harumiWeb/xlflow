@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Offer a server-provided Quick Fix to remove redundant `Step 1` when VB084 is
+  enabled. Corrections preserve comments and use the current editor buffer.
+
 ## v0.13.0
 
 - Moved structured UserForm validation warnings into a collapsed Problems panel

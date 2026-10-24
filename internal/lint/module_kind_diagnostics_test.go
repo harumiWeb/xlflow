@@ -115,6 +115,7 @@ func TestModuleKindDiagnosticsUseTightKeywordAndMeRanges(t *testing.T) {
 			}
 			if found == nil {
 				t.Fatalf("missing %s diagnostic: %+v", tc.code, issues)
+				return
 			}
 			if found.Line != tc.line || found.Column != tc.col {
 				t.Fatalf("%s range = %d:%d, want %d:%d", tc.code, found.Line, found.Column, tc.line, tc.col)

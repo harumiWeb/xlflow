@@ -320,6 +320,7 @@ func TestCompileTemplatePreservesUneditedControlRawBytes(t *testing.T) {
 		updated := findModelControl(result.Controls, original.Name)
 		if updated == nil {
 			t.Fatalf("control %q disappeared", original.Name)
+			return
 		}
 		if !bytes.Equal(original.Site.Raw, updated.Site.Raw) || !bytes.Equal(original.OpaqueRaw, updated.OpaqueRaw) || !reflect.DeepEqual(original.Record, updated.Record) {
 			t.Fatalf("unedited control %q changed", original.Name)

@@ -100,7 +100,7 @@ func (l Linter) maintainabilityIssues(path string, source []byte, root *tree_sit
 			step := node.ChildByFieldName("step")
 			if step == nil && cfg.RequireExplicitStep {
 				add(node, "VB085", "For loop omits Step.")
-			} else if step != nil && cfg.DetectRedundantStepOne && strings.TrimSpace(step.Utf8Text(source)) == "1" {
+			} else if cfg.DetectRedundantStepOne && redundantStepOne(node, source) != nil {
 				add(step, "VB084", "Step 1 restates the default step.")
 			}
 		case "for_each_statement":
@@ -187,6 +187,17 @@ func (l Linter) maintainabilityIssues(path string, source []byte, root *tree_sit
 	}
 	walk(root, false)
 	return issues
+}
+
+func redundantStepOne(node *tree_sitter.Node, source []byte) *tree_sitter.Node {
+	if node == nil || node.Kind() != "for_statement" {
+		return nil
+	}
+	step := node.ChildByFieldName("step")
+	if step != nil && strings.TrimSpace(step.Utf8Text(source)) == "1" {
+		return step
+	}
+	return nil
 }
 
 func startsWithKeyword(text, keyword string) bool {

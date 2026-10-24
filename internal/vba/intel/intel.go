@@ -1488,8 +1488,15 @@ func (a Analyzer) SignatureHelp(doc Document, pos Position, open []Document) (*S
 }
 
 type CodeAction struct {
-	Title   string
-	Kind    string
+	Title       string
+	Kind        string
+	Edits       []CodeActionEdit
+	Diagnostics []Diagnostic
+}
+
+// CodeActionEdit uses coordinates in the captured document revision. All edits
+// in one action belong to that document and must not overlap.
+type CodeActionEdit struct {
 	Range   Range
 	NewText string
 }
@@ -1510,8 +1517,8 @@ func (a Analyzer) CodeActionsContext(ctx context.Context, doc Document, selectio
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	allowDocumentation, allowProcedureNameConstant := codeActionFamilies(only)
-	if !allowDocumentation && !allowProcedureNameConstant {
+	allowDocumentation, allowQuickFix := codeActionFamilies(only)
+	if !allowDocumentation && !allowQuickFix {
 		return []CodeAction{}, nil
 	}
 
@@ -1526,12 +1533,12 @@ func (a Analyzer) CodeActionsContext(ctx context.Context, doc Document, selectio
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if allowProcedureNameConstant {
-		procedureActions, procedureErr := a.procedureNameConstantCodeActionsContext(ctx, doc, selection)
-		if procedureErr != nil {
-			return nil, procedureErr
+	if allowQuickFix {
+		fixActions, fixErr := a.quickFixCodeActionsContext(ctx, doc, selection)
+		if fixErr != nil {
+			return nil, fixErr
 		}
-		out = append(out, procedureActions...)
+		out = append(out, fixActions...)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1539,7 +1546,7 @@ func (a Analyzer) CodeActionsContext(ctx context.Context, doc Document, selectio
 	return out, nil
 }
 
-func codeActionFamilies(only []string) (documentation, procedureNameConstant bool) {
+func codeActionFamilies(only []string) (documentation, quickFix bool) {
 	if len(only) == 0 {
 		return true, true
 	}
@@ -1583,18 +1590,17 @@ func (a Analyzer) documentationCodeActionsContext(ctx context.Context, doc Docum
 			continue
 		}
 		insert := Range{Start: Position{Line: sym.Range.Start.Line, Character: 0}, End: Position{Line: sym.Range.Start.Line, Character: 0}}
-		out = append(out, CodeAction{Title: snippet.Label, Kind: "refactor.rewrite", Range: insert, NewText: snippet.Text + "\n"})
+		out = append(out, CodeAction{Title: snippet.Label, Kind: "refactor.rewrite", Edits: []CodeActionEdit{{Range: insert, NewText: snippet.Text + "\n"}}})
 	}
 	return out, nil
 }
 
-func (a Analyzer) procedureNameConstantCodeActionsContext(ctx context.Context, doc Document, selection Range) ([]CodeAction, error) {
+func (a Analyzer) quickFixCodeActionsContext(ctx context.Context, doc Document, selection Range) ([]CodeAction, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// VB044 is opt-in. In particular, do not parse the source merely because
-	// VS Code asks for generic code actions when the rule is disabled.
-	if !a.Config.Lint.ProcedureNameConstant.Enabled {
+	// Do not parse merely because VS Code asks for automatic code actions.
+	if !a.Config.Lint.ProcedureNameConstant.Enabled && !a.Config.Lint.DetectRedundantStepOne {
 		return nil, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -1609,24 +1615,19 @@ func (a Analyzer) procedureNameConstantCodeActionsContext(ctx context.Context, d
 		return nil, err
 	}
 	linter := lint.Linter{RootDir: a.RootDir, Config: a.Config}
-	// The fix scanner is the same AST-backed rule implementation used by
-	// diagnostics. Calling LintParsed here used to run every lint rule (and
-	// build ProcedureIR/CFG) just to rediscover the VB044 locations.
-	fixes, err := linter.ProcedureNameConstantFixesParsedContext(ctx, parsed)
+	fixes, err := linter.QuickFixesParsedContext(ctx, parsed)
 	if err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Keep CodeAction visibility aligned with diagnostics: a suppressed VB044
-	// finding must not reappear as a quick fix. Apply uses the same source
-	// directive parser and family filtering as the normal lint path.
+	// Use the same suppression directives and family as the diagnostic path.
 	directives, _ := suppression.DirectivesForSource(a.RootDir, doc.Path, doc.Source)
 	file := documentSuppressionFile(a.RootDir, doc.Path)
 	records := make([]suppression.Diagnostic, len(fixes))
 	for i, fix := range fixes {
-		records[i] = suppression.Diagnostic{Code: "VB044", File: file, Line: fix.Line}
+		records[i] = suppression.Diagnostic{Code: fix.Diagnostic.Code, File: file, Line: fix.Diagnostic.Line}
 	}
 	suppressed, _ := suppression.Apply(records, directives, suppression.FamilyLint)
 	out := make([]CodeAction, 0, len(fixes))
@@ -1637,18 +1638,25 @@ func (a Analyzer) procedureNameConstantCodeActionsContext(ctx context.Context, d
 		if suppressed[i] {
 			continue
 		}
-		editRange := Range{
-			Start: positionForDocumentByteOffset(doc, fix.StartByte),
-			End:   positionForDocumentByteOffset(doc, fix.EndByte),
+		issue := fix.Diagnostic
+		diagnosticRange := issueRange(doc.Source, issue.Line, issue.Column)
+		selected := rangeIntersects(selection, diagnosticRange)
+		edits := make([]CodeActionEdit, len(fix.Edits))
+		for j, edit := range fix.Edits {
+			edits[j] = CodeActionEdit{
+				Range:   Range{Start: positionForDocumentByteOffset(doc, edit.StartByte), End: positionForDocumentByteOffset(doc, edit.EndByte)},
+				NewText: edit.NewText,
+			}
+			selected = selected || rangeIntersects(selection, edits[j].Range)
 		}
-		if !rangeIntersects(selection, editRange) {
+		if !selected {
 			continue
 		}
 		out = append(out, CodeAction{
-			Title:   fmt.Sprintf("Update %s to %q", fix.ConstantName, fix.ExpectedName),
-			Kind:    "quickfix",
-			Range:   editRange,
-			NewText: vbaStringLiteral(fix.ExpectedName),
+			Title:       fix.Title,
+			Kind:        "quickfix",
+			Edits:       edits,
+			Diagnostics: []Diagnostic{{Code: issue.Code, Severity: issue.Severity, Source: "xlflow", Message: lintDiagnosticMessage(issue), Range: diagnosticRange}},
 		})
 	}
 	return out, nil
@@ -1663,10 +1671,6 @@ func documentSuppressionFile(root, path string) string {
 		file = path
 	}
 	return filepath.ToSlash(file)
-}
-
-func vbaStringLiteral(value string) string {
-	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func (a Analyzer) documentationSnippetCompletions(doc Document, pos Position) ([]Completion, bool, error) {

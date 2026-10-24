@@ -2480,7 +2480,7 @@
       "scope": "procedure-local",
       "realtime": true,
       "precision": "high",
-      "fix_available": false,
+      "fix_available": true,
       "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vb084",
       "configurable": true,
       "configuration_key": "detect_redundant_step_one",
