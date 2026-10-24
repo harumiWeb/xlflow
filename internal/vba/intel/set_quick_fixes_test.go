@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
 func TestSetAssignmentQuickFixPreservesSourceAndPublishedDiagnostic(t *testing.T) {
@@ -66,6 +68,42 @@ func TestSetAssignmentQuickFixPreservesSourceAndPublishedDiagnostic(t *testing.T
 			source := strings.ReplaceAll(tc.source, "\n", tc.eol)
 			want := strings.ReplaceAll(tc.want, "\n", tc.eol)
 			assertSetAssignmentQuickFix(t, analyzer, source, want, tc.code, tc.title, tc.editAnchor, tc.editOffset, tc.editLength, tc.newText)
+		})
+	}
+}
+
+func TestSetAssignmentQuickFixWithholdsDefaultMemberIntent(t *testing.T) {
+	for _, tc := range []struct {
+		name, metadata, projectType, projectMember string
+	}{
+		{name: "named default on target", metadata: `{"types":[{"name":"Test.Control","library":"Test","kind":"interface","default_member":"Value","default_member_type":"Long"}]}`},
+		{name: "flagged property on source", metadata: `{"types":[{"name":"Test.TextBox","library":"Test","kind":"interface","assignable_to":["Test.Control"],"properties":[{"name":"Value","return_type":"Long","default":true}]}]}`},
+		{name: "flagged method on target", metadata: `{"types":[{"name":"Test.Control","library":"Test","kind":"interface","methods":[{"name":"Value","return_type":"Long","default":true}]}]}`},
+		{name: "ambiguous defaults on target", metadata: `{"types":[{"name":"Test.Control","library":"Test","kind":"interface","properties":[{"name":"First","default":true},{"name":"Second","default":true}]}]}`},
+		{name: "project default on target", projectType: "test.control", projectMember: "test.control"},
+		{name: "project default on source", projectType: "test.textbox", projectMember: "test.textbox"},
+		{name: "project default metadata incomplete", projectType: "test.control"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			analyzer := newTestAnalyzer(t)
+			addSetAssignmentTestTypes(t, &analyzer)
+			if tc.metadata != "" {
+				if err := analyzer.DB.MergeJSON([]byte(tc.metadata)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.projectType != "" {
+				analyzer.ProjectDefaultTypes = map[string]bool{tc.projectType: true}
+			}
+			if tc.projectMember != "" {
+				analyzer.ProjectDefaultMembers = map[string]vbadb.MemberInfo{tc.projectMember: {Name: "Value", Default: true, ReturnType: "Long"}}
+			}
+			source := "Option Explicit\nSub Work()\nDim target As Test.Control\nDim source As Test.TextBox\ntarget = source\nEnd Sub\n"
+			doc := Document{Path: filepath.Join(analyzer.RootDir, "Main.bas"), Source: source}
+			if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB036"); len(diagnostics) != 1 {
+				t.Fatalf("existing diagnostic changed: %+v", diagnostics)
+			}
+			assertNoSetAssignmentFix(t, analyzer, doc, Range{End: positionForByteOffset(source, len(source))})
 		})
 	}
 }

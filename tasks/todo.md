@@ -1,5 +1,18 @@
 # Issue #949: type-backed Set Quick Fixes
 
+- [x] Address the additional default-member review: withhold VB036 for object types with default-member evidence; verify TypeDB/project metadata and production LSP behavior.
+
+Default-member follow-up: seven focused metadata cases failed before the guard
+and pass afterward. Named/flagged/ambiguous TypeDB defaults and project metadata
+withhold the correction without changing the VB036 diagnostic. Production LSP
+coverage verifies Range and unregistered project classes; the latter already
+fail DB assignability, so no project IR or metadata expansion is needed.
+After this guard, complete intel/LSP suites pass again (70.666s / 149.103s),
+scoped lint reports zero issues, docs/diff checks pass, and a separate read-only
+delta review found no confirmed defects. This is a conservative applicability
+policy based on existing metadata; no new VBE semantics or evidence is asserted.
+Command: `rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/vba/intel ./internal/lspserver -count=1 -timeout 10m`.
+
 - [x] Reproduce PR #950's indexed-property binding finding and isolate accessor-local candidates by declaration range.
 - [x] Verify accessor parameters/locals and preserve duplicate-binding rejection; prepare the review correction for push.
 

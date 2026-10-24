@@ -147,3 +147,42 @@ func TestCodeActionCorrectsSetInUnsavedBuffer(t *testing.T) {
 		}
 	}
 }
+
+func TestCodeActionWithholdsSetForDefaultMemberTypes(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	for _, typeName := range []string{"Excel.Range", "ProjectValue"} {
+		t.Run(typeName, func(t *testing.T) {
+			if typeName == "ProjectValue" {
+				classURI := pathToFileURI(filepath.Join(root, "ProjectValue.cls"))
+				if _, err := s.docs.open(classURI, "Attribute VB_Name = \"ProjectValue\"\nPublic Property Get Value() As Long\nAttribute Value.VB_UserMemId = 0\nValue = 1\nEnd Property\n", 1); err != nil {
+					t.Fatal(err)
+				}
+			}
+			uri := protocol.DocumentUri(pathToFileURI(filepath.Join(root, "Main.bas")))
+			source := "Option Explicit\nSub Work()\nDim target As " + typeName + "\nDim source As " + typeName + "\ntarget = source\nEnd Sub\n"
+			if _, err := s.docs.open(string(uri), source, 1); err != nil {
+				t.Fatal(err)
+			}
+			result, err := s.codeAction(nil, &protocol.CodeActionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+				Range:        protocol.Range{Start: protocol.Position{Line: 4}, End: protocol.Position{Line: 4, Character: 15}},
+				Context:      protocol.CodeActionContext{Only: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, action := range result.([]protocol.CodeAction) {
+				for _, diagnostic := range action.Diagnostics {
+					if diagnostic.Code != nil && diagnostic.Code.Value == "VB036" {
+						t.Fatalf("unexpected reference-intent correction: %+v", action)
+					}
+				}
+			}
+		})
+	}
+}

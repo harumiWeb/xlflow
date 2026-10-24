@@ -85,6 +85,11 @@ separate scopes; duplicate declarations inside one accessor remain ambiguous.
 
 VB036 accepts only a typed object identifier RHS whose assignment compatibility
 is confirmed by TypeDB. It inserts `Set ` or replaces an explicit `Let` prefix.
+Withhold it when either operand has named or flagged default-member metadata,
+including ambiguous defaults. Known project types are also withheld when their
+default-member metadata cannot prove reference intent. Project classes absent
+from TypeDB cannot pass the required assignability proof; code actions must not
+build ProcedureIR/CFG merely to populate project default-member maps.
 VB037 requires a scalar RHS identifier or scalar literal and removes only
 `Set` plus horizontal trivia. Calls, member expressions, New expressions,
 default-property access and other value expressions are deferred. Existing

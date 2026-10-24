@@ -119,6 +119,9 @@ func (a Analyzer) setAssignmentQuickFixesContext(ctx context.Context, doc Docume
 			if !concreteObjectDiagnosticType(lhsType) || !concreteObjectDiagnosticType(rhsType) {
 				continue
 			}
+			if a.setFixObjectIntentAmbiguous(lhsType) || a.setFixObjectIntentAmbiguous(rhsType) {
+				continue
+			}
 			if assignable, known := a.DB.IsAssignable(lhsType, rhsType); !known || !assignable {
 				continue
 			}
@@ -149,6 +152,30 @@ func (a Analyzer) setAssignmentQuickFixesContext(ctx context.Context, doc Docume
 		}
 	}
 	return out[:kept], ctx.Err()
+}
+
+// Default-member evidence leaves value/reference intent unresolved. Do not
+// require a unique default: conflicting metadata is also insufficient proof.
+func (a Analyzer) setFixObjectIntentAmbiguous(typeName string) bool {
+	key := strings.ToLower(strings.TrimSpace(typeName))
+	if _, ok := a.ProjectDefaultMembers[key]; ok || a.ProjectDefaultTypes[key] {
+		return true
+	}
+	typ, ok := a.DB.ResolveType(typeName)
+	if !ok || typ.DefaultMember != "" {
+		return true
+	}
+	for _, member := range typ.Properties {
+		if member.Default {
+			return true
+		}
+	}
+	for _, member := range typ.Methods {
+		if member.Default {
+			return true
+		}
+	}
+	return false
 }
 
 // Only explicit, uniquely bound variables from this source revision qualify.
