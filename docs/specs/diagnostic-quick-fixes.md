@@ -79,6 +79,9 @@ and an unambiguous explicitly declared local, parameter or module variable in
 the current source. Array, function-return, property/member and conditional
 targets are excluded. Unknown, inferred-only, Object and Variant types cannot
 justify an edit. An identifier RHS must also bind to one such declaration.
+Local and parameter bindings must lie within the containing procedure's
+declaration range. Property Get/Let/Set accessors sharing a name retain
+separate scopes; duplicate declarations inside one accessor remain ambiguous.
 
 VB036 accepts only a typed object identifier RHS whose assignment compatibility
 is confirmed by TypeDB. It inserts `Set ` or replaces an explicit `Let` prefix.

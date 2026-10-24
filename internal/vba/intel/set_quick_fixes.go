@@ -155,13 +155,18 @@ func (a Analyzer) setAssignmentQuickFixesContext(ctx context.Context, doc Docume
 // Do not turn assignment inference, functions, properties or conditional symbols
 // into authority to change object/value assignment semantics.
 func (a Analyzer) setFixDeclaredType(doc Document, index *documentIndex, name string, offset int) (string, bool) {
-	procedure := currentProcedureNameAt(doc, positionForDocumentByteOffset(doc, offset), nil)
+	procedure, scope := currentProcedureForDocument(doc, positionForDocumentByteOffset(doc, offset))
 	var locals, modules []Symbol
 	for _, sym := range index.symbolsByName[indexName(name)] {
 		if !a.sameDocumentSymbol(doc, sym) || !a.visibleDefinitionSymbol(doc, procedure, sym) {
 			continue
 		}
 		if sym.Parent != "" {
+			// Get/Let/Set accessors share a name but have distinct parameters
+			// and locals. Count only declarations in the containing accessor.
+			if scope == nil || !rangeContains(*scope, sym.Range) {
+				continue
+			}
 			locals = append(locals, sym)
 		} else {
 			modules = append(modules, sym)

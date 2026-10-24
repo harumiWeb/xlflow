@@ -1,5 +1,17 @@
 # Issue #949: type-backed Set Quick Fixes
 
+- [x] Reproduce PR #950's indexed-property binding finding and isolate accessor-local candidates by declaration range.
+- [x] Verify accessor parameters/locals and preserve duplicate-binding rejection; prepare the review correction for push.
+
+PR #950 follow-up: focused accessor regressions failed before the scope fix and
+passed afterward, including snapshot/live paths and rejected ambiguous/Variant
+bindings. Complete intel/LSP suites pass (75.518s / 163.472s), scoped lint reports
+zero issues, and docs checks pass. A separate read-only review of this bounded
+delta found no confirmed defects; it did not independently execute the tests.
+This source-declaration identity correction does not change diagnostic or VBE
+type semantics, so the established oracle evidence is retained without rerunning
+Excel. Native editor application/Undo and new remote CI results remain separate.
+
 - [x] Confirm merged #948 and stage-three scope; create #949 before implementation.
 - [x] Share selected-line assignment diagnostics and add conservative Set corrections.
 - [x] Cover type/binding ambiguity, source preservation, diagnostic association and discovery costs.

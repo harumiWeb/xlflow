@@ -70,12 +70,74 @@ func TestSetAssignmentQuickFixPreservesSourceAndPublishedDiagnostic(t *testing.T
 	}
 }
 
+func TestSetAssignmentQuickFixDistinguishesPropertyAccessors(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, code, anchor, replacement, title string
+	}{
+		{
+			name: "shared index parameters", code: "VB037",
+			source: "Option Explicit\nPublic Property Get Item(ByVal index As Long) As Long\nItem = index\nEnd Property\nPublic Property Let Item(ByVal index As Long, ByVal value As Long)\nSet index = 1\nEnd Property\n",
+			anchor: "Set index = 1", replacement: "index = 1", title: "Remove Set from value assignment",
+		},
+		{
+			name: "shared accessor locals", code: "VB037",
+			source: "Option Explicit\nPublic Property Get Item() As Long\nDim count As Long\nItem = count\nEnd Property\nPublic Property Let Item(ByVal value As Long)\nDim count As Long\nSet count = value\nEnd Property\n",
+			anchor: "Set count = value", replacement: "count = value", title: "Remove Set from value assignment",
+		},
+		{
+			name: "object parameters in get and set", code: "VB036",
+			source: "Option Explicit\nPublic Property Get Item(ByVal target As Excel.Worksheet, ByVal source As Excel.Worksheet) As Excel.Worksheet\ntarget = source\nEnd Property\nPublic Property Set Item(ByVal target As Excel.Worksheet, ByVal source As Excel.Worksheet, ByVal value As Excel.Worksheet)\nEnd Property\n",
+			anchor: "target = source", replacement: "Set target = source", title: "Insert Set for object assignment",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, snapshot := range []bool{false, true} {
+				analyzer := newTestAnalyzer(t)
+				doc := Document{Path: filepath.Join(analyzer.RootDir, "Main.cls"), Source: tc.source}
+				if snapshot {
+					view := NewAnalysisSnapshot(doc)
+					defer view.Retire()
+					doc = view.Document()
+				}
+				diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), tc.code)
+				if len(diagnostics) != 1 {
+					t.Fatalf("snapshot=%v: diagnostics = %+v, want one %s", snapshot, diagnostics, tc.code)
+				}
+				actions, err := analyzer.CodeActionsContext(t.Context(), doc, Range{End: positionForDocumentByteOffset(doc, len(doc.Source))}, []string{"quickfix"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				fixes := setAssignmentActionsByCode(actions, tc.code)
+				if len(fixes) != 1 {
+					t.Fatalf("snapshot=%v: fixes = %+v, want one %s", snapshot, fixes, tc.code)
+					return
+				}
+				if fixes[0].Title != tc.title || !reflect.DeepEqual(fixes[0].Diagnostics, diagnostics) {
+					t.Fatalf("associated action = %+v, diagnostics = %+v", fixes[0], diagnostics)
+				}
+				want := strings.Replace(tc.source, tc.anchor, tc.replacement, 1)
+				if got := applyQuickFixForTest(t, doc, fixes[0]); got != want {
+					t.Fatalf("corrected source = %q, want %q", got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestSetAssignmentQuickFixWithholdsUnsafeCorrections(t *testing.T) {
 	tests := []struct {
 		name, source string
 		customTypes  bool
 		relation     string
 	}{
+		{
+			name:   "duplicate local in current accessor",
+			source: "Option Explicit\nPublic Property Get Item() As Long\nDim count As Long\nEnd Property\nPublic Property Let Item(ByVal value As Long)\nDim count As Long\nDim count As Long\nSet count = value\nEnd Property\n",
+		},
+		{
+			name:   "sibling accessor cannot prove current Variant parameter",
+			source: "Option Explicit\nPublic Property Get Item(ByVal index As Long) As Long\nEnd Property\nPublic Property Let Item(ByVal index As Variant, ByVal value As Long)\nSet index = 1\nEnd Property\n",
+		},
 		{
 			name:   "compound string expression is not a scalar literal",
 			source: "Option Explicit\nSub Work()\nDim target As String\nDim source As Excel.Range\nSet target = \"a\" & source & \"b\"\nEnd Sub\n",

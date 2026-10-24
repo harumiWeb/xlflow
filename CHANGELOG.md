@@ -5,7 +5,8 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Added type-backed individual Quick Fixes for VB036/VB037 to insert or remove
-  `Set` on unambiguous, explicitly typed variable assignments.
+  `Set` on unambiguous, explicitly typed variable assignments, including
+  parameters and locals in same-named Property Get/Let/Set accessors.
 
 - Added document-local Quick Fixes for VB080 (`Let`), VB086 (`Option Base 0`),
   and VB001 (`Option Explicit`), preserving source trivia and diagnostic policy.
