@@ -68,8 +68,42 @@ continued `Option Explicit` spellings. Existing BOM rejection remains unchanged.
 VB001 retains its existing default-enabled warning policy. VB044 remains
 opt-in; VB080, VB084, and VB086 remain opt-in at information severity.
 Documentation generation retains its existing refactor kind and has no
-associated diagnostic. Fix All, CLI mutation, save-time fixes, and cross-file
-edits are outside this initial contract.
+associated diagnostic. CLI mutation, save-time fixes, and cross-file edits
+remain outside this contract.
+
+## Document Fix All
+
+VB044, VB080, VB084, and VB086 have explicit document Fix All eligibility,
+independent of `fix_available`. VB001 and VB036/VB037 remain individual-only.
+The rule's existing configuration and conservative correction preconditions
+still apply; occurrences without a safe individual correction are unchanged.
+
+The kinds are `source.fixAll.xlflow.vb044`, `source.fixAll.xlflow.vb080`,
+`source.fixAll.xlflow.vb084`, and `source.fixAll.xlflow.vb086`. An explicit
+`context.only` request for a kind or its `source`, `source.fixAll`, or
+`source.fixAll.xlflow` parent requests aggregation. Parent requests return
+separate actions per rule, never one mixed-rule transaction. Empty `only`, an
+empty kind, and ordinary `quickfix` requests do not trigger aggregation.
+Automatic requests (`triggerKind: 2`) omit source actions even when a source
+kind is supplied. Save-time fixes are not enabled automatically.
+
+Reuse the same syntax correction providers, suppression rules and diagnostic
+projection as individual actions, with the entire captured document as the
+selection. Do not run whole-file lint, TypeDB queries, semantic indexing or
+ProcedureIR/CFG construction. Disabled or unsupported kinds return before
+parsing. Sort edits by UTF-16 start/end positions and validate every range
+against that revision, including surrogate boundaries. Duplicate ranges,
+overlaps, insertions sharing a start, reversed ranges and invalid coordinates
+reject the entire affected rule action. Adjacent ranges are permitted.
+
+Publish Fix All only for open documents and clients advertising
+`workspace.workspaceEdit.documentChanges`. Advertise the four source kinds
+only to those clients. One action contains one versioned `TextDocumentEdit`
+with all rule edits and all associated diagnostics. Request cancellation,
+document changes, close and reopen invalidate stale results through the
+existing bounded request lifecycle. Legacy clients retain individual fixes
+through `changes`; they do not receive unversioned Fix All. Editor application
+uses the normal workspace-edit and Undo mechanism.
 
 ## Type-backed Set corrections
 
@@ -113,6 +147,22 @@ UTF-16 coordinates, comments, colon-separated statements, safe and withheld
 continuations, malformed syntax, suppression, disabled rules, idempotency,
 multiple edits, and document ownership/version projection. Snapshot counters
 protect discovery from accidental ProcedureIR/CFG construction.
+Fix All tests also compare individual edits and diagnostic metadata, verify
+idempotency, kind hierarchy and eligibility, reject conflicting or invalid
+ranges, and exercise automatic-request filtering, client capability gating,
+version ownership, cancellation and document lifecycle changes over JSON-RPC.
+Aggregation introduces no new VBA transformation semantics and reuses the
+existing local VBE evidence below.
+
+The optional native editor check uses the actual extension LanguageClient and
+CLI LSP to request VB080 Fix All, apply both edits, and restore the saved buffer
+with one VS Code Undo. Build the CLI from the repository root with
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 build -o .tmp-quickfix/xlflow.exe ./cmd/xlflow`,
+then run `rtk pnpm --dir editors/vscode test:fix-all`.
+`XLFLOW_VSCODE_DEBUG_PATH` can select another built CLI;
+`VSCODE_EXECUTABLE` can select an editor executable. This developer check does
+not require Excel or replace the ordinary extension test suite.
+
 TypeDB-dependent LSP tests use explicit temporary manifest-backed fixtures,
 including both complete and incomplete states. Default-member withholding tests
 include a reference-only positive control so missing metadata cannot make a

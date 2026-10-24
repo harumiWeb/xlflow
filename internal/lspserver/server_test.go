@@ -1104,12 +1104,16 @@ func TestCodeActionGeneratesDocumentationComment(t *testing.T) {
 }
 
 func TestJSONRPCCodeActionDoesNotBlockInteractiveRequestsOrCancellation(t *testing.T) {
-	for _, invalidate := range []string{"cancel-string", "cancel-number", "change", "close", "reopen"} {
-		t.Run(invalidate, func(t *testing.T) {
+	for _, scenario := range []string{"cancel-string", "cancel-number", "change", "close", "reopen", "fix-all-cancel-string", "fix-all-cancel-number", "fix-all-change", "fix-all-close", "fix-all-reopen"} {
+		invalidate := strings.TrimPrefix(scenario, "fix-all-")
+		fixAll := strings.HasPrefix(scenario, "fix-all-")
+		t.Run(scenario, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), jsonrpcIntegrationTimeout)
 			defer cancel()
 			root := t.TempDir()
-			s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+			cfg := config.Default()
+			cfg.Lint.DetectLetAssignment = fixAll
+			s, cleanup, err := New(Options{RootDir: root, Config: cfg, TypeDBDir: t.TempDir()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1117,6 +1121,9 @@ func TestJSONRPCCodeActionDoesNotBlockInteractiveRequestsOrCancellation(t *testi
 			path := filepath.Join(root, "src", "modules", "Main.bas")
 			uri := pathToFileURI(path)
 			source := "Option Explicit\nPublic Sub Run()\n    Dim value As Long\nEnd Sub\n"
+			if fixAll {
+				source = "Option Explicit\nPublic Sub Run()\n    Dim value As Long\n    Let value = 1\n    Let value = 2\nEnd Sub\n"
+			}
 			if _, err := s.docs.open(uri, source, 1); err != nil {
 				t.Fatal(err)
 			}
@@ -1143,16 +1150,21 @@ func TestJSONRPCCodeActionDoesNotBlockInteractiveRequestsOrCancellation(t *testi
 			clientConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(clientSide, jsonrpc2.VSCodeObjectCodec{}), &rpcRecorder{})
 			defer func() { _ = clientConn.Close() }()
 			var initialized protocol.InitializeResult
-			if err := clientConn.Call(ctx, "initialize", protocol.InitializeParams{}, &initialized); err != nil {
+			if err := clientConn.Call(ctx, "initialize", fixAllInitializeParams(t, fixAll), &initialized); err != nil {
 				t.Fatal(err)
 			}
 			id := jsonrpc2.ID{Str: "code-action", IsString: true}
 			if invalidate == "cancel-number" {
 				id = jsonrpc2.ID{Num: 1234}
 			}
+			var only []protocol.CodeActionKind
+			if fixAll {
+				only = []protocol.CodeActionKind{fixAllLetKind}
+			}
 			waiter, err := clientConn.DispatchCall(ctx, "textDocument/codeAction", protocol.CodeActionParams{
 				TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
 				Range:        protocol.Range{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 1, Character: 16}},
+				Context:      protocol.CodeActionContext{Only: only},
 			}, jsonrpc2.PickID(id))
 			if err != nil {
 				t.Fatal(err)

@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added document-scoped, same-rule Fix All for enabled VB044, VB080, VB084,
+  and VB086 corrections, using explicit source actions and versioned editor
+  transactions. Conflicting edits withhold the affected rule action.
+
 - Added type-backed individual Quick Fixes for VB036/VB037 to insert or remove
   `Set` on unambiguous, explicitly typed variable assignments, including
   parameters and locals in same-named Property Get/Let/Set accessors.

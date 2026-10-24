@@ -10,3 +10,10 @@ rule as suppressible. If metadata cannot be loaded, its schema is unsupported,
 or the ID is unknown, the extension does not guess and omits the action.
 
 Project-wide checks still run from `xlflow lint` and `xlflow analyze`; they include filesystem and preflight rules that cannot be inferred safely from one unsaved document. Treat a clean editor as a good first signal, then run the project checks before `push`. Use `Go to Definition`, `Find References`, symbols, and rename for project navigation.
+
+Use **Source Action...** for **Fix all VB044/VB080/VB084/VB086 occurrences in this
+document** when the corresponding lint rule is enabled. Each action corrects
+one rule in the open buffer and can be undone normally. Unsafe occurrences
+remain unchanged; conflicting edits withhold that rule's action. VB001 and
+VB036/VB037 remain individual Quick Fixes. Fix All uses versioned document edits
+and is not enabled automatically on save.

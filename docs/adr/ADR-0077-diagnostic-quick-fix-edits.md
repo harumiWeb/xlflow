@@ -31,14 +31,28 @@ future CLI would duplicate applicability and source-coordinate rules.
   whose surrounding CST tokens and horizontal whitespace prove a local edit.
   Preserve comments and unrelated continuation markers; withhold a correction
   when the removed span would cross a physical line continuation.
+- Add document Fix All through an explicit whitelist of VB044, VB080, VB084,
+  and VB086, reusing individual syntax correction providers. Keep VB001 and
+  type-backed Set corrections individual-only because their intent and
+  preconditions need separate consideration. `fix_available` is insufficient
+  authorization for bulk edits.
+- Require explicit source-kind requests for aggregation so routine lightbulb
+  requests do not scan the whole document. Parent source-kind requests yield
+  separate actions per rule. Automatic requests omit aggregation.
+- Require an open, versioned document and `documentChanges` capability for Fix
+  All. Reject an entire rule action on duplicate, overlapping or invalid edits
+  rather than silently selecting an order-dependent subset. This preserves
+  one captured revision and an atomic editor transaction.
 
 ## Consequences
 
 - Adapters can expose multiple edits without learning VBA transformations.
 - Additional corrections can reuse diagnostic association and suppression.
 - Conservative applicability leaves some diagnosed occurrences without a fix.
-- This document-local model does not yet solve cross-file preconditions or
-  conflict resolution. Fix All and CLI application require separate contracts.
+- Legacy clients retain individual corrections but cannot request unversioned
+  bulk edits. Explicit eligibility limits bulk coverage in exchange for
+  conservative applicability and bounded discovery cost.
+- Cross-file preconditions and CLI application still require separate contracts.
 
 ## Alternatives Considered
 
@@ -56,3 +70,4 @@ future CLI would duplicate applicability and source-coordinate rules.
 - [Rule registry](ADR-0024-shared-static-analysis-rule-registry.md)
 - [Roadmap #944](https://github.com/harumiWeb/xlflow/issues/944)
 - [Initial implementation #945](https://github.com/harumiWeb/xlflow/issues/945)
+- [Document Fix All #952](https://github.com/harumiWeb/xlflow/issues/952)

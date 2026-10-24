@@ -1,3 +1,27 @@
+# Issue #952: document-scoped same-rule Fix All
+
+- [x] Confirm merged #950, read existing edit/lifecycle contracts, and create #952 before implementation.
+- [x] Share individual syntax correction discovery and aggregate only explicitly eligible rules.
+- [x] Add source-kind capabilities, open/versioned document gating, and automatic-request filtering.
+- [x] Verify aggregation conflicts, suppression, idempotency, EOL/Unicode and LSP revision/cancellation behavior.
+- [x] Update ADR/specification, guides and changelogs; run affected tests, lint and docs checks.
+- [ ] Commit and complete independent review.
+
+VB044/VB080/VB084/VB086 source actions reuse individual corrections and reject
+invalid or conflicting ranges per rule. Empty-kind requests cannot broaden an
+explicit source-kind selection. The complete intel/LSP/lint suites pass
+(255.838s / 392.993s / 204.900s); final focused regressions pass (9.501s / 1.926s).
+Scoped Go lint reports zero issues; TypeScript compile/check, oxlint, formatting,
+docs and diff checks pass. The optional `test:fix-all` native VS Code check uses
+the actual CLI LanguageClient, applies both VB080 edits, and restores the exact
+saved buffer with one Undo. Its Extension Host exits successfully and temporary
+workspace/process cleanup is confirmed. Log:
+`C:/Users/HARUMI/orca/workspaces/xlflow/tautog/.tmp-quickfix/fix-all-test.log`.
+Commands: `rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/vba/intel ./internal/lspserver ./internal/lint -count=1 -timeout 10m`
+and `rtk pnpm --dir editors/vscode run test:fix-all`.
+No new VBA transformation semantics or VBE evidence are asserted. Remote CI has
+not run for this branch; independent review remains pending.
+
 # Issue #949: type-backed Set Quick Fixes
 
 - [x] Fix PR #950 CI by making TypeDB-dependent LSP tests use explicit manifest-backed fixtures.
