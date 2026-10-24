@@ -178,6 +178,7 @@ func TestPlanProjectReusesExportEquivalentDocumentSource(t *testing.T) {
 	}
 	if sheet == nil {
 		t.Fatal("template has no Sheet1 document module")
+		return
 	}
 	sheet.Source = strings.TrimRight(sheet.Source, "\r\n") + "\r\n\r\n"
 	disk, err := vbaproject.ExportModuleSource(*sheet)

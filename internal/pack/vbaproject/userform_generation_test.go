@@ -69,6 +69,7 @@ func TestNewUserFormModuleConfirmsExcelAuthoredComponentIdentity(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("Excel-authored baseline has no UserForm module")
+		return
 	}
 	if err := validateUserFormModuleSource(*found, found.Name); err != nil {
 		t.Fatalf("baseline UserForm module identity: %v", err)

@@ -139,6 +139,7 @@ func TestProcedureAnalysisFactsEmptyInputsRemainAllocationFree(t *testing.T) {
 	facts := newProcedureAnalysisFacts(nil, nil, nil, nil)
 	if facts == nil {
 		t.Fatalf("empty facts = nil")
+		return
 	}
 	if facts.declarationIndex != nil || facts.statementIndex != nil || facts.expressionIndex != nil || facts.memberExpressionsByStatement != nil {
 		t.Fatalf("empty facts allocated indexes: %#v", facts)

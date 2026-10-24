@@ -94,6 +94,7 @@ End Sub
 	}
 	if hover == nil {
 		t.Fatal("hover = nil")
+		return
 	}
 	contents, ok := hover.Contents.(protocol.MarkupContent)
 	if !ok || !strings.Contains(contents.Value, "Target documentation.") {

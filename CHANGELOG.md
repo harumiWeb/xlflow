@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added an opt-in VB084 Quick Fix to remove redundant `Step 1` clauses while
+  preserving comments and line endings, using shared diagnostic-associated
+  source edits in the language server.
+
 - Added `--preserve-designer` for template pack and file push. Code-only
   updates preserve Designer streams and storage metadata, skip equal-caption
   repair, and reject Designer changes before publication. Normal authoring

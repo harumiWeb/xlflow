@@ -58,13 +58,17 @@ func (l Linter) procedureNameConstantIssuesContext(ctx context.Context, path str
 				return nil, err
 			}
 		}
-		issue := l.issueAt(path, sourceByteRange(source, fix.StartByte, fix.EndByte), procedureNameConstantRuleID, "warning", fmt.Sprintf("Local constant %q is %q but its enclosing procedure is %q.", fix.ConstantName, fix.CurrentValue, fix.ExpectedName))
-		issue.Kind = "procedure_name_constant"
-		issue.Symbol = fix.ConstantName
-		issue.Suggestion = fmt.Sprintf("Update the string literal to %q.", fix.ExpectedName)
-		issues = append(issues, issue)
+		issues = append(issues, l.procedureNameConstantIssue(path, source, fix))
 	}
 	return issues, ctx.Err()
+}
+
+func (l Linter) procedureNameConstantIssue(path string, source []byte, fix ProcedureNameConstantFix) Issue {
+	issue := l.issueAt(path, sourceByteRange(source, fix.StartByte, fix.EndByte), procedureNameConstantRuleID, "warning", fmt.Sprintf("Local constant %q is %q but its enclosing procedure is %q.", fix.ConstantName, fix.CurrentValue, fix.ExpectedName))
+	issue.Kind = "procedure_name_constant"
+	issue.Symbol = fix.ConstantName
+	issue.Suggestion = fmt.Sprintf("Update the string literal to %q.", fix.ExpectedName)
+	return issue
 }
 
 func procedureNameConstantFixesContext(ctx context.Context, root *tree_sitter.Node, source []byte, cfg config.ProcedureNameConstantConfig) ([]ProcedureNameConstantFix, error) {

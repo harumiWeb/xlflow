@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "quickfix-step-one-after",
+  "description": "Observe omitted default step after the VB084 correction.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "maintainability"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "maintainability-observation",
+    "binding_note": "VB084 is an opt-in style diagnostic. This fixture observes the corrected syntax, not compile-equivalent diagnostic evidence."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-10-24T03:51:33Z"
+      }
+    ]
+  }
+}

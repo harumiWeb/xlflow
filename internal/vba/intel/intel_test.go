@@ -345,7 +345,7 @@ func TestProcedureNameConstantQuickFixPreservesCRLFRange(t *testing.T) {
 	}
 	for _, action := range actions {
 		if action.Kind == "quickfix" {
-			if action.Range != wantRange || action.NewText != "\"Foo\"" {
+			if len(action.Edits) != 1 || action.Edits[0].Range != wantRange || action.Edits[0].NewText != "\"Foo\"" {
 				t.Fatalf("quick fix = %+v, want range %+v and replacement %q", action, wantRange, "\"Foo\"")
 			}
 			return
@@ -446,7 +446,7 @@ func TestCodeActionsContextQuickFixDoesNotBuildProcedureIR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(actions) != 1 || actions[0].Kind != "quickfix" || actions[0].NewText != `"Run"` {
+	if len(actions) != 1 || actions[0].Kind != "quickfix" || len(actions[0].Edits) != 1 || actions[0].Edits[0].NewText != `"Run"` {
 		t.Fatalf("quickfix actions = %+v, want one VB044 quickfix", actions)
 	}
 	if got := snapshot.ProcedureArtifactStats(); got.IRBuild != 0 || got.CFGBuild != 0 {

@@ -20,6 +20,7 @@ func TestValidateReportsFirstInvalidUTF8Position(t *testing.T) {
 	var encodingErr *Error
 	if encodingErr, _ = errors.AsType[*Error](err); encodingErr == nil {
 		t.Fatalf("Validate() error = %v, want *Error", err)
+		return
 	}
 	if encodingErr.Status != StatusInvalidUTF8 || encodingErr.Position.Offset != 34 || encodingErr.Position.Line != 3 || encodingErr.Position.ByteColumn != 7 {
 		t.Fatalf("encoding error = %+v", encodingErr)

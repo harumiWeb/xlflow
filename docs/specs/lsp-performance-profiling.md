@@ -137,10 +137,11 @@ interruptible requires a separate change to shared parse ownership, retry
 after cancellation, and snapshot retirement; the action queue does not detach
 unowned parser goroutines to simulate immediate cancellation.
 
-`context.only` filters action families before their computation. VB044 being
-disabled skips its parse and fix scan. When enabled, its code actions evaluate
-only the procedure-name-constant rule and apply the same inline suppressions;
-they must not call whole-file `LintParsed` or construct ProcedureIR/CFG.
+`context.only` filters action families before their computation. With VB044 and
+VB084 disabled, quickfix-only requests skip parsing and correction scans.
+Enabled correction providers evaluate only their own rule and apply the same
+inline suppressions; they must not call whole-file `LintParsed` or construct
+ProcedureIR/CFG. See [Quick Fix contract](./diagnostic-quick-fixes.md).
 Documentation actions retain their document-symbol projection.
 
 `didChange` must not wait for a background reader or an in-progress parse of

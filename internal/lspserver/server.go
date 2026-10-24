@@ -1711,21 +1711,30 @@ func (s *Server) codeActionForDocument(ctx context.Context, doc intel.Document, 
 	if err != nil {
 		return nil, err
 	}
+	return s.projectCodeActions(doc, params.TextDocument.URI, actions), nil
+}
+
+func (s *Server) projectCodeActions(doc intel.Document, requestURI protocol.DocumentUri, actions []intel.CodeAction) []protocol.CodeAction {
 	out := make([]protocol.CodeAction, 0, len(actions))
-	requestURI := protocol.DocumentUri(params.TextDocument.URI)
 	for _, action := range actions {
 		kind := protocol.CodeActionKindRefactorRewrite
 		if action.Kind == "quickfix" {
 			kind = protocol.CodeActionKindQuickFix
 		}
+		edits := make([]protocol.TextEdit, len(action.Edits))
+		for i, edit := range action.Edits {
+			edits[i] = protocol.TextEdit{Range: toProtocolRange(edit.Range), NewText: edit.NewText}
+		}
+		diagnostics := make([]protocol.Diagnostic, len(action.Diagnostics))
+		for i, diagnostic := range action.Diagnostics {
+			diagnostics[i] = toProtocolDiagnostic(diagnostic)
+		}
 		out = append(out, protocol.CodeAction{
-			Title: action.Title,
-			Kind:  &kind,
+			Title:       action.Title,
+			Kind:        &kind,
+			Diagnostics: diagnostics,
 			Edit: &protocol.WorkspaceEdit{Changes: map[protocol.DocumentUri][]protocol.TextEdit{
-				requestURI: {{
-					Range:   toProtocolRange(action.Range),
-					NewText: action.NewText,
-				}},
+				requestURI: edits,
 			}},
 		})
 	}
@@ -1751,7 +1760,7 @@ func (s *Server) codeActionForDocument(ctx context.Context, doc intel.Document, 
 			}}}
 		}
 	}
-	return out, nil
+	return out
 }
 
 func (s *Server) signatureHelp(ctx *glsp.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
