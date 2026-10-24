@@ -1,5 +1,20 @@
 # Issue #949: type-backed Set Quick Fixes
 
+- [x] Fix PR #950 CI by making TypeDB-dependent LSP tests use explicit manifest-backed fixtures.
+- [x] Verify complete/incomplete DB behavior and default-member positive/negative controls; prepare the verified correction for push.
+
+CI run `40090237013` failed the new LSP tests on both platforms: Linux lacked a
+generated manifest; Windows loaded Range metadata different from the developer
+cache. The tests now use `Options.TypeDBDir` with a compatible temporary manifest
+and explicit generated types, rather than relying on installed TypeLib data.
+Complete/incomplete DB cases and a reference-only positive control prevent
+vacuous withholding results. Production code is unchanged.
+Windows focused tests pass (1.183s), the full LSP suite passes (144.836s), scoped
+lint reports zero issues, and docs/diff checks pass. A clean Linux container
+also passes the focused cases (0.045s) using Go 1.26.10; its read-only source
+mount is this worktree, and the container was automatically removed.
+Linux command: `rtk docker run --rm --name xlflow-pr950-ci-tests --mount "type=bind,source=C:/Users/HARUMI/orca/workspaces/xlflow/tautog,target=/src,readonly" --workdir /src --env GOTOOLCHAIN=auto --env CGO_ENABLED=1 golang:1.26.9-bookworm go test ./internal/lspserver -run "TestCodeAction(CorrectsSet|WithholdsSet)" -count=1 -timeout 5m`.
+
 - [x] Address the additional default-member review: withhold VB036 for object types with default-member evidence; verify TypeDB/project metadata and production LSP behavior.
 
 Default-member follow-up: seven focused metadata cases failed before the guard

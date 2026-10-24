@@ -113,6 +113,11 @@ UTF-16 coordinates, comments, colon-separated statements, safe and withheld
 continuations, malformed syntax, suppression, disabled rules, idempotency,
 multiple edits, and document ownership/version projection. Snapshot counters
 protect discovery from accidental ProcedureIR/CFG construction.
+TypeDB-dependent LSP tests use explicit temporary manifest-backed fixtures,
+including both complete and incomplete states. Default-member withholding tests
+include a reference-only positive control so missing metadata cannot make a
+negative test pass without exercising the provider. Installed TypeLib caches
+are not test evidence.
 
 The local VBE probes `quickfix-step-one-before` and
 `quickfix-step-one-after` observe the original and corrected syntax after the

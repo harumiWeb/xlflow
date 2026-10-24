@@ -1,3 +1,4 @@
+- Give TypeDB-dependent LSP tests an explicit temporary generated directory and compatible manifest. Never assume the developer's installed TypeLib cache is present or has particular member metadata; assert completeness and include a positive control for withheld-action tests.
 - Validate new oracle fixtures with `oracle.LoadCase` before opening Excel; observational fixtures require `unknown` evidence phase and `observation` diagnostic meaning. Promote only pending observations, in a separate invocation from already asserted controls.
 - For supervised agent launches, distinguish input acceptance from actual turn start. Confirm `turn_started` or concrete worker activity before reporting that a review is running; recover through the same Dispatch without blindly creating another worker.
 - Write GitHub PR titles and descriptions in English for this project, even when the conversation is in Japanese. Preserve English when updating existing PRs.
