@@ -5,7 +5,7 @@
 - [x] Add source-kind capabilities, open/versioned document gating, and automatic-request filtering.
 - [x] Verify aggregation conflicts, suppression, idempotency, EOL/Unicode and LSP revision/cancellation behavior.
 - [x] Update ADR/specification, guides and changelogs; run affected tests, lint and docs checks.
-- [ ] Commit and complete independent review.
+- [x] Commit and complete independent review.
 
 VB044/VB080/VB084/VB086 source actions reuse individual corrections and reject
 invalid or conflicting ranges per rule. Empty-kind requests cannot broaden an
@@ -20,7 +20,12 @@ workspace/process cleanup is confirmed. Log:
 Commands: `rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/vba/intel ./internal/lspserver ./internal/lint -count=1 -timeout 10m`
 and `rtk pnpm --dir editors/vscode run test:fix-all`.
 No new VBA transformation semantics or VBE evidence are asserted. Remote CI has
-not run for this branch; independent review remains pending.
+not run for this branch. Independent Codex review of `f2f16a74` passed with no
+confirmed in-scope findings; the reviewer also passed focused intel/LSP tests
+(4.700s / 2.183s). The report is retained at
+`C:/Users/HARUMI/orca/workspaces/xlflow/tautog/tmp_workspaces/final-review/issue952-pass1/report.md`.
+Run `run_6765b4844b57`, Dispatch `ctx_108e0d894e32`: completion acknowledged,
+external review terminal and watcher closed, and temporary review worktree removed.
 
 # Issue #949: type-backed Set Quick Fixes
 
