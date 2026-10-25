@@ -1328,3 +1328,16 @@ CI or publication is claimed.
 - [x] Update the Designer specification, user guide, and unreleased changelogs for deferred save and explicit conflict resolution.
 - [x] Implement `CustomEditorProvider` and URI-shared draft state, including draft history rebasing, `CustomDocumentEditEvent` Undo/Redo, and Save/Save As/Revert/backup/restore through the latest `TextDocument`. Isolate native Designer history with a dedicated editor resource URI while retaining the real source URI for LSP and persistence.
 - [x] Verify shared drafts across panels; unchanged source before Save; external-edit merge and history rebasing; structural and same-line conflict retention; explicit conflict resolution; Save As, source-preserving Revert, backup/recovery, and configured AutoSave. Full VS Code 1.141.1 tests, type checks, lint/docs checks and diff checks pass. Bounded read-only review completed; source-only change requires no Excel workbook E2E.
+
+# Issue #956: individual unused-local Quick Fix
+
+## PR #958 CI follow-up
+
+- [x] Synchronize binding coverage counts and exact unbound fixture IDs with the two asserted maintainability observations; preserve their evidence and binding status.
+- [x] Run the complete oracle package (77.513s), scoped lint and docs checks; document full-package validation after fixture inventory changes. Validate staged formatting before commit and inspect the replacement CI after push.
+
+- [x] Prove a standalone, explicitly typed primitive scalar Dim has no other syntactic occurrence; reuse the VB020 diagnostic owner without changing diagnostic semantics.
+- [x] Preserve comments and source bytes; cover withheld forms, suppression, disabled rules, Unicode/CRLF and individual LSP edits. Keep Fix All and CLI eligibility unchanged.
+- [x] Verify focused VBE accept/reject controls and before/after observations, update specifications and generated rule references, and run affected package, corpus, lint/docs checks and self-review.
+- [x] Collect the origin/main analyzer benchmark comparison (Count 3): deterministic counters unchanged; std-vba dependency-edit elapsed time increased 23.7% under non-isolated load, so timing remains inconclusive. Direct Quick Fix discovery/scalability tests prove no IR/CFG/index construction.
+- [x] Commit the verified change and perform independent final review: a6c71e8, no confirmed defects; report preserved and review-only resources removed.

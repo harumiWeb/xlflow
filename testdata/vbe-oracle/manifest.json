@@ -20,6 +20,11 @@
     { "id": "quickfix-step-one-after", "path": "cases/quickfix-step-one-after/case.json" },
     { "id": "quickfix-local-before", "path": "cases/quickfix-local-before/case.json" },
     { "id": "quickfix-local-after", "path": "cases/quickfix-local-after/case.json" },
+    {
+      "id": "quickfix-unused-local-before",
+      "path": "cases/quickfix-unused-local-before/case.json"
+    },
+    { "id": "quickfix-unused-local-after", "path": "cases/quickfix-unused-local-after/case.json" },
     { "id": "quickfix-set-object-before", "path": "cases/quickfix-set-object-before/case.json" },
     { "id": "quickfix-set-object-after", "path": "cases/quickfix-set-object-after/case.json" },
     { "id": "maintainability-global", "path": "cases/maintainability-global/case.json" },

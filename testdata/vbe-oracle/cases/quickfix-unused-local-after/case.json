@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "quickfix-unused-local-after",
+  "description": "Observe VBE compilation after removing the unused procedure-local Dim declaration while preserving its trailing comment.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "maintainability"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "maintainability-observation",
+    "binding_note": "VB020 is a maintainability diagnostic, not compile-equivalent; this fixture has no diagnostic contract."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-10-25T09:31:04Z"
+      }
+    ]
+  }
+}

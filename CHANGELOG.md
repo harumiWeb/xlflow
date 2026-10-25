@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added an individual VB020 Quick Fix to remove eligible unused local scalar
+  declarations, preserving trailing comments and line endings. Assigned,
+  ambiguous, and unsupported declarations remain unchanged.
+
 - Updated VS Code extension packaging dependencies to address nine Dependabot
   alerts affecting MSAL Node, undici, fast-uri, and markdown-it.
 - Updated the documentation toolchain's transitive nanoid dependency to fix

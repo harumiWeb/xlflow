@@ -158,6 +158,10 @@
 - For Resume Next array-value probes, bind an Err.Number guard to the exact assignment statement, invalidate it across non-observation mutations, and allow only narrow Err status observations before Boolean capture; verify generated scaffolds, the full corpus, race safety, and cold/warm performance before merging.
 - For Excel-authored picture fixtures, inspect the saved resource bytes before assigning format expectations: Excel can normalize JPEG input to BMP. Verify a compiler-generated native JPEG artifact separately in Excel before claiming direct JPEG persistence support.
 
+# VBE oracle fixture inventory
+
+- After adding or promoting VBE oracle fixtures, synchronize the binding coverage counts and exact ID sets, then run the complete `internal/oracle` package. Selected fixture-loading/contract tests do not exercise `TestOracleBindingCoverage`.
+
 # UserForm preview alignment
 
 - When the user confirms a feature has never been released, evaluate a single clear schema and execution contract without preserving speculative compatibility aliases or divergent authoring paths.

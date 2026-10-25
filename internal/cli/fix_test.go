@@ -162,7 +162,7 @@ func TestFixArgumentsAndOwnership(t *testing.T) {
 		writeEncodingFile(t, root, path, []byte("Option Base 0\n"))
 	}
 	for _, args := range [][]string{
-		{}, {"src/modules/Main.bas"}, {"src/modules/Main.bas", "--rule", "VB001"},
+		{}, {"src/modules/Main.bas"}, {"src/modules/Main.bas", "--rule", "VB001"}, {"src/modules/Main.bas", "--rule", "VB020"},
 		{"src/modules/Main.bas", "--rule", "VB080,VB084"}, {"src/modules/Main.bas", "--rule", "VB080", "--rule", "VB084"},
 		{"src/modules/Main.bas", "outside.bas", "--rule", "VB086"},
 		{"outside.bas", "--rule", "VB086"}, {"src/forms/assets/Resource.bas", "--rule", "VB086"}, {"src/forms/specs/Resource.cls", "--rule", "VB086"}, {"src/forms/Form.frm", "--rule", "VB086"},

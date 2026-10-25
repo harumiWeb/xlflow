@@ -134,6 +134,7 @@ func TestRedundantStepOneQuickFixWithholdsUnsafeOrInvisibleCorrections(t *testin
 			analyzer.Config.Lint.DetectRedundantStepOne = !tc.disabled
 			if tc.disabled {
 				analyzer.Config.Lint.RequireOptionExplicit = false
+				analyzer.Config.Lint.DetectUnusedLocalVariables = false
 				analyzer.DB = nil
 			}
 			source := "Option Explicit\nSub Work()\nDim i As Long\n" + tc.before + tc.header + "\nDebug.Print i\nNext i\nEnd Sub\n"

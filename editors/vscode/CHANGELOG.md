@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Offer an individual VB020 Quick Fix to remove eligible unused local scalar
+  declarations. Assigned, ambiguous, and unsupported declarations have no
+  removal action; comments and line endings are preserved.
+
 - Updated packaging dependencies to patched MSAL Node, undici, fast-uri, and
   markdown-it versions to address nine Dependabot alerts.
 
