@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated VS Code extension packaging dependencies to address nine Dependabot
+  alerts affecting MSAL Node, undici, fast-uri, and markdown-it.
+- Updated the documentation toolchain's transitive nanoid dependency to fix
+  an additional vulnerability reported by pnpm audit.
+
 - Fixed Fix All edit validation ignoring request cancellation when building
   UTF-16 indexes for documents without a matching analysis snapshot.
 
