@@ -1,5 +1,25 @@
 # Issue #954: CLI diagnostic fix preview and apply
 
+## PR #955 review follow-up
+
+- [x] Verify the request-context propagation finding and snapshot-range coverage gap against current code.
+- [x] Pass the request context into Fix All aggregation and shared edit validation; add a cancellation regression.
+- [x] Cover the four index-dependent invalid ranges with matching document snapshots.
+- [x] Run focused Intel/LSP/CLI tests and lint/docs/format checks; prepare the verified correction for push.
+
+The review identified one uncancelable UTF-16 index scan when Fix All validates
+a document without a matching snapshot. Propagating the existing context fixes
+that path without changing edit eligibility or VBA semantics. Snapshot coverage
+will protect the round-trip check that rejects clamped invalid positions.
+
+The cancellation regression fails with the former background context for both
+source-only and snapshot-backed documents, then passes after propagation.
+Focused Intel/LSP/CLI suites pass (8.793s / 1.709s / 8.857s):
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/vba/intel ./internal/lspserver ./internal/cli -run 'TestApplyCodeActionEdits|TestAggregateDocumentFixes|TestDocumentFixAll|Test.*FixAll|TestFix' -count=1 -timeout 5m`.
+Scoped Intel lint reports zero issues; docs, formatting and diff checks pass.
+The prior PR revision's 15 remote checks passed; the review correction still
+requires CI on its new revision. No VBA semantics or diagnostic output changed.
+
 - [x] Confirm merged #953, create Issue #954, and agree on one explicit file and one eligible syntax rule.
 - [x] Implement shared edit validation, guarded single-file publication, and CLI projection.
 - [x] Verify preview/apply, suppression, encoding, stale targets and filesystem failures.

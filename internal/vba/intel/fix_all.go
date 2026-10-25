@@ -76,7 +76,7 @@ func (a Analyzer) documentFixAllCodeActionsContext(ctx context.Context, doc Docu
 		if !codeActionKindAllowed(documentFixAllKind(code), only) {
 			continue
 		}
-		if action, ok := aggregateDocumentFixes(doc, code, fixes); ok {
+		if action, ok := aggregateDocumentFixes(ctx, doc, code, fixes); ok {
 			out = append(out, action)
 		}
 	}
@@ -85,7 +85,7 @@ func (a Analyzer) documentFixAllCodeActionsContext(ctx context.Context, doc Docu
 
 // aggregateDocumentFixes validates all ranges against the captured document.
 // A conflict rejects the whole rule action, never a subset of its corrections.
-func aggregateDocumentFixes(doc Document, code string, fixes []CodeAction) (CodeAction, bool) {
+func aggregateDocumentFixes(ctx context.Context, doc Document, code string, fixes []CodeAction) (CodeAction, bool) {
 	if !slices.Contains(documentFixAllRules[:], code) {
 		return CodeAction{}, false
 	}
@@ -103,7 +103,7 @@ func aggregateDocumentFixes(doc Document, code string, fixes []CodeAction) (Code
 	if len(action.Edits) == 0 {
 		return CodeAction{}, false
 	}
-	validated, err := validateAndSortCodeActionEdits(context.Background(), doc, action.Edits)
+	validated, err := validateAndSortCodeActionEdits(ctx, doc, action.Edits)
 	if err != nil {
 		return CodeAction{}, false
 	}

@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed Fix All edit validation ignoring request cancellation when building
+  UTF-16 indexes for documents without a matching analysis snapshot.
+
 - Added `xlflow fix` for previewing or applying one supported same-rule
   correction to one configured `.bas` or `.cls` source file, including active
   sidecar form code. Preview is the default; apply recomputes against the

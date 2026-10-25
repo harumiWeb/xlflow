@@ -79,16 +79,17 @@ func TestApplyCodeActionEditsRejectsInvalidRanges(t *testing.T) {
 		return CodeActionEdit{Range: Range{Start: start, End: end}, NewText: "x"}
 	}
 	for _, tc := range []struct {
-		name   string
-		source string
-		edits  []CodeActionEdit
+		name           string
+		source         string
+		edits          []CodeActionEdit
+		snapshotBacked bool
 	}{
 		{name: "negative line", source: "abc", edits: []CodeActionEdit{validEdit(Position{Line: -1}, Position{})}},
 		{name: "negative character", source: "abc", edits: []CodeActionEdit{validEdit(Position{Character: -1}, Position{})}},
-		{name: "line beyond document", source: "abc", edits: []CodeActionEdit{validEdit(Position{Line: 1}, Position{Line: 1})}},
-		{name: "character beyond line", source: "abc", edits: []CodeActionEdit{validEdit(Position{Character: 2}, Position{Character: 4})}},
-		{name: "surrogate split at start", source: "a😀b", edits: []CodeActionEdit{validEdit(Position{Character: 2}, Position{Character: 3})}},
-		{name: "surrogate split at end", source: "a😀b", edits: []CodeActionEdit{validEdit(Position{Character: 1}, Position{Character: 2})}},
+		{name: "line beyond document", source: "abc", snapshotBacked: true, edits: []CodeActionEdit{validEdit(Position{Line: 1}, Position{Line: 1})}},
+		{name: "character beyond line", source: "abc", snapshotBacked: true, edits: []CodeActionEdit{validEdit(Position{Character: 2}, Position{Character: 4})}},
+		{name: "surrogate split at start", source: "a😀b", snapshotBacked: true, edits: []CodeActionEdit{validEdit(Position{Character: 2}, Position{Character: 3})}},
+		{name: "surrogate split at end", source: "a😀b", snapshotBacked: true, edits: []CodeActionEdit{validEdit(Position{Character: 1}, Position{Character: 2})}},
 		{name: "reversed range", source: "abc", edits: []CodeActionEdit{validEdit(Position{Character: 2}, Position{Character: 1})}},
 		{name: "overlap", source: "abcdef", edits: []CodeActionEdit{
 			validEdit(Position{}, Position{Character: 3}),
@@ -103,11 +104,21 @@ func TestApplyCodeActionEditsRejectsInvalidRanges(t *testing.T) {
 			validEdit(Position{Character: 2}, Position{Character: 2}),
 		}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := ApplyCodeActionEdits(t.Context(), Document{Source: tc.source}, tc.edits); !errors.Is(err, ErrInvalidCodeActionEdits) {
+		run := func(t *testing.T, snapshotBacked bool) {
+			doc := Document{Source: tc.source}
+			if snapshotBacked {
+				snapshot := NewAnalysisSnapshot(doc)
+				defer snapshot.Retire()
+				doc = snapshot.Document()
+			}
+			if _, err := ApplyCodeActionEdits(t.Context(), doc, tc.edits); !errors.Is(err, ErrInvalidCodeActionEdits) {
 				t.Fatalf("ApplyCodeActionEdits error = %v, want ErrInvalidCodeActionEdits", err)
 			}
-		})
+		}
+		t.Run(tc.name, func(t *testing.T) { run(t, false) })
+		if tc.snapshotBacked {
+			t.Run(tc.name+"/snapshot", func(t *testing.T) { run(t, true) })
+		}
 	}
 }
 

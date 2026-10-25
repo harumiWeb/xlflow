@@ -222,6 +222,10 @@ Fix All tests also compare individual edits and diagnostic metadata, verify
 idempotency, kind hierarchy and eligibility, reject conflicting or invalid
 ranges, and exercise automatic-request filtering, client capability gating,
 version ownership, cancellation and document lifecycle changes over JSON-RPC.
+Aggregation passes the request context through shared edit validation so raw
+UTF-16 indexing can stop on cancellation. Range validation tests also exercise
+matching snapshots for out-of-document lines, out-of-line characters, and both
+surrogate-split endpoints; clamped offsets must fail the position round trip.
 Aggregation introduces no new VBA transformation semantics and reuses the
 existing local VBE evidence below.
 
