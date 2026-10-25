@@ -287,17 +287,24 @@ one of the parent's declared rule codes.
 Run the Excel-free deterministic report with:
 
 ```powershell
-rtk go test ./internal/oracle -run TestOracleBindingCoverage -v
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/oracle -run TestOracleBindingCoverage -v
 ```
 
 The test reports fixture state counts, complete and incomplete rule counts,
 sorted fixture IDs for every state (`bound`, `partially-bound`, `unbound`, and
 `not-applicable`), and sorted rule-to-case and surface coverage. The committed
-corpus currently reports 91 asserted fixtures: 75 `bound`, 0
-`partially-bound`, 15 `unbound`, and 2 `not-applicable`; the fifteen bound rules
-have complete positive/negative coverage. The report is emitted before a
-validation failure so missing positive/negative evidence and state changes
-remain visible in CI logs.
+coverage test asserts the current corpus counts and exact fixture ID sets.
+The report is emitted before a validation failure so missing positive/negative
+evidence and state changes remain visible in CI logs.
+
+When adding or promoting fixtures, synchronize the expected counts and sorted
+ID sets in `TestOracleBindingCoverage`, preserving the confirmed evidence and
+binding classifications. Run the complete Excel-free oracle package rather
+than only selected loading or diagnostic-contract tests:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/oracle -count=1
+```
 
 ## Outcomes and strict mode
 

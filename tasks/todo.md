@@ -1331,6 +1331,11 @@ CI or publication is claimed.
 
 # Issue #956: individual unused-local Quick Fix
 
+## PR #958 CI follow-up
+
+- [x] Synchronize binding coverage counts and exact unbound fixture IDs with the two asserted maintainability observations; preserve their evidence and binding status.
+- [x] Run the complete oracle package (77.513s), scoped lint and docs checks; document full-package validation after fixture inventory changes. Validate staged formatting before commit and inspect the replacement CI after push.
+
 - [x] Prove a standalone, explicitly typed primitive scalar Dim has no other syntactic occurrence; reuse the VB020 diagnostic owner without changing diagnostic semantics.
 - [x] Preserve comments and source bytes; cover withheld forms, suppression, disabled rules, Unicode/CRLF and individual LSP edits. Keep Fix All and CLI eligibility unchanged.
 - [x] Verify focused VBE accept/reject controls and before/after observations, update specifications and generated rule references, and run affected package, corpus, lint/docs checks and self-review.
