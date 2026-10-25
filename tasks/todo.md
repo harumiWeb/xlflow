@@ -1,3 +1,28 @@
+# Issue #954: CLI diagnostic fix preview and apply
+
+- [x] Confirm merged #953, create Issue #954, and agree on one explicit file and one eligible syntax rule.
+- [x] Implement shared edit validation, guarded single-file publication, and CLI projection.
+- [x] Verify preview/apply, suppression, encoding, stale targets and filesystem failures.
+- [x] Update CLI inventory, ADR/specification, user guide and changelog.
+- [ ] Run affected suites, lint/docs checks and source-only CLI smoke; commit and request independent final review.
+
+The complete affected suites pass: CLI 663.680s, sourceedit 1.530s,
+coordination 79.110s, intel 402.931s and LSP 563.894s. Focused CLI regressions
+pass (11.486s); exported class metadata/UTF-16 regression passes (2.409s).
+Shared application/Fix All tests pass (16.748s) and sourceedit race tests pass
+(2.711s). Scoped Go lint reports zero issues; formatting, generated docs and
+diff checks pass. There are no new diagnostic semantics, TypeDB loading,
+ProcedureIR/CFG or workbook/Excel access.
+
+The built Windows CLI smoke passes preview (two edits without disk changes),
+apply (matching preview hash and exact UTF-8/CRLF bytes), repeated apply (no-op)
+and staging cleanup. Retained project and JSON evidence:
+`C:/Users/HARUMI/orca/workspaces/xlflow/tautog/tmp_workspaces/issue954-cli-smoke`.
+Commands: `rtk pwsh -NoProfile -Command '& ./scripts/dev/go.ps1 -GoArgs @("build", "-o", ".tmp-quickfix/xlflow.exe", "./cmd/xlflow")'`,
+`rtk pwsh -NoProfile -ExecutionPolicy Bypass -File .tmp-quickfix/cli-smoke.ps1`,
+and `rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/cli ./internal/sourceedit ./internal/coordination ./internal/vba/intel ./internal/lspserver -count=1 -timeout 12m`.
+Linux and remote CI remain unverified. Independent final review is pending.
+
 # Issue #952: document-scoped same-rule Fix All
 
 - [x] Confirm merged #950, read existing edit/lifecycle contracts, and create #952 before implementation.

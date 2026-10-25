@@ -106,6 +106,9 @@ const excludedErrorInventoryLiterals = new Set([
   "counter_snapshot",
   "rule_codes",
   "binding_note",
+  "new_text", // Diagnostic-fix output metadata, not errors.
+  "source_sha256",
+  "result_sha256",
   "dependency_edges_updated",
   "dependency_nodes_updated",
   "allowed_occurrence_evidence",

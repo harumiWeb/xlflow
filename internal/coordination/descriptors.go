@@ -94,6 +94,7 @@ func buildDescriptors() []Descriptor {
 		both("inspect.used-range", "inspect used-range", workbookRead, bridgeArgs("inspect", "Target", "used-range")),
 		both("inspect.cell", "inspect cell", workbookRead, bridgeArgs("inspect", "Target", "cell")),
 		cli("fmt", "fmt", sourceMutate),
+		cli("fix", "fix", Policy{ResourceScope: ResourceSourceTree, OperationKind: OperationMutate, DefaultWaitPolicy: WaitFail, RecoveryBehavior: RecoveryNotApplicable}),
 		cli("lint", "lint", sourceRead),
 		cli("encoding.check", "encoding check", sourceRead),
 		cli("encoding.convert", "encoding convert", sourceTransaction),

@@ -54,6 +54,57 @@ future CLI would duplicate applicability and source-coordinate rules.
   conservative applicability and bounded discovery cost.
 - Cross-file preconditions and CLI application still require separate contracts.
 
+## Proposed CLI Extension (Draft)
+
+### Context
+
+The accepted editor contract already provides rule-scoped corrections for one
+document revision. A source-only CLI can reuse that behavior for explicit
+single-file application, but it needs a filesystem boundary and a publication
+contract that editor buffers do not have.
+
+### Proposed Decision
+
+- Add `xlflow fix <path> --rule VB044|VB080|VB084|VB086 [--apply] [--json]`.
+  It requires the current project's `xlflow.toml`, accepts one file inside
+  configured modules, classes, or workbook source roots or the test root, and
+  initially supports only `.bas` and `.cls`. Under the configured forms root,
+  permit only `forms/code/*.bas` when `[userform].code_source = "sidecar"`;
+  reject forms assets, specs, and inactive sidecar paths regardless of file
+  extension. Exclude `.frm` until its `.frx` sidecar has a transaction
+  contract.
+- Reuse the shared `intel` same-rule correction provider, the existing rule
+  configuration and suppression behavior, and UTF-16 range application. Do
+  not load TypeDB, run whole-project lint, or construct ProcedureIR/CFG.
+- Make preview the default. `--apply` recaptures the current file and computes
+  its edits again; preview results are not persisted or reused. Require UTF-8
+  without BOM and expose project-relative slash-separated paths, uppercase
+  rule IDs, changed/applied state, source/result SHA-256 values, edits,
+  associated diagnostics, and a unified diff in JSON.
+- Publish a changed file through a same-directory staging file and native
+  atomic replace. Reject symlink targets and non-regular files; reject a
+  read-only target only when a changed result will be applied. Recheck target
+  identity, mode, and contents before publication and clean up staging files
+  on pre-publication failure or cancellation.
+- Treat conflict detection as best effort. It does not promise a race-free
+  compare-and-swap against arbitrary external writers or crash durability.
+  Keep workbook bridges, COM, and unsaved editor buffers outside the command.
+- Advertise source-tree mutation to consumers through policy
+  `ResourceSourceTree`, operation `mutate`, and `ParallelSafe: false`. This
+  capability metadata acquires no source-tree lock or workbook lease and
+  provides no `--wait` behavior; external-writer races remain best-effort.
+
+### Consequences
+
+- CLI callers and editors use one correction implementation and coordinate
+  contract, while explicit preview remains the default for filesystem edits.
+- The initial command supports fewer file kinds than project-wide source
+  discovery. Extending it to UserForms or multiple files requires a separate
+  transaction decision.
+- Hashes describe each invocation's captured and proposed bytes; they are not
+  durable plan identifiers and do not bind a later apply to an earlier
+  preview.
+
 ## Alternatives Considered
 
 1. **Add individual VS Code providers.** Rejected because applicability would
@@ -66,8 +117,10 @@ future CLI would duplicate applicability and source-coordinate rules.
 ## Related
 
 - [Quick Fix contract](../specs/diagnostic-quick-fixes.md)
+- [CLI contract](../specs/cli-contract.md)
 - [Reusable LSP](ADR-0014-reusable-vba-lsp-server.md)
 - [Rule registry](ADR-0024-shared-static-analysis-rule-registry.md)
 - [Roadmap #944](https://github.com/harumiWeb/xlflow/issues/944)
 - [Initial implementation #945](https://github.com/harumiWeb/xlflow/issues/945)
 - [Document Fix All #952](https://github.com/harumiWeb/xlflow/issues/952)
+- [CLI application #954](https://github.com/harumiWeb/xlflow/issues/954)

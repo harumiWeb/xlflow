@@ -62,6 +62,7 @@ xlflow [--json] impact <Module.Procedure> [--path <dir-or-file>] [--direction ca
 xlflow [--json] graph dependencies [--path <dir-or-file>] [--module <name>]
 xlflow [--json] inspect-gui
 xlflow [--json] lint
+xlflow [--json] fix <path> --rule VB044|VB080|VB084|VB086 [--apply]
 xlflow lsp (--stdio | --check | --version) [--log-file <path>] [--performance-log]
 xlflow [--json] fmt [--write|--check|--diff] [--line-numbers <preserve|add|remove|renumber>] [--stdin] [<path>...]
 xlflow [--json] encoding check [<path>...]
@@ -615,6 +616,58 @@ UTF-8 and are not rewritten by the import normalization.
 
 `encoding convert --from cp932` is the only supported source conversion in v1. It uses the same managed scope and path checks as `encoding check`. UTF-8 without BOM remains byte-identical; every other selected file must decode strictly as CP932 and is converted to UTF-8 without BOM while retaining line endings and permissions. UTF-8 BOM, UTF-16 BOM, malformed CP932, unreadable files, and unstageable destinations fail before any original is modified. The command stages replacements in the source file's directory, commits them as one transaction, and rolls back already-applied replacements from retained originals when a commit step fails. It leaves no permanent `.bak` files. JSON uses `source.expected`, `source.from`, `source.to`, `source.files[]`, and `source.summary`; statuses include `converted` and `unchanged`. `analyze`, `lint`, `fmt`, `check`, `push`, `pack`, and other parser consumers validate source encoding but never perform implicit conversion. `pack` rejects invalid source before source planning, template payload reading, or `vbaProject.bin` generation. Its preflight resolves configured roots with the same cross-platform separator and absolute-root rules as pack inventory, while explicit `encoding check/convert` paths remain project-contained. `check`, `push`, and other Excel-backed preflight paths reject invalid source before starting Excel or doctor. Encoding conversion is source-only and never starts Excel; on Windows, the CLI serializes its transaction per configured project workbook identity without requiring recovery clearance. Encoding I/O failures are environment errors and path/argument violations are configuration errors.
 
+`fix <path> --rule VB044|VB080|VB084|VB086 [--apply]` runs the shared
+document-scoped, same-rule correction provider for one explicit file and one
+rule. The current working directory must contain `xlflow.toml`. Eligible
+files are under configured modules, classes, or workbook source roots, or the
+project test root, and must have the `.bas` or `.cls` extension. Under the
+configured forms root, the only allowed path is `forms/code/*.bas` when
+`[userform].code_source = "sidecar"`; forms assets, specs, and inactive
+sidecar paths are rejected even when their extensions look like source. A
+`.frm` file is not accepted because its `.frx` sidecar needs a separate
+transaction contract. The selected file is read from disk and must be UTF-8
+without BOM. The command does not use an open editor buffer, workbook, Excel
+COM, or session.
+
+The command respects the existing enabled-rule configuration and inline
+suppression behavior; it never enables a rule or changes its default. It uses
+the shared `intel` corrections and UTF-16 range application, without TypeDB,
+whole-project lint, or ProcedureIR/CFG construction. With no `--apply`, it
+previews the result. `--apply` recomputes edits from the current file capture;
+the command does not save or reuse a preview plan.
+
+Successful JSON uses `command="fix"` and an `output` object with `mode`
+(`preview` or `apply`), project-relative slash-separated `path`, uppercase
+`rule`, `changed`, `applied`, `source_sha256`, `result_sha256`, `edits`,
+`diagnostics`, and unified `diff`. `changed` means the proposed bytes differ
+from the captured source. `applied` is true only when changed bytes were
+written; it is false for preview and for an apply with no changes. Each edit
+has `range.start` and `range.end` with zero-based UTF-16 `line` and
+`character`, plus `new_text`. `diagnostics` retains the associated metadata
+from the shared correction provider. Both SHA-256 values cover the exact
+captured and proposed file bytes. The hashes identify that invocation's
+preview; an apply always captures and analyzes the current file again.
+
+Apply stages a replacement beside the target and publishes it with the
+platform's native atomic replace. Symlink targets and non-regular files are
+rejected. A read-only target is rejected only when apply would change it.
+Before publication, xlflow rechecks file identity, mode, and contents; a
+detected mismatch returns `fix_source_changed`. Cancellation or failure before
+publication removes the staging file. This is best-effort conflict detection,
+not a race-free compare-and-swap against arbitrary external writers or a crash
+durability guarantee.
+
+`fix` advertises a source-tree mutation capability to consumers through
+coordination policy `ResourceSourceTree`, operation `mutate`, and
+`ParallelSafe: false`. This metadata does not acquire a source-tree lock or
+workbook lease and provides no `--wait` behavior. The target recheck remains
+best-effort against external writers.
+
+`fix_args_invalid` and standard missing/invalid project configuration errors
+exit `2`. `source_encoding_invalid`, `fix_source_changed`, and
+`fix_edits_invalid` exit `1`. File-system failures return `fix_failed` and
+exit `3`; cancellation returns `fix_cancelled` and exit `3`.
+
 ## Configuration
 
 The MVP only auto-discovers `xlflow.toml` from the current working directory. `vba.toml` is intentionally not supported.
@@ -971,6 +1024,7 @@ Command-specific fields are added at the top level:
 - `gui_boundaries` for `inspect-gui`, `run --headless` preflight failures, and `doctor` source summaries
 - `ui` for `run --ui-stream` / `test --ui-stream` dialog events and `ui button` commands
 - `output` for `fmt` result summaries, `export-image`, `form export-image`, and `form snapshot` paths
+- `output` for `fix` mode, file/rule, hashes, edits, associated diagnostics, and unified diff
 
 `run --json` is intentionally more compact than the general envelope shape when the command fails during macro execution. The default run JSON is the stable AI-agent contract and keeps the high-signal fields needed to identify what failed, where it failed, whether the live workbook/session needs saving, and what the next suggested action is. `run --json --verbose` preserves the broader diagnostic payload used for xlflow internals, dialog-watcher debugging, and bug reports.
 
@@ -1195,6 +1249,11 @@ the corresponding marker. Cleanup results add `recovery.cleared[]` and
   execution failures, WSL delegation failures, and process
   enumeration/termination errors (`process_enumeration_failed`,
   `process_termination_failed`, `process_cleanup_failed`)
+
+For `fix`, `fix_args_invalid` and standard project `config_error` failures use
+exit `2`; `source_encoding_invalid`, `fix_source_changed`, and
+`fix_edits_invalid` use exit `1`; `fix_failed` and `fix_cancelled` use exit
+`3`.
 
 `diff` intentionally returns `0` when differences are found. Consumers should inspect `diff.summary.total_diffs` to distinguish changed and unchanged inputs.
 

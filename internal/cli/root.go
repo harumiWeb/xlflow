@@ -262,6 +262,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.encodingCommand(),
 		a.lspCommand(),
 		a.fmtCommand(),
+		a.fixCommand(),
 		a.analyzeCommand(),
 		a.metricsCommand(),
 		a.architectureCommand(),

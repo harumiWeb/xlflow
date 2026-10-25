@@ -97,36 +97,19 @@ func aggregateDocumentFixes(doc Document, code string, fixes []CodeAction) (Code
 		if len(fix.Edits) == 0 {
 			return CodeAction{}, false
 		}
-		for _, edit := range fix.Edits {
-			if comparePosition(edit.Range.Start, edit.Range.End) > 0 || !validFixAllPosition(doc, edit.Range.Start) || !validFixAllPosition(doc, edit.Range.End) {
-				return CodeAction{}, false
-			}
-			action.Edits = append(action.Edits, edit)
-		}
+		action.Edits = append(action.Edits, fix.Edits...)
 		action.Diagnostics = append(action.Diagnostics, fix.Diagnostics[0])
 	}
 	if len(action.Edits) == 0 {
 		return CodeAction{}, false
 	}
-	slices.SortFunc(action.Edits, func(left, right CodeActionEdit) int {
-		if result := comparePosition(left.Range.Start, right.Range.Start); result != 0 {
-			return result
-		}
-		return comparePosition(left.Range.End, right.Range.End)
-	})
-	for i := 1; i < len(action.Edits); i++ {
-		previous, current := action.Edits[i-1].Range, action.Edits[i].Range
-		if comparePosition(current.Start, previous.End) < 0 || current.Start == previous.Start {
-			return CodeAction{}, false
-		}
+	validated, err := validateAndSortCodeActionEdits(context.Background(), doc, action.Edits)
+	if err != nil {
+		return CodeAction{}, false
+	}
+	action.Edits = make([]CodeActionEdit, len(validated))
+	for i, edit := range validated {
+		action.Edits[i] = edit.edit
 	}
 	return action, true
-}
-
-func validFixAllPosition(doc Document, position Position) bool {
-	if position.Line < 0 || position.Character < 0 {
-		return false
-	}
-	offset := byteOffsetForDocumentPosition(doc, position)
-	return positionForDocumentByteOffset(doc, offset) == position
 }
