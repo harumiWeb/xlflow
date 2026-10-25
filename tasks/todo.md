@@ -1350,6 +1350,6 @@ CI or publication is claimed.
 - [x] Run focused local VBE controls and before/after observations, full oracle contracts, Intel/rule/CLI/corpus/lint/docs checks.
 - [x] Complete the full LSP and focused race checks and inspect the analyzer performance comparison (Count 1; timing is not conclusive; deterministic counters unchanged).
 - [x] Update ADR/specification, user guidance, registry and changelogs; complete self-review.
-- [ ] Complete independent final review of the committed implementation.
+- [x] Complete independent final review of the committed implementation (Pass 2 approved at e755b309; no additional confirmed defects).
 - [x] Address Pass 1's confirmed operator-scope finding: explicitly allow arithmetic binary operators and cover excluded direct/nested logical/concatenation expressions; focused ByVal tests pass.
-- [ ] Recheck the committed correction in Pass 2.
+- [x] Recheck the committed correction in Pass 2; preserve both review reports and clean up their temporary worktrees and sessions. Remote CI and PR publication remain unperformed.
