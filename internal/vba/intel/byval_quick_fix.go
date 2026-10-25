@@ -179,6 +179,22 @@ func byValScalarExpression(ctx context.Context, node *tree_sitter.Node, source [
 	case "number_literal", "string_literal", "boolean_literal", "date_literal":
 		return true
 	case "binary_expression", "unary_expression", "parenthesized_expression":
+		if node.Kind() == "binary_expression" {
+			// The grammar shares this node kind with logical and concatenation
+			// operators. Recognize the approved operator as well as its operands.
+			if node.NamedChildCount() != 2 {
+				return false
+			}
+			left, right := node.NamedChild(0), node.NamedChild(1)
+			// Case-insensitive keywords can comprise several anonymous CST
+			// tokens. Read the complete operator spelling between operands.
+			operator := strings.TrimSpace(string(source[left.EndByte():right.StartByte()]))
+			switch strings.ToLower(operator) {
+			case "+", "-", "*", "/", "\\", "mod", "^":
+			default:
+				return false
+			}
+		}
 		for i := range node.NamedChildCount() {
 			if !byValScalarExpression(ctx, node.NamedChild(i), source, parameter) {
 				return false

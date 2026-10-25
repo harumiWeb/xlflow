@@ -126,7 +126,11 @@ and `String`. `Variant`, objects, arrays and UDTs are withheld.
 
 The body must contain at least one straight-line assignment (including `Let`)
 to the function's own return slot. Expressions may contain only the parameter,
-scalar literals, arithmetic/unary operators and parentheses. Preserve comments
+scalar literals, arithmetic binary operators (`+`, `-`, `*`, `/`, `\`, `Mod`, `^`),
+unary operators and parentheses. Binary logical operators and string
+concatenation (`&`) withhold the correction, including inside nested expressions.
+Recognize the operator token explicitly: a `binary_expression` CST node alone
+does not establish arithmetic applicability. Preserve comments
 and blank lines. Withhold all other statements, bindings, calls, member access,
 control flow, procedure attributes, Static, conditional compilation, colon lines,
 continuations, duplicate declarations and recovered syntax. Sub/Property

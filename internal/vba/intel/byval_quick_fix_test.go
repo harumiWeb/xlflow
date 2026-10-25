@@ -70,11 +70,21 @@ func TestByValQuickFixPreservesSourceAndDiagnostic(t *testing.T) {
 }
 
 func TestByValQuickFixFunctions(t *testing.T) {
-	for _, assignment := range []string{"Adjust = value + 1", "Let Adjust = (value * 2)", "Adjust = \"ByRef 日本語😀\""} {
+	for _, assignment := range []string{
+		"Adjust = value + 1", "Adjust = value - 1", "Let Adjust = (value * 2)",
+		"Adjust = value / 2", "Adjust = value \\ 2", "Adjust = value Mod 2", "Adjust = value mOd 2",
+		"Adjust = value ^ 2", "Adjust = -(value + 1)", "Adjust = +value", "Adjust = Not value",
+		"Adjust = \"ByRef 日本語😀\"",
+	} {
 		source := "Option Explicit\nPrivate Function Adjust(ByRef value As Long) As String\n    " + assignment + "\nEnd Function\n"
 		a, doc, diagnostic := byValFixTestAnalyzer(t, source)
+		snapshot := NewAnalysisSnapshot(doc)
+		t.Cleanup(snapshot.RetireAndWait)
+		doc = snapshot.Document()
 		actions, err := a.CodeActionsContext(t.Context(), doc, diagnostic.Range, []string{"quickfix"})
 		if err != nil || len(actions) != 1 {
+			parsed, _ := snapshot.ParsedDocument()
+			_ = parsed.Read(func(view ast.ParsedView) error { t.Log(view.Root.ToSexp()); return nil })
 			t.Fatalf("%s: actions = %+v, err = %v", assignment, actions, err)
 		}
 	}
@@ -141,6 +151,22 @@ func TestByValQuickFixWithholdsUnsafeFormsEvenWithDiagnostic(t *testing.T) {
 			actions, err := a.CodeActionsContext(t.Context(), doc, diagnostic.Range, []string{"quickfix"})
 			if err != nil || len(actions) != 0 {
 				t.Fatalf("actions = %+v, err = %v", actions, err)
+			}
+		})
+	}
+}
+
+func TestByValQuickFixWithholdsNonArithmeticBinaryExpressions(t *testing.T) {
+	for _, expression := range []string{
+		"value And True", "value Or False", "value Xor True", "value Eqv True", "value Imp True",
+		"value & \"suffix\"", "value + (value And 1)", "-(value Or 1)",
+	} {
+		t.Run(expression, func(t *testing.T) {
+			source := "Private Function Show(ByRef value As Long) As Long\n    Show = " + expression + "\nEnd Function\n"
+			a, doc, diagnostic := byValFixTestAnalyzer(t, source)
+			actions, err := a.CodeActionsContext(t.Context(), doc, diagnostic.Range, []string{"quickfix"})
+			if err != nil || len(actions) != 0 {
+				t.Fatalf("non-arithmetic expression offered a correction: actions=%+v err=%v", actions, err)
 			}
 		})
 	}

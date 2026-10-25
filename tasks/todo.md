@@ -1348,6 +1348,8 @@ CI or publication is claimed.
 - [x] Reuse accepted current VBA275 diagnostics, withhold stale/missing evidence, and implement the restricted private scalar CST correction without new analysis artifacts.
 - [x] Verify exact edits, withheld alias/call/signature forms, diagnostic equality, unsaved revisions, lifecycle/cancellation and deterministic discovery costs.
 - [x] Run focused local VBE controls and before/after observations, full oracle contracts, Intel/rule/CLI/corpus/lint/docs checks.
-- [ ] Complete the full LSP and focused race checks and inspect the analyzer performance comparison (Count 1; timing is not conclusive).
+- [x] Complete the full LSP and focused race checks and inspect the analyzer performance comparison (Count 1; timing is not conclusive; deterministic counters unchanged).
 - [x] Update ADR/specification, user guidance, registry and changelogs; complete self-review.
 - [ ] Complete independent final review of the committed implementation.
+- [x] Address Pass 1's confirmed operator-scope finding: explicitly allow arithmetic binary operators and cover excluded direct/nested logical/concatenation expressions; focused ByVal tests pass.
+- [ ] Recheck the committed correction in Pass 2.
