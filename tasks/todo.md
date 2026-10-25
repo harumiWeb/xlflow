@@ -21,7 +21,12 @@ and staging cleanup. Retained project and JSON evidence:
 Commands: `rtk pwsh -NoProfile -Command '& ./scripts/dev/go.ps1 -GoArgs @("build", "-o", ".tmp-quickfix/xlflow.exe", "./cmd/xlflow")'`,
 `rtk pwsh -NoProfile -ExecutionPolicy Bypass -File .tmp-quickfix/cli-smoke.ps1`,
 and `rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/cli ./internal/sourceedit ./internal/coordination ./internal/vba/intel ./internal/lspserver -count=1 -timeout 12m`.
-Linux and remote CI remain unverified. Independent final review is pending.
+Linux and remote CI remain unverified. Independent review could not start:
+Codex rejected the configured model catalog (`max` reasoning level), and Orca
+rejected the required Devin fallback's `--model swe-2`. No Task/Dispatch was
+created and no review verdict exists. The review-only terminals were closed;
+the temporary checkout was clean with no active workers. Failure evidence:
+`C:/Users/HARUMI/orca/workspaces/xlflow/tautog/tmp_workspaces/final-review/issue954-pass1/launch-failure.md`.
 
 # Issue #952: document-scoped same-rule Fix All
 
