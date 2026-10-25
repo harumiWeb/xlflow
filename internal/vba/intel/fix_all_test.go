@@ -1,6 +1,7 @@
 package intel
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -316,7 +317,7 @@ func TestAggregateDocumentFixes(t *testing.T) {
 		}
 	}
 
-	action, ok := aggregateDocumentFixes(doc, "VB084", []CodeAction{
+	action, ok := aggregateDocumentFixes(t.Context(), doc, "VB084", []CodeAction{
 		fix("VB084", 4, 6),
 		fix("VB080", 0, 2),
 		fix("VB084", 0, 2),
@@ -339,10 +340,10 @@ func TestAggregateDocumentFixes(t *testing.T) {
 			t.Errorf("edit[%d] starts at byte %d, want %d", i, got, wantStart)
 		}
 	}
-	if _, ok := aggregateDocumentFixes(doc, "VB084", []CodeAction{fix("VB080", 0, 1)}); ok {
+	if _, ok := aggregateDocumentFixes(t.Context(), doc, "VB084", []CodeAction{fix("VB080", 0, 1)}); ok {
 		t.Fatal("aggregation succeeded without a target-rule fix")
 	}
-	if _, ok := aggregateDocumentFixes(doc, "VB001", []CodeAction{fix("VB001", 0, 1)}); ok {
+	if _, ok := aggregateDocumentFixes(t.Context(), doc, "VB001", []CodeAction{fix("VB001", 0, 1)}); ok {
 		t.Fatal("aggregation accepted an ineligible rule")
 	}
 
@@ -361,8 +362,37 @@ func TestAggregateDocumentFixes(t *testing.T) {
 		{name: "invalid surrogate end", doc: Document{Source: "a😀b"}, fixes: []CodeAction{{Diagnostics: []Diagnostic{{Code: "VB084"}}, Edits: []CodeActionEdit{{Range: Range{Start: Position{Character: 1}, End: Position{Character: 2}}}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if action, ok := aggregateDocumentFixes(tc.doc, "VB084", tc.fixes); ok {
+			if action, ok := aggregateDocumentFixes(t.Context(), tc.doc, "VB084", tc.fixes); ok {
 				t.Fatalf("aggregateDocumentFixes accepted invalid edits: %+v", action)
+			}
+		})
+	}
+}
+
+func TestAggregateDocumentFixesHonorsCancellation(t *testing.T) {
+	for _, snapshotBacked := range []bool{false, true} {
+		name := "source"
+		if snapshotBacked {
+			name = "snapshot"
+		}
+		t.Run(name, func(t *testing.T) {
+			doc := Document{Source: "abc"}
+			if snapshotBacked {
+				snapshot := NewAnalysisSnapshot(doc)
+				defer snapshot.Retire()
+				doc = snapshot.Document()
+			}
+			fixes := []CodeAction{{
+				Diagnostics: []Diagnostic{{Code: "VB080"}},
+				Edits:       []CodeActionEdit{{Range: Range{End: Position{Character: 1}}}},
+			}}
+			if _, ok := aggregateDocumentFixes(t.Context(), doc, "VB080", fixes); !ok {
+				t.Fatal("active context rejected valid corrections")
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			if action, ok := aggregateDocumentFixes(ctx, doc, "VB080", fixes); ok {
+				t.Fatalf("canceled aggregation returned an action: %+v", action)
 			}
 		})
 	}

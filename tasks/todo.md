@@ -1,3 +1,53 @@
+# Issue #954: CLI diagnostic fix preview and apply
+
+## PR #955 review follow-up
+
+- [x] Verify the request-context propagation finding and snapshot-range coverage gap against current code.
+- [x] Pass the request context into Fix All aggregation and shared edit validation; add a cancellation regression.
+- [x] Cover the four index-dependent invalid ranges with matching document snapshots.
+- [x] Run focused Intel/LSP/CLI tests and lint/docs/format checks; prepare the verified correction for push.
+
+The review identified one uncancelable UTF-16 index scan when Fix All validates
+a document without a matching snapshot. Propagating the existing context fixes
+that path without changing edit eligibility or VBA semantics. Snapshot coverage
+will protect the round-trip check that rejects clamped invalid positions.
+
+The cancellation regression fails with the former background context for both
+source-only and snapshot-backed documents, then passes after propagation.
+Focused Intel/LSP/CLI suites pass (8.793s / 1.709s / 8.857s):
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/vba/intel ./internal/lspserver ./internal/cli -run 'TestApplyCodeActionEdits|TestAggregateDocumentFixes|TestDocumentFixAll|Test.*FixAll|TestFix' -count=1 -timeout 5m`.
+Scoped Intel lint reports zero issues; docs, formatting and diff checks pass.
+The prior PR revision's 15 remote checks passed; the review correction still
+requires CI on its new revision. No VBA semantics or diagnostic output changed.
+
+- [x] Confirm merged #953, create Issue #954, and agree on one explicit file and one eligible syntax rule.
+- [x] Implement shared edit validation, guarded single-file publication, and CLI projection.
+- [x] Verify preview/apply, suppression, encoding, stale targets and filesystem failures.
+- [x] Update CLI inventory, ADR/specification, user guide and changelog.
+- [ ] Run affected suites, lint/docs checks and source-only CLI smoke; commit and request independent final review.
+
+The complete affected suites pass: CLI 663.680s, sourceedit 1.530s,
+coordination 79.110s, intel 402.931s and LSP 563.894s. Focused CLI regressions
+pass (11.486s); exported class metadata/UTF-16 regression passes (2.409s).
+Shared application/Fix All tests pass (16.748s) and sourceedit race tests pass
+(2.711s). Scoped Go lint reports zero issues; formatting, generated docs and
+diff checks pass. There are no new diagnostic semantics, TypeDB loading,
+ProcedureIR/CFG or workbook/Excel access.
+
+The built Windows CLI smoke passes preview (two edits without disk changes),
+apply (matching preview hash and exact UTF-8/CRLF bytes), repeated apply (no-op)
+and staging cleanup. Retained project and JSON evidence:
+`C:/Users/HARUMI/orca/workspaces/xlflow/tautog/tmp_workspaces/issue954-cli-smoke`.
+Commands: `rtk pwsh -NoProfile -Command '& ./scripts/dev/go.ps1 -GoArgs @("build", "-o", ".tmp-quickfix/xlflow.exe", "./cmd/xlflow")'`,
+`rtk pwsh -NoProfile -ExecutionPolicy Bypass -File .tmp-quickfix/cli-smoke.ps1`,
+and `rtk powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/go.ps1 test ./internal/cli ./internal/sourceedit ./internal/coordination ./internal/vba/intel ./internal/lspserver -count=1 -timeout 12m`.
+Linux and remote CI remain unverified. Independent review could not start:
+Codex rejected the configured model catalog (`max` reasoning level), and Orca
+rejected the required Devin fallback's `--model swe-2`. No Task/Dispatch was
+created and no review verdict exists. The review-only terminals were closed;
+the temporary checkout was clean with no active workers. Failure evidence:
+`C:/Users/HARUMI/orca/workspaces/xlflow/tautog/tmp_workspaces/final-review/issue954-pass1/launch-failure.md`.
+
 # Issue #952: document-scoped same-rule Fix All
 
 - [x] Confirm merged #950, read existing edit/lifecycle contracts, and create #952 before implementation.

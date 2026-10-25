@@ -68,8 +68,8 @@ continued `Option Explicit` spellings. Existing BOM rejection remains unchanged.
 VB001 retains its existing default-enabled warning policy. VB044 remains
 opt-in; VB080, VB084, and VB086 remain opt-in at information severity.
 Documentation generation retains its existing refactor kind and has no
-associated diagnostic. CLI mutation, save-time fixes, and cross-file edits
-remain outside this contract.
+associated diagnostic. CLI application is defined below. Save-time fixes and
+cross-file edits remain outside this contract.
 
 ## Document Fix All
 
@@ -104,6 +104,77 @@ document changes, close and reopen invalidate stale results through the
 existing bounded request lifecycle. Legacy clients retain individual fixes
 through `changes`; they do not receive unversioned Fix All. Editor application
 uses the normal workspace-edit and Undo mechanism.
+
+## CLI application
+
+`xlflow fix <path> --rule VB044|VB080|VB084|VB086 [--apply] [--json]` runs
+same-rule Fix All for one file. It requires `xlflow.toml` in the current
+project. Eligible files are under the configured modules, classes, or
+workbook source roots, or the project test root. The initial CLI surface
+accepts only `.bas` and `.cls`. Under the configured forms root, the sole
+exception is `forms/code/*.bas` when `[userform].code_source = "sidecar"`;
+forms assets, specs, and inactive sidecar paths are rejected even when a file
+has a supported extension. UserForm `.frm` files are excluded because their
+`.frx` sidecars and source ownership require a separate transaction contract.
+
+The command reuses the shared `intel` same-rule correction provider, including
+its enabled-rule configuration, inline suppression behavior, diagnostic
+associations, and UTF-16 edit application. It does not enable rules, broaden
+diagnostic defaults, run whole-project lint, load TypeDB, or construct
+ProcedureIR/CFG. It reads the saved file from disk; open editor buffers,
+workbooks, Excel COM, and workbook sessions are not inputs.
+
+Without `--apply`, the command previews the proposed result. With `--apply`, it
+captures and analyzes the current file again; a prior preview is never stored
+or reused as an edit plan. The input must be valid UTF-8 without a BOM.
+`changed` reports whether applying the proposed edits changes the captured
+bytes. `applied` is true only when changed bytes were successfully written.
+Preview output always has `applied=false`; an apply with no byte changes also
+has `applied=false`.
+
+JSON success uses the normal envelope with `command="fix"` and an `output`
+object containing:
+
+- `mode`: `preview` or `apply`, according to the requested operation.
+- `path`: project-relative path with `/` separators.
+- `rule`: uppercase rule ID.
+- `changed` and `applied`: booleans with the meanings above.
+- `source_sha256` and `result_sha256`: SHA-256 of the captured source bytes and
+  the proposed result bytes. In preview mode they bind the result to that
+  invocation's current file capture; they do not create a reusable plan.
+- `edits`: ordered edits with ranges in the captured document revision. Each
+  range uses zero-based UTF-16 line and character positions and each edit has
+  `new_text`.
+- `diagnostics`: the exact diagnostic metadata associated with the shared
+  corrections.
+- `diff`: unified diff from captured source to proposed result; it is empty
+  when there is no change.
+
+Before publishing a changed file, the command stages a replacement in the same
+directory and uses the platform's native atomic replace. It rejects symlink
+targets and non-regular files. Apply mode rejects a read-only target only when
+the proposed bytes differ. Before publication it rechecks the target identity,
+mode, and contents against the captured file; a detected change fails with
+`fix_source_changed`. The transaction removes its staging file on cancellation
+or failure before publication. This is best-effort conflict detection: it does
+not provide a race-free compare-and-swap against arbitrary external writers or
+crash durability.
+
+The command advertises a source-tree mutation capability to consumers through
+policy `ResourceSourceTree`, operation `mutate`, and `ParallelSafe: false`.
+This is coordination metadata only: no source-tree lock or workbook lease is
+acquired, and there is no `--wait` behavior. File rechecking remains
+best-effort against external writers.
+
+| Error code                | Exit | Meaning                                                                                                  |
+| ------------------------- | ---: | -------------------------------------------------------------------------------------------------------- |
+| `config_error`            |    2 | Required project configuration is missing or invalid, using the standard configuration error projection. |
+| `fix_args_invalid`        |    2 | Invalid command arguments, rule, path scope, or unsupported file extension.                              |
+| `source_encoding_invalid` |    1 | The selected source is not UTF-8 without BOM, using the existing source-encoding projection.             |
+| `fix_source_changed`      |    1 | Target identity, mode, or contents changed before publication.                                           |
+| `fix_edits_invalid`       |    1 | The shared edit set failed range or conflict validation.                                                 |
+| `fix_failed`              |    3 | File-system or other operational failure.                                                                |
+| `fix_cancelled`           |    3 | The operation was canceled before publication.                                                           |
 
 ## Type-backed Set corrections
 
@@ -151,6 +222,10 @@ Fix All tests also compare individual edits and diagnostic metadata, verify
 idempotency, kind hierarchy and eligibility, reject conflicting or invalid
 ranges, and exercise automatic-request filtering, client capability gating,
 version ownership, cancellation and document lifecycle changes over JSON-RPC.
+Aggregation passes the request context through shared edit validation so raw
+UTF-16 indexing can stop on cancellation. Range validation tests also exercise
+matching snapshots for out-of-document lines, out-of-line characters, and both
+surrogate-split endpoints; clamped offsets must fail the position round trip.
 Aggregation introduces no new VBA transformation semantics and reuses the
 existing local VBE evidence below.
 

@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed Fix All edit validation ignoring request cancellation when building
+  UTF-16 indexes for documents without a matching analysis snapshot.
+
+- Added `xlflow fix` for previewing or applying one supported same-rule
+  correction to one configured `.bas` or `.cls` source file, including active
+  sidecar form code. Preview is the default; apply recomputes against the
+  current file and publishes through a same-directory atomic replacement.
+
 - Added document-scoped, same-rule Fix All for enabled VB044, VB080, VB084,
   and VB086 corrections, using explicit source actions and versioned editor
   transactions. Conflicting edits withhold the affected rule action.

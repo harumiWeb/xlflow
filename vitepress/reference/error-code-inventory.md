@@ -589,6 +589,11 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `file_read`
 - `files_changed`
 - `files_to_change`
+- `fix_args_invalid`
+- `fix_cancelled`
+- `fix_edits_invalid`
+- `fix_failed`
+- `fix_source_changed`
 - `fixed_array_parameter`
 - `fixture_invalid`
 - `fmt_args_invalid`

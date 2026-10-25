@@ -37,6 +37,7 @@ const requiredCommandPages = [
   "lint",
   "lsp",
   "fmt",
+  "fix",
   "analyze",
   "architecture",
   "check",
