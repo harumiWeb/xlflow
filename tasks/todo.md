@@ -1334,5 +1334,5 @@ CI or publication is claimed.
 - [x] Prove a standalone, explicitly typed primitive scalar Dim has no other syntactic occurrence; reuse the VB020 diagnostic owner without changing diagnostic semantics.
 - [x] Preserve comments and source bytes; cover withheld forms, suppression, disabled rules, Unicode/CRLF and individual LSP edits. Keep Fix All and CLI eligibility unchanged.
 - [x] Verify focused VBE accept/reject controls and before/after observations, update specifications and generated rule references, and run affected package, corpus, lint/docs checks and self-review.
-- [ ] Collect the origin/main analyzer benchmark comparison (Count 3); direct Quick Fix discovery/scalability tests already prove no IR/CFG/index construction.
-- [ ] Commit the verified change and perform independent final review.
+- [x] Collect the origin/main analyzer benchmark comparison (Count 3): deterministic counters unchanged; std-vba dependency-edit elapsed time increased 23.7% under non-isolated load, so timing remains inconclusive. Direct Quick Fix discovery/scalability tests prove no IR/CFG/index construction.
+- [x] Commit the verified change and perform independent final review: a6c71e8, no confirmed defects; report preserved and review-only resources removed.
