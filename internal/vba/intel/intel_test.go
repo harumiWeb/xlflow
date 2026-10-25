@@ -367,7 +367,7 @@ func TestCodeActionsContextFiltersKindsBeforeParsing(t *testing.T) {
 	doc.Snapshot = snapshot
 	defer snapshot.Retire()
 
-	for _, only := range [][]string{{"source"}, {"refactor.extract"}, {"quickfix.other"}} {
+	for _, only := range [][]string{{"source.organizeImports"}, {"refactor.extract"}, {"quickfix.other"}} {
 		actions, err := analyzer.CodeActionsContext(context.Background(), doc, Range{}, only)
 		if err != nil {
 			t.Fatalf("CodeActionsContext(%v) error = %v", only, err)

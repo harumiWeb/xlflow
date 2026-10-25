@@ -141,6 +141,16 @@ Promise.all([
   }),
   esbuild.build({
     ...common,
+    entryPoints: ["test/runFixAllTest.ts"],
+    outfile: "dist/test/runFixAllTest.js",
+  }),
+  esbuild.build({
+    ...common,
+    entryPoints: ["test/suite/fixAll.test.ts"],
+    outfile: "dist/test/suite/fixAll.test.js",
+  }),
+  esbuild.build({
+    ...common,
     entryPoints: ["test/suite/extension.test.ts"],
     outfile: "dist/test/suite/extension.test.js",
   }),

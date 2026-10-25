@@ -788,6 +788,13 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	s.codeActionDocumentChanges.Store(versionedActions)
 	s.applyDeclarationPriorityOptions(params)
 	capabilities := s.handler.CreateServerCapabilities()
+	codeActionKinds := []protocol.CodeActionKind{protocol.CodeActionKindQuickFix, protocol.CodeActionKindRefactorRewrite}
+	if versionedActions {
+		for _, kind := range intel.FixAllCodeActionKinds() {
+			codeActionKinds = append(codeActionKinds, protocol.CodeActionKind(kind))
+		}
+	}
+	capabilities.CodeActionProvider = protocol.CodeActionOptions{CodeActionKinds: codeActionKinds}
 	capabilities.Experimental = map[string]any{"declarationPriority": true, "userFormPreview": true, "userFormEdit": true, "userFormPropertyEdit": true, "userFormPropertyEditors": 1, "userFormPicture": true, "userFormStructuralEdit": true, "userFormParentEdit": true, "userFormPageEdit": true, "userFormTabEdit": true, "userFormProductivityEdit": true, "userFormEvents": 1}
 	if capabilities.CodeLensProvider != nil {
 		resolveProvider := false
@@ -1707,6 +1714,12 @@ func (s *Server) codeActionForDocument(ctx context.Context, doc intel.Document, 
 	for i, kind := range params.Context.Only {
 		only[i] = string(kind)
 	}
+	if !s.codeActionDocumentChanges.Load() || !s.docs.isOpen(doc.URI) {
+		only = withoutSourceCodeActionKinds(only)
+		if len(params.Context.Only) > 0 && len(only) == 0 {
+			return []protocol.CodeAction{}, nil
+		}
+	}
 	actions, err := s.analyzer.CodeActionsContext(ctx, doc, fromProtocolRange(params.Range), only)
 	if err != nil {
 		return nil, err
@@ -1717,9 +1730,12 @@ func (s *Server) codeActionForDocument(ctx context.Context, doc intel.Document, 
 func (s *Server) projectCodeActions(doc intel.Document, requestURI protocol.DocumentUri, actions []intel.CodeAction) []protocol.CodeAction {
 	out := make([]protocol.CodeAction, 0, len(actions))
 	for _, action := range actions {
-		kind := protocol.CodeActionKindRefactorRewrite
-		if action.Kind == "quickfix" {
-			kind = protocol.CodeActionKindQuickFix
+		if strings.HasPrefix(action.Kind, "source.fixAll.") && (!s.codeActionDocumentChanges.Load() || !s.docs.isOpen(doc.URI)) {
+			continue
+		}
+		kind := protocol.CodeActionKind(action.Kind)
+		if kind == "" {
+			kind = protocol.CodeActionKindRefactorRewrite
 		}
 		edits := make([]protocol.TextEdit, len(action.Edits))
 		for i, edit := range action.Edits {

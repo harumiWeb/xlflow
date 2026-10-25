@@ -222,6 +222,19 @@ func (s *Server) dispatchCodeAction(ctx context.Context, conn *jsonrpc2.Conn, re
 			if s.performanceHook != nil {
 				s.performanceHook("codeAction", doc.Path)
 			}
+			if trigger.Context.TriggerKind == 2 {
+				filtered := params
+				filtered.Context.Only = nil
+				for _, kind := range params.Context.Only {
+					if !sourceCodeActionKind(string(kind)) {
+						filtered.Context.Only = append(filtered.Context.Only, kind)
+					}
+				}
+				if len(params.Context.Only) > 0 && len(filtered.Context.Only) == 0 {
+					return []protocol.CodeAction{}, nil
+				}
+				return s.codeActionForDocument(runCtx, doc, &filtered)
+			}
 			return s.codeActionForDocument(runCtx, doc, &params)
 		},
 		reply: func(result any, err error) {

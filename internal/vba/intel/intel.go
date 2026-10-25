@@ -1518,7 +1518,8 @@ func (a Analyzer) CodeActionsContext(ctx context.Context, doc Document, selectio
 		return nil, err
 	}
 	allowDocumentation, allowQuickFix := codeActionFamilies(only)
-	if !allowDocumentation && !allowQuickFix {
+	allowFixAll := requestedFixAll(only)
+	if !allowDocumentation && !allowQuickFix && !allowFixAll {
 		return []CodeAction{}, nil
 	}
 
@@ -1535,6 +1536,13 @@ func (a Analyzer) CodeActionsContext(ctx context.Context, doc Document, selectio
 	}
 	if allowQuickFix {
 		fixActions, fixErr := a.quickFixCodeActionsContext(ctx, doc, selection)
+		if fixErr != nil {
+			return nil, fixErr
+		}
+		out = append(out, fixActions...)
+	}
+	if allowFixAll {
+		fixActions, fixErr := a.documentFixAllCodeActionsContext(ctx, doc, only)
 		if fixErr != nil {
 			return nil, fixErr
 		}
@@ -1612,6 +1620,18 @@ func (a Analyzer) quickFixCodeActionsContext(ctx context.Context, doc Document, 
 		return nil, err
 	}
 	defer closeParsed()
+	out, err := a.lintQuickFixCodeActionsContext(ctx, doc, parsed, selection, linter)
+	if err != nil {
+		return nil, err
+	}
+	semanticActions, err := a.setAssignmentQuickFixesContext(ctx, doc, parsed, selection)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, semanticActions...), nil
+}
+
+func (a Analyzer) lintQuickFixCodeActionsContext(ctx context.Context, doc Document, parsed *ast.ParsedDocument, selection Range, linter lint.Linter) ([]CodeAction, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1659,11 +1679,7 @@ func (a Analyzer) quickFixCodeActionsContext(ctx context.Context, doc Document, 
 			Diagnostics: []Diagnostic{{Code: issue.Code, Severity: issue.Severity, Source: "xlflow", Message: lintDiagnosticMessage(issue), Range: diagnosticRange}},
 		})
 	}
-	semanticActions, err := a.setAssignmentQuickFixesContext(ctx, doc, parsed, selection)
-	if err != nil {
-		return nil, err
-	}
-	return append(out, semanticActions...), nil
+	return out, nil
 }
 
 func documentSuppressionFile(root, path string) string {
