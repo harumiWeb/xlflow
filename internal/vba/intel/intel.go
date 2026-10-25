@@ -108,12 +108,17 @@ type Analyzer struct {
 	// keyed by the folded project type name. ProjectDefaultTypes distinguishes
 	// a known project class without a usable value-producing default member
 	// from an unresolved external type.
-	ProjectDefaultMembers  map[string]vbadb.MemberInfo
-	ProjectDefaultTypes    map[string]bool
-	RealtimeFindingsFunc   RealtimeFindingsFunc
-	visibleDeclarations    map[string]bool
-	typeDeclarations       map[string]int
-	objectTypeDeclarations map[string]int
+	ProjectDefaultMembers map[string]vbadb.MemberInfo
+	ProjectDefaultTypes   map[string]bool
+	RealtimeFindingsFunc  RealtimeFindingsFunc
+	// QuickFixDiagnosticsFunc returns server-owned diagnostics from an accepted
+	// Full generation for this exact open document revision. It must not start
+	// analysis or use diagnostics supplied by a language client. Missing or stale
+	// evidence withholds corrections that require analyzer-family proof.
+	QuickFixDiagnosticsFunc func(Document) []Diagnostic
+	visibleDeclarations     map[string]bool
+	typeDeclarations        map[string]int
+	objectTypeDeclarations  map[string]int
 }
 
 // RealtimeFinding is a protocol-neutral analyzer result that can be adapted by
@@ -1609,7 +1614,11 @@ func (a Analyzer) quickFixCodeActionsContext(ctx context.Context, doc Document, 
 	}
 	// Do not parse merely because VS Code asks for automatic code actions.
 	linter := lint.Linter{RootDir: a.RootDir, Config: a.Config}
-	if !linter.QuickFixesEnabled() && (a.DB == nil || a.TypeDBResolutionIncomplete) {
+	var byValDiagnostics []Diagnostic
+	if a.Config.Analyze.DetectByRefParametersCanBeByVal && a.QuickFixDiagnosticsFunc != nil && strings.EqualFold(doc.ModuleKind, "standard") {
+		byValDiagnostics = a.QuickFixDiagnosticsFunc(doc)
+	}
+	if !linter.QuickFixesEnabled() && (a.DB == nil || a.TypeDBResolutionIncomplete) && len(byValDiagnostics) == 0 {
 		return nil, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -1628,7 +1637,12 @@ func (a Analyzer) quickFixCodeActionsContext(ctx context.Context, doc Document, 
 	if err != nil {
 		return nil, err
 	}
-	return append(out, semanticActions...), nil
+	out = append(out, semanticActions...)
+	byValActions, err := byValParameterQuickFixesContext(ctx, doc, parsed, selection, byValDiagnostics)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, byValActions...), nil
 }
 
 func (a Analyzer) lintQuickFixCodeActionsContext(ctx context.Context, doc Document, parsed *ast.ParsedDocument, selection Range, linter lint.Linter) ([]CodeAction, error) {

@@ -3668,7 +3668,7 @@
       "scope": "procedure-local",
       "realtime": true,
       "precision": "high",
-      "fix_available": false,
+      "fix_available": true,
       "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba275",
       "configurable": true,
       "configuration_key": "detect_byref_parameters_can_be_byval",

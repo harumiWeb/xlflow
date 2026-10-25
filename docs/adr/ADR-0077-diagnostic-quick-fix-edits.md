@@ -157,6 +157,42 @@ associated edits, while bulk eligibility remains an explicit separate policy.
   accepted edit ownership, revision, suppression, or explicit bulk-eligibility
   decisions above.
 
+## Proposed Individual VBA275 Extension (Draft)
+
+### Context
+
+VBA275 proves that a parameter binding is not written. A ByRef parameter can
+nevertheless observe mutations through another argument or module variable.
+Changing the passing modifier can also break public or constrained signatures.
+Recomputing interprocedural proof on automatic code-action requests would
+repeat expensive diagnostic work.
+
+### Proposed Decision
+
+- Require the server's accepted, project-aware Full VBA275 result for the exact
+  open document, generation and dependency generation. Never use a client's
+  diagnostic payload as proof. Keep a compact per-document subset, withhold
+  missing/stale evidence, and release it when the document closes.
+- Initially support explicit private standard-module Functions with one
+  required explicitly typed primitive scalar ByRef parameter and a primitive
+  scalar return type. Accept only straight-line return-slot assignments from
+  parameter/literal expressions. Exclude calls, other bindings, member access,
+  Variant, arrays, objects, UDTs and constrained or ambiguous syntax.
+- Reuse the published diagnostic and protocol-neutral edit model. Replace only
+  the modifier token and keep VBA275 opt-in and individual-only. Fix All and
+  CLI allowlists remain unchanged.
+
+### Consequences
+
+- The narrow body proof closes aliasing and reentrancy paths without caller
+  analysis during code-action discovery. Many valid VBA275 suggestions remain
+  without an automatic edit, including Sub and public API declarations.
+- A newly edited buffer must wait for accepted Full diagnostics before this
+  correction appears. This exchanges immediate availability for authoritative
+  current proof and bounded automatic-request cost.
+- Compile-only oracle observations establish syntax acceptance. They do not
+  establish runtime equivalence or make VBA275 compile-equivalent.
+
 ## Alternatives Considered
 
 1. **Add individual VS Code providers.** Rejected because applicability would

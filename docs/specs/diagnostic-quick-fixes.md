@@ -109,6 +109,47 @@ the `xlflow fix --rule` allowlist. An explicit
 `source.fixAll.xlflow.vb020` request yields no aggregate action; parent source
 requests continue to aggregate only VB044, VB080, VB084, and VB086.
 
+## Individual VBA275 correction
+
+VBA275 remains an opt-in information diagnostic. **Pass parameter ByVal**
+replaces only an explicit `ByRef` token with `ByVal`. It requires a server-owned
+VBA275 diagnostic from an accepted, project-aware Full diagnostic generation
+for the exact current open document. Missing or stale evidence yields no action;
+client-provided diagnostics never authorize a correction. Discovery reuses this
+evidence without running diagnostics, building IR/CFG, or querying the workspace.
+
+The initial provider accepts only an explicit `Private Function` in a standard
+module, with one required, explicitly typed primitive scalar parameter and an
+explicit primitive scalar return type. Allowed types are `Boolean`, `Byte`,
+`Integer`, `Long`, `LongLong`, `LongPtr`, `Single`, `Double`, `Currency`, `Date`
+and `String`. `Variant`, objects, arrays and UDTs are withheld.
+
+The body must contain at least one straight-line assignment (including `Let`)
+to the function's own return slot. Expressions may contain only the parameter,
+scalar literals, arithmetic/unary operators and parentheses. Preserve comments
+and blank lines. Withhold all other statements, bindings, calls, member access,
+control flow, procedure attributes, Static, conditional compilation, colon lines,
+continuations, duplicate declarations and recovered syntax. Sub/Property
+procedures, public/friend/implicit visibility, implicit ByRef, Optional and
+ParamArray parameters are outside this provider. Existing VBA275 signature
+constraints, configuration and suppression remain authoritative.
+
+A read-only ByRef parameter can observe a write through a different argument
+or module variable. The one-parameter, closed-expression body restriction
+excludes those aliasing paths; the diagnostic alone is insufficient proof.
+`Debug.Print` is also withheld: its parsed call shape and spelling alone do not
+prove builtin identity without resolving possible shadowing.
+
+Diagnostic evidence is invalid after document generation or dependency-generation
+changes, close/reopen, incomplete Full analysis or a rejected/canceled publication.
+Associated diagnostic metadata and UTF-16 ranges come from the accepted result.
+Only the five modifier bytes change; all surrounding trivia and source bytes
+remain intact. LSP edit versioning and request lifecycle checks still apply.
+
+VBA275 is individual-only. Fix All and CLI eligibility remain limited to
+VB044, VB080, VB084 and VB086. `fix_available` advertises the restricted provider,
+without enabling VBA275 or promising a correction for every diagnostic.
+
 ## Document Fix All
 
 VB044, VB080, VB084, and VB086 have explicit document Fix All eligibility,
@@ -250,6 +291,18 @@ Set does not guarantee that unrelated conversions or runtime errors disappear.
 Neither correction is eligible for Fix All in this stage.
 
 ## Verification
+
+VBA275 tests cover current accepted diagnostic evidence, incomplete Full/Fast
+results, obsolete generations, dependency invalidation, close/reopen and
+unsaved versioned edits. Closed scalar-expression positive controls accompany
+withheld aliases, calls, module state and unsupported signatures. Automatic
+discovery builds no new IR/CFG or interactive/workspace indexes.
+
+The sequential `quickfix-byval-before` / `quickfix-byval-after` observations
+compiled after the known accept/reject controls with confirmed Excel cleanup.
+Their exact sources differ only at the four explicit modifier tokens. They
+remain unbound maintainability observations for VBA275; compile acceptance is
+not runtime-equivalence evidence.
 
 Focused tests cover exact output and unchanged non-target bytes, LF/CRLF,
 UTF-16 coordinates, comments, colon-separated statements, safe and withheld

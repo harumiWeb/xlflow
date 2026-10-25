@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added an individual opt-in VBA275 Quick Fix to change eligible private scalar
+  Function parameters from ByRef to ByVal, using current diagnostic evidence
+  and conservative alias/syntax checks. Bulk eligibility is unchanged.
+
 - Added an individual VB020 Quick Fix to remove eligible unused local scalar
   declarations, preserving trailing comments and line endings. Assigned,
   ambiguous, and unsupported declarations remain unchanged.

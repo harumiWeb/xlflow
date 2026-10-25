@@ -1341,3 +1341,13 @@ CI or publication is claimed.
 - [x] Verify focused VBE accept/reject controls and before/after observations, update specifications and generated rule references, and run affected package, corpus, lint/docs checks and self-review.
 - [x] Collect the origin/main analyzer benchmark comparison (Count 3): deterministic counters unchanged; std-vba dependency-edit elapsed time increased 23.7% under non-isolated load, so timing remains inconclusive. Direct Quick Fix discovery/scalability tests prove no IR/CFG/index construction.
 - [x] Commit the verified change and perform independent final review: a6c71e8, no confirmed defects; report preserved and review-only resources removed.
+
+# Issue #959: individual ByRef-to-ByVal Quick Fix
+
+- [x] Create and read-back validate the English issue before implementation; assess aliasing, signature compatibility and bounded discovery.
+- [x] Reuse accepted current VBA275 diagnostics, withhold stale/missing evidence, and implement the restricted private scalar CST correction without new analysis artifacts.
+- [x] Verify exact edits, withheld alias/call/signature forms, diagnostic equality, unsaved revisions, lifecycle/cancellation and deterministic discovery costs.
+- [x] Run focused local VBE controls and before/after observations, full oracle contracts, Intel/rule/CLI/corpus/lint/docs checks.
+- [ ] Complete the full LSP and focused race checks and inspect the analyzer performance comparison (Count 1; timing is not conclusive).
+- [x] Update ADR/specification, user guidance, registry and changelogs; complete self-review.
+- [ ] Complete independent final review of the committed implementation.

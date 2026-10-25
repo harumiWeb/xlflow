@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Offer an individual opt-in VBA275 ByRef-to-ByVal Quick Fix for eligible private
+  scalar Functions after current project-aware diagnostics complete. Alias-
+  sensitive bodies and unsupported signatures remain unchanged.
+
 - Offer an individual VB020 Quick Fix to remove eligible unused local scalar
   declarations. Assigned, ambiguous, and unsupported declarations have no
   removal action; comments and line endings are preserved.

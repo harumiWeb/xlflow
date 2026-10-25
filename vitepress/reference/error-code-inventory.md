@@ -273,6 +273,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `database_result`
 - `dataflow_candidate_procedures`
 - `dataflow_cfg_walks`
+- `date_literal`
 - `debug_log`
 - `debug_stream_init_failed`
 - `declaration_line`
@@ -498,6 +499,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `encoding_convert_rollback_failed`
 - `end_byte`
 - `end_column`
+- `end_function_statement`
 - `end_if_fragment`
 - `end_line`
 - `end_statement`
