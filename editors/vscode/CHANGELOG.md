@@ -6,6 +6,9 @@
   declarations. Assigned, ambiguous, and unsupported declarations have no
   removal action; comments and line endings are preserved.
 
+- Updated packaging dependencies to patched MSAL Node, undici, fast-uri, and
+  markdown-it versions to address nine Dependabot alerts.
+
 - Offer document Fix All actions for enabled VB044, VB080, VB084, and VB086
   corrections through `source.fixAll.xlflow.<rule>` kinds, with versioned edits
   and normal editor Undo. VB001 and Set corrections remain individual-only.
