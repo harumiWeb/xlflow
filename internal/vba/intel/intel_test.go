@@ -385,6 +385,7 @@ func TestCodeActionsContextDisabledVB044QuickFixSkipsParsing(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	analyzer.DB = nil // No type-backed correction provider is available.
 	analyzer.Config.Lint.RequireOptionExplicit = false
+	analyzer.Config.Lint.DetectUnusedLocalVariables = false
 	doc := Document{
 		Path:   filepath.Join(analyzer.RootDir, "Main.bas"),
 		Source: "Public Sub Run()\n    Const PROCEDURE_NAME As String = \"Old\"\nEnd Sub\n",

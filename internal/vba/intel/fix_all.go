@@ -50,6 +50,7 @@ func (a Analyzer) documentFixAllCodeActionsContext(ctx context.Context, doc Docu
 	// particular, never run type-backed diagnostics or build a symbol index.
 	cfg := a.Config
 	cfg.Lint.RequireOptionExplicit = false
+	cfg.Lint.DetectUnusedLocalVariables = false
 	cfg.Lint.ProcedureNameConstant.Enabled = cfg.Lint.ProcedureNameConstant.Enabled && codeActionKindAllowed(documentFixAllKind("VB044"), only)
 	cfg.Lint.DetectLetAssignment = cfg.Lint.DetectLetAssignment && codeActionKindAllowed(documentFixAllKind("VB080"), only)
 	cfg.Lint.DetectRedundantStepOne = cfg.Lint.DetectRedundantStepOne && codeActionKindAllowed(documentFixAllKind("VB084"), only)

@@ -105,6 +105,58 @@ contract that editor buffers do not have.
   durable plan identifiers and do not bind a later apply to an earlier
   preview.
 
+## Proposed Individual VB020 Extension (Draft)
+
+### Context
+
+VB020's procedure-local reference predicate excludes assignment-target
+occurrences. Its warning therefore does not establish that deleting a local
+declaration alone is safe: an assigned-but-unread variable can still have
+writes. The shared correction model already supports individual diagnostic-
+associated edits, while bulk eligibility remains an explicit separate policy.
+
+### Proposed Decision
+
+- Add one individual action, **Remove unused local variable**, only when the
+  existing enabled VB020 predicate reports the diagnostic and a separate
+  occurrence check finds no other same-name identifier in the procedure,
+  including writes. Reuse the published diagnostic and its normal configuration
+  and suppression behavior; a diagnostic alone does not authorize deletion.
+  Bound the additional check to the current parsed procedure; do not rerun
+  whole-file lint or construct ProcedureIR/CFG for this action.
+- Restrict removal to a standalone, single-declarator procedure-local `Dim`
+  with an explicit primitive scalar type: `Boolean`, `Byte`, `Integer`, `Long`,
+  `LongLong`, `LongPtr`, `Single`, `Double`, `Currency`, `Date`, `String`, or
+  `Variant`. Exclude fixed-length strings, constants, `Static` declarations or procedures, `As New`,
+  objects, arrays, UDTs, multi-declarators, colon-separated or continued
+  statements, conditional-compilation branches, recovered syntax, and
+  ambiguous binding. Withhold ambiguous same-name occurrences conservatively.
+- Remove only the declaration statement's CST byte span. Keep indentation,
+  trailing comments, line endings, blank lines, and all unrelated source bytes
+  unchanged.
+- Keep VB020 default-enabled and keep its current diagnostic predicate,
+  configuration, and suppression policy. Registry `fix_available` advertises
+  provider availability only; it does not enable VB020 or authorize Fix All.
+  Keep document Fix All and CLI eligibility limited to VB044, VB080, VB084,
+  and VB086, including no aggregate action for an explicit
+  `source.fixAll.xlflow.vb020` request.
+- Keep `quickfix-unused-local-before` and `quickfix-unused-local-after` as
+  unbound maintainability observations. Both compile in VBE after the known
+  accept/reject controls with confirmed cleanup. Compilation supports syntax
+  acceptance; deletion safety additionally depends on the restricted types
+  and absence of other occurrences.
+
+### Consequences
+
+- Assigned-but-unread locals and other same-name occurrences cannot be removed
+  based solely on VB020's unread-reference diagnostic.
+- The syntax and binding gates intentionally leave many diagnosed declarations
+  without an action; `fix_available` remains a capability flag, not a promise
+  that every VB020 occurrence can be corrected.
+- The proposal extends individual correction coverage without changing the
+  accepted edit ownership, revision, suppression, or explicit bulk-eligibility
+  decisions above.
+
 ## Alternatives Considered
 
 1. **Add individual VS Code providers.** Rejected because applicability would
@@ -124,3 +176,4 @@ contract that editor buffers do not have.
 - [Initial implementation #945](https://github.com/harumiWeb/xlflow/issues/945)
 - [Document Fix All #952](https://github.com/harumiWeb/xlflow/issues/952)
 - [CLI application #954](https://github.com/harumiWeb/xlflow/issues/954)
+- [Individual VB020 correction #956](https://github.com/harumiWeb/xlflow/issues/956)

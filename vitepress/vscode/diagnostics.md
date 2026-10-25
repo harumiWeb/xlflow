@@ -15,5 +15,8 @@ Use **Source Action...** for **Fix all VB044/VB080/VB084/VB086 occurrences in th
 document** when the corresponding lint rule is enabled. Each action corrects
 one rule in the open buffer and can be undone normally. Unsafe occurrences
 remain unchanged; conflicting edits withhold that rule's action. VB001 and
-VB036/VB037 remain individual Quick Fixes. Fix All uses versioned document edits
-and is not enabled automatically on save.
+VB020 and VB036/VB037 remain individual Quick Fixes. VB020 offers removal only
+for a standalone, single-variable `Dim` with an explicit primitive scalar type
+and no reads or writes elsewhere in the procedure. Comments and line endings
+are preserved. Fix All uses versioned document edits and is not enabled
+automatically on save.

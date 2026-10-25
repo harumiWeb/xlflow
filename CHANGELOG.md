@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added an individual VB020 Quick Fix to remove eligible unused local scalar
+  declarations, preserving trailing comments and line endings. Assigned,
+  ambiguous, and unsupported declarations remain unchanged.
+
 - Fixed Fix All edit validation ignoring request cancellation when building
   UTF-16 indexes for documents without a matching analysis snapshot.
 

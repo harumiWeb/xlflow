@@ -1328,3 +1328,11 @@ CI or publication is claimed.
 - [x] Update the Designer specification, user guide, and unreleased changelogs for deferred save and explicit conflict resolution.
 - [x] Implement `CustomEditorProvider` and URI-shared draft state, including draft history rebasing, `CustomDocumentEditEvent` Undo/Redo, and Save/Save As/Revert/backup/restore through the latest `TextDocument`. Isolate native Designer history with a dedicated editor resource URI while retaining the real source URI for LSP and persistence.
 - [x] Verify shared drafts across panels; unchanged source before Save; external-edit merge and history rebasing; structural and same-line conflict retention; explicit conflict resolution; Save As, source-preserving Revert, backup/recovery, and configured AutoSave. Full VS Code 1.141.1 tests, type checks, lint/docs checks and diff checks pass. Bounded read-only review completed; source-only change requires no Excel workbook E2E.
+
+# Issue #956: individual unused-local Quick Fix
+
+- [x] Prove a standalone, explicitly typed primitive scalar Dim has no other syntactic occurrence; reuse the VB020 diagnostic owner without changing diagnostic semantics.
+- [x] Preserve comments and source bytes; cover withheld forms, suppression, disabled rules, Unicode/CRLF and individual LSP edits. Keep Fix All and CLI eligibility unchanged.
+- [x] Verify focused VBE accept/reject controls and before/after observations, update specifications and generated rule references, and run affected package, corpus, lint/docs checks and self-review.
+- [ ] Collect the origin/main analyzer benchmark comparison (Count 3); direct Quick Fix discovery/scalability tests already prove no IR/CFG/index construction.
+- [ ] Commit the verified change and perform independent final review.

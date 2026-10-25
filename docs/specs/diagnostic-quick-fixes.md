@@ -71,10 +71,48 @@ Documentation generation retains its existing refactor kind and has no
 associated diagnostic. CLI application is defined below. Save-time fixes and
 cross-file edits remain outside this contract.
 
+## Individual VB020 correction
+
+VB020 offers an individual **Remove unused local variable** action only when
+the existing enabled VB020 diagnostic predicate reports the local and the
+additional removal checks below pass. VB020 remains default-enabled, and its
+existing configuration and suppression behavior remain authoritative. The
+rule registry sets `fix_available` for VB020 to advertise this individual
+provider; that metadata does not enable the rule or grant bulk eligibility.
+Build the additional occurrence check from the current parsed procedure only;
+do not rerun whole-file lint or construct ProcedureIR/CFG for this action.
+
+The declaration must be a standalone, single-declarator `Dim` inside a
+procedure, explicitly typed as one of `Boolean`, `Byte`, `Integer`, `Long`,
+`LongLong`, `LongPtr`, `Single`, `Double`, `Currency`, `Date`, `String`, or
+`Variant`. Fixed-length `String` declarations are excluded. The procedure must
+contain no other identifier occurrence with that name, including writes. If
+same-name occurrences cannot be distinguished from the declared binding,
+withhold the action conservatively.
+
+Withhold the action for `Const`, `Static` declarations or procedures, `As New`, object types, arrays, UDTs,
+multiple declarators, colon-separated statements, continued statements,
+conditional-compilation branches, recovered or malformed syntax, ambiguous
+binding, or any other occurrence of the name in the procedure. In particular,
+VB020's unread-reference predicate alone is insufficient: it excludes
+assignment-target occurrences, so a write-only local must not receive a
+declaration-only deletion.
+
+Associate the action with the exact published VB020 diagnostic and remove only
+the declaration statement's CST byte span. Preserve indentation, trailing
+comments, the original line ending, and every byte outside that span, leaving
+the resulting blank line when the declaration had occupied the line. The edit
+uses the captured document revision and the existing UTF-16 edit projection.
+
+VB020 is individual-only. It is not added to the document Fix All allowlist or
+the `xlflow fix --rule` allowlist. An explicit
+`source.fixAll.xlflow.vb020` request yields no aggregate action; parent source
+requests continue to aggregate only VB044, VB080, VB084, and VB086.
+
 ## Document Fix All
 
 VB044, VB080, VB084, and VB086 have explicit document Fix All eligibility,
-independent of `fix_available`. VB001 and VB036/VB037 remain individual-only.
+independent of `fix_available`. VB001, VB020, and VB036/VB037 remain individual-only.
 The rule's existing configuration and conservative correction preconditions
 still apply; occurrences without a safe individual correction are unchanged.
 
@@ -254,6 +292,14 @@ The sequential `quickfix-local-before` / `quickfix-local-after` VBE pair covers
 the combined VB001/VB080/VB086 edits on a module whose variables are declared.
 These are policy observations, not compile-equivalent bindings or a promise
 that adding Option Explicit preserves compilation for undeclared variables.
+
+The sequential `quickfix-unused-local-before` / `quickfix-unused-local-after`
+pair confirms VBE compilation before and after removing the standalone `Dim`
+while retaining its comment. Both were accepted after the known accept/reject
+controls, with confirmed Excel cleanup. These remain unbound maintainability
+observations, not compile-equivalent bindings for VB020 or runtime-equivalence
+evidence. Deletion safety additionally requires the occurrence and syntax
+checks above.
 
 For Set corrections, `quickfix-set-object-before` / `quickfix-set-object-after`
 observe VB036 syntax on explicit Worksheet references and remain policy

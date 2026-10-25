@@ -116,6 +116,11 @@ func (l Linter) QuickFixesParsedContext(ctx context.Context, doc *vbaast.ParsedD
 		}
 		return ctx.Err()
 	})
+	if err == nil && l.Config.Lint.DetectUnusedLocalVariables {
+		var unused []QuickFix
+		unused, err = l.unusedLocalQuickFixesContext(ctx, doc)
+		fixes = append(fixes, unused...)
+	}
 	return fixes, err
 }
 
@@ -193,7 +198,7 @@ func missingOptionExplicitEdit(root *tree_sitter.Node, source []byte) (FixEdit, 
 // QuickFixesEnabled lets adapters skip parsing when every provider is disabled.
 func (l Linter) QuickFixesEnabled() bool {
 	cfg := l.Config.Lint
-	return cfg.RequireOptionExplicit || cfg.ProcedureNameConstant.Enabled || cfg.DetectRedundantStepOne || cfg.DetectLetAssignment || cfg.DetectRedundantOptionBaseZero
+	return cfg.RequireOptionExplicit || cfg.ProcedureNameConstant.Enabled || cfg.DetectRedundantStepOne || cfg.DetectLetAssignment || cfg.DetectRedundantOptionBaseZero || cfg.DetectUnusedLocalVariables
 }
 
 func explicitLetEdit(node *tree_sitter.Node, source []byte) (FixEdit, bool) {
