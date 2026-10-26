@@ -194,8 +194,8 @@ uses the normal workspace-edit and Undo mechanism.
 
 ## CLI application
 
-`xlflow fix <path> --rule VB044|VB080|VB084|VB086 [--apply] [--json]` runs
-same-rule Fix All for one file. It requires `xlflow.toml` in the current
+`xlflow fix <path> [<path>...] --rule VB044|VB080|VB084|VB086 [--apply] [--json]` runs
+same-rule Fix All for explicit files. It requires `xlflow.toml` in the current
 project. Eligible files are under the configured modules, classes, or
 workbook source roots, or the project test root. The initial CLI surface
 accepts only `.bas` and `.cls`. Under the configured forms root, the sole
@@ -236,6 +236,37 @@ object containing:
   corrections.
 - `diff`: unified diff from captured source to proposed result; it is empty
   when there is no change.
+
+### Multiple-file previews
+
+Two or more positional paths select a preview-only output schema, even when
+aliases deduplicate to one file. `--apply` with multiple arguments fails with
+`fix_args_invalid` before project configuration or source reads. Directories,
+globs and implicit project discovery are unsupported; each input must satisfy
+the same managed-source and regular-file checks as a single-file invocation.
+
+Logical absolute paths are deduplicated using `sourcepath.Key` (case-folded
+only on Windows), not inode or hard-link identity. Results are sorted by
+project-relative slash-separated path using lexical case-sensitive ordering;
+duplicate aliases use the lexically smallest relative spelling. Each argument
+is validated before deduplication. Files are captured and analyzed sequentially,
+retiring each analysis snapshot before processing the next file.
+
+The batch `output` contains `mode="preview"`, uppercase `rule`, `files` (each
+with the complete single-file preview shape), and `summary.file_count`,
+`summary.changed_file_count`, `summary.edit_count`. Counts cover unique selected
+files, including unchanged, suppressed and disabled-rule results. `target`
+contains ordered `paths` and `rule`. Text output includes each file's diff and
+the aggregate counts. One positional path retains its existing output shape
+and apply behavior.
+
+Any invalid input, read, encoding or analysis failure, or cancellation returns
+one existing failure envelope without a successful partial `output`. Preview
+never stages or writes source files. Captures describe individual file states;
+they are neither an atomic project snapshot nor a durable plan for later apply.
+Multi-file writes and cross-file corrections remain deferred.
+
+### Single-file publication
 
 Before publishing a changed file, the command stages a replacement in the same
 directory and uses the platform's native atomic replace. It rejects symlink

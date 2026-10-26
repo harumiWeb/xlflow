@@ -109,6 +109,8 @@ const excludedErrorInventoryLiterals = new Set([
   "new_text", // Diagnostic-fix output metadata, not errors.
   "source_sha256",
   "result_sha256",
+  "changed_file_count", // Multi-file diagnostic-fix summary, not errors.
+  "edit_count",
   "dependency_edges_updated",
   "dependency_nodes_updated",
   "allowed_occurrence_evidence",

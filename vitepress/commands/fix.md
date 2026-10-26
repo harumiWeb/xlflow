@@ -1,26 +1,27 @@
 # xlflow fix
 
-Preview or apply the supported Quick Fix corrections for one VBA source file
-and one diagnostic rule. The command is source-only and never opens Excel.
+Preview the supported Quick Fix corrections for explicit VBA source files,
+or apply to one file, using one diagnostic rule. The command is source-only
+and never opens Excel.
 
 ## Usage
 
 ```powershell
-xlflow fix <path> --rule VB044|VB080|VB084|VB086 [--apply] [--json]
+xlflow fix <path> [<path>...] --rule VB044|VB080|VB084|VB086 [--apply] [--json]
 ```
 
 Without `--apply`, the command previews the edits. Add `--apply` to write a
-changed result. The command always captures and analyzes the current file for
+changed result for exactly one path. The command captures and analyzes each file for
 each invocation, so a prior preview is not an apply plan.
 
 ## Options and Arguments
 
-| Option / argument | Description                                                         | Default      |
-| ----------------- | ------------------------------------------------------------------- | ------------ |
-| `<path>`          | One existing file under an eligible configured source or test root. | Required     |
-| `--rule`          | One rule: `VB044`, `VB080`, `VB084`, or `VB086`.                    | Required     |
-| `--apply`         | Apply changed bytes to the file.                                    | Preview only |
-| `--json`          | Return the structured xlflow JSON envelope.                         | false        |
+| Option / argument | Description                                                             | Default      |
+| ----------------- | ----------------------------------------------------------------------- | ------------ |
+| `<path>...`       | Explicit existing files under eligible configured source or test roots. | Required     |
+| `--rule`          | One rule: `VB044`, `VB080`, `VB084`, or `VB086`.                        | Required     |
+| `--apply`         | Apply changed bytes; requires exactly one positional path.              | Preview only |
+| `--json`          | Return the structured xlflow JSON envelope.                             | false        |
 
 The project root must contain `xlflow.toml`. Eligible files are under the
 configured modules, classes, or workbook source roots, or the project test
@@ -72,6 +73,20 @@ using zero-based UTF-16 line and character positions, plus `new_text`.
 provider. `diff` is the unified source-to-result diff and is empty when no
 change is proposed.
 
+When two or more paths are provided, `output` contains `mode="preview"`,
+`rule`, `files` (the single-file preview objects described above), and
+`summary.file_count`, `summary.changed_file_count`, `summary.edit_count`.
+Unchanged files are included. Logical path aliases are deduplicated (ignoring
+case on Windows), and results are sorted lexically by project-relative path.
+Multiple arguments use this schema even if aliases select only one file.
+`target.paths` lists the selected paths in the same order.
+
+All selected files must pass validation; a failure returns one error without
+partial results. Each file is captured sequentially, so this is not an atomic
+project snapshot. Preview never writes files. Directories, globs and project
+discovery are unsupported. Multiple paths with `--apply` are rejected before
+configuration or source reads. Apply one file at a time after reviewing it.
+
 ## Exit Codes
 
 | Code | Meaning                                                                          |
@@ -95,6 +110,12 @@ Preview a rule's applicable corrections:
 xlflow fix src/modules/Loops.bas --rule VB084 --json
 ```
 
+Preview the same rule in multiple explicit files:
+
+```powershell
+xlflow fix src/modules/First.bas src/classes/Second.cls --rule VB080 --json
+```
+
 Apply the current result after reviewing the preview:
 
 ```powershell
@@ -106,30 +127,32 @@ xlflow fix src/modules/Loops.bas --rule VB084 --apply --json
 ## When to use this command
 
 Use `xlflow fix` to preview and selectively apply one supported rule's safe
-corrections in one configured source file.
+corrections. Preview can select several explicit configured source files;
+application requires exactly one path.
 
 ## Prerequisites
 
-Run it from a project containing `xlflow.toml`. The selected file must be in
+Run it from a project containing `xlflow.toml`. Each selected file must be in
 the configured modules, classes, workbook, or test roots and use `.bas` or
 `.cls`; the only forms path allowed is active sidecar `forms/code/*.bas`.
 
 ## What this command reads and changes
 
-The command reads one saved source file and its project configuration. With
+The command reads explicitly selected saved source files and project configuration. With
 `--apply`, it can replace that file after rechecking the captured file state.
 It does not read or change a workbook or an unsaved editor buffer.
 
 ## Effect on source-of-truth state
 
-Preview leaves the source file untouched. Apply writes only when the proposed
+Preview leaves all source files untouched. Apply writes only when the proposed
 bytes differ. Review the unified diff before using `--apply`; a later apply
 recomputes against the file as it exists then.
 
 ## Common workflows
 
 Run `xlflow fix <path> --rule <VB-rule> --json`, inspect `output.diff`, then
-repeat with `--apply` when the current result is intended.
+repeat with `--apply` when the current result is intended. For multiple paths,
+inspect `output.files[].diff` and `output.summary`, then apply to one path at a time.
 
 ## Common failures
 

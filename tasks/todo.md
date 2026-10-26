@@ -1359,3 +1359,11 @@ CI or publication is claimed.
 - [x] Verify the reported gap between evidence revalidation and LSP projection against the current code; existing remote CI passes.
 - [x] Reproduce stale dependency evidence at projection with an unchanged document version, then move the final evidence filter after protocol/versioned edit conversion while preserving unrelated actions.
 - [x] Run focused LSP checks (21.913s) and race coverage (142.256s), lint/format/docs checks; self-review the correction before commit/push to PR #960.
+
+# Issue #961: multi-file Quick Fix preview
+
+- [x] Inspect merged CLI/specification boundaries; create and read-back validate the English issue before implementation.
+- [x] Reuse single-file preview for explicit, ordered/deduplicated multi-file previews with one eligible rule and no multi-file writes.
+- [x] Preserve single-file apply/output; test error/cancellation, ownership, encoding, aliases, unchanged results and exact per-file parity without writes.
+- [ ] Update ADR proposal, CLI/public specifications, help/generated inventories and changelog; run focused/full affected checks and self-review.
+- [ ] Commit and start supervised independent final review; retain report and clean up review resources on completion.
