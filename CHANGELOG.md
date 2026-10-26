@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added explicit multi-file `xlflow fix` previews with per-file diffs, edits,
+  hashes and aggregate counts. Multi-file application remains unsupported.
+
 - Added an individual opt-in VBA275 Quick Fix to change eligible private scalar
   Function parameters from ByRef to ByVal, using current diagnostic evidence
   and conservative alias/syntax checks. Bulk eligibility is unchanged.

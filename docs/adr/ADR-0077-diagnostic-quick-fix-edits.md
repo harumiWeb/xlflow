@@ -193,6 +193,36 @@ repeat expensive diagnostic work.
 - Compile-only oracle observations establish syntax acceptance. They do not
   establish runtime equivalence or make VBA275 compile-equivalent.
 
+## Proposed Multi-file Preview Extension (Draft)
+
+### Context
+
+Issue [#961](https://github.com/harumiWeb/xlflow/issues/961) extends CLI review
+to several saved sources. Applying several files would require publication,
+rollback and conflict decisions beyond the existing single-file transaction.
+
+### Proposed Decision
+
+- Accept several explicit managed `.bas`/`.cls` paths for one existing eligible
+  rule, reusing the same per-document provider and capture checks sequentially.
+- Keep multi-file operations preview-only. Reject multiple arguments with
+  `--apply` before configuration or source reads, including duplicate aliases.
+- Preserve single-file output and apply. Multiple arguments use an aggregate
+  schema, deduplicate logical paths using host case rules, and sort relative
+  paths lexically. Validate every argument before deduplication.
+- Return complete per-file edits, diagnostic associations, diffs and hashes,
+  including unchanged files, plus unique file/change/edit counts. Publish one
+  success envelope only after all files succeed; otherwise return one error.
+
+### Consequences
+
+- Users can review several files without broadening rule eligibility or
+  introducing a multi-file publication transaction.
+- Sequential captures bound analysis lifetime but do not describe an atomic
+  project snapshot. Hashes remain invocation evidence rather than a saved plan.
+- Directories, globs, implicit discovery, cross-file edits and multi-file writes
+  require separate scope and design decisions.
+
 ## Alternatives Considered
 
 1. **Add individual VS Code providers.** Rejected because applicability would

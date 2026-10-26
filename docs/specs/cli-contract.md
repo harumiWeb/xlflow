@@ -62,7 +62,7 @@ xlflow [--json] impact <Module.Procedure> [--path <dir-or-file>] [--direction ca
 xlflow [--json] graph dependencies [--path <dir-or-file>] [--module <name>]
 xlflow [--json] inspect-gui
 xlflow [--json] lint
-xlflow [--json] fix <path> --rule VB044|VB080|VB084|VB086 [--apply]
+xlflow [--json] fix <path> [<path>...] --rule VB044|VB080|VB084|VB086 [--apply]
 xlflow lsp (--stdio | --check | --version) [--log-file <path>] [--performance-log]
 xlflow [--json] fmt [--write|--check|--diff] [--line-numbers <preserve|add|remove|renumber>] [--stdin] [<path>...]
 xlflow [--json] encoding check [<path>...]
@@ -616,8 +616,8 @@ UTF-8 and are not rewritten by the import normalization.
 
 `encoding convert --from cp932` is the only supported source conversion in v1. It uses the same managed scope and path checks as `encoding check`. UTF-8 without BOM remains byte-identical; every other selected file must decode strictly as CP932 and is converted to UTF-8 without BOM while retaining line endings and permissions. UTF-8 BOM, UTF-16 BOM, malformed CP932, unreadable files, and unstageable destinations fail before any original is modified. The command stages replacements in the source file's directory, commits them as one transaction, and rolls back already-applied replacements from retained originals when a commit step fails. It leaves no permanent `.bak` files. JSON uses `source.expected`, `source.from`, `source.to`, `source.files[]`, and `source.summary`; statuses include `converted` and `unchanged`. `analyze`, `lint`, `fmt`, `check`, `push`, `pack`, and other parser consumers validate source encoding but never perform implicit conversion. `pack` rejects invalid source before source planning, template payload reading, or `vbaProject.bin` generation. Its preflight resolves configured roots with the same cross-platform separator and absolute-root rules as pack inventory, while explicit `encoding check/convert` paths remain project-contained. `check`, `push`, and other Excel-backed preflight paths reject invalid source before starting Excel or doctor. Encoding conversion is source-only and never starts Excel; on Windows, the CLI serializes its transaction per configured project workbook identity without requiring recovery clearance. Encoding I/O failures are environment errors and path/argument violations are configuration errors.
 
-`fix <path> --rule VB044|VB080|VB084|VB086 [--apply]` runs the shared
-document-scoped, same-rule correction provider for one explicit file and one
+`fix <path> [<path>...] --rule VB044|VB080|VB084|VB086 [--apply]` runs the shared
+document-scoped, same-rule correction provider for explicit files and one
 rule. The current working directory must contain `xlflow.toml`. Eligible
 files are under configured modules, classes, or workbook source roots, or the
 project test root, and must have the `.bas` or `.cls` extension. Under the
@@ -647,6 +647,22 @@ has `range.start` and `range.end` with zero-based UTF-16 `line` and
 from the shared correction provider. Both SHA-256 values cover the exact
 captured and proposed file bytes. The hashes identify that invocation's
 preview; an apply always captures and analyzes the current file again.
+
+With two or more positional paths, `output` instead contains `mode="preview"`,
+`rule`, `files` (complete single-file results), and `summary` with `file_count`,
+`changed_file_count`, and `edit_count`. Unchanged files remain included. `target`
+contains ordered `paths` and `rule`. Logical absolute paths deduplicate using
+`sourcepath.Key`, case-folded only on Windows; results sort lexically by their
+project-relative slash paths, with the smallest relative spelling representing
+duplicate aliases. Every input is validated before deduplication. Multiple
+arguments retain this schema even if only one unique path remains.
+
+Multiple paths with `--apply` fail with `fix_args_invalid` before configuration
+or source reads. Directories, globs and implicit project discovery are excluded.
+Selected files are processed sequentially; any failure or cancellation returns
+one standard error envelope without a successful partial `output`. No preview
+staging or writes occur. Per-file captures are not an atomic project snapshot
+or a reusable apply plan. Multi-file writes remain unsupported.
 
 Apply stages a replacement beside the target and publishes it with the
 platform's native atomic replace. Symlink targets and non-regular files are

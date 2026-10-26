@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/sourceedit"
+	"github.com/harumiWeb/xlflow/internal/sourcepath"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/sourceencoding"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
@@ -58,15 +60,28 @@ type fixResult struct {
 	ResultSHA256 string          `json:"result_sha256"`
 }
 
+type fixPreviewSummary struct {
+	FileCount        int `json:"file_count"`
+	ChangedFileCount int `json:"changed_file_count"`
+	EditCount        int `json:"edit_count"`
+}
+
+type fixPreviewResult struct {
+	Mode    string            `json:"mode"`
+	Rule    string            `json:"rule"`
+	Files   []fixResult       `json:"files"`
+	Summary fixPreviewSummary `json:"summary"`
+}
+
 func (a *app) fixCommand() *cobra.Command {
 	var rules []string
 	var apply bool
 	cmd := &cobra.Command{
-		Use:   "fix <path> --rule <code>",
-		Short: "Preview or explicitly apply one rule's diagnostic fixes to one source file",
+		Use:   "fix <path> [<path>...] --rule <code>",
+		Short: "Preview one rule's diagnostic fixes in explicit source files, or apply to one file",
 		Args: func(_ *cobra.Command, args []string) error {
-			if len(args) != 1 {
-				return a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", errors.New("exactly one source file is required"))
+			if len(args) == 0 || (len(args) > 1 && apply) {
+				return a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", errors.New("at least one source file is required; --apply requires exactly one path"))
 			}
 			return nil
 		},
@@ -83,6 +98,9 @@ func (a *app) fixCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if len(args) > 1 {
+				return a.runFixPreview(cmd.Context(), cfg, args, rule, kind)
+			}
 			return a.runFix(cmd.Context(), cfg, args[0], rule, kind, apply)
 		},
 	}
@@ -91,42 +109,53 @@ func (a *app) fixCommand() *cobra.Command {
 	return cmd
 }
 
-func (a *app) runFix(ctx context.Context, cfg config.Config, arg, rule, kind string, apply bool) error {
+type fixSource struct {
+	path     string
+	relative string
+}
+
+func (a *app) resolveFixSource(ctx context.Context, cfg config.Config, arg string) (fixSource, error) {
 	if err := ctx.Err(); err != nil {
-		return a.writeFixFailure(err)
+		return fixSource{}, a.writeFixFailure(err)
 	}
 	path := filepath.FromSlash(strings.ReplaceAll(arg, `\`, "/"))
 	if strings.TrimSpace(path) == "" || (strings.ToLower(filepath.Ext(path)) != ".bas" && strings.ToLower(filepath.Ext(path)) != ".cls") {
-		return a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", errors.New("path must name one existing .bas or .cls source file"))
+		return fixSource{}, a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", errors.New("path must name one existing .bas or .cls source file"))
 	}
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(a.cwd, path)
 	}
+	path = filepath.Clean(path)
 	// Reject directories before scoped discovery can walk them. Validate ownership
 	// before reading the selected file's contents.
 	info, err := os.Lstat(path)
 	if err != nil {
-		return a.writeFixFailure(err)
+		return fixSource{}, a.writeFixFailure(err)
 	}
 	if !info.Mode().IsRegular() {
-		return a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", errors.New("path must name a regular source file without symlinks"))
+		return fixSource{}, a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", errors.New("path must name a regular source file without symlinks"))
 	}
 	files, err := sourceencoding.DiscoverFiles(ctx, sourceEncodingOptions(a.cwd, cfg, []string{arg}))
 	if err != nil {
 		if _, ok := errors.AsType[*sourceencoding.ScopeError](err); ok {
-			return a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", err)
+			return fixSource{}, a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", err)
 		}
-		return a.writeFixFailure(err)
+		return fixSource{}, a.writeFixFailure(err)
 	}
 	if len(files) != 1 || !fixCanonicalFormCode(a.cwd, cfg, path) {
-		return a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", errors.New("path must name one active managed source file"))
+		return fixSource{}, a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", errors.New("path must name one active managed source file"))
 	}
+	return fixSource{path: path, relative: files[0].Path}, nil
+}
+
+func (a *app) prepareFix(ctx context.Context, cfg config.Config, source fixSource, rule, kind string) (fixResult, *sourceedit.Snapshot, string, error) {
+	path := source.path
 	captured, err := sourceedit.Capture(ctx, path)
 	if err != nil {
-		return a.writeFixFailure(err)
+		return fixResult{}, nil, "", a.writeFixFailure(err)
 	}
-	if err := sourceencoding.Validate(files[0].Path, captured.Source); err != nil {
-		return a.writeSourceEncodingResult(output.New("fix"), output.ExitValidation, "source_encoding_invalid", err)
+	if err := sourceencoding.Validate(source.relative, captured.Source); err != nil {
+		return fixResult{}, nil, "", a.writeSourceEncodingResult(output.New("fix"), output.ExitValidation, "source_encoding_invalid", err)
 	}
 	doc := intel.Document{Path: captured.Path, Source: string(captured.Source), ModuleKind: "standard"}
 	if strings.EqualFold(filepath.Ext(path), ".cls") {
@@ -138,9 +167,9 @@ func (a *app) runFix(ctx context.Context, cfg config.Config, arg, rule, kind str
 	analyzer := intel.Analyzer{RootDir: a.cwd, Config: cfg, SourceOnly: true}
 	actions, err := analyzer.CodeActionsContext(ctx, doc, intel.Range{}, []string{kind})
 	if err != nil {
-		return a.writeFixFailure(err)
+		return fixResult{}, nil, "", a.writeFixFailure(err)
 	}
-	result := fixResult{Mode: "preview", Path: files[0].Path, Rule: rule, Edits: []fixEdit{}, Diagnostics: []fixDiagnostic{}}
+	result := fixResult{Mode: "preview", Path: source.relative, Rule: rule, Edits: []fixEdit{}, Diagnostics: []fixDiagnostic{}}
 	edits := []intel.CodeActionEdit{}
 	for _, action := range actions {
 		if action.Kind != kind {
@@ -154,12 +183,12 @@ func (a *app) runFix(ctx context.Context, cfg config.Config, arg, rule, kind str
 	replacement, err := intel.ApplyCodeActionEdits(ctx, doc, edits)
 	if err != nil {
 		if errors.Is(err, intel.ErrInvalidCodeActionEdits) {
-			return a.writeFailure("fix", output.ExitValidation, "fix_edits_invalid", err)
+			return fixResult{}, nil, "", a.writeFailure("fix", output.ExitValidation, "fix_edits_invalid", err)
 		}
-		return a.writeFixFailure(err)
+		return fixResult{}, nil, "", a.writeFixFailure(err)
 	}
-	if err := sourceencoding.Validate(files[0].Path, []byte(replacement)); err != nil {
-		return a.writeSourceEncodingResult(output.New("fix"), output.ExitValidation, "source_encoding_invalid", err)
+	if err := sourceencoding.Validate(source.relative, []byte(replacement)); err != nil {
+		return fixResult{}, nil, "", a.writeSourceEncodingResult(output.New("fix"), output.ExitValidation, "source_encoding_invalid", err)
 	}
 	for _, edit := range edits {
 		result.Edits = append(result.Edits, fixEdit{Range: projectFixRange(edit.Range), NewText: edit.NewText})
@@ -169,6 +198,18 @@ func (a *app) runFix(ctx context.Context, cfg config.Config, arg, rule, kind str
 	result.ResultSHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(replacement)))
 	if result.Changed {
 		result.Diff = vbafmt.Diff(result.Path, doc.Source, replacement)
+	}
+	return result, captured, replacement, nil
+}
+
+func (a *app) runFix(ctx context.Context, cfg config.Config, arg, rule, kind string, apply bool) error {
+	source, err := a.resolveFixSource(ctx, cfg, arg)
+	if err != nil {
+		return err
+	}
+	result, captured, replacement, err := a.prepareFix(ctx, cfg, source, rule, kind)
+	if err != nil {
+		return err
 	}
 	if apply {
 		result.Mode = "apply"
@@ -191,6 +232,52 @@ func (a *app) runFix(ctx context.Context, cfg config.Config, arg, rule, kind str
 	if result.Diff != "" {
 		env.Logs = append(env.Logs, result.Diff)
 	}
+	return a.write(env, output.ExitSuccess)
+}
+
+func (a *app) runFixPreview(ctx context.Context, cfg config.Config, args []string, rule, kind string) error {
+	unique := make(map[string]fixSource, len(args))
+	for _, arg := range args {
+		source, err := a.resolveFixSource(ctx, cfg, arg)
+		if err != nil {
+			return err
+		}
+		key := sourcepath.Key(source.path)
+		if previous, exists := unique[key]; !exists || source.relative < previous.relative {
+			unique[key] = source
+		}
+	}
+	sources := make([]fixSource, 0, len(unique))
+	for _, source := range unique {
+		sources = append(sources, source)
+	}
+	slices.SortFunc(sources, func(a, b fixSource) int { return cmp.Compare(a.relative, b.relative) })
+	result := fixPreviewResult{Mode: "preview", Rule: rule, Files: make([]fixResult, 0, len(sources))}
+	env := output.New("fix")
+	paths := make([]string, 0, len(sources))
+	for _, source := range sources {
+		file, _, _, err := a.prepareFix(ctx, cfg, source, rule, kind)
+		if err != nil {
+			return err
+		}
+		result.Files = append(result.Files, file)
+		paths = append(paths, file.Path)
+		result.Summary.FileCount++
+		result.Summary.EditCount += len(file.Edits)
+		if file.Changed {
+			result.Summary.ChangedFileCount++
+		}
+		env.Logs = append(env.Logs, fmt.Sprintf("preview %s: %d edit(s), changed=%t, applied=false", file.Path, len(file.Edits), file.Changed))
+		if file.Diff != "" {
+			env.Logs = append(env.Logs, file.Diff)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return a.writeFixFailure(err)
+	}
+	env.Logs = append(env.Logs, fmt.Sprintf("preview: %d file(s), %d changed, %d edit(s)", result.Summary.FileCount, result.Summary.ChangedFileCount, result.Summary.EditCount))
+	env.Target = map[string]any{"paths": paths, "rule": rule}
+	env.Output = result
 	return a.write(env, output.ExitSuccess)
 }
 
