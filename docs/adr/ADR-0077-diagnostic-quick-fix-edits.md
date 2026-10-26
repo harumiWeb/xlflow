@@ -223,6 +223,93 @@ rollback and conflict decisions beyond the existing single-file transaction.
 - Directories, globs, implicit discovery, cross-file edits and multi-file writes
   require separate scope and design decisions.
 
+## Proposed Multi-file Application Extension (Draft)
+
+### Context
+
+Issue [#963](https://github.com/harumiWeb/xlflow/issues/963) follows the
+multi-file preview introduced by #961 and PR #962. The preview contract already
+selects explicit managed files and reuses the existing four-rule correction
+providers, but applying results to several files introduces failure and
+recovery states that a per-file atomic replacement cannot describe. The
+preview-only limit above records the earlier proposal and remains as history;
+this draft proposes the additional application contract without changing the
+accepted editor decisions in this ADR.
+
+### Proposed Decision
+
+- Permit `--apply` with multiple explicit managed `.bas` and `.cls` paths for
+  one existing eligible rule. Keep the rule allowlist, ownership, suppression,
+  encoding, coordinate, and correction-provider contracts unchanged. Preserve
+  the single-path result shape and the batch preview shape; multiple positional
+  arguments select the batch apply shape even when aliases deduplicate to one
+  logical file.
+- Resolve and validate every argument before logical-path deduplication. Keep
+  deterministic relative-path ordering, capture and compute all files before
+  publication, and retire each analysis snapshot before processing the next
+  file. Reject distinct selected paths with duplicate physical identities,
+  including hard-link aliases, before writing.
+- Validate all captured targets, including no-op files. Reject read-only targets
+  only when their proposed bytes change. Stage each changed file's replacement
+  and original-byte backup beside the target before publishing any file, retain
+  permission bits, and recheck identity, parent, mode, and contents after
+  staging and again before each publication. No-op batches create no temporary
+  files.
+- If publication fails or cancellation occurs before all changed files publish,
+  restore published files in reverse order while ignoring cancellation during
+  recovery. Before each restoration, verify the transaction's published target
+  identity, mode, and bytes and verify the original-byte backup. Never knowingly
+  overwrite an external edit. Preserve and report recovery material when a
+  conflict or restoration failure prevents rollback. If the parent directory
+  moved or was replaced, or the source-side backup is altered or inaccessible,
+  treat its path as untrusted and attempt to persist an independent copy of the
+  captured original bytes in an OS temporary file with permission mode `0600`
+  (subject to host filesystem permission semantics), using the
+  `.sourceedit-*.tmp` file. Report that absolute, out-of-project path as
+  `recovery_path`; report inaccessible or unremoved source-side artifacts
+  separately. If all persistence attempts fail, report the failures and do not
+  promise that recovery remains possible.
+- Return one error envelope without partial success output. Include
+  `error.details.committed`, per-file states (`unchanged`, `not_applied`,
+  `applied`, `restored`, or `recovery_required`), optional `recovery_path`, and
+  retained `artifacts`. Include recovery information in human output. Rollback
+  failure uses `fix_rollback_failed` (exit 3) and overrides the triggering
+  stale-state or cancellation error. Post-commit cleanup failure uses
+  `fix_cleanup_failed` (exit 3) with `committed=true`; ordinary stale-state,
+  cancellation, and operational failures retain their existing exit classes
+  and include transaction details.
+- Remove same-directory `.sourceedit-*.tmp` artifacts after successful commit
+  or successful rollback. Preserve artifacts needed for recovery when rollback
+  fails. Project paths in CLI output stay project-relative, while recovery paths
+  outside the project remain absolute; the core source-edit API uses absolute
+  paths.
+- Keep the guarantee best-effort. Do not promise simultaneous atomic visibility
+  across files, crash durability, or race-free compare-and-swap against external
+  writers. Do not add saved plans, new correction rules, implicit discovery,
+  directories/globs, cross-file semantic edits, `.frm` transactions, or workbook
+  I/O. Keep the unrelated source-encoding transaction separate.
+
+### Consequences
+
+- Explicit multi-file apply can report and recover from ordinary partial
+  publication failures without presenting a successful partial result.
+- A source-side backup whose parent or contents changed is not trusted. A
+  restricted-permission OS temporary copy can preserve the original bytes for
+  recovery, but recovery cannot be guaranteed if every persistence attempt
+  fails; those failures must remain visible in the report.
+- Independent native file replacements cannot make a batch simultaneously
+  visible or durable across process termination. Rechecks reduce but cannot
+  eliminate races with external writers; a conflict leaves recovery material
+  and requires deliberate operator action.
+- Unchanged read-only targets can participate because they are validated but
+  never staged or published. Changed read-only targets fail before publication.
+- Transaction state and absolute recovery material are projected as
+  project-relative CLI paths when possible, keeping public output consistent
+  with existing command paths while retaining usable paths outside the project.
+- The earlier multi-file preview proposal remains historical context for #961;
+  this draft extends its limitation for current behavior without broadening the
+  accepted correction or editor-action decisions above.
+
 ## Alternatives Considered
 
 1. **Add individual VS Code providers.** Rejected because applicability would

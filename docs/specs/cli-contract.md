@@ -625,7 +625,7 @@ configured forms root, the only allowed path is `forms/code/*.bas` when
 `[userform].code_source = "sidecar"`; forms assets, specs, and inactive
 sidecar paths are rejected even when their extensions look like source. A
 `.frm` file is not accepted because its `.frx` sidecar needs a separate
-transaction contract. The selected file is read from disk and must be UTF-8
+transaction contract. Selected files are read from disk and must be UTF-8
 without BOM. The command does not use an open editor buffer, workbook, Excel
 COM, or session.
 
@@ -648,30 +648,69 @@ from the shared correction provider. Both SHA-256 values cover the exact
 captured and proposed file bytes. The hashes identify that invocation's
 preview; an apply always captures and analyzes the current file again.
 
-With two or more positional paths, `output` instead contains `mode="preview"`,
-`rule`, `files` (complete single-file results), and `summary` with `file_count`,
+Two or more positional arguments select the batch schema for both preview and
+apply, even if aliases deduplicate to one selected file. Resolve and validate
+every argument before logical-path deduplication. Deduplicate logical absolute
+paths using `sourcepath.Key`, case-folded only on Windows; sort results
+case-sensitively by project-relative slash path, using the lexically smallest
+relative spelling for duplicate aliases. Batch apply rejects distinct selected paths with
+the same physical file identity, including hard-link aliases, before any
+publication. Directories, globs, and implicit project discovery are excluded.
+Existing managed-path, symlink/reparse-point, and regular-file guards apply to
+every selected file.
+
+The batch `output` contains `mode` (`preview` or `apply`), `rule`, `files`
+(complete single-file results), and `summary` with `file_count`,
 `changed_file_count`, and `edit_count`. Unchanged files remain included. `target`
-contains ordered `paths` and `rule`. Logical absolute paths deduplicate using
-`sourcepath.Key`, case-folded only on Windows; results sort lexically by their
-project-relative slash paths, with the smallest relative spelling representing
-duplicate aliases. Every input is validated before deduplication. Multiple
-arguments retain this schema even if only one unique path remains.
+contains ordered `paths` and `rule`. Every input is validated before logical
+deduplication, and captures and analysis run sequentially with each analysis
+snapshot retired before the next file. Multiple arguments retain this schema
+even if only one unique path remains. One positional argument retains the
+existing single-file result shape.
 
-Multiple paths with `--apply` fail with `fix_args_invalid` before configuration
-or source reads. Directories, globs and implicit project discovery are excluded.
-Selected files are processed sequentially; any failure or cancellation returns
-one standard error envelope without a successful partial `output`. No preview
-staging or writes occur. Per-file captures are not an atomic project snapshot
-or a reusable apply plan. Multi-file writes remain unsupported.
+Batch apply captures and computes every selected file before publication. It
+validates all targets, including no-ops; a read-only target is rejected only
+when its proposed bytes change, so unchanged read-only files remain eligible.
+For every changed target, it stages replacement bytes and an original-byte
+backup beside that target before publishing any target, preserving permission
+bits. No-op batches create no temporary files. After staging, it rechecks every
+target's identity, parent, mode, and contents, then verifies each target again
+immediately before publication. Staging and backup artifacts use same-directory
+`.sourceedit-*.tmp` files. Successful commits and successful rollbacks remove
+their temporary artifacts.
 
-Apply stages a replacement beside the target and publishes it with the
-platform's native atomic replace. Symlink targets and non-regular files are
-rejected. A read-only target is rejected only when apply would change it.
-Before publication, xlflow rechecks file identity, mode, and contents; a
-detected mismatch returns `fix_source_changed`. Cancellation or failure before
-publication removes the staging file. This is best-effort conflict detection,
-not a race-free compare-and-swap against arbitrary external writers or a crash
-durability guarantee.
+If publication fails or cancellation occurs before all changed files publish,
+the command restores published targets in reverse order and ignores
+cancellation during recovery. Before restoring, it verifies the published
+target's identity, mode, and bytes and verifies the original-byte backup. An
+external conflict or failed restoration is never knowingly overwritten. If the
+parent directory moved or was replaced, or the source-side backup was altered
+or is inaccessible, treat that backup path as untrusted. Attempt to persist an
+independent copy of the captured original bytes in an OS temporary
+`.sourceedit-*.tmp` file with permission mode `0600` (subject to host filesystem semantics), and report its
+absolute path as `recovery_path` outside the project. Report an inaccessible or
+unremoved source-side artifact separately from the fallback recovery copy. If
+all persistence attempts fail, recovery is not guaranteed; report those errors
+and affected files. This is best-effort conflict detection, not race-free
+compare-and-swap against external writers. Multi-file publication does not
+provide simultaneous atomic visibility or crash durability, and process
+termination does not trigger automatic recovery.
+
+Apply failures return one error envelope and omit `output`. Failures from the batch transaction use `error.details`, which
+contains `committed`, `files`, and `artifacts`. File entries report `path` and
+state `unchanged`, `not_applied`, `applied`, `restored`, or `recovery_required`,
+with optional `recovery_path`. `committed` is true only when all requested
+changes were published; `artifacts` lists retained temporary/recovery paths or paths that could not be inspected or removed. Earlier configuration, ownership, encoding and analysis failures retain their existing error shapes.
+Human-readable errors also include transaction states and recovery paths. Core
+source-edit paths are absolute; CLI paths are project-relative with `/`
+separators except paths outside the project, which remain absolute.
+
+With one positional path, changed bytes retain the existing single-file
+publication contract: stage beside the target, then use the platform's native
+atomic replacement after rechecking identity, mode, and contents. A mismatch
+returns `fix_source_changed`; cancellation or failure before publication cleans
+up the staging file. This remains best-effort against external writers and does
+not provide crash durability.
 
 `fix` advertises a source-tree mutation capability to consumers through
 coordination policy `ResourceSourceTree`, operation `mutate`, and
@@ -681,8 +720,14 @@ best-effort against external writers.
 
 `fix_args_invalid` and standard missing/invalid project configuration errors
 exit `2`. `source_encoding_invalid`, `fix_source_changed`, and
-`fix_edits_invalid` exit `1`. File-system failures return `fix_failed` and
-exit `3`; cancellation returns `fix_cancelled` and exit `3`.
+`fix_edits_invalid` exit `1`. Operational failures return `fix_failed` and
+exit `3`; cancellation returns `fix_cancelled` and exit `3` after successful
+recovery. A rollback failure returns `fix_rollback_failed` with exit `3`,
+overriding the triggering stale-state or cancellation error. A post-commit
+cleanup failure returns `fix_cleanup_failed` with exit `3` and
+`error.details.committed=true`; file states identify the changes that remain
+committed. Recovery paths and artifact lists are retained in the structured
+error details.
 
 ## Configuration
 
@@ -1268,8 +1313,10 @@ the corresponding marker. Cleanup results add `recovery.cleared[]` and
 
 For `fix`, `fix_args_invalid` and standard project `config_error` failures use
 exit `2`; `source_encoding_invalid`, `fix_source_changed`, and
-`fix_edits_invalid` use exit `1`; `fix_failed` and `fix_cancelled` use exit
-`3`.
+`fix_edits_invalid` use exit `1`; `fix_failed`, `fix_cancelled`,
+`fix_rollback_failed`, and `fix_cleanup_failed` use exit `3`. Rollback failure
+supersedes a triggering stale-state or cancellation error. Post-commit cleanup
+failure explicitly reports `committed=true` in error details.
 
 `diff` intentionally returns `0` when differences are found. Consumers should inspect `diff.summary.total_diffs` to distinguish changed and unchanged inputs.
 

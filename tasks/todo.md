@@ -1367,3 +1367,11 @@ CI or publication is claimed.
 - [x] Preserve single-file apply/output; test error/cancellation, ownership, encoding, aliases, unchanged results and exact per-file parity without writes.
 - [x] Update ADR proposal, CLI/public specifications, help/generated inventories and changelog; full CLI tests passed (335.205s), focused multi-file tests, lint, format and docs checks passed.
 - [x] Commit and complete supervised independent final review: PASS at `0304de5d`, no confirmed findings; independent `TestFix` passed (7.152s). Report retained under `tmp_workspaces/final-review/issue961-pass1/report.md`; review agent, watcher and temporary worktree cleaned up.
+
+# Issue #963: multi-file Quick Fix application
+
+- [x] Inspect capture/publication and existing transactions; create and read-back validate the English issue before implementation.
+- [x] Implement captured-source batch preparation, staged replacements/backups, revalidation, reverse rollback and retained recovery artifacts with deterministic fault tests; sourceedit race tests passed (2.315s).
+- [x] Integrate explicit multi-file apply without altering single-file/preview contracts; verify per-file states, no-write validation failures and error projections. Full CLI tests passed (372.623s); focused Quick Fix tests passed (12.203s).
+- [x] Update ADR draft, CLI/public specifications and changelog; lint, docs and format checks passed; self-review corrected reporting of already-removed artifacts and verifies empty recovery paths when all persistence fails.
+- [ ] Commit and complete supervised independent final review, preserve evidence and clean up review resources.

@@ -399,18 +399,18 @@ func TestFixMultiPreviewTextShowsDiffsAndAggregateCounts(t *testing.T) {
 	}
 }
 
-func TestFixMultiApplyRejectsAliasesBeforeConfig(t *testing.T) {
+func TestFixMultiApplyRequiresConfig(t *testing.T) {
 	root := t.TempDir()
 	path := "src/modules/Main.bas"
 	source := []byte("Sub A()\n Let x = 1\nEnd Sub\n")
 	writeEncodingFile(t, root, path, source)
 	abs := filepath.Join(root, filepath.FromSlash(path))
 	_, env, err := runFixTest(t, root, t.Context(), path, abs, "--rule", "VB080", "--apply")
-	if err == nil || env.Error == nil || env.Error.Code != "fix_args_invalid" || env.Output != nil {
-		t.Fatalf("envelope=%+v error=%v, want early multi-apply rejection", env, err)
+	if err == nil || env.Error == nil || env.Error.Code != "config_error" || env.Output != nil {
+		t.Fatalf("envelope=%+v error=%v, want missing-config failure", env, err)
 	}
 	if got, readErr := os.ReadFile(abs); readErr != nil || !bytes.Equal(got, source) {
-		t.Fatalf("source changed after rejected apply: %q error=%v", got, readErr)
+		t.Fatalf("source changed after missing-config failure: %q error=%v", got, readErr)
 	}
 }
 

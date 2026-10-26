@@ -4,8 +4,15 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
-- Added explicit multi-file `xlflow fix` previews with per-file diffs, edits,
-  hashes and aggregate counts. Multi-file application remains unsupported.
+- Added explicit multi-file `xlflow fix` preview and apply for the existing
+  eligible rules, with per-file results and aggregate counts. Apply stages
+  replacement bytes and original backups before publication, rolls back
+  published files in reverse order on failure or cancellation, and reports
+  retained recovery material and post-commit cleanup failures. If a source-side
+  backup is untrusted, recovery can use an OS-temporary copy when
+  persistence succeeds; recovery cannot be guaranteed if every persistence
+  attempt fails. Multi-file apply remains best-effort and does not provide
+  atomic visibility or automatic recovery after process termination.
 
 - Added an individual opt-in VBA275 Quick Fix to change eligible private scalar
   Function parameters from ByRef to ByVal, using current diagnostic evidence

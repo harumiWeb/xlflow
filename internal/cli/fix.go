@@ -78,10 +78,10 @@ func (a *app) fixCommand() *cobra.Command {
 	var apply bool
 	cmd := &cobra.Command{
 		Use:   "fix <path> [<path>...] --rule <code>",
-		Short: "Preview one rule's diagnostic fixes in explicit source files, or apply to one file",
+		Short: "Preview or apply one rule's diagnostic fixes in explicit source files",
 		Args: func(_ *cobra.Command, args []string) error {
-			if len(args) == 0 || (len(args) > 1 && apply) {
-				return a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", errors.New("at least one source file is required; --apply requires exactly one path"))
+			if len(args) == 0 {
+				return a.writeFailure("fix", output.ExitConfig, "fix_args_invalid", errors.New("at least one source file is required"))
 			}
 			return nil
 		},
@@ -99,7 +99,7 @@ func (a *app) fixCommand() *cobra.Command {
 				return err
 			}
 			if len(args) > 1 {
-				return a.runFixPreview(cmd.Context(), cfg, args, rule, kind)
+				return a.runFixMulti(cmd.Context(), cfg, args, rule, kind, apply)
 			}
 			return a.runFix(cmd.Context(), cfg, args[0], rule, kind, apply)
 		},
@@ -235,7 +235,7 @@ func (a *app) runFix(ctx context.Context, cfg config.Config, arg, rule, kind str
 	return a.write(env, output.ExitSuccess)
 }
 
-func (a *app) runFixPreview(ctx context.Context, cfg config.Config, args []string, rule, kind string) error {
+func (a *app) runFixMulti(ctx context.Context, cfg config.Config, args []string, rule, kind string, apply bool) error {
 	unique := make(map[string]fixSource, len(args))
 	for _, arg := range args {
 		source, err := a.resolveFixSource(ctx, cfg, arg)
@@ -252,13 +252,22 @@ func (a *app) runFixPreview(ctx context.Context, cfg config.Config, args []strin
 		sources = append(sources, source)
 	}
 	slices.SortFunc(sources, func(a, b fixSource) int { return cmp.Compare(a.relative, b.relative) })
-	result := fixPreviewResult{Mode: "preview", Rule: rule, Files: make([]fixResult, 0, len(sources))}
+	mode := "preview"
+	if apply {
+		mode = "apply"
+	}
+	result := fixPreviewResult{Mode: mode, Rule: rule, Files: make([]fixResult, 0, len(sources))}
 	env := output.New("fix")
 	paths := make([]string, 0, len(sources))
+	changes := make([]sourceedit.Change, 0, len(sources))
 	for _, source := range sources {
-		file, _, _, err := a.prepareFix(ctx, cfg, source, rule, kind)
+		file, snapshot, replacement, err := a.prepareFix(ctx, cfg, source, rule, kind)
 		if err != nil {
 			return err
+		}
+		if apply {
+			changes = append(changes, sourceedit.Change{Snapshot: snapshot, Replacement: []byte(replacement)})
+			file.Mode = "apply"
 		}
 		result.Files = append(result.Files, file)
 		paths = append(paths, file.Path)
@@ -267,15 +276,26 @@ func (a *app) runFixPreview(ctx context.Context, cfg config.Config, args []strin
 		if file.Changed {
 			result.Summary.ChangedFileCount++
 		}
-		env.Logs = append(env.Logs, fmt.Sprintf("preview %s: %d edit(s), changed=%t, applied=false", file.Path, len(file.Edits), file.Changed))
-		if file.Diff != "" {
-			env.Logs = append(env.Logs, file.Diff)
-		}
 	}
 	if err := ctx.Err(); err != nil {
 		return a.writeFixFailure(err)
 	}
-	env.Logs = append(env.Logs, fmt.Sprintf("preview: %d file(s), %d changed, %d edit(s)", result.Summary.FileCount, result.Summary.ChangedFileCount, result.Summary.EditCount))
+	if apply {
+		batch, err := sourceedit.ApplyBatch(ctx, changes)
+		if err != nil {
+			return a.writeFixBatchFailure(err, batch)
+		}
+		for i := range result.Files {
+			result.Files[i].Applied = result.Files[i].Changed
+		}
+	}
+	for _, file := range result.Files {
+		env.Logs = append(env.Logs, fmt.Sprintf("%s %s: %d edit(s), changed=%t, applied=%t", mode, file.Path, len(file.Edits), file.Changed, file.Applied))
+		if file.Diff != "" {
+			env.Logs = append(env.Logs, file.Diff)
+		}
+	}
+	env.Logs = append(env.Logs, fmt.Sprintf("%s: %d file(s), %d changed, %d edit(s)", mode, result.Summary.FileCount, result.Summary.ChangedFileCount, result.Summary.EditCount))
 	env.Target = map[string]any{"paths": paths, "rule": rule}
 	env.Output = result
 	return a.write(env, output.ExitSuccess)
@@ -309,4 +329,76 @@ func (a *app) writeFixFailure(err error) error {
 		code = "fix_cancelled"
 	}
 	return a.writeFailure("fix", exit, code, err)
+}
+
+type fixBatchFailureDetails struct {
+	Committed bool                  `json:"committed"`
+	Files     []fixBatchFailureFile `json:"files"`
+	Artifacts []string              `json:"artifacts"`
+}
+
+type fixBatchFailureFile struct {
+	Path         string `json:"path"`
+	State        string `json:"state"`
+	RecoveryPath string `json:"recovery_path,omitempty"`
+}
+
+func (a *app) writeFixBatchFailure(err error, batch sourceedit.BatchResult) error {
+	code, exit := "fix_failed", output.ExitEnvironment
+	batchErr, _ := errors.AsType[*sourceedit.BatchError](err)
+	switch {
+	case batchErr != nil && batchErr.Rollback != nil:
+		code, exit = "fix_rollback_failed", output.ExitEnvironment
+	case batchErr != nil && batch.Committed && batchErr.Cleanup != nil:
+		code, exit = "fix_cleanup_failed", output.ExitEnvironment
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		code, exit = "fix_cancelled", output.ExitEnvironment
+	case errors.Is(err, sourceedit.ErrStale):
+		code, exit = "fix_source_changed", output.ExitValidation
+	}
+
+	details := fixBatchFailureDetails{
+		Committed: batch.Committed,
+		Files:     make([]fixBatchFailureFile, 0, len(batch.Files)),
+		Artifacts: make([]string, 0, len(batch.Artifacts)),
+	}
+	logs := []string{fmt.Sprintf("apply transaction: committed=%t", batch.Committed)}
+	for _, file := range batch.Files {
+		path := fixProjectPath(a.cwd, file.Path)
+		recoveryPath := fixProjectPath(a.cwd, file.RecoveryPath)
+		details.Files = append(details.Files, fixBatchFailureFile{Path: path, State: file.State, RecoveryPath: recoveryPath})
+		logs = append(logs, fmt.Sprintf("apply %s: %s", path, file.State))
+		if recoveryPath != "" {
+			logs = append(logs, fmt.Sprintf("recovery %s: %s", path, recoveryPath))
+		}
+	}
+	for _, artifact := range batch.Artifacts {
+		artifact = fixProjectPath(a.cwd, artifact)
+		details.Artifacts = append(details.Artifacts, artifact)
+		logs = append(logs, "artifact: "+artifact)
+	}
+
+	env := output.Failure("fix", output.Error{Code: code, Message: err.Error(), Details: details})
+	env.Logs = logs
+	a.addConfigWarnings(&env)
+	a.addPreflightWaiverWarnings(&env)
+	if writeErr := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); writeErr != nil {
+		return output.WithExitCode(exit, writeErr)
+	}
+	return output.WithExitCode(exit, err)
+}
+
+func fixProjectPath(root, path string) string {
+	if path == "" {
+		return ""
+	}
+	path = filepath.FromSlash(path)
+	if !filepath.IsAbs(path) {
+		return filepath.ToSlash(filepath.Clean(path))
+	}
+	relative, err := filepath.Rel(root, path)
+	if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(relative)
+	}
+	return filepath.ToSlash(path)
 }

@@ -593,8 +593,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `files_to_change`
 - `fix_args_invalid`
 - `fix_cancelled`
+- `fix_cleanup_failed`
 - `fix_edits_invalid`
 - `fix_failed`
+- `fix_rollback_failed`
 - `fix_source_changed`
 - `fixed_array_parameter`
 - `fixture_invalid`
