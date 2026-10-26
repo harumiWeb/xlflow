@@ -3,6 +3,7 @@ package lspserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -215,9 +216,76 @@ func TestByValActionRevalidationPreservesUnrelatedActions(t *testing.T) {
 		{Title: "Pass parameter ByVal", Kind: "quickfix", Diagnostics: []intel.Diagnostic{{Code: byValQuickFixDiagnosticCode}}},
 		{Title: "Add Option Explicit", Kind: "quickfix", Diagnostics: []intel.Diagnostic{{Code: "VB001"}}},
 	}
-	got := retainCurrentByValQuickFixActions(actions, nil)
+	projected := []protocol.CodeAction{{Title: "Pass parameter ByVal"}, {Title: "Add Option Explicit"}}
+	got := retainCurrentByValQuickFixActions(actions, projected, nil)
 	if len(got) != 1 || got[0].Title != "Add Option Explicit" {
 		t.Fatalf("revalidated actions = %+v, want unrelated VB001 action retained", got)
+	}
+}
+
+func TestCodeActionProjectionRevalidatesByValEvidence(t *testing.T) {
+	for _, versioned := range []bool{false, true} {
+		for _, stale := range []bool{false, true} {
+			t.Run(fmt.Sprintf("versioned=%t/stale=%t", versioned, stale), func(t *testing.T) {
+				const source = "Private Function Echo(ByRef value As Long) As Long\n Echo = value\nEnd Function\n"
+				server, doc, cleanup := newByValProjectTestServer(t, source)
+				defer cleanup()
+				server.codeActionDocumentChanges.Store(versioned)
+				start := strings.Index(source, "ByRef")
+				diagnostic := intel.Diagnostic{
+					Code: byValQuickFixDiagnosticCode, Severity: "information", Source: "xlflow", Message: "parameter can be ByVal",
+					Range: intel.Range{Start: intel.Position{Character: start}, End: intel.Position{Character: start + len("ByRef")}},
+				}
+				state := &diagnosticState{
+					generation: 1, latest: doc, open: true, publishedMode: intel.DiagnosticModeFull,
+					hasPublished: true, dependencyGeneration: 8,
+					quickFixEvidence: newQuickFixDiagnosticEvidence(doc, 1, 8, true, []intel.Diagnostic{diagnostic}),
+				}
+				server.diagMu.Lock()
+				server.diagStates[doc.URI] = state
+				server.diagMu.Unlock()
+				candidates, err := server.analyzer.CodeActionsContext(t.Context(), doc, diagnostic.Range, []string{"quickfix"})
+				if err != nil || len(candidates) != 1 {
+					t.Fatalf("candidates=%+v err=%v", candidates, err)
+				}
+				// Model the old response gap: discovery and the former pre-projection
+				// evidence check succeeded, then a dependency changed without an edit.
+				if len(server.currentQuickFixDiagnostics(doc)) != 1 {
+					t.Fatal("expected current evidence before projection")
+				}
+				if stale {
+					state.mu.Lock()
+					state.dependencyGeneration++
+					state.mu.Unlock()
+				}
+				candidates = append(candidates,
+					intel.CodeAction{Title: "Unrelated Fix All", Kind: "source.fixAll.xlflow.vb084"},
+					intel.CodeAction{Title: "Add Option Explicit", Kind: "quickfix", Diagnostics: []intel.Diagnostic{{Code: "VB001"}}},
+				)
+				got := server.projectCodeActions(doc, protocol.DocumentUri(doc.URI), candidates)
+				wantCount := 2
+				if versioned {
+					wantCount++
+				}
+				if stale {
+					wantCount--
+				}
+				if len(got) != wantCount || got[len(got)-1].Title != "Add Option Explicit" {
+					t.Fatalf("projected actions=%+v, want %d with unrelated action retained", got, wantCount)
+				}
+				for _, action := range got {
+					if action.Title == "Pass parameter ByVal" && stale {
+						t.Fatalf("stale ByVal survived projection: %+v", action)
+					}
+					if versioned {
+						edit := action.Edit.DocumentChanges[0].(protocol.TextDocumentEdit)
+						if edit.TextDocument.Version == nil || *edit.TextDocument.Version != protocol.Integer(doc.Version) {
+							t.Fatalf("projection lost unchanged document version: %+v", edit)
+						}
+					}
+				}
+			})
+		}
 	}
 }
 

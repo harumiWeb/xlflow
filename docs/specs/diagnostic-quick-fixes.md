@@ -147,6 +147,10 @@ prove builtin identity without resolving possible shadowing.
 Diagnostic evidence is invalid after document generation or dependency-generation
 changes, close/reopen, incomplete Full analysis or a rejected/canceled publication.
 Associated diagnostic metadata and UTF-16 ranges come from the accepted result.
+Revalidate that evidence after protocol and versioned-edit projection, immediately
+before returning the actions. A dependency update can invalidate the proof even
+when the target document version stays unchanged; remove only unsupported VBA275
+actions and retain unrelated projected actions.
 Only the five modifier bytes change; all surrounding trivia and source bytes
 remain intact. LSP edit versioning and request lifecycle checks still apply.
 

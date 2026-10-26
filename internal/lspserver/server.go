@@ -1726,17 +1726,16 @@ func (s *Server) codeActionForDocument(ctx context.Context, doc intel.Document, 
 	if err != nil {
 		return nil, err
 	}
-	if hasByValQuickFixDiagnostic(actions) {
-		// Analyzer discovery can outlive the project evidence it read. Recheck
-		// only VBA275 actions at the response boundary; do not hold state locks
-		// while the analyzer parses the document.
-		actions = retainCurrentByValQuickFixActions(actions, s.currentQuickFixDiagnostics(doc))
-	}
 	return s.projectCodeActions(doc, params.TextDocument.URI, actions), nil
 }
 
 func (s *Server) projectCodeActions(doc intel.Document, requestURI protocol.DocumentUri, actions []intel.CodeAction) []protocol.CodeAction {
 	out := make([]protocol.CodeAction, 0, len(actions))
+	revalidateByVal := hasByValQuickFixDiagnostic(actions)
+	var projectedSources []intel.CodeAction
+	if revalidateByVal {
+		projectedSources = make([]intel.CodeAction, 0, len(actions))
+	}
 	for _, action := range actions {
 		if strings.HasPrefix(action.Kind, "source.fixAll.") && (!s.codeActionDocumentChanges.Load() || !s.docs.isOpen(doc.URI)) {
 			continue
@@ -1761,6 +1760,9 @@ func (s *Server) projectCodeActions(doc intel.Document, requestURI protocol.Docu
 				requestURI: edits,
 			}},
 		})
+		if revalidateByVal {
+			projectedSources = append(projectedSources, action)
+		}
 	}
 	if s.codeActionDocumentChanges.Load() {
 		// A versioned edit also protects the client-side gap: the editor may
@@ -1783,6 +1785,12 @@ func (s *Server) projectCodeActions(doc intel.Document, requestURI protocol.Docu
 				Edits: versionedEdits,
 			}}}
 		}
+	}
+	if revalidateByVal {
+		// Discovery and protocol/versioned-edit projection can outlive the
+		// project evidence. Recheck after all conversion, without holding
+		// lifecycle locks during parsing or projection.
+		return retainCurrentByValQuickFixActions(projectedSources, out, s.currentQuickFixDiagnostics(doc))
 	}
 	return out
 }

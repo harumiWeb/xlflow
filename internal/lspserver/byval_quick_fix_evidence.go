@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
+	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
 const byValQuickFixDiagnosticCode = "VBA275"
@@ -59,16 +60,18 @@ func hasByValQuickFixDiagnostic(actions []intel.CodeAction) bool {
 	return false
 }
 
-func retainCurrentByValQuickFixActions(actions []intel.CodeAction, current []intel.Diagnostic) []intel.CodeAction {
+// actions and projected contain matching entries after projection eligibility
+// checks. Filter by their original diagnostic values after protocol conversion.
+func retainCurrentByValQuickFixActions(actions []intel.CodeAction, projected []protocol.CodeAction, current []intel.Diagnostic) []protocol.CodeAction {
 	if len(actions) == 0 {
-		return actions
+		return projected
 	}
 	currentEvidence := make(map[intel.Diagnostic]struct{}, len(current))
 	for _, diagnostic := range current {
 		currentEvidence[diagnostic] = struct{}{}
 	}
-	retained := make([]intel.CodeAction, 0, len(actions))
-	for _, action := range actions {
+	retained := projected[:0]
+	for i, action := range actions {
 		isCurrent := true
 		for _, diagnostic := range action.Diagnostics {
 			if diagnostic.Code != byValQuickFixDiagnosticCode {
@@ -80,7 +83,7 @@ func retainCurrentByValQuickFixActions(actions []intel.CodeAction, current []int
 			}
 		}
 		if isCurrent {
-			retained = append(retained, action)
+			retained = append(retained, projected[i])
 		}
 	}
 	return retained

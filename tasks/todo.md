@@ -1352,4 +1352,10 @@ CI or publication is claimed.
 - [x] Update ADR/specification, user guidance, registry and changelogs; complete self-review.
 - [x] Complete independent final review of the committed implementation (Pass 2 approved at e755b309; no additional confirmed defects).
 - [x] Address Pass 1's confirmed operator-scope finding: explicitly allow arithmetic binary operators and cover excluded direct/nested logical/concatenation expressions; focused ByVal tests pass.
-- [x] Recheck the committed correction in Pass 2; preserve both review reports and clean up their temporary worktrees and sessions. Remote CI and PR publication remain unperformed.
+- [x] Recheck the committed correction in Pass 2; preserve both review reports and clean up their temporary worktrees and sessions. PR #960 was published and its initial remote CI passed.
+
+## PR #960 review follow-up: evidence through projection
+
+- [x] Verify the reported gap between evidence revalidation and LSP projection against the current code; existing remote CI passes.
+- [x] Reproduce stale dependency evidence at projection with an unchanged document version, then move the final evidence filter after protocol/versioned edit conversion while preserving unrelated actions.
+- [x] Run focused LSP checks (21.913s) and race coverage (142.256s), lint/format/docs checks; self-review the correction before commit/push to PR #960.
