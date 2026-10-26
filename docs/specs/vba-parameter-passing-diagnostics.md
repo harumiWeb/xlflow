@@ -84,6 +84,11 @@ evaluation and does not propagate a write. The `With` receiver itself may
 be an indexed member (`With p.Items(0)`); implicit member writes inside it
 resolve to the receiver's root parameter.
 
+VBA275 has a restricted individual correction for private scalar Functions.
+Its stronger alias and syntax checks are defined in
+[Diagnostic Quick Fixes](diagnostic-quick-fixes.md#individual-vba275-correction).
+The diagnostic itself retains the broader applicability described above.
+
 ### VBA276 — misleading Property value ByRef
 
 Reports an explicit `ByRef` modifier on the final value parameter of

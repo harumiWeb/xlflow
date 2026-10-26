@@ -20,3 +20,12 @@ for a standalone, single-variable `Dim` with an explicit primitive scalar type
 and no reads or writes elsewhere in the procedure. Comments and line endings
 are preserved. Fix All uses versioned document edits and is not enabled
 automatically on save.
+
+When `analyze.detect_byref_parameters_can_be_byval` is enabled, VBA275 can offer
+**Pass parameter ByVal** for an explicit `ByRef` parameter in a private standard-
+module Function. The first version requires one primitive scalar parameter and
+scalar return-slot assignments using only that parameter and literals. Calls,
+other bindings, public APIs, Optional, Variant, arrays and objects have no fix.
+The action appears after current project-aware Full diagnostics complete; an
+edit can temporarily hide it while new diagnostics are pending. Only `ByRef`
+changes, preserving comments and line endings. VBA275 remains individual-only.

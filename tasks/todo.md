@@ -1341,3 +1341,21 @@ CI or publication is claimed.
 - [x] Verify focused VBE accept/reject controls and before/after observations, update specifications and generated rule references, and run affected package, corpus, lint/docs checks and self-review.
 - [x] Collect the origin/main analyzer benchmark comparison (Count 3): deterministic counters unchanged; std-vba dependency-edit elapsed time increased 23.7% under non-isolated load, so timing remains inconclusive. Direct Quick Fix discovery/scalability tests prove no IR/CFG/index construction.
 - [x] Commit the verified change and perform independent final review: a6c71e8, no confirmed defects; report preserved and review-only resources removed.
+
+# Issue #959: individual ByRef-to-ByVal Quick Fix
+
+- [x] Create and read-back validate the English issue before implementation; assess aliasing, signature compatibility and bounded discovery.
+- [x] Reuse accepted current VBA275 diagnostics, withhold stale/missing evidence, and implement the restricted private scalar CST correction without new analysis artifacts.
+- [x] Verify exact edits, withheld alias/call/signature forms, diagnostic equality, unsaved revisions, lifecycle/cancellation and deterministic discovery costs.
+- [x] Run focused local VBE controls and before/after observations, full oracle contracts, Intel/rule/CLI/corpus/lint/docs checks.
+- [x] Complete the full LSP and focused race checks and inspect the analyzer performance comparison (Count 1; timing is not conclusive; deterministic counters unchanged).
+- [x] Update ADR/specification, user guidance, registry and changelogs; complete self-review.
+- [x] Complete independent final review of the committed implementation (Pass 2 approved at e755b309; no additional confirmed defects).
+- [x] Address Pass 1's confirmed operator-scope finding: explicitly allow arithmetic binary operators and cover excluded direct/nested logical/concatenation expressions; focused ByVal tests pass.
+- [x] Recheck the committed correction in Pass 2; preserve both review reports and clean up their temporary worktrees and sessions. PR #960 was published and its initial remote CI passed.
+
+## PR #960 review follow-up: evidence through projection
+
+- [x] Verify the reported gap between evidence revalidation and LSP projection against the current code; existing remote CI passes.
+- [x] Reproduce stale dependency evidence at projection with an unchanged document version, then move the final evidence filter after protocol/versioned edit conversion while preserving unrelated actions.
+- [x] Run focused LSP checks (21.913s) and race coverage (142.256s), lint/format/docs checks; self-review the correction before commit/push to PR #960.

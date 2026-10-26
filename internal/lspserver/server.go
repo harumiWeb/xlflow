@@ -189,6 +189,7 @@ type diagnosticState struct {
 	baselineKnown          bool
 	baselineMatchesOverlay bool
 	diagnosticCache        *intel.DiagnosticCache
+	quickFixEvidence       *quickFixDiagnosticEvidence
 	changes                intel.ProcedureChangeSet
 	overlayGeneration      uint64
 	dependencyGeneration   uint64
@@ -288,6 +289,7 @@ func New(opts Options) (*Server, func(), error) {
 	s.analyzer.WorkspaceSymbolQueryFunc = s.cachedWorkspaceSymbolQuery
 	s.analyzer.WorkspaceSymbolQueryContextFunc = s.cachedWorkspaceSymbolQueryContext
 	s.analyzer.WorkspaceSymbolsSnapshotFunc = s.cachedWorkspaceSymbolsSnapshot
+	s.analyzer.QuickFixDiagnosticsFunc = s.currentQuickFixDiagnostics
 	s.semanticTokenGenerator = s.analyzer.SemanticTokensContext
 	s.diagnostics = s.analyzer.DiagnosticsContext
 	s.diagnosticsRequest = s.analyzer.DiagnosticsRequestContext
@@ -1729,6 +1731,11 @@ func (s *Server) codeActionForDocument(ctx context.Context, doc intel.Document, 
 
 func (s *Server) projectCodeActions(doc intel.Document, requestURI protocol.DocumentUri, actions []intel.CodeAction) []protocol.CodeAction {
 	out := make([]protocol.CodeAction, 0, len(actions))
+	revalidateByVal := hasByValQuickFixDiagnostic(actions)
+	var projectedSources []intel.CodeAction
+	if revalidateByVal {
+		projectedSources = make([]intel.CodeAction, 0, len(actions))
+	}
 	for _, action := range actions {
 		if strings.HasPrefix(action.Kind, "source.fixAll.") && (!s.codeActionDocumentChanges.Load() || !s.docs.isOpen(doc.URI)) {
 			continue
@@ -1753,6 +1760,9 @@ func (s *Server) projectCodeActions(doc intel.Document, requestURI protocol.Docu
 				requestURI: edits,
 			}},
 		})
+		if revalidateByVal {
+			projectedSources = append(projectedSources, action)
+		}
 	}
 	if s.codeActionDocumentChanges.Load() {
 		// A versioned edit also protects the client-side gap: the editor may
@@ -1775,6 +1785,12 @@ func (s *Server) projectCodeActions(doc intel.Document, requestURI protocol.Docu
 				Edits: versionedEdits,
 			}}}
 		}
+	}
+	if revalidateByVal {
+		// Discovery and protocol/versioned-edit projection can outlive the
+		// project evidence. Recheck after all conversion, without holding
+		// lifecycle locks during parsing or projection.
+		return retainCurrentByValQuickFixActions(projectedSources, out, s.currentQuickFixDiagnostics(doc))
 	}
 	return out
 }
@@ -2519,16 +2535,20 @@ func (s *Server) runDiagnosticsBody(
 	dependencyGeneration := state.dependencyGeneration
 	state.mu.Unlock()
 	var result intel.DiagnosticResult
+	projectAwareFull := false
 	if s.documentKind(doc) == DocumentKindVBA && s.diagnosticsRequest != nil {
 		request := intel.DiagnosticRequest{Document: doc, Mode: mode, Changes: changes, PreviousCache: previousCache, Recorder: recorder, InitialFast: initialFast && mode == intel.DiagnosticModeFast}
 		project := intel.ProjectAnalysisSnapshot{}
 		if mode == intel.DiagnosticModeFull {
 			project = s.analysis.projectSnapshotClassContext(runCtx, analysisWorkBackground.String())
+			// A document-local fallback may miss project-wide AddressOf
+			// constraints, so it cannot authorize ByRef-to-ByVal edits.
+			projectAwareFull = project.Complete && s.projectDiagnosticsEnabled()
 			if !project.Complete && s.projectDiagnosticsEnabled() {
 				s.scheduleProjectReadyDiagnostics(state)
 			}
 		}
-		if mode == intel.DiagnosticModeFull && project.Complete && s.projectDiagnosticsEnabled() {
+		if mode == intel.DiagnosticModeFull && projectAwareFull {
 			result = s.projectDiagnosticsRequest(runCtx, request, project)
 		} else {
 			result = s.diagnosticsRequest(runCtx, request)
@@ -2565,6 +2585,11 @@ func (s *Server) runDiagnosticsBody(
 		state.hasPublished = true
 		if mode == intel.DiagnosticModeFull && result.Cache != nil {
 			state.diagnosticCache = result.Cache
+		}
+		if mode == intel.DiagnosticModeFull && projectAwareFull && notify != nil && sameScheduledDocument(state.latest, doc) {
+			state.quickFixEvidence = newQuickFixDiagnosticEvidence(doc, generation, dependencyGeneration, projectAwareFull, diagnostics)
+		} else {
+			state.quickFixEvidence = nil
 		}
 	}
 	state.mu.Unlock()
@@ -2734,6 +2759,7 @@ func (state *diagnosticState) close() {
 	state.baselineKnown = false
 	state.baselineMatchesOverlay = false
 	state.diagnosticCache = nil
+	state.quickFixEvidence = nil
 	state.hasPublished = false
 	state.initialFast = false
 	state.overlayGeneration = 0

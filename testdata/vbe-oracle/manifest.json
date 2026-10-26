@@ -25,6 +25,8 @@
       "path": "cases/quickfix-unused-local-before/case.json"
     },
     { "id": "quickfix-unused-local-after", "path": "cases/quickfix-unused-local-after/case.json" },
+    { "id": "quickfix-byval-before", "path": "cases/quickfix-byval-before/case.json" },
+    { "id": "quickfix-byval-after", "path": "cases/quickfix-byval-after/case.json" },
     { "id": "quickfix-set-object-before", "path": "cases/quickfix-set-object-before/case.json" },
     { "id": "quickfix-set-object-after", "path": "cases/quickfix-set-object-after/case.json" },
     { "id": "maintainability-global", "path": "cases/maintainability-global/case.json" },
