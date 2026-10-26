@@ -1365,5 +1365,5 @@ CI or publication is claimed.
 - [x] Inspect merged CLI/specification boundaries; create and read-back validate the English issue before implementation.
 - [x] Reuse single-file preview for explicit, ordered/deduplicated multi-file previews with one eligible rule and no multi-file writes.
 - [x] Preserve single-file apply/output; test error/cancellation, ownership, encoding, aliases, unchanged results and exact per-file parity without writes.
-- [ ] Update ADR proposal, CLI/public specifications, help/generated inventories and changelog; run focused/full affected checks and self-review.
-- [ ] Commit and start supervised independent final review; retain report and clean up review resources on completion.
+- [x] Update ADR proposal, CLI/public specifications, help/generated inventories and changelog; full CLI tests passed (335.205s), focused multi-file tests, lint, format and docs checks passed.
+- [x] Commit and complete supervised independent final review: PASS at `0304de5d`, no confirmed findings; independent `TestFix` passed (7.152s). Report retained under `tmp_workspaces/final-review/issue961-pass1/report.md`; review agent, watcher and temporary worktree cleaned up.
