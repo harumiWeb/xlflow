@@ -1375,3 +1375,10 @@ CI or publication is claimed.
 - [x] Integrate explicit multi-file apply without altering single-file/preview contracts; verify per-file states, no-write validation failures and error projections. Full CLI tests passed (372.623s); focused Quick Fix tests passed (12.203s).
 - [x] Update ADR draft, CLI/public specifications and changelog; lint, docs and format checks passed; self-review corrected reporting of already-removed artifacts and verifies empty recovery paths when all persistence fails.
 - [ ] Commit and complete supervised independent final review, preserve evidence and clean up review resources.
+
+## Issue #963 final review follow-up
+
+- [x] Confirm Pass 1 P2: a backup lost during failed restore can leave a stale recovery path.
+- [x] Add regression coverage for backup loss/corruption during restore, including unavailable fallback storage; all four cases fail before the fix and pass afterwards.
+- [x] Revalidate backups after failed restore before selecting recovery material; sourceedit race tests pass (3.543s) and focused Quick Fix CLI tests pass (8.068s).
+- [ ] Commit the correction and complete bounded Pass 2 independent review.

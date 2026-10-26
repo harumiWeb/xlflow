@@ -3,9 +3,11 @@ package sourceedit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -435,6 +437,68 @@ func TestBatchCorruptBackupIsNotRestored(t *testing.T) {
 	t.Cleanup(func() { _ = os.Remove(recovery) })
 	assertFileContents(t, recovery, changes[0].Snapshot.Source)
 	assertFileContents(t, changes[0].Snapshot.path, changes[0].Replacement)
+}
+
+func TestBatchBackupLostDuringFailedRestore(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		for _, fallbackFails := range []bool{false, true} {
+			t.Run(fmt.Sprintf("corrupt=%t/fallbackFails=%t", corrupt, fallbackFails), func(t *testing.T) {
+				changes := batchTestChanges(t, t.TempDir(), "a.bas", "b.bas")
+				var backupPath string
+				stageCalls := 0
+				ops := batchOperations{stage: func(ctx context.Context, source *Snapshot, data []byte) (*Snapshot, error) {
+					staged, err := stageBatchFile(ctx, source, data)
+					stageCalls++
+					if stageCalls == 1 && err == nil {
+						backupPath = staged.path
+					}
+					return staged, err
+				}}
+				storageErr := errors.New("recovery storage unavailable")
+				if fallbackFails {
+					ops.recover = func([]byte) (*Snapshot, error) { return nil, storageErr }
+				}
+				restoreErr := errors.New("restore failed after backup changed")
+				changes[0].Snapshot.ops.publish = func(temp, target string) error {
+					if temp != backupPath {
+						return platformAtomicReplace(temp, target)
+					}
+					var err error
+					if corrupt {
+						err = os.WriteFile(backupPath, []byte("corrupted backup"), 0o600)
+					} else {
+						err = os.Remove(backupPath)
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					return restoreErr
+				}
+				changes[1].Snapshot.ops.publish = func(string, string) error { return errors.New("second publish failed") }
+				result, err := applyBatch(t.Context(), changes, ops)
+				if !errors.Is(err, restoreErr) || result.Committed || result.Files[0].State != "recovery_required" || result.Files[1].State != "not_applied" {
+					t.Fatalf("result=%+v error=%v", result, err)
+				}
+				recovery := result.Files[0].RecoveryPath
+				if fallbackFails {
+					if !errors.Is(err, storageErr) || recovery != "" {
+						t.Fatalf("unusable recovery path: result=%+v error=%v", result, err)
+					}
+				} else {
+					if recovery == "" || recovery == backupPath || !slices.Contains(result.Artifacts, recovery) {
+						t.Fatalf("no safe fallback: %+v", result)
+					}
+					t.Cleanup(func() { _ = os.Remove(recovery) })
+					assertFileContents(t, recovery, changes[0].Snapshot.Source)
+				}
+				if slices.Contains(result.Artifacts, backupPath) != corrupt {
+					t.Fatalf("incorrect backup artifact state: %+v", result)
+				}
+				assertFileContents(t, changes[0].Snapshot.path, changes[0].Replacement)
+				assertFileContents(t, changes[1].Snapshot.path, changes[1].Snapshot.Source)
+			})
+		}
+	}
 }
 
 func TestBatchUnavailableBackupAndRecoveryStorageReportNoUsableRecoveryPath(t *testing.T) {

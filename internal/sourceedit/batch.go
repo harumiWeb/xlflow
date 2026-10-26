@@ -305,6 +305,10 @@ func rollbackBatch(items []batchItem, result *BatchResult, recoverOriginal func(
 			err = publish(item.backup.path, item.source.path)
 		}
 		if err != nil {
+			// Restore itself can lose or alter the previously verified backup.
+			// Select recovery material using its state after that failure.
+			backupErr = item.backup.verifyCurrent()
+			err = errors.Join(err, backupErr)
 			result.Files[i].State = "recovery_required"
 			result.Files[i].RecoveryPath = item.backup.path
 			if backupErr != nil {

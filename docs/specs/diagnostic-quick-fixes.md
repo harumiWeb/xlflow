@@ -276,7 +276,11 @@ If publication fails or cancellation occurs before all changed files are
 published, restore published targets in reverse publication order while
 ignoring cancellation during recovery. Before restoring each target, verify
 that the published file still has the transaction's identity, mode, and bytes,
-and verify its original-byte backup. If either check conflicts or restoration
+and verify its original-byte backup. After a failed restore call, verify the
+backup again before reporting it as usable recovery material: the restore
+attempt may itself lose or alter that previously verified file. Regression
+coverage includes backup loss/corruption during restore and unavailable
+fallback storage. If either check conflicts or restoration
 fails, do not overwrite the external state. If the parent directory moved or
 was replaced, or the source-side backup is altered or inaccessible, treat that
 backup path as untrusted. Attempt to persist an independent copy of the captured
