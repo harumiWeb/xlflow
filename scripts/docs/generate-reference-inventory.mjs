@@ -111,6 +111,8 @@ const excludedErrorInventoryLiterals = new Set([
   "result_sha256",
   "changed_file_count", // Multi-file diagnostic-fix summary, not errors.
   "edit_count",
+  "not_applied", // Source-edit batch state and recovery metadata, not errors.
+  "recovery_path",
   "dependency_edges_updated",
   "dependency_nodes_updated",
   "allowed_occurrence_evidence",

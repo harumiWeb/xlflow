@@ -1367,3 +1367,25 @@ CI or publication is claimed.
 - [x] Preserve single-file apply/output; test error/cancellation, ownership, encoding, aliases, unchanged results and exact per-file parity without writes.
 - [x] Update ADR proposal, CLI/public specifications, help/generated inventories and changelog; full CLI tests passed (335.205s), focused multi-file tests, lint, format and docs checks passed.
 - [x] Commit and complete supervised independent final review: PASS at `0304de5d`, no confirmed findings; independent `TestFix` passed (7.152s). Report retained under `tmp_workspaces/final-review/issue961-pass1/report.md`; review agent, watcher and temporary worktree cleaned up.
+
+# Issue #963: multi-file Quick Fix application
+
+## PR #964 review follow-up
+
+- [x] Verify comment 4383363818: default recovery staging fails when the OS temporary directory has a symlinked ancestor, because Capture rejects linked paths.
+- [x] Add a regression using a linked OS temp directory and unavailable original backup; confirm failure before changing recovery staging.
+- [x] Resolve only the fallback directory before staging and preserve strict source-path checks. Sourceedit race tests pass (2.674s), focused Quick Fix CLI tests pass (12.031s), and docs checks pass.
+- [x] Prepare the verified correction for existing PR #964; its prior revision's remote checks passed, while the correction requires CI on the new revision.
+
+- [x] Inspect capture/publication and existing transactions; create and read-back validate the English issue before implementation.
+- [x] Implement captured-source batch preparation, staged replacements/backups, revalidation, reverse rollback and retained recovery artifacts with deterministic fault tests; sourceedit race tests passed (2.315s).
+- [x] Integrate explicit multi-file apply without altering single-file/preview contracts; verify per-file states, no-write validation failures and error projections. Full CLI tests passed (372.623s); focused Quick Fix tests passed (12.203s).
+- [x] Update ADR draft, CLI/public specifications and changelog; lint, docs and format checks passed; self-review corrected reporting of already-removed artifacts and verifies empty recovery paths when all persistence fails.
+- [x] Commit and complete supervised independent final review, preserve evidence and clean up review resources. Pass 2 approved commit `034ec932a67654d155872ca44f1382fb7b423091` with no findings; independent sourceedit race tests (3.459s), focused CLI tests (6.927s) and fallback cleanup overlay passed. Report: `tmp_workspaces/final-review/issue963-pass2/report.md`. Remote PR/CI remains pending.
+
+## Issue #963 final review follow-up
+
+- [x] Confirm Pass 1 P2: a backup lost during failed restore can leave a stale recovery path.
+- [x] Add regression coverage for backup loss/corruption during restore, including unavailable fallback storage; all four cases fail before the fix and pass afterwards.
+- [x] Revalidate backups after failed restore before selecting recovery material; sourceedit race tests pass (3.543s) and focused Quick Fix CLI tests pass (8.068s).
+- [x] Commit the correction and complete bounded Pass 2 independent review; preserve both reports and remove both review worktrees and their sessions.

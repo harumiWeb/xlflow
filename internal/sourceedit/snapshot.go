@@ -1,5 +1,5 @@
 // Package sourceedit provides best-effort stale-write protection and atomic
-// publication for edits to one existing regular file.
+// publication for edits to existing regular files, with best-effort batch rollback.
 //
 // The identity, mode, and content checks are cooperative protection against
 // stale edits. Another process can still race the final check and publication,

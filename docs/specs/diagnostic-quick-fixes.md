@@ -68,8 +68,9 @@ continued `Option Explicit` spellings. Existing BOM rejection remains unchanged.
 VB001 retains its existing default-enabled warning policy. VB044 remains
 opt-in; VB080, VB084, and VB086 remain opt-in at information severity.
 Documentation generation retains its existing refactor kind and has no
-associated diagnostic. CLI application is defined below. Save-time fixes and
-cross-file edits remain outside this contract.
+associated diagnostic. CLI application is defined below. Save-time fixes,
+cross-file semantic edits, and editor multi-document transactions remain
+outside this contract.
 
 ## Individual VB020 correction
 
@@ -195,14 +196,14 @@ uses the normal workspace-edit and Undo mechanism.
 ## CLI application
 
 `xlflow fix <path> [<path>...] --rule VB044|VB080|VB084|VB086 [--apply] [--json]` runs
-same-rule Fix All for explicit files. It requires `xlflow.toml` in the current
-project. Eligible files are under the configured modules, classes, or
-workbook source roots, or the project test root. The initial CLI surface
-accepts only `.bas` and `.cls`. Under the configured forms root, the sole
-exception is `forms/code/*.bas` when `[userform].code_source = "sidecar"`;
-forms assets, specs, and inactive sidecar paths are rejected even when a file
-has a supported extension. UserForm `.frm` files are excluded because their
-`.frx` sidecars and source ownership require a separate transaction contract.
+same-rule corrections for explicit files. It requires `xlflow.toml` in the
+current project. Eligible files are under the configured modules, classes, or
+workbook source roots, or the project test root. The initial CLI surface accepts
+only `.bas` and `.cls`. Under the configured forms root, the sole exception is
+`forms/code/*.bas` when `[userform].code_source = "sidecar"`; forms assets, specs,
+and inactive sidecar paths are rejected even when a file has a supported
+extension. UserForm `.frm` files are excluded because their `.frx` sidecars and
+source ownership require a separate transaction contract.
 
 The command reuses the shared `intel` same-rule correction provider, including
 its enabled-rule configuration, inline suppression behavior, diagnostic
@@ -212,12 +213,12 @@ ProcedureIR/CFG. It reads the saved file from disk; open editor buffers,
 workbooks, Excel COM, and workbook sessions are not inputs.
 
 Without `--apply`, the command previews the proposed result. With `--apply`, it
-captures and analyzes the current file again; a prior preview is never stored
-or reused as an edit plan. The input must be valid UTF-8 without a BOM.
-`changed` reports whether applying the proposed edits changes the captured
-bytes. `applied` is true only when changed bytes were successfully written.
-Preview output always has `applied=false`; an apply with no byte changes also
-has `applied=false`.
+captures and analyzes every selected file again; a prior preview is never stored
+or reused as an edit plan. Inputs must be valid UTF-8 without a BOM. `changed`
+reports whether applying the proposed edits changes the captured bytes.
+`applied` is true only when changed bytes were successfully written. Preview
+output always has `applied=false`; an apply with no byte changes also has
+`applied=false`.
 
 JSON success uses the normal envelope with `command="fix"` and an `output`
 object containing:
@@ -237,34 +238,85 @@ object containing:
 - `diff`: unified diff from captured source to proposed result; it is empty
   when there is no change.
 
-### Multiple-file previews
+### Multiple-file preview and apply
 
-Two or more positional paths select a preview-only output schema, even when
-aliases deduplicate to one file. `--apply` with multiple arguments fails with
-`fix_args_invalid` before project configuration or source reads. Directories,
-globs and implicit project discovery are unsupported; each input must satisfy
-the same managed-source and regular-file checks as a single-file invocation.
+Two or more positional arguments select the batch output schema for both preview
+and `--apply`, even when aliases later deduplicate to one selected file. Resolve
+and validate every argument before logical-path deduplication. Deduplicate
+logical absolute paths using `sourcepath.Key` (case-folded only on Windows),
+then sort selected results by project-relative slash-separated path using
+case-sensitive lexical ordering. Duplicate logical aliases use the
+lexically-smallest relative spelling. Batch apply rejects distinct selected paths that have
+the same physical file identity, including hard-link aliases, before any source
+publication. Directories, globs, implicit project discovery, and `.frm`
+transactions remain unsupported.
 
-Logical absolute paths are deduplicated using `sourcepath.Key` (case-folded
-only on Windows), not inode or hard-link identity. Results are sorted by
-project-relative slash-separated path using lexical case-sensitive ordering;
-duplicate aliases use the lexically smallest relative spelling. Each argument
-is validated before deduplication. Files are captured and analyzed sequentially,
-retiring each analysis snapshot before processing the next file.
+Capture and compute all selected files before publishing any source. Process
+captures sequentially and retire each analysis snapshot before processing the
+next file. The batch `output` contains `mode` (`preview` or `apply`), uppercase
+`rule`, `files` (each with the complete single-file result shape), and
+`summary.file_count`, `summary.changed_file_count`, and `summary.edit_count`.
+Counts cover unique logical files, including unchanged, suppressed, and
+disabled-rule results. `target` contains ordered `paths` and `rule`. Text output
+includes each file's diff and the aggregate counts. One positional argument
+retains its existing single-file output shape and apply behavior. The number of
+arguments selects batch mode before deduplication, so two aliases still produce
+the batch schema when they resolve to one selected file.
 
-The batch `output` contains `mode="preview"`, uppercase `rule`, `files` (each
-with the complete single-file preview shape), and `summary.file_count`,
-`summary.changed_file_count`, `summary.edit_count`. Counts cover unique selected
-files, including unchanged, suppressed and disabled-rule results. `target`
-contains ordered `paths` and `rule`. Text output includes each file's diff and
-the aggregate counts. One positional path retains its existing output shape
-and apply behavior.
+Batch apply validates all captured targets, including no-op files. Reject a
+read-only target only when its proposed bytes change; unchanged read-only files
+remain eligible. Stage both replacement bytes and original-byte backups beside
+every changed target before publishing any target, preserving permission bits.
+No-op files create no temporary files. Recheck every target's identity, parent,
+mode, and contents after staging and again immediately before its publication.
+Staging artifacts use same-directory `.sourceedit-*.tmp` files. On successful
+commit or successful rollback, remove temporary artifacts.
 
-Any invalid input, read, encoding or analysis failure, or cancellation returns
-one existing failure envelope without a successful partial `output`. Preview
-never stages or writes source files. Captures describe individual file states;
-they are neither an atomic project snapshot nor a durable plan for later apply.
-Multi-file writes and cross-file corrections remain deferred.
+If publication fails or cancellation occurs before all changed files are
+published, restore published targets in reverse publication order while
+ignoring cancellation during recovery. Before restoring each target, verify
+that the published file still has the transaction's identity, mode, and bytes,
+and verify its original-byte backup. After a failed restore call, verify the
+backup again before reporting it as usable recovery material: the restore
+attempt may itself lose or alter that previously verified file. Regression
+coverage includes backup loss/corruption during restore and unavailable
+fallback storage. If either check conflicts or restoration
+fails, do not overwrite the external state. If the parent directory moved or
+was replaced, or the source-side backup is altered or inaccessible, treat that
+backup path as untrusted. Resolve symlinked components in the OS temporary
+directory before staging fallback recovery material, while retaining strict
+link rejection for source paths and captured files. Attempt to persist an independent copy of the captured
+original bytes in an OS temporary `.sourceedit-*.tmp` file with restricted
+permission mode `0600` (subject to host filesystem permission semantics), and report its absolute path as `recovery_path` (outside the
+project). Report an inaccessible or unremoved source-side artifact separately
+from the fallback recovery copy. Retain recovery material and report affected
+paths. If all persistence attempts fail, recovery is not guaranteed; report
+those failures and the affected files. External writers can still race with
+these checks.
+
+Successful apply results use each file's existing apply-mode shape and the
+batch counts. `applied` is true only for changed files actually published; it
+is false for unchanged files. Any invalid input, read, encoding, analysis,
+staging, stale-state, publication, or cancellation failure returns one error
+envelope without a partial success `output`. Captures are sequential and do not
+form an atomic project snapshot or reusable apply plan. Multi-file visibility is
+not atomic, process termination does not provide automatic recovery, and the
+rechecks are not a race-free compare-and-swap. Cross-file semantic corrections
+remain outside this contract.
+
+Failures after entering the batch transaction report `error.details.committed`, `error.details.files`, and
+`error.details.artifacts`. Each file entry has a path and one of the states
+`unchanged`, `not_applied`, `applied`, `restored`, or `recovery_required`:
+`unchanged` had no proposed byte changes, `not_applied` was not published,
+`applied` remains committed, `restored` was returned to its original bytes, and
+`recovery_required` could not be safely restored. An entry may also have
+`recovery_path` when original bytes were retained for manual recovery.
+`committed` is true only when all requested changes were published. The
+`artifacts` array lists retained temporary/recovery paths or paths that could not be inspected or removed. Earlier configuration, ownership, encoding and analysis failures retain their existing error shapes. Failure envelopes
+omit `output`. Human-readable errors also identify file states and recovery
+paths. Core source-edit paths are absolute. The CLI projects in-project paths
+as project-relative slash-separated paths and leaves paths outside the project
+absolute.
 
 ### Single-file publication
 
@@ -284,15 +336,17 @@ This is coordination metadata only: no source-tree lock or workbook lease is
 acquired, and there is no `--wait` behavior. File rechecking remains
 best-effort against external writers.
 
-| Error code                | Exit | Meaning                                                                                                  |
-| ------------------------- | ---: | -------------------------------------------------------------------------------------------------------- |
-| `config_error`            |    2 | Required project configuration is missing or invalid, using the standard configuration error projection. |
-| `fix_args_invalid`        |    2 | Invalid command arguments, rule, path scope, or unsupported file extension.                              |
-| `source_encoding_invalid` |    1 | The selected source is not UTF-8 without BOM, using the existing source-encoding projection.             |
-| `fix_source_changed`      |    1 | Target identity, mode, or contents changed before publication.                                           |
-| `fix_edits_invalid`       |    1 | The shared edit set failed range or conflict validation.                                                 |
-| `fix_failed`              |    3 | File-system or other operational failure.                                                                |
-| `fix_cancelled`           |    3 | The operation was canceled before publication.                                                           |
+| Error code                | Exit | Meaning                                                                                                       |
+| ------------------------- | ---: | ------------------------------------------------------------------------------------------------------------- |
+| `config_error`            |    2 | Required project configuration is missing or invalid, using the standard configuration error projection.      |
+| `fix_args_invalid`        |    2 | Invalid command arguments, rule, path scope, or unsupported file extension.                                   |
+| `source_encoding_invalid` |    1 | The selected source is not UTF-8 without BOM, using the existing source-encoding projection.                  |
+| `fix_source_changed`      |    1 | Target identity, mode, or contents changed before publication.                                                |
+| `fix_edits_invalid`       |    1 | The shared edit set failed range or conflict validation.                                                      |
+| `fix_failed`              |    3 | File-system or other operational failure; transaction details identify unpublished or restored files.         |
+| `fix_cancelled`           |    3 | The operation was canceled; any published files were restored before this error is returned.                  |
+| `fix_rollback_failed`     |    3 | Rollback failed or detected an external conflict; overrides the triggering stale-state or cancellation error. |
+| `fix_cleanup_failed`      |    3 | Post-commit artifact cleanup failed; `committed=true` and file states report the committed changes.           |
 
 ## Type-backed Set corrections
 
