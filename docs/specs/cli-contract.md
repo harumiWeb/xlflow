@@ -1462,7 +1462,7 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB026`: `Resume` is used outside a likely error-handler context
 - `VB027`: nested `With` blocks use implicit Excel members whose target can be ambiguous
 - `VB029`: `Option Explicit` is present and an assignment target or loop control variable is not declared in the project-visible namespace
-  The `VB029` diagnostic reports against the current source file, but its declaration lookup includes public module-level variables, constants, user-defined types, and enums from project standard modules. LSP requests use the coherent workspace symbol snapshot for this lookup.
+  The `VB029` diagnostic reports against the current source file, but its declaration lookup includes public module-level variables, constants, user-defined types, and enums from project standard modules. Class module names with `Attribute VB_PredeclaredId = True` also resolve as default-instance assignment targets, including `Set ClassName = Nothing`; classes with a false or omitted attribute do not acquire this project-visible value binding. The declared module name, rather than the source filename, identifies the instance. LSP requests use the coherent workspace symbol snapshot, including unsaved class attribute edits, for this lookup.
 - `VB030`: procedure call argument has an inferred, array/object, or otherwise
   uncertain mismatch with the resolved signature; it remains a warning
 - `VB045`: deterministic argument-count, duplicate-name, unknown-name, or

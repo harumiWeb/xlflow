@@ -147,6 +147,10 @@ func workspaceObjectTypeDeclarations(symbols []Symbol) map[string]int {
 func visibleAssignmentDeclarations(symbols []Symbol) map[string]bool {
 	visible := make(map[string]bool)
 	for _, symbol := range symbols {
+		if symbol.Parent == "" && strings.EqualFold(symbol.Kind, "module") && strings.EqualFold(symbol.ModuleKind, "class") && symbol.PredeclaredID {
+			visible[symbol.Name] = true
+			continue
+		}
 		if symbol.Parent != "" || !strings.EqualFold(symbol.Visibility, "Public") || !strings.EqualFold(symbol.ModuleKind, "standard") {
 			continue
 		}

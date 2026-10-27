@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VB029` incorrectly rejecting assignments such as
+  `Set Predeclared = Nothing` to class default instances declared with
+  `Attribute VB_PredeclaredId = True`, including lint, source preflight and LSP
+  diagnostics.
+
 - Added explicit multi-file `xlflow fix` preview and apply for the existing
   eligible rules, with per-file results and aggregate counts. Apply stages
   replacement bytes and original backups before publication, rolls back

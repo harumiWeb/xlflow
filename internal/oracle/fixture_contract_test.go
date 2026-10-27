@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -151,6 +152,11 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 			}
 
 			lspAnalyzer := intel.Analyzer{RootDir: projectRoot, Config: cfg, DB: db}
+			if slices.Contains(c.Analysis.RuleCodes, "VB029") {
+				lspAnalyzer.WorkspaceSymbolsSnapshotFunc = func(open []intel.Document) ([]intel.Symbol, error) {
+					return lspAnalyzer.WorkspaceSymbolsContext(t.Context(), open, "")
+				}
+			}
 			// The direct intel analyzer normally runs file-local diagnostics. For
 			// this Excel-free contract test, install the same project resolver
 			// projection used by LSP Full so interprocedural VB052–VB054 contracts
@@ -260,7 +266,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 196 || report.BoundFixtures != 154 || report.PartialFixtures != 0 || report.UnboundFixtures != 41 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 198 || report.BoundFixtures != 156 || report.PartialFixtures != 0 || report.UnboundFixtures != 41 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -342,6 +348,8 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"option-in-procedure",
 		"option-in-procedure-valid-controls",
 		"optional-argument-omitted",
+		"ordinary-class-assignment-rejected",
+		"predeclared-class-assignment-accepted",
 		"procedure-optional-numeric-literals-valid",
 		"procedure-parameter-limit-60",
 		"procedure-parameter-limit-61",

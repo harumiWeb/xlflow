@@ -147,6 +147,30 @@ public sealed class VbeOracleServiceTests
     }
 
     [Theory]
+    [InlineData("True")]
+    [InlineData("False")]
+    public void OracleClassImportPreservesPredeclaredAttributeAndUsesCrLf(string value)
+    {
+        var source = "Attribute VB_Name = \"Widget\"\nAttribute VB_PredeclaredId = " + value + "\nOption Explicit\n";
+        var text = VbeOracleService.BuildOracleClassImport(source);
+
+        Assert.StartsWith("VERSION 1.0 CLASS\r\nBEGIN\r\n", text);
+        Assert.Contains("Attribute VB_PredeclaredId = " + value + "\r\n", text);
+        Assert.DoesNotContain("\n", text.Replace("\r\n", "", StringComparison.Ordinal));
+        Assert.Equal(text, VbeOracleService.BuildOracleClassImport(text));
+        VbeOracleService.VerifyOraclePredeclaredId(source, text);
+    }
+
+    [Theory]
+    [InlineData("Attribute VB_PredeclaredId = False\r\n")]
+    [InlineData("Option Explicit\r\n")]
+    public void OracleClassImportRejectsLostPredeclaredAttribute(string exported)
+    {
+        Assert.Throws<VbeOracleService.OracleSourceMutationException>(() =>
+            VbeOracleService.VerifyOraclePredeclaredId("Attribute VB_PredeclaredId = True\n", exported));
+    }
+
+    [Theory]
     [InlineData(100, "ThisWorkbook", "ThisWorkbook", "workbook", true)]
     [InlineData(100, "THISWORKBOOK", "ThisWorkbook", "workbook", true)]
     [InlineData(100, "Sheet2", "Sheet2", "worksheet", true)]

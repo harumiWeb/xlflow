@@ -1,3 +1,10 @@
+# Issue #965: predeclared class assignment targets
+
+- [x] Preserve class attribute evidence in the local VBE oracle and run known controls plus focused accepted/rejected cases sequentially.
+- [x] Resolve predeclared class module symbols as assignment targets in batch lint and coherent LSP workspace snapshots; retain ordinary-class errors and local shadowing.
+- [x] Add batch/LSP/preflight regressions, bind confirmed oracle evidence, and update the specification and changelog.
+- [ ] Run affected suites, corpus/format/docs/lint checks, benchmark comparison and independent review; preserve evidence.
+
 # Issue #954: CLI diagnostic fix preview and apply
 
 ## PR #955 review follow-up
