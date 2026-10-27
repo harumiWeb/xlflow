@@ -5,6 +5,13 @@
 - [x] Add batch/LSP/preflight regressions, bind confirmed oracle evidence, and update the specification and changelog.
 - [x] Run affected suites, corpus/format/docs/lint checks, benchmark comparison and independent review; preserve evidence.
 
+# Batch lint IR reuse
+
+- [x] Retain owned syntax-local IR only within one complete unfiltered run.
+- [x] Reject changed source, module identity, incomplete parsing and editor reuse.
+- [x] Compare fresh and reused project diagnostics, including conditional and event code.
+- [x] Run lint, procedure IR and CLI tests in Linux. Cloud Runtime preservation checks are tracked by xlflow-cloud.
+
 # Issue #954: CLI diagnostic fix preview and apply
 
 ## PR #955 review follow-up

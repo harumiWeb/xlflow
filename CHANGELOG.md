@@ -8,6 +8,8 @@ All notable changes to xlflow will be documented in this file.
   `Set Predeclared = Nothing` to class default instances declared with
   `Attribute VB_PredeclaredId = True`, including lint, source preflight and LSP
   diagnostics.
+- Reduced duplicate procedure IR construction within full batch lint runs,
+  retaining source and module identity checks and existing diagnostics.
 
 - Added explicit multi-file `xlflow fix` preview and apply for the existing
   eligible rules, with per-file results and aggregate counts. Apply stages

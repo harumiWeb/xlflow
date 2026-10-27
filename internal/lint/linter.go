@@ -82,6 +82,7 @@ type Linter struct {
 	localConstantValues    map[string]constexpr.Value
 	TypeDeclarations       map[string]int
 	ObjectTypeDeclarations map[string]int
+	batchIRCache           map[string]batchIRCacheEntry
 }
 
 type procedureFrame struct {
@@ -155,6 +156,10 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 	files, err := l.filesContext(ctx)
 	if err != nil {
 		return Result{}, err
+	}
+	l.batchIRCache = nil
+	if l.PathFilter == nil {
+		l.batchIRCache = make(map[string]batchIRCacheEntry, len(files))
 	}
 	if l.ConstantValues == nil {
 		l.ConstantValues = l.projectConstantValuesContext(ctx, files)
@@ -405,6 +410,7 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 	if irErr != nil {
 		return nil, irErr
 	}
+	l.rememberBatchIR(path, source, ir)
 	procedureIR := &ir
 	l.localConstantValues = constantValuesFromSource(string(source), procedureIR, nil)
 	if l.ConstantValues == nil {
@@ -2489,7 +2495,10 @@ func (l Linter) resolutionIssuesContextWithResult(ctx context.Context, files []s
 			return nil, err
 		}
 		module, kind := moduleForSymbols(result, l.RootDir, path)
-		ir, err := procedureir.BuildSource(procedureir.BuildOptions{RootDir: l.RootDir, Path: path, ModuleName: module, ModuleKind: kind}, source)
+		ir, reused := l.reuseBatchIR(path, source, module, kind)
+		if !reused {
+			ir, err = procedureir.BuildSource(procedureir.BuildOptions{RootDir: l.RootDir, Path: path, ModuleName: module, ModuleKind: kind}, source)
+		}
 		if err != nil {
 			// Any source that cannot be represented in procedure IR makes the
 			// project snapshot incomplete. Fail open for every file rather than
