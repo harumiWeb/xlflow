@@ -911,3 +911,19 @@ propagation without adding effect claims to the IR itself.
 The IR itself does not expose reachability or effect claims. No new public CLI
 flag, configuration key, JSON field, diagnostic ID, or LSP capability is
 introduced by this specification.
+
+## Batch lint reuse boundary
+
+A full, unfiltered lint run may retain an owned syntax-local IR snapshot from
+its file-local pass and reuse it for project resolution within that invocation.
+The cache is recreated for each run and is never shared with filtered lint or
+editor calls. Reuse requires complete parsing and an exact match of source
+SHA-256, module name, and module kind. Project symbols and current source bytes
+are still collected. A miss uses the ordinary source builder, preserving
+incomplete-project behavior and document-module classification.
+
+Use the canonical IR clone before retaining and before consuming a snapshot;
+never retain AST handles or expose mutable cached slices. Root-relative display
+paths must match a fresh build, including call-site and type-reference paths.
+Cloning may normalize empty slices to nil internally; CLI diagnostics, ranges,
+severity, suppression, exit status, and cancellation remain unchanged.
