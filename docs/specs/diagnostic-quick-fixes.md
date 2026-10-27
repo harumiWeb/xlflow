@@ -283,7 +283,9 @@ coverage includes backup loss/corruption during restore and unavailable
 fallback storage. If either check conflicts or restoration
 fails, do not overwrite the external state. If the parent directory moved or
 was replaced, or the source-side backup is altered or inaccessible, treat that
-backup path as untrusted. Attempt to persist an independent copy of the captured
+backup path as untrusted. Resolve symlinked components in the OS temporary
+directory before staging fallback recovery material, while retaining strict
+link rejection for source paths and captured files. Attempt to persist an independent copy of the captured
 original bytes in an OS temporary `.sourceedit-*.tmp` file with restricted
 permission mode `0600` (subject to host filesystem permission semantics), and report its absolute path as `recovery_path` (outside the
 project). Report an inaccessible or unremoved source-side artifact separately

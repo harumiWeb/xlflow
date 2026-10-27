@@ -1370,6 +1370,13 @@ CI or publication is claimed.
 
 # Issue #963: multi-file Quick Fix application
 
+## PR #964 review follow-up
+
+- [x] Verify comment 4383363818: default recovery staging fails when the OS temporary directory has a symlinked ancestor, because Capture rejects linked paths.
+- [x] Add a regression using a linked OS temp directory and unavailable original backup; confirm failure before changing recovery staging.
+- [x] Resolve only the fallback directory before staging and preserve strict source-path checks. Sourceedit race tests pass (2.674s), focused Quick Fix CLI tests pass (12.031s), and docs checks pass.
+- [x] Prepare the verified correction for existing PR #964; its prior revision's remote checks passed, while the correction requires CI on the new revision.
+
 - [x] Inspect capture/publication and existing transactions; create and read-back validate the English issue before implementation.
 - [x] Implement captured-source batch preparation, staged replacements/backups, revalidation, reverse rollback and retained recovery artifacts with deterministic fault tests; sourceedit race tests passed (2.315s).
 - [x] Integrate explicit multi-file apply without altering single-file/preview contracts; verify per-file states, no-write validation failures and error projections. Full CLI tests passed (372.623s); focused Quick Fix tests passed (12.203s).

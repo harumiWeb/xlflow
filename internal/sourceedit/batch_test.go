@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -437,6 +438,63 @@ func TestBatchCorruptBackupIsNotRestored(t *testing.T) {
 	t.Cleanup(func() { _ = os.Remove(recovery) })
 	assertFileContents(t, recovery, changes[0].Snapshot.Source)
 	assertFileContents(t, changes[0].Snapshot.path, changes[0].Replacement)
+}
+
+func TestBatchRecoveryCopyWithLinkedTempDirectory(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	realTemp := filepath.Join(root, "real-temp")
+	if err := os.MkdirAll(filepath.Join(realTemp, "nested"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkedTemp := filepath.Join(root, "linked-temp")
+	if err := os.Symlink(realTemp, linkedTemp); err != nil {
+		t.Skipf("directory symlinks unavailable: %v", err)
+	}
+	for _, key := range []string{"TMP", "TEMP", "TMPDIR"} {
+		t.Setenv(key, filepath.Join(linkedTemp, "nested"))
+	}
+	if _, err := lstatNoLinks(os.TempDir()); !errors.Is(err, errSymlinkPath) {
+		t.Fatalf("OS temp directory must contain the test link: %s: %v", os.TempDir(), err)
+	}
+	changes := batchTestChanges(t, root, "a.bas", "b.bas")
+	stageCalls := 0
+	ops := batchOperations{stage: func(ctx context.Context, source *Snapshot, data []byte) (*Snapshot, error) {
+		stage, err := stageBatchFile(ctx, source, data)
+		stageCalls++
+		if stageCalls == 1 && err == nil {
+			changes[1].Snapshot.ops.beforePublish = func() {
+				if err := os.Remove(stage.path); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		return stage, err
+	}}
+	changes[1].Snapshot.ops.publish = func(string, string) error { return errors.New("publication failed") }
+	result, err := applyBatch(t.Context(), changes, ops)
+	if err == nil || result.Committed || result.Files[0].State != "recovery_required" {
+		t.Fatalf("result=%+v error=%v", result, err)
+	}
+	recovery := result.Files[0].RecoveryPath
+	if recovery == "" || !filepath.IsAbs(recovery) || !slices.Contains(result.Artifacts, recovery) {
+		t.Fatalf("no usable recovery copy: result=%+v error=%v", result, err)
+	}
+	t.Cleanup(func() { _ = os.Remove(recovery) })
+	assertFileContents(t, recovery, changes[0].Snapshot.Source)
+	if _, err := Capture(t.Context(), recovery); err != nil {
+		t.Fatalf("recovery path contains an unresolved link: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(recovery)
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("recovery permission mode: info=%v error=%v", info, err)
+		}
+	}
+	assertFileContents(t, changes[0].Snapshot.path, changes[0].Replacement)
+	assertFileContents(t, changes[1].Snapshot.path, changes[1].Snapshot.Source)
 }
 
 func TestBatchBackupLostDuringFailedRestore(t *testing.T) {

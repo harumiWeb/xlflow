@@ -136,7 +136,13 @@ func applyBatch(ctx context.Context, changes []Change, ops batchOperations) (res
 	}
 	if ops.recover == nil {
 		ops.recover = func(data []byte) (*Snapshot, error) {
-			return stageBatchBytes(context.Background(), os.TempDir(), 0o600, data)
+			dir := os.TempDir()
+			// OS temp paths may legitimately contain linked ancestors. Resolve
+			// this fallback directory while keeping Capture's no-links contract.
+			if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+				dir = resolved
+			}
+			return stageBatchBytes(context.Background(), dir, 0o600, data)
 		}
 	}
 	defer func() {
