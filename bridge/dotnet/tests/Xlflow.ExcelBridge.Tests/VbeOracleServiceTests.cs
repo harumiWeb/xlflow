@@ -171,6 +171,76 @@ public sealed class VbeOracleServiceTests
     }
 
     [Theory]
+    [InlineData(true, "\n")]
+    [InlineData(false, "\n")]
+    [InlineData(false, "\r\n")]
+    [InlineData(false, "\r")]
+    public void OracleClassImportRelocatesExistingHeaderWithoutChangingSettings(bool headerFirst, string newline)
+    {
+        const string header = "VERSION 1.0 CLASS\nBEGIN\n  MultiUse = 0  'False\nEND\n";
+        const string attributes = "Attribute VB_Name = \"Widget\"\nAttribute VB_PredeclaredId = True\n";
+        var source = "\uFEFF" + (headerFirst ? header + attributes : attributes + header) + "Option Explicit\n";
+        source = source.Replace("\n", newline, StringComparison.Ordinal);
+
+        var text = VbeOracleService.BuildOracleClassImport(source);
+
+        Assert.StartsWith(header.Replace("\n", "\r\n", StringComparison.Ordinal), text);
+        Assert.Equal(2, text.Split("VERSION 1.0 CLASS", StringSplitOptions.None).Length);
+        Assert.EndsWith(attributes.Replace("\n", "\r\n", StringComparison.Ordinal) + "Option Explicit\r\n", text);
+        Assert.DoesNotContain("\n", text.Replace("\r\n", "", StringComparison.Ordinal));
+        Assert.Equal(text, VbeOracleService.BuildOracleClassImport(text));
+    }
+
+    [Theory]
+    [InlineData("True", true)]
+    [InlineData("False", true)]
+    [InlineData(null, false)]
+    public void OracleProvisioningImportsExplicitPredeclaredClassesAndAddsOrdinaryClasses(string? value, bool import)
+    {
+        var source = "Attribute VB_Name = \"Widget\"\n";
+        if (value is not null)
+        {
+            source += "Attribute VB_PredeclaredId = " + value + "\n";
+        }
+        source += "Option Explicit\nPublic Value As Long\n";
+        var plan = new
+        {
+            schema_version = 1,
+            case_id = "class-provisioning",
+            probe_mode = "compile",
+            modules = new[] { new { name = "Widget", kind = "class", source } },
+        };
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(plan)));
+        var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+        var decoded = typeof(VbeOracleService).GetMethod("DecodePlan", flags)!.Invoke(null, [encoded])!;
+        var modules = decoded.GetType().GetProperty("Modules")!.GetValue(decoded)!;
+        var project = new FakeProject();
+        var tempDirectory = Directory.CreateTempSubdirectory("xlflow-oracle-components-").FullName;
+        try
+        {
+            typeof(VbeOracleService).GetMethod("ProvisionComponents", flags)!
+                .Invoke(null, [new FakeWorkbook(project), modules, tempDirectory, CancellationToken.None]);
+
+            Assert.Equal(import ? 1 : 0, project.VBComponents.ImportCalls);
+            Assert.Equal(import ? 0 : 1, project.VBComponents.AddCalls);
+            var component = Assert.IsType<FakeComponent>(project.VBComponents.Component);
+            Assert.Equal("Widget", component.Name);
+            Assert.Equal(2, component.Type);
+            Assert.Equal(VbaSourceHelper.NormalizeDocumentModuleContent(source), component.CodeModule.Text);
+            Assert.Equal(import ? 1 : 0, component.ExportCalls);
+            if (import)
+            {
+                Assert.Equal(".cls", Path.GetExtension(project.VBComponents.ImportPath));
+                Assert.Contains("Attribute VB_PredeclaredId = " + value, component.ImportedSource);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
     [InlineData(100, "ThisWorkbook", "ThisWorkbook", "workbook", true)]
     [InlineData(100, "THISWORKBOOK", "ThisWorkbook", "workbook", true)]
     [InlineData(100, "Sheet2", "Sheet2", "worksheet", true)]
@@ -241,6 +311,66 @@ public sealed class VbeOracleServiceTests
     private sealed class FakeProject
     {
         public FakeReferences References { get; } = new();
+        public FakeComponents VBComponents { get; } = new();
+    }
+
+    private sealed class FakeComponents
+    {
+        public int ImportCalls { get; private set; }
+        public int AddCalls { get; private set; }
+        public string ImportPath { get; private set; } = "";
+        public FakeComponent? Component { get; private set; }
+
+        public FakeComponent Import(string path)
+        {
+            ImportCalls++;
+            ImportPath = path;
+            var source = VbaSourceHelper.ReadExportedTextAsUtf8(path);
+            Component = new FakeComponent(2) { Name = "Widget", ImportedSource = source };
+            Component.CodeModule.Text = VbaSourceHelper.NormalizeDocumentModuleContent(source);
+            return Component;
+        }
+
+        public FakeComponent Add(int componentType)
+        {
+            AddCalls++;
+            Component = new FakeComponent(componentType);
+            return Component;
+        }
+    }
+
+    private sealed class FakeComponent(int componentType)
+    {
+        public string Name { get; set; } = "";
+        public int Type { get; } = componentType;
+        public string ImportedSource { get; init; } = "";
+        public ProvisioningCodeModule CodeModule { get; } = new();
+        public int ExportCalls { get; private set; }
+
+        public void Export(string path)
+        {
+            ExportCalls++;
+            File.WriteAllText(path, ImportedSource, VbaSourceHelper.GetVbaImportEncoding());
+        }
+    }
+
+    public sealed class ProvisioningCodeModule
+    {
+        public string Text { get; set; } = "";
+        public int CountOfLines => string.IsNullOrEmpty(Text) ? 0 : Text.Split('\n').Length;
+        public string Lines(object startLine, object count) => Text;
+
+        public object? DeleteLines(object startLine, object count)
+        {
+            Text = "";
+            return null;
+        }
+
+        public object? InsertLines(object startLine, object value)
+        {
+            Text = Convert.ToString(value) ?? "";
+            return null;
+        }
     }
 
     private sealed class FakeReferences

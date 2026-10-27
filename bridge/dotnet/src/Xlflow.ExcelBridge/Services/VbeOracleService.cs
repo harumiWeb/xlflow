@@ -588,10 +588,17 @@ public sealed class VbeOracleService : IVbeOracleService
     internal static string BuildOracleClassImport(string source)
     {
         var normalized = source.TrimStart('\uFEFF').Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
-        if (!normalized.TrimStart().StartsWith("VERSION 1.0 CLASS", StringComparison.OrdinalIgnoreCase))
+        var header = "VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  'True\nEND\n";
+        var existingHeader = Regex.Match(
+            normalized,
+            @"^[ \t]*VERSION 1\.0 CLASS[ \t]*\n[ \t]*BEGIN[ \t]*\n.*?^[ \t]*END[ \t]*(?:\n|$)",
+            RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline);
+        if (existingHeader.Success)
         {
-            normalized = "VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  'True\nEND\n" + normalized;
+            header = existingHeader.Value.TrimStart(' ', '\t').TrimEnd('\n') + "\n";
+            normalized = normalized.Remove(existingHeader.Index, existingHeader.Length);
         }
+        normalized = header + normalized;
         // VBIDE requires CRLF to recognize the exported class header.
         return normalized.TrimEnd('\n').Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n";
     }

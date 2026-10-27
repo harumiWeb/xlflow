@@ -145,8 +145,10 @@ Case expectations start as observational fixtures:
 
 Class fixtures with an explicit Boolean `VB_PredeclaredId` attribute are
 imported through a temporary exported `.cls` file, using CRLF and the local
-VBA code page. The oracle verifies component identity, the sanitized code body,
-and the re-exported `VB_PredeclaredId` before compiling. A changed or missing
+VBA code page. A complete existing class export header is moved before the
+attributes, retaining settings such as `MultiUse`; a default header is added
+only when no complete header exists. The oracle verifies component identity,
+the sanitized code body, and the re-exported `VB_PredeclaredId` before compiling. A changed or missing
 attribute, altered body, or unrepresentable source is an infrastructure
 failure, never compiler evidence. Other fixtures keep the existing code
 injection path. This preserves the class default-instance semantics needed by
