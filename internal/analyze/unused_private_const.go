@@ -36,6 +36,9 @@ func (a Analyzer) unusedPrivateConstFindings(file parsedFile) []Finding {
 	if len(consts) == 0 {
 		return nil
 	}
+	if file.AuthoredSource != nil {
+		file.Lines = normalizedSourceLines(string(file.AuthoredSource))
+	}
 
 	// shadowedByProcedure indexes procedures that declare a local or parameter
 	// with the same name; occurrences inside those bodies bind to the local.

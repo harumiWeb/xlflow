@@ -356,15 +356,18 @@ func (a Analyzer) localInteractiveSymbols(doc Document, request WorkspaceSymbolQ
 	}
 	start := byteOffsetForDocumentPosition(doc, scope.Start)
 	end := byteOffsetForDocumentPosition(doc, scope.End)
-	if end < len(doc.Source) {
-		_, end = rawLineBounds(doc.Source, end)
+	source := doc.AnalysisSource()
+	if end < len(source) {
+		_, end = rawLineBounds(source, end)
 	}
-	if start < 0 || end <= start || end > len(doc.Source) {
+	if start < 0 || end <= start || end > len(source) {
 		return nil, false
 	}
 	fragment := doc
-	fragment.Source = doc.Source[start:end]
+	fragment.Source = source[start:end]
 	fragment.Snapshot = nil
+	fragment.ProjectConditionals = false
+	fragment.ConditionalConstants = nil
 	parsed, closeParsed, err := parsedDocumentForDocument(fragment)
 	if err != nil {
 		return nil, false

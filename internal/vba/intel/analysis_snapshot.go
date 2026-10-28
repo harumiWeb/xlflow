@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/conditional"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -38,15 +40,18 @@ type ProcedureInfo struct {
 // access is serialized by ParsedDocument because tree-sitter trees are not
 // thread safe. Retire closes that document after its in-flight readers finish.
 type AnalysisSnapshot struct {
-	uri        string
-	path       string
-	version    int32
-	moduleKind string
-	source     string
-	sourceHash [sha256.Size]byte
-	lines      []string
-	lineStarts []int
-	lineEnds   []int
+	uri                  string
+	path                 string
+	version              int32
+	moduleKind           string
+	source               string
+	sourceHash           [sha256.Size]byte
+	analysisSource       string
+	projectConditionals  bool
+	conditionalConstants map[string]string
+	lines                []string
+	lineStarts           []int
+	lineEnds             []int
 
 	proceduresOnce              sync.Once
 	procedures                  []ProcedureInfo
@@ -112,6 +117,12 @@ type AnalysisSnapshot struct {
 	retireDone chan struct{}
 }
 
+type conditionalSourceCache struct {
+	source    string
+	constants map[string]string
+	projected string
+}
+
 // AnalysisArtifacts contains derived values that were built for the exact
 // document revision captured by an AnalysisSnapshot.  Batch analysis can
 // provide these values when it has already built them while preparing its
@@ -129,7 +140,10 @@ type AnalysisArtifacts struct {
 // NewAnalysisSnapshot captures doc as an immutable analysis revision.
 func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 	source := doc.Source
-	normalized := strings.ReplaceAll(source, "\r\n", "\n")
+	constants := maps.Clone(doc.ConditionalConstants)
+	doc.ConditionalConstants = constants
+	analysisSource := doc.projectedSource()
+	normalized := strings.ReplaceAll(analysisSource, "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 	lineStarts, lineEnds := buildSourceLineMap(source)
 	return &AnalysisSnapshot{
@@ -139,6 +153,9 @@ func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 		moduleKind:           doc.ModuleKind,
 		source:               source,
 		sourceHash:           sha256.Sum256([]byte(source)),
+		analysisSource:       analysisSource,
+		projectConditionals:  doc.ProjectConditionals,
+		conditionalConstants: constants,
 		lines:                strings.Split(normalized, "\n"),
 		lineStarts:           lineStarts,
 		lineEnds:             lineEnds,
@@ -146,6 +163,103 @@ func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 		artifacts:            newProcedureArtifactStore(),
 		retireDone:           make(chan struct{}),
 	}
+}
+
+func conditionalAnalysisSource(source string, enabled bool, constants map[string]string) string {
+	if !enabled || !strings.Contains(source, "#") {
+		return source
+	}
+	sourceBytes := []byte(source)
+	projected := conditional.Project(sourceBytes, constants)
+	if len(sourceBytes) == 0 || &projected[0] == &sourceBytes[0] {
+		return source
+	}
+	return string(projected)
+}
+
+func (doc Document) WithConditionalProjection(constants map[string]string) Document {
+	if !hasConditionalDirectives(doc.Source) {
+		if doc.ProjectConditionals && maps.Equal(doc.ConditionalConstants, constants) && analysisSnapshotForDocument(doc) != nil {
+			return doc
+		}
+		doc.ProjectConditionals = false
+		doc.ConditionalConstants = maps.Clone(constants)
+		if doc.Snapshot != nil && !doc.Snapshot.Matches(doc) {
+			doc.Snapshot = nil
+		}
+		doc.conditionalSource = nil
+		return doc
+	}
+	if doc.ProjectConditionals && maps.Equal(doc.ConditionalConstants, constants) {
+		if analysisSnapshotForDocument(doc) != nil {
+			return doc
+		}
+		if cache := doc.conditionalSource; cache != nil && cache.source == doc.Source && maps.Equal(cache.constants, constants) {
+			return doc
+		}
+	}
+	doc.ProjectConditionals = true
+	doc.ConditionalConstants = maps.Clone(constants)
+	if doc.Snapshot != nil && !doc.Snapshot.Matches(doc) {
+		doc.Snapshot = nil
+	}
+	doc.conditionalSource = &conditionalSourceCache{
+		source:    doc.Source,
+		constants: maps.Clone(doc.ConditionalConstants),
+		projected: conditionalAnalysisSource(doc.Source, true, doc.ConditionalConstants),
+	}
+	return doc
+}
+
+func (doc Document) projectedSource() string {
+	if !doc.ProjectConditionals {
+		return doc.Source
+	}
+	if cache := doc.conditionalSource; cache != nil && cache.source == doc.Source && maps.Equal(cache.constants, doc.ConditionalConstants) {
+		return cache.projected
+	}
+	return conditionalAnalysisSource(doc.Source, true, doc.ConditionalConstants)
+}
+
+func (doc Document) AnalysisSource() string {
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		return snapshot.analysisSource
+	}
+	return doc.projectedSource()
+}
+
+func (a Analyzer) configureConditionalDocument(doc Document) Document {
+	if !a.ConditionalProjection {
+		return doc
+	}
+	return a.projectConditionalDocument(doc)
+}
+
+func (a Analyzer) projectConditionalDocument(doc Document) Document {
+	return doc.WithConditionalProjection(a.Config.VBA.ConditionalConstants)
+}
+
+func (s *AnalysisSnapshot) AnalysisSource() string {
+	if s == nil {
+		return ""
+	}
+	return s.analysisSource
+}
+
+func hasConditionalDirectives(source string) bool {
+	for source != "" {
+		end := strings.IndexAny(source, "\r\n")
+		line := source
+		if end >= 0 {
+			line, source = source[:end], source[end+1:]
+		} else {
+			source = ""
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			return true
+		}
+	}
+	return false
 }
 
 func buildSourceLineMap(source string) ([]int, []int) {
@@ -244,19 +358,24 @@ func NewAnalysisSnapshotWithArtifacts(doc Document, parsed *ast.ParsedDocument, 
 // previous's tree. previous remains immutable and continues to own its tree;
 // the returned snapshot owns only the newly parsed tree.
 func NewIncrementalAnalysisSnapshot(doc Document, previous *AnalysisSnapshot, edits []tree_sitter.InputEdit) (*AnalysisSnapshot, error) {
-	if previous == nil || len(edits) == 0 || previous.Retired() {
+	if previous == nil || len(edits) == 0 || previous.Retired() ||
+		previous.projectConditionals != doc.ProjectConditionals ||
+		!maps.Equal(previous.conditionalConstants, doc.ConditionalConstants) ||
+		hasConditionalDirectives(previous.source) || hasConditionalDirectives(doc.Source) {
 		return nil, ErrIncrementalSnapshotUnavailable
 	}
 	parsed, ready := previous.ParsedDocumentIfReady()
 	if !ready {
 		return nil, ErrIncrementalSnapshotUnavailable
 	}
-	next, err := ast.ParseDocumentIncrementalIfAvailable(doc.Path, []byte(doc.Source), []byte(previous.Source()), parsed, edits)
+	next, err := ast.ParseDocumentIncrementalIfAvailable(doc.Path, []byte(conditionalAnalysisSource(doc.Source, doc.ProjectConditionals, doc.ConditionalConstants)), []byte(previous.analysisSource), parsed, edits)
 	if err != nil || next == nil {
 		return nil, ErrIncrementalSnapshotUnavailable
 	}
 	snapshot := NewAnalysisSnapshotWithParsedDocument(doc, next)
-	snapshot.artifacts = previous.artifacts.clone()
+	if snapshot.projectConditionals == previous.projectConditionals && maps.Equal(snapshot.conditionalConstants, previous.conditionalConstants) {
+		snapshot.artifacts = previous.artifacts.clone()
+	}
 	return snapshot, nil
 }
 
@@ -265,7 +384,7 @@ func NewIncrementalAnalysisSnapshot(doc Document, previous *AnalysisSnapshot, ed
 // available for later changed-procedure reuse.
 func NewSuccessorAnalysisSnapshot(doc Document, previous *AnalysisSnapshot) *AnalysisSnapshot {
 	snapshot := NewAnalysisSnapshot(doc)
-	if previous != nil && !previous.Retired() {
+	if previous != nil && !previous.Retired() && snapshot.projectConditionals == previous.projectConditionals && maps.Equal(snapshot.conditionalConstants, previous.conditionalConstants) {
 		snapshot.artifacts = previous.artifacts.clone()
 	}
 	return snapshot
@@ -276,7 +395,7 @@ func NewSuccessorAnalysisSnapshot(doc Document, previous *AnalysisSnapshot) *Ana
 // the same open-document lifecycle.
 func NewSuccessorAnalysisSnapshotWithParsedDocument(doc Document, parsed *ast.ParsedDocument, previous *AnalysisSnapshot) *AnalysisSnapshot {
 	snapshot := NewAnalysisSnapshotWithParsedDocument(doc, parsed)
-	if previous != nil && !previous.Retired() {
+	if previous != nil && !previous.Retired() && snapshot.projectConditionals == previous.projectConditionals && maps.Equal(snapshot.conditionalConstants, previous.conditionalConstants) {
 		snapshot.artifacts = previous.artifacts.clone()
 	}
 	return snapshot
@@ -289,7 +408,8 @@ func (s *AnalysisSnapshot) Document() Document {
 	}
 	return Document{
 		URI: s.uri, Path: s.path, Source: s.source, ModuleKind: s.moduleKind,
-		Version: s.version, Snapshot: s,
+		Version: s.version, Snapshot: s, ProjectConditionals: s.projectConditionals,
+		ConditionalConstants: maps.Clone(s.conditionalConstants),
 	}
 }
 
@@ -404,7 +524,8 @@ func (s *AnalysisSnapshot) ProcedureCatalogStats() (builds, reuses uint64) {
 func (s *AnalysisSnapshot) sameRevision(doc Document) bool {
 	if s == nil || s.retired.Load() || s.uri != doc.URI || s.path != doc.Path ||
 		s.version != doc.Version || s.moduleKind != doc.ModuleKind ||
-		len(s.source) != len(doc.Source) {
+		len(s.source) != len(doc.Source) || s.projectConditionals != doc.ProjectConditionals ||
+		!maps.Equal(s.conditionalConstants, doc.ConditionalConstants) {
 		return false
 	}
 	// A Document returned by this snapshot retains the immutable source
@@ -733,7 +854,7 @@ func (s *AnalysisSnapshot) documentIndex(load DocumentSymbolLoader) (*documentIn
 		// SourceSymbols returns a defensive copy to public callers. The snapshot
 		// owns s.symbols and never mutates it after the successful build completes, so the
 		// internal index can safely avoid a second full clone.
-		s.index = buildDocumentIndex(s.source, s.lines, s.procedures, s.procedureLines, s.symbols)
+		s.index = buildDocumentIndex(s.analysisSource, s.lines, s.procedures, s.procedureLines, s.symbols)
 	})
 	return s.index, initialized, s.indexErr
 }
@@ -794,7 +915,7 @@ func (s *AnalysisSnapshot) ParsedDocumentContext(ctx context.Context) (*ast.Pars
 		if parse == nil {
 			parse = ast.ParseDocumentContext
 		}
-		parsed, err = parse(ctx, s.path, []byte(s.source))
+		parsed, err = parse(ctx, s.path, []byte(s.analysisSource))
 	}
 	if err != nil {
 		if isRetryableContextError(err) {
@@ -950,7 +1071,7 @@ func parsedDocumentForDocumentContext(ctx context.Context, doc Document) (*ast.P
 		parsed, err := snapshot.ParsedDocumentContext(ctx)
 		return parsed, func() {}, err
 	}
-	parsed, err := ast.ParseDocumentContext(ctx, doc.Path, []byte(doc.Source))
+	parsed, err := ast.ParseDocumentContext(ctx, doc.Path, []byte(doc.AnalysisSource()))
 	if err != nil {
 		return nil, func() {}, err
 	}
@@ -1004,7 +1125,7 @@ func documentLines(doc Document) []string {
 	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
 		return snapshot.sourceLines()
 	}
-	return normalizedLines(doc.Source)
+	return normalizedLines(doc.AnalysisSource())
 }
 
 func cloneAnalysisSymbols(syms []Symbol) []Symbol {

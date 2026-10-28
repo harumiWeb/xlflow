@@ -134,14 +134,15 @@ func (s *AnalysisSnapshot) incrementalProcedureIR(ctx context.Context, rootDir s
 	if len(hits) == 0 {
 		return procedureir.DocumentIR{}, false, nil
 	}
-	moduleSource := maskProcedureSet(doc.Source, catalog, nil)
+	analysisSource := doc.AnalysisSource()
+	moduleSource := maskProcedureSet(analysisSource, catalog, nil)
 	moduleIR, err := procedureir.BuildSourceContext(ctx, procedureir.BuildOptions{RootDir: rootDir, Path: doc.Path, ModuleKind: doc.ModuleKind}, []byte(moduleSource))
 	if err != nil || moduleIR.Parse.HasError || moduleIR.Parse.HasMissing {
 		return procedureir.DocumentIR{}, false, err
 	}
 	var built procedureir.DocumentIR
 	if len(misses) > 0 {
-		built, err = procedureir.BuildSourceContext(ctx, procedureir.BuildOptions{RootDir: rootDir, Path: doc.Path, ModuleKind: doc.ModuleKind}, []byte(maskProcedureSet(doc.Source, catalog, misses)))
+		built, err = procedureir.BuildSourceContext(ctx, procedureir.BuildOptions{RootDir: rootDir, Path: doc.Path, ModuleKind: doc.ModuleKind}, []byte(maskProcedureSet(analysisSource, catalog, misses)))
 		if err != nil || built.Parse.HasError || built.Parse.HasMissing {
 			return procedureir.DocumentIR{}, false, err
 		}

@@ -3,6 +3,7 @@ package lspserver
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,6 +18,38 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+func TestDefaultRealtimeFallbackPreservesRawConditionalSourceForVBA266(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Analyze.DetectUnusedPrivateConstants = true
+	cfg.VBA.ConditionalConstants = map[string]string{"FeatureFlag": "True"}
+	server, cleanup, err := New(Options{RootDir: root, Config: cfg, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	source := "Private Const FeatureFlag As Boolean = True\n" +
+		"#If FeatureFlag Then\n" +
+		"Public Sub Run()\nEnd Sub\n" +
+		"#End If\n"
+	doc := intel.Document{
+		Path:       filepath.Join(root, "Main.bas"),
+		ModuleKind: "standard",
+		Source:     source,
+	}
+	doc = doc.WithConditionalProjection(cfg.VBA.ConditionalConstants)
+	if strings.Contains(doc.AnalysisSource(), "#If FeatureFlag") {
+		t.Fatalf("known conditional wrapper was not projected from parse view:\n%s", doc.AnalysisSource())
+	}
+
+	for _, diagnostic := range server.analyzer.Diagnostics(doc) {
+		if diagnostic.Code == "VBA266" {
+			t.Fatalf("document-local fallback reported used constant from raw #If reference: %+v", diagnostic)
+		}
+	}
+}
 
 func TestDocumentsReuseReplaceCloseAndReopenSnapshots(t *testing.T) {
 	root := t.TempDir()
@@ -664,5 +697,137 @@ func TestDiskSnapshotRetriesAfterConcurrentPublication(t *testing.T) {
 	}
 	if reads.Load() < 3 {
 		t.Fatalf("disk reads = %d, want stale read plus fresh publication and retry", reads.Load())
+	}
+}
+
+func TestLSPConditionalProjectionKeepsSelectedSplitDeclarationHeaderWhole(t *testing.T) {
+	docs := newDocuments(t.TempDir())
+	defer docs.closeAll()
+	uri := pathToFileURI(filepath.Join(t.TempDir(), "Main.bas"))
+	source := "#Const UseLong = True\n" +
+		"#If UseLong Then\n" +
+		"Public Function SplitDeclaration(ByVal value As Long) As Long\n" +
+		"#Else\n" +
+		"Public Function SplitDeclaration(ByVal value As String) As String\n" +
+		"#End If\n" +
+		"    SplitDeclaration = value\n" +
+		"End Function\n"
+	doc, err := docs.open(uri, source, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Source != source || doc.Snapshot.Source() != source {
+		t.Fatal("LSP snapshot did not retain the authored source")
+	}
+	projected := doc.Snapshot.AnalysisSource()
+	if strings.Contains(projected, "#If UseLong") || strings.Contains(projected, "#Else") || strings.Contains(projected, "#End If") {
+		t.Fatalf("resolved conditional wrappers remain in the selected source:\n%s", projected)
+	}
+	if strings.Contains(projected, "As String") {
+		t.Fatalf("inactive split declaration remained in the selected source:\n%s", projected)
+	}
+
+	parsed, err := doc.Snapshot.ParsedDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hasRecovery bool
+	if err := parsed.Read(func(view vbaast.ParsedView) error {
+		hasRecovery = view.HasError || view.HasMissing
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if hasRecovery {
+		t.Fatal("selected split declaration header produced parser recovery")
+	}
+
+	analyzer := intel.Analyzer{Config: config.Default(), ConditionalProjection: true}
+	symbols, err := analyzer.DeclarationSymbolsContext(context.Background(), doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var procedures []intel.Symbol
+	for _, symbol := range symbols {
+		if strings.EqualFold(symbol.Kind, "function") || strings.EqualFold(symbol.Kind, "subroutine") || strings.EqualFold(symbol.Kind, "property") {
+			procedures = append(procedures, symbol)
+		}
+	}
+	if len(procedures) != 1 || !strings.EqualFold(procedures[0].Name, "SplitDeclaration") {
+		t.Fatalf("compact declaration procedures = %+v, want only SplitDeclaration; all symbols = %+v", procedures, symbols)
+	}
+	diagnostics := analyzer.Diagnostics(doc)
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "VB014" || diagnostic.Code == "VBA000" {
+			t.Fatalf("LSP diagnostics contain parser failure for selected declaration: %+v", diagnostics)
+		}
+	}
+
+	ir, _, err := doc.Snapshot.ProcedureIRContext(context.Background(), func(ctx context.Context) (procedureir.DocumentIR, error) {
+		parsed, err := doc.Snapshot.ParsedDocumentContext(ctx)
+		if err != nil {
+			return procedureir.DocumentIR{}, err
+		}
+		return procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{Path: doc.Path, ModuleKind: "standard"}, parsed)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ir.Procedures) != 1 || !strings.EqualFold(ir.Procedures[0].Symbol.Name, "SplitDeclaration") {
+		t.Fatalf("procedure IR = %+v, want only SplitDeclaration", ir.Procedures)
+	}
+}
+
+func TestDocumentsConditionalEditChangingConstForcesFullParse(t *testing.T) {
+	docs := newDocuments(t.TempDir())
+	defer docs.closeAll()
+	uri := pathToFileURI(filepath.Join(t.TempDir(), "Conditional.bas"))
+	source := "#Const EnableBranch = True\n" +
+		"#If EnableBranch Then\n" +
+		"Public Sub Selected()\nEnd Sub\n" +
+		"#Else\n" +
+		"This is active prose after the edit.\n" +
+		"#End If\n"
+	opened, err := docs.open(uri, source, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := opened.Snapshot.ParsedDocument(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(opened.Snapshot.AnalysisSource(), "Public Sub Selected()") || strings.Contains(opened.Snapshot.AnalysisSource(), "This is active prose") {
+		t.Fatalf("initial projection selected the wrong branch:\n%s", opened.Snapshot.AnalysisSource())
+	}
+	valueStart := strings.Index(source, "True")
+	result, err := docs.applyChangesWithResult(uri, []documentContentChange{{
+		rng:  protocolRange(0, valueStart, 0, valueStart+len("True")),
+		text: "False",
+	}}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.applied || result.parseMode != "deferred_full" || result.fallbackReason != "incremental_parse_unavailable" {
+		t.Fatalf("conditional #Const edit result = %+v, want full-parse fallback", result)
+	}
+	if !opened.Snapshot.Retired() || result.document.Source != strings.Replace(source, "True", "False", 1) {
+		t.Fatalf("source/snapshot after #Const edit = retired:%v source:%q", opened.Snapshot.Retired(), result.document.Source)
+	}
+	projected := result.document.Snapshot.AnalysisSource()
+	if !strings.Contains(projected, "This is active prose") || strings.Contains(projected, "Public Sub Selected()") {
+		t.Fatalf("edited projection did not switch branches:\n%s", projected)
+	}
+	parsed, err := result.document.Snapshot.ParsedDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hasRecovery bool
+	if err := parsed.Read(func(view vbaast.ParsedView) error {
+		hasRecovery = view.HasError || view.HasMissing
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !hasRecovery {
+		t.Fatal("full parse reused the old branch after #Const changed")
 	}
 }

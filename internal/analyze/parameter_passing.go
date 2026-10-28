@@ -15,11 +15,16 @@ const (
 	parameterWritten
 )
 
-type parameterMutationSummary map[string]parameterMutationState
+type parameterMutationStates map[string]parameterMutationState
+
+type parameterMutationSummary struct {
+	states   parameterMutationStates
+	udtTypes map[string]bool
+}
 
 type parameterMutationRecord struct {
 	proc         sourceProcedure
-	summary      parameterMutationSummary
+	summary      parameterMutationStates
 	udtTypes     map[string]bool
 	objectTypes  map[string]bool
 	exprByID     map[int]procedureir.Expression
@@ -99,7 +104,7 @@ func buildParameterMutationSummariesWithWork(files []parsedFile) (map[string]par
 
 	out := make(map[string]parameterMutationSummary, len(index.byKey))
 	for key, record := range index.byKey {
-		out[key] = record.summary
+		out[key] = parameterMutationSummary{states: record.summary, udtTypes: record.udtTypes}
 	}
 	return out, work
 }
@@ -204,8 +209,8 @@ func parameterMutationCallers(ordered []*parameterMutationRecord, index paramete
 	return callers
 }
 
-func directParameterMutationSummary(proc sourceProcedure, udtTypes, objectTypes map[string]bool, exprByID map[int]procedureir.Expression, withReceiver map[int]int) parameterMutationSummary {
-	summary := make(parameterMutationSummary, proc.Params.Len())
+func directParameterMutationSummary(proc sourceProcedure, udtTypes, objectTypes map[string]bool, exprByID map[int]procedureir.Expression, withReceiver map[int]int) parameterMutationStates {
+	summary := make(parameterMutationStates, proc.Params.Len())
 	for parameter := range proc.Params.All() {
 		summary[parameterName(parameter.Name)] = parameterNotWritten
 	}
@@ -337,7 +342,7 @@ func parameterExprRootName(exprByID map[int]procedureir.Expression, withReceiver
 	}
 }
 
-func recordParameterMemberWrite(summary parameterMutationSummary, parameters []procedureir.Parameter, root string, udtTypes, objectTypes map[string]bool) {
+func recordParameterMemberWrite(summary parameterMutationStates, parameters []procedureir.Parameter, root string, udtTypes, objectTypes map[string]bool) {
 	if _, ok := summary[root]; !ok {
 		return
 	}
@@ -362,7 +367,7 @@ func recordParameterMemberWrite(summary parameterMutationSummary, parameters []p
 // statement operand (Erase, Input #, Get #). Bare parameters are written;
 // member targets follow the member-write rules; anything else fails open on
 // every parameter read inside the target subtree.
-func recordParameterWriteTarget(summary parameterMutationSummary, proc sourceProcedure, udtTypes, objectTypes map[string]bool, exprByID map[int]procedureir.Expression, withReceiver map[int]int, accessesByExpression map[int][]procedureir.VariableAccess, expressionID int) {
+func recordParameterWriteTarget(summary parameterMutationStates, proc sourceProcedure, udtTypes, objectTypes map[string]bool, exprByID map[int]procedureir.Expression, withReceiver map[int]int, accessesByExpression map[int][]procedureir.VariableAccess, expressionID int) {
 	expression, ok := exprByID[expressionID]
 	if !ok {
 		return
@@ -389,7 +394,7 @@ func recordParameterWriteTarget(summary parameterMutationSummary, proc sourcePro
 	}
 }
 
-func markParameterSubtreePossiblyWritten(summary parameterMutationSummary, procedure *procedureir.ProcedureIR, accessesByExpression map[int][]procedureir.VariableAccess, expressionID int) {
+func markParameterSubtreePossiblyWritten(summary parameterMutationStates, procedure *procedureir.ProcedureIR, accessesByExpression map[int][]procedureir.VariableAccess, expressionID int) {
 	for _, nestedID := range parameterArgumentExpressionIDs(procedure, expressionID) {
 		for _, access := range accessesByExpression[nestedID] {
 			name := parameterName(access.Name)
@@ -670,18 +675,19 @@ func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure
 	}
 	var summary parameterMutationSummary
 	for _, key := range parameterProcedureKeys(proc) {
-		if s := summaries[key]; s != nil {
+		if s, ok := summaries[key]; ok && s.states != nil {
 			summary = s
 			break
 		}
 	}
-	if summary == nil && !a.Config.Analyze.DetectMisleadingPropertyValueByRef {
+	if summary.states == nil && !a.Config.Analyze.DetectMisleadingPropertyValueByRef {
 		// Fail open: without a mutation record xlflow cannot prove
 		// mutation-sensitive parameter claims. VBA276 only needs the
 		// declaration, so it can still be checked without a summary.
 		return nil
 	}
 	constrained := parameterPassingSignatureConstrained(file, proc, addressOfNames)
+	summaryAvailable := summary.states != nil
 	var findings []Finding
 	for index, parameter := range proc.IR.Symbol.Parameters {
 		name := cleanIdentifier(parameter.Name)
@@ -690,31 +696,32 @@ func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure
 		}
 		valueParameter := propertyValueParameter(proc.IR.Symbol, index)
 		effective := effectiveParameterPassing(proc.IR.Symbol, index)
-		state := summary[parameterName(name)]
+		state := summary.states[parameterName(name)]
 		switch {
 		case a.Config.Analyze.DetectMisleadingPropertyValueByRef && valueParameter && !constrained && parameter.PassingExplicit && strings.EqualFold(parameter.Passing, "ByRef"):
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA276", "warning",
 				"Property value parameter "+name+" is declared ByRef but VBA always passes it ByVal.",
 				"The final value parameter of Property Let and Property Set has ByVal runtime semantics even when ByRef is written.",
 				"Declare the property value parameter ByVal so the signature matches its actual behavior."))
-		case summary != nil && a.Config.Analyze.DetectImplicitByRefParameters && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && !parameter.PassingExplicit:
+		case summaryAvailable && a.Config.Analyze.DetectImplicitByRefParameters && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && !parameter.PassingExplicit:
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA273", "information",
 				"Parameter "+name+" is implicitly passed ByRef.",
 				"VBA defaults ordinary parameters to ByRef when no passing modifier is written.",
 				"Add an explicit ByRef or ByVal modifier to document the intended API contract."))
-		case summary != nil && a.Config.Analyze.DetectRedundantByRefModifiers && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && parameter.PassingExplicit:
+		case summaryAvailable && a.Config.Analyze.DetectRedundantByRefModifiers && !constrained && !valueParameter && !parameter.ParamArray && effective == "byref" && parameter.PassingExplicit:
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA277", "information",
 				"Explicit ByRef on parameter "+name+" repeats VBA's default.",
 				"Ordinary VBA parameters are already ByRef when the modifier is omitted.",
 				"Remove the ByRef modifier when the project style relies on VBA's default."))
 		}
-		if summary != nil && a.Config.Analyze.DetectAssignedByValParameters && effective == "byval" && state == parameterWritten {
+		if summaryAvailable && a.Config.Analyze.DetectAssignedByValParameters && effective == "byval" && state == parameterWritten {
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA274", "warning",
 				"ByVal parameter "+name+" is reassigned inside the procedure.",
 				"The assignment changes only the procedure-local copy and is not visible to the caller.",
 				"Use a separate local variable, or change the API contract only when caller-visible mutation is intended."))
 		}
-		if summary != nil && a.Config.Analyze.DetectByRefParametersCanBeByVal && !constrained && !valueParameter && effective == "byref" &&
+		if summaryAvailable && a.Config.Analyze.DetectByRefParametersCanBeByVal && !constrained && !valueParameter && effective == "byref" &&
+			!parameterTypeIsUDT(parameter.Type, summary.udtTypes) &&
 			!parameter.IsArray && !parameter.ParamArray && state == parameterNotWritten {
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA275", "information",
 				"ByRef parameter "+name+" is never written and can be passed ByVal.",

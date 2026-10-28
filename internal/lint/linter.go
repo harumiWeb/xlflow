@@ -19,6 +19,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/conditional"
 	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/reachability"
@@ -354,7 +355,8 @@ func (l Linter) lintSourceContext(ctx context.Context, path string, source []byt
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	doc, err := vbaast.ParseDocument(path, source)
+	projectedSource := conditional.Project(source, l.Config.VBA.ConditionalConstants)
+	doc, err := vbaast.ParseDocument(path, projectedSource)
 	if err != nil {
 		return nil, err
 	}
@@ -680,9 +682,15 @@ func (l Linter) projectDeclarationsContext(ctx context.Context, files []string) 
 		if err != nil {
 			continue
 		}
-		file, err := symbols.InspectSourceContext(ctx, symbols.SourceOptions{
+		projectedSource := conditional.Project(source, l.Config.VBA.ConditionalConstants)
+		parsed, err := vbaast.ParseDocumentContext(ctx, path, projectedSource)
+		if err != nil {
+			continue
+		}
+		file, err := symbols.InspectParsedContext(ctx, symbols.SourceOptions{
 			RootDir: l.RootDir, Path: path, ModuleKind: l.moduleKindForPath(path), IncludePrivate: true,
-		}, source)
+		}, parsed)
+		parsed.Close()
 		if err != nil {
 			continue
 		}
@@ -692,7 +700,7 @@ func (l Linter) projectDeclarationsContext(ctx context.Context, files []string) 
 		}
 		standardModule := strings.EqualFold(l.moduleKindForPath(path), "standard") || strings.EqualFold(file.ModuleKind, "standard")
 		inEnum, enumVisible, enumName := false, false, ""
-		for _, line := range strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n") {
+		for _, line := range strings.Split(strings.ReplaceAll(string(projectedSource), "\r\n", "\n"), "\n") {
 			trim := strings.TrimSpace(strings.SplitN(line, "'", 2)[0])
 			lower := strings.ToLower(trim)
 			if strings.HasPrefix(lower, "enum ") || strings.HasPrefix(lower, "public enum ") || strings.HasPrefix(lower, "friend enum ") || strings.HasPrefix(lower, "private enum ") {

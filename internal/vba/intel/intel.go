@@ -75,6 +75,10 @@ type Analyzer struct {
 	RootDir string
 	Config  config.Config
 	DB      *vbadb.DB
+	// ConditionalProjection opts production editor analysis into whole-source
+	// conditional-compilation projection. Snapshotless structural callers keep
+	// their raw-source behavior unless they opt in explicitly.
+	ConditionalProjection bool
 	// SourceOnly restricts this analyzer to caller-supplied documents. In
 	// particular, form metadata and workspace symbols are resolved from the
 	// provided source documents only; no configured source directories or form
@@ -111,6 +115,10 @@ type Analyzer struct {
 	ProjectDefaultMembers map[string]vbadb.MemberInfo
 	ProjectDefaultTypes   map[string]bool
 	RealtimeFindingsFunc  RealtimeFindingsFunc
+	// RealtimeFindingsDocumentFunc is the source-aware form of
+	// RealtimeFindingsFunc. It receives the original document alongside the
+	// projected parse view so source-level rules can inspect authored text.
+	RealtimeFindingsDocumentFunc RealtimeFindingsDocumentFunc
 	// QuickFixDiagnosticsFunc returns server-owned diagnostics from an accepted
 	// Full generation for this exact open document revision. It must not start
 	// analysis or use diagnostics supplied by a language client. Missing or stale
@@ -139,13 +147,20 @@ type RealtimeFinding struct {
 // lets batch analysis reuse typed VBA call resolution without an import cycle.
 type RealtimeFindingsFunc func(ctx context.Context, rootDir string, cfg config.Config, doc *ast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]RealtimeFinding, error)
 
+// RealtimeFindingsDocumentFunc supplies analyzer-family findings with both
+// the parsed analysis view and the original document source.
+type RealtimeFindingsDocumentFunc func(ctx context.Context, rootDir string, cfg config.Config, doc *ast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, sourceDocument Document) ([]RealtimeFinding, error)
+
 type Document struct {
-	URI        string
-	Path       string
-	Source     string
-	ModuleKind string
-	Version    int32
-	Snapshot   *AnalysisSnapshot
+	URI                  string
+	Path                 string
+	Source               string
+	ModuleKind           string
+	Version              int32
+	Snapshot             *AnalysisSnapshot
+	ProjectConditionals  bool
+	ConditionalConstants map[string]string
+	conditionalSource    *conditionalSourceCache
 }
 
 type Position struct {
@@ -300,6 +315,7 @@ func (a Analyzer) CompileEquivalentDiagnosticsContextWithByRefDiagnostics(ctx co
 }
 
 func (a Analyzer) compileEquivalentDiagnosticsContext(ctx context.Context, doc Document, byRefDiagnostics []Diagnostic, byRefDiagnosticsReady bool) []Diagnostic {
+	doc = a.projectConditionalDocument(doc)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -338,7 +354,7 @@ func (a Analyzer) compileEquivalentDiagnosticsContext(ctx context.Context, doc D
 			return out
 		}
 		if ir, err := procedureIRForDocumentContext(ctx, doc, a.RootDir, parsed); err == nil {
-			for _, issue := range lint.CompileEquivalentArrayShapeIssuesWithValues(doc.Path, doc.Source, &ir, a.VisibleConstants, a.ConstantValues) {
+			for _, issue := range lint.CompileEquivalentArrayShapeIssuesWithValues(doc.Path, doc.AnalysisSource(), &ir, a.VisibleConstants, a.ConstantValues) {
 				if !isCompileEquivalentDiagnostic(issue.Code) {
 					continue
 				}
@@ -456,9 +472,17 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 	if err != nil {
 		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
 	}
-	if a.RealtimeFindingsFunc != nil {
+	if a.RealtimeFindingsFunc != nil || a.RealtimeFindingsDocumentFunc != nil {
 		finishStage = analysisstats.Measure(ctx, "analyze")
-		findings, err := a.RealtimeFindingsFunc(ctx, a.RootDir, a.Config, parsed, procedureIR, controlFlow)
+		var findings []RealtimeFinding
+		var err error
+		if a.RealtimeFindingsFunc != nil {
+			// Keep the existing callback first so project-aware callers that
+			// override it retain their established resolution behavior.
+			findings, err = a.RealtimeFindingsFunc(ctx, a.RootDir, a.Config, parsed, procedureIR, controlFlow)
+		} else {
+			findings, err = a.RealtimeFindingsDocumentFunc(ctx, a.RootDir, a.Config, parsed, procedureIR, controlFlow, doc)
+		}
 		finishStage(len(findings), err)
 		if ctx.Err() != nil {
 			return nil
@@ -584,7 +608,7 @@ func preferUnavailableWorksheetFunctionDiagnostics(diagnostics []Diagnostic) []D
 }
 
 func applyDocumentInlineSuppressions(root string, doc Document, diagnostics []Diagnostic) []Diagnostic {
-	directives, _ := suppression.DirectivesForSource(root, doc.Path, doc.Source)
+	directives, _ := suppression.DirectivesForSource(root, doc.Path, doc.AnalysisSource())
 	if len(directives) == 0 || len(diagnostics) == 0 {
 		return diagnostics
 	}
@@ -639,6 +663,7 @@ func lintDiagnosticMessage(issue lint.Issue) string {
 }
 
 func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
+	doc = a.configureConditionalDocument(doc)
 	parsed, closeParsed, err := parsedDocumentForDocument(doc)
 	if err != nil {
 		return nil, err
@@ -650,6 +675,7 @@ func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
 // DocumentSymbolsContext extracts source symbols with cooperative CST-walk
 // cancellation while preserving the snapshot's retryable lazy cache.
 func (a Analyzer) DocumentSymbolsContext(ctx context.Context, doc Document) ([]Symbol, error) {
+	doc = a.configureConditionalDocument(doc)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -672,6 +698,7 @@ func (a Analyzer) DocumentSymbolsContext(ctx context.Context, doc Document) ([]S
 // DocumentSymbols callback and never walks procedure bodies. A valid document
 // snapshot owns and reuses the resulting immutable index.
 func (a Analyzer) DeclarationSymbolsContext(ctx context.Context, doc Document) ([]Symbol, error) {
+	doc = a.configureConditionalDocument(doc)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -771,6 +798,7 @@ func DefaultCodeLensConfig() CodeLensConfig {
 }
 
 func (a Analyzer) RunnableProcedures(doc Document, cfg CodeLensConfig) ([]RunnableProcedure, error) {
+	doc = a.configureConditionalDocument(doc)
 	if !cfg.Enabled {
 		return nil, nil
 	}
@@ -1035,7 +1063,8 @@ func hasAnyPathKey(set map[string]bool, keys []string) bool {
 }
 
 func (a Analyzer) Definition(doc Document, pos Position, open []Document, uriForPath func(string) string) ([]Location, error) {
-	word, _ := WordAt(doc.Source, pos)
+	doc = a.configureConditionalDocument(doc)
+	word, _ := WordAt(doc.AnalysisSource(), pos)
 	if word == "" {
 		return nil, nil
 	}
@@ -1055,7 +1084,8 @@ func (a Analyzer) Definition(doc Document, pos Position, open []Document, uriFor
 }
 
 func (a Analyzer) References(doc Document, pos Position, open []Document, includeDeclaration bool, uriForPath func(string) string) ([]Location, error) {
-	word, _ := WordAt(doc.Source, pos)
+	doc = a.configureConditionalDocument(doc)
+	word, _ := WordAt(doc.AnalysisSource(), pos)
 	if word == "" {
 		return nil, nil
 	}
@@ -1160,8 +1190,8 @@ func (a Analyzer) unresolvedExternalMemberReference(doc Document, pos Position, 
 	if a.DB == nil {
 		return false
 	}
-	_, wordRange := WordAt(doc.Source, pos)
-	line := lineAt(doc.Source, wordRange.Start.Line)
+	_, wordRange := WordAt(doc.AnalysisSource(), pos)
+	line := lineAt(doc.AnalysisSource(), wordRange.Start.Line)
 	if line == "" {
 		return false
 	}
@@ -1277,7 +1307,8 @@ func comparePosition(a, b Position) int {
 }
 
 func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, error) {
-	word, r := WordAt(doc.Source, pos)
+	doc = a.configureConditionalDocument(doc)
+	word, r := WordAt(doc.AnalysisSource(), pos)
 	if word == "" {
 		return nil, nil
 	}
@@ -1330,7 +1361,7 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 		}
 		return &Hover{Contents: symbolHoverWithDocumentation(detail, symbolSource(sym), sym.Documentation), Range: r}, nil
 	}
-	if typ, ok := a.inferExpressionType(doc.Source, pos); ok {
+	if typ, ok := a.inferExpressionType(doc.AnalysisSource(), pos); ok {
 		if dbType, found := a.DB.ResolveType(typ); found {
 			return &Hover{Contents: typeHover(dbType, "inferred expression"), Range: r}, nil
 		}
@@ -1375,7 +1406,8 @@ func typedHoverSymbol(syms []Symbol) (inferredType, bool) {
 }
 
 func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Completion, error) {
-	line := lineAt(doc.Source, pos.Line)
+	doc = a.configureConditionalDocument(doc)
+	line := lineAt(doc.AnalysisSource(), pos.Line)
 	prefix := utf16Prefix(line, pos.Character)
 	if annotationPrefix, replaceRange, ok := rubberduckAnnotationCompletionContext(line, prefix, pos); ok {
 		return rubberduckAnnotationCompletions(annotationPrefix, replaceRange), nil
@@ -1386,7 +1418,7 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	if commentStartIndex(prefix) >= 0 {
 		return nil, nil
 	}
-	if strings.TrimSpace(prefix) == "" && isModuleLevelPosition(doc.Source, pos) && moduleHasContent(doc.Source) {
+	if strings.TrimSpace(prefix) == "" && isModuleLevelPosition(doc.AnalysisSource(), pos) && moduleHasContent(doc.AnalysisSource()) {
 		return nil, nil
 	}
 	if progIDPrefix, replaceRange, quoteInsert, ok := createObjectProgIDCompletionContext(prefix, pos); ok {
@@ -1438,7 +1470,7 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 	if eachPrefix, replaceRange, ok := forEachInCompletionContext(prefix, pos); ok {
 		return a.valueRHSCompletions(eachPrefix, replaceRange, doc, pos, open)
 	}
-	word, _ := WordAt(doc.Source, pos)
+	word, _ := WordAt(doc.AnalysisSource(), pos)
 	if strings.TrimSpace(word) == "" {
 		word = currentIdentifierPrefix(prefix)
 	}
@@ -1473,7 +1505,8 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 }
 
 func (a Analyzer) SignatureHelp(doc Document, pos Position, open []Document) (*SignatureHelp, error) {
-	prefix := logicalCallPrefixAt(doc.Source, pos)
+	doc = a.configureConditionalDocument(doc)
+	prefix := logicalCallPrefixAt(doc.AnalysisSource(), pos)
 	call, ok := callContextFromPrefix(prefix)
 	if !ok {
 		return nil, nil
@@ -1517,6 +1550,7 @@ func (a Analyzer) CodeActions(doc Document, selection Range) ([]CodeAction, erro
 // requests return immediately, before parsing the document or constructing
 // any symbol indexes.
 func (a Analyzer) CodeActionsContext(ctx context.Context, doc Document, selection Range, only []string) ([]CodeAction, error) {
+	doc = a.configureConditionalDocument(doc)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1658,7 +1692,7 @@ func (a Analyzer) lintQuickFixCodeActionsContext(ctx context.Context, doc Docume
 		return nil, err
 	}
 	// Use the same suppression directives and family as the diagnostic path.
-	directives, _ := suppression.DirectivesForSource(a.RootDir, doc.Path, doc.Source)
+	directives, _ := suppression.DirectivesForSource(a.RootDir, doc.Path, doc.AnalysisSource())
 	file := documentSuppressionFile(a.RootDir, doc.Path)
 	records := make([]suppression.Diagnostic, len(fixes))
 	for i, fix := range fixes {
@@ -1709,12 +1743,12 @@ func documentSuppressionFile(root, path string) string {
 }
 
 func (a Analyzer) documentationSnippetCompletions(doc Document, pos Position) ([]Completion, bool, error) {
-	line := lineAt(doc.Source, pos.Line)
+	line := lineAt(doc.AnalysisSource(), pos.Line)
 	prefix := utf16Prefix(line, pos.Character)
 	if strings.TrimSpace(line) != "'''" || strings.TrimSpace(prefix) != "'''" || insideOpenString(prefix) {
 		return nil, false, nil
 	}
-	if !isModuleLevelPosition(doc.Source, pos) {
+	if !isModuleLevelPosition(doc.AnalysisSource(), pos) {
 		return nil, true, nil
 	}
 	sym, ok, err := a.nextDocumentationTarget(doc, pos.Line)
@@ -2267,10 +2301,10 @@ func (a Analyzer) argumentDiagnosticsContext(ctx context.Context, doc Document) 
 		key := strings.ToLower(strings.TrimSpace(symbol.Name))
 		localSymbolsByName[key] = append(localSymbolsByName[key], symbol)
 	}
-	conditionalLines := conditionalCompilationLines(doc.Source)
+	conditionalLines := conditionalCompilationLines(doc.AnalysisSource())
 	var out []Diagnostic
 	inUserDefinedType := false
-	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.AnalysisSource()) {
 		if i&0x3f == 0 && ctx.Err() != nil {
 			return nil
 		}
@@ -2443,6 +2477,7 @@ func (a Analyzer) StatefulExcelCallArgumentDiagnostics(doc Document) []Diagnosti
 // StatefulExcelCallArgumentDiagnosticsContext is the cancellable form used by
 // realtime analysis of large modules.
 func (a Analyzer) StatefulExcelCallArgumentDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
+	doc = a.projectConditionalDocument(doc)
 	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.DB == nil {
 		return nil, nil
 	}
@@ -2455,7 +2490,7 @@ func (a Analyzer) StatefulExcelCallArgumentDiagnosticsContext(ctx context.Contex
 	}
 	typeContext := newDocumentTypeContext(doc, documentLines(doc), nil, index)
 	var out []Diagnostic
-	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.AnalysisSource()) {
 		if i&0x3f == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -2502,6 +2537,7 @@ func (a Analyzer) ImplicitApproximateLookupDiagnostics(doc Document) []Diagnosti
 // ImplicitApproximateLookupDiagnosticsContext is the cancellable form used by
 // batch and realtime analysis.
 func (a Analyzer) ImplicitApproximateLookupDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
+	doc = a.projectConditionalDocument(doc)
 	if !a.Config.Analyze.DetectImplicitApproximateLookups || a.DB == nil {
 		return nil, nil
 	}
@@ -2514,7 +2550,7 @@ func (a Analyzer) ImplicitApproximateLookupDiagnosticsContext(ctx context.Contex
 	}
 	typeContext := newDocumentTypeContext(doc, documentLines(doc), nil, index)
 	var out []Diagnostic
-	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.AnalysisSource()) {
 		if i&0x3f == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -2780,7 +2816,7 @@ func (a Analyzer) documentationDiagnosticsParsed(doc Document, parsed *ast.Parse
 			})
 		}
 	}
-	for _, diag := range doccomments.UnlinkedDocDiagnostics(doc.Source, linked, declarations) {
+	for _, diag := range doccomments.UnlinkedDocDiagnostics(doc.AnalysisSource(), linked, declarations) {
 		out = append(out, Diagnostic{
 			Code:     diag.Code,
 			Severity: "warning",
@@ -2796,7 +2832,7 @@ func (a Analyzer) documentationDiagnosticsParsed(doc Document, parsed *ast.Parse
 }
 
 func (a Analyzer) unresolvedMemberReceiverDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
-	if !hasOptionExplicit(doc.Source) {
+	if !hasOptionExplicit(doc.AnalysisSource()) {
 		return nil
 	}
 	var out []Diagnostic
@@ -4308,14 +4344,14 @@ func (a Analyzer) callCompletions(prefix string, replaceRange Range, doc Documen
 }
 
 func (a Analyzer) namedArgumentCompletionContext(doc Document, pos Position) (argPrefix string, replaceRange Range, call callContext, ok bool) {
-	line := lineAt(doc.Source, pos.Line)
+	line := lineAt(doc.AnalysisSource(), pos.Line)
 	prefix := utf16Prefix(line, pos.Character)
 	wordPrefix := currentIdentifierPrefix(prefix)
 	beforeWord := strings.TrimRight(prefix[:len(prefix)-len(wordPrefix)], " \t")
 	if strings.HasSuffix(beforeWord, ":=") {
 		return "", Range{}, callContext{}, false
 	}
-	logicalPrefix := logicalCallPrefixAt(doc.Source, pos)
+	logicalPrefix := logicalCallPrefixAt(doc.AnalysisSource(), pos)
 	call, ok = callContextFromPrefix(logicalPrefix)
 	if !ok || call.Target == "" {
 		return "", Range{}, callContext{}, false
@@ -4791,7 +4827,7 @@ func (a Analyzer) documentIndexFor(doc Document) (*documentIndex, bool) {
 	}
 	lines := documentLines(doc)
 	procedures, procedureLines := procedureIndexForLines(lines)
-	return buildDocumentIndex(doc.Source, lines, procedures, procedureLines, syms), true
+	return buildDocumentIndex(doc.AnalysisSource(), lines, procedures, procedureLines, syms), true
 }
 
 func (c *documentTypeContext) procedureAt(pos Position) (string, *Range) {
@@ -4945,7 +4981,7 @@ func (a Analyzer) inferWordTypeInfoAtContextWithState(doc Document, word string,
 	}
 	lookupOffset := offset
 	if lookupOffset < 0 {
-		lookupOffset = len(doc.Source)
+		lookupOffset = len(doc.AnalysisSource())
 	}
 	lookupPosition := positionForDocumentByteOffset(doc, lookupOffset)
 	procedure := currentProcedureNameAt(doc, lookupPosition, ctx)
@@ -5046,7 +5082,7 @@ func (a Analyzer) inferExpressionType(source string, pos Position) (string, bool
 }
 
 func (a Analyzer) memberHover(doc Document, word string, wordRange Range, offset int) (*Hover, bool) {
-	line := lineAt(doc.Source, wordRange.Start.Line)
+	line := lineAt(doc.AnalysisSource(), wordRange.Start.Line)
 	if line == "" {
 		return nil, false
 	}
@@ -5643,7 +5679,7 @@ func pathInsideRoot(path, root string) bool {
 }
 
 func moduleNameForCurrentInstance(doc Document) string {
-	for _, line := range strings.Split(doc.Source, "\n") {
+	for line := range strings.SplitSeq(doc.AnalysisSource(), "\n") {
 		match := attrNameRe.FindStringSubmatch(line)
 		if match != nil && strings.TrimSpace(match[1]) != "" {
 			return strings.TrimSpace(match[1])
@@ -5708,6 +5744,7 @@ func (a Analyzer) workspaceDocuments(open []Document) ([]Document, error) {
 	out := make([]Document, 0, len(open))
 	seen := map[string]bool{}
 	for _, doc := range open {
+		doc = a.configureConditionalDocument(doc)
 		key := pathKey(doc.Path)
 		if key == "" {
 			key = doc.URI
@@ -5755,7 +5792,8 @@ func (a Analyzer) workspaceDocuments(open []Document) ([]Document, error) {
 				return err
 			}
 			seen[key] = true
-			out = append(out, Document{Path: path, Source: string(body), ModuleKind: dir.kind})
+			doc := Document{Path: path, Source: string(body), ModuleKind: dir.kind}
+			out = append(out, a.configureConditionalDocument(doc))
 			return nil
 		})
 		if err != nil && !os.IsNotExist(err) {
@@ -5862,10 +5900,11 @@ func (a Analyzer) lightweightProcedureExpressionType(doc Document, pos Position,
 	}
 	start := byteOffsetForDocumentPosition(doc, procedureRange.Start)
 	end := byteOffsetForDocumentPosition(doc, procedureRange.End)
-	if end < len(doc.Source) {
-		_, end = rawLineBounds(doc.Source, end)
+	source := doc.AnalysisSource()
+	if end < len(source) {
+		_, end = rawLineBounds(source, end)
 	}
-	if start < 0 || end <= start || end > len(doc.Source) {
+	if start < 0 || end <= start || end > len(source) {
 		return "", false
 	}
 	parts := splitMemberExpression(expr)
@@ -5877,9 +5916,16 @@ func (a Analyzer) lightweightProcedureExpressionType(doc Document, pos Position,
 		base = strings.TrimSpace(base[:index])
 	}
 	fragment := doc
-	fragment.Source = doc.Source[start:end]
+	fragment.Source = source[start:end]
 	fragment.Snapshot = nil
-	symbols, err := a.DocumentSymbols(fragment)
+	fragment.ProjectConditionals = false
+	fragment.ConditionalConstants = nil
+	parsed, closeParsed, err := parsedDocumentForDocument(fragment)
+	if err != nil {
+		return "", false
+	}
+	defer closeParsed()
+	symbols, err := a.documentSymbolsParsed(fragment, parsed)
 	if err != nil {
 		return "", false
 	}
@@ -6036,11 +6082,11 @@ func (a Analyzer) syntaxCompletions(doc Document, pos Position, prefix string) [
 		Start: Position{Line: pos.Line, Character: utf16Len(prefix[:start])},
 		End:   pos,
 	}
-	if isModuleLevelPosition(doc.Source, pos) {
-		if typed == "" && moduleHasContent(doc.Source) {
+	if isModuleLevelPosition(doc.AnalysisSource(), pos) {
+		if typed == "" && moduleHasContent(doc.AnalysisSource()) {
 			return nil
 		}
-		return completionsFromSpecs(moduleCompletionSpecs(doc.Source), typed, replaceRange)
+		return completionsFromSpecs(moduleCompletionSpecs(doc.AnalysisSource()), typed, replaceRange)
 	}
 	return completionsFromSpecs(procedureStatementCompletions, typed, replaceRange)
 }

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "issue966-active-prose-rejected",
+  "description": "Issue #966 control: the same prose is active under a true conditional-compilation expression.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "language-observation",
+    "binding_note": "VB014 reports parser recovery rather than a VBE compile-equivalent diagnostic; this fixture records conditional-compilation language behavior only."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-10-28T13:18:32Z"
+      }
+    ]
+  }
+}

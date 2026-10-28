@@ -1106,14 +1106,12 @@
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA275","severity":"information","line":737,"column":48}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA273","severity":"information","line":738,"column":5}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA273","severity":"information","line":738,"column":43}
-{"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":779,"column":5}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":790,"column":5}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":790,"column":5}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA273","severity":"information","line":806,"column":33}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA273","severity":"information","line":806,"column":49}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA275","severity":"information","line":806,"column":49}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA273","severity":"information","line":806,"column":70}
-{"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":832,"column":5}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA254","severity":"information","line":837,"column":31}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":848,"column":5}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":848,"column":5}

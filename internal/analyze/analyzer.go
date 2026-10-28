@@ -625,6 +625,9 @@ type parsedFile struct {
 	// authoritative even when their logical paths do not exist on disk.
 	sourceProject bool
 	Source        []byte
+	// AuthoredSource retains lexical mentions for VBA266's conservative usedness
+	// policy. Syntax, declarations and executable analysis use Source instead.
+	AuthoredSource []byte
 	// UserFormControlNames is populated for form analysis when the matching
 	// designer artifact provides a complete control set. VBA220 uses it to
 	// distinguish a real control event procedure from a helper whose name merely
@@ -1019,11 +1022,13 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 			return Result{}, err
 		}
 		file := sourceFile.Path
-		source := sourceFile.Source
 		moduleKind := string(sourceFile.ModuleKind)
+		preparedDocument := intel.Document{Path: file, Source: string(sourceFile.Source), ModuleKind: moduleKind}.
+			WithConditionalProjection(a.Config.VBA.ConditionalConstants)
+		analysisSource := []byte(preparedDocument.AnalysisSource())
 		files = append(files, file)
 		finishStage = analysisstats.Measure(ctx, "parse")
-		parsed, err := vbaast.ParseDocument(file, source)
+		parsed, err := vbaast.ParseDocument(file, analysisSource)
 		finishStage(1, err)
 		if err != nil {
 			closeParsedFiles(parsedFiles)
@@ -1064,17 +1069,16 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 		finishStage(len(controlFlow.Graphs), nil)
 		var intelDocument intel.Document
 		if needsTypedExcelAnalysis {
-			intelDocument = intel.Document{Path: file, Source: string(source), ModuleKind: moduleKind}
-			intelDocument = batchIntelDocument(intelDocument, parsed, ir, controlFlow)
+			intelDocument = batchIntelDocument(preparedDocument, parsed, ir, controlFlow, a.Config.VBA.ConditionalConstants)
 		}
-		lines := normalizedSourceLines(string(source))
+		lines := normalizedSourceLines(string(analysisSource))
 		var rangeValueConstants map[string]int
 		if a.Config.Analyze.DetectRangeValueArrayShape {
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var constantValues map[string]constexpr.Value
 		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors || a.Config.Analyze.DetectUnreachableSelectCase {
-			constantValues = lint.ConstantValuesFromSource(string(source), &ir, nil)
+			constantValues = lint.ConstantValuesFromSource(string(analysisSource), &ir, nil)
 		}
 		parsedFile := parsedFile{
 			Path:                      file,
@@ -1083,7 +1087,8 @@ func (a Analyzer) analyzeProjectContext(ctx context.Context, queryContext semant
 			ModuleKind:                moduleKind,
 			IsTest:                    sourceFile.IsTest,
 			sourceProject:             a.sourceProject,
-			Source:                    source,
+			Source:                    analysisSource,
+			AuthoredSource:            sourceFile.Source,
 			IR:                        ir,
 			CFG:                       controlFlow,
 			Parsed:                    parsed,
@@ -2083,7 +2088,8 @@ func (file parsedFile) intelDocument() intel.Document {
 // artifacts into the Intel snapshot used by batch diagnostics. Keeping this
 // boundary in one helper makes it explicit that batch preparation and Intel
 // analysis operate on the same document revision.
-func batchIntelDocument(doc intel.Document, parsed *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) intel.Document {
+func batchIntelDocument(doc intel.Document, parsed *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, constants map[string]string) intel.Document {
+	doc = doc.WithConditionalProjection(constants)
 	doc.Snapshot = intel.NewAnalysisSnapshotWithArtifacts(doc, parsed, intel.AnalysisArtifacts{
 		ProcedureIR: ir,
 		ControlFlow: controlFlow,
@@ -2101,7 +2107,8 @@ func SourceNonShortCircuitObjectGuardFindingsContext(ctx context.Context, rootDi
 	if !cfg.Analyze.DetectNonShortCircuitObjectGuard {
 		return nil, nil
 	}
-	doc, err := vbaast.ParseDocument(path, source)
+	sourceDocument := intel.Document{Path: path, Source: string(source)}.WithConditionalProjection(cfg.VBA.ConditionalConstants)
+	doc, err := vbaast.ParseDocument(path, []byte(sourceDocument.AnalysisSource()))
 	if err != nil {
 		return nil, err
 	}
@@ -2164,12 +2171,21 @@ func SourceRealtimeFindingsContext(ctx context.Context, rootDir, path string, cf
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
-	doc, err := vbaast.ParseDocument(path, source)
+	sourceDocument := intel.Document{Path: path, Source: string(source)}.WithConditionalProjection(cfg.VBA.ConditionalConstants)
+	doc, err := vbaast.ParseDocument(path, []byte(sourceDocument.AnalysisSource()))
 	if err != nil {
 		return nil, err
 	}
 	defer doc.Close()
-	return SourceRealtimeFindingsParsedContext(ctx, rootDir, cfg, doc)
+	ir, err := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{RootDir: rootDir}, doc)
+	if err != nil {
+		return nil, err
+	}
+	controlFlow, err := vbacfg.BuildDocumentContext(ctx, ir)
+	if err != nil {
+		return nil, err
+	}
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, nil, effects.ProjectSummary{}, nil, nil, nil, nil, &sourceDocument, nil, nil, 0)
 }
 
 // SourceRealtimeFindingsParsed runs real-time source analysis against a
@@ -2633,7 +2649,10 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			file.OptionCompare = optionCompare(lines)
 			file.OptionCompareSet = true
 		}
-		if expressionDocument != nil && expressionDocument.Path == view.Path && expressionDocument.Source == string(view.Source) {
+		if sourceDocument != nil && sourceDocument.Path == view.Path && sourceDocument.AnalysisSource() == string(view.Source) {
+			file.AuthoredSource = []byte(sourceDocument.Source)
+		}
+		if expressionDocument != nil && expressionDocument.Path == view.Path && expressionDocument.AnalysisSource() == string(view.Source) {
 			file.IntelDocument = *expressionDocument
 			file.ExpressionTypeResolver = sourceExpressionResolver
 		}

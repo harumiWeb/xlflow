@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "issue966-gosub-label-reference-accepted",
+  "description": "Issue #966: a GoSub label reference with a same-line statement and an active conditional-compilation block compiles alongside an unused label.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "policy"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "policy-observation",
+    "binding_note": "VB090 is an unused-label policy diagnostic, not a compile-equivalent rule. This compile probe records VBE syntax acceptance only; it does not establish the correctness of the analyzer's label-reference or unused-label decisions."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-10-28T14:37:21Z"
+      }
+    ]
+  }
+}

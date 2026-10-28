@@ -13,6 +13,32 @@ The `[fmt]` table controls the source formatter. These options are read by `fmt`
 
 xlflow reads `xlflow.toml` from the project root. It is the single source of truth for workbook paths, source directories, VBE behavior, and static analysis rules.
 
+## Conditional compilation
+
+Lint, analyze, push preflight and LSP diagnostics skip content in `#If` branches
+that are provably inactive. Module `#Const` directives are evaluated in source
+order. Undefined custom constants behave as VBA `Empty`; target built-ins
+remain unknown until configured.
+
+Use the optional `[vba.conditional_constants]` table to match the target VBA
+project's compiler arguments:
+
+```toml
+[vba.conditional_constants]
+DEBUG = "False"
+VBA7 = "True"
+Win64 = "True"
+Win32 = "True"
+Mac = "False"
+```
+
+Values are strings containing VBA literal expressions, and names are
+case-insensitive. Analysis does not change the workbook's compiler arguments
+or infer its platform from the xlflow host. Unknown or unsupported conditions
+retain their candidate branches, so parser recovery may still be reported
+there. Source files and imported VBA keep all original branches. Restart the
+LSP after changing this configuration.
+
 ## Full annotated example
 
 This is the file produced by `xlflow new`. The comments are preserved so that each option is self-documenting.
@@ -59,6 +85,9 @@ folders = true
 folder_annotation = "update"
 # Automatically assign default folder annotations based on source paths.
 default_component_folders = true
+
+# Optional project compiler arguments. Values are VBA literal expressions.
+# conditional_constants = {}
 
 # Optional Erl instrumentation. When enabled, push adds temporary physical
 # prepared-import-source line numbers to imported procedure statements; tracked source stays unnumbered.

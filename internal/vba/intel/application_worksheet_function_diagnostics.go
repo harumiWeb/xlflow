@@ -49,7 +49,7 @@ func (a Analyzer) ResolvedApplicationWorksheetFunctionDispatchCallsContext(ctx c
 	}
 	typeContext := newDocumentTypeContext(doc, documentLines(doc), nil, index)
 	out := make([]ApplicationWorksheetFunctionDispatchCall, 0)
-	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.AnalysisSource()) {
 		if i&0x3f == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -95,6 +95,7 @@ func (a Analyzer) ApplicationWorksheetFunctionDispatchDiagnostics(doc Document) 
 // leaves failure-contract ownership to VBA218 and approximate-lookup ownership
 // to VBA251.
 func (a Analyzer) ApplicationWorksheetFunctionDispatchDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
+	doc = a.projectConditionalDocument(doc)
 	if ctx == nil {
 		ctx = context.Background()
 	}

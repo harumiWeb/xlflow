@@ -15,6 +15,7 @@ import (
 // deliberately fail-closed: an incomplete workspace lookup is not treated as
 // proof that a name is missing.
 func (a Analyzer) LocalTypeNameDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
+	doc = a.projectConditionalDocument(doc)
 	if ctx.Err() != nil || a.DB == nil || a.TypeDBResolutionIncomplete {
 		return nil
 	}

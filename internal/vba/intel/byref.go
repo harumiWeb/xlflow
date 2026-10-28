@@ -26,6 +26,7 @@ func (a Analyzer) ByRefArgumentDiagnostics(doc Document) []Diagnostic {
 
 // ByRefArgumentDiagnosticsContext is the cancellable form used by realtime LSP analysis.
 func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
+	doc = a.projectConditionalDocument(doc)
 	if recorder := analysisstats.FromContext(ctx); recorder != nil {
 		recorder.Add("byref_diagnostic_passes", 1)
 	}
@@ -46,10 +47,10 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 	if ctx.Err() != nil {
 		return nil
 	}
-	conditionalLines := conditionalCompilationLines(doc.Source)
+	conditionalLines := conditionalCompilationLines(doc.AnalysisSource())
 	var out []Diagnostic
 	inUserDefinedType := false
-	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.AnalysisSource()) {
 		if i&0x3f == 0 && ctx.Err() != nil {
 			return nil
 		}
@@ -685,7 +686,7 @@ func (a Analyzer) ptrSafeDeclareDiagnostics(doc Document) []Diagnostic {
 	if err != nil {
 		return nil
 	}
-	lines := normalizedLines(doc.Source)
+	lines := normalizedLines(doc.AnalysisSource())
 	var out []Diagnostic
 	for _, symbol := range symbols {
 		if !strings.EqualFold(symbol.Kind, "declare_function") && !strings.EqualFold(symbol.Kind, "declare_sub") {

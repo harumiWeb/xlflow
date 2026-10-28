@@ -52,7 +52,7 @@ func (a Analyzer) ResolvedExcelAPIFailureCallsContext(ctx context.Context, doc D
 	}
 	typeContext := newDocumentTypeContext(doc, documentLines(doc), nil, index)
 	out := make([]ExcelAPIFailureCall, 0)
-	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.AnalysisSource()) {
 		if i&0x3f == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -121,6 +121,7 @@ func (a Analyzer) ExcelAPIFailureContractDiagnostics(doc Document) []Diagnostic 
 }
 
 func (a Analyzer) ExcelAPIFailureContractDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
+	doc = a.projectConditionalDocument(doc)
 	calls, err := a.ResolvedExcelAPIFailureCallsContext(ctx, doc)
 	if err != nil {
 		return nil, err

@@ -282,7 +282,7 @@ End Sub
 }
 
 func TestUnusedPrivateConstCountsConditionalCompilationAndDeclarationUse(t *testing.T) {
-	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": `Option Explicit
+	source := `Option Explicit
 Private Const FlagEnabled As Long = 1
 Private Const SeedValue As Long = 7
 Private Const DerivedLimit As Long = SeedValue + 1
@@ -291,9 +291,17 @@ Public Sub Run()
   Debug.Print DerivedLimit
 End Sub
 #End If
-`})
+`
+	findings := runUnusedDeclarationAnalysis(t, map[string]string{"Main.bas": source})
 	if got := findingsByCode(findings, "VBA266"); len(got) != 0 {
 		t.Fatalf("VBA266 findings = %+v, want none", got)
+	}
+	realtime, err := SourceRealtimeFindings(t.TempDir(), "Main.bas", enableUnusedDeclarationRules(config.Default()), []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA266"); len(got) != 0 {
+		t.Fatalf("realtime VBA266 findings = %+v, want none", got)
 	}
 }
 

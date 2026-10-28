@@ -1,0 +1,12 @@
+Attribute VB_Name = "Main"
+Option Explicit
+#If Not MissingFlag Then
+Public Function Answer() As Long
+    Answer = 42
+End Function
+#Else
+
+This is plain prose, not VBA code.
+## Heading
+1. item
+#End If

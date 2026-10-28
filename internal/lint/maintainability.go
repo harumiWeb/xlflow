@@ -383,6 +383,18 @@ func (l Linter) unusedLabelIssues(path string, source []byte, procedure *tree_si
 			return
 		}
 		switch node.Kind() {
+		case "call_statement":
+			// The VBA grammar currently represents GoSub as a bare call. Use
+			// that CST shape to retain its label reference without scanning
+			// comments, strings or qualified member names as branch syntax.
+			callee := node.ChildByFieldName("callee")
+			args := node.ChildByFieldName("arguments")
+			if callee != nil && callee.Kind() == "identifier" && strings.EqualFold(callee.Utf8Text(source), "GoSub") && args != nil && args.NamedChildCount() == 1 {
+				target := args.NamedChild(0)
+				if target.Kind() == "identifier" || target.Kind() == "number_literal" {
+					refs[strings.ToLower(strings.TrimSpace(target.Utf8Text(source)))] = true
+				}
+			}
 		case "preprocessor_if":
 			// A branch-dependent target is not enough evidence for an unused label.
 			labels = nil

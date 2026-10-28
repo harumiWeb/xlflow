@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "issue966-udt-byref-accepted",
+  "description": "Issue #966: compile a read-only user-defined type parameter passed ByRef; the body only prints value.member.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "policy"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "policy-observation",
+    "binding_note": "VBA275 is a maintainability policy rule. This paired compile observation records the UDT ByRef/ByVal boundary; it does not bind VBA275 as a compile-equivalent diagnostic."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-10-28T14:52:16Z"
+      }
+    ]
+  }
+}

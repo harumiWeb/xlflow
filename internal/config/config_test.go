@@ -12,6 +12,44 @@ import (
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 )
 
+func TestConditionalConstantsLoadWriteAndValidation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	cfg := Default()
+	cfg.VBA.ConditionalConstants = map[string]string{
+		"FeatureFlag": "False",
+		"Win64":       "True",
+	}
+	if err := Write(path, cfg); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `conditional_constants = { "FeatureFlag" = "False", "Win64" = "True" }`) {
+		t.Fatalf("conditional constants were not written as an inline table:\n%s", body)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if !reflect.DeepEqual(loaded.VBA.ConditionalConstants, cfg.VBA.ConditionalConstants) {
+		t.Fatalf("conditional constants = %#v, want %#v", loaded.VBA.ConditionalConstants, cfg.VBA.ConditionalConstants)
+	}
+
+	invalid := []byte(`[vba]
+conditional_constants = { FeatureFlag = "OtherFlag" }
+`)
+	if err := os.WriteFile(path, invalid, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "vba.conditional_constants") {
+		t.Fatalf("Load error = %v, want invalid conditional constant error", err)
+	}
+}
+
 func TestConfigRuleAdaptersMatchRegistry(t *testing.T) {
 	for _, rule := range staticrules.All() {
 		switch rule.Family {
@@ -2523,6 +2561,35 @@ func TestWriteListsEveryOptInRuleHint(t *testing.T) {
 		t.Fatalf("generated config missing VBA273/VBA277 conflict note:\n%s", text)
 	}
 }
+func TestConfigUpdatesPreserveConditionalConstants(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	body := []byte(`[vba]
+conditional_constants = { "FeatureFlag" = "False", "Win64" = "True" }
+
+[userform]
+code_source = "frm"
+`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateUserFormCodeSource(path, "sidecar"); err != nil {
+		t.Fatalf("UpdateUserFormCodeSource failed: %v", err)
+	}
+	if err := UpdateBlankCodePage(path, 1252); err != nil {
+		t.Fatalf("UpdateBlankCodePage failed: %v", err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load after updates failed: %v", err)
+	}
+	want := map[string]string{"FeatureFlag": "False", "Win64": "True"}
+	if !reflect.DeepEqual(loaded.VBA.ConditionalConstants, want) {
+		t.Fatalf("conditional constants after updates = %#v, want %#v", loaded.VBA.ConditionalConstants, want)
+	}
+}
+
 func TestUpdateUserFormCodeSourcePreservesUnrelatedConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)

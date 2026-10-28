@@ -45,6 +45,11 @@ is never replaced. Eligibility includes ordinary `Public`, `Friend`, and
 members, Property Let/Set value parameters, arrays, and `ParamArray`.
 Procedures passed as `AddressOf` callbacks are excluded because their
 parameter declarations form an externally constrained signature.
+Parameters whose types resolve to a project or module user-defined type are
+also excluded because VBA rejects passing a UDT `ByVal`. The check reuses the
+project/module UDT index; names absent from that index continue through the
+existing mutation-summary rules, including fail-open handling of unknown call
+and composite-write boundaries.
 
 The proof starts with direct parameter writes and propagates through uniquely
 resolved project-local calls. Positional and named arguments are mapped to

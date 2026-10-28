@@ -381,6 +381,41 @@ End Sub
 	}
 }
 
+func TestParameterPassingExcludesUDTFromByValCandidates(t *testing.T) {
+	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{
+		"Types.bas": `Option Explicit
+Public Type SharedRecord
+    Value As Long
+End Type
+`,
+		"Main.bas": `Option Explicit
+Private Type LocalRecord
+    Value As Long
+End Type
+
+Private Sub ObserveShared(ByRef value As SharedRecord)
+    Dim observed As Long
+    observed = value.Value
+End Sub
+
+Private Sub ObserveLocal(ByRef value As LocalRecord)
+    Dim observed As Long
+    observed = value.Value
+End Sub
+
+Private Sub ObserveObject(ByRef value As Object)
+    Dim observed As Variant
+    observed = value.Tag
+End Sub
+`,
+	})
+
+	got := findingsByCode(findings, "VBA275")
+	if len(got) != 1 || got[0].Procedure != "ObserveObject" || !strings.Contains(got[0].Message, "value") {
+		t.Fatalf("VBA275 findings = %+v, want only ObserveObject.value", got)
+	}
+}
+
 func TestParameterPassingTreatsUDTMemberByRefCallAsCallerVisibleMutation(t *testing.T) {
 	findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{"Main.bas": `Option Explicit
 Private Type Pair
@@ -985,7 +1020,7 @@ func TestParameterMutationWorklistScalesWithLongCallChain(t *testing.T) {
 	}
 	file := parameterPassingParsedFile(t, source.String())
 	summaries, work := buildParameterMutationSummariesWithWork([]parsedFile{file})
-	if got := summaries["sub|main.step000"]["value"]; got != parameterWritten {
+	if got := summaries["sub|main.step000"].states["value"]; got != parameterWritten {
 		t.Fatalf("Step000.value state = %v, want written", got)
 	}
 	if work.records != procedureCount*2 {

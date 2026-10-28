@@ -110,6 +110,18 @@ type Result struct {
 // Evaluate evaluates expression against env. A nil environment still knows
 // VBA's intrinsic literal values but leaves named constants unresolved.
 func Evaluate(expression string, env Environment) Result {
+	return evaluate(expression, env, false)
+}
+
+// EvaluateConditional evaluates the compile-time subset used by #Const/#If.
+// Empty is numeric zero and logical operators support integral operands. The
+// ordinary declaration evaluator deliberately keeps its conservative coercion
+// policy; conditional-compilation behavior is an explicit entry point.
+func EvaluateConditional(expression string, env Environment) Result {
+	return evaluate(expression, env, true)
+}
+
+func evaluate(expression string, env Environment, conditional bool) Result {
 	lexer := newLexer(expression)
 	if lexer.invalid != "" {
 		return Result{Kind: Invalid, Reason: lexer.invalid}
@@ -117,7 +129,7 @@ func Evaluate(expression string, env Environment) Result {
 	if len(lexer.tokens) == 0 {
 		return Result{Kind: Unknown, Reason: "empty expression"}
 	}
-	p := parser{tokens: lexer.tokens, env: env}
+	p := parser{tokens: lexer.tokens, env: env, conditional: conditional}
 	result := p.parseImp()
 	if result.Kind == Invalid {
 		return result
@@ -362,16 +374,25 @@ func isIdentifierStart(ch byte) bool { return ch == '_' || unicode.IsLetter(rune
 func isIdentifierPart(ch byte) bool  { return isIdentifierStart(ch) || unicode.IsDigit(rune(ch)) }
 
 type parser struct {
-	tokens []token
-	pos    int
-	env    Environment
+	tokens      []token
+	pos         int
+	env         Environment
+	conditional bool
 }
 
 func (p *parser) parseImp() Result { return p.binary(p.parseEqv, "imp") }
 func (p *parser) parseEqv() Result { return p.binary(p.parseOr, "eqv") }
 func (p *parser) parseOr() Result  { return p.binary(p.parseXor, "or") }
 func (p *parser) parseXor() Result { return p.binary(p.parseAnd, "xor") }
-func (p *parser) parseAnd() Result { return p.binary(p.parseCompare, "and") }
+func (p *parser) parseAnd() Result { return p.binary(p.parseNot, "and") }
+
+func (p *parser) parseNot() Result {
+	if p.conditional && p.pos < len(p.tokens) && p.tokens[p.pos].kind == tokenOperator && strings.EqualFold(p.tokens[p.pos].text, "not") {
+		p.pos++
+		return conditionalUnary(p.parseNot(), "not")
+	}
+	return p.parseCompare()
+}
 
 type parseFn func() Result
 
@@ -381,7 +402,11 @@ func (p *parser) binary(next parseFn, operators ...string) Result {
 		op := strings.ToLower(p.tokens[p.pos].text)
 		p.pos++
 		right := next()
-		left = combine(left, right, op)
+		if p.conditional {
+			left = conditionalCombine(left, right, op)
+		} else {
+			left = combine(left, right, op)
+		}
 	}
 	return left
 }
@@ -392,7 +417,11 @@ func (p *parser) parseCompare() Result {
 		op := strings.ToLower(p.tokens[p.pos].text)
 		p.pos++
 		right := p.parseConcat()
-		left = compare(left, right, op)
+		if p.conditional {
+			left = conditionalCompare(left, right, op)
+		} else {
+			left = compare(left, right, op)
+		}
 	}
 	return left
 }
@@ -402,9 +431,12 @@ func (p *parser) parseAdd() Result    { return p.binary(p.parseMul, "+", "-") }
 func (p *parser) parseMul() Result    { return p.binary(p.parseUnary, "*", "/", "\\", "mod") }
 
 func (p *parser) parseUnary() Result {
-	if p.pos < len(p.tokens) && p.tokens[p.pos].kind == tokenOperator && contains([]string{"+", "-", "not"}, strings.ToLower(p.tokens[p.pos].text)) {
+	if p.pos < len(p.tokens) && p.tokens[p.pos].kind == tokenOperator && contains([]string{"+", "-", "not"}, strings.ToLower(p.tokens[p.pos].text)) && (!p.conditional || !strings.EqualFold(p.tokens[p.pos].text, "not")) {
 		op := strings.ToLower(p.tokens[p.pos].text)
 		p.pos++
+		if p.conditional {
+			return conditionalUnary(p.parseUnary(), op)
+		}
 		return unary(p.parseUnary(), op)
 	}
 	return p.parsePower()
@@ -414,7 +446,14 @@ func (p *parser) parsePower() Result {
 	left := p.parsePrimary()
 	if p.pos < len(p.tokens) && p.tokens[p.pos].kind == tokenOperator && p.tokens[p.pos].text == "^" {
 		p.pos++
-		return power(left, p.parseUnary())
+		right := p.parseUnary()
+		if p.conditional {
+			if left.Typed.Kind == ValueSingle || right.Typed.Kind == ValueSingle {
+				return unknown("conditional Single exponent rounding is not modelled")
+			}
+			return power(conditionalNumber(left), conditionalNumber(right))
+		}
+		return power(left, right)
 	}
 	return left
 }
@@ -440,6 +479,9 @@ func (p *parser) parsePrimary() Result {
 		return known(Value{Kind: ValueDate, String: tok.text})
 	}
 	if tok.kind == tokenNumber {
+		if p.conditional {
+			return conditionalLiteral(tok.text)
+		}
 		return parseNumber(tok.text)
 	}
 	if tok.kind != tokenIdentifier {

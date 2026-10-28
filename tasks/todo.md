@@ -1,3 +1,11 @@
+# Issue #966: inactive conditional-compilation source
+
+- [x] Add a shared, byte-preserving projection with module-local #Const and explicit project constants; retain uncertain branches and structural errors.
+- [x] Apply the projection consistently to batch lint/analyze, symbols and LSP diagnostics while retaining original source for editing and delivery.
+- [x] Re-establish VBE oracle controls and focused accepted/rejected evidence after the observational fixture infrastructure failure.
+- [x] Cover inactive prose, active errors, nested/alternate branches, constant scope, source positions and unsaved edits.
+- [ ] Document configuration and semantic boundaries; run package/corpus/performance checks and independent review.
+
 # Issue #965: predeclared class assignment targets
 
 ## PR #968 review follow-up
