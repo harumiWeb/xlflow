@@ -183,6 +183,7 @@ type Symbol struct {
 	File                string
 	Module              string
 	ModuleKind          string
+	PredeclaredID       bool // The class module declares a default instance.
 	Parent              string
 	Visibility          string
 	ConditionalBranches []procedureir.ConditionalBranch
@@ -6940,6 +6941,7 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 			File:                firstNonEmpty(uri, file.Path, sym.File),
 			Module:              sym.Module,
 			ModuleKind:          file.ModuleKind,
+			PredeclaredID:       symbols.IsPredeclaredClass(sym),
 			Parent:              sym.Parent,
 			Visibility:          sym.Visibility,
 			ConditionalBranches: append([]procedureir.ConditionalBranch(nil), sym.ConditionalBranches...),

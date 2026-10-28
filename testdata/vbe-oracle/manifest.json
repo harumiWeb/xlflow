@@ -7,6 +7,14 @@
   },
   "cases": [
     {
+      "id": "predeclared-class-assignment-accepted",
+      "path": "cases/predeclared-class-assignment-accepted/case.json"
+    },
+    {
+      "id": "ordinary-class-assignment-rejected",
+      "path": "cases/ordinary-class-assignment-rejected/case.json"
+    },
+    {
       "id": "known-compile-accept",
       "path": "cases/known-compile-accept/case.json",
       "control_role": "accept"

@@ -797,6 +797,9 @@ func pathInside(path, root string) bool {
 }
 
 func projectVisibleDeclaration(sym symbols.Symbol, moduleKind string) bool {
+	if symbols.IsPredeclaredClass(sym) {
+		return true
+	}
 	if sym.Parent != "" || !strings.EqualFold(sym.Visibility, "Public") {
 		return false
 	}

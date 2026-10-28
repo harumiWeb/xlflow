@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "ordinary-class-assignment-rejected",
+  "description": "Issue #965 negative boundary: a class with VB_PredeclaredId=False has no default instance to assign.",
+  "modules": [
+    {
+      "name": "Ordinary",
+      "kind": "class",
+      "path": "Ordinary.bas"
+    },
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB029"],
+    "negative_controls": ["predeclared-class-assignment-accepted"],
+    "expected_diagnostics": [{ "code": "VB029", "severity": "error", "surfaces": ["lint", "lsp"] }]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-10-27T12:51:25Z"
+      }
+    ]
+  }
+}

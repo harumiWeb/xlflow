@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VB029` incorrectly rejecting assignments such as
+  `Set Predeclared = Nothing` to class default instances declared with
+  `Attribute VB_PredeclaredId = True`, including lint, source preflight and LSP
+  diagnostics.
 - Reduced duplicate procedure IR construction within full batch lint runs,
   retaining source and module identity checks and existing diagnostics.
 

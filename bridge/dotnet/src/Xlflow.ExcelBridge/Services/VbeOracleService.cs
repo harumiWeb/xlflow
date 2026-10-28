@@ -28,6 +28,10 @@ public sealed class VbeOracleService : IVbeOracleService
         "^\\s*Attribute\\s+VB_Name\\s*=\\s*\\\"([^\\\"]+)\\\"",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
+    private static readonly Regex PredeclaredIdPattern = new(
+        @"^\s*Attribute\s+VB_PredeclaredId\s*=\s*(True|False)\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
+
     public BridgeResponse Execute(BridgeRequest request, VbeOracleCommandArguments args, CancellationToken cancellationToken)
     {
         OraclePlan plan;
@@ -151,7 +155,7 @@ public sealed class VbeOracleService : IVbeOracleService
             ProvisionReferences(workbook, plan.References ?? [], cancellationToken);
 
             stage = "provision_components";
-            ProvisionComponents(workbook, plan.Modules ?? [], cancellationToken);
+            ProvisionComponents(workbook, plan.Modules ?? [], tempDirectory, cancellationToken);
 
             stage = "vbe_compile";
             var selectionLocator = new VbeSelectionLocator(
@@ -467,7 +471,7 @@ public sealed class VbeOracleService : IVbeOracleService
         }
     }
 
-    private static void ProvisionComponents(object workbook, IReadOnlyList<OracleModule> modules, CancellationToken cancellationToken)
+    private static void ProvisionComponents(object workbook, IReadOnlyList<OracleModule> modules, string tempDirectory, CancellationToken cancellationToken)
     {
         object? project = null;
         object? components = null;
@@ -498,17 +502,47 @@ public sealed class VbeOracleService : IVbeOracleService
                 object? codeModule = null;
                 try
                 {
-                    component = ExcelBridgeSupport.InvokeMethod(components, "Add", componentType)
-                        ?? throw new InvalidOperationException($"failed to provision VBA component '{module.Name}'");
-                    ExcelBridgeSupport.Set(component, "Name", module.Name);
-                    codeModule = ExcelBridgeSupport.Get(component, "CodeModule")
-                        ?? throw new InvalidOperationException($"VBA component '{module.Name}' has no code module");
                     var source = module.Source;
                     if (string.IsNullOrWhiteSpace(source))
                     {
                         source = File.ReadAllText(module.SourcePath, Encoding.UTF8);
                     }
-                    SetOracleCodeModuleText(codeModule, source, module.Name);
+                    if (componentType == 2 && PredeclaredIdPattern.IsMatch(source))
+                    {
+                        // CodeModule injection discards hidden class attributes.
+                        // Import an exported class and verify both its body and
+                        // predeclared flag before collecting compiler evidence.
+                        var importPath = Path.Combine(tempDirectory, "class-" + Guid.NewGuid().ToString("N") + ".cls");
+                        var text = BuildOracleClassImport(source);
+                        var encoding = VbaSourceHelper.GetVbaImportEncoding();
+                        if (!string.Equals(encoding.GetString(encoding.GetBytes(text)), text, StringComparison.Ordinal))
+                        {
+                            throw new OracleSourceMutationException("Oracle class source is not representable in the local VBA code page.");
+                        }
+                        File.WriteAllText(importPath, text, encoding);
+                        component = ExcelBridgeSupport.InvokeMethod(components, "Import", importPath)
+                            ?? throw new InvalidOperationException($"failed to import oracle class '{module.Name}'");
+                        if (Convert.ToInt32(ExcelBridgeSupport.Get(component, "Type"), CultureInfo.InvariantCulture) != 2 ||
+                            !string.Equals(Convert.ToString(ExcelBridgeSupport.Get(component, "Name"), CultureInfo.InvariantCulture), module.Name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new OracleSourceMutationException($"VBE changed oracle class identity '{module.Name}'.");
+                        }
+                        codeModule = ExcelBridgeSupport.Get(component, "CodeModule")
+                            ?? throw new InvalidOperationException($"VBA component '{module.Name}' has no code module");
+                        VerifyOracleCodeModuleText(codeModule, source, module.Name);
+                        var exportPath = importPath + ".verified.cls";
+                        ExcelBridgeSupport.InvokeMethod(component, "Export", exportPath);
+                        VerifyOraclePredeclaredId(source, VbaSourceHelper.ReadExportedTextAsUtf8(exportPath));
+                    }
+                    else
+                    {
+                        component = ExcelBridgeSupport.InvokeMethod(components, "Add", componentType)
+                            ?? throw new InvalidOperationException($"failed to provision VBA component '{module.Name}'");
+                        ExcelBridgeSupport.Set(component, "Name", module.Name);
+                        codeModule = ExcelBridgeSupport.Get(component, "CodeModule")
+                            ?? throw new InvalidOperationException($"VBA component '{module.Name}' has no code module");
+                        SetOracleCodeModuleText(codeModule, source, module.Name);
+                    }
                 }
                 finally
                 {
@@ -548,6 +582,41 @@ public sealed class VbeOracleService : IVbeOracleService
     {
         var expected = SanitizeOracleSource(source);
         VbaSourceHelper.SetCodeModuleText(codeModule, expected);
+        VerifyOracleCodeModuleText(codeModule, source, moduleName);
+    }
+
+    internal static string BuildOracleClassImport(string source)
+    {
+        var normalized = source.TrimStart('\uFEFF').Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        var header = "VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  'True\nEND\n";
+        var existingHeader = Regex.Match(
+            normalized,
+            @"^[ \t]*VERSION 1\.0 CLASS[ \t]*\n[ \t]*BEGIN[ \t]*\n.*?^[ \t]*END[ \t]*(?:\n|$)",
+            RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline);
+        if (existingHeader.Success)
+        {
+            header = existingHeader.Value.TrimStart(' ', '\t').TrimEnd('\n') + "\n";
+            normalized = normalized.Remove(existingHeader.Index, existingHeader.Length);
+        }
+        normalized = header + normalized;
+        // VBIDE requires CRLF to recognize the exported class header.
+        return normalized.TrimEnd('\n').Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n";
+    }
+
+    internal static void VerifyOraclePredeclaredId(string source, string exported)
+    {
+        var expected = PredeclaredIdPattern.Match(source);
+        var actual = PredeclaredIdPattern.Match(exported);
+        if (!expected.Success || !actual.Success ||
+            !string.Equals(expected.Groups[1].Value, actual.Groups[1].Value, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new OracleSourceMutationException("VBE changed the oracle class VB_PredeclaredId attribute.");
+        }
+    }
+
+    private static void VerifyOracleCodeModuleText(object codeModule, string source, string moduleName)
+    {
+        var expected = SanitizeOracleSource(source);
         var actual = VbaSourceHelper.GetCodeModuleText(codeModule);
         if (!string.Equals(NormalizeOracleCode(expected), NormalizeOracleCode(actual), StringComparison.Ordinal))
         {

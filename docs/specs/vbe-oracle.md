@@ -35,7 +35,7 @@ Dialog detection is tied to the target Excel process/VBE owner chain through
 the existing Win32/UI Automation watcher. The oracle does not use
 `SendKeys` or keyboard-focus scripting.
 
-After injecting each fixture module, the oracle reads the `CodeModule` back
+After provisioning each fixture module, the oracle reads the `CodeModule` back
 and requires it to match the sanitized fixture source, apart from line-ending
 normalization and trailing line breaks. If VBE rewrites the source during
 injection, the run fails with `oracle_source_mutated`; compile evidence from
@@ -142,6 +142,18 @@ Case expectations start as observational fixtures:
   "provenance": { "status": "pending", "verified_on": [] }
 }
 ```
+
+Class fixtures with an explicit Boolean `VB_PredeclaredId` attribute are
+imported through a temporary exported `.cls` file, using CRLF and the local
+VBA code page. A complete existing class export header is moved before the
+attributes, retaining settings such as `MultiUse`; a default header is added
+only when no complete header exists. The oracle verifies component identity,
+the sanitized code body, and the re-exported `VB_PredeclaredId` before compiling. A changed or missing
+attribute, altered body, or unrepresentable source is an infrastructure
+failure, never compiler evidence. Other fixtures keep the existing code
+injection path. This preserves the class default-instance semantics needed by
+the Issue #965 accepted/rejected `VB029` pair without adding designer artifacts
+or changing the `.bas` fixture format.
 
 Source is kept in normal module files so the same fixture can be consumed by
 parser, lint, analyze, type-analysis, LSP, and oracle tests. Schema v1 accepts

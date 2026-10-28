@@ -1,3 +1,17 @@
+# Issue #965: predeclared class assignment targets
+
+## PR #968 review follow-up
+
+- [x] Preserve and relocate existing oracle class export headers; cover attribute-first source, header settings, CRLF and idempotence.
+- [x] Exercise component provisioning with managed fakes, proving explicit Boolean predeclared classes use Import and ordinary classes use Add.
+- [x] Exercise unsaved class attribute changes through LSP document handlers and published dependent diagnostics using the production snapshot callback.
+- [x] Run focused/full affected checks, review the diff, commit and push the validated changes to PR #968.
+
+- [x] Preserve class attribute evidence in the local VBE oracle and run known controls plus focused accepted/rejected cases sequentially.
+- [x] Resolve predeclared class module symbols as assignment targets in batch lint and coherent LSP workspace snapshots; retain ordinary-class errors and local shadowing.
+- [x] Add batch/LSP/preflight regressions, bind confirmed oracle evidence, and update the specification and changelog.
+- [x] Run affected suites, corpus/format/docs/lint checks, benchmark comparison and independent review; preserve evidence.
+
 # Batch lint IR reuse
 
 - [x] Retain owned syntax-local IR only within one complete unfiltered run.

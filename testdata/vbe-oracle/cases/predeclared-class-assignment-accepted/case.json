@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "predeclared-class-assignment-accepted",
+  "description": "Issue #965: a class with VB_PredeclaredId=True supports member access and assignment of Nothing to its default instance.",
+  "modules": [
+    {
+      "name": "Predeclared",
+      "kind": "class",
+      "path": "Predeclared.bas"
+    },
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "specification"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB029"],
+    "forbidden_diagnostics": [{ "code": "VB029", "surfaces": ["lint", "lsp"] }]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-10-27T12:51:25Z"
+      }
+    ]
+  }
+}
