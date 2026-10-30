@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "issue966-conditional-currency-exact-less-than",
+  "description": "Issue #966: adjacent large Currency literals select a valid Then procedure only when their conditional less-than comparison is true; Else contains invalid prose.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "specification"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "language-observation",
+    "binding_note": "This fixture observes the exact Currency literal comparison used by conditional compilation. The valid Then procedure and invalid Else prose expose the selected branch without binding a compile-equivalent analyzer diagnostic."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-10-30T04:52:40Z"
+      }
+    ]
+  }
+}

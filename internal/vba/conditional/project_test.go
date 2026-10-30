@@ -65,6 +65,24 @@ func TestProjectSelectsOnlyProvenInactiveSource(t *testing.T) {
 	}
 }
 
+func TestProjectCurrencyPrecisionBoundary(t *testing.T) {
+	source := []byte("#If 900719925474.0987@ < 900719925474.0988@ Then\nactive source\n#Else\ninactive prose\n#End If\n")
+	got := Project(source, nil)
+	if !bytes.Contains(got, []byte("active source")) || bytes.Contains(got, []byte("inactive prose")) {
+		t.Fatalf("Currency precision selected the wrong branch:\n%s", got)
+	}
+	configured := []byte("#If Price < 900719925474.0988@ Then\nactive source\n#Else\ninactive prose\n#End If\n")
+	got = Project(configured, map[string]string{"Price": "900719925474.0987@"})
+	if !bytes.Contains(got, []byte("active source")) || bytes.Contains(got, []byte("inactive prose")) {
+		t.Fatalf("configured Currency precision selected the wrong branch:\n%s", got)
+	}
+	uncertain := []byte("#If 0.00015@ = 0.0002@ Then\nfirst candidate\n#Else\nsecond candidate\n#End If\n")
+	got = Project(uncertain, nil)
+	if !bytes.Contains(got, []byte("first candidate")) || !bytes.Contains(got, []byte("second candidate")) {
+		t.Fatalf("unmodelled Currency rounding removed a candidate:\n%s", got)
+	}
+}
+
 func TestProjectPreservesMalformedStructureAndUnsupportedContinuations(t *testing.T) {
 	for _, source := range []string{
 		"#If False Then\nprose\n", "#Else\nprose\n", "#End If\n",
@@ -112,7 +130,7 @@ func TestProjectDoesNotHideInvalidSourceEncoding(t *testing.T) {
 
 func TestValidateConstants(t *testing.T) {
 	for _, values := range []map[string]string{
-		nil, {"DEBUG": "True", "Win64": "False", "Count": "1 + 2", "Title": `"it's ok"`}, {"EmptyFlag": "Empty"},
+		nil, {"DEBUG": "True", "Win64": "False", "Count": "1 + 2", "Title": `"it's ok"`}, {"EmptyFlag": "Empty"}, {"Price": "900719925474.0987@"},
 	} {
 		if err := ValidateConstants(values); err != nil {
 			t.Fatalf("valid table %v: %v", values, err)
@@ -120,6 +138,7 @@ func TestValidateConstants(t *testing.T) {
 	}
 	for _, values := range []map[string]string{
 		{"Debug": "True", "DEBUG": "False"}, {"bad name": "1"}, {"Flag": "Unresolved"}, {"Flag": "1 / 0"}, {"Flag": "Null"}, {"True": "1"}, {"Flag": "Nothing"},
+		{"Price": "0.00015@"}, {"Price": "1@ + 1@"},
 	} {
 		if err := ValidateConstants(values); err == nil {
 			t.Fatalf("invalid table accepted: %v", values)

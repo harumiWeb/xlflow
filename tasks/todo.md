@@ -1,5 +1,11 @@
 # Issue #966: inactive conditional-compilation source
 
+## Final review follow-up
+
+- [x] Reproduce the Currency precision finding; confirm the conditional-compilation boundary with local VBE controls and focused observations.
+- [x] Preserve exact Currency literal/comparison values or retain uncertain branches; cover projection and unchanged ordinary evaluation.
+- [ ] Validate performance counter changes and the noisy warm timing, run affected checks, and complete bounded Pass 2 review with cleanup.
+
 - [x] Add a shared, byte-preserving projection with module-local #Const and explicit project constants; retain uncertain branches and structural errors.
 - [x] Apply the projection consistently to batch lint/analyze, symbols and LSP diagnostics while retaining original source for editing and delivery.
 - [x] Re-establish VBE oracle controls and focused accepted/rejected evidence after the observational fixture infrastructure failure.

@@ -1,11 +1,36 @@
 package constexpr
 
 import (
+	"cmp"
 	"math"
+	"strconv"
 	"strings"
 )
 
 func conditionalLiteral(text string) Result {
+	if digits, currency := strings.CutSuffix(text, "@"); currency {
+		// Parse decimal fixed-point units without a float64 intermediate.
+		// Rounding extra fractional digits and exponent notation is not
+		// modelled here: neither may decide which source branch to discard.
+		whole, fraction, _ := strings.Cut(digits, ".")
+		if len(fraction) > 4 {
+			return unknown("conditional Currency literal rounding is not modelled")
+		}
+		if whole == "" {
+			whole = "0"
+		}
+		units := whole + fraction + strings.Repeat("0", 4-len(fraction))
+		for _, digit := range units {
+			if digit < '0' || digit > '9' {
+				return unknown("conditional Currency literal notation is not modelled")
+			}
+		}
+		value, err := strconv.ParseInt(units, 10, 64)
+		if err != nil {
+			return unknown("conditional Currency literal overflow")
+		}
+		return known(Value{Kind: ValueCurrency, Currency: value})
+	}
 	if len(text) > 1 && text[0] != '&' && strings.ContainsAny(text[len(text)-1:], "!#@") && !strings.ContainsAny(text, ".eE") {
 		text = text[:len(text)-1] + ".0" + text[len(text)-1:]
 	}
@@ -34,11 +59,15 @@ func conditionalCompare(left, right Result, op string) Result {
 		return unknown("conditional string comparison depends on Option Compare")
 	}
 	if left.Kind == Known && right.Kind == Known {
+		if left.Typed.Kind == ValueCurrency && right.Typed.Kind == ValueCurrency {
+			// Only the exact ordering (-1, 0, 1) enters the common operator
+			// selector; converting the scaled values to float64 loses units.
+			return compareFloat(float64(cmp.Compare(left.Typed.Currency, right.Typed.Currency)), 0, op)
+		}
 		// The shared comparator uses float64. Beyond its exact integer range,
-		// adjacent LongLong/Currency values can collapse to the same number.
+		// adjacent LongLong values can collapse to the same number.
 		for _, value := range []Value{left.Typed, right.Typed} {
-			if (isIntegral(value) && (value.Integer > 1<<53 || value.Integer < -(1<<53))) ||
-				(value.Kind == ValueCurrency && (value.Currency > 1<<53 || value.Currency < -(1<<53))) {
+			if isIntegral(value) && (value.Integer > 1<<53 || value.Integer < -(1<<53)) {
 				return unknown("conditional wide numeric comparison precision is not modelled")
 			}
 		}
@@ -82,6 +111,9 @@ func conditionalUnary(value Result, op string) Result {
 }
 
 func conditionalCombine(left, right Result, op string) Result {
+	if left.Kind == Known && right.Kind == Known && (left.Typed.Kind == ValueCurrency || right.Typed.Kind == ValueCurrency) {
+		return unknown("conditional Currency arithmetic rounding is not modelled")
+	}
 	if left.Kind == Known && right.Kind == Known && (left.Typed.Kind == ValueSingle || right.Typed.Kind == ValueSingle) {
 		return unknown("conditional Single arithmetic rounding is not modelled")
 	}

@@ -8,6 +8,8 @@ All notable changes to xlflow will be documented in this file.
   `analyze_failed` in lint, analyze, source preflight and LSP diagnostics.
   Added `[vba.conditional_constants]` for explicit project and target constants;
   uncertain branches remain available for conservative analysis.
+  Currency comparisons preserve exact fixed-point values; unsupported rounding
+  retains both candidate branches.
   Preserved GoSub label references after branch selection and excluded
   user-defined type parameters from invalid VBA275 ByVal suggestions.
 

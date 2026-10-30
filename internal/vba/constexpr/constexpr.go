@@ -451,6 +451,9 @@ func (p *parser) parsePower() Result {
 			if left.Typed.Kind == ValueSingle || right.Typed.Kind == ValueSingle {
 				return unknown("conditional Single exponent rounding is not modelled")
 			}
+			if left.Typed.Kind == ValueCurrency || right.Typed.Kind == ValueCurrency {
+				return unknown("conditional Currency exponent rounding is not modelled")
+			}
 			return power(conditionalNumber(left), conditionalNumber(right))
 		}
 		return power(left, right)

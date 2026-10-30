@@ -49,6 +49,11 @@ Boolean/Empty numeric coercions and integral logical operators. `Not` binds
 after comparisons and before `And`. These coercions do not change ordinary
 declaration-constant evaluation.
 
+Decimal Currency literals with at most four fractional digits retain exact
+scaled integer values, including comparisons between adjacent large values.
+Currency literal rounding, exponent notation, arithmetic and exponentiation
+remain unknown rather than selecting a branch through floating-point rounding.
+
 Unsupported coercions, runtime calls, string comparisons, signed-boundary
 hexadecimal/octal literal widths, Single arithmetic rounding, mixed-precision
 Single/Currency comparisons, wide integer comparison precision and fractional

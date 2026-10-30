@@ -339,6 +339,10 @@
       "path": "cases/issue966-active-prose-rejected/case.json"
     },
     {
+      "id": "issue966-conditional-currency-exact-less-than",
+      "path": "cases/issue966-conditional-currency-exact-less-than/case.json"
+    },
+    {
       "id": "issue966-conditional-module-const-bitwise",
       "path": "cases/issue966-conditional-module-const-bitwise/case.json"
     },
