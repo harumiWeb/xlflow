@@ -52,6 +52,11 @@ type moduleAnalysisFacts struct {
 	// rule by procedure count.
 	unusedDeclOnce sync.Once
 	unusedDecl     *unusedDeclFileFacts
+
+	// loopInvariantStringConstOnce lazily builds the source-ordered string
+	// constant index shared by procedure lanes for this module revision.
+	loopInvariantStringConstOnce  sync.Once
+	loopInvariantStringConstIndex *loopInvariantStringConstantIndex
 }
 
 // unusedDeclFileFacts holds the immutable per-file scans used by the

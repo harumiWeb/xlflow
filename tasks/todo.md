@@ -2,9 +2,21 @@
 
 ## Final review follow-up
 
+### Efficiency implementation
+
+- [x] Reuse exact prepared snapshots before directive detection and gate disabled/cancelled diagnostics before preparation.
+- [x] Index authored Private Const mentions once while preserving lexical boundaries, declarator exclusion and local shadowing.
+- [x] Reuse string-constant prefix facts across loop-bearing procedures without changing source-order or local override behavior.
+- [ ] Verify focused regressions, scalability, race and corpus identity.
+- [ ] Compare the optimization against pinned post-fix batch/editor baselines; retain all samples and confidence intervals.
+- [ ] Review the committed optimization independently and complete review cleanup.
+- [ ] Separately investigate VBA238's existing string-constant extraction guard before enabling any additional selector proofs.
+
 - [x] Reproduce the Currency precision finding; confirm the conditional-compilation boundary with local VBE controls and focused observations.
 - [x] Preserve exact Currency literal/comparison values or retain uncertain branches; cover projection and unchanged ordinary evaluation.
-- [ ] Validate performance counter changes and the noisy warm timing, run affected checks, and complete bounded Pass 2 review with cleanup.
+- [x] Run correction checks and bounded Pass 2 review; preserve its report and clean up its worker, watcher, setup terminals and temporary worktree.
+- [x] Define Issue #966 performance budgets, required batch/editor workloads, balanced measurement and explicit pass/fail/unverified verdicts.
+- [ ] Satisfy the documented performance gate: resolve warm timing, account for CFG route cost and measure repeated editor preparation.
 
 - [x] Add a shared, byte-preserving projection with module-local #Const and explicit project constants; retain uncertain branches and structural errors.
 - [x] Apply the projection consistently to batch lint/analyze, symbols and LSP diagnostics while retaining original source for editing and delivery.

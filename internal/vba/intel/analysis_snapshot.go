@@ -40,18 +40,19 @@ type ProcedureInfo struct {
 // access is serialized by ParsedDocument because tree-sitter trees are not
 // thread safe. Retire closes that document after its in-flight readers finish.
 type AnalysisSnapshot struct {
-	uri                  string
-	path                 string
-	version              int32
-	moduleKind           string
-	source               string
-	sourceHash           [sha256.Size]byte
-	analysisSource       string
-	projectConditionals  bool
-	conditionalConstants map[string]string
-	lines                []string
-	lineStarts           []int
-	lineEnds             []int
+	uri                   string
+	path                  string
+	version               int32
+	moduleKind            string
+	source                string
+	sourceHash            [sha256.Size]byte
+	analysisSource        string
+	projectConditionals   bool
+	conditionalDirectives bool
+	conditionalConstants  map[string]string
+	lines                 []string
+	lineStarts            []int
+	lineEnds              []int
 
 	proceduresOnce              sync.Once
 	procedures                  []ProcedureInfo
@@ -147,21 +148,22 @@ func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 	lineStarts, lineEnds := buildSourceLineMap(source)
 	return &AnalysisSnapshot{
-		uri:                  doc.URI,
-		path:                 doc.Path,
-		version:              doc.Version,
-		moduleKind:           doc.ModuleKind,
-		source:               source,
-		sourceHash:           sha256.Sum256([]byte(source)),
-		analysisSource:       analysisSource,
-		projectConditionals:  doc.ProjectConditionals,
-		conditionalConstants: constants,
-		lines:                strings.Split(normalized, "\n"),
-		lineStarts:           lineStarts,
-		lineEnds:             lineEnds,
-		parseDocumentContext: ast.ParseDocumentContext,
-		artifacts:            newProcedureArtifactStore(),
-		retireDone:           make(chan struct{}),
+		uri:                   doc.URI,
+		path:                  doc.Path,
+		version:               doc.Version,
+		moduleKind:            doc.ModuleKind,
+		source:                source,
+		sourceHash:            sha256.Sum256([]byte(source)),
+		analysisSource:        analysisSource,
+		projectConditionals:   doc.ProjectConditionals,
+		conditionalDirectives: hasConditionalDirectives(source),
+		conditionalConstants:  constants,
+		lines:                 strings.Split(normalized, "\n"),
+		lineStarts:            lineStarts,
+		lineEnds:              lineEnds,
+		parseDocumentContext:  ast.ParseDocumentContext,
+		artifacts:             newProcedureArtifactStore(),
+		retireDone:            make(chan struct{}),
 	}
 }
 
@@ -178,10 +180,20 @@ func conditionalAnalysisSource(source string, enabled bool, constants map[string
 }
 
 func (doc Document) WithConditionalProjection(constants map[string]string) Document {
-	if !hasConditionalDirectives(doc.Source) {
-		if doc.ProjectConditionals && maps.Equal(doc.ConditionalConstants, constants) && analysisSnapshotForDocument(doc) != nil {
+	if maps.Equal(doc.ConditionalConstants, constants) {
+		if snapshot := analysisSnapshotForDocument(doc); snapshot != nil &&
+			(doc.ProjectConditionals || !snapshot.conditionalDirectives) {
+			// A matching immutable revision already proves whether projection is
+			// needed. Raw snapshots with directives must still be configured.
 			return doc
 		}
+		if doc.ProjectConditionals {
+			if cache := doc.conditionalSource; cache != nil && cache.source == doc.Source && maps.Equal(cache.constants, constants) {
+				return doc
+			}
+		}
+	}
+	if !hasConditionalDirectives(doc.Source) {
 		doc.ProjectConditionals = false
 		doc.ConditionalConstants = maps.Clone(constants)
 		if doc.Snapshot != nil && !doc.Snapshot.Matches(doc) {
@@ -189,14 +201,6 @@ func (doc Document) WithConditionalProjection(constants map[string]string) Docum
 		}
 		doc.conditionalSource = nil
 		return doc
-	}
-	if doc.ProjectConditionals && maps.Equal(doc.ConditionalConstants, constants) {
-		if analysisSnapshotForDocument(doc) != nil {
-			return doc
-		}
-		if cache := doc.conditionalSource; cache != nil && cache.source == doc.Source && maps.Equal(cache.constants, constants) {
-			return doc
-		}
 	}
 	doc.ProjectConditionals = true
 	doc.ConditionalConstants = maps.Clone(constants)
@@ -361,7 +365,7 @@ func NewIncrementalAnalysisSnapshot(doc Document, previous *AnalysisSnapshot, ed
 	if previous == nil || len(edits) == 0 || previous.Retired() ||
 		previous.projectConditionals != doc.ProjectConditionals ||
 		!maps.Equal(previous.conditionalConstants, doc.ConditionalConstants) ||
-		hasConditionalDirectives(previous.source) || hasConditionalDirectives(doc.Source) {
+		previous.conditionalDirectives || hasConditionalDirectives(doc.Source) {
 		return nil, ErrIncrementalSnapshotUnavailable
 	}
 	parsed, ready := previous.ParsedDocumentIfReady()

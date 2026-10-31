@@ -127,7 +127,7 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 	return findings
 }
 
-func (a Analyzer) loopInvariantCandidate(file parsedFile, proc sourceProcedure, statement procedureir.Statement, expression procedureir.Expression, constants map[string]string, facts *procedureAnalysisFacts) (loopInvariantCandidate, bool) {
+func (a Analyzer) loopInvariantCandidate(file parsedFile, proc sourceProcedure, statement procedureir.Statement, expression procedureir.Expression, constants loopInvariantStringConstantSet, facts *procedureAnalysisFacts) (loopInvariantCandidate, bool) {
 	expression.Text = loopInvariantExpressionSource(file.Source, expression)
 	loopInvariantExpandRange(&expression, expression.Text)
 	segments := splitLoopInvariantChain(expression.Text)
@@ -505,7 +505,7 @@ func splitLoopInvariantChain(text string) []loopInvariantChainSegment {
 	return segments
 }
 
-func loopInvariantConstantSelector(arguments string, constants map[string]string) bool {
+func loopInvariantConstantSelector(arguments string, constants loopInvariantStringConstantSet) bool {
 	arguments = strings.TrimSpace(arguments)
 	if arguments == "" {
 		return false
@@ -519,7 +519,7 @@ func loopInvariantConstantSelector(arguments string, constants map[string]string
 		if loopInvariantStringLiteral(part) {
 			continue
 		}
-		if _, ok := constants[strings.ToLower(cleanIdentifier(part))]; !ok {
+		if _, ok := constants.lookup(strings.ToLower(cleanIdentifier(part))); !ok {
 			return false
 		}
 	}
@@ -566,29 +566,83 @@ func loopInvariantStringLiteral(text string) bool {
 	return len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"'
 }
 
-func loopInvariantStringConstants(file parsedFile, proc sourceProcedure) map[string]string {
-	constants := map[string]string{}
-	for lineNumber, line := range file.Lines {
-		// File-level declarations precede a procedure in normal VBA modules.
-		// Do not let a procedure-local Const from a different procedure prove
-		// a selector in this one.
-		if proc.StartLine > 0 && lineNumber+1 > proc.StartLine {
-			break
-		}
+type loopInvariantStringConstantFact struct {
+	line  int
+	value string
+}
+
+type loopInvariantStringConstantIndex struct {
+	byName       map[string][]loopInvariantStringConstantFact
+	linesScanned int
+}
+
+type loopInvariantStringConstantSet struct {
+	index      *loopInvariantStringConstantIndex
+	prefixLine int
+	procedure  map[string]string
+}
+
+func (facts *moduleAnalysisFacts) loopInvariantStringConstantIndexFor(lines []string) *loopInvariantStringConstantIndex {
+	if facts == nil {
+		return buildLoopInvariantStringConstantIndex(lines)
+	}
+	facts.loopInvariantStringConstOnce.Do(func() {
+		facts.loopInvariantStringConstIndex = buildLoopInvariantStringConstantIndex(lines)
+	})
+	return facts.loopInvariantStringConstIndex
+}
+
+func buildLoopInvariantStringConstantIndex(lines []string) *loopInvariantStringConstantIndex {
+	index := &loopInvariantStringConstantIndex{
+		byName:       make(map[string][]loopInvariantStringConstantFact),
+		linesScanned: len(lines),
+	}
+	for lineNumber, line := range lines {
 		line = strings.TrimSpace(gui.StripComment(line))
 		match := loopInvariantConstStringRe.FindStringSubmatch(line)
 		if len(match) == 2 {
-			constants[strings.ToLower(match[1])] = match[2]
+			name := strings.ToLower(match[1])
+			index.byName[name] = append(index.byName[name], loopInvariantStringConstantFact{
+				line:  lineNumber + 1,
+				value: match[2],
+			})
 		}
 	}
+	return index
+}
+
+func loopInvariantStringConstants(file parsedFile, proc sourceProcedure) loopInvariantStringConstantSet {
+	index := file.ModuleFacts.loopInvariantStringConstantIndexFor(file.Lines)
+	procedureConstants := map[string]string{}
 	for statement := range proc.Statements.All() {
 		line := strings.TrimSpace(gui.StripComment(statement.Text))
 		match := loopInvariantConstStringRe.FindStringSubmatch(line)
 		if len(match) == 2 {
-			constants[strings.ToLower(match[1])] = match[2]
+			procedureConstants[strings.ToLower(match[1])] = match[2]
 		}
 	}
-	return constants
+	prefixLine := proc.StartLine
+	if prefixLine <= 0 {
+		prefixLine = len(file.Lines)
+	}
+	return loopInvariantStringConstantSet{index: index, prefixLine: prefixLine, procedure: procedureConstants}
+}
+
+func (constants loopInvariantStringConstantSet) lookup(name string) (string, bool) {
+	if value, ok := constants.procedure[name]; ok {
+		return value, true
+	}
+	if constants.index == nil {
+		return "", false
+	}
+	declarations := constants.index.byName[name]
+	count := sort.Search(len(declarations), func(i int) bool {
+		return declarations[i].line > constants.prefixLine
+	})
+	if count == 0 {
+		return "", false
+	}
+	return declarations[count-1].value, true
 }
 
 func normalizeLoopInvariantChain(text string) string {

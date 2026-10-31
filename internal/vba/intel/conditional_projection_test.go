@@ -2,6 +2,8 @@ package intel
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/conditional"
+	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
 func TestDiagnosticsProjectionMatchesBatchLintForConditionalProse(t *testing.T) {
@@ -251,6 +254,147 @@ func TestAnalysisSnapshotLeavesStructuralSourceUnprojectedByDefault(t *testing.T
 	defer snapshot.Retire()
 	if snapshot.AnalysisSource() != source {
 		t.Fatal("zero-value structural snapshot projected conditional source")
+	}
+}
+
+func TestConditionalProjectionConfiguresStructuralSnapshot(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n", "\r"} {
+		t.Run(fmt.Sprintf("newline-%q", newline), func(t *testing.T) {
+			source := strings.Join([]string{"#If False Then", "Inactive prose", "#End If", "Sub Active()", "End Sub", ""}, newline)
+			snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: source})
+			defer snapshot.RetireAndWait()
+			projected := snapshot.Document().WithConditionalProjection(nil)
+			if projected.Snapshot != nil || !projected.ProjectConditionals {
+				t.Fatal("structural snapshot was reused without configuring projection")
+			}
+			if strings.Contains(projected.AnalysisSource(), "Inactive prose") || projected.Source != source {
+				t.Fatal("structural snapshot bypassed projection or changed authored source")
+			}
+		})
+	}
+}
+
+func TestConditionalProjectionPreparedSnapshotDoesNotAllocate(t *testing.T) {
+	constants := make(map[string]string, 16)
+	for i := range 16 {
+		constants[fmt.Sprintf("Feature%d", i)] = "True"
+	}
+	for _, tail := range []string{"", "#If False Then\nInactive prose\n#End If\n"} {
+		doc := Document{Path: "Main.bas", Source: strings.Repeat("' padding\n", 4096) + tail}.WithConditionalProjection(constants)
+		snapshot := NewAnalysisSnapshot(doc)
+		doc = snapshot.Document()
+		allocations := testing.AllocsPerRun(100, func() {
+			projected := doc.WithConditionalProjection(constants)
+			if projected.Snapshot != snapshot {
+				t.Fatal("prepared snapshot was discarded")
+			}
+		})
+		snapshot.RetireAndWait()
+		if allocations != 0 {
+			t.Fatalf("unchanged preparation allocated %v times, want zero", allocations)
+		}
+	}
+}
+
+func TestConditionalProjectionRejectsChangedSourceAndRetiredSnapshot(t *testing.T) {
+	source := "#If False Then\nInactive prose\n#End If\n"
+	snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: source}.WithConditionalProjection(nil))
+	defer snapshot.RetireAndWait()
+	changed := snapshot.Document()
+	changed.Source = strings.ReplaceAll(source, "False", "True ")
+	projected := changed.WithConditionalProjection(nil)
+	if projected.Snapshot != nil || !strings.Contains(projected.AnalysisSource(), "Inactive prose") {
+		t.Fatal("changed source reused the previous projection")
+	}
+	doc := snapshot.Document()
+	snapshot.RetireAndWait()
+	if doc.WithConditionalProjection(nil).Snapshot != nil {
+		t.Fatal("retired snapshot was reused")
+	}
+}
+
+func BenchmarkConditionalProjectionPreparedSnapshot(b *testing.B) {
+	for _, size := range []int{4096, 256 << 10, 2 << 20} {
+		for _, directives := range []bool{false, true} {
+			b.Run(fmt.Sprintf("bytes-%d/directives-%t", size, directives), func(b *testing.B) {
+				constants := map[string]string{"Feature": "False"}
+				source := strings.Repeat("' padding\n", size/10)
+				if directives {
+					source += "#If Feature Then\nInactive prose\n#End If\n"
+				}
+				doc := Document{Path: "Main.bas", Source: source}.WithConditionalProjection(constants)
+				snapshot := NewAnalysisSnapshot(doc)
+				defer snapshot.RetireAndWait()
+				doc = snapshot.Document()
+				b.ReportAllocs()
+				for b.Loop() {
+					if doc.WithConditionalProjection(constants).Snapshot != snapshot {
+						b.Fatal("prepared snapshot was discarded")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestDisabledDiagnosticsSkipConditionalPreparation(t *testing.T) {
+	// An unprepared configured document would allocate when cloning its
+	// environment. Disabled rules must not perform that preparation at all.
+	doc := Document{Path: "Main.bas", Source: "#If Feature Then\nInactive prose\n#End If\n"}
+	for _, db := range []*vbadb.DB{nil, {}} {
+		analyzer := Analyzer{DB: db}
+		analyzer.Config.VBA.ConditionalConstants = map[string]string{"Feature": "False"}
+		for _, rule := range []struct {
+			name string
+			run  func(context.Context, Document) ([]Diagnostic, error)
+		}{
+			{"default-member", analyzer.DefaultMemberDiagnosticsContext},
+			{"stateful-excel", analyzer.StatefulExcelCallArgumentDiagnosticsContext},
+			{"approximate-lookup", analyzer.ImplicitApproximateLookupDiagnosticsContext},
+		} {
+			t.Run(fmt.Sprintf("%s/db-%t", rule.name, db != nil), func(t *testing.T) {
+				allocations := testing.AllocsPerRun(100, func() {
+					diagnostics, err := rule.run(t.Context(), doc)
+					if err != nil || len(diagnostics) != 0 {
+						t.Fatalf("disabled diagnostics = %v, %v", diagnostics, err)
+					}
+				})
+				if allocations != 0 {
+					t.Fatalf("disabled rule allocated %v times, want zero", allocations)
+				}
+			})
+		}
+	}
+}
+
+func TestCanceledDiagnosticsSkipConditionalPreparation(t *testing.T) {
+	analyzer := Analyzer{DB: &vbadb.DB{}}
+	analyzer.Config.VBA.ConditionalConstants = map[string]string{"Feature": "False"}
+	analyzer.Config.Analyze.DetectStatefulExcelCallArguments = true
+	analyzer.Config.Analyze.DetectImplicitApproximateLookups = true
+	doc := Document{Path: "Main.bas", Source: "#If Feature Then\nInactive prose\n#End If\n"}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, rule := range []func(context.Context, Document) ([]Diagnostic, error){
+		analyzer.StatefulExcelCallArgumentDiagnosticsContext,
+		analyzer.ImplicitApproximateLookupDiagnosticsContext,
+	} {
+		allocations := testing.AllocsPerRun(100, func() {
+			diagnostics, err := rule(ctx, doc)
+			if len(diagnostics) != 0 || !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancelled diagnostics = %v, %v", diagnostics, err)
+			}
+		})
+		if allocations != 0 {
+			t.Fatalf("cancelled rule allocated %v times, want zero", allocations)
+		}
+	}
+	if allocations := testing.AllocsPerRun(100, func() {
+		if got := analyzer.CompileEquivalentDiagnosticsContext(ctx, doc); len(got) != 0 {
+			t.Fatalf("cancelled compile diagnostics = %v", got)
+		}
+	}); allocations != 0 {
+		t.Fatalf("cancelled compile diagnostics allocated %v times, want zero", allocations)
 	}
 }
 

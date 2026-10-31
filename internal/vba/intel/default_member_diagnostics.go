@@ -24,7 +24,6 @@ type DefaultMemberDiagnosticContext struct {
 // It deliberately uses the existing revision-scoped document index so batch
 // and realtime analysis share declaration shadowing and assignment inference.
 func (a Analyzer) DefaultMemberDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
-	doc = a.projectConditionalDocument(doc)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -39,6 +38,7 @@ func (a Analyzer) DefaultMemberDiagnosticsContext(ctx context.Context, doc Docum
 		// analyzer path does not pay for a source scan or surface a new policy.
 		return nil, nil
 	}
+	doc = a.projectConditionalDocument(doc)
 	resolver, ok := a.NewDocumentExpressionTypeResolver(doc)
 	if !ok {
 		return nil, nil

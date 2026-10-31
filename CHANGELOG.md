@@ -13,6 +13,10 @@ All notable changes to xlflow will be documented in this file.
   Preserved GoSub label references after branch selection and excluded
   user-defined type parameters from invalid VBA275 ByVal suggestions.
 
+- Reduced repeated source scans in conditional-analysis preparation and
+  disabled diagnostics, and indexed constant references and string-constant
+  prefixes for batch analysis without changing diagnostic selection.
+
 - Fixed `VB029` incorrectly rejecting assignments such as
   `Set Predeclared = Nothing` to class default instances declared with
   `Attribute VB_PredeclaredId = True`, including lint, source preflight and LSP

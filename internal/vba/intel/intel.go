@@ -315,10 +315,10 @@ func (a Analyzer) CompileEquivalentDiagnosticsContextWithByRefDiagnostics(ctx co
 }
 
 func (a Analyzer) compileEquivalentDiagnosticsContext(ctx context.Context, doc Document, byRefDiagnostics []Diagnostic, byRefDiagnosticsReady bool) []Diagnostic {
-	doc = a.projectConditionalDocument(doc)
 	if ctx.Err() != nil {
 		return nil
 	}
+	doc = a.projectConditionalDocument(doc)
 	var out []Diagnostic
 	appendCompileEquivalent := func(diagnostics []Diagnostic) {
 		for _, diagnostic := range diagnostics {
@@ -2477,13 +2477,13 @@ func (a Analyzer) StatefulExcelCallArgumentDiagnostics(doc Document) []Diagnosti
 // StatefulExcelCallArgumentDiagnosticsContext is the cancellable form used by
 // realtime analysis of large modules.
 func (a Analyzer) StatefulExcelCallArgumentDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
-	doc = a.projectConditionalDocument(doc)
 	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.DB == nil {
 		return nil, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	doc = a.projectConditionalDocument(doc)
 	index, ok := a.documentIndexFor(doc)
 	if !ok || index == nil {
 		return nil, nil
@@ -2537,13 +2537,13 @@ func (a Analyzer) ImplicitApproximateLookupDiagnostics(doc Document) []Diagnosti
 // ImplicitApproximateLookupDiagnosticsContext is the cancellable form used by
 // batch and realtime analysis.
 func (a Analyzer) ImplicitApproximateLookupDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
-	doc = a.projectConditionalDocument(doc)
 	if !a.Config.Analyze.DetectImplicitApproximateLookups || a.DB == nil {
 		return nil, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	doc = a.projectConditionalDocument(doc)
 	index, ok := a.documentIndexFor(doc)
 	if !ok || index == nil {
 		return nil, nil
