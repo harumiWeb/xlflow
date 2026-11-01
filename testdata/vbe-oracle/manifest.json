@@ -7,6 +7,38 @@
   },
   "cases": [
     {
+      "id": "pr969-conditional-contextual-name",
+      "path": "cases/pr969-conditional-contextual-name/case.json"
+    },
+    {
+      "id": "pr969-conditional-debug-name",
+      "path": "cases/pr969-conditional-debug-name/case.json"
+    },
+    {
+      "id": "pr969-conditional-intrinsic-name",
+      "path": "cases/pr969-conditional-intrinsic-name/case.json"
+    },
+    {
+      "id": "pr969-conditional-keyword-and",
+      "path": "cases/pr969-conditional-keyword-and/case.json"
+    },
+    {
+      "id": "pr969-conditional-keyword-if",
+      "path": "cases/pr969-conditional-keyword-if/case.json"
+    },
+    {
+      "id": "pr969-conditional-keyword-sub",
+      "path": "cases/pr969-conditional-keyword-sub/case.json"
+    },
+    {
+      "id": "pr969-conditional-ordinary-name",
+      "path": "cases/pr969-conditional-ordinary-name/case.json"
+    },
+    {
+      "id": "pr969-private-udt-range-byval",
+      "path": "cases/pr969-private-udt-range-byval/case.json"
+    },
+    {
       "id": "predeclared-class-assignment-accepted",
       "path": "cases/predeclared-class-assignment-accepted/case.json"
     },

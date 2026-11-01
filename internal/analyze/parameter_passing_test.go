@@ -398,6 +398,11 @@ Private Sub ObserveShared(ByRef value As SharedRecord)
     observed = value.Value
 End Sub
 
+Private Sub ObserveQualified(ByRef value As Types.SharedRecord)
+    Dim observed As Long
+    observed = value.Value
+End Sub
+
 Private Sub ObserveLocal(ByRef value As LocalRecord)
     Dim observed As Long
     observed = value.Value
@@ -413,6 +418,45 @@ End Sub
 	got := findingsByCode(findings, "VBA275")
 	if len(got) != 1 || got[0].Procedure != "ObserveObject" || !strings.Contains(got[0].Message, "value") {
 		t.Fatalf("VBA275 findings = %+v, want only ObserveObject.value", got)
+	}
+}
+
+func TestParameterPassingUDTExclusionRespectsScopeAndQualification(t *testing.T) {
+	for _, visibility := range []string{"Private", "Public"} {
+		t.Run(visibility, func(t *testing.T) {
+			findings := runParameterPassingAnalysis(t, parameterPassingConfig(), map[string]string{
+				"Other.bas": "Option Explicit\n" + visibility + " Type Range\n    Value As Long\nEnd Type\n",
+				"Main.bas": `Option Explicit
+Private Type LocalRecord
+    Value As Long
+End Type
+Private Sub ObserveUnqualified(ByRef value As Range)
+    Dim observed As Variant
+    observed = value.Value
+End Sub
+Private Sub ObserveExcel(ByRef value As Excel.Range)
+    Dim observed As Long
+    observed = value.Row
+End Sub
+Private Sub ObserveLocal(ByRef value As LocalRecord)
+    Dim observed As Long
+    observed = value.Value
+End Sub
+`,
+			})
+			got := make(map[string]bool)
+			for _, finding := range findingsByCode(findings, "VBA275") {
+				got[finding.Procedure] = true
+			}
+			wantUnqualified := visibility == "Private"
+			wantCount := 1
+			if wantUnqualified {
+				wantCount++
+			}
+			if got["ObserveUnqualified"] != wantUnqualified || !got["ObserveExcel"] || got["ObserveLocal"] || len(got) != wantCount {
+				t.Fatalf("%s Other.Range: VBA275 procedures = %v; want Excel and unqualified=%t", visibility, got, wantUnqualified)
+			}
+		})
 	}
 }
 
@@ -1006,6 +1050,7 @@ func TestParameterMutationWorklistScalesWithLongCallChain(t *testing.T) {
 	const procedureCount = 128
 	var source strings.Builder
 	source.WriteString("Option Explicit\n")
+	source.WriteString("Private Type LocalRecord\n    Value As Long\nEnd Type\n")
 	for index := 0; index < procedureCount; index++ {
 		fmt.Fprintf(&source, "Private Sub Step%03d(ByRef value As Long)\n", index)
 		if index+1 < procedureCount {
@@ -1025,6 +1070,9 @@ func TestParameterMutationWorklistScalesWithLongCallChain(t *testing.T) {
 	}
 	if work.records != procedureCount*2 {
 		t.Fatalf("records = %d, want %d", work.records, procedureCount*2)
+	}
+	if work.typeDeclarationsVisited != len(file.IR.Declarations) || !summaries["sub|main.step000"].udtTypes.contains("Main", "LocalRecord") {
+		t.Fatalf("UDT index visits = %d, want one visit per declaration (%d) with a visible local UDT", work.typeDeclarationsVisited, len(file.IR.Declarations))
 	}
 	if work.evaluations > work.records*2 {
 		t.Fatalf("worklist evaluations = %d for %d records, want at most two per record", work.evaluations, work.records)

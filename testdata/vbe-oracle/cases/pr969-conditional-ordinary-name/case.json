@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "pr969-conditional-ordinary-name",
+  "description": "PR #969: Feature is a valid declared and referenced conditional constant.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "specification"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "language-observation"
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-11-01T12:46:31Z"
+      }
+    ]
+  }
+}

@@ -1,5 +1,12 @@
 # Issue #966: inactive conditional-compilation source
 
+## PR #969 review follow-up
+
+- [x] Reproduce the VBA275 UDT scope collision; restrict candidate exclusion to applicable local/public UDT declarations with exact qualification and regression coverage.
+- [x] Verify conditional constant keyword names with sequential local VBE controls/observations before changing configuration or projection validation.
+- [x] Investigate the Linux LSP quick-fix publication timeout; correct a confirmed cause without weakening diagnostic evidence checks.
+- [ ] Run affected checks, corpus and scoped work-scaling verification; document evidence, commit, review and push the validated corrections to PR #969.
+
 ## Final review follow-up
 
 ### Efficiency implementation

@@ -119,6 +119,11 @@ for the exact current open document. Missing or stale evidence yields no action;
 client-provided diagnostics never authorize a correction. Discovery reuses this
 evidence without running diagnostics, building IR/CFG, or querying the workspace.
 
+If startup completes after a diagnostic request captured an incomplete project,
+the readiness retry must still recheck the completed project and reschedule
+Full diagnostics. Checking readiness and returning without this retry can lose
+the only completion notification and leave current quick-fix evidence absent.
+
 The initial provider accepts only an explicit `Private Function` in a standard
 module, with one required, explicitly typed primitive scalar parameter and an
 explicit primitive scalar return type. Allowed types are `Boolean`, `Byte`,

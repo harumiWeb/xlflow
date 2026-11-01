@@ -316,12 +316,28 @@ func identifier(name string) bool {
 			return false
 		}
 	}
-	switch strings.ToLower(name) {
-	case "true", "false", "empty", "null", "nothing":
-		return false
-	}
-	return true
+	return !reservedIdentifiers[strings.ToLower(name)]
 }
+
+// MS-VBAL 3.3.5.2 defines IDENTIFIER by excluding these reserved tokens.
+// Keep VBA's list separate from the broader VB.NET rename restrictions.
+// https://learn.microsoft.com/en-us/openspecs/microsoft_general_purpose_programming_languages/ms-vbal/7df907cb-ab6c-40d3-aa81-272742ce00c3
+var reservedIdentifiers = func() map[string]bool {
+	const names = `call case close const declare defbool defbyte defcur defdate defdbl defint deflng deflnglng deflngptr defobj defsng defstr defvar
+dim do else elseif end endif enum erase event exit for friend function get global gosub goto if implements input let lock loop lset next on open option print private public put raiseevent redim resume return rset seek select set static stop sub type unlock wend while with write
+rem any as byref byval each in new shared until withevents optional paramarray preserve spc tab then to
+addressof and eqv imp is like mod not or typeof xor
+abs cbool cbyte ccur cdate cdbl cdec cint clng clnglng clngptr csng cstr cvar cverr date debug doevents fix int len lenb me pset scale sgn string
+array circle inputb lbound ubound boolean byte currency double integer long longlong longptr single variant
+true false nothing empty null
+attribute lineinput vb_base vb_control vb_creatable vb_customizable vb_description vb_exposed vb_ext_key vb_globalnamespace vb_helpid vb_invoke_func vb_invoke_property vb_invoke_propertyput vb_invoke_propertyputref vb_memberflags vb_name vb_predeclaredid vb_procdata vb_templatederived vb_usermemid vb_vardescription vb_varhelpid vb_varmemberflags vb_varprocdata vb_varusermemid
+cdecl decimal defdec`
+	reserved := make(map[string]bool)
+	for name := range strings.FieldsSeq(names) {
+		reserved[name] = true
+	}
+	return reserved
+}()
 
 func stripComment(text string) string {
 	quoted := false

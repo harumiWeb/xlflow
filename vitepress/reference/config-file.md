@@ -25,7 +25,7 @@ project's compiler arguments:
 
 ```toml
 [vba.conditional_constants]
-DEBUG = "False"
+DEBUG_FLAG = "False"
 VBA7 = "True"
 Win64 = "True"
 Win32 = "True"

@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"cmp"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -19,7 +20,20 @@ type parameterMutationStates map[string]parameterMutationState
 
 type parameterMutationSummary struct {
 	states   parameterMutationStates
-	udtTypes map[string]bool
+	udtTypes parameterCandidateUDTIndex
+}
+
+// Candidate eligibility uses visible declarations and exact qualification.
+// The broader mutation model remains conservative about unresolved types.
+type parameterCandidateUDTIndex struct {
+	public              map[string]bool
+	local               map[string]map[string]bool
+	declarationsVisited int
+}
+
+func (index parameterCandidateUDTIndex) contains(module, typeName string) bool {
+	name := parameterName(typeName)
+	return index.local[parameterName(module)][name] || index.public[name]
 }
 
 type parameterMutationRecord struct {
@@ -32,8 +46,9 @@ type parameterMutationRecord struct {
 }
 
 type parameterMutationWork struct {
-	records     int
-	evaluations int
+	records                 int
+	evaluations             int
+	typeDeclarationsVisited int
 }
 
 func buildParameterMutationSummaries(files []parsedFile) map[string]parameterMutationSummary {
@@ -47,7 +62,7 @@ func buildParameterMutationSummariesWithWork(files []parsedFile) (map[string]par
 		byName: make(map[string][]*parameterMutationRecord),
 	}
 	ordered := make([]*parameterMutationRecord, 0)
-	udtTypes, objectTypes := parameterCompositeTypes(files)
+	udtTypes, objectTypes, candidateUDTs := parameterCompositeTypes(files)
 	for _, file := range files {
 		for _, proc := range file.Procedures {
 			if proc.IR == nil {
@@ -85,7 +100,7 @@ func buildParameterMutationSummariesWithWork(files []parsedFile) (map[string]par
 	for _, record := range queue {
 		queued[record] = true
 	}
-	work := parameterMutationWork{records: len(ordered)}
+	work := parameterMutationWork{records: len(ordered), typeDeclarationsVisited: candidateUDTs.declarationsVisited}
 	for len(queue) > 0 {
 		record := queue[0]
 		queue = queue[1:]
@@ -104,14 +119,15 @@ func buildParameterMutationSummariesWithWork(files []parsedFile) (map[string]par
 
 	out := make(map[string]parameterMutationSummary, len(index.byKey))
 	for key, record := range index.byKey {
-		out[key] = parameterMutationSummary{states: record.summary, udtTypes: record.udtTypes}
+		out[key] = parameterMutationSummary{states: record.summary, udtTypes: candidateUDTs}
 	}
 	return out, work
 }
 
-func parameterCompositeTypes(files []parsedFile) (map[string]bool, map[string]bool) {
+func parameterCompositeTypes(files []parsedFile) (map[string]bool, map[string]bool, parameterCandidateUDTIndex) {
 	udtTypes := make(map[string]bool)
 	objectTypes := make(map[string]bool)
+	candidates := parameterCandidateUDTIndex{public: make(map[string]bool), local: make(map[string]map[string]bool)}
 	for _, file := range files {
 		module := parameterName(file.IR.ModuleName)
 		if module == "" {
@@ -125,17 +141,29 @@ func parameterCompositeTypes(files []parsedFile) (map[string]bool, map[string]bo
 			objectTypes[module] = true
 		}
 		for _, declaration := range file.IR.Declarations {
+			candidates.declarationsVisited++
 			if !strings.EqualFold(declaration.Kind, "type") {
 				continue
 			}
 			name := parameterName(declaration.Name)
 			udtTypes[name] = true
+			if candidates.local[module] == nil {
+				candidates.local[module] = make(map[string]bool)
+			}
+			candidates.local[module][name] = true
 			if module != "" {
 				udtTypes[module+"."+name] = true
+				candidates.local[module][module+"."+name] = true
+			}
+			if !strings.EqualFold(declaration.Visibility, "Private") && (moduleKind == "" || strings.EqualFold(moduleKind, "standard")) {
+				candidates.public[name] = true
+				if module != "" {
+					candidates.public[module+"."+name] = true
+				}
 			}
 		}
 	}
-	return udtTypes, objectTypes
+	return udtTypes, objectTypes, candidates
 }
 
 func parameterExpressionIndex(procedure *procedureir.ProcedureIR) map[int]procedureir.Expression {
@@ -721,7 +749,7 @@ func (a Analyzer) parameterPassingFindings(file parsedFile, proc sourceProcedure
 				"Use a separate local variable, or change the API contract only when caller-visible mutation is intended."))
 		}
 		if summaryAvailable && a.Config.Analyze.DetectByRefParametersCanBeByVal && !constrained && !valueParameter && effective == "byref" &&
-			!parameterTypeIsUDT(parameter.Type, summary.udtTypes) &&
+			!summary.udtTypes.contains(cmp.Or(file.IR.ModuleName, file.Module), parameter.Type) &&
 			!parameter.IsArray && !parameter.ParamArray && state == parameterNotWritten {
 			findings = append(findings, a.parameterFinding(file, proc, parameter, "VBA275", "information",
 				"ByRef parameter "+name+" is never written and can be passed ByVal.",

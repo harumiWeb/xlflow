@@ -12,6 +12,11 @@ All notable changes to xlflow will be documented in this file.
   retains both candidate branches.
   Preserved GoSub label references after branch selection and excluded
   user-defined type parameters from invalid VBA275 ByVal suggestions.
+  Conditional constant names reject VBA reserved identifiers, and VBA275's
+  UDT exclusion respects module visibility and explicit type qualification.
+
+- Fixed a startup completion race that could leave LSP project diagnostics
+  and ByVal quick-fix evidence waiting indefinitely after an incomplete scan.
 
 - Reduced repeated source scans in conditional-analysis preparation and
   disabled diagnostics, and indexed constant references and string-constant

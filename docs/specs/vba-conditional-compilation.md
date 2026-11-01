@@ -14,7 +14,7 @@ Project arguments can be declared in `xlflow.toml`:
 
 ```toml
 [vba.conditional_constants]
-DEBUG = "False"
+DEBUG_FLAG = "False"
 FeatureLevel = "2"
 VBA7 = "True"
 Win64 = "True"
@@ -23,6 +23,11 @@ Mac = "False"
 ```
 
 Keys are case-insensitive VBA identifiers; duplicate case variants are errors.
+Reserved identifiers from MS-VBAL 3.3.5.2 are rejected, including `If`, `And`
+and `Debug`. Use a name such as `DEBUG_FLAG` instead. The same check applies
+to active module `#Const` declarations; an invalid name retains the original
+source conservatively rather than selecting branches from an invalid binding.
+VBA's reserved set does not include all VB.NET keywords: `Catch` remains valid.
 Values are TOML strings containing independently evaluable VBA literal
 expressions. Boolean, integral, floating-point, currency, string and Empty
 values are accepted. Date, Null, Nothing, unresolved names and unsupported

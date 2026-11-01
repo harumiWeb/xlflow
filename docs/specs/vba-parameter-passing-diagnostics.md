@@ -47,7 +47,11 @@ Procedures passed as `AddressOf` callbacks are excluded because their
 parameter declarations form an externally constrained signature.
 Parameters whose types resolve to a project or module user-defined type are
 also excluded because VBA rejects passing a UDT `ByVal`. The check reuses the
-project/module UDT index; names absent from that index continue through the
+project/module UDT index, built once per project summary. Private declarations
+apply only within their declaring module; public standard-module declarations
+also apply across modules. Qualified names require an exact match: an unrelated
+`Type Range` must not classify `Excel.Range` as a UDT. Names absent from the
+applicable index continue through the
 existing mutation-summary rules, including fail-open handling of unknown call
 and composite-write boundaries.
 

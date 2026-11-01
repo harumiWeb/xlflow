@@ -20,11 +20,11 @@ func TestProjectSelectsOnlyProvenInactiveSource(t *testing.T) {
 		{name: "true", source: "#If True Then\nactive prose\n#Else\ninactive source\n#End If", present: []string{"active prose"}, absent: []string{"inactive source"}},
 		{name: "nested", source: "#If False Then\n#If True Then\ninactive nested\n#End If\n#Else\n#If 1 Then\nactive nested\n#End If\n#End If", present: []string{"active nested"}, absent: []string{"inactive nested"}},
 		{name: "elseif", source: "#If False Then\nfirst branch\n#ElseIf 2 > 1 Then\nsecond branch\n#ElseIf True Then\nthird branch\n#Else\nlast branch\n#End If", present: []string{"second branch"}, absent: []string{"first branch", "third branch", "last branch"}},
-		{name: "module constant", source: "#Const Debug = 2 + 3\n#If Debug = 5 Then\nactive source\n#Else\ninactive prose\n#End If", present: []string{"active source", "#Const Debug"}, absent: []string{"inactive prose"}},
+		{name: "module constant", source: "#Const DebugFlag = 2 + 3\n#If DebugFlag = 5 Then\nactive source\n#Else\ninactive prose\n#End If", present: []string{"active source", "#Const DebugFlag"}, absent: []string{"inactive prose"}},
 		{name: "continued const remains uncertain", source: "#Const Flag = False Or _\n    OtherFlag\n#If Flag Then\npossible source\n#Else\nalso possible\n#End If", present: []string{"possible source", "also possible", "#If Flag"}},
-		{name: "custom project argument", constants: map[string]string{"DEBUG": "True"}, source: "#If debug Then\nactive source\n#Else\ninactive prose\n#End If", present: []string{"active source"}, absent: []string{"inactive prose"}},
-		{name: "module overrides project", constants: map[string]string{"DEBUG": "True"}, source: "#Const Debug = False\n#If debug Then\ninactive prose\n#Else\nactive source\n#End If", present: []string{"active source"}, absent: []string{"inactive prose"}},
-		{name: "inactive const", source: "#If False Then\n#Const Debug = True\n#End If\n#If Debug Then\ninactive prose\n#End If", absent: []string{"#Const Debug", "inactive prose"}},
+		{name: "custom project argument", constants: map[string]string{"DEBUGFLAG": "True"}, source: "#If debugflag Then\nactive source\n#Else\ninactive prose\n#End If", present: []string{"active source"}, absent: []string{"inactive prose"}},
+		{name: "module overrides project", constants: map[string]string{"DEBUGFLAG": "True"}, source: "#Const DebugFlag = False\n#If debugflag Then\ninactive prose\n#Else\nactive source\n#End If", present: []string{"active source"}, absent: []string{"inactive prose"}},
+		{name: "inactive const", source: "#If False Then\n#Const DebugFlag = True\n#End If\n#If DebugFlag Then\ninactive prose\n#End If", absent: []string{"#Const DebugFlag", "inactive prose"}},
 		{name: "unknown builtins retain candidates", source: "#If Win64 Then\nfirst branch\n#ElseIf Mac Then\nsecond branch\n#Else\nlast branch\n#End If", present: []string{"first branch", "second branch", "last branch"}},
 		{name: "explicit builtin", constants: map[string]string{"Win64": "True"}, source: "#If Win64 Then\nactive source\n#Else\ninactive prose\n#End If", present: []string{"active source"}, absent: []string{"inactive prose"}},
 		{name: "unknown assignment merge", source: "#If Win64 Then\n#Const Flag = True\n#End If\n#If Flag Then\npossible source\n#Else\nalso possible\n#End If", present: []string{"possible source", "also possible"}},
@@ -114,8 +114,8 @@ func TestProjectPreservesPositionsAndModuleScope(t *testing.T) {
 	if bytes.Index(got, []byte("Public Sub Run")) != bytes.Index(source, []byte("Public Sub Run")) {
 		t.Fatal("active code byte offset moved")
 	}
-	Project([]byte("#Const Debug = True\n"), nil)
-	if got := Project([]byte("#If Debug Then\nprose\n#End If"), nil); bytes.Contains(got, []byte("prose")) {
+	Project([]byte("#Const DebugFlag = True\n"), nil)
+	if got := Project([]byte("#If DebugFlag Then\nprose\n#End If"), nil); bytes.Contains(got, []byte("prose")) {
 		t.Fatal("module #Const leaked into next module")
 	}
 }
@@ -130,18 +130,37 @@ func TestProjectDoesNotHideInvalidSourceEncoding(t *testing.T) {
 
 func TestValidateConstants(t *testing.T) {
 	for _, values := range []map[string]string{
-		nil, {"DEBUG": "True", "Win64": "False", "Count": "1 + 2", "Title": `"it's ok"`}, {"EmptyFlag": "Empty"}, {"Price": "900719925474.0987@"},
+		nil, {"DEBUGFLAG": "True", "Win64": "False", "Count": "1 + 2", "Title": `"it's ok"`}, {"EmptyFlag": "Empty"}, {"Price": "900719925474.0987@"},
 	} {
 		if err := ValidateConstants(values); err != nil {
 			t.Fatalf("valid table %v: %v", values, err)
 		}
 	}
 	for _, values := range []map[string]string{
-		{"Debug": "True", "DEBUG": "False"}, {"bad name": "1"}, {"Flag": "Unresolved"}, {"Flag": "1 / 0"}, {"Flag": "Null"}, {"True": "1"}, {"Flag": "Nothing"},
+		{"DebugFlag": "True", "DEBUGFLAG": "False"}, {"bad name": "1"}, {"Flag": "Unresolved"}, {"Flag": "1 / 0"}, {"Flag": "Null"}, {"True": "1"}, {"Flag": "Nothing"},
 		{"Price": "0.00015@"}, {"Price": "1@ + 1@"},
 	} {
 		if err := ValidateConstants(values); err == nil {
 			t.Fatalf("invalid table accepted: %v", values)
+		}
+	}
+}
+
+func TestConditionalConstantNamesRejectReservedIdentifiers(t *testing.T) {
+	for _, name := range []string{"If", "aNd", "Sub", "Len", "DEBUG", "ByRef", "Currency", "True", "VB_Name", "DefDec"} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateConstants(map[string]string{name: "True"}); err == nil {
+				t.Fatalf("reserved project constant %q accepted", name)
+			}
+			source := []byte("#If False Then\nprose\n#End If\n#Const " + name + " = True\n")
+			if projected := Project(source, nil); !bytes.Equal(projected, source) {
+				t.Fatalf("invalid #Const %q did not retain original source: %s", name, projected)
+			}
+		})
+	}
+	for _, name := range []string{"Feature", "DebugFlag", "Catch", "Win64", "名前"} {
+		if err := ValidateConstants(map[string]string{name: "True"}); err != nil {
+			t.Errorf("valid constant %q rejected: %v", name, err)
 		}
 	}
 }

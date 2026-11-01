@@ -126,7 +126,7 @@ End Sub
 }
 
 func TestDeclarationDiagnosticsIgnoreMutuallyExclusiveBranches(t *testing.T) {
-	source := "Option Explicit\n#If DEBUG Then\nDim value As Long\n#Else\nDim VALUE As String\n#End If\n"
+	source := "Option Explicit\n#If DEBUGFLAG Then\nDim value As Long\n#Else\nDim VALUE As String\n#End If\n"
 	issues, err := (Linter{}).LintSource("Main.bas", []byte(source))
 	if err != nil {
 		t.Fatal(err)
@@ -139,9 +139,9 @@ func TestDeclarationDiagnosticsIgnoreMutuallyExclusiveBranches(t *testing.T) {
 }
 
 func TestDeclarationDiagnosticsCompareRepeatedConditionalBranch(t *testing.T) {
-	source := "Option Explicit\n#If DEBUG Then\nDim value As Long\n#End If\n#If DEBUG Then\nDim VALUE As String\n#End If\n"
+	source := "Option Explicit\n#If DEBUGFLAG Then\nDim value As Long\n#End If\n#If DEBUGFLAG Then\nDim VALUE As String\n#End If\n"
 	cfg := config.Default()
-	cfg.VBA.ConditionalConstants = map[string]string{"DEBUG": "True"}
+	cfg.VBA.ConditionalConstants = map[string]string{"DEBUGFLAG": "True"}
 	issues, err := (Linter{Config: cfg}).LintSource("Main.bas", []byte(source))
 	if err != nil {
 		t.Fatal(err)
@@ -152,9 +152,9 @@ func TestDeclarationDiagnosticsCompareRepeatedConditionalBranch(t *testing.T) {
 }
 
 func TestDeclarationDiagnosticsConditionalProcedureRange(t *testing.T) {
-	source := "Option Explicit\n#If DEBUG Then\nSub Foo()\nEnd Sub\nSub foo()\nEnd Sub\n#End If\n"
+	source := "Option Explicit\n#If DEBUGFLAG Then\nSub Foo()\nEnd Sub\nSub foo()\nEnd Sub\n#End If\n"
 	cfg := config.Default()
-	cfg.VBA.ConditionalConstants = map[string]string{"DEBUG": "True"}
+	cfg.VBA.ConditionalConstants = map[string]string{"DEBUGFLAG": "True"}
 	issues, err := (Linter{Config: cfg}).LintSource("Main.bas", []byte(source))
 	if err != nil {
 		t.Fatal(err)
@@ -169,9 +169,9 @@ func TestDeclarationDiagnosticsConditionalProcedureRange(t *testing.T) {
 }
 
 func TestDeclarationDiagnosticsIgnoreRepeatedInactiveConditionalBranch(t *testing.T) {
-	source := "Option Explicit\n#If DEBUG Then\nDim value As Long\n#End If\n#If DEBUG Then\nDim VALUE As String\n#End If\n"
+	source := "Option Explicit\n#If DEBUGFLAG Then\nDim value As Long\n#End If\n#If DEBUGFLAG Then\nDim VALUE As String\n#End If\n"
 	cfg := config.Default()
-	cfg.VBA.ConditionalConstants = map[string]string{"DEBUG": "False"}
+	cfg.VBA.ConditionalConstants = map[string]string{"DEBUGFLAG": "False"}
 	issues, err := (Linter{Config: cfg}).LintSource("Main.bas", []byte(source))
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestDeclarationDiagnosticsIgnoreStaticallyFalseBranch(t *testing.T) {
 }
 
 func TestDeclarationDiagnosticsPreserveFalseConditionalAlternatives(t *testing.T) {
-	source := "Option Explicit\n#If False Then\nDim value As Long\n#ElseIf DEBUG Then\nDim VALUE As String\n#Else\nDim Value As Double\n#End If\n"
+	source := "Option Explicit\n#If False Then\nDim value As Long\n#ElseIf DEBUGFLAG Then\nDim VALUE As String\n#Else\nDim Value As Double\n#End If\n"
 	issues, err := (Linter{}).LintSource("Main.bas", []byte(source))
 	if err != nil {
 		t.Fatal(err)

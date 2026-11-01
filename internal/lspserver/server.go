@@ -2624,12 +2624,9 @@ func (s *Server) scheduleProjectReadyDiagnostics(state *diagnosticState) {
 		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 		return
 	}
-	if s.analysis.initialReady() {
-		return
-	}
-	s.diagWorkers.Add(1)
-	go func() {
-		defer s.diagWorkers.Done()
+	// Startup may finish after the incomplete snapshot above. waitReady also
+	// handles an already-closed readiness channel, so always recheck the project.
+	s.diagWorkers.Go(func() {
 		err := s.analysis.waitReady()
 		if err != nil {
 			state.mu.Lock()
@@ -2640,7 +2637,7 @@ func (s *Server) scheduleProjectReadyDiagnostics(state *diagnosticState) {
 		}
 		project, _ := s.analysis.projectChangeClass("background")
 		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
-	}()
+	})
 }
 
 func diagnosticsWithoutCode(in []intel.Diagnostic, code string) []intel.Diagnostic {
