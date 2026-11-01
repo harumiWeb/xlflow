@@ -7,9 +7,11 @@
 - [x] Reuse exact prepared snapshots before directive detection and gate disabled/cancelled diagnostics before preparation.
 - [x] Index authored Private Const mentions once while preserving lexical boundaries, declarator exclusion and local shadowing.
 - [x] Reuse string-constant prefix facts across loop-bearing procedures without changing source-order or local override behavior.
-- [ ] Verify focused regressions, scalability, race and corpus identity.
-- [ ] Compare the optimization against pinned post-fix batch/editor baselines; retain all samples and confidence intervals.
-- [ ] Review the committed optimization independently and complete review cleanup.
+- [x] Verify focused regressions, scalability, race and corpus identity.
+- [x] Compare the optimization against pinned post-fix batch/editor baselines; retain all samples and confidence intervals (46 pass, two large-editor workloads require a longer matched rerun).
+- [x] Complete optimization review Pass 1 and preserve its report; release and remove its review resources.
+- [x] Correct the loop scan counter and add checked populated-index lookup benchmark coverage for the two accepted P3 findings.
+- [ ] Verify the corrected commit, complete bounded Pass 2 review and clean up its review resources.
 - [ ] Separately investigate VBA238's existing string-constant extraction guard before enabling any additional selector proofs.
 
 - [x] Reproduce the Currency precision finding; confirm the conditional-compilation boundary with local VBE controls and focused observations.

@@ -594,10 +594,10 @@ func (facts *moduleAnalysisFacts) loopInvariantStringConstantIndexFor(lines []st
 
 func buildLoopInvariantStringConstantIndex(lines []string) *loopInvariantStringConstantIndex {
 	index := &loopInvariantStringConstantIndex{
-		byName:       make(map[string][]loopInvariantStringConstantFact),
-		linesScanned: len(lines),
+		byName: make(map[string][]loopInvariantStringConstantFact),
 	}
 	for lineNumber, line := range lines {
+		index.linesScanned++
 		line = strings.TrimSpace(gui.StripComment(line))
 		match := loopInvariantConstStringRe.FindStringSubmatch(line)
 		if len(match) == 2 {

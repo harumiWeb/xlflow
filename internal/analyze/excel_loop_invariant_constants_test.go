@@ -25,6 +25,18 @@ func TestLoopInvariantStringConstantIndexConcurrentInitialization(t *testing.T) 
 	}
 }
 
+func TestLoopInvariantStringConstantIndexCountsVisitedLines(t *testing.T) {
+	for _, size := range []int{0, 1, 10000} {
+		t.Run(fmt.Sprintf("lines-%d", size), func(t *testing.T) {
+			// Nonmatching lines are still visited by the index build.
+			index := buildLoopInvariantStringConstantIndex(make([]string, size))
+			if index.linesScanned != size {
+				t.Fatalf("visited %d lines, want %d", index.linesScanned, size)
+			}
+		})
+	}
+}
+
 func TestLoopInvariantStringConstantIndexReusesModuleScan(t *testing.T) {
 	t.Parallel()
 	lines := []string{
@@ -110,8 +122,11 @@ func BenchmarkLoopInvariantStringConstantIndex(b *testing.B) {
 			_ = buildLoopInvariantStringConstantIndex(lines)
 		}
 	})
-	b.Run("many-procedure-prefix-lookups", func(b *testing.B) {
+	b.Run("existing-extraction-empty-prefix-lookups", func(b *testing.B) {
 		index := buildLoopInvariantStringConstantIndex(lines)
+		if len(index.byName) != 0 {
+			b.Fatal("existing extraction semantics changed; update this control explicitly")
+		}
 		b.ReportAllocs()
 		for b.Loop() {
 			for line := 1; line <= lineCount; line++ {
@@ -119,6 +134,39 @@ func BenchmarkLoopInvariantStringConstantIndex(b *testing.B) {
 				_, _ = constants.lookup(names[line%constantCount])
 			}
 		}
+	})
+	b.Run("populated-source-order-prefix-lookups", func(b *testing.B) {
+		// The production extraction guard currently produces no facts. Seed
+		// immutable facts explicitly to measure the positive lookup kernel
+		// without extending the rule's supported selector proofs.
+		index := &loopInvariantStringConstantIndex{byName: make(map[string][]loopInvariantStringConstantFact, constantCount)}
+		for _, name := range names {
+			index.byName[name] = []loopInvariantStringConstantFact{
+				{line: 1, value: `"Worksheets"`},
+				{line: lineCount / 2, value: `"Names"`},
+				{line: lineCount, value: `"Sheets"`},
+			}
+		}
+		for _, check := range []struct {
+			line int
+			want string
+		}{{0, ""}, {1, `"Worksheets"`}, {lineCount / 2, `"Names"`}, {lineCount, `"Sheets"`}} {
+			constants := loopInvariantStringConstantSet{index: index, prefixLine: check.line}
+			value, ok := constants.lookup(names[0])
+			if value != check.want || ok != (check.line > 0) {
+				b.Fatalf("prefix %d = %q, %t; want %q", check.line, value, ok, check.want)
+			}
+		}
+		b.ReportAllocs()
+		for b.Loop() {
+			for line := 1; line <= lineCount; line++ {
+				constants := loopInvariantStringConstantSet{index: index, prefixLine: line}
+				if _, ok := constants.lookup(names[line%constantCount]); !ok {
+					b.Fatal("populated prefix lookup missed an available fact")
+				}
+			}
+		}
+		b.ReportMetric(lineCount, "successful-lookups/op")
 	})
 }
 
