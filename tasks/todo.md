@@ -8,7 +8,7 @@
 - [x] Index authored Private Const mentions once while preserving lexical boundaries, declarator exclusion and local shadowing.
 - [x] Reuse string-constant prefix facts across loop-bearing procedures without changing source-order or local override behavior.
 - [x] Verify focused regressions, scalability, race and corpus identity.
-- [x] Compare the optimization against pinned post-fix batch/editor baselines; retain all samples and confidence intervals (46 pass, two large-editor workloads require a longer matched rerun).
+- [x] Compare the optimization against pinned post-fix baselines and retain every sample: batch/preparation/edit workloads pass; flag-enabled editor rerun passes all 24 conditions. Earlier flag-off editor measurements remain separate controls, not configured-request evidence.
 - [x] Complete optimization review Pass 1 and preserve its report; release and remove its review resources.
 - [x] Correct the loop scan counter and add checked populated-index lookup benchmark coverage for the two accepted P3 findings.
 - [ ] Verify the corrected commit, complete bounded Pass 2 review and clean up its review resources.
