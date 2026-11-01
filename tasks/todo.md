@@ -11,7 +11,7 @@
 - [x] Compare the optimization against pinned post-fix baselines and retain every sample: batch/preparation/edit workloads pass; flag-enabled editor rerun passes all 24 conditions. Earlier flag-off editor measurements remain separate controls, not configured-request evidence.
 - [x] Complete optimization review Pass 1 and preserve its report; release and remove its review resources.
 - [x] Correct the loop scan counter and add checked populated-index lookup benchmark coverage for the two accepted P3 findings.
-- [ ] Verify the corrected commit, complete bounded Pass 2 review and clean up its review resources.
+- [x] Verify corrections and complete bounded Pass 2: PASS at c791cd34, no new in-scope findings. Preserve the report under tmp_workspaces/final-review/issue966-efficiency-pass2/report.md; acknowledge/release the worker, close review terminals and remove the temporary worktree. Original Issue #966 performance acceptance remains separate and unverified.
 - [ ] Separately investigate VBA238's existing string-constant extraction guard before enabling any additional selector proofs.
 
 - [x] Reproduce the Currency precision finding; confirm the conditional-compilation boundary with local VBE controls and focused observations.
