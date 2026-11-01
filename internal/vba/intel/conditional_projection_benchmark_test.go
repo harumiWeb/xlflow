@@ -48,7 +48,7 @@ func BenchmarkConditionalEditorRequests(b *testing.B) {
 			constants := map[string]string{"Feature": "True"}
 			cfg := config.Default()
 			cfg.VBA.ConditionalConstants = constants
-			analyzer := Analyzer{Config: cfg}
+			analyzer := Analyzer{Config: cfg, ConditionalProjection: true}
 			for _, request := range []struct {
 				name string
 				run  func(Document, []Document) error
