@@ -468,7 +468,7 @@ func (x *workspaceAnalysisIndex) promoteDeclarationCandidates(names []string, pr
 func (x *workspaceAnalysisIndex) promoteOpenDocument(doc intel.Document) {
 	x.promoteDeclarationPath(doc.Path, declarationPriorityActive)
 	x.skipInitialDeclarationPath(doc.Path)
-	x.promoteDocumentDependencies(doc.Source)
+	x.promoteDocumentDependencies(doc.AnalysisSource())
 }
 
 func (x *workspaceAnalysisIndex) promoteDocumentDependencies(source string) {

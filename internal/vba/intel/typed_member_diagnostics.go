@@ -32,6 +32,7 @@ func (a Analyzer) TypedMemberDiagnostics(doc Document, spec TypedMemberDiagnosti
 // TypedMemberDiagnosticsContext is the cancellable form used by batch and
 // realtime analysis.
 func (a Analyzer) TypedMemberDiagnosticsContext(ctx context.Context, doc Document, spec TypedMemberDiagnosticSpec) ([]Diagnostic, error) {
+	doc = a.projectConditionalDocument(doc)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -61,7 +62,7 @@ func (a Analyzer) TypedMemberDiagnosticsContext(ctx context.Context, doc Documen
 	}
 
 	var out []Diagnostic
-	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.AnalysisSource()) {
 		if i&0x3f == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err

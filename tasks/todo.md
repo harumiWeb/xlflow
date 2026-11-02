@@ -1,3 +1,38 @@
+# Issue #966: inactive conditional-compilation source
+
+## PR #969 review follow-up
+
+- [x] Reproduce the VBA275 UDT scope collision; restrict candidate exclusion to applicable local/public UDT declarations with exact qualification and regression coverage.
+- [x] Verify conditional constant keyword names with sequential local VBE controls/observations before changing configuration or projection validation.
+- [x] Investigate the Linux LSP quick-fix publication timeout; correct a confirmed cause without weakening diagnostic evidence checks.
+- [ ] Run affected checks, corpus and scoped work-scaling verification; document evidence, commit, review and push the validated corrections to PR #969.
+
+## Final review follow-up
+
+### Efficiency implementation
+
+- [x] Reuse exact prepared snapshots before directive detection and gate disabled/cancelled diagnostics before preparation.
+- [x] Index authored Private Const mentions once while preserving lexical boundaries, declarator exclusion and local shadowing.
+- [x] Reuse string-constant prefix facts across loop-bearing procedures without changing source-order or local override behavior.
+- [x] Verify focused regressions, scalability, race and corpus identity.
+- [x] Compare the optimization against pinned post-fix baselines and retain every sample: batch/preparation/edit workloads pass; flag-enabled editor rerun passes all 24 conditions. Earlier flag-off editor measurements remain separate controls, not configured-request evidence.
+- [x] Complete optimization review Pass 1 and preserve its report; release and remove its review resources.
+- [x] Correct the loop scan counter and add checked populated-index lookup benchmark coverage for the two accepted P3 findings.
+- [x] Verify corrections and complete bounded Pass 2: PASS at c791cd34, no new in-scope findings. Preserve the report under tmp_workspaces/final-review/issue966-efficiency-pass2/report.md; acknowledge/release the worker, close review terminals and remove the temporary worktree. Original Issue #966 performance acceptance remains separate and unverified.
+- [ ] Separately investigate VBA238's existing string-constant extraction guard before enabling any additional selector proofs.
+
+- [x] Reproduce the Currency precision finding; confirm the conditional-compilation boundary with local VBE controls and focused observations.
+- [x] Preserve exact Currency literal/comparison values or retain uncertain branches; cover projection and unchanged ordinary evaluation.
+- [x] Run correction checks and bounded Pass 2 review; preserve its report and clean up its worker, watcher, setup terminals and temporary worktree.
+- [x] Define Issue #966 performance budgets, required batch/editor workloads, balanced measurement and explicit pass/fail/unverified verdicts.
+- [ ] Satisfy the documented performance gate: resolve warm timing, account for CFG route cost and measure repeated editor preparation.
+
+- [x] Add a shared, byte-preserving projection with module-local #Const and explicit project constants; retain uncertain branches and structural errors.
+- [x] Apply the projection consistently to batch lint/analyze, symbols and LSP diagnostics while retaining original source for editing and delivery.
+- [x] Re-establish VBE oracle controls and focused accepted/rejected evidence after the observational fixture infrastructure failure.
+- [x] Cover inactive prose, active errors, nested/alternate branches, constant scope, source positions and unsaved edits.
+- [ ] Document configuration and semantic boundaries; run package/corpus/performance checks and independent review.
+
 # Issue #965: predeclared class assignment targets
 
 ## PR #968 review follow-up

@@ -4,6 +4,26 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.37.0
+
+- Fixed inactive conditional-compilation content causing VB014 and
+  `analyze_failed` in lint, analyze, source preflight and LSP diagnostics.
+  Added `[vba.conditional_constants]` for explicit project and target constants;
+  uncertain branches remain available for conservative analysis.
+  Currency comparisons preserve exact fixed-point values; unsupported rounding
+  retains both candidate branches.
+  Preserved GoSub label references after branch selection and excluded
+  user-defined type parameters from invalid VBA275 ByVal suggestions.
+  Conditional constant names reject VBA reserved identifiers, and VBA275's
+  UDT exclusion respects module visibility and explicit type qualification.
+
+- Fixed a startup completion race that could leave LSP project diagnostics
+  and ByVal quick-fix evidence waiting indefinitely after an incomplete scan.
+
+- Reduced repeated source scans in conditional-analysis preparation and
+  disabled diagnostics, and indexed constant references and string-constant
+  prefixes for batch analysis without changing diagnostic selection.
+
 - Fixed `VB029` incorrectly rejecting assignments such as
   `Set Predeclared = Nothing` to class default instances declared with
   `Attribute VB_PredeclaredId = True`, including lint, source preflight and LSP

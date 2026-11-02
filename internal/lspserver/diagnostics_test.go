@@ -3,6 +3,7 @@ package lspserver
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1186,6 +1187,42 @@ func TestCompleteProjectReschedulesDiagnosticsSuppressedWhileIncomplete(t *testi
 	}
 	if got := len(timers.snapshot()); got != 1 {
 		t.Fatalf("scheduled diagnostic timers = %d, want 1", got)
+	}
+}
+
+type projectReadyLogWriter struct {
+	index *workspaceAnalysisIndex
+	once  sync.Once
+}
+
+func (w *projectReadyLogWriter) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), `stage="projectSnapshot" class="interactive"`) && strings.Contains(string(p), "elapsed_ms=") {
+		// The snapshot has captured Complete=false, but startup finishes
+		// before the caller can check readiness or begin waiting for it.
+		w.once.Do(w.index.closeReady)
+	}
+	return len(p), nil
+}
+
+func TestProjectReadyDiagnosticsDoesNotLoseConcurrentStartupCompletion(t *testing.T) {
+	s, timers, cleanup := newDiagnosticsTestServer(t)
+	defer cleanup()
+	// Control the empty index's readiness without a background filesystem scan.
+	s.analysis.startOnce.Do(func() {})
+	s.analysis.declarations.markReady(nil)
+	s.analysis.nonBlockingQueries = true
+	s.analysis.performance = newPerformanceRecorder(true, log.New(&projectReadyLogWriter{index: s.analysis}, "", 0))
+	doc := intel.Document{URI: "file:///pending.bas", Path: filepath.Join(t.TempDir(), "pending.bas"), Source: "Option Explicit", ModuleKind: "standard"}
+	state := &diagnosticState{open: true, latest: doc}
+	s.diagStates[doc.URI] = state
+
+	s.scheduleProjectReadyDiagnostics(state)
+	s.diagWorkers.Wait()
+	if !s.analysis.initialReady() {
+		t.Fatal("test did not complete startup between the snapshot and readiness check")
+	}
+	if state.projectReadyPending || len(timers.snapshot()) != 1 {
+		t.Fatalf("lost project-ready retry: pending=%t, timers=%d", state.projectReadyPending, len(timers.snapshot()))
 	}
 }
 

@@ -7,6 +7,38 @@
   },
   "cases": [
     {
+      "id": "pr969-conditional-contextual-name",
+      "path": "cases/pr969-conditional-contextual-name/case.json"
+    },
+    {
+      "id": "pr969-conditional-debug-name",
+      "path": "cases/pr969-conditional-debug-name/case.json"
+    },
+    {
+      "id": "pr969-conditional-intrinsic-name",
+      "path": "cases/pr969-conditional-intrinsic-name/case.json"
+    },
+    {
+      "id": "pr969-conditional-keyword-and",
+      "path": "cases/pr969-conditional-keyword-and/case.json"
+    },
+    {
+      "id": "pr969-conditional-keyword-if",
+      "path": "cases/pr969-conditional-keyword-if/case.json"
+    },
+    {
+      "id": "pr969-conditional-keyword-sub",
+      "path": "cases/pr969-conditional-keyword-sub/case.json"
+    },
+    {
+      "id": "pr969-conditional-ordinary-name",
+      "path": "cases/pr969-conditional-ordinary-name/case.json"
+    },
+    {
+      "id": "pr969-private-udt-range-byval",
+      "path": "cases/pr969-private-udt-range-byval/case.json"
+    },
+    {
       "id": "predeclared-class-assignment-accepted",
       "path": "cases/predeclared-class-assignment-accepted/case.json"
     },
@@ -334,6 +366,50 @@
       "path": "cases/issue594-typeof-trailing-token/case.json"
     },
     { "id": "issue594-typeof-valid", "path": "cases/issue594-typeof-valid/case.json" },
+    {
+      "id": "issue966-active-prose-rejected",
+      "path": "cases/issue966-active-prose-rejected/case.json"
+    },
+    {
+      "id": "issue966-conditional-currency-exact-less-than",
+      "path": "cases/issue966-conditional-currency-exact-less-than/case.json"
+    },
+    {
+      "id": "issue966-conditional-module-const-bitwise",
+      "path": "cases/issue966-conditional-module-const-bitwise/case.json"
+    },
+    {
+      "id": "issue966-conditional-not-comparison",
+      "path": "cases/issue966-conditional-not-comparison/case.json"
+    },
+    {
+      "id": "issue966-conditional-not-undefined",
+      "path": "cases/issue966-conditional-not-undefined/case.json"
+    },
+    {
+      "id": "issue966-gosub-label-reference-accepted",
+      "path": "cases/issue966-gosub-label-reference-accepted/case.json"
+    },
+    {
+      "id": "issue966-inactive-prose-false",
+      "path": "cases/issue966-inactive-prose-false/case.json"
+    },
+    {
+      "id": "issue966-inactive-prose-module-const",
+      "path": "cases/issue966-inactive-prose-module-const/case.json"
+    },
+    {
+      "id": "issue966-inactive-prose-undefined",
+      "path": "cases/issue966-inactive-prose-undefined/case.json"
+    },
+    {
+      "id": "issue966-udt-byref-accepted",
+      "path": "cases/issue966-udt-byref-accepted/case.json"
+    },
+    {
+      "id": "issue966-udt-byval-rejected",
+      "path": "cases/issue966-udt-byval-rejected/case.json"
+    },
     {
       "id": "vb012-terminator-function-end-function-class",
       "path": "cases/vb012-terminator-function-end-function-class/case.json"

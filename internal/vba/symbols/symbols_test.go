@@ -35,6 +35,104 @@ func TestInspectParsedMatchesInspectSource(t *testing.T) {
 	}
 }
 
+func TestInspectProjectsConditionalCompilationFromProjectConfig(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(moduleDir, "Conditional.bas")
+	source := []byte(`Attribute VB_Name = "Conditional"
+#Const ModuleFeature = False
+#If ModuleFeature Then
+Public Sub HiddenByModuleConst()
+End Sub
+#End If
+#If ProjectFeature Then
+Public Sub HiddenByProjectConst()
+End Sub
+This is inactive prose, not VBA code.
+#End If
+Public Sub Run()
+End Sub
+`)
+	if err := os.WriteFile(path, source, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	consumerPath := filepath.Join(moduleDir, "Consumer.bas")
+	consumerSource := []byte(`Attribute VB_Name = "Consumer"
+#Const ModuleFeature = True
+#If ModuleFeature Then
+Public Sub CrossFileVisible()
+End Sub
+#End If
+Public Sub Caller()
+End Sub
+`)
+	if err := os.WriteFile(consumerPath, consumerSource, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.VBA.ConditionalConstants = map[string]string{"ProjectFeature": "False"}
+	result, err := Inspect(Options{RootDir: root, Config: cfg, IncludePrivate: true})
+	if err != nil {
+		t.Fatalf("Inspect failed: %v", err)
+	}
+	if result.Summary.ParseErrors != 0 || result.Summary.MissingNodes != 0 {
+		t.Fatalf("parse summary = %+v, want no parser recovery", result.Summary)
+	}
+	if len(result.Files) != 2 {
+		t.Fatalf("file count = %d, want 2", len(result.Files))
+	}
+	var runFound, callerFound, crossFileFound bool
+	for _, file := range result.Files {
+		for _, symbol := range file.Symbols {
+			switch symbol.Name {
+			case "Run":
+				runFound = true
+			case "Caller":
+				callerFound = true
+			case "CrossFileVisible":
+				crossFileFound = true
+			case "HiddenByModuleConst", "HiddenByProjectConst":
+				t.Fatalf("inactive conditional declaration leaked into project symbols: %+v", symbol)
+			}
+		}
+	}
+	if !runFound || !callerFound || !crossFileFound {
+		t.Fatalf("visible project symbols missing: Run=%v Caller=%v CrossFileVisible=%v", runFound, callerFound, crossFileFound)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(source) {
+		t.Fatal("symbol inspection changed the source file")
+	}
+	got, err = os.ReadFile(consumerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(consumerSource) {
+		t.Fatal("project symbol inspection changed the consumer source file")
+	}
+}
+
+func TestInspectKeepsUnspecifiedPlatformConditionalUnresolved(t *testing.T) {
+	t.Parallel()
+	file, err := InspectSource(SourceOptions{Path: "Platform.bas", ModuleKind: "standard"}, []byte(`#If Win64 Then
+This branch is unknown until the target is configured.
+#End If
+`))
+	if err != nil {
+		t.Fatalf("InspectSource failed: %v", err)
+	}
+	if !file.Parse.HasError && !file.Parse.HasMissing {
+		t.Fatal("unspecified Win64 should leave the branch unresolved")
+	}
+}
+
 func TestInspectParsedDeclarationsSkipsProcedureBodies(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Main.bas")
 	source := []byte(`Attribute VB_Name = "Main"

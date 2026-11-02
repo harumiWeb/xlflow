@@ -87,11 +87,11 @@ func (a Analyzer) Rename(doc Document, pos Position, newName string, open []Docu
 }
 
 func (a Analyzer) renameTarget(doc Document, pos Position, open []Document) (RenameTarget, error) {
-	word, wordRange := WordAt(doc.Source, pos)
+	word, wordRange := WordAt(doc.AnalysisSource(), pos)
 	if strings.TrimSpace(word) == "" || !rangeContains(wordRange, Range{Start: pos, End: pos}) {
 		return RenameTarget{}, fmt.Errorf("cannot rename unresolved identifier")
 	}
-	if !rangeIsCodeIdentifier(doc.Source, wordRange, word) {
+	if !rangeIsCodeIdentifier(doc.AnalysisSource(), wordRange, word) {
 		return RenameTarget{}, fmt.Errorf("cannot rename unresolved identifier")
 	}
 	if a.isExternalRenameTarget(doc, word, wordRange, pos) {
@@ -152,7 +152,7 @@ func (a Analyzer) symbolRenameRanges(doc Document, target Symbol, open []Documen
 	}
 	targetID := renameSymbolIdentity(target)
 	var out []Range
-	for _, r := range codeIdentifierRanges(doc.Source, word) {
+	for _, r := range codeIdentifierRanges(doc.AnalysisSource(), word) {
 		if !rangeContains(search, r) {
 			continue
 		}
@@ -298,7 +298,7 @@ func (a Analyzer) isExternalRenameTarget(doc Document, word string, wordRange Ra
 	if a.DB == nil {
 		return false
 	}
-	line := lineAt(doc.Source, wordRange.Start.Line)
+	line := lineAt(doc.AnalysisSource(), wordRange.Start.Line)
 	startByte := byteIndexForUTF16(line, wordRange.Start.Character)
 	if startByte > len(line) {
 		startByte = len(line)
@@ -413,7 +413,7 @@ func labelRenameRanges(doc Document, target Symbol) []Range {
 	if !ok {
 		return out
 	}
-	for _, r := range labelReferenceRanges(doc.Source, target.Name) {
+	for _, r := range labelReferenceRanges(doc.AnalysisSource(), target.Name) {
 		if rangeContains(scope, r) {
 			out = append(out, r)
 		}

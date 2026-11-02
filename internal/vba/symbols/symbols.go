@@ -12,6 +12,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/sourcepath"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/conditional"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
@@ -116,12 +117,13 @@ type SourceFile struct {
 }
 
 type SourceOptions struct {
-	RootDir         string
-	Path            string
-	ModuleKind      string
-	IncludePrivate  bool
-	IncludeLabels   bool
-	DeclarationOnly bool
+	RootDir              string
+	Path                 string
+	ModuleKind           string
+	IncludePrivate       bool
+	IncludeLabels        bool
+	DeclarationOnly      bool
+	ConditionalConstants map[string]string
 }
 
 type extractor struct {
@@ -188,7 +190,12 @@ func InspectContext(ctx context.Context, opts Options) (*Result, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		parsed, err := parser.ParseFile(file.path)
+		source, err := os.ReadFile(file.path)
+		if err != nil {
+			return nil, err
+		}
+		source = conditional.Project(source, opts.Config.VBA.ConditionalConstants)
+		parsed, err := parser.ParseChecked(file.path, source)
 		if err != nil {
 			return nil, err
 		}
@@ -387,6 +394,7 @@ func InspectSourceContext(ctx context.Context, opts SourceOptions, source []byte
 	if strings.TrimSpace(path) == "" {
 		path = "Untitled.bas"
 	}
+	source = conditional.Project(source, opts.ConditionalConstants)
 	doc, err := vbaast.ParseDocument(path, source)
 	if err != nil {
 		return FileResult{}, err

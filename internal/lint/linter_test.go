@@ -17,6 +17,49 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
 
+func TestRunResultProjectsInactiveConditionalCompilation(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(moduleDir, "Conditional.bas")
+	source := `Attribute VB_Name = "Conditional"
+Option Explicit
+#Const ModuleFeature = False
+#If ModuleFeature Or NotDefinedConst Or ProjectFeature Then
+This is plain prose, not VBA code.
+## Heading
+1. item
+#End If
+Public Function Answer() As Long
+    Answer = 42
+End Function
+`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.VBA.ConditionalConstants = map[string]string{"ProjectFeature": "False"}
+	result, err := (Linter{RootDir: root, Config: cfg}).RunResult()
+	if err != nil {
+		t.Fatalf("RunResult failed: %v", err)
+	}
+	for _, issue := range result.Issues {
+		if issue.Code == "VB014" {
+			t.Fatalf("inactive conditional prose produced parser-recovery issue: %+v", issue)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != source {
+		t.Fatal("lint changed the source file")
+	}
+}
+
 func TestLinterRunResultContextReturnsCancellation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1150,7 +1193,11 @@ func TestLinterAcceptsVB014CorpusLexicalBoundaries(t *testing.T) {
 	for name, source := range tests {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "Main.bas")
-			issues, err := (Linter{Config: config.Default()}).LintSource(path, []byte(source))
+			cfg := config.Default()
+			if name == "repeated conditional guard" {
+				cfg.VBA.ConditionalConstants = map[string]string{"Feature": "True"}
+			}
+			issues, err := (Linter{Config: cfg}).LintSource(path, []byte(source))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1164,9 +1211,10 @@ func TestLinterAcceptsVB014CorpusLexicalBoundaries(t *testing.T) {
 func TestLinterRejectsUnclosedVB014CorpusLexicalBoundaries(t *testing.T) {
 	t.Parallel()
 	tests := map[string]struct {
-		source         string
-		openingLine    int
-		expectedCloser string
+		source               string
+		conditionalConstants map[string]string
+		openingLine          int
+		expectedCloser       string
 	}{
 		"type declaration plus unclosed If": {
 			source: "Private Type Item\n  Next As Long\nEnd Type\nSub Main()\n  If True Then\n    Debug.Print True\nEnd Sub\n", openingLine: 5, expectedCloser: "End If",
@@ -1178,13 +1226,21 @@ func TestLinterRejectsUnclosedVB014CorpusLexicalBoundaries(t *testing.T) {
 			source: "Sub Main()\n  If IsReady(value:=1) Then\n    Debug.Print True\nEnd Sub\n", openingLine: 2, expectedCloser: "End If",
 		},
 		"repeated conditional unclosed If": {
-			source: "Sub Main()\n#If Feature Then\n  If ready Then\n#End If\n  Debug.Print ready\n#If Feature Then\n  Else\n    Debug.Print False\n#End If\nEnd Sub\n", openingLine: 0,
+			source: "Sub Main()\n#If VBA7 Then\n  If ready Then\n#End If\n  Debug.Print ready\n#If VBA7 Then\n  Else\n    Debug.Print False\n#End If\nEnd Sub\n", openingLine: 0,
+		},
+		"resolved repeated conditional unclosed If": {
+			source:               "Sub Main()\n#If Feature Then\n  If ready Then\n#End If\n  Debug.Print ready\n#If Feature Then\n  Else\n    Debug.Print False\n#End If\nEnd Sub\n",
+			conditionalConstants: map[string]string{"Feature": "True"},
+			openingLine:          3,
+			expectedCloser:       "End If",
 		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "Main.bas")
-			issues, err := (Linter{Config: config.Default()}).LintSource(path, []byte(test.source))
+			cfg := config.Default()
+			cfg.VBA.ConditionalConstants = test.conditionalConstants
+			issues, err := (Linter{Config: cfg}).LintSource(path, []byte(test.source))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1200,6 +1256,18 @@ func TestLinterRejectsUnclosedVB014CorpusLexicalBoundaries(t *testing.T) {
 				t.Fatalf("conditional recovery should remain conservative: %+v", got[0])
 			}
 		})
+	}
+}
+
+func TestLinterSkipsInactiveRepeatedConditionalUnclosedIf(t *testing.T) {
+	t.Parallel()
+	source := "Sub Main()\n#If Feature Then\n  If ready Then\n#End If\n  Debug.Print ready\n#If Feature Then\n  Else\n    Debug.Print False\n#End If\nEnd Sub\n"
+	issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("undefined Feature should make the malformed runtime If inactive: %+v", got)
 	}
 }
 
@@ -1986,6 +2054,18 @@ Property Let UserData(ByVal value As Long)
 End Property
 `,
 		},
+		{
+			name: "shared body after resolved conditional function header",
+			source: `Option Explicit
+#If UndefinedFeature Then
+Public Function SelectedValue() As Long
+#Else
+Public Function SelectedValue() As String
+#End If
+    SelectedValue = "selected"
+End Function
+`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1993,7 +2073,7 @@ End Property
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, code := range []string{"VB010", "VB011", "VB012"} {
+			for _, code := range []string{"VB010", "VB011", "VB012", "VB014"} {
 				if got := issuesByCode(issues, code); len(got) != 0 {
 					t.Fatalf("valid conditional/type declaration should not trigger %s: %+v", code, got)
 				}

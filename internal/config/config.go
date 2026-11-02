@@ -17,6 +17,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
+	"github.com/harumiWeb/xlflow/internal/vba/conditional"
 )
 
 const FileName = "xlflow.toml"
@@ -69,6 +70,7 @@ type VBAConfig struct {
 	Folders                 bool                 `toml:"folders"`
 	FolderAnnotation        string               `toml:"folder_annotation"`
 	DefaultComponentFolders bool                 `toml:"default_component_folders"`
+	ConditionalConstants    map[string]string    `toml:"conditional_constants"`
 	LineNumbers             VBALineNumbersConfig `toml:"line_numbers"`
 }
 
@@ -701,6 +703,9 @@ func applyDefaults(cfg *Config) {
 }
 
 func validate(cfg Config) error {
+	if err := conditional.ValidateConstants(cfg.VBA.ConditionalConstants); err != nil {
+		return fmt.Errorf("vba.conditional_constants: %w", err)
+	}
 	if cfg.Lint.DetectRedundantStepOne && cfg.Lint.RequireExplicitStep {
 		return errors.New("[lint].detect_redundant_step_one and [lint].require_explicit_step cannot both be enabled")
 	}
@@ -1451,6 +1456,9 @@ func renderMetricsConfig(cfg MetricsConfig) string {
 }
 
 func Write(path string, cfg Config) (err error) {
+	if err := conditional.ValidateConstants(cfg.VBA.ConditionalConstants); err != nil {
+		return fmt.Errorf("vba.conditional_constants: %w", err)
+	}
 	preflightConfig := cfg.Preflight
 	if err := normalizePreflightConfig(&preflightConfig); err != nil {
 		return err
@@ -1485,6 +1493,7 @@ func Write(path string, cfg Config) (err error) {
 	packConfigText := renderPackConfig(cfg.Pack)
 	metricsConfigText := renderMetricsConfig(metricsConfig)
 	preflightConfigText := renderPreflightConfig(preflightConfig)
+	conditionalConstantsText := renderConditionalConstants(cfg.VBA.ConditionalConstants)
 
 	const tmpl = `# Project identity and entry point.
 [project]
@@ -1527,6 +1536,10 @@ folders = %t
 folder_annotation = %q
 # Automatically assign default folder annotations based on source paths.
 default_component_folders = %t
+
+# Project conditional-compilation constants. Values are VBA literal expressions.
+# Specify platform constants explicitly when the workbook target is known.
+%s
 
 # Optional Erl instrumentation. When enabled, push numbers only temporary
 # import copies; tracked source remains unnumbered.
@@ -1582,6 +1595,7 @@ builtin_casing = %t
 		cfg.Excel.Path, cfg.Excel.Visible, cfg.Excel.DisplayAlerts, cfg.Excel.Bridge,
 		cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook,
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
+		conditionalConstantsText,
 		cfg.UserForm.CodeSource,
 		buildConfigText,
 		packConfigText,
@@ -1592,6 +1606,22 @@ builtin_casing = %t
 		analyzeConfigText,
 	)
 	return err
+}
+
+func renderConditionalConstants(constants map[string]string) string {
+	if len(constants) == 0 {
+		return "# conditional_constants = {}"
+	}
+	names := make([]string, 0, len(constants))
+	for name := range constants {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	entries := make([]string, 0, len(names))
+	for _, name := range names {
+		entries = append(entries, strconv.Quote(name)+" = "+strconv.Quote(constants[name]))
+	}
+	return "conditional_constants = { " + strings.Join(entries, ", ") + " }"
 }
 
 func UpdateUserFormCodeSource(path string, codeSource string) error {

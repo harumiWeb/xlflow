@@ -251,9 +251,10 @@ func New(opts Options) (*Server, func(), error) {
 			RootDir:                    opts.RootDir,
 			Config:                     opts.Config,
 			DB:                         typeDB.DB,
+			ConditionalProjection:      true,
 			TypeDBResolutionIncomplete: !typeDB.Complete,
-			RealtimeFindingsFunc: func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
-				findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx, rootDir, cfg, doc, ir, controlFlow, &analyze.TypeDatabase{DB: typeDB.DB, Complete: typeDB.Complete})
+			RealtimeFindingsDocumentFunc: func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, sourceDocument intel.Document) ([]intel.RealtimeFinding, error) {
+				findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(ctx, rootDir, cfg, doc, ir, controlFlow, &analyze.TypeDatabase{DB: typeDB.DB, Complete: typeDB.Complete}, effects.ProjectSummary{}, nil, nil, sourceDocument, 0)
 				if err != nil {
 					return nil, err
 				}
@@ -363,7 +364,7 @@ func New(opts Options) (*Server, func(), error) {
 			projectConstants = s.projectConstantsContext(ctx, project, resolutionComplete, typeDB.DB)
 		}
 		analyzer := s.analyzer
-		workspaceDocuments := projectWorkspaceDocuments(resolvedProjectDocuments, request.Document)
+		workspaceDocuments := projectWorkspaceDocuments(resolvedProjectDocuments, request.Document, s.opts.Config.VBA.ConditionalConstants)
 		workspaceSymbolsSnapshot := analyzer.WorkspaceSymbolsSnapshotFunc
 		analyzer.VisibleConstants = projectConstants.visible
 		analyzer.ConstantValues = projectConstants.values
@@ -447,6 +448,14 @@ func New(opts Options) (*Server, func(), error) {
 	}, nil
 }
 
+func (s *Server) configureConditionalDocument(doc intel.Document) intel.Document {
+	return doc.WithConditionalProjection(s.opts.Config.VBA.ConditionalConstants)
+}
+
+func (s *Server) newAnalysisSnapshot(doc intel.Document) *intel.AnalysisSnapshot {
+	return intel.NewAnalysisSnapshot(s.configureConditionalDocument(doc))
+}
+
 func realtimeFinding(finding analyze.Finding) intel.RealtimeFinding {
 	out := intel.RealtimeFinding{
 		Code: finding.Code, Severity: finding.Severity,
@@ -464,7 +473,7 @@ func realtimeFinding(finding analyze.Finding) intel.RealtimeFinding {
 	return out
 }
 
-func projectWorkspaceDocuments(projectDocuments []intel.ProjectAnalysisDocument, current intel.Document) []intel.Document {
+func projectWorkspaceDocuments(projectDocuments []intel.ProjectAnalysisDocument, current intel.Document, conditionalConstants map[string]string) []intel.Document {
 	workspaceDocuments := make([]intel.Document, 0, len(projectDocuments)+1)
 	currentKey := symbolFileKey(current.Path)
 	currentIncluded := false
@@ -475,9 +484,10 @@ func projectWorkspaceDocuments(projectDocuments []intel.ProjectAnalysisDocument,
 			continue
 		}
 		document := intel.Document{Path: path, Source: projectDocument.Source, ModuleKind: string(projectDocument.IR.ModuleKind)}
+		document = document.WithConditionalProjection(conditionalConstants)
 		key := symbolFileKey(path)
 		if currentKey != "" && key == currentKey {
-			document = current
+			document = current.WithConditionalProjection(conditionalConstants)
 			currentIncluded = true
 		}
 		if index, ok := seen[key]; ok {
@@ -1090,7 +1100,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	}
 	if s.documentKind(change.document) == DocumentKindVBA {
 		s.semanticTokens.invalidateWorkspace()
-		s.analysis.promoteDocumentDependencies(change.document.Source)
+		s.analysis.promoteDocumentDependencies(change.document.AnalysisSource())
 	}
 	s.scheduleDiagnostics(ctx, change.document, diagnosticChangeSet(changes))
 	return nil
@@ -2614,12 +2624,9 @@ func (s *Server) scheduleProjectReadyDiagnostics(state *diagnosticState) {
 		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 		return
 	}
-	if s.analysis.initialReady() {
-		return
-	}
-	s.diagWorkers.Add(1)
-	go func() {
-		defer s.diagWorkers.Done()
+	// Startup may finish after the incomplete snapshot above. waitReady also
+	// handles an already-closed readiness channel, so always recheck the project.
+	s.diagWorkers.Go(func() {
 		err := s.analysis.waitReady()
 		if err != nil {
 			state.mu.Lock()
@@ -2630,7 +2637,7 @@ func (s *Server) scheduleProjectReadyDiagnostics(state *diagnosticState) {
 		}
 		project, _ := s.analysis.projectChangeClass("background")
 		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
-	}()
+	})
 }
 
 func diagnosticsWithoutCode(in []intel.Diagnostic, code string) []intel.Diagnostic {
@@ -2973,7 +2980,7 @@ func (s *Server) parseIndexedFileContext(ctx context.Context, file symbols.Sourc
 		return indexedFileAnalysis{}, err
 	}
 	defer release()
-	snapshot := intel.NewAnalysisSnapshot(intel.Document{
+	snapshot := s.newAnalysisSnapshot(intel.Document{
 		Path:       file.Path,
 		Source:     string(body),
 		ModuleKind: file.ModuleKind,
@@ -2984,6 +2991,7 @@ func (s *Server) parseIndexedFileContext(ctx context.Context, file symbols.Sourc
 }
 
 func (s *Server) analyzeIndexedDocumentContextClass(ctx context.Context, doc intel.Document, class string) (indexedFileAnalysis, error) {
+	doc = s.configureConditionalDocument(doc)
 	snapshot := doc.Snapshot
 	if snapshot == nil || !snapshot.Matches(doc) {
 		snapshot = intel.NewAnalysisSnapshot(doc)
@@ -3070,6 +3078,7 @@ func (s *Server) parseIndexedDeclarationsInitialContext(ctx context.Context, fil
 }
 
 func (s *Server) analyzeIndexedDeclarationsDocumentContext(ctx context.Context, doc intel.Document, class string) (indexedFileAnalysis, error) {
+	doc = s.configureConditionalDocument(doc)
 	snapshot := doc.Snapshot
 	if snapshot == nil || !snapshot.Matches(doc) {
 		snapshot = intel.NewAnalysisSnapshot(doc)
@@ -3129,7 +3138,7 @@ func (s *Server) diskProcedureSignatures(ctx context.Context, path, overlaySourc
 	if string(body) == overlaySource {
 		return nil, true, nil
 	}
-	snapshot := intel.NewAnalysisSnapshot(intel.Document{Path: file.Path, Source: string(body), ModuleKind: file.ModuleKind})
+	snapshot := s.newAnalysisSnapshot(intel.Document{Path: file.Path, Source: string(body), ModuleKind: file.ModuleKind})
 	defer snapshot.Retire()
 	syms, err := s.analyzer.DocumentSymbols(snapshot.Document())
 	if err != nil {
@@ -3179,6 +3188,7 @@ func (s *Server) analyzeWorkspaceOverlayDeclarations(ctx context.Context, doc in
 	}
 	doc.Path = file.Path
 	doc.ModuleKind = file.ModuleKind
+	doc = s.configureConditionalDocument(doc)
 	snapshot := doc.Snapshot
 	hadSnapshot := snapshot != nil && snapshot.Matches(doc)
 	if snapshot == nil || !snapshot.Matches(doc) {
@@ -3520,6 +3530,10 @@ func (d *documents) documentKind(doc intel.Document) DocumentKind {
 	return DetectDocumentKind(d.root, d.formsRoot, doc.Path, doc.Source)
 }
 
+func (d *documents) configureConditionalDocument(doc intel.Document) intel.Document {
+	return doc.WithConditionalProjection(d.cfg.VBA.ConditionalConstants)
+}
+
 func (entry documentEntry) currentDocument() intel.Document {
 	if entry.snapshot != nil {
 		return entry.snapshot.Document()
@@ -3569,6 +3583,7 @@ func (d *documents) openWithIndex(uri, text string, lineIndex *lineOffsetIndex, 
 		}
 		return doc, nil
 	}
+	doc = d.configureConditionalDocument(doc)
 	snapshot := intel.NewAnalysisSnapshot(doc)
 	if d.beforePublish != nil {
 		d.beforePublish()
@@ -3916,6 +3931,7 @@ func (d *documents) getOrRead(uri string) (intel.Document, error) {
 			}
 			return doc, nil
 		}
+		doc = d.configureConditionalDocument(doc)
 		candidate := intel.NewAnalysisSnapshot(doc)
 		if d.beforePublish != nil {
 			d.beforePublish()
@@ -3932,8 +3948,7 @@ func (d *documents) getOrRead(uri string) (intel.Document, error) {
 			candidate.Retire()
 			return current.currentDocument(), nil
 		}
-		if current.snapshot != nil && current.snapshot.SourceHash() == candidate.SourceHash() &&
-			current.snapshot.URI() == candidate.URI() && current.snapshot.ModuleKind() == candidate.ModuleKind() {
+		if current.snapshot != nil && current.snapshot.Matches(candidate.Document()) {
 			d.mu.Unlock()
 			candidate.Retire()
 			return current.snapshot.Document(), nil

@@ -310,8 +310,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdEndpoint.cls","surface":"lint","code":"VB076","severity":"information","line":40,"column":3}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/FibonacciIteratorExample.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/FibonacciIteratorExample.cls","surface":"lint","code":"VB059","severity":"error","line":48,"column":3}
-{"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB087","severity":"information","line":30,"column":5}
-{"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB089","severity":"information","line":30,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB081","severity":"information","line":88,"column":18}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB081","severity":"information","line":94,"column":18}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB081","severity":"information","line":96,"column":16}

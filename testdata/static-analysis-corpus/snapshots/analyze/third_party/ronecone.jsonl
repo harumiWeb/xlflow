@@ -253,7 +253,6 @@
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA212","severity":"warning","line":13349,"column":29}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA212","severity":"warning","line":13359,"column":29}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA254","severity":"information","line":13389,"column":18}
-{"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA275","severity":"information","line":13400,"column":29}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA282","severity":"warning","line":13477,"column":18}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA244","severity":"warning","line":13485,"column":32}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA244","severity":"information","line":13566,"column":9}
@@ -264,7 +263,6 @@
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA269","severity":"warning","line":13717,"column":12}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA214","severity":"warning","line":13726,"column":0}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA214","severity":"warning","line":13726,"column":0}
-{"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA275","severity":"information","line":13837,"column":5}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA269","severity":"warning","line":13889,"column":25}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA274","severity":"warning","line":13904,"column":14}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA244","severity":"warning","line":14075,"column":13}

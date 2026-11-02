@@ -9906,7 +9906,7 @@ End Sub
 			source: `Option Explicit
 Public Sub Run(ByVal condition As Boolean)
   Dim result As Object
-#If Windows Then
+#If Win32 Then
   If condition Then
     Set result = New Collection
   End If
@@ -10124,8 +10124,8 @@ End Function
 			source: `Option Explicit
 Public Sub Run()
   Dim result As Object
-#If Windows Then
-  #If NestedBuild Then
+#If Win32 Then
+  #If VBA7 Then
     Set result = New Collection
   #End If
   Debug.Print result.Count

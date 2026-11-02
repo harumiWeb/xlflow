@@ -38,6 +38,7 @@ func (a Analyzer) DefaultMemberDiagnosticsContext(ctx context.Context, doc Docum
 		// analyzer path does not pay for a source scan or surface a new policy.
 		return nil, nil
 	}
+	doc = a.projectConditionalDocument(doc)
 	resolver, ok := a.NewDocumentExpressionTypeResolver(doc)
 	if !ok {
 		return nil, nil
@@ -54,7 +55,7 @@ func (a Analyzer) DefaultMemberDiagnosticsContext(ctx context.Context, doc Docum
 		out = append(out, diagnostic)
 	}
 
-	for index, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for index, logicalLine := range logicalLinesForCallAnalysis(doc.AnalysisSource()) {
 		if index&0x3f == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err

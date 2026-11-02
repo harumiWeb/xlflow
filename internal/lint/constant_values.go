@@ -9,6 +9,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/conditional"
 	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
@@ -369,7 +370,8 @@ func (l Linter) projectConstantValuesContext(ctx context.Context, files []string
 		if err != nil {
 			continue
 		}
-		parsed, err := ast.ParseDocument(path, source)
+		projectedSource := conditional.Project(source, l.Config.VBA.ConditionalConstants)
+		parsed, err := ast.ParseDocument(path, projectedSource)
 		if err != nil {
 			continue
 		}
@@ -380,7 +382,7 @@ func (l Linter) projectConstantValuesContext(ctx context.Context, files []string
 		if err != nil {
 			continue
 		}
-		documents = append(documents, ConstantValueDocument{Source: string(source), IR: &ir})
+		documents = append(documents, ConstantValueDocument{Source: string(projectedSource), IR: &ir})
 	}
 	var typeDB *vbadb.DB
 	if result, err := typedb.LoadForRuntime(""); err == nil {

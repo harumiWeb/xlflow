@@ -113,6 +113,7 @@ type DiagnosticCache struct {
 }
 
 func (a Analyzer) DiagnosticsRequestContext(ctx context.Context, request DiagnosticRequest) DiagnosticResult {
+	request.Document = a.projectConditionalDocument(request.Document)
 	ctx = analysisstats.WithRecorder(ctx, request.Recorder)
 	recorder := request.Recorder
 	if recorder == nil {
@@ -179,9 +180,10 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 	out := make([]Diagnostic, 0)
 	modulePreamble := ""
 	modulePreambleEnd := 0
+	analysisSource := doc.AnalysisSource()
 	if len(catalog.Entries) > 0 {
 		modulePreambleEnd = catalog.Entries[0].StartByte
-		modulePreamble = doc.Source[:modulePreambleEnd]
+		modulePreamble = analysisSource[:modulePreambleEnd]
 	}
 	for _, entry := range changed {
 		if ctx.Err() != nil {
@@ -194,7 +196,9 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 		}
 		fragment := doc
 		fragment.Snapshot = nil
-		fragment.Source = fastDiagnosticFragmentSource(doc.Source, modulePreamble, modulePreambleEnd, entry)
+		fragment.Source = fastDiagnosticFragmentSource(analysisSource, modulePreamble, modulePreambleEnd, entry)
+		fragment.ProjectConditionals = false
+		fragment.ConditionalConstants = nil
 		fragmentCatalog := procedureCatalogForDocumentMode(fragment, false)
 		if len(fragmentCatalog.Entries) != 1 {
 			continue
@@ -248,7 +252,9 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 func (a Analyzer) fastLintProcedureContext(ctx context.Context, doc Document, modulePreamble string, modulePreambleEnd int, entry ProcedureCatalogEntry) []Diagnostic {
 	fragment := doc
 	fragment.Snapshot = nil
-	fragment.Source = fastDiagnosticFragmentSource(doc.Source, modulePreamble, modulePreambleEnd, entry)
+	fragment.Source = fastDiagnosticFragmentSource(doc.AnalysisSource(), modulePreamble, modulePreambleEnd, entry)
+	fragment.ProjectConditionals = false
+	fragment.ConditionalConstants = nil
 	parsed, closeParsed, err := parsedDocumentForDocument(fragment)
 	if err != nil {
 		return nil
@@ -363,6 +369,7 @@ func procedureCatalogForDocument(doc Document) ProcedureCatalog {
 
 func procedureCatalogForDocumentMode(doc Document, checkRecovery bool) ProcedureCatalog {
 	procedures, _ := procedureIndexForLines(documentLines(doc))
+	source := doc.AnalysisSource()
 	catalog := ProcedureCatalog{ReuseSafe: true}
 	ordinals := make(map[string]int)
 	conditionalHasher := sha256.New()
@@ -370,19 +377,19 @@ func procedureCatalogForDocumentMode(doc Document, checkRecovery bool) Procedure
 	for _, procedure := range procedures {
 		start := byteOffsetForDocumentPosition(doc, procedure.Range.Start)
 		end := byteOffsetForDocumentPosition(doc, procedure.Range.End)
-		if end < len(doc.Source) {
-			_, end = rawLineBounds(doc.Source, end)
+		if end < len(source) {
+			_, end = rawLineBounds(source, end)
 		}
 		if start < lastByte || end < start {
 			catalog.ReuseSafe = false
 			continue
 		}
-		declaration := firstProcedureDeclarationLine(doc.Source[start:end])
+		declaration := firstProcedureDeclarationLine(source[start:end])
 		declarationStart := start
-		for declarationStart < end && (doc.Source[declarationStart] == ' ' || doc.Source[declarationStart] == '\t') {
+		for declarationStart < end && (source[declarationStart] == ' ' || source[declarationStart] == '\t') {
 			declarationStart++
 		}
-		lineStart := strings.LastIndexByte(doc.Source[:declarationStart], '\n') + 1
+		lineStart := strings.LastIndexByte(source[:declarationStart], '\n') + 1
 		kind := procedureDeclarationKind(declaration)
 		key := strings.ToLower(strings.TrimSpace(procedure.Name)) + "|" + kind
 		ordinal := ordinals[key]
@@ -390,7 +397,7 @@ func procedureCatalogForDocumentMode(doc Document, checkRecovery bool) Procedure
 		catalog.Entries = append(catalog.Entries, ProcedureCatalogEntry{
 			Identity:      ProcedureIdentity{CanonicalName: strings.ToLower(strings.TrimSpace(procedure.Name)), Kind: kind, Ordinal: ordinal},
 			SignatureHash: sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(declaration)))),
-			SourceHash:    sha256.Sum256([]byte(doc.Source[start:end])), Range: procedure.Range,
+			SourceHash:    sha256.Sum256([]byte(source[start:end])), Range: procedure.Range,
 			StartByte: start, DeclarationStartByte: declarationStart, StartColumn: declarationStart - lineStart + 1, EndByte: end,
 		})
 		lastByte = end
@@ -402,7 +409,7 @@ func procedureCatalogForDocumentMode(doc Document, checkRecovery bool) Procedure
 	_, _ = moduleHasher.Write([]byte{'\n'})
 	_, _ = moduleHasher.Write([]byte(strings.ToLower(strings.TrimSpace(doc.Path))))
 	_, _ = moduleHasher.Write([]byte{'\n'})
-	moduleSource := maskProcedureSet(doc.Source, catalog, nil)
+	moduleSource := maskProcedureSet(source, catalog, nil)
 	for _, line := range strings.Split(strings.ReplaceAll(strings.ReplaceAll(moduleSource, "\r\n", "\n"), "\r", "\n"), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "'") {

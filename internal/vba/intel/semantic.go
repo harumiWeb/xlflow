@@ -682,7 +682,7 @@ func (b *semanticBuilder) addUserFormControlTokens() {
 		if b.canceled() {
 			return
 		}
-		for _, rng := range identifierRanges(b.doc.Source, control.Name) {
+		for _, rng := range identifierRanges(b.doc.AnalysisSource(), control.Name) {
 			b.add(rng, SemanticTokenVariable)
 		}
 	}

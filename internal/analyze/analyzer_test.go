@@ -1857,6 +1857,54 @@ End Sub
 	}
 }
 
+func TestAnalyzerProjectsInactiveConditionalCompilation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+#Const LocalFeature = False
+#If LocalFeature Or ProjectFeature Then
+This is plain prose, not VBA code.
+## Heading
+1. item
+#End If
+Public Function Answer() As Long
+    Answer = 42
+End Function
+`
+	writeModule(t, dir, "Conditional.bas", source)
+	cfg := config.Default()
+	cfg.VBA.ConditionalConstants = map[string]string{"ProjectFeature": "False"}
+	if _, err := (Analyzer{RootDir: dir, Config: cfg}).Run(); err != nil {
+		t.Fatalf("Run failed on inactive conditional prose: %v", err)
+	}
+	path := filepath.Join(dir, "src", "modules", "Conditional.bas")
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != source {
+		t.Fatal("analyze changed the source file")
+	}
+}
+
+func TestAnalyzerParsesSharedBodyAfterResolvedConditionalFunctionHeader(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "ConditionalHeader.bas", `Option Explicit
+#If UndefinedFeature Then
+Public Function SelectedValue() As Long
+#Else
+Public Function SelectedValue() As String
+#End If
+    SelectedValue = "selected"
+End Function
+`)
+
+	if _, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run(); err != nil {
+		t.Fatalf("analyze failed to parse shared procedure body after resolved header: %v", err)
+	}
+}
+
 func TestAnalyzerFailsOnParserRecovery(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -6490,8 +6538,13 @@ End Sub
 	}
 	controlFlow := vbacfg.BuildDocument(ir)
 	document := intel.Document{Path: path, Source: string(source)}
-	document = batchIntelDocument(document, parsed, ir, controlFlow)
+	document = batchIntelDocument(document, parsed, ir, controlFlow, nil)
 	defer document.Snapshot.Retire()
+	// Compile-equivalent diagnostics configure projection at their entry point.
+	// The batch-owned parse/index must survive that same configuration step.
+	if configured := document.WithConditionalProjection(nil); configured.Snapshot != document.Snapshot {
+		t.Fatal("conditional diagnostic entry invalidated the prepared batch snapshot")
+	}
 	db, err := vbadb.LoadBuiltin()
 	if err != nil {
 		t.Fatal(err)

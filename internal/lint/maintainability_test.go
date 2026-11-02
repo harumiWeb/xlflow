@@ -225,6 +225,47 @@ func TestMaintainabilityUnusedNumericLabels(t *testing.T) {
 	}
 }
 
+func TestMaintainabilityConditionalProjectionPreservesGoSubLabelReferences(t *testing.T) {
+	source := "#Const devMode = True\nSub Work()\nGoSub Used: Debug.Print 1\n#If devMode Then\nDebug.Print 2\n#End If\nExit Sub\nUsed:\nReturn\nUnused:\nReturn\nEnd Sub\n"
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedLabels = true
+	issues, err := (Linter{RootDir: ".", Config: cfg}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []Issue
+	for _, issue := range issues {
+		if issue.Code == "VB090" {
+			got = append(got, issue)
+		}
+	}
+	if len(got) != 1 || got[0].Line != 10 {
+		t.Fatalf("VB090 = %+v, want only the unused label at line 10", got)
+	}
+}
+
+func TestMaintainabilityConditionalProjectionSkipsInactiveDeclarations(t *testing.T) {
+	source := "#If False Then\nDim NULL_, S_OK, S_FALSE\n#End If\nDim activeLeft, activeRight\n"
+	cfg := config.Default()
+	cfg.Lint.DetectModuleDim = true
+	cfg.Lint.DetectMultipleDeclarations = true
+	issues, err := (Linter{RootDir: ".", Config: cfg}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VB087", "VB089"} {
+		var lines []int
+		for _, issue := range issues {
+			if issue.Code == code {
+				lines = append(lines, issue.Line)
+			}
+		}
+		if len(lines) != 1 || lines[0] != 4 {
+			t.Errorf("%s lines = %v, want only active declaration at line 4", code, lines)
+		}
+	}
+}
+
 func TestMaintainabilityTypeSuffixReportsDeclaredCallee(t *testing.T) {
 	source := "Function Compute$()\nCompute$ = \"x\"\nEnd Function\nSub Work()\nDebug.Print Compute$()\nDebug.Print Chr$(65)\nEnd Sub\n"
 	cfg := config.Default()

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.14.0
+
 - Offer an individual opt-in VBA275 ByRef-to-ByVal Quick Fix for eligible private
   scalar Functions after current project-aware diagnostics complete. Alias-
   sensitive bodies and unsupported signatures remain unchanged.

@@ -221,7 +221,7 @@ func TestVBA280FailsOpenOnConditionalGetter(t *testing.T) {
 	// the IR cannot prove a matching getter in every configuration and the
 	// property stays silent.
 	findings := runClassHazardProjectAnalysis(t, []sourceproject.SourceFile{
-		classFile("Widget.cls", "Option Explicit\nPublic Property Let Size(v As Long)\nEnd Property\n#If DEBUG Then\nPublic Property Get Size() As Long\nEnd Property\n#End If\n"),
+		classFile("Widget.cls", "Option Explicit\nPublic Property Let Size(v As Long)\nEnd Property\n#If VBA7 Then\nPublic Property Get Size() As Long\nEnd Property\n#End If\n"),
 	}, func(cfg *config.AnalyzeConfig) { cfg.DetectWriteOnlyProperty = true })
 	if got := findingsByCode(findings, "VBA280"); len(got) != 0 {
 		t.Fatalf("VBA280 findings = %+v, want none when the only Get is conditional", got)
