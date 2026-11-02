@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.37.0
+
 - Fixed inactive conditional-compilation content causing VB014 and
   `analyze_failed` in lint, analyze, source preflight and LSP diagnostics.
   Added `[vba.conditional_constants]` for explicit project and target constants;
