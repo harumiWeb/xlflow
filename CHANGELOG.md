@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated the documentation toolchain's Vite dependency to the patched 6.4.5
+  release.
+
 ## v0.37.0
 
 - Fixed inactive conditional-compilation content causing VB014 and
