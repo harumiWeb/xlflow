@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Updated packaging dependencies to patched glob 14.0.2, minimatch 11.0.1,
+  and qs 6.16.1.
+
 ## v0.14.0
 
 - Offer an individual opt-in VBA275 ByRef-to-ByVal Quick Fix for eligible private
