@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated Excelize to v2.11.1 to address CVE-2026-107223
+  (GHSA-fq3v-74gv-27gm), reported by Dependabot alert #102.
+
 - Updated the documentation toolchain's Vite dependency to the patched 6.4.5
   release.
 
